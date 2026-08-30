@@ -1,0 +1,172 @@
+/* Reuses this app's management-page tokens wholesale (`.page`/`.card`/`.btn`/`.chip`/`.dot`/`.empty`/
+   `.label`/`.mono`/`.muted`/`.faint`/`.truncate`/`.field-sm`/`.field-md`/`.field-lg` from
+   `src/styles.css`) — no new colors. `.profile-form*`/`.binding-form*` mirror `org-settings.css`'s own
+   `.org-form*` grid (this page's two forms); `.table-scroll` mirrors `devices.css`'s identical wrapper. */
+
+.card + .card {
+  margin-top: var(--space-16);
+}
+
+/* ---- Profile cards ---- */
+
+.profile-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  gap: var(--space-16);
+}
+
+.profile-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding: var(--space-16);
+  background: var(--panel-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-width: 0;
+}
+
+.profile-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+.profile-card-name {
+  font-weight: 600;
+  min-width: 0;
+}
+
+.profile-card-facts {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-8) var(--space-16);
+  margin: 0;
+}
+
+.profile-card-facts dt {
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.profile-card-facts dd {
+  margin: 0;
+}
+
+.profile-card-binding {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.profile-card-actions {
+  display: flex;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+  margin-top: auto;
+  padding-top: var(--space-8);
+}
+
+/* ---- Editor / binding forms ---- */
+
+.profile-form,
+.binding-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.profile-form h3 {
+  margin: 0;
+}
+
+.profile-form-grid,
+.binding-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: var(--space-16);
+}
+
+.profile-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.profile-field select,
+.profile-field textarea {
+  min-height: 40px;
+}
+
+.profile-field .label {
+  margin-bottom: 0;
+}
+
+.profile-field-wide {
+  grid-column: 1 / -1;
+}
+
+.profile-field-inline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.profile-field-static {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+}
+
+.profile-check {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  align-self: end;
+}
+
+.profile-errors {
+  margin: 0;
+  padding-left: var(--space-16);
+}
+
+.profile-event-rule {
+  display: flex;
+  align-items: center;
+  gap: var(--space-16);
+  flex-wrap: wrap;
+  font-size: 0.85rem;
+}
+
+.profile-form-actions,
+.binding-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}
+
+.profile-form-actions .btn,
+.binding-form-actions .btn {
+  min-height: 40px;
+}
+
+/* ---- Coverage table ---- */
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+table {
+  min-width: 56rem;
+}
+
+.actions {
+  display: flex;
+  gap: var(--space-8);
+  white-space: nowrap;
+}

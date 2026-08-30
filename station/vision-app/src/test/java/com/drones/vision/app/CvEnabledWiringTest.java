@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -47,11 +48,19 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Also proves the detection-only half of the shared-channel wiring (docs/plans/done/CV-TRAINING-PLAN.md
  * §7/§8, Phase 2 T9): with {@code vision.training.enabled} left at its default {@code false},
  * {@link WiringConfiguration#cvGrpcChannel} is still built (its {@code @ConditionalOnExpression}
- * matches on {@code vision.cv.enabled} alone), but the model registry controller/service/port stay
- * entirely absent — a CV-only deployment doesn't accidentally light up the training endpoints. See
- * {@link TrainingEnabledWiringTest} for the training-only mirror and {@link
- * CvAndTrainingSharedChannelWiringTest} for the both-enabled case that actually proves the channel
- * is the <em>same instance</em> both ports consume.
+ * matches on {@code vision.cv.enabled} alone). See {@link TrainingEnabledWiringTest} for the
+ * training-only mirror and {@link CvAndTrainingSharedChannelWiringTest} for the both-enabled case
+ * that actually proves the channel is the <em>same instance</em> both ports consume.
+ *
+ * <p><b>The model registry now comes along for free</b> (docs/plans/active/CV-SETTINGS-PLAN.md §5,
+ * CV-SETTINGS-CONTEXT.md's W4-app → W5 handoff): {@code vision.cv.registry.enabled}'s own
+ * {@code application.yaml} default is the placeholder {@code ${vision.cv.enabled:false}}, so a
+ * CV-only deployment that never touches the registry key still gets {@code
+ * ModelRegistryController}/{@code ModelRegistryService}/{@code ModelRegistryPort} wired — a
+ * deployment with detection on already has a cv-service worker to register models against. See
+ * {@link CvRegistryExplicitOptOutWiringTest} for the explicit {@code
+ * vision.cv.registry.enabled=false} escape hatch that keeps the pre-W5 "registry stays entirely
+ * absent" behavior.
  */
 @SpringBootTest(properties = {
         "vision.publish.enabled=false",
@@ -104,10 +113,17 @@ class CvEnabledWiringTest {
         assertInstanceOf(ManagedChannel.class, cvGrpcChannel);
     }
 
+    /**
+     * docs/plans/active/CV-SETTINGS-PLAN.md §5: {@code vision.cv.registry.enabled} left unset
+     * follows {@code vision.cv.enabled} via {@code application.yaml}'s {@code
+     * ${vision.cv.enabled:false}} placeholder — a CV-only deployment (no {@code
+     * vision.training.enabled}, no explicit registry key) wires the model registry anyway, unlike
+     * before this wave.
+     */
     @Test
-    void cvOnlyConfigurationDoesNotWireTheModelRegistry() {
-        assertTrue(applicationContext.getBeansOfType(ModelRegistryController.class).isEmpty());
-        assertTrue(applicationContext.getBeansOfType(ModelRegistryService.class).isEmpty());
-        assertTrue(applicationContext.getBeansOfType(ModelRegistryPort.class).isEmpty());
+    void cvOnlyConfigurationWiresTheModelRegistryByDefault() {
+        assertFalse(applicationContext.getBeansOfType(ModelRegistryController.class).isEmpty());
+        assertFalse(applicationContext.getBeansOfType(ModelRegistryService.class).isEmpty());
+        assertFalse(applicationContext.getBeansOfType(ModelRegistryPort.class).isEmpty());
     }
 }

@@ -1,7 +1,7 @@
 import { EnvironmentInjector, createEnvironmentInjector, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ManualControlClient } from './manual-control-client';
+import { ENGAGE_TIMEOUT_MS, ManualControlClient } from './manual-control-client';
 import { RcInputService } from './rc-input.service';
 import { VirtualRcInputService } from './virtual-rc-input.service';
 import { RcSource } from './rc-source.service';
@@ -157,6 +157,46 @@ describe('ManualControlClient', () => {
 
     ws.triggerOpen();
     expect(ws.sent).toEqual([JSON.stringify({ type: 'engage', assetId: 'asset-1' })]);
+  });
+
+  it('gives up on an engage the server never confirms, rather than stranding the operator', () => {
+    const { client } = create(new FakeRcInputService());
+    const ws = engageAndOpen(client);
+    expect(client.state()).toBe('engaging');
+
+    // The socket stays open and the server says nothing — which is exactly what an `engaged`
+    // frame this client cannot validate looks like from here. Silence must not be permanent.
+    vi.advanceTimersByTime(ENGAGE_TIMEOUT_MS);
+
+    expect(client.state()).toBe('denied');
+    expect(client.deniedReason()).toContain('never confirmed');
+    expect(ws.readyState).toBe(MockWebSocket.CLOSED);
+  });
+
+  it('a server frame it cannot validate is discarded loudly, not silently', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const { client } = create(new FakeRcInputService());
+    const ws = engageAndOpen(client);
+
+    // An `engaged` frame missing `channelMap` fails its guard. State must not advance...
+    ws.triggerMessage({ type: 'engaged', assetId: 'asset-1', rateHz: 25, ...PROFILE });
+    expect(client.state()).toBe('engaging');
+    // ...but the operator's console must carry the reason.
+    expect(warn).toHaveBeenCalledWith(
+      '[manual-control] discarded an unrecognised server frame:',
+      expect.stringContaining('engaged'),
+    );
+    warn.mockRestore();
+  });
+
+  it('a confirmed engage cancels the give-up timer', () => {
+    const { client } = create(new FakeRcInputService());
+    const ws = engageAndOpen(client);
+    ws.triggerMessage({ type: 'engaged', assetId: 'asset-1', rateHz: 25, ...PROFILE, channelMap: [ROLL_BINDING] });
+    expect(client.state()).toBe('engaged');
+
+    vi.advanceTimersByTime(ENGAGE_TIMEOUT_MS * 3);
+    expect(client.state()).toBe('engaged'); // the timeout must not fire against a live session
   });
 
   it('is a no-op while already engaging/engaged — never opens a second socket', () => {

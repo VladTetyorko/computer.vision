@@ -46,7 +46,6 @@ const ROUTED_PAGES = [
   'org-settings/org-settings',
   'activity/activity',
   'settings/account-settings',
-  'settings/detection-settings',
   'auth/login/login',
   'labeling/datasets',
   'labeling/dataset-detail',
@@ -65,6 +64,9 @@ const ROUTED_PAGES = [
   // `RcInputService` directly (a browser-input service, not a store), the layouts themselves come
   // through its facade.
   'controller/controller-setup',
+  // Profiles (docs/plans/active/CV-SETTINGS-PLAN.md §4, wave W6) — replaces `settings/detection-settings`
+  // outright (deleted this wave; `/settings/detection` now redirects here).
+  'vision-profiles/vision-profiles',
 ];
 
 // All feature .ts sources, inlined as raw strings at build time. Keys look like

@@ -11,9 +11,12 @@ import com.drones.vision.flight.domain.port.VehicleProfileRepositoryPort;
 import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import com.drones.vision.identity.domain.port.GroupRepositoryPort;
 import com.drones.vision.identity.domain.port.UserRepositoryPort;
+import com.drones.vision.learning.domain.port.CvModelRepositoryPort;
 import com.drones.vision.learning.domain.port.DatasetRepositoryPort;
 import com.drones.vision.learning.domain.port.SampleImageStorePort;
+import com.drones.vision.learning.domain.port.TrainingRunRepositoryPort;
 import com.drones.vision.learning.domain.port.TrainingSampleRepositoryPort;
+import com.drones.vision.perception.domain.port.CvProfileRepositoryPort;
 import com.drones.vision.map.domain.port.CameraPoseRepositoryPort;
 import com.drones.vision.map.domain.port.DrawingRepositoryPort;
 import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
@@ -158,6 +161,36 @@ public class PersistenceWiringConfiguration {
     @Bean
     public SampleImageStorePort sampleImageStorePort(EntityManagerFactory entityManagerFactory) {
         return new JpaSampleImageStore(entityManagerFactory);
+    }
+
+    /**
+     * docs/plans/active/CV-SETTINGS-PLAN.md §3.1/§5.3, Wave W3 — CV profiles and their scope bindings,
+     * same shape as the fifteen above. Unconditional like every other bean in this class: profiles ship
+     * regardless of {@code vision.cv.enabled}/{@code vision.cv.registry.enabled}, consumed by {@code
+     * CvProfileWiringConfiguration}'s own unconditional beans.
+     */
+    @Bean
+    public CvProfileRepositoryPort cvProfileRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaCvProfileRepository(entityManagerFactory);
+    }
+
+    /**
+     * docs/plans/active/CV-SETTINGS-PLAN.md §3.2/§5.3, Wave W3 — the CV model catalogue, same shape as
+     * the sixteen above. Consumed by {@code TrainingWiringConfiguration#modelRegistryService}/{@code
+     * #trainingJobService}, both gated behind their own property (unlike this bean).
+     */
+    @Bean
+    public CvModelRepositoryPort cvModelRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaCvModelRepository(entityManagerFactory);
+    }
+
+    /**
+     * docs/plans/active/CV-SETTINGS-PLAN.md §3.3/§5.3, Wave W3 — training run records, same shape as
+     * the seventeen above. Consumed by {@code TrainingWiringConfiguration#trainingJobService}.
+     */
+    @Bean
+    public TrainingRunRepositoryPort trainingRunRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaTrainingRunRepository(entityManagerFactory);
     }
 
     /**

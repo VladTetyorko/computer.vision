@@ -359,9 +359,19 @@ vision:
     # upload:
     #   timeout: 300s
     #   chunk-bytes: 262144
-    # GrpcModelRegistryPort's per-call deadline (ListModels/PromoteModel).
-    # registry:
-    #   call-timeout: 10s
+    # ModelRegistryPort/ModelRegistryService (GrpcModelRegistryPort, and the /api/cv/registry/*
+    # endpoints they back) -- docs/plans/active/CV-SETTINGS-PLAN.md §5, CV-SETTINGS-CONTEXT.md's
+    # W4-app -> W5 handoff.
+    registry:
+      # Whether the model registry is wired at all. Deliberately follows `vision.cv.enabled` above
+      # by default (the ${...:default} placeholder), rather than defaulting to false outright: a
+      # deployment that already turned detection on has a cv-service worker to register models
+      # against, so the registry comes along for free unless explicitly opted out below. Set this
+      # to false to disable JUST the registry (e.g. detection on, promote/rollback off), or leave
+      # both this and vision.cv.enabled unset/false to keep today's fully-off behavior.
+      enabled: ${vision.cv.enabled:false}
+      # GrpcModelRegistryPort's per-call deadline (ListModels/PromoteModel/Rollback).
+      # call-timeout: 10s
     # Bounded reconnect for the shared cv-service channel (docs/plans/active/CV-RECONNECT-PLAN.md).
     # A fail-fast gRPC call issued while the channel is in TRANSIENT_FAILURE returns the cached failure
     # WITHOUT starting a new connect attempt -- only the channel's OWN reconnect backoff retries, and
@@ -437,6 +447,14 @@ vision:
     #   How long one GET /api/streams/{id}/detections poll counts as demand (the poll half, for
     #   Wall/Live pages that never open the SSE detections:<assetId> topic at all).
     #   poll-ttl: 10s
+    # CvProfileCache's lazy-reload TTL (docs/plans/active/CV-SETTINGS-PLAN.md §3.1,
+    # CV-SETTINGS-CONTEXT.md's W2 -> W5 handoff). Profiles ship unconditionally -- no feature flag,
+    # the four built-in profiles exist regardless of vision.cv.enabled/vision.cv.registry.enabled --
+    # so this is the only tunable. Every write (create/update/delete/bind/unbind) refreshes the
+    # cached snapshot immediately regardless of this TTL; it only bounds staleness after a write
+    # made by a DIFFERENT JVM (e.g. a second app instance) sharing the same database.
+    # profiles:
+    #   cache-ttl: 60s
 
   # --- Tracking engine (docs/plans/done/TRACKING-PLAN.md, docs/extracts/TRACKING-ORCHESTRATION.md 4.3) ---
   # Every key below is commented out: each documents VisionTrackingProperties' default rather than

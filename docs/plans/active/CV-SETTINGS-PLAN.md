@@ -1,6 +1,6 @@
 # CV-SETTINGS-PLAN — CV settings that survive a browser, a model registry that remembers
 
-Status: **spec, nothing built** (2026-08-30). Branch suggestion `feat/cv-settings`. Cut from
+Status: **W1–W8 built on `feat/cv-settings`, unmerged** (2026-08-30; cut from `feat/warehouse-ux` head — merge warehouse-ux first). Ledger/handoffs/deviations in [CV-SETTINGS-CONTEXT.md](CV-SETTINGS-CONTEXT.md). All §8 defaults accepted; train-start gate relaxed to `canManageOrg`; no fork endpoint (client copies); explicit stream-start overrides folded at the API layer.
 `feat/warehouse-ux` @ `829ac48a` (max Flyway **V28**, five-group rail with a **Vision** group already
 live). Owner: CV control plane.
 

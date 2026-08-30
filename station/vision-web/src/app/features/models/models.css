@@ -13,3 +13,14 @@ td.actions {
   text-align: right;
   white-space: nowrap;
 }
+
+/* §3.5 honesty rule 4's explicit warning text — plain warn-toned text, not a second chip
+   (frontend-style §5 "one chip per row max"; the row's one chip is Status). Same secondary-line
+   warning idiom `features/devices/devices.css`'s `.endpoint-conflict` already uses. */
+.availability-warn {
+  color: var(--color-warn-text);
+}
+
+.prov-links a {
+  white-space: nowrap;
+}

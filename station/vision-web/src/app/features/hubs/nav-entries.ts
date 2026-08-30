@@ -48,11 +48,15 @@ import type { IconName } from '../../shared/ui/icon-registry';
  * "Fleet readiness" are both unchanged — only the nav label was ever "Pre-flight checklist" while the
  * page itself already said "Readiness"/"Fleet readiness", per WAREHOUSE-UX-PLAN.md §1.2 finding P3).
  *
- * **Detection defaults and Controller leave the rail entirely** (WAREHOUSE-UX-PLAN.md §3.1 rule 5) — a
- * detection profile and a transmitter layout are configuration a user visits rarely, not a
- * day-to-day Operate/Manage door. Both routes (`/settings/detection`, `/manage/controller`) are
- * untouched and ungated; they are now reached from a small "Settings" link list on `/settings`
- * (`features/settings/account-settings.html`) instead of from here.
+ * **Controller leaves the rail entirely** (WAREHOUSE-UX-PLAN.md §3.1 rule 5) — a transmitter layout is
+ * configuration a user visits rarely, not a day-to-day Operate/Manage door. `/manage/controller` is
+ * untouched and ungated; it is reached from a small "Settings" link list on `/settings`
+ * (`features/settings/account-settings.html`) instead of from here. Detection defaults
+ * (`/settings/detection`) followed the same path in WAREHOUSE-UX-PLAN.md §3.1, but wave W6
+ * (docs/plans/active/CV-SETTINGS-PLAN.md) supersedes that move outright: the whole surface it stood in
+ * for is gone (replaced by named, bindable profiles, not a single-org form), so it comes back as a
+ * first-class, `managerOnly` **Vision** entry (**Profiles**, below) rather than a Settings-page link —
+ * see that entry's own comment.
  *
  * **W4 folds Asset categories, Inventory reports, and Devices into Inventory itself** (docs/plans/active/WAREHOUSE-UX-PLAN.md
  * §3.3) — all three pages are absorbed as `InventoryPage` tabs (`?tab=categories|links`; Reports has
@@ -73,8 +77,7 @@ import type { IconName } from '../../shared/ui/icon-registry';
  * comment. `System status` keeps its one documented exception: `diagnostics`-flavoured but not
  * `managerOnly` (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.1) — an operator whose CV pipeline just died needs to
  * see why, the same reasoning `/command` already applies more broadly. `Settings` is deliberately not
- * `managerOnly` either — every signed-in user, pilot included, owns account/detection/controller
- * preferences.
+ * `managerOnly` either — every signed-in user, pilot included, owns account/controller preferences.
  */
 export type NavModeId = 'operate' | 'monitor' | 'fleet' | 'vision' | 'system';
 
@@ -226,6 +229,17 @@ export const NAV_MODES: readonly NavMode[] = [
     primaryRoute: '/manage/training',
     entries: [
       {
+        icon: 'layers',
+        name: 'Profiles',
+        // New this wave (docs/plans/active/CV-SETTINGS-PLAN.md §4, wave W6) — replaces the old
+        // single-org "Detection defaults" Settings-page link outright (see this file's own class
+        // doc): a named, reusable, bindable per-stream CV config, not a single fleet-wide form.
+        // `/settings/detection` now redirects here (`settings.routes.ts`).
+        description: 'Named CV configs — model, thresholds, tracking — bound per organization, category, or asset.',
+        to: '/vision/profiles',
+        managerOnly: true,
+      },
+      {
         icon: 'target',
         name: 'CV training',
         description: 'Capture live frames, correct the boxes, and export YOLO datasets to improve detection models.',
@@ -284,9 +298,11 @@ export const NAV_MODES: readonly NavMode[] = [
         icon: 'settings',
         name: 'Settings',
         // New this wave (WAREHOUSE-UX-PLAN.md §3.1 rule 5) — Account settings plus a link list to
-        // Detection defaults and Controller, the two entries that just left the rail (see this
-        // file's own class doc). Every signed-in user, pilot included, owns these preferences.
-        description: 'Your account, plus links to detection defaults and your controller layout.',
+        // Controller, the one entry that just left the rail (see this file's own class doc); every
+        // signed-in user, pilot included, owns these preferences. Detection defaults used to be
+        // listed here too — it left this link list for its own `managerOnly` Vision nav entry
+        // (`Profiles`, wave W6) once it stopped being a single-org form.
+        description: 'Your account, plus a link to your controller layout.',
         to: '/settings',
       },
     ],

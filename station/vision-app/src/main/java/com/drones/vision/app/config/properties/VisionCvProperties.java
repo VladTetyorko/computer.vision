@@ -82,6 +82,9 @@ import java.util.List;
  * @param training               the training/geolocation channel's single target (R6, split
  *                               deployment); defaulted as a whole when absent — see
  *                               {@link #trainingTarget()}/{@link #trainingTargetConfigured()}
+ * @param profiles               {@code CvProfileCache}'s lazy-reload TTL (docs/plans/active/CV-SETTINGS-PLAN.md
+ *                               §3.1, docs/plans/active/CV-SETTINGS-CONTEXT.md's W2 &rarr; W5 handoff);
+ *                               defaulted as a whole when absent — see {@link Profiles#cacheTtl()}
  */
 @ConfigurationProperties(prefix = "vision.cv")
 public record VisionCvProperties(@DefaultValue("false") boolean enabled,
@@ -103,7 +106,8 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
                                   Demand demand,
                                   Reconnect reconnect,
                                   Inference inference,
-                                  Training training) {
+                                  Training training,
+                                  Profiles profiles) {
 
     static final String DEFAULT_ENDPOINT = "localhost:50051";
     static final String DEFAULT_DETECT_WIDTH = "640";
@@ -138,7 +142,11 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
             upload = new Upload(Upload.DEFAULT_TIMEOUT_DURATION, Upload.DEFAULT_CHUNK_BYTES_INT);
         }
         if (registry == null) {
-            registry = new Registry(Registry.DEFAULT_CALL_TIMEOUT_DURATION);
+            // Java-construction fallback (bypassing Spring's Environment entirely -- direct `new
+            // VisionCvProperties(...)` callers, e.g. tests): mirrors the YAML placeholder
+            // `vision.cv.registry.enabled: ${vision.cv.enabled:false}` binds by reusing this
+            // record's own top-level `enabled` (detection's switch) as the registry's default.
+            registry = new Registry(enabled, Registry.DEFAULT_CALL_TIMEOUT_DURATION);
         }
         if (pull == null) {
             pull = new Pull(Pull.DEFAULT_RTSP_BASE_URI, Pull.DEFAULT_RECONNECT_INITIAL_BACKOFF,
@@ -157,6 +165,9 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
         }
         if (training == null) {
             training = new Training(Training.DEFAULT_TARGET);
+        }
+        if (profiles == null) {
+            profiles = new Profiles(Profiles.DEFAULT_CACHE_TTL);
         }
         if (!inference.targets().isEmpty()) {
             try {
@@ -197,7 +208,7 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
                                Pull pull) {
         this(enabled, endpoint, detectWidth, jpegQuality, wireFormat, frameTransport, responseTimeout,
                 keepAliveTime, keepAliveTimeout, keepAliveWithoutCalls, channelShutdownTimeout, plaintext, upload,
-                registry, pull, false, null, null, null, null);
+                registry, pull, false, null, null, null, null, null);
     }
 
     /**
@@ -300,10 +311,22 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
     }
 
     /**
+     * @param enabled     whether {@code ModelRegistryPort}/{@code ModelRegistryService} (and the
+     *                    {@code /api/cv/registry/*} endpoints they back) are wired at all
+     *                    (docs/plans/active/CV-SETTINGS-PLAN.md §5, CV-SETTINGS-CONTEXT.md's W4-app
+     *                    &rarr; W5 handoff). No {@code @DefaultValue} here deliberately: bound from
+     *                    the YAML placeholder {@code vision.cv.registry.enabled:
+     *                    ${vision.cv.enabled:false}} in application.yaml, so leaving both keys unset
+     *                    keeps the registry following {@link #enabled()} (detection's own switch) —
+     *                    a Spring {@code Environment} default, not a record default. The compact
+     *                    constructor's {@code registry == null} fallback (a direct-Java {@code new
+     *                    VisionCvProperties(...)} call, bypassing Spring's {@code Environment}
+     *                    entirely) mirrors the same derivation by reusing this record's own
+     *                    top-level {@link #enabled()}
      * @param callTimeout per-call deadline for {@code GrpcModelRegistryPort}'s {@code
      *                    ListModels}/{@code PromoteModel} RPCs; default 10s
      */
-    public record Registry(@DefaultValue("10s") Duration callTimeout) {
+    public record Registry(boolean enabled, @DefaultValue("10s") Duration callTimeout) {
         static final Duration DEFAULT_CALL_TIMEOUT_DURATION = Duration.ofSeconds(10);
     }
 
@@ -434,5 +457,20 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
                 target = DEFAULT_TARGET;
             }
         }
+    }
+
+    /**
+     * {@code CvProfileCache}'s lazy-reload TTL (docs/plans/active/CV-SETTINGS-PLAN.md §3.1,
+     * CV-SETTINGS-CONTEXT.md's W2 &rarr; W5 handoff) — profiles ship unconditionally (no feature
+     * flag; built-in profiles exist regardless of {@link #enabled()}/{@link Registry#enabled()}),
+     * so this record only ever holds the one cache-freshness tunable.
+     *
+     * @param cacheTtl how long {@code CvProfileCache} serves a stale in-memory snapshot before
+     *                 reloading from {@code CvProfileRepositoryPort} on next read; every write
+     *                 (create/update/delete/bind/unbind) still refreshes the snapshot immediately
+     *                 regardless of this TTL. Default 60s
+     */
+    public record Profiles(@DefaultValue("60s") Duration cacheTtl) {
+        static final Duration DEFAULT_CACHE_TTL = Duration.ofSeconds(60);
     }
 }

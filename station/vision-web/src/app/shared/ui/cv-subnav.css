@@ -1,0 +1,12 @@
+/* Reuses the global `.segmented`/`.btn` primitives (src/styles.css) — no new colors, same tab-bar
+   idiom `features/inventory/inventory.css`'s own `.tab-bar` documents. Only the vertical rhythm
+   below the bar is page-local. */
+
+:host {
+  display: block;
+  margin-bottom: var(--space-16);
+}
+
+.cv-subnav a.btn {
+  text-decoration: none;
+}

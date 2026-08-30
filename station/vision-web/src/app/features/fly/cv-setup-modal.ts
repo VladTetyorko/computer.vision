@@ -1,10 +1,11 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, input, output, signal } from '@angular/core';
 import { FleetStore } from '../../core/fleet/fleet-store';
-import { SettingsStore, type PipelineSettings } from '../../core/settings/settings-store';
+import { VisionApi } from '../../core/api/vision-api';
 import { ToastService } from '../../core/toast.service';
+import { describeHttpError } from '../../core/api-error';
 import { DetectionsStore } from '../../core/detections/detections-store';
 import { HIDDEN_CLASS_TRUTH, isLabelDenied, toggleLabelDeny } from '../../core/detections/detections-logic';
-import type { TrackingMode, UpdateStreamConfigRequest } from '../../core/api/models';
+import type { EffectiveCvProfile, TrackingMode, UpdateStreamConfigRequest } from '../../core/api/models';
 import {
   CAPABILITY_LEVEL_OPTIONS,
   DEFAULT_FOLLOW_FPS,
@@ -17,6 +18,7 @@ import {
   buildFollowFpsPatch,
   buildHotKnobPatch,
   buildModelChangePatch,
+  buildProfileRequestFromConfig,
   buildTrackingEnginePatch,
   buildTrackingModePatch,
   buildVerifyCadencePatch,
@@ -24,6 +26,8 @@ import {
   capabilityLevelLabel,
   chipCandidates,
   debounce,
+  defaultAssetProfileDescription,
+  defaultAssetProfileName,
   engineOptionsForMode,
   filterLabelsByQuery,
   findModel,
@@ -44,6 +48,7 @@ import {
   sortRecentFirst,
   stagedLabelSeed,
   submitLabelFilterButtonText,
+  type ResolvedCvConfig,
 } from './cv-control-panel-logic';
 
 /**
@@ -82,13 +87,15 @@ import {
  * way the app's non-video-adjacent dialogs do; a wash this component's own `.backdrop` rule
  * documents.
  *
- * **`streamId` is the one input** — every other fact this dialog needs (the model roster, the
- * settings draft, observed/tracked detections) comes from directly-injected app-wide services,
- * the same shape `cv-control-panel.ts` already used before the split (root-provided `FleetStore`/
- * `SettingsStore`/`ToastService`, and the cockpit-route-provided `DetectionsStore` — see
- * `cockpit.ts`'s own `providers` array; this component resolves the identical instance the panel
- * and the detections strip already share, since it is mounted inside the same route's component
- * tree). **Deliberately does not call `DetectionsStore#trackTracks`/`untrackTracks` itself** —
+ * **No local settings draft any more** (docs/plans/active/CV-SETTINGS-PLAN.md wave W7, H2) — every
+ * control here reads {@link config} (`CockpitFacade#resolvedCvConfig`, an input like `streamId`),
+ * merged with this component's own {@link pendingEdits} overlay for edits not yet echoed back by
+ * the wire (see that field's own doc comment). The model roster and observed/tracked detections
+ * still come from directly-injected app-wide services, the same shape `cv-control-panel.ts` already
+ * uses (root-provided `FleetStore`/`VisionApi`/`ToastService`, and the cockpit-route-provided
+ * `DetectionsStore` — see `cockpit.ts`'s own `providers` array; this component resolves the
+ * identical instance the panel and the detections strip already share, since it is mounted inside
+ * the same route's component tree). **Deliberately does not call `DetectionsStore#trackTracks`/`untrackTracks` itself** —
  * that poll's lifecycle stays owned by `cv-control-panel.ts`, which stays mounted for the whole
  * time the Vision drawer is open (this modal's own mount/unmount is a *shorter*, independent
  * window nested inside that). If this component started/stopped the same poll on its own
@@ -104,15 +111,15 @@ import {
  * dialog, unlike the old always-mounted-while-the-drawer-is-open panel, is not continuously
  * mounted — a component-local field would forget the choice on every close).
  *
- * **Tracking mode/engine and the capability ceiling reset to their defaults on every reopen** —
- * unchanged from before the split: `trackingMode`/`trackingEngineId` immediately re-sync from the
- * tracks poll's own `stats` the instant this component mounts (the constructor `effect` below), so
- * that pair reads the honest wire state within one tick regardless. `capabilityLevel`/
- * `verifyEveryMillis`/`followFps` have no such readback (see each field's own doc comment) and so
- * do genuinely reset to their seed values on reopen — the exact same behavior the old panel already
- * had every time an operator closed and reopened the Vision drawer (that component was destroyed/
- * recreated too, `cockpit.html`'s `@if (isPanelOpen('cv') ...)`), not a regression this wave
- * introduces.
+ * **Every tracking field now has a real readback on reopen** (wave W7, H6 —
+ * docs/plans/active/CV-SETTINGS-PLAN.md §3.5 rule 3): `trackingMode`/`trackingEngineId` re-sync
+ * from the tracks poll's own `stats` the instant this component mounts, unchanged from before the
+ * split. `capabilityLevel`/`verifyEveryMillis`/`followFps` **used to have no readback at all** —
+ * they reset to a hardcoded default on every reopen and otherwise just echoed whatever this browser
+ * last clicked. They now seed from {@link config}'s own `tracking` object (`GET
+ * /api/streams/{id}/config`, the exact same H6 fix `cv-control-panel.ts` never needed for this
+ * family) via a second constructor `effect`, so a reopen shows the stream's actual state, not a
+ * reset default.
  */
 @Component({
   selector: 'vision-cv-setup-modal',
@@ -135,14 +142,64 @@ export class CvSetupModal {
    *  "component only reports the request, host owns the store write" shape. */
   readonly closed = output<void>();
 
+  /** The one value every control in this modal renders from and builds its next PATCH from
+   *  (`CockpitFacade#resolvedCvConfig`, wave W7) — see class doc's "No local settings draft" note. */
+  readonly config = input<ResolvedCvConfig | undefined>(undefined);
+
+  /** The asset's own effective CV profile — feeds "Save to this asset's profile"'s own create-vs-
+   *  update decision below (see {@link saveToAssetProfile}). */
+  readonly effectiveProfile = input<EffectiveCvProfile | undefined>(undefined);
+
+  /** The primary device's asset id — {@link saveToAssetProfile}'s write target; the action is a
+   *  no-op with nothing to save into while this is `undefined`. */
+  readonly assetId = input<string | undefined>(undefined);
+
+  /** The asset's own display name — seeds a new profile's name/description (never used once the
+   *  asset already owns one; see {@link saveToAssetProfile}). */
+  readonly assetDisplayName = input<string | undefined>(undefined);
+
+  /** `CockpitFacade#canManage` (`canManageOrg`) — gates the "Save to this asset's profile" footer
+   *  button, mirroring `/vision/profiles`' own gate (`VisionProfilesFacade.canManage`). Passed as an
+   *  input rather than re-derived here so the two surfaces can never disagree about who can write. */
+  readonly canManage = input<boolean>(false);
+
+  /** Emitted after any PATCH this modal sends succeeds — the host (`CockpitFacade#refreshStreamConfig`)
+   *  re-reads `GET .../config` so {@link config} always renders the wire, never an assumption (H6). */
+  readonly configChanged = output<void>();
+
+  /** Emitted after a successful "Save to this asset's profile" — the host
+   *  (`CockpitFacade#refreshEffectiveProfile`) re-reads the asset's own effective profile. */
+  readonly profileSaved = output<void>();
+
   private readonly fleet = inject(FleetStore);
-  protected readonly settings = inject(SettingsStore);
+  private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
   /** Read-only here — see this class's own doc comment for why `trackTracks`/`untrackTracks` are
    *  never called from this component. */
   protected readonly detections = inject(DetectionsStore);
 
   protected readonly hasStream = computed(() => !!this.streamId());
+
+  /**
+   * Local overlay of not-yet-confirmed hot-knob/model edits, merged on top of {@link config} before
+   * both rendering and building the next PATCH (`applyHotKnob`/`onModelChange`) — without this,
+   * editing two different fields inside the same {@link HOT_KNOB_DEBOUNCE_MS} window would silently
+   * drop the earlier one: `debounce()` only ever fires its *last* call, and that call would
+   * otherwise rebuild its patch from the still-stale {@link config} (nothing this component itself
+   * sent has echoed back onto the wire yet). Cleared whenever {@link config} itself changes — a
+   * fresh readback, either from this component's own {@link configChanged} round-trip or from a
+   * stream/asset switch — so it can never drift stale once the wire actually agrees.
+   */
+  private readonly pendingEdits = signal<Partial<ResolvedCvConfig>>({});
+
+  /** {@link config} merged with {@link pendingEdits} — every control below reads this, never
+   *  {@link config} directly. */
+  protected readonly liveConfig = computed<ResolvedCvConfig | undefined>(() => {
+    const base = this.config();
+    return base ? { ...base, ...this.pendingEdits() } : undefined;
+  });
+
+  protected readonly savingProfile = signal(false);
 
   /** The honest "hidden classes drop everywhere" sentence — shown verbatim once, at the foot of
    *  the merged Classes section (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P2 §5 — the pre-P2 split
@@ -156,11 +213,11 @@ export class CvSetupModal {
    *  full staging model (unchanged by this wave, only relocated). */
   protected readonly pendingLabels = signal<readonly string[] | null>(null);
   protected readonly labelFilterSeed = computed(() =>
-    stagedLabelSeed(this.pendingLabels(), this.settings.effective().labelFilter),
+    stagedLabelSeed(this.pendingLabels(), this.liveConfig()?.labelFilter ?? []),
   );
 
   protected readonly models = computed(() => this.fleet.models());
-  protected readonly selectedModel = computed(() => findModel(this.models(), this.settings.effective().model));
+  protected readonly selectedModel = computed(() => findModel(this.models(), this.liveConfig()?.model ?? ''));
   protected readonly isOpenVocab = computed(() => this.selectedModel()?.openVocab ?? false);
   protected readonly perfHintText = computed(() => perfHint(this.isOpenVocab()));
 
@@ -177,7 +234,7 @@ export class CvSetupModal {
   }
 
   protected readonly chips = computed(() =>
-    chipCandidates(this.labelFilterSeed(), this.settings.effective().labelDenyFilter, observedLabels(this.detections.results())),
+    chipCandidates(this.labelFilterSeed(), this.liveConfig()?.labelDenyFilter ?? [], observedLabels(this.detections.results())),
   );
   /** The most-recently-observed labels, in recency order — {@link filteredChips}' own sort
    *  priority (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P2 §5). This is all that survives of the
@@ -191,16 +248,23 @@ export class CvSetupModal {
     () => this.classQuery().trim().length > 0 && !hasExactLabelMatch(this.chips(), this.classQuery()),
   );
 
+  /** Emits {@link configChanged} on a successful PATCH only — a failed edit left the stream exactly
+   *  where it was, so {@link pendingEdits} keeps standing in for it rather than being dropped. */
   private readonly hotKnobPatch = debounce((patch: ReturnType<typeof buildHotKnobPatch>) => {
     const streamId = this.streamId();
-    if (streamId) {
-      void this.fleet.patchStreamConfig(streamId, patch);
+    if (!streamId) {
+      return;
     }
+    void this.fleet.patchStreamConfig(streamId, patch).then((result) => {
+      if (result) {
+        this.configChanged.emit();
+      }
+    });
   }, HOT_KNOB_DEBOUNCE_MS);
 
   // --- Tracking (docs/plans/done/TRACKING-PLAN.md §4's frozen wire contract, wave T7) — unchanged
-  // from the pre-split panel beyond relocation; see this class's own doc comment for the "resets on
-  // reopen vs. re-syncs from stats" distinction between these fields.
+  // from the pre-split panel beyond relocation; see this class's own doc comment for the "re-syncs
+  // from stats vs. from `config`'s own readback" distinction between these fields.
 
   protected readonly trackingMode = signal<TrackingMode>('OFF');
   protected readonly trackingEngineId = signal('');
@@ -255,6 +319,30 @@ export class CvSetupModal {
       }
     });
 
+    // H6 (docs/plans/active/CV-SETTINGS-PLAN.md §3.5 rule 3) — capabilityLevel/verifyEveryMillis/
+    // followFps used to have **no readback at all**, resetting to a hardcoded default on every
+    // reopen; see class doc's own "Every tracking field now has a real readback" note. Seeded from
+    // `config()`, not `liveConfig()` — an in-flight, not-yet-confirmed tracking PATCH is always sent
+    // immediately (never debounced/staged in `pendingEdits`, which exists only for the hot-knob
+    // family), so there is nothing local to layer on top of the wire value here.
+    effect(() => {
+      const tracking = this.config()?.tracking;
+      if (!tracking) {
+        return;
+      }
+      this.capabilityLevel.set(tracking.capabilityLevel);
+      this.verifyEveryMillis.set(tracking.verifyEveryMillis);
+      this.followFps.set(tracking.followFps);
+    });
+
+    // Drops any not-yet-confirmed hot-knob overlay the instant a fresh readback arrives — see
+    // `pendingEdits`' own doc comment for why this is the right moment (never sooner: a debounced
+    // edit needs the overlay's *own* value to survive until its PATCH actually lands).
+    effect(() => {
+      this.config();
+      this.pendingEdits.set({});
+    });
+
     // A stream change drops any staged-but-unsubmitted allowlist edit — built against the previous
     // stream's observed vocabulary, with no guaranteed meaning against whatever comes next.
     effect(() => {
@@ -290,16 +378,23 @@ export class CvSetupModal {
   }
 
   /** Every tracking PATCH is sent immediately, never debounced/coalesced with `hotKnobPatch` — see
-   *  `cv-control-panel.ts`'s identical, pre-split private method's own doc comment. */
+   *  `cv-control-panel.ts`'s identical, pre-split private method's own doc comment. Emits {@link
+   *  configChanged} on success, same as `hotKnobPatch` — this is what feeds the H6 readback effect
+   *  above (`config()?.tracking`) on the very next tick. */
   private patchTracking(patch: UpdateStreamConfigRequest): void {
     const streamId = this.streamId();
-    if (streamId) {
-      void this.fleet.patchStreamConfig(streamId, patch);
+    if (!streamId) {
+      return;
     }
+    void this.fleet.patchStreamConfig(streamId, patch).then((result) => {
+      if (result) {
+        this.configChanged.emit();
+      }
+    });
   }
 
   protected isChecked(label: string): boolean {
-    return isLabelChecked(this.labelFilterSeed(), label) && !isLabelDenied(this.settings.effective().labelDenyFilter, label);
+    return isLabelChecked(this.labelFilterSeed(), label) && !isLabelDenied(this.liveConfig()?.labelDenyFilter ?? [], label);
   }
 
   /** Whether `label` is on the operator's own deny-list — the merged Classes checklist's explicit
@@ -308,7 +403,7 @@ export class CvSetupModal {
    *  `chip.hidden` treatment so an operator sees the same "— hidden" wording in both places. The
    *  same {@link toggleChip} click both hides and un-hides — this only changes what the chip *says*. */
   protected isHidden(label: string): boolean {
-    return isLabelDenied(this.settings.effective().labelDenyFilter, label);
+    return isLabelDenied(this.liveConfig()?.labelDenyFilter ?? [], label);
   }
 
   protected onConfidence(value: string): void {
@@ -323,7 +418,7 @@ export class CvSetupModal {
    *  single merged Classes checklist's only click handler as of P2 (pre-P2, the now-deleted "Seen
    *  now" mini-checklist called this same method too — one apparatus, not two, from the start). */
   protected toggleChip(label: string): void {
-    this.applyHotKnob({ labelDenyFilter: toggleLabelDeny(this.settings.effective().labelDenyFilter, label) });
+    this.applyHotKnob({ labelDenyFilter: toggleLabelDeny(this.liveConfig()?.labelDenyFilter ?? [], label) });
   }
 
   protected addClass(): void {
@@ -367,19 +462,39 @@ export class CvSetupModal {
     this.pendingLabels.set(null);
   }
 
-  private applyHotKnob(patch: Partial<PipelineSettings>): void {
-    this.settings.adjust(patch);
-    this.hotKnobPatch.run(buildHotKnobPatch(this.settings.effective()));
+  /** Layers `patch` onto {@link pendingEdits} (so it survives until its own PATCH lands — see that
+   *  field's own doc comment) and sends the debounced hot-knob PATCH built from {@link liveConfig}
+   *  merged with this one edit. A no-op before {@link config} has resolved at all — there is nothing
+   *  honest to merge onto yet. */
+  private applyHotKnob(patch: Partial<ResolvedCvConfig>): void {
+    const current = this.liveConfig();
+    if (!current) {
+      return;
+    }
+    this.pendingEdits.update((pending) => ({ ...pending, ...patch }));
+    this.hotKnobPatch.run(buildHotKnobPatch({ ...current, ...patch }));
   }
 
+  /**
+   * A model change is always its own separate PATCH (`buildModelChangePatch`, `model` alone — see
+   * `core/api/models.ts#UpdateStreamConfigRequest`'s own frozen "two families of change never mix
+   * in one call" rule). The seeded label filter this used to only reach the wire lazily, via
+   * whatever *unrelated* hot-knob edit happened to come next (`SettingsStore#adjust` mutating a
+   * local draft the old `buildHotKnobPatch` read on its own later schedule) — wave W7 sends it
+   * promptly instead, as its own **second**, still-separate hot-knob PATCH right after the model
+   * PATCH succeeds, rather than folding it into the model PATCH itself (which would blur the exact
+   * boundary that rule exists to keep: a slider drag must never accidentally trigger a re-arm, and
+   * the model PATCH must never accidentally carry an unrelated field either).
+   */
   protected async onModelChange(modelId: string): Promise<void> {
-    if (modelId === this.settings.effective().model) {
+    const current = this.liveConfig();
+    if (!current || modelId === current.model) {
       return;
     }
     this.hotKnobPatch.cancel();
     this.pendingLabels.set(null);
     const seeded = seedLabelFilterForModel(findModel(this.models(), modelId));
-    this.settings.adjust({ model: modelId, labelFilter: seeded });
+    this.pendingEdits.update((pending) => ({ ...pending, model: modelId, labelFilter: seeded }));
 
     const streamId = this.streamId();
     if (!streamId) {
@@ -388,12 +503,54 @@ export class CvSetupModal {
     this.modelBusy.set(true);
     try {
       const response = await this.fleet.patchStreamConfig(streamId, buildModelChangePatch(modelId));
+      if (response) {
+        await this.fleet.patchStreamConfig(streamId, buildHotKnobPatch({ ...current, model: modelId, labelFilter: seeded }));
+        this.configChanged.emit();
+      }
       const hint = response ? reArmHint(response) : null;
       if (hint) {
         this.toasts.info(hint);
       }
     } finally {
       this.modelBusy.set(false);
+    }
+  }
+
+  // --- "Save to this asset's profile" (docs/plans/active/CV-SETTINGS-PLAN.md §3.1 rule 2, §4) -----
+  // The only write path that ever moves a live value *upward* into a profile — explicit, one click,
+  // never a side effect of any of the PATCHes above. Updates the asset's own profile in place when
+  // one is already bound at ASSET scope (`effectiveProfile()?.source === 'ASSET'`); otherwise creates
+  // a new one and binds it, so the very next Start (and every other stream of this asset) picks up
+  // what the operator is looking at right now.
+
+  /** `true` while the asset already owns a profile of its own — {@link saveToAssetProfile} updates
+   *  it in place rather than creating a second, orphaned one. */
+  protected readonly assetOwnsProfile = computed(() => this.effectiveProfile()?.source === 'ASSET');
+
+  protected async saveToAssetProfile(): Promise<void> {
+    const assetId = this.assetId();
+    const config = this.liveConfig();
+    if (!assetId || !config || !this.canManage() || this.savingProfile()) {
+      return;
+    }
+    this.savingProfile.set(true);
+    try {
+      const existing = this.effectiveProfile();
+      const owned = existing?.source === 'ASSET' ? existing.profile : undefined;
+      const displayName = this.assetDisplayName() ?? assetId;
+      const request = buildProfileRequestFromConfig(
+        config,
+        owned?.name ?? defaultAssetProfileName(displayName),
+        owned?.description ?? defaultAssetProfileDescription(displayName),
+      );
+      const profile = owned ? await this.api.updateCvProfile(owned.id, request) : await this.api.createCvProfile(request);
+      await this.api.setCvProfileBinding({ scopeKind: 'ASSET', scopeId: assetId, profileId: profile.id });
+      this.toasts.ok(`Saved to this asset's profile ("${profile.name}").`);
+      this.profileSaved.emit();
+    } catch (error) {
+      this.toasts.error(describeHttpError(error));
+    } finally {
+      this.savingProfile.set(false);
     }
   }
 }

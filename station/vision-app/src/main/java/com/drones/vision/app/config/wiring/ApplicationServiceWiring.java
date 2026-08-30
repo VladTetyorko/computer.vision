@@ -63,6 +63,7 @@ import com.drones.vision.map.application.*;
 import com.drones.vision.map.application.mark.*;
 import com.drones.vision.perception.application.device.*;
 import com.drones.vision.perception.application.pipeline.*;
+import com.drones.vision.perception.application.profile.CvProfileResolver;
 import com.drones.vision.events.application.*;
 import com.drones.vision.simulation.application.*;
 import com.drones.vision.perception.application.stream.*;
@@ -503,6 +504,13 @@ public class ApplicationServiceWiring {
      * on {@code vision.cv.demand.enabled} (default {@code true}) — resolving to {@link Optional#empty()}
      * when that flag is {@code false} reproduces {@code DefaultStreamService}'s pre-wave-D2 constructor
      * exactly: the demand-poll task is never scheduled, and every stream stays fail-open on demand.
+     *
+     * <p>{@code cvProfileResolver} (docs/plans/active/CV-SETTINGS-PLAN.md §3.1/§5.4,
+     * CV-SETTINGS-CONTEXT.md's W2 &rarr; W5 handoff) is {@code CvProfileWiringConfiguration}'s
+     * unconditional bean — {@code DefaultStreamService#start} applies the same asset &rarr; category
+     * &rarr; organization &rarr; platform fold {@code StreamDetectionSupport#resolveStartConfig}
+     * (vision-api) applies for the device-level start path, so asset-level start and simulation
+     * starts fold identically.
      */
     @Bean
     public StreamService streamService(AssetDirectoryService assetDirectoryService,
@@ -520,7 +528,8 @@ public class ApplicationServiceWiring {
                                         VisionPublishProperties publishProperties,
                                         ObjectProvider<PulledDetectionPort> pulledDetectionPort,
                                         MediamtxLiveFrameGrabber mediamtxLiveFrameGrabber,
-                                        ObjectProvider<DetectionDemandPort> detectionDemandPort) {
+                                        ObjectProvider<DetectionDemandPort> detectionDemandPort,
+                                        CvProfileResolver cvProfileResolver) {
         Optional<PullDetectionSettings> pullDetectionSettings = cvProperties.pullEnabled()
                 ? Optional.of(new PullDetectionSettings(pulledDetectionPort.getObject(), cvProperties.pull().rtspBase()))
                 : Optional.empty();
@@ -529,7 +538,8 @@ public class ApplicationServiceWiring {
                 new DefaultStreamServiceSettings(Optional.of(usageTracker), Optional.of(detectionEventRepositoryPort),
                         Optional.of(detectionLiveUpdatePort),
                         streamPipelineSettings(applicationProperties, trackingProperties, cvProperties),
-                        pullDetectionSettings, Optional.ofNullable(detectionDemandPort.getIfAvailable())));
+                        pullDetectionSettings, Optional.ofNullable(detectionDemandPort.getIfAvailable())),
+                cvProfileResolver);
         if (publishProperties.sourceProxy().enabled()) {
             return new LiveFrameFallbackStreamService(defaultStreamService, mediamtxLiveFrameGrabber);
         }

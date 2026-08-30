@@ -1,14 +1,10 @@
 <div class="page">
+  <vision-cv-subnav active="labeling" />
+
   <vision-section-header
     title="CV training datasets"
     subtitle="Capture live frames, correct their boxes, and export YOLO datasets to fine-tune detection models."
-  >
-    @if (!facade.training.disabled()) {
-      <div actions>
-        <a routerLink="/manage/training/models" class="btn secondary small">Models</a>
-      </div>
-    }
-  </vision-section-header>
+  />
 
   @if (facade.training.disabled()) {
     <vision-empty

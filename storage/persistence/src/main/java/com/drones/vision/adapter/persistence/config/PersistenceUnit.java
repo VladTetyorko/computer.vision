@@ -7,6 +7,9 @@ import com.drones.vision.adapter.persistence.entity.AssignmentEntity;
 import com.drones.vision.adapter.persistence.entity.AuditEntryEntity;
 import com.drones.vision.adapter.persistence.entity.CameraPoseEntity;
 import com.drones.vision.adapter.persistence.entity.CategoryEntity;
+import com.drones.vision.adapter.persistence.entity.CvModelEntity;
+import com.drones.vision.adapter.persistence.entity.CvProfileBindingEntity;
+import com.drones.vision.adapter.persistence.entity.CvProfileEntity;
 import com.drones.vision.adapter.persistence.entity.DatasetEntity;
 import com.drones.vision.adapter.persistence.entity.DbAuditLogEntity;
 import com.drones.vision.adapter.persistence.entity.DetectionEventEntity;
@@ -24,6 +27,7 @@ import com.drones.vision.adapter.persistence.entity.SampleImageEntity;
 import com.drones.vision.adapter.persistence.entity.TelemetrySampleEntity;
 import com.drones.vision.adapter.persistence.entity.TrackCorrectionEntity;
 import com.drones.vision.adapter.persistence.entity.TrackPointEntity;
+import com.drones.vision.adapter.persistence.entity.TrainingRunEntity;
 import com.drones.vision.adapter.persistence.entity.TrainingSampleEntity;
 import com.drones.vision.adapter.persistence.entity.UserEntity;
 import com.drones.vision.adapter.persistence.entity.ControlProfileEntity;
@@ -253,6 +257,14 @@ public final class PersistenceUnit {
         // docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.5/§3.7 (V23__track_corrections.sql) -- excluded
         // from db_audit_log, same reasoning as TrackPointEntity above.
         configuration.addAnnotatedClass(TrackCorrectionEntity.class);
+        // docs/plans/active/CV-SETTINGS-PLAN.md §5.3 (V29__cv_profiles.sql, V30__cv_model_registry.sql,
+        // CV-SETTINGS wave W3) -- CvProfileBindingEntity needs no registration of its own beyond this;
+        // unlike LayerGrantEmbeddable it is a real @Entity (its own @IdClass composite key), not an
+        // @Embeddable, so it must be listed here explicitly like every other entity.
+        configuration.addAnnotatedClass(CvProfileEntity.class);
+        configuration.addAnnotatedClass(CvProfileBindingEntity.class);
+        configuration.addAnnotatedClass(CvModelEntity.class);
+        configuration.addAnnotatedClass(TrainingRunEntity.class);
         return configuration.buildSessionFactory();
     }
 

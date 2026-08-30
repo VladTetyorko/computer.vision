@@ -1,0 +1,61 @@
+/* Reuses `.page`/`.chip`/`.dot`/`.muted`/`.faint`/`.mono`/`.truncate`/`.empty` from `src/styles.css`
+   — no new colors. `.run-row`'s full-row-anchor + `.label`/`.value` pair idiom mirrors
+   `dataset-detail.css`'s own `.job-list`/`.job-row` and `training-job.css`'s `.job-osd`/`.item`
+   pattern, kept component-local here per this feature folder's own "repeated rather than shared"
+   convention (`training-job.css`'s header comment). A full-row link (rather than a table + a
+   trailing "Open" action column) keeps every row one large touch target, per this app's
+   responsive/touch-target rule — the same reasoning `dataset-detail.html`'s own job list already
+   applies to this exact kind of row. */
+
+.run-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.run-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-24);
+  flex-wrap: wrap;
+  padding: var(--space-12);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: inherit;
+  text-decoration: none;
+}
+
+.run-row:hover {
+  border-color: var(--border-strong);
+  background: var(--panel-raised);
+}
+
+.run-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.run-item.dataset {
+  max-width: 16rem;
+}
+
+.run-item.started {
+  margin-left: auto;
+  text-align: right;
+}
+
+.label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.value {
+  font-weight: 600;
+}

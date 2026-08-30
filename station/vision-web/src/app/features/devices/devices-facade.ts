@@ -2,7 +2,6 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet/fleet-store';
-import { SettingsStore } from '../../core/settings/settings-store';
 import { ToastService } from '../../core/toast.service';
 import { UndoToastService } from '../../shared/ui/undo-toast.service';
 import { describeHttpError } from '../../core/api-error';
@@ -58,7 +57,6 @@ export class DevicesFacade {
   private readonly route = inject(ActivatedRoute);
 
   readonly fleet = inject(FleetStore);
-  readonly settings = inject(SettingsStore);
 
   readonly busyDeviceId = signal<string | null>(null);
 
@@ -350,7 +348,10 @@ export class DevicesFacade {
   async start(device: Device): Promise<void> {
     this.busyDeviceId.set(device.id);
     try {
-      const result = await this.fleet.start(device.id, this.settings.effective());
+      // No settings argument (docs/plans/active/CV-SETTINGS-PLAN.md wave W7, H2) — the server
+      // resolves the CV config from the profile hierarchy, never from a browser-local draft this
+      // app no longer keeps (see `CockpitFacade.start`'s identical change for the full rationale).
+      const result = await this.fleet.start(device.id);
       if (result) {
         await this.router.navigate(['/live', device.id]);
       }

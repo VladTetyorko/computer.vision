@@ -4,11 +4,13 @@ import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.events.domain.port.ReplayFrameExtractionPort;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.learning.domain.port.CvModelRepositoryPort;
 import com.drones.vision.learning.domain.port.DatasetRepositoryPort;
 import com.drones.vision.learning.domain.port.DatasetUploadPort;
 import com.drones.vision.learning.domain.port.ModelRegistryPort;
 import com.drones.vision.learning.domain.port.SampleImageStorePort;
 import com.drones.vision.learning.domain.port.TrainingPort;
+import com.drones.vision.learning.domain.port.TrainingRunRepositoryPort;
 import com.drones.vision.learning.domain.port.TrainingSampleRepositoryPort;
 import com.drones.vision.warehouse.application.directory.AssetDirectoryService;
 import com.drones.vision.adapter.cvgrpc.GrpcCvSettings;
@@ -36,10 +38,17 @@ import org.springframework.context.annotation.Configuration;
  * gRPC-backed {@link DatasetUploadPort} (the replacement for the deleted filesystem export step) —
  * behind {@link VisionTrainingProperties#enabled()} (default {@code false}).
  *
- * <p>Also wires the model registry control plane (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9):
- * {@link #modelRegistryPort}/{@link #modelRegistryService} behind {@code ModelRegistryController}
- * (vision-api, component-scanned), gated by the same {@link VisionTrainingProperties#enabled()}
- * property.
+ * <p>Also wires the model registry control plane (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9,
+ * joined/governed per docs/plans/active/CV-SETTINGS-PLAN.md §3.2): {@link #modelRegistryPort}/{@link
+ * #modelRegistryService} behind {@code ModelRegistryController} (vision-api, component-scanned) —
+ * gated by {@link VisionCvProperties.Registry#enabled()} (docs/plans/active/CV-SETTINGS-CONTEXT.md's
+ * W4-app &rarr; W5 handoff), <b>not</b> {@link VisionTrainingProperties#enabled()} any more: the
+ * registry is a governance/promotion concern over models, independent of whether the capture &rarr;
+ * label &rarr; train pipeline below is wired at all. {@code vision.cv.registry.enabled} defaults to
+ * {@code vision.cv.enabled}'s own value (a deployment with detection already on gets the registry for
+ * free), stays physically in this class rather than moving to {@code CvWiring} — it is still the
+ * training/control-plane channel routing, {@link #trainingPort}/{@link #datasetUploadPort} live right
+ * alongside it, and only the gating property changed.
  *
  * <p><b>Channel routing (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6)</b>: {@code
  * Training/*} RPCs belong to the training role, so {@link #datasetUploadPort}/{@link
@@ -192,7 +201,7 @@ public class TrainingWiringConfiguration {
      * as the actual per-call deadline.
      */
     @Bean
-    @ConditionalOnProperty(prefix = "vision.training", name = "enabled", havingValue = "true")
+    @ConditionalOnProperty(prefix = "vision.cv.registry", name = "enabled", havingValue = "true")
     public ModelRegistryPort modelRegistryPort(@Qualifier("cvTrainingChannel") ObjectProvider<ManagedChannel> cvTrainingChannel,
                                                 @Qualifier("cvGrpcChannel") ObjectProvider<ManagedChannel> cvGrpcChannel,
                                                 VisionCvProperties cvProperties) {
@@ -201,15 +210,23 @@ public class TrainingWiringConfiguration {
     }
 
     /**
-     * Model list/promote (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9) behind {@code
-     * ModelRegistryController} (vision-api, component-scanned) — a one-line assembly, mirroring
-     * {@link #datasetService}'s shape.
+     * Model list/promote/rollback (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2 T9, widened per
+     * docs/plans/active/CV-SETTINGS-PLAN.md §3.2) behind {@code ModelRegistryController} (vision-api,
+     * component-scanned). {@code cvModelRepositoryPort}/{@code configModelCatalog} are the two new
+     * collaborators {@link DefaultModelRegistryService} gained joining platform governance rows onto
+     * worker truth (docs/plans/active/CV-SETTINGS-CONTEXT.md's W4-app handoff) — the former is {@link
+     * PersistenceWiringConfiguration}'s unconditional {@code JpaCvModelRepository} bean, the latter is
+     * {@code CvWiring#configModelCatalog} (also unconditional — the worker-unreachable fallback must
+     * exist regardless of whether this bean itself does).
      */
     @Bean
-    @ConditionalOnProperty(prefix = "vision.training", name = "enabled", havingValue = "true")
+    @ConditionalOnProperty(prefix = "vision.cv.registry", name = "enabled", havingValue = "true")
     public ModelRegistryService modelRegistryService(ModelRegistryPort modelRegistryPort,
+                                                       CvModelRepositoryPort cvModelRepositoryPort,
+                                                       ConfigModelCatalog configModelCatalog,
                                                        AuditTrailPort auditTrailPort) {
-        return new DefaultModelRegistryService(modelRegistryPort, auditTrailPort);
+        return new DefaultModelRegistryService(modelRegistryPort, cvModelRepositoryPort, configModelCatalog,
+                auditTrailPort);
     }
 
     /**
@@ -236,13 +253,23 @@ public class TrainingWiringConfiguration {
      * internal cached daemon-thread executor, so {@link TrainingPort#startTraining}'s blocking,
      * potentially many-epoch call never holds a request thread — nothing extra to wire here for
      * that.
+     *
+     * <p>{@code trainingRunRepositoryPort}/{@code cvModelRepositoryPort} are bundled into a {@link
+     * TrainingRunStores} inline here (docs/plans/active/CV-SETTINGS-CONTEXT.md's W4-app handoff,
+     * fixing H7 — "training metrics evaporate") rather than as their own {@code @Bean}: unlike {@link
+     * #trainingStores}/{@link #replaySources}, this bundle has exactly one consumer, so a dedicated
+     * bean would be indirection with no reuse to justify it. Both ports are already unconditionally
+     * wired in {@link PersistenceWiringConfiguration}.
      */
     @Bean
     @ConditionalOnProperty(prefix = "vision.training", name = "enabled", havingValue = "true")
     public TrainingJobService trainingJobService(TrainingPort trainingPort, LabelingService labelingService,
                                                    AuditTrailPort auditTrailPort,
+                                                   TrainingRunRepositoryPort trainingRunRepositoryPort,
+                                                   CvModelRepositoryPort cvModelRepositoryPort,
                                                    VisionApplicationProperties applicationProperties) {
-        return new DefaultTrainingJobService(trainingPort, labelingService, auditTrailPort,
+        TrainingRunStores trainingRunStores = new TrainingRunStores(trainingRunRepositoryPort, cvModelRepositoryPort);
+        return new DefaultTrainingJobService(trainingPort, labelingService, auditTrailPort, trainingRunStores,
                 applicationProperties.training().maxFinishedJobs());
     }
 }

@@ -1,41 +1,68 @@
 package com.drones.vision.api.support;
 
+import com.drones.vision.api.dto.StartStreamRequest;
 import com.drones.vision.api.live.LiveAndPollDetectionDemand;
+import com.drones.vision.api.security.CurrentUser;
+import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.StreamId;
+import com.drones.vision.perception.application.profile.CvProfileService;
+import com.drones.vision.perception.application.profile.EffectiveProfile;
 import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 
 import java.util.Objects;
+import java.util.Optional;
 
 /**
- * Bundles {@code StreamController}'s two new detection-demand concerns
- * (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.5/&sect;3.8) behind one constructor parameter,
- * deliberately: that controller already sits at four collaborators, and neither {@link
- * #defaultConfig()} (a single field read, once per {@code start}) nor {@link #touched(StreamId)} (a
- * single delegated call, once per {@code detections} read) is substantial enough on its own to
- * justify pushing the controller past this codebase's five-constructor-parameter ceiling
- * (.claude/skills/java-clean-code/SKILL.md &sect;3) — splitting the controller over two
+ * Bundles {@code StreamController}'s detection-related start-time concerns
+ * (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.5/&sect;3.8, widened by docs/plans/active/CV-SETTINGS-PLAN.md
+ * &sect;5.4/W2 deviation 3 for CV-profile resolution) behind one constructor parameter, deliberately:
+ * that controller already sits at its own five-collaborator ceiling, and none of {@link
+ * #defaultConfig()} (a single field read), {@link #touched(StreamId)} (a single delegated call), or
+ * {@link #resolveStartConfig} (one more lookup plus a merge) is substantial enough on its own to
+ * justify pushing the controller past this codebase's constructor-parameter ceiling
+ * (.claude/skills/java-clean-code/SKILL.md &sect;3) — splitting the controller over three
  * single-method reads would be indirection for its own sake. This class exists to keep that
- * bundling honest and named, rather than an unlabeled extra field.
+ * bundling honest and named, rather than unlabeled extra fields; growing it from two components to
+ * five (rather than adding parameters to {@code StreamController}, already at its own ceiling) is
+ * the sanctioned move that rule's own withdrawal note describes.
  *
  * <p>Plain class, constructed by {@code vision-app}'s wiring — not a {@code @Component} — mirroring
  * {@link SnapshotJpegEncoder}'s own precedent for a framework-free support class {@code vision-api}
  * holds but only {@code vision-app} can assemble (it alone knows whether {@code
  * vision.cv.demand.enabled} wired a real {@link LiveAndPollDetectionDemand} bean at all).
  *
- * @param defaultConfig the deployment's default {@link PipelineConfig} for a newly started
- *                       device-level stream (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.8) — {@code
- *                       StartStreamRequest#mergeOnto} merges a request's overrides onto this instead
- *                       of the domain's static {@link PipelineConfig#defaults()}, so {@code
- *                       vision.cv.detection-default-enabled} actually reaches a started stream
- * @param demand        the demand port's concrete implementation, so {@link #touched(StreamId)} can
- *                       reach {@link LiveAndPollDetectionDemand#touched(StreamId)} directly; {@code
- *                       null} when {@code vision.cv.demand.enabled=false} (the port bean is absent
- *                       entirely), in which case {@link #touched(StreamId)} is a no-op
+ * @param defaultConfig       the deployment's default {@link PipelineConfig} for a newly started
+ *                            device-level stream (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.8) — the
+ *                            {@code platformDefault} {@link #resolveStartConfig} folds a bound {@code
+ *                            CvProfile} down onto when nothing more specific matches, so {@code
+ *                            vision.cv.detection-default-enabled} still reaches a started stream that
+ *                            names no profile at any scope
+ * @param demand              the demand port's concrete implementation, so {@link
+ *                            #touched(StreamId)} can reach {@link
+ *                            LiveAndPollDetectionDemand#touched(StreamId)} directly; {@code null}
+ *                            when {@code vision.cv.demand.enabled=false} (the port bean is absent
+ *                            entirely), in which case {@link #touched(StreamId)} is a no-op
+ * @param cvProfileService    resolves a started device's asset's bound {@code CvProfile} — the
+ *                            same asset &rarr; category &rarr; organization &rarr; platform fold
+ *                            {@code GET /api/cv/profiles/effective} exposes as its own read
+ * @param assetRepositoryPort looks up which {@link Asset} (if any) owns the device being started;
+ *                            an unowned device (no asset at all) skips profile resolution entirely,
+ *                            exactly as an unowned device already skips every other asset-scoped
+ *                            concern in this controller
+ * @param currentUser         the acting caller, so profile resolution is scoped the same way every
+ *                            other read in this request is
  */
-public record StreamDetectionSupport(PipelineConfig defaultConfig, LiveAndPollDetectionDemand demand) {
+public record StreamDetectionSupport(PipelineConfig defaultConfig, LiveAndPollDetectionDemand demand,
+                                      CvProfileService cvProfileService, AssetRepositoryPort assetRepositoryPort,
+                                      CurrentUser currentUser) {
 
     public StreamDetectionSupport {
         Objects.requireNonNull(defaultConfig, "defaultConfig must not be null");
+        Objects.requireNonNull(cvProfileService, "cvProfileService must not be null");
+        Objects.requireNonNull(assetRepositoryPort, "assetRepositoryPort must not be null");
+        Objects.requireNonNull(currentUser, "currentUser must not be null");
         // demand is nullable -- see this record's own javadoc
     }
 
@@ -50,5 +77,43 @@ public record StreamDetectionSupport(PipelineConfig defaultConfig, LiveAndPollDe
         if (demand != null) {
             demand.touched(streamId);
         }
+    }
+
+    /**
+     * Resolves the {@link PipelineConfig} a newly started device-level stream should use
+     * (docs/plans/active/CV-SETTINGS-PLAN.md &sect;5.4, W2 deviation 3): folds {@code deviceId}'s
+     * owning asset's bound {@code CvProfile} (asset &rarr; category &rarr; organization &rarr;
+     * platform, {@link CvProfileService#effective}) underneath {@code body}'s own explicit
+     * overrides — an explicit field on {@code body} always wins over whatever the profile fold
+     * resolved, matching {@link StartStreamRequest#mergeOnto}'s existing "request beats default"
+     * contract one level up.
+     *
+     * <p>A device with no owning asset at all (unowned) skips profile resolution and merges
+     * {@code body} straight onto {@link #defaultConfig()}, byte-identical to before this wave —
+     * there is no asset to resolve a profile for. This method does not itself enforce visibility:
+     * {@code StreamController#start} still calls {@code StreamAccess#requireVisible} immediately
+     * after, which is what actually turns an out-of-scope asset into a 404 in production; in a test
+     * slice that mocks {@link CvProfileService} generically, that mock does not itself enforce
+     * scope, so the existing 404 assertions there are satisfied by {@code requireVisible} instead —
+     * both converge on the same outcome, just via different collaborators.
+     *
+     * @param deviceId the device being started
+     * @param body     the raw request body — its own overrides are resolved twice against two
+     *                 different bases ({@link #defaultConfig()} inside {@link
+     *                 StartStreamRequest#mergeOnto} for the no-asset case, or the profile-folded
+     *                 config for the owned case), never double-applied: exactly one of the two
+     *                 merges below actually runs
+     * @return the effective {@link PipelineConfig} to start the stream with
+     */
+    public PipelineConfig resolveStartConfig(DeviceId deviceId, StartStreamRequest body) {
+        Objects.requireNonNull(deviceId, "deviceId must not be null");
+        Objects.requireNonNull(body, "body must not be null");
+        Optional<Asset> asset = assetRepositoryPort.findByDeviceId(deviceId);
+        if (asset.isEmpty()) {
+            return body.mergeOnto(defaultConfig);
+        }
+        EffectiveProfile effective =
+                cvProfileService.effective(asset.get().id(), defaultConfig, currentUser.userId(), currentUser.scope());
+        return body.mergeOnto(effective.config());
     }
 }

@@ -3,12 +3,21 @@ package com.drones.vision.learning.application;
 import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
+import com.drones.vision.learning.domain.model.CvModelRecord;
 import com.drones.vision.learning.domain.model.DatasetId;
 import com.drones.vision.learning.domain.model.DatasetUpload;
 import com.drones.vision.learning.domain.model.JobState;
+import com.drones.vision.learning.domain.model.MetricsKind;
+import com.drones.vision.learning.domain.model.ModelMetrics;
+import com.drones.vision.learning.domain.model.ModelProvenance;
+import com.drones.vision.learning.domain.model.ModelRuntime;
+import com.drones.vision.learning.domain.model.ModelStatus;
+import com.drones.vision.learning.domain.model.ModelTaskType;
 import com.drones.vision.learning.domain.model.SampleStatus;
 import com.drones.vision.learning.domain.model.TrainingJobSpec;
 import com.drones.vision.learning.domain.model.TrainingProgress;
+import com.drones.vision.learning.domain.model.TrainingRunId;
+import com.drones.vision.learning.domain.model.TrainingRunRecord;
 import com.drones.vision.learning.domain.model.TrainingSample;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AuditTrailPort;
@@ -19,6 +28,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -33,11 +43,14 @@ import com.drones.vision.platform.VisibilityScope;
 /**
  * The one implementation of {@link TrainingJobService}.
  *
- * <h2>Scope gate</h2>
- * {@link #start} requires {@link VisibilityScope#canAdminister()} — ADMIN only, mirroring {@code
- * DefaultModelRegistryService#promote}'s gate exactly (docs/plans/done/OPS-UX-PLAN.md §1):
- * claiming the deployment's single training host is a deployment-global action, not a team-scoped
- * one, so a group manager's {@code canManageOrg()} is not the right gate here either.
+ * <h2>Scope gate (docs/plans/active/CV-SETTINGS-PLAN.md §8 OQ9)</h2>
+ * {@link #start} requires {@link VisibilityScope#canManageOrg()} — relaxed from {@code
+ * canAdminister()} (a security-gate change, accepted by the user per docs/plans/active/CV-SETTINGS-CONTEXT.md's
+ * "Decisions taken"): claiming the shared training host is still a privileged act, but training a
+ * dataset a manager can already label is team-scoped, not deployment-global — promoting the result
+ * to production stays {@code canAdminister()} on {@link ModelRegistryService#promote}. {@link
+ * #runs}/{@link #run} are gated on {@code canManageOrg()} too — see {@link TrainingJobService}'s own
+ * javadoc, "Scope".
  *
  * <h2>Synchronous dataset pre-check (docs/plans/done/CV-TRAINING-V2-PLAN.md §4/§E)</h2>
  * After the scope gate, {@link #start} runs one cheap, bounded {@link
@@ -51,61 +64,59 @@ import com.drones.vision.platform.VisibilityScope;
  * {@code DATASET} target, not by this class. Only after this check passes does the existing
  * scope-denial-or-STARTED audit/registration continue exactly as before.
  *
- * <h2>Locally-generated job id vs. the wire job id</h2>
+ * <h2>Locally-generated job id doubles as the persisted run id</h2>
  * {@link TrainingPort#startTraining} <b>blocks</b> for the lifetime of the job, so this service
  * cannot wait for cv-service to assign its own {@link TrainingProgress#jobId()} before answering
- * the caller — that would defeat the entire point of an async "start a long job" endpoint.
- * Instead, {@link #start} mints a fresh {@link UUID} locally, registers a {@link TrainingJobView}
- * under it, and returns it immediately; the actual run is submitted to {@code executor}. Every
- * {@link #updateJob} call is keyed by this closed-over local id, not by whatever id a particular
- * {@link TrainingProgress} message itself carries — the wire {@code jobId} is read nowhere in this
- * class. The two ids are therefore allowed to differ (and in practice, cv-service assigns its own
- * unrelated one); only the locally-generated id is ever exposed through this service's surface, so
- * a caller never needs to know the wire id exists at all.
+ * the caller. {@link #start} mints one fresh {@link UUID}, uses its string form as the in-memory
+ * {@link TrainingJobView#jobId()} (unchanged from before this run-persistence wave) and the same
+ * UUID, wrapped, as the {@link TrainingRunId} the persisted {@link TrainingRunRecord} is keyed by —
+ * so a caller can look up the same job through either {@link #job(String)} (the live poll) or
+ * {@link #run(TrainingRunId, UserId, VisibilityScope)} (the durable record) without tracking two
+ * unrelated ids. The wire {@code jobId} a particular {@link TrainingProgress} message carries is
+ * still read nowhere in this class — see the "Off-thread run" section below.
  *
- * <h2>Off-thread run: upload, then train (docs/plans/done/CV-TRAINING-V2-PLAN.md §4)</h2>
+ * <h2>Off-thread run: upload, then train, then persist (docs/plans/done/CV-TRAINING-V2-PLAN.md §4;
+ * run/candidate persistence per docs/plans/active/CV-SETTINGS-PLAN.md §3.3, fixing H7)</h2>
  * The task submitted to {@code executor} ({@link #runJob}) first calls {@link
  * LabelingService#uploadForTraining} — composing every {@code LABELED} sample into the frozen §5
  * YOLO content and shipping it to the training host — noting the phase in the job's {@code message}
  * field ({@link #note}) before and after, then calls {@link TrainingPort#startTraining} with a
  * callback that folds every {@link TrainingProgress} onto the tracked {@link TrainingJobView}
- * ({@link #updateJob}) exactly as before. No new {@link JobState} is invented for "uploading" — the
- * job stays {@link JobState#RUNNING} from the moment {@link #start} returns, and {@code
- * epoch}/{@code totalEpochs} stay {@code 0} until the first epoch arrives, same as before this
- * upload phase existed. Either step's failure — an upload rejection or a training transport
- * failure — surfaces identically: a thrown {@link RuntimeException} is caught here and recorded as
- * a terminal {@link JobState#FAILED} job (message = the exception's own message, or its class's
- * simple name if none), ensuring neither failure mode silently leaves a dead background thread and
- * a job stuck at {@code RUNNING} forever. The exception never escapes {@link #runJob} itself, so it
- * is never thrown back through {@code executor} to any caller.
+ * ({@link #updateJob}) exactly as before this wave, <b>and</b> onto a matching {@link
+ * TrainingRunRecord} save through {@link TrainingRunStores#trainingRuns()} — the durable
+ * counterpart {@code TrainingJobView} never had. A terminal {@link JobState#SUCCEEDED} message
+ * additionally registers a {@link ModelStatus#CANDIDATE} {@link CvModelRecord} through {@link
+ * TrainingRunStores#models()} (docs/plans/active/CV-SETTINGS-PLAN.md §8 OQ6 — <b>never</b> {@code
+ * LIVE}; promotion stays {@link ModelRegistryService#promote}'s own human, {@code
+ * canAdminister()}-gated act) — but only when the terminal message actually names a produced model
+ * id ({@link TrainingProgress#message()} non-blank); a blank one is treated as "nothing to
+ * register", not a crash. Either upload or training failing is recorded as a terminal {@link
+ * JobState#FAILED} job (and a matching {@code FAILED} run row) rather than escaping, exactly as
+ * before this wave.
  *
  * <h2>Concurrent jobs</h2>
  * Nothing here rejects a second {@link #start} while another job is still {@code RUNNING}: each
  * job is independent (its own id/dataset/base model/progress), and {@link TrainingPort}'s own
- * contract already requires an implementation to be safe for concurrently-running jobs — refusing
- * concurrency at this layer would only add a limitation nothing in the frozen contract asks for.
+ * contract already requires an implementation to be safe for concurrently-running jobs.
  *
  * <h2>Retention</h2>
  * {@code jobs} is a {@link ConcurrentHashMap} keyed by job id; a job's entry is replaced (never
- * mutated in place) on every progress update, so a reader always sees one fully-formed, internally
- * consistent {@link TrainingJobView} — never a torn read across its fields. Finished jobs (terminal
- * {@link JobState#SUCCEEDED}/{@link JobState#FAILED}) are additionally tracked, oldest-first, in a
- * companion {@link ConcurrentLinkedDeque}; once more than {@value #MAX_FINISHED_JOBS} have
- * finished, the oldest is evicted from {@code jobs}. A still-{@code RUNNING} job is never evicted —
- * only completions count toward the cap — so this bounds memory for a long-lived service instance
- * without ever losing an in-progress job a poller might still be watching. This is a best-effort
- * cap, not a hard invariant: two completions racing on the size check can occasionally let the map
- * grow one entry past the bound; harmless, and self-corrects on the very next completion.
+ * mutated in place) on every progress update. Finished jobs (terminal {@link JobState#SUCCEEDED}/
+ * {@link JobState#FAILED}) are additionally tracked, oldest-first, in a companion {@link
+ * ConcurrentLinkedDeque}; once more than {@value #MAX_FINISHED_JOBS} default (or the configured
+ * {@code maxFinishedJobs}) have finished, the oldest is evicted from {@code jobs} — but never from
+ * the persisted {@link TrainingRunRecord} store, which {@link #runs}/{@link #run} read from
+ * directly and which has no such cap (docs/plans/active/CV-SETTINGS-PLAN.md §3.3's whole point:
+ * the durable record outlives the in-memory poll's bound).
  *
  * <h2>Audit</h2>
  * Exactly one {@link AuditEntry} per {@link #start} attempt — a scope denial ({@code
  * DENIED:out of scope}) or a successful submission ({@code STARTED}) — against {@link
- * AuditTargetType#MODEL}, keyed by the generated job id (an opaque target id, per that enum's own
- * javadoc), {@link AuditAction#CREATED} (a new job resource is being created, unlike {@code
- * DefaultModelRegistryService#promote}'s update-shaped {@link AuditAction#UPDATED} over an
- * existing model reference). Progress updates and terminal completion are <b>not</b> individually
- * audited — a poller already observes them through {@link #job(String)}, and auditing every
- * progress tick would flood the trail for no security-relevant benefit.
+ * AuditTargetType#MODEL}, keyed by the generated job id, {@link AuditAction#CREATED}. Progress
+ * updates and terminal completion are <b>not</b> individually audited — a poller already observes
+ * them through {@link #job(String)}/{@link #run}. {@link #runs}/{@link #run} audit only a scope
+ * denial, never a successful read (a read must never audit its own success, matching every other
+ * read in this module).
  *
  * <h2>Threading</h2>
  * Holds no state beyond the two thread-safe collections above and the injected collaborators.
@@ -122,13 +133,24 @@ public final class DefaultTrainingJobService implements TrainingJobService {
     private static final String ATTR_RESULT = "result";
     private static final String DENIED_OUT_OF_SCOPE = "DENIED:out of scope";
     private static final String RESULT_STARTED = "STARTED";
+    private static final String RUNS_TARGET_ID = "training-runs";
 
     /** Labeled-sample presence check's fetch bound — one row is enough to prove non-emptiness. */
     private static final int PRESENCE_CHECK_LIMIT = 1;
 
+    /**
+     * Version/kind stamped on a run-produced {@link CvModelRecord} — no version axis exists on the
+     * training wire (a run's output is one uniquely-named checkpoint, mirroring the worker's own
+     * {@code "latest"} sentinel convention for a version-less reference — see
+     * docs/plans/active/CV-SETTINGS-CONTEXT.md's W4-domain handoff, deviation 6).
+     */
+    static final String TRAINED_MODEL_VERSION = "latest";
+    static final String TRAINED_MODEL_KIND = "fine-tuned";
+
     private final TrainingPort trainingPort;
     private final LabelingService labelingService;
     private final AuditTrailPort auditTrail;
+    private final TrainingRunStores trainingRunStores;
     private final ExecutorService executor;
     private final Supplier<Instant> clock;
 
@@ -137,34 +159,22 @@ public final class DefaultTrainingJobService implements TrainingJobService {
     private final Map<String, TrainingJobView> jobs = new ConcurrentHashMap<>();
     private final ConcurrentLinkedDeque<String> finishedOrder = new ConcurrentLinkedDeque<>();
 
-    /** Production convenience ctor: a cached daemon-thread pool, {@link Instant#now()}. */
+    /** Production ctor: a cached daemon-thread pool, {@link Instant#now()}. */
     public DefaultTrainingJobService(TrainingPort trainingPort, LabelingService labelingService,
-                                      AuditTrailPort auditTrail) {
-        this(trainingPort, labelingService, auditTrail, defaultExecutor(), Instant::now, MAX_FINISHED_JOBS);
+                                      AuditTrailPort auditTrail, TrainingRunStores trainingRunStores,
+                                      int maxFinishedJobs) {
+        this(trainingPort, labelingService, auditTrail, trainingRunStores, defaultExecutor(), Instant::now,
+                maxFinishedJobs);
     }
 
-    /**
-     * Same as the 3-argument constructor, plus an explicit retention cap (docs/plans/active/LAYERING-REFACTOR-PLAN.md
-     * &sect;1.3 config extraction, {@code vision.application.training.max-finished-jobs}) instead
-     * of {@link #MAX_FINISHED_JOBS}.
-     */
-    public DefaultTrainingJobService(TrainingPort trainingPort, LabelingService labelingService,
-                                      AuditTrailPort auditTrail, int maxFinishedJobs) {
-        this(trainingPort, labelingService, auditTrail, defaultExecutor(), Instant::now, maxFinishedJobs);
-    }
-
-    /** Test/wiring seam: an explicit executor (e.g. a same-thread one) and clock. */
+    /** Test seam: same as the production constructor, with an explicit executor (e.g. a same-thread one) and clock. */
     DefaultTrainingJobService(TrainingPort trainingPort, LabelingService labelingService, AuditTrailPort auditTrail,
-                               ExecutorService executor, Supplier<Instant> clock) {
-        this(trainingPort, labelingService, auditTrail, executor, clock, MAX_FINISHED_JOBS);
-    }
-
-    /** Test/wiring seam: same as the above, with both an explicit executor/clock and retention cap. */
-    DefaultTrainingJobService(TrainingPort trainingPort, LabelingService labelingService, AuditTrailPort auditTrail,
-                               ExecutorService executor, Supplier<Instant> clock, int maxFinishedJobs) {
+                               TrainingRunStores trainingRunStores, ExecutorService executor,
+                               Supplier<Instant> clock, int maxFinishedJobs) {
         this.trainingPort = Objects.requireNonNull(trainingPort, "trainingPort must not be null");
         this.labelingService = Objects.requireNonNull(labelingService, "labelingService must not be null");
         this.auditTrail = Objects.requireNonNull(auditTrail, "auditTrail must not be null");
+        this.trainingRunStores = Objects.requireNonNull(trainingRunStores, "trainingRunStores must not be null");
         this.executor = Objects.requireNonNull(executor, "executor must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.maxFinishedJobs = maxFinishedJobs;
@@ -184,9 +194,11 @@ public final class DefaultTrainingJobService implements TrainingJobService {
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
 
-        String jobId = UUID.randomUUID().toString();
+        UUID uuid = UUID.randomUUID();
+        String jobId = uuid.toString();
+        TrainingRunId runId = new TrainingRunId(uuid);
 
-        if (!scope.canAdminister()) {
+        if (!scope.canManageOrg()) {
             audit(actor, jobId, spec, DENIED_OUT_OF_SCOPE);
             throw new AccessDeniedException("Not permitted to start training jobs");
         }
@@ -199,11 +211,14 @@ public final class DefaultTrainingJobService implements TrainingJobService {
                     "Dataset " + spec.datasetId() + " has no LABELED samples to train on");
         }
 
+        Instant startedAt = clock.get();
         jobs.put(jobId, new TrainingJobView(jobId, spec.baseModel(), spec.datasetId(), spec.epochs(),
-                0, 0, 0.0, 0.0, JobState.RUNNING, "", clock.get()));
+                0, 0, 0.0, 0.0, JobState.RUNNING, "", startedAt));
+        trainingRunStores.trainingRuns().save(new TrainingRunRecord(runId, datasetId, spec.baseModel(),
+                spec.epochs(), JobState.RUNNING, 0, 0, 0.0, 0.0, null, actor, startedAt, null, ""));
         audit(actor, jobId, spec, RESULT_STARTED);
 
-        executor.execute(() -> runJob(jobId, spec, datasetId, actor, scope));
+        executor.execute(() -> runJob(jobId, runId, spec, datasetId, actor, startedAt, scope));
         return jobId;
     }
 
@@ -219,16 +234,44 @@ public final class DefaultTrainingJobService implements TrainingJobService {
         return Optional.ofNullable(jobs.get(jobId));
     }
 
-    private void runJob(String jobId, TrainingJobSpec spec, DatasetId datasetId, UserId actor,
-                         VisibilityScope scope) {
+    @Override
+    public List<TrainingRunRecord> runs(int limit, UserId actor, VisibilityScope scope) {
+        Objects.requireNonNull(actor, "actor must not be null");
+        Objects.requireNonNull(scope, "scope must not be null");
+        if (limit <= 0) {
+            throw new IllegalArgumentException("limit must be positive: " + limit);
+        }
+        if (!scope.canManageOrg()) {
+            auditRunsDenied(actor, RUNS_TARGET_ID);
+            throw new AccessDeniedException("Not permitted to view training runs");
+        }
+        return trainingRunStores.trainingRuns().findAll(limit);
+    }
+
+    @Override
+    public TrainingRunRecord run(TrainingRunId runId, UserId actor, VisibilityScope scope) {
+        Objects.requireNonNull(runId, "runId must not be null");
+        Objects.requireNonNull(actor, "actor must not be null");
+        Objects.requireNonNull(scope, "scope must not be null");
+        if (!scope.canManageOrg()) {
+            auditRunsDenied(actor, runId.value().toString());
+            throw new AccessDeniedException("Not permitted to view training runs");
+        }
+        return trainingRunStores.trainingRuns().findById(runId)
+                .orElseThrow(() -> new NoSuchElementException("Unknown training run: " + runId.value()));
+    }
+
+    private void runJob(String jobId, TrainingRunId runId, TrainingJobSpec spec, DatasetId datasetId, UserId actor,
+                         Instant startedAt, VisibilityScope scope) {
         try {
             note(jobId, "Uploading dataset…");
             DatasetUpload upload = labelingService.uploadForTraining(datasetId, actor, scope);
             note(jobId, "Uploaded " + upload.sampleCount() + " sample(s), " + upload.sizeBytes()
                     + " bytes; starting training…");
-            trainingPort.startTraining(spec, progress -> updateJob(jobId, progress));
+            trainingPort.startTraining(spec,
+                    progress -> updateJob(jobId, runId, spec, datasetId, actor, startedAt, progress));
         } catch (RuntimeException e) {
-            recordFailure(jobId, e);
+            recordFailure(jobId, runId, spec, datasetId, actor, startedAt, e);
         }
     }
 
@@ -239,21 +282,73 @@ public final class DefaultTrainingJobService implements TrainingJobService {
                 current.map50(), current.state(), message, current.startedAt()));
     }
 
-    private void updateJob(String jobId, TrainingProgress progress) {
+    private void updateJob(String jobId, TrainingRunId runId, TrainingJobSpec spec, DatasetId datasetId,
+                            UserId actor, Instant startedAt, TrainingProgress progress) {
         jobs.computeIfPresent(jobId, (id, current) -> new TrainingJobView(current.jobId(), current.baseModel(),
                 current.datasetId(), current.epochs(), progress.epoch(), progress.totalEpochs(), progress.loss(),
                 progress.map50(), progress.state(), progress.message(), current.startedAt()));
-        if (isTerminal(progress.state())) {
+
+        boolean terminal = isTerminal(progress.state());
+        Instant now = clock.get();
+        String outputModelId = outputModelIdOf(progress);
+        persistRun(jobId, runId, spec, datasetId, actor, startedAt, terminal ? now : null, outputModelId);
+
+        if (progress.state() == JobState.SUCCEEDED && outputModelId != null) {
+            registerCandidateModel(runId, datasetId, spec, outputModelId, progress.map50(), now);
+        }
+        if (terminal) {
             retire(jobId);
         }
     }
 
-    private void recordFailure(String jobId, RuntimeException e) {
+    private void recordFailure(String jobId, TrainingRunId runId, TrainingJobSpec spec, DatasetId datasetId,
+                                UserId actor, Instant startedAt, RuntimeException e) {
         String message = e.getMessage() != null ? e.getMessage() : e.getClass().getSimpleName();
         jobs.computeIfPresent(jobId, (id, current) -> new TrainingJobView(current.jobId(), current.baseModel(),
                 current.datasetId(), current.epochs(), current.epoch(), current.totalEpochs(), current.loss(),
                 current.map50(), JobState.FAILED, message, current.startedAt()));
+        persistRun(jobId, runId, spec, datasetId, actor, startedAt, clock.get(), null);
         retire(jobId);
+    }
+
+    /** Mirrors the in-memory {@link TrainingJobView} onto a matching {@link TrainingRunRecord} save. */
+    private void persistRun(String jobId, TrainingRunId runId, TrainingJobSpec spec, DatasetId datasetId,
+                             UserId actor, Instant startedAt, Instant finishedAtOrNull, String outputModelId) {
+        TrainingJobView view = jobs.get(jobId);
+        if (view == null) {
+            return;
+        }
+        trainingRunStores.trainingRuns().save(new TrainingRunRecord(runId, datasetId, spec.baseModel(),
+                spec.epochs(), view.state(), view.epoch(), view.totalEpochs(), view.loss(), view.map50(),
+                outputModelId, actor, startedAt, finishedAtOrNull, view.message()));
+    }
+
+    /** The produced model id on a {@code SUCCEEDED} terminal message, or {@code null} if blank/absent/not terminal. */
+    private static String outputModelIdOf(TrainingProgress progress) {
+        if (progress.state() != JobState.SUCCEEDED) {
+            return null;
+        }
+        String message = progress.message();
+        return (message == null || message.isBlank()) ? null : message;
+    }
+
+    /**
+     * Registers the run's output as a {@link ModelStatus#CANDIDATE} {@link CvModelRecord}, never
+     * {@link ModelStatus#LIVE} (docs/plans/active/CV-SETTINGS-PLAN.md §8 OQ6). {@code taskType}/
+     * {@code runtime}/{@code classes}/{@code defaultLabelFilter} fall back to the same honest
+     * "we don't know more than the wire told us" defaults {@link CvModelView#synthesize} uses for a
+     * worker-only model — this run's own wire ({@link TrainingProgress}) carries no task type,
+     * runtime, or class roster either.
+     */
+    private void registerCandidateModel(TrainingRunId runId, DatasetId datasetId, TrainingJobSpec spec,
+                                         String outputModelId, double map50, Instant trainedAt) {
+        ModelMetrics metrics = new ModelMetrics(map50, MetricsKind.TRAINING);
+        ModelProvenance provenance =
+                new ModelProvenance(datasetId, runId, spec.baseModel(), spec.epochs(), trainedAt);
+        CvModelRecord candidate = new CvModelRecord(outputModelId, TRAINED_MODEL_VERSION, outputModelId,
+                TRAINED_MODEL_KIND, false, List.of(), ModelTaskType.DETECT, ModelRuntime.PYTORCH, List.of(),
+                ModelStatus.CANDIDATE, metrics, provenance, null, null, trainedAt);
+        trainingRunStores.models().save(candidate);
     }
 
     private static boolean isTerminal(JobState state) {
@@ -278,5 +373,12 @@ public final class DefaultTrainingJobService implements TrainingJobService {
         attributes.put(ATTR_RESULT, result);
         auditTrail.record(AuditEntry.of(actor, AuditAction.CREATED, AuditTargetType.MODEL, jobId,
                 "Training job " + jobId + " " + result, attributes));
+    }
+
+    private void auditRunsDenied(UserId actor, String targetId) {
+        Map<String, String> attributes = new LinkedHashMap<>();
+        attributes.put(ATTR_RESULT, DENIED_OUT_OF_SCOPE);
+        auditTrail.record(AuditEntry.of(actor, AuditAction.UPDATED, AuditTargetType.MODEL, targetId,
+                "Denied reading training runs: out of scope", attributes));
     }
 }

@@ -2,16 +2,23 @@ package com.drones.vision.learning.application;
 
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
+import com.drones.vision.learning.domain.model.CvModelRecord;
 import com.drones.vision.learning.domain.model.DatasetId;
 import com.drones.vision.learning.domain.model.DatasetUpload;
 import com.drones.vision.learning.domain.model.JobState;
+import com.drones.vision.learning.domain.model.MetricsKind;
+import com.drones.vision.learning.domain.model.ModelStatus;
 import com.drones.vision.learning.domain.model.SampleImage;
 import com.drones.vision.learning.domain.model.SampleStatus;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.learning.domain.model.TrainingJobSpec;
 import com.drones.vision.learning.domain.model.TrainingProgress;
+import com.drones.vision.learning.domain.model.TrainingRunId;
+import com.drones.vision.learning.domain.model.TrainingRunRecord;
 import com.drones.vision.learning.domain.model.TrainingSample;
 import com.drones.vision.learning.domain.model.TrainingSampleId;
+import com.drones.vision.learning.domain.port.CvModelRepositoryPort;
+import com.drones.vision.learning.domain.port.TrainingRunRepositoryPort;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.learning.domain.port.TrainingPort;
@@ -20,8 +27,12 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.AbstractExecutorService;
 import java.util.concurrent.ExecutorService;
@@ -40,25 +51,30 @@ import com.drones.vision.platform.VisibilityScope;
 
 /**
  * Unit tests for {@link DefaultTrainingJobService}. {@link TrainingPort}/{@link LabelingService}/
- * {@link AuditTrailPort} are hand-rolled in-memory fakes (this module's dominant test style); the
- * executor is a same-thread {@link DirectExecutorService} so every scripted {@link
- * TrainingProgress} sequence lands deterministically, with no real background thread or sleep in
- * most tests. A dedicated real-thread test at the bottom exercises actual concurrency.
+ * {@link AuditTrailPort}/{@link TrainingRunRepositoryPort}/{@link CvModelRepositoryPort} are
+ * hand-rolled in-memory fakes (this module's dominant test style); the executor is a same-thread
+ * {@link DirectExecutorService} so every scripted {@link TrainingProgress} sequence lands
+ * deterministically, with no real background thread or sleep in most tests. A dedicated real-thread
+ * test at the bottom exercises actual concurrency.
  */
 class DefaultTrainingJobServiceTest {
 
     private FakeTrainingPort trainingPort;
     private FakeLabelingService labelingService;
     private FakeAuditTrailPort auditTrail;
+    private FakeTrainingRunRepositoryPort trainingRunRepository;
+    private FakeCvModelRepositoryPort cvModelRepository;
+    private TrainingRunStores trainingRunStores;
     private MutableClock clock;
     private DefaultTrainingJobService service;
 
     private final UserId actor = UserId.random();
     private final DatasetId datasetId = DatasetId.random();
     private final TrainingJobSpec spec = new TrainingJobSpec("yolo26n.pt", datasetId.value().toString(), 10);
-    // docs/plans/done/OPS-UX-PLAN.md §1: starting a training job is deployment-global (it claims
-    // the single training host), so only an ADMIN/unbounded scope may -- adminScope is the scope
-    // every happy-path test below now runs as; managerScope exists solely to prove it is refused.
+    // docs/plans/active/CV-SETTINGS-PLAN.md §8 OQ9: starting a training job is now team-scoped, not
+    // deployment-global -- any manager may claim the shared training host to train a dataset they
+    // can already label; adminScope/managerScope both prove the relaxed gate, pilotScope proves it
+    // still refuses a caller with no management authority at all.
     private final VisibilityScope adminScope = VisibilityScope.unbounded();
     private final VisibilityScope managerScope = VisibilityScope.groups(Set.of());
     private final VisibilityScope pilotScope = VisibilityScope.assignedAssets(Set.of());
@@ -68,12 +84,15 @@ class DefaultTrainingJobServiceTest {
         trainingPort = new FakeTrainingPort();
         labelingService = new FakeLabelingService();
         auditTrail = new FakeAuditTrailPort();
+        trainingRunRepository = new FakeTrainingRunRepositoryPort();
+        cvModelRepository = new FakeCvModelRepositoryPort();
+        trainingRunStores = new TrainingRunStores(trainingRunRepository, cvModelRepository);
         clock = new MutableClock(Instant.parse("2026-08-01T00:00:00Z"));
-        service = new DefaultTrainingJobService(trainingPort, labelingService, auditTrail,
-                new DirectExecutorService(), clock);
+        service = new DefaultTrainingJobService(trainingPort, labelingService, auditTrail, trainingRunStores,
+                new DirectExecutorService(), clock, DefaultTrainingJobService.MAX_FINISHED_JOBS);
     }
 
-    // -- gate ---------------------------------------------------------------
+    // -- gate (relaxed to canManageOrg -- CV-SETTINGS-PLAN.md §8 OQ9) --------
 
     @Test
     void startDeniedForAPilotScopeAuditsTheDenialAndNeverCallsThePort() {
@@ -93,23 +112,16 @@ class DefaultTrainingJobServiceTest {
         // the denied job id (the audit's own target id) was never actually registered
         assertTrue(service.job(entry.targetId()).isEmpty());
         assertTrue(service.jobs().isEmpty());
+        assertTrue(trainingRunRepository.saveLog.isEmpty(), "no run may be persisted for a denied start");
     }
 
     @Test
-    void startDeniedForAManagerScopeAuditsTheDenialAndNeverCallsThePort() {
-        // docs/plans/done/OPS-UX-PLAN.md §1: a MANAGER may administer every asset in their
-        // subtree but training claims the one deployment-wide host, so canManageOrg() is not
-        // enough here -- only an unbounded (ADMIN) scope may start a job.
-        AccessDeniedException ex = assertThrows(AccessDeniedException.class,
-                () -> service.start(spec, actor, managerScope));
-        assertTrue(ex.getMessage().toLowerCase().contains("not permitted"));
+    void startSucceedsForAManagerScopeSinceTheGateIsRelaxedToCanManageOrg() {
+        String jobId = service.start(spec, actor, managerScope);
 
-        assertNull(trainingPort.lastSpec, "the port must never have been called");
-        assertNull(labelingService.lastUploadDatasetId, "the dataset pre-check must never have run");
-
-        AuditEntry entry = onlyEntry();
-        assertEquals("DENIED:out of scope", entry.details().get("result"));
-        assertTrue(service.jobs().isEmpty());
+        assertFalse(jobId.isBlank());
+        assertEquals(spec, trainingPort.lastSpec);
+        assertEquals("STARTED", onlyEntry().details().get("result"));
     }
 
     // -- synchronous dataset pre-check ---------------------------------------
@@ -165,7 +177,7 @@ class DefaultTrainingJobServiceTest {
         assertEquals(0, job.epoch());
         assertEquals(0, job.totalEpochs());
         assertEquals(JobState.RUNNING, job.state());
-        // the empty training script leaves the last upload-phase note as the final message
+        // the empty training script leaves the last upload-phase note as the final in-memory message
         assertEquals("Uploaded 3 sample(s), 12345 bytes; starting training…", job.message());
         assertEquals(clock.instant, job.startedAt());
 
@@ -174,7 +186,129 @@ class DefaultTrainingJobServiceTest {
         assertEquals("STARTED", entry.details().get("result"));
     }
 
-    // -- streamed progress ----------------------------------------------------
+    // -- run persistence (docs/plans/active/CV-SETTINGS-PLAN.md §3.3, fixing H7) ---------------
+
+    @Test
+    void startPersistsATrainingRunRecordBeforeAnyProgressArrives() {
+        // empty script -> runJob's upload succeeds but training never calls onProgress, so
+        // persistRun is invoked exactly once: from start() itself.
+        String jobId = service.start(spec, actor, adminScope);
+
+        assertEquals(1, trainingRunRepository.saveLog.size());
+        TrainingRunRecord run = trainingRunRepository.findById(TrainingRunId.of(jobId)).orElseThrow();
+        assertEquals(datasetId, run.datasetId());
+        assertEquals("yolo26n.pt", run.baseModel());
+        assertEquals(10, run.epochs());
+        assertEquals(JobState.RUNNING, run.state());
+        assertEquals(0, run.epoch());
+        assertEquals(0, run.totalEpochs());
+        assertNull(run.outputModelId());
+        assertEquals(actor, run.startedBy());
+        assertEquals(clock.instant, run.startedAt());
+        assertNull(run.finishedAt(), "still running -- never terminal");
+        // the "Uploading dataset..."/"Uploaded N samples..." notes only ever touch the in-memory
+        // TrainingJobView (via note()), never the persisted run -- persistRun is not called again
+        // until a progress message (or the run's own terminal failure) arrives.
+        assertEquals("", run.message());
+    }
+
+    @Test
+    void progressUpdatesArePersistedOntoTheSameRunRecord() {
+        trainingPort.script = List.of(
+                new TrainingProgress("wire-job-xyz", 1, 10, 0.9, 0.10, JobState.RUNNING, ""),
+                new TrainingProgress("wire-job-xyz", 2, 10, 0.6, 0.35, JobState.RUNNING, ""));
+
+        String jobId = service.start(spec, actor, adminScope);
+
+        TrainingRunRecord run = trainingRunRepository.findById(TrainingRunId.of(jobId)).orElseThrow();
+        assertEquals(2, run.epoch());
+        assertEquals(10, run.totalEpochs());
+        assertEquals(0.6, run.loss());
+        assertEquals(0.35, run.map50());
+        assertEquals(JobState.RUNNING, run.state());
+        assertNull(run.finishedAt());
+        // one save from start(), one per progress message
+        assertEquals(3, trainingRunRepository.saveLog.size());
+    }
+
+    @Test
+    void aSucceededRunIsPersistedTerminalWithTheProducedModelId() {
+        trainingPort.script = List.of(
+                new TrainingProgress("wire-job", 10, 10, 0.05, 0.91, JobState.SUCCEEDED, "yolo26n-finetuned-v7"));
+
+        String jobId = service.start(spec, actor, adminScope);
+
+        TrainingRunRecord run = trainingRunRepository.findById(TrainingRunId.of(jobId)).orElseThrow();
+        assertEquals(JobState.SUCCEEDED, run.state());
+        assertEquals("yolo26n-finetuned-v7", run.outputModelId());
+        assertEquals(clock.instant, run.finishedAt());
+    }
+
+    @Test
+    void aFailedRunIsPersistedTerminalWithNoOutputModelId() {
+        trainingPort.script = List.of(
+                new TrainingProgress("wire-job", 3, 10, 1.2, 0.05, JobState.RUNNING, ""),
+                new TrainingProgress("wire-job", 3, 10, 1.2, 0.05, JobState.FAILED, "GPU OOM at epoch 3"));
+
+        String jobId = service.start(spec, actor, adminScope);
+
+        TrainingRunRecord run = trainingRunRepository.findById(TrainingRunId.of(jobId)).orElseThrow();
+        assertEquals(JobState.FAILED, run.state());
+        assertNull(run.outputModelId());
+        assertEquals(clock.instant, run.finishedAt());
+        assertTrue(cvModelRepository.saved.isEmpty(), "a FAILED run must never register a candidate model");
+    }
+
+    @Test
+    void aTransportFailureIsPersistedAsAFailedRun() {
+        trainingPort.failure = new IllegalStateException("connection reset by peer");
+
+        String jobId = service.start(spec, actor, adminScope);
+
+        TrainingRunRecord run = trainingRunRepository.findById(TrainingRunId.of(jobId)).orElseThrow();
+        assertEquals(JobState.FAILED, run.state());
+        assertNull(run.outputModelId());
+        assertEquals(clock.instant, run.finishedAt());
+    }
+
+    // -- SUCCEEDED => CANDIDATE model registration (docs/plans/active/CV-SETTINGS-PLAN.md §8 OQ6) --
+
+    @Test
+    void aSucceededRunRegistersACandidateModelWithProvenanceAndTrainingMetrics() {
+        trainingPort.script = List.of(
+                new TrainingProgress("wire-job", 10, 10, 0.05, 0.91, JobState.SUCCEEDED, "yolo26n-finetuned-v7"));
+
+        String jobId = service.start(spec, actor, adminScope);
+
+        assertEquals(1, cvModelRepository.saved.size());
+        CvModelRecord candidate = cvModelRepository.saved.get(0);
+        assertEquals("yolo26n-finetuned-v7", candidate.modelId());
+        assertEquals(ModelStatus.CANDIDATE, candidate.status(), "never LIVE -- promotion is a separate human act");
+        assertNull(candidate.promotedBy());
+        assertNull(candidate.promotedAt());
+
+        assertEquals(MetricsKind.TRAINING, candidate.metrics().kind());
+        double actualMap50 = candidate.metrics().map50();
+        assertEquals(0.91, actualMap50);
+
+        assertEquals(datasetId, candidate.provenance().datasetId());
+        assertEquals(TrainingRunId.of(jobId), candidate.provenance().trainingRunId());
+        assertEquals("yolo26n.pt", candidate.provenance().baseModel());
+        assertEquals(10, candidate.provenance().epochs());
+        assertEquals(clock.instant, candidate.provenance().trainedAt());
+    }
+
+    @Test
+    void aSucceededRunWithABlankTerminalMessageRegistersNoCandidateModel() {
+        trainingPort.script = List.of(
+                new TrainingProgress("wire-job", 10, 10, 0.05, 0.91, JobState.SUCCEEDED, ""));
+
+        service.start(spec, actor, adminScope);
+
+        assertTrue(cvModelRepository.saved.isEmpty(), "a blank terminal message names no produced model");
+    }
+
+    // -- streamed progress (in-memory poll) ------------------------------------
 
     @Test
     void streamedProgressUpdatesTheViewToTheLatestMessage() {
@@ -266,7 +400,7 @@ class DefaultTrainingJobServiceTest {
         assertNull(trainingPort.lastSpec, "training must never start when the upload itself failed");
     }
 
-    // -- retention ------------------------------------------------------------
+    // -- retention (in-memory poll only -- the persisted run store has no cap) ------------------
 
     @Test
     void finishedJobsBeyondTheCapAreEvictedButRunningJobsNeverAre() {
@@ -279,6 +413,61 @@ class DefaultTrainingJobServiceTest {
 
         assertTrue(service.job(runningJobId).isPresent(), "a still-RUNNING job must never be evicted");
         assertEquals(DefaultTrainingJobService.MAX_FINISHED_JOBS + 1, service.jobs().size());
+        // the persisted run store keeps every run -- no eviction, unlike the in-memory poll above
+        assertEquals(DefaultTrainingJobService.MAX_FINISHED_JOBS + 6, trainingRunRepository.rows.size());
+    }
+
+    // -- runs()/run() (docs/plans/active/CV-SETTINGS-PLAN.md §3.3; gated canManageOrg) ----------
+
+    @Test
+    void runsDeniedForAPilotScopeAuditsTheDenialAndNeverReadsTheStore() {
+        AccessDeniedException ex = assertThrows(AccessDeniedException.class,
+                () -> service.runs(10, actor, pilotScope));
+        assertTrue(ex.getMessage().toLowerCase().contains("not permitted"));
+        assertEquals("DENIED:out of scope", onlyEntry().details().get("result"));
+    }
+
+    @Test
+    void runsRejectsANonPositiveLimit() {
+        assertThrows(IllegalArgumentException.class, () -> service.runs(0, actor, adminScope));
+        assertThrows(IllegalArgumentException.class, () -> service.runs(-1, actor, adminScope));
+    }
+
+    @Test
+    void runsSucceedsForAManagerScopeAndListsNewestFirst() {
+        String olderJobId = service.start(spec, actor, adminScope);
+        clock.instant = Instant.parse("2026-08-01T01:00:00Z");
+        String newerJobId = service.start(spec, actor, adminScope);
+
+        List<TrainingRunRecord> runs = service.runs(10, actor, managerScope);
+
+        assertEquals(2, runs.size());
+        assertEquals(newerJobId, runs.get(0).runId().value().toString());
+        assertEquals(olderJobId, runs.get(1).runId().value().toString());
+    }
+
+    @Test
+    void runDeniedForAPilotScopeAuditsTheDenial() {
+        TrainingRunId runId = TrainingRunId.random();
+
+        assertThrows(AccessDeniedException.class, () -> service.run(runId, actor, pilotScope));
+        assertEquals("DENIED:out of scope", onlyEntry().details().get("result"));
+    }
+
+    @Test
+    void runThrowsNoSuchElementForAnUnknownRunEvenWithASufficientScope() {
+        TrainingRunId runId = TrainingRunId.random();
+
+        assertThrows(NoSuchElementException.class, () -> service.run(runId, actor, adminScope));
+    }
+
+    @Test
+    void runSucceedsForAManagerScope() {
+        String jobId = service.start(spec, actor, adminScope);
+
+        TrainingRunRecord run = service.run(TrainingRunId.of(jobId), actor, managerScope);
+
+        assertEquals(jobId, run.runId().value().toString());
     }
 
     // -- concurrent jobs isolate (deterministic, same-thread executor) --------
@@ -318,7 +507,8 @@ class DefaultTrainingJobServiceTest {
         DatasetId datasetB = DatasetId.random();
         ExecutorService realExecutor = Executors.newCachedThreadPool();
         DefaultTrainingJobService realService = new DefaultTrainingJobService(new LatchedTrainingPort(),
-                labelingService, auditTrail, realExecutor, Instant::now);
+                labelingService, auditTrail, trainingRunStores, realExecutor, Instant::now,
+                DefaultTrainingJobService.MAX_FINISHED_JOBS);
         try {
             // A real cached-thread-pool executor returns from execute() without waiting for the
             // task, so these two run genuinely concurrently on background threads.
@@ -358,22 +548,31 @@ class DefaultTrainingJobServiceTest {
 
     @Test
     void constructorsRejectNullCollaborators() {
-        assertThrows(NullPointerException.class,
-                () -> new DefaultTrainingJobService(null, labelingService, auditTrail));
-        assertThrows(NullPointerException.class,
-                () -> new DefaultTrainingJobService(trainingPort, null, auditTrail));
-        assertThrows(NullPointerException.class,
-                () -> new DefaultTrainingJobService(trainingPort, labelingService, null));
         assertThrows(NullPointerException.class, () -> new DefaultTrainingJobService(null, labelingService,
-                auditTrail, new DirectExecutorService(), clock));
+                auditTrail, trainingRunStores, DefaultTrainingJobService.MAX_FINISHED_JOBS));
         assertThrows(NullPointerException.class, () -> new DefaultTrainingJobService(trainingPort, null,
-                auditTrail, new DirectExecutorService(), clock));
+                auditTrail, trainingRunStores, DefaultTrainingJobService.MAX_FINISHED_JOBS));
         assertThrows(NullPointerException.class, () -> new DefaultTrainingJobService(trainingPort, labelingService,
-                null, new DirectExecutorService(), clock));
+                null, trainingRunStores, DefaultTrainingJobService.MAX_FINISHED_JOBS));
         assertThrows(NullPointerException.class, () -> new DefaultTrainingJobService(trainingPort, labelingService,
-                auditTrail, null, clock));
+                auditTrail, null, DefaultTrainingJobService.MAX_FINISHED_JOBS));
+
+        assertThrows(NullPointerException.class, () -> new DefaultTrainingJobService(null, labelingService,
+                auditTrail, trainingRunStores, new DirectExecutorService(), clock,
+                DefaultTrainingJobService.MAX_FINISHED_JOBS));
+        assertThrows(NullPointerException.class, () -> new DefaultTrainingJobService(trainingPort, null,
+                auditTrail, trainingRunStores, new DirectExecutorService(), clock,
+                DefaultTrainingJobService.MAX_FINISHED_JOBS));
         assertThrows(NullPointerException.class, () -> new DefaultTrainingJobService(trainingPort, labelingService,
-                auditTrail, new DirectExecutorService(), null));
+                null, trainingRunStores, new DirectExecutorService(), clock,
+                DefaultTrainingJobService.MAX_FINISHED_JOBS));
+        assertThrows(NullPointerException.class, () -> new DefaultTrainingJobService(trainingPort, labelingService,
+                auditTrail, null, new DirectExecutorService(), clock, DefaultTrainingJobService.MAX_FINISHED_JOBS));
+        assertThrows(NullPointerException.class, () -> new DefaultTrainingJobService(trainingPort, labelingService,
+                auditTrail, trainingRunStores, null, clock, DefaultTrainingJobService.MAX_FINISHED_JOBS));
+        assertThrows(NullPointerException.class, () -> new DefaultTrainingJobService(trainingPort, labelingService,
+                auditTrail, trainingRunStores, new DirectExecutorService(), null,
+                DefaultTrainingJobService.MAX_FINISHED_JOBS));
     }
 
     private AuditEntry onlyEntry() {
@@ -501,6 +700,61 @@ class DefaultTrainingJobServiceTest {
         }
     }
 
+    /** In-memory {@link TrainingRunRepositoryPort}, keyed by run id; {@link #saveLog} keeps every save in order. */
+    private static final class FakeTrainingRunRepositoryPort implements TrainingRunRepositoryPort {
+        private final Map<TrainingRunId, TrainingRunRecord> rows = new LinkedHashMap<>();
+        private final List<TrainingRunRecord> saveLog = new ArrayList<>();
+
+        @Override
+        public Optional<TrainingRunRecord> findById(TrainingRunId id) {
+            return Optional.ofNullable(rows.get(id));
+        }
+
+        @Override
+        public List<TrainingRunRecord> findAll(int limit) {
+            return rows.values().stream()
+                    .sorted(Comparator.comparing(TrainingRunRecord::startedAt).reversed())
+                    .limit(limit)
+                    .toList();
+        }
+
+        @Override
+        public TrainingRunRecord save(TrainingRunRecord run) {
+            rows.put(run.runId(), run);
+            saveLog.add(run);
+            return run;
+        }
+    }
+
+    /** In-memory {@link CvModelRepositoryPort}; this suite only ever exercises {@link #save}. */
+    private static final class FakeCvModelRepositoryPort implements CvModelRepositoryPort {
+        private final List<CvModelRecord> saved = new ArrayList<>();
+
+        @Override
+        public Optional<CvModelRecord> findByIdAndVersion(String modelId, String version) {
+            return saved.stream()
+                    .filter(r -> r.modelId().equals(modelId) && r.version().equals(version))
+                    .findFirst();
+        }
+
+        @Override
+        public List<CvModelRecord> findAll() {
+            return List.copyOf(saved);
+        }
+
+        @Override
+        public Optional<CvModelRecord> findLive() {
+            return saved.stream().filter(r -> r.status() == ModelStatus.LIVE).findFirst();
+        }
+
+        @Override
+        public CvModelRecord save(CvModelRecord model) {
+            saved.removeIf(r -> r.modelId().equals(model.modelId()) && r.version().equals(model.version()));
+            saved.add(model);
+            return model;
+        }
+    }
+
     /** Runs every submitted task synchronously on the calling thread -- no real background thread. */
     private static final class DirectExecutorService extends AbstractExecutorService {
         @Override
@@ -533,9 +787,9 @@ class DefaultTrainingJobServiceTest {
         }
     }
 
-    /** A clock a test can read the current fixed instant from -- no real time ever passes. */
+    /** A clock a test can read/advance the current fixed instant on -- no real time ever passes. */
     private static final class MutableClock implements java.util.function.Supplier<Instant> {
-        private final Instant instant;
+        private Instant instant;
 
         MutableClock(Instant instant) {
             this.instant = instant;

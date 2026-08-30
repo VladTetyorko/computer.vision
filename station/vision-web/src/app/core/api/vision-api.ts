@@ -12,6 +12,7 @@ import type {
   AssignedPilot,
   Assignment,
   AuditEntry,
+  BindingScope,
   CalibrateCameraPoseRequest,
   CalibrationResult,
   CameraPoseRequest,
@@ -28,7 +29,13 @@ import type {
   CreateMarkRequest,
   CreateUserRequest,
   CustodyActionRequest,
+  CvCoverageResponse,
   CvModelsResponse,
+  CvProfile,
+  CvProfileBinding,
+  CvProfileBindingRequest,
+  CvProfileRequest,
+  CvProfilesResponse,
   CvTrackersResponse,
   Dataset,
   DatasetsResponse,
@@ -36,6 +43,7 @@ import type {
   DetectionResult,
   Device,
   DeviceEdit,
+  EffectiveCvProfile,
   FleetMaintenanceRecord,
   FleetReadiness,
   FleetSummary,
@@ -70,6 +78,7 @@ import type {
   ProbeDeviceRequest,
   ProbeDeviceResult,
   PromoteModelRequest,
+  PromotionResultResponse,
   ReadinessReport,
   RegionIngestRequest,
   RegionProgressResponse,
@@ -79,8 +88,6 @@ import type {
   RemediationRequest,
   RemediationResult,
   RenameLayerRequest,
-  RegisteredModel,
-  RegisteredModelsResponse,
   ReturnHomeResponse,
   SampleStatus,
   SamplesResponse,
@@ -93,12 +100,15 @@ import type {
   StartStreamRequest,
   StartStreamResult,
   StartTrainingJobRequest,
+  StreamConfigResponse,
   StreamTracksResponse,
   SystemNetworkResponse,
   SystemStatus,
   TelemetrySample,
   TrainingJobResponse,
   TrainingJobsResponse,
+  TrainingRun,
+  TrainingRunsResponse,
   TrainingSample,
   UpdateCategoryRequest,
   UpdateLiveTopicsRequest,
@@ -211,6 +221,17 @@ export class VisionApi {
         patch,
       ),
     );
+  }
+
+  /**
+   * A running stream's effective configuration (`200`, see {@link StreamConfigResponse}'s own doc
+   * comment) — docs/plans/active/CV-SETTINGS-PLAN.md wave W7's H6 fix: every hot knob this app
+   * exposes now has a real readback instead of assuming from what was last sent. `404` for an
+   * unknown/not-running stream — the caller (`CockpitFacade`) degrades to `undefined`, never a
+   * fabricated default (see that type's own doc comment).
+   */
+  getStreamConfig(streamId: string): Promise<StreamConfigResponse> {
+    return firstValueFrom(this.http.get<StreamConfigResponse>(`/api/streams/${encodeURIComponent(streamId)}/config`));
   }
 
   /**
@@ -1370,28 +1391,101 @@ export class VisionApi {
     );
   }
 
-  // --- CV model registry (docs/plans/done/CV-TRAINING-PLAN.md §7-8, Phase 2 T9/T10) — the dynamic registry
-  // behind `features/models/**`'s "list + promote" page. Gated by the same `vision.training.enabled`
-  // flag as the dataset/labeling methods above; `ModelsFacade.refresh()` treats a 404 on
-  // `registryModels()` the same way `TrainingStore.refresh()` treats one on `listDatasets()` — the
-  // only call here that can only mean "the controller is absent".
+  // --- CV profiles (docs/plans/active/CV-SETTINGS-PLAN.md §5's frozen wire contract, wave W6) -------------
+  // `features/vision-profiles/**`'s `/vision/profiles` page is the one caller. Every method here
+  // codes against §5.2's endpoint table exactly — the backend (`contexts/vision-perception` +
+  // `vision-learning` + `storage/persistence`, waves W2-W4) had not shipped when this wave landed, so
+  // every read degrades to a visible notice on 404/transport failure rather than a fabricated row
+  // (§3.5 rule 2), and the page states once that a profile applies only at stream start.
 
-  /** Every model reference cv-service's registry currently knows about, and which one (if any) is live (`RegisteredModelsResponse#models`). Unscoped/unaudited — any signed-in caller may read it. */
-  registryModels(): Promise<RegisteredModelsResponse> {
-    return firstValueFrom(this.http.get<RegisteredModelsResponse>('/api/cv/registry/models'));
+  /** Every profile in the caller's scope, built-in ones included (`CvProfilesResponse#profiles`). */
+  getCvProfiles(): Promise<CvProfilesResponse> {
+    return firstValueFrom(this.http.get<CvProfilesResponse>('/api/cv/profiles'));
+  }
+
+  /** Creates a non-built-in profile for the caller's own org. `403` when the caller may not manage
+   * the organization (`canManageOrg`-gated on this page); `400` a value fails the domain record's own
+   * compact-constructor validation. */
+  createCvProfile(request: CvProfileRequest): Promise<CvProfile> {
+    return firstValueFrom(this.http.post<CvProfile>('/api/cv/profiles', request));
+  }
+
+  /** Updates an existing, non-built-in profile in place. `404` unknown id; `403` a built-in profile
+   * (not editable — "Fork" creates an editable copy instead, never an in-place edit) or out-of-scope
+   * org; `400` a value fails validation. */
+  updateCvProfile(id: string, request: CvProfileRequest): Promise<CvProfile> {
+    return firstValueFrom(this.http.put<CvProfile>(`/api/cv/profiles/${encodeURIComponent(id)}`, request));
+  }
+
+  /** `404` unknown id; `409` reserved for "still bound somewhere" (the page still attempts the call
+   * and surfaces whatever the server says via `describeHttpError` — no client-side precondition
+   * check invented ahead of the real one). */
+  deleteCvProfile(id: string): Promise<void> {
+    return firstValueFrom(this.http.delete<void>(`/api/cv/profiles/${encodeURIComponent(id)}`));
+  }
+
+  /** Sets (or replaces) the profile bound at one scope. `404` unknown `profileId`; `400` a
+   * `scopeId` that doesn't resolve (unknown group/category slug/asset id). */
+  setCvProfileBinding(request: CvProfileBindingRequest): Promise<CvProfileBinding> {
+    return firstValueFrom(this.http.put<CvProfileBinding>('/api/cv/bindings', request));
+  }
+
+  /** Clears whatever profile is bound at one scope, falling back to the next level up
+   * (§3.1's hierarchy) — never sends `profileId` (see `CvProfileBindingRequest`'s own doc comment). */
+  deleteCvProfileBinding(scopeKind: BindingScope, scopeId: string): Promise<void> {
+    return firstValueFrom(
+      this.http.delete<void>('/api/cv/bindings', { body: { scopeKind, scopeId } satisfies CvProfileBindingRequest }),
+    );
+  }
+
+  /** The profile that would actually apply to `assetId`'s next stream start, and which binding
+   * produced it (`EffectiveCvProfile#source`). `404` unknown asset. */
+  getEffectiveCvProfile(assetId: string): Promise<EffectiveCvProfile> {
+    return firstValueFrom(
+      this.http.get<EffectiveCvProfile>('/api/cv/profiles/effective', { params: { assetId } }),
+    );
+  }
+
+  /** The coverage table's one fleet-wide read (`CvCoverageResponse#rows` — §4's UI sketch: "asset ·
+   * category · profile · source · detection · model · filters"). Never errors server-side for an
+   * empty fleet (an empty `rows` array reads as the honest "no assets yet" empty state, not a
+   * failure); a transport failure still degrades to the page's own notice. */
+  getCvCoverage(): Promise<CvCoverageResponse> {
+    return firstValueFrom(this.http.get<CvCoverageResponse>('/api/cv/coverage'));
+  }
+
+  // --- CV model registry (docs/plans/active/CV-SETTINGS-PLAN.md §3.2/§5.2, wave W8) — promote/rollback,
+  // behind `features/models/**`'s registry page. Gated by `vision.cv.registry.enabled` (default
+  // `vision.cv.enabled`), **not** `vision.training.enabled` — `ModelRegistryController`'s own
+  // javadoc. The roster read itself lives above (`getCvModels()`); `GET /api/cv/registry/models` no
+  // longer exists.
+
+  /**
+   * Promotes `id`@`version` to `LIVE`, demoting whichever model was previously `LIVE` to `RETIRED`.
+   * `403` when the caller may not administer the organization (`canAdminister` — ADMIN only, a
+   * narrower gate than `canManageOrg`); `409` when cv-service refuses (an unknown id — the artifact
+   * hasn't been rsync'd into its model directory yet); `400` a malformed `version`
+   * (`ModelRef`'s own compact-constructor check — see `features/models/models-logic.ts#resolvePromoteVersion`
+   * for why the caller never sends a roster row's own often-blank `version` verbatim). `404` when
+   * `vision.cv.registry.enabled` is off (the whole controller is absent from the context).
+   */
+  promoteModel(id: string, version: string): Promise<PromotionResultResponse> {
+    return firstValueFrom(
+      this.http.post<PromotionResultResponse>(
+        `/api/cv/registry/models/${encodeURIComponent(id)}/promote`,
+        { version } satisfies PromoteModelRequest,
+      ),
+    );
   }
 
   /**
-   * Promotes `id` to the registry's live/default model. `403` when the caller may not manage the
-   * organization; `409` when cv-service refuses (an unknown id — the artifact hasn't been rsync'd
-   * into its model directory yet); `400` a malformed `version` (`ModelRef`'s own compact-constructor
-   * check — see `features/models/models-logic.ts#resolvePromoteVersion` for why the caller never
-   * sends the registry's own often-blank `version` verbatim).
+   * Restores whichever model the most recent {@link promoteModel} call demoted to `RETIRED` back to
+   * `LIVE`, retiring the current live model in its place. `403` — same `canAdminister` gate as
+   * {@link promoteModel}; `409` when there is nothing to roll back to (no promotion has happened
+   * yet on this deployment); `404` when `vision.cv.registry.enabled` is off.
    */
-  promoteModel(id: string, request: PromoteModelRequest): Promise<RegisteredModel> {
-    return firstValueFrom(
-      this.http.post<RegisteredModel>(`/api/cv/registry/models/${encodeURIComponent(id)}/promote`, request),
-    );
+  rollbackModel(): Promise<PromotionResultResponse> {
+    return firstValueFrom(this.http.post<PromotionResultResponse>('/api/cv/registry/rollback', {}));
   }
 
   // --- CV training-job flow (docs/plans/done/CV-TRAINING-PLAN.md §7-8, Phase 2's last web wave) — starting a
@@ -1424,5 +1518,28 @@ export class VisionApi {
   /** Every tracked job, newest-first by `startedAt` (`TrainingJobsResponse#jobs`). Unscoped/unaudited — any signed-in caller may poll progress. */
   trainingJobs(): Promise<TrainingJobsResponse> {
     return firstValueFrom(this.http.get<TrainingJobsResponse>('/api/training/jobs'));
+  }
+
+  // --- CV training runs (docs/plans/active/CV-SETTINGS-PLAN.md §3.3/§5.2, wave W8) — the **persisted**
+  // run history behind `features/training-jobs/run-history*` (`TrainingRun`, distinct from the
+  // in-memory `TrainingJobResponse` above — see that interface's own doc comment). `canManageOrg`
+  // gated server-side (`TrainingJobService#runs`/`#run`), so a non-manager gets a `403`; the route
+  // itself is additionally `orgGuard`-gated (`run-history.routes` — actually `training-jobs.routes.ts`),
+  // so this app never issues either call for a non-manager in the first place.
+
+  /**
+   * Every persisted training run, newest-first (`TrainingRunRepositoryPort#findAll`'s own
+   * documented order — `run-history-logic.ts#sortRunsNewestFirst` re-sorts defensively rather than
+   * trusting that ordering blindly). `403` for a non-manager; `404` when `vision.training.enabled`
+   * is off (this controller's whole route tree is absent from the context, mirroring
+   * `TrainingJobController`'s existing `GET /api/training/jobs`).
+   */
+  getTrainingRuns(): Promise<TrainingRunsResponse> {
+    return firstValueFrom(this.http.get<TrainingRunsResponse>('/api/cv/training/runs'));
+  }
+
+  /** One persisted run by id, for the run-detail view. `403` for a non-manager; `404` unknown `runId` or the feature disabled. */
+  getTrainingRun(runId: string): Promise<TrainingRun> {
+    return firstValueFrom(this.http.get<TrainingRun>(`/api/cv/training/runs/${encodeURIComponent(runId)}`));
   }
 }

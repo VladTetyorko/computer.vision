@@ -152,14 +152,17 @@ export type StreamState = 'STARTING' | 'LIVE' | 'STALLED' | 'RECONNECTING' | 'UN
  * own additions, both optional — an absent `labelFilter` keeps today's "empty = all labels"
  * semantics, an absent `detectionEnabled` defaults to `PipelineConfig.DEFAULT_DETECTION_ENABLED`
  * server-side — **`false`** as of docs/plans/done/CV-DEMAND-PLAN.md wave D1 (flipped from `true`: detection
- * is opt-in per stream now, not opt-out). This app never relies on that server fallback either way —
- * `core/settings/settings-store.ts#SettingsStore.effective()` always resolves a concrete
- * `detectionEnabled` value, and every call site that starts a stream
- * (`features/fly/cockpit-facade.ts#start`, `features/live/live-facade.ts`,
- * `features/devices/devices-facade.ts`) passes `settings.effective()` straight through as this
- * request, so it is always sent explicitly — the SPA's own default (also flipped to `false`, same
- * wave, §D3) is what actually governs a stream this app started, not this field's absence. Both are
- * also PATCH-able live afterward — see `UpdateStreamConfigRequest`.
+ * is opt-in per stream now, not opt-out).
+ *
+ * **Wave W7 (docs/plans/active/CV-SETTINGS-PLAN.md §3.1, H2) deleted the browser-local draft this app
+ * used to always send explicitly** (`SettingsStore#effective()` — that slice of `SettingsStore` no
+ * longer exists at all). Every call site that starts a stream (`features/fly/cockpit-facade.ts#start`,
+ * `features/live/live-facade.ts#start`, `features/devices/devices-facade.ts#start`) now sends **no
+ * body at all**, so this request's own documented fallback governs instead: the server resolves the
+ * new stream's config from the profile hierarchy (PLATFORM → ORGANIZATION → CATEGORY → ASSET, §3.1) —
+ * `PipelineConfig.defaults()` merged with whatever profile is actually bound, not a fixed SPA-side
+ * default any more. Both `labelFilter`/`detectionEnabled` are still PATCH-able live afterward — see
+ * `UpdateStreamConfigRequest`.
  *
  * `labelDenyFilter` (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2, wave W5) mirrors `dto.StartStreamRequest
  * #labelDenyFilter` one for one: an explicit empty array is a real value meaning "deny nothing",
@@ -251,6 +254,48 @@ export interface PatchStreamConfigResponse {
 }
 
 /**
+ * `StreamConfigResponse#tracking` — mirrors `dto.StreamConfigResponse.StreamTrackingConfigResponse`
+ * field-for-field (docs/plans/active/CV-SETTINGS-PLAN.md wave W7, H6: "read tracking settings back
+ * from `GET .../config` instead of assuming from what was sent"). Wider than
+ * {@link CvProfileTracking} — this also carries the three session-only knobs a profile does not own
+ * (`redetectIouPercent`/`maxAgeFrames`/`minHits`) plus `reupdateMaxGapMillis`. `lock` is deliberately
+ * absent (the Java record's own doc comment): a held target is confirmed from `GET .../tracks`'s own
+ * `lockedTrackId` and nowhere else (docs/extracts/TRACKING-ORCHESTRATION.md §3.3).
+ */
+export interface StreamTrackingConfigResponse {
+  readonly mode: TrackingMode;
+  readonly engineId: string;
+  readonly verifyEveryMillis: number;
+  readonly followFps: number;
+  readonly redetectIouPercent: number;
+  readonly maxAgeFrames: number;
+  readonly minHits: number;
+  readonly capabilityLevel: number;
+  readonly reupdateMaxGapMillis: number;
+}
+
+/**
+ * Mirrors `dto.StreamConfigResponse`, the `200` body of `GET /api/streams/{streamId}/config`
+ * (docs/plans/active/CV-SETTINGS-PLAN.md wave W7) — "the read half of a knob that was write-only
+ * over HTTP" (the Java record's own doc comment). Field names mirror
+ * {@link UpdateStreamConfigRequest} one-for-one, but **every field here is always present** — this
+ * is the effective configuration, not a patch, so there is no "absent means unchanged" to represent.
+ * `404` for an unknown/not-running stream — the Java controller's own doc comment: "a plausible-
+ * looking default configuration for a stream that does not exist" is exactly the fabrication this
+ * app's "degrade honestly" rule forbids, so a `404` here means the caller has nothing to show, not a
+ * reason to substitute a guess.
+ */
+export interface StreamConfigResponse {
+  readonly model: string;
+  readonly confidenceThreshold: number;
+  readonly inferenceFps: number;
+  readonly labelFilter: readonly string[];
+  readonly labelDenyFilter: readonly string[];
+  readonly detectionEnabled: boolean;
+  readonly tracking: StreamTrackingConfigResponse;
+}
+
+/**
  * Mirrors one entry of `dto.CvModelsResponse#models` (`GET /api/cv/models`) — one row of the
  * detection-model picker's roster, replacing the old hardcoded `DETECTION_MODEL_OPTIONS` array.
  * `id` is the exact checkpoint filename `StartStreamRequest#model`/`UpdateStreamConfigRequest#model`
@@ -280,6 +325,57 @@ export interface CvModel {
   readonly kind: string;
   readonly openVocab: boolean;
   readonly defaultLabelFilter: readonly string[];
+  /**
+   * Widened roster fields (docs/plans/active/CV-SETTINGS-PLAN.md §5.2, `/vision/profiles`'s model
+   * picker) — every field below is **optional**, not because the wire contract permits omitting
+   * them, but so this interface stays backward-compatible with every existing object-literal
+   * fixture typed as `CvModel` (`cv-control-panel-logic.spec.ts#model()` in particular, which is
+   * out of this wave's file scope and must keep compiling with only the original 5 fields set).
+   * Absent means "not reported by this roster entry", never a fabricated default — read `undefined`
+   * the same way the rest of this app reads a failed enrichment: render "—", never a guessed value.
+   */
+  readonly version?: string;
+  readonly taskType?: 'DETECT' | 'SEGMENT' | 'POSE' | 'CLASSIFY';
+  readonly runtime?: 'PYTORCH' | 'ONNX' | 'OPENVINO' | 'TENSORRT';
+  readonly classes?: readonly string[];
+  /** Registry lifecycle state — `'LIVE'` is the promoted, servable version; `'CANDIDATE'`/`'DRAFT'`/
+   * `'RETIRED'` are registry-only states this picker still lists for context but should not
+   * default-select. **Corrected wave W8** (docs/plans/active/CV-SETTINGS-PLAN.md §6 row W8) from
+   * this file's own original `'LIVE' | 'CANDIDATE' | 'ARCHIVED'` guess, written before the backend
+   * landed — `dto.CvModelResponse#status` (station/vision-api) serializes the domain `ModelStatus`
+   * name verbatim, which is `DRAFT`/`CANDIDATE`/`LIVE`/`RETIRED`; `'ARCHIVED'` is never sent. */
+  readonly status?: 'DRAFT' | 'CANDIDATE' | 'LIVE' | 'RETIRED';
+  /** Whether the model file this entry names actually exists on the worker filesystem right now —
+   * `'MISSING'` is CV-SETTINGS-PLAN.md §3.5 rule 4's "Missing on worker" case: the profile still
+   * references it, but the picker must say so rather than silently falling back to something else. */
+  readonly availability?: 'PRESENT' | 'MISSING';
+  readonly metrics?: CvModelMetrics;
+  readonly provenance?: CvModelProvenance;
+  /** Where this roster entry came from — `'config'` is the pre-registry static list (today's only
+   * source, docs/plans/active/CV-SETTINGS-PLAN.md §8 Q5: `GET /api/cv/models` never errors, it falls
+   * back to `source:"config"` entries rather than surfacing a transport failure); `'registry'` is a
+   * trained-and-promoted model row. Absent reads the same as `'config'`. */
+  readonly source?: 'config' | 'registry';
+}
+
+/** `CvModel#metrics` — evaluation numbers for a trained roster entry; absent for a static config
+ * entry with no training run behind it. `kind` distinguishes a training-time metric (measured on
+ * held-out validation split during the run) from a future held-out evaluation metric
+ * (docs/plans/active/CV-SETTINGS-PLAN.md §7 non-goal — not computed yet, but the field is already
+ * shaped to carry one without another wire change). */
+export interface CvModelMetrics {
+  readonly map50?: number;
+  readonly kind?: 'TRAINING' | 'HELDOUT';
+}
+
+/** `CvModel#provenance` — training lineage for a `source:'registry'` entry; every field is `null`
+ * (not merely absent) for a `source:'config'` entry that was never trained, per §5.2's own example. */
+export interface CvModelProvenance {
+  readonly datasetId: string | null;
+  readonly trainingRunId: string | null;
+  readonly baseModel: string | null;
+  readonly epochs: number | null;
+  readonly trainedAt: string | null;
 }
 
 /** Mirrors `GET /api/cv/models`'s `200` body — `yolo26n.pt` (the fast closed-set default) listed
@@ -288,6 +384,183 @@ export interface CvModel {
  * class's own doc comment). */
 export interface CvModelsResponse {
   readonly models: readonly CvModel[];
+}
+
+// --- CV profiles (docs/plans/active/CV-SETTINGS-PLAN.md §5's frozen wire contract, wave W6) ----------------
+// A profile bundles the whole per-stream CV config (model, thresholds, tracking, the event rule) into
+// one named, reusable thing that can be bound at ORGANIZATION/CATEGORY/ASSET scope and resolves once
+// at stream start (§3.1: PLATFORM → ORGANIZATION → CATEGORY → ASSET → SESSION, most specific wins, a
+// session PATCH never writes back upward). **The backend for this wire contract had not shipped when
+// this wave landed** (W2/W3/W4 land concurrently in `contexts/vision-perception`/`vision-learning` and
+// `storage/persistence` — see docs/plans/active/CV-SETTINGS-CONTEXT.md's ledger) — `/vision/profiles`
+// degrades every read to a visible notice on transport failure, never a fabricated row (§3.5 rule 2).
+
+/** Mirrors `domain.model.BindingScope` — where a `CvProfileBinding` attaches. `ORGANIZATION` is the
+ * group-wide default; `CATEGORY` binds every asset of one `CategoryId` slug; `ASSET` overrides both
+ * for exactly one asset. Resolution picks the most specific bound profile, per §3.1. */
+export type BindingScope = 'ORGANIZATION' | 'CATEGORY' | 'ASSET';
+
+/** `CvProfile#tracking` — deliberately a narrower shape than `TrackingConfigRequest` (that request
+ * also carries session-only knobs — `lock`, `redetectIouPercent`, `maxAgeFrames`, `minHits`,
+ * `reupdateMaxGapMillis` — that a profile does not own; §5.1 lists exactly these five fields). */
+export interface CvProfileTracking {
+  readonly mode: TrackingMode;
+  /** Empty string means "use the deployment default engine" — never a magic sentinel other than "". */
+  readonly engineId: string;
+  readonly capabilityLevel: number;
+  readonly verifyEveryMillis: number;
+  readonly followFps: number;
+}
+
+/**
+ * `CvProfile#eventRule` — occupancy-style open/close rule for this profile's stream. **Start-time
+ * only**: §5.1 marks this whole object absent from the PATCH-shaped update request — a running
+ * stream keeps whatever event rule it started with, exactly like every other profile field (§3.1's
+ * "resolved once at stream start" rule), so the profile editor must say so next to this section
+ * rather than let it look like a live-editable control.
+ */
+export interface CvProfileEventRule {
+  readonly labels: readonly string[];
+  readonly confidenceThreshold: number;
+  readonly consecutiveToOpen: number;
+  readonly absenceToCloseSeconds: number;
+}
+
+/**
+ * Mirrors `domain.model.CvProfile` (§5.1's frozen JSON). `groupId` is **optional**, not because the
+ * wire can omit it arbitrarily, but because the Java domain record validates it bidirectionally
+ * (docs/plans/active/CV-SETTINGS-CONTEXT.md "W1 → W2/W3 handoff"): `builtIn === true` requires
+ * `groupId` absent/null, `builtIn === false` requires it present — a built-in profile has no owning
+ * org, a forked/custom one always does. `eventRule` is present on every read but never sent back on
+ * an update (see `CvProfileRequest`).
+ */
+export interface CvProfile {
+  readonly id: string;
+  readonly name: string;
+  readonly description: string;
+  readonly builtIn: boolean;
+  readonly groupId?: string;
+  readonly model: string;
+  readonly confidenceThreshold: number;
+  readonly inferenceFps: number;
+  readonly labelFilter: readonly string[];
+  readonly labelDenyFilter: readonly string[];
+  readonly detectionEnabled: boolean;
+  readonly tracking: CvProfileTracking;
+  readonly eventRule: CvProfileEventRule;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+}
+
+/** Mirrors `GET /api/cv/profiles`'s `200` body — the wrapped-list convention every list endpoint in
+ * this API follows (`CvModelsResponse`, `CvTrackersResponse`, …), never a bare array. */
+export interface CvProfilesResponse {
+  readonly profiles: readonly CvProfile[];
+}
+
+/**
+ * Body for `POST /api/cv/profiles` (create) and `PUT /api/cv/profiles/{id}` (update) — one shared
+ * request shape for both verbs, this codebase's own precedent (`GeofenceZoneRequest`). Deliberately
+ * excludes `id`/`builtIn`/`createdAt`/`updatedAt` (server-assigned) and `eventRule` (§5.1:
+ * start-time only, never accepted on an update — a profile's event rule is fixed at creation and
+ * only changes by forking a new profile). `groupId` is never sent — POST always creates a
+ * non-built-in profile for the caller's own org, and PUT never moves a profile between orgs.
+ */
+export interface CvProfileRequest {
+  readonly name: string;
+  readonly description: string;
+  readonly model: string;
+  readonly confidenceThreshold: number;
+  readonly inferenceFps: number;
+  readonly labelFilter: readonly string[];
+  readonly labelDenyFilter: readonly string[];
+  readonly detectionEnabled: boolean;
+  readonly tracking: CvProfileTracking;
+}
+
+/** Mirrors `domain.model.CvProfileBinding`. `scopeId` is a `GroupId`/`CategoryId` slug/`AssetId`
+ * depending on `scopeKind` — an opaque string from this client's point of view, resolved by picking
+ * it from the matching existing list (groups/categories/assets) rather than typed free-form. */
+export interface CvProfileBinding {
+  readonly scopeKind: BindingScope;
+  readonly scopeId: string;
+  readonly profileId: string;
+  readonly createdAt: string;
+}
+
+/** Body for `PUT /api/cv/bindings` (set/replace) and `DELETE /api/cv/bindings` (clear) — §5.2 has no
+ * `GET /api/cv/bindings` to list raw rows (only the write verbs), so `/vision/profiles` derives its
+ * "bound to" summaries from `GET /api/cv/coverage` instead (`vision-profiles-logic.ts`). `profileId`
+ * is omitted on a `DELETE` (clearing a scope doesn't name which profile it was bound to). */
+export interface CvProfileBindingRequest {
+  readonly scopeKind: BindingScope;
+  readonly scopeId: string;
+  readonly profileId?: string;
+}
+
+/** Mirrors `GET /api/cv/profiles/effective?assetId=…`'s `200` body — the profile that would actually
+ * apply to this asset's next stream start, plus which binding produced it (or `'PLATFORM'` when
+ * nothing at all is bound, §3.1's "behavior-preserving with zero bindings" default). */
+export interface EffectiveCvProfile {
+  readonly assetId: string;
+  readonly profile: CvProfile;
+  readonly source: BindingScope | 'PLATFORM';
+}
+
+/** One row of `GET /api/cv/coverage`'s `200` body — a per-asset resolved-profile summary
+ * (§4's UI sketch: "asset · category · profile · source · detection · model · filters"). `assetId`
+ * is always present; `categoryId`/`categoryName` describe the asset's own category, not necessarily
+ * where the resolved binding came from (that's `source`). */
+export interface CvCoverageRow {
+  readonly assetId: string;
+  readonly assetName: string;
+  readonly categoryId: string;
+  readonly categoryName: string;
+  readonly profileId: string;
+  readonly profileName: string;
+  readonly source: BindingScope | 'PLATFORM';
+  readonly detectionEnabled: boolean;
+  readonly model: string;
+  readonly labelFilter: readonly string[];
+  readonly labelDenyFilter: readonly string[];
+}
+
+/** Mirrors `GET /api/cv/coverage`'s `200` body. */
+export interface CvCoverageResponse {
+  readonly rows: readonly CvCoverageRow[];
+}
+
+/**
+ * Mirrors `domain.model.TrainingRun` (§5.2) — a `vision-learning` training job's own **persisted**
+ * record (`cv_training_runs`, survives a browser/server restart), distinct from the older, in-memory
+ * `TrainingJobResponse` (`core/api/models.ts` below) that `TrainingJobController#job`/`#jobs` still
+ * serve — that one is this app's live-poll view of a run still in flight; this one is the
+ * queryable history `VisionApi#getTrainingRuns`/`#getTrainingRun` reads (wave W8,
+ * `features/training-jobs/run-history*`). Reuses `TrainingJobState` for `state` rather than a second
+ * near-identical union (`RUNNING` / `SUCCEEDED` / `FAILED`) — same three-state lifecycle, one
+ * vocabulary.
+ */
+export interface TrainingRun {
+  readonly runId: string;
+  readonly datasetId: string;
+  readonly datasetName: string;
+  readonly baseModel: string;
+  readonly epochs: number;
+  readonly state: TrainingJobState;
+  readonly epoch: number;
+  readonly totalEpochs: number;
+  readonly loss: number | null;
+  readonly map50: number | null;
+  readonly outputModelId: string | null;
+  readonly startedAt: string;
+  readonly finishedAt: string | null;
+  readonly startedBy: string;
+}
+
+/** Mirrors `GET /api/cv/training/runs`'s `200` body — wrapped-list convention, matching
+ * `CvModelsResponse`/`DatasetsResponse`'s own precedent. Read by `VisionApi#getTrainingRuns`. */
+export interface TrainingRunsResponse {
+  readonly runs: readonly TrainingRun[];
 }
 
 // --- Tracking engine (docs/plans/done/TRACKING-PLAN.md §4's frozen wire contract, wave T7) -----------------
@@ -2949,35 +3222,39 @@ export interface LabelAnnotationsRequest {
   readonly annotations: readonly Annotation[];
 }
 
-// --- CV model registry (docs/plans/done/CV-TRAINING-PLAN.md §7-8, Phase 2 T9/T10) -------------------------
-// The dynamic model registry — every model reference cv-service's own `Training/ListModels` RPC
-// actually reports, live, and the one place a model gets promoted to production. **Not** the same
-// roster as `CvModelsResponse`/`GET /api/cv/models` above (a static, config-backed picker for the
-// Fly cockpit's model dropdown) — see `ModelRegistryController`'s own javadoc (vision-api/MODULE.md,
-// "Not the same roster as `CvModelsController`"). Gated by the same `vision.training.enabled` flag
-// as the dataset/labeling endpoints above; `features/models/**` (Phase 2 T10) is the one consumer.
-
-/**
- * Mirrors `dto.RegisteredModelResponse` — one row of `GET /api/cv/registry/models`. No optional
- * fields (no `@JsonInclude(NON_NULL)` server-side, mirroring `CvModelResponse`'s own posture) —
- * `version` is routinely `""` today, since cv-service's registry tracks no per-model version data
- * yet (`cv_service/server.py#ListModels`'s own doc comment). See
- * `features/models/models-logic.ts#resolvePromoteVersion` for why that matters when promoting.
- */
-export interface RegisteredModel {
-  readonly id: string;
-  readonly version: string;
-  readonly active: boolean;
-}
-
-/** Mirrors `dto.RegisteredModelsResponse` — `GET /api/cv/registry/models`'s wrapper shape, the same `{"models":[...]}` precedent `CvModelsResponse`/`DatasetsResponse` set. */
-export interface RegisteredModelsResponse {
-  readonly models: readonly RegisteredModel[];
-}
+// --- CV model registry (docs/plans/active/CV-SETTINGS-PLAN.md §3.2/§5.2, wave W8) --------------------------
+// The registry's mutation surface — promote a model to `LIVE`, or roll back to whichever model that
+// promotion demoted. **The read side moved**: `GET /api/cv/registry/models` is deleted; the roster
+// (worker truth joined with platform governance — status/runtime/metrics/provenance/availability) is
+// now `GET /api/cv/models`/`CvModelsResponse` above, the one roster this app reads (`CvModel#status`/
+// `#source` distinguish a registry row from a static config entry — see that interface's own doc
+// comment). Gated by `vision.cv.registry.enabled` (default `vision.cv.enabled`), **not**
+// `vision.training.enabled` — `ModelRegistryController`'s own javadoc, CV-SETTINGS-PLAN.md §5.5.
+// `features/models/**` is the one consumer.
 
 /** Mirrors `dto.PromoteModelRequest` — the body of `POST /api/cv/registry/models/{id}/promote`. `version` must be non-blank server-side (`ModelRef`'s own compact-constructor check, surfaced as a 400). */
 export interface PromoteModelRequest {
   readonly version: string;
+}
+
+/**
+ * Mirrors `dto.PromotionResultResponse` — the shared response body of `POST
+ * /api/cv/registry/models/{id}/promote` and `POST /api/cv/registry/rollback` (§5.2): the model now
+ * `LIVE`, and whichever model (if any) that operation demoted to `RETIRED`. `id`/`version` name the
+ * model **now live** — not the one that was just promoted/rolled-back *from* — per the wire
+ * contract's own field names (unlike the domain `PromotionResult#modelId`).
+ *
+ * `previousModelId`/`previousVersion` are **absent, not `null`**, when nothing was demoted (the
+ * DTO carries `@JsonInclude(NON_NULL)` server-side, which omits a null field from the JSON body
+ * entirely rather than serializing it as `null`) — read `undefined` the same as any other
+ * "not reported" field in this app, never fabricate a "none" string.
+ */
+export interface PromotionResultResponse {
+  readonly id: string;
+  readonly version: string;
+  readonly status: 'LIVE';
+  readonly previousModelId?: string;
+  readonly previousVersion?: string;
 }
 
 // --- CV training-job flow (docs/plans/done/CV-TRAINING-PLAN.md §7-8, Phase 2's last web wave) -------------

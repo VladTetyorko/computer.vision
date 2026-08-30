@@ -57,7 +57,6 @@ class EndpointAuthorizationTest {
             "DiscoveryController#scan",
             "GeoRegionController#list",
             "GeoRegionController#progress",
-            "ModelRegistryController#models",
             "OnboardingController#probeCandidate",
             "SystemNetworkController#network",
             "SystemStatusController#status",

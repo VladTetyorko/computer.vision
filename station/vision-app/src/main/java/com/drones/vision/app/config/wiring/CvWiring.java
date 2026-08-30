@@ -14,9 +14,19 @@ import com.drones.vision.app.config.properties.VisionCvProperties;
 import com.drones.vision.app.devsupport.NoopDetectionPort;
 import com.drones.vision.app.geo.TrackProjectionRunner;
 import com.drones.vision.kernel.AssetId;
+import com.drones.vision.learning.application.ConfigModelCatalog;
+import com.drones.vision.learning.application.ModelRegistryService;
+import com.drones.vision.learning.domain.model.CvModelRecord;
+import com.drones.vision.learning.domain.model.ModelProvenance;
+import com.drones.vision.learning.domain.model.ModelRuntime;
+import com.drones.vision.learning.domain.model.ModelStatus;
+import com.drones.vision.learning.domain.model.ModelTaskType;
+import com.drones.vision.perception.application.profile.CvProfileService;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.port.DetectionPort;
 import com.drones.vision.perception.domain.port.PulledDetectionPort;
+import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
+import com.drones.vision.api.security.CurrentUser;
 import io.grpc.ManagedChannel;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -27,6 +37,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.function.Predicate;
 
@@ -106,7 +117,8 @@ public class CvWiring {
      */
     @Bean(destroyMethod = "shutdown")
     @ConditionalOnExpression("${vision.cv.enabled:false} or ${vision.training.enabled:false} "
-            + "or '${vision.cv.frame-transport:push}' == 'pull' or ${vision.geo.visual.enabled:false}")
+            + "or '${vision.cv.frame-transport:push}' == 'pull' or ${vision.geo.visual.enabled:false} "
+            + "or ${vision.cv.registry.enabled:false}")
     @Primary
     public ManagedChannel cvGrpcChannel(VisionCvProperties cvProperties) {
         GrpcCvSettings settings = toGrpcCvSettings(cvProperties);
@@ -199,7 +211,8 @@ public class CvWiring {
      */
     @Bean(initMethod = "start", destroyMethod = "close")
     @ConditionalOnExpression("(${vision.cv.enabled:false} or ${vision.training.enabled:false} "
-            + "or '${vision.cv.frame-transport:push}' == 'pull' or ${vision.geo.visual.enabled:false}) "
+            + "or '${vision.cv.frame-transport:push}' == 'pull' or ${vision.geo.visual.enabled:false} "
+            + "or ${vision.cv.registry.enabled:false}) "
             + "and ${vision.cv.reconnect.enabled:true}")
     public CvChannelSupervisor cvChannelSupervisor(VisionCvProperties cvProperties,
             @Qualifier("cvGrpcChannel") ObjectProvider<ManagedChannel> cvGrpcChannel) {
@@ -272,10 +285,35 @@ public class CvWiring {
     @Bean
     public List<CvModelResponse> cvModelRoster() {
         return List.of(
-                new CvModelResponse("yolo26n.pt", "General (people & vehicles, fast)", "general", false, List.of()),
-                new CvModelResponse("orion12l.pt", "Military vehicles", "specialized", false, List.of()),
+                new CvModelResponse("yolo26n.pt", "General (people & vehicles, fast)", "general", false, List.of(),
+                        null, null, null, null, null, null, null, null, null),
+                new CvModelResponse("orion12l.pt", "Military vehicles", "specialized", false, List.of(), null, null,
+                        null, null, null, null, null, null, null),
                 new CvModelResponse("yoloe-26s-seg-pf.pt", "Everything (incl. buildings, slower)", "open-vocab",
-                        true, List.of()));
+                        true, List.of(), null, null, null, null, null, null, null, null, null));
+    }
+
+    /**
+     * {@link ModelRegistryService#models()}'s worker-unreachable fallback, and {@code
+     * CvModelsController}'s own fallback when {@code ModelRegistryService} is not wired at all
+     * (docs/plans/active/CV-SETTINGS-PLAN.md §8 OQ5, CV-SETTINGS-CONTEXT.md's W4-app → W5 handoff) —
+     * maps {@link #cvModelRoster} (unchanged, still the picker's original three-entry list) onto the
+     * {@code CvModelRecord} shape the registry's own catalogue deals in. Every field this static
+     * roster cannot supply falls back to the same stand-in {@code DefaultModelRegistryService} itself
+     * uses when it has to synthesize a row from scratch (see {@code CvModelView#synthesize}): {@code
+     * DRAFT} status, {@link ModelProvenance#none()}, no metrics, never promoted, version {@code
+     * "latest"}, task type {@code DETECT}, runtime {@code PYTORCH}, an empty closed class set, and a
+     * fixed {@link Instant#EPOCH} {@code createdAt} sentinel — deterministic across restarts rather
+     * than "whenever this bean happens to run."
+     */
+    @Bean
+    public ConfigModelCatalog configModelCatalog(List<CvModelResponse> cvModelRoster) {
+        List<CvModelRecord> records = cvModelRoster.stream()
+                .map(model -> new CvModelRecord(model.id(), "latest", model.displayName(), model.kind(),
+                        model.openVocab(), model.defaultLabelFilter(), ModelTaskType.DETECT, ModelRuntime.PYTORCH,
+                        List.of(), ModelStatus.DRAFT, null, ModelProvenance.none(), null, null, Instant.EPOCH))
+                .toList();
+        return new ConfigModelCatalog(records);
     }
 
     /**
@@ -353,15 +391,22 @@ public class CvWiring {
     }
 
     /**
-     * Bundles {@link #streamDefaultConfig} and {@link #detectionDemandPort}'s poll-touch seam behind
-     * one bean for {@code StreamController} (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.8) — see
-     * {@link StreamDetectionSupport}'s own javadoc for why. {@code detectionDemandPort} resolves to
-     * {@code null} exactly when {@link #detectionDemandPort} itself was not created (demand gate
-     * disabled), which {@link StreamDetectionSupport} already treats as "nothing to touch."
+     * Bundles {@link #streamDefaultConfig} and {@link #detectionDemandPort}'s poll-touch seam, plus
+     * (docs/plans/active/CV-SETTINGS-PLAN.md §5.4, CV-SETTINGS-CONTEXT.md's W2 → W5 handoff) the
+     * profile-resolution collaborators {@code StreamController#start} needs to fold a bound {@code
+     * CvProfile} under an explicit request override, behind one bean for {@code StreamController}
+     * (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.8) — see {@link StreamDetectionSupport}'s own
+     * javadoc for why. {@code detectionDemandPort} resolves to {@code null} exactly when {@link
+     * #detectionDemandPort} itself was not created (demand gate disabled), which {@link
+     * StreamDetectionSupport} already treats as "nothing to touch." {@code cvProfileService} is
+     * unconditional (see {@code CvProfileWiringConfiguration}) — profiles ship regardless of {@link
+     * VisionCvProperties#enabled()}/{@link VisionCvProperties.Registry#enabled()}.
      */
     @Bean
     public StreamDetectionSupport streamDetectionSupport(PipelineConfig streamDefaultConfig,
-            ObjectProvider<LiveAndPollDetectionDemand> detectionDemandPort) {
-        return new StreamDetectionSupport(streamDefaultConfig, detectionDemandPort.getIfAvailable());
+            ObjectProvider<LiveAndPollDetectionDemand> detectionDemandPort, CvProfileService cvProfileService,
+            AssetRepositoryPort assetRepositoryPort, CurrentUser currentUser) {
+        return new StreamDetectionSupport(streamDefaultConfig, detectionDemandPort.getIfAvailable(),
+                cvProfileService, assetRepositoryPort, currentUser);
     }
 }

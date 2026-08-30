@@ -24,6 +24,20 @@ import {
  * this app — no bearer token, no `withCredentials` to set. */
 const MANUAL_CONTROL_WS_URL = '/ws/manual-control';
 
+/**
+ * How long `engage` waits for the server's own `engaged`/`denied` frame before giving up.
+ *
+ * Without this an operator can be stranded indefinitely: the socket stays open (so no `onclose`
+ * deadman fires) and the server, having engaged, is already relaying to the vehicle — the only
+ * thing missing is the confirmation this client refuses to assume. That combination is not
+ * hypothetical; it is what a reply this client cannot validate looks like from the outside.
+ *
+ * Generous relative to the handshake it covers — the server does no vehicle I/O inside `engage`
+ * (`DefaultManualControlService#engage` is entirely local), so anything past a couple of seconds
+ * is a fault, not slowness.
+ */
+export const ENGAGE_TIMEOUT_MS = 4000;
+
 export type ManualControlEngageState = 'idle' | 'engaging' | 'engaged' | 'denied' | 'released';
 
 /**
@@ -132,6 +146,7 @@ export class ManualControlClient {
   private lastSentAt = 0;
   private lastSentAxes: readonly number[] = [];
   private lastSentButtons: readonly number[] = [];
+  private engageTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     document.addEventListener('visibilitychange', this.onVisibilityChange);
@@ -196,6 +211,8 @@ export class ManualControlClient {
     this.lastSentButtons = [];
     this._state.set('engaging');
 
+    this.engageTimer = setTimeout(() => this.abandonEngage(), ENGAGE_TIMEOUT_MS);
+
     const ws = new WebSocket(MANUAL_CONTROL_WS_URL);
     this.ws = ws;
     ws.onopen = () => ws.send(JSON.stringify(buildEngageFrame(assetId)));
@@ -225,8 +242,14 @@ export class ManualControlClient {
   private handleMessage(raw: string): void {
     const msg = parseManualControlServerMessage(raw);
     if (!msg) {
-      return; // Malformed/unknown frame — defensively ignored, see `parseManualControlServerMessage`.
+      // Defensively ignored (see `parseManualControlServerMessage`) but never silently: dropping
+      // an `engaged` frame this client cannot validate leaves the operator watching "Engaging…"
+      // with the vehicle already being relayed to, and no way to tell why. The console line is
+      // what turns that into a five-second diagnosis instead of a bisect.
+      console.warn('[manual-control] discarded an unrecognised server frame:', raw.slice(0, 400));
+      return;
     }
+    this.clearEngageTimer();
     switch (msg.type) {
       case 'engaged':
         this._channelMap.set(msg.channelMap);
@@ -264,11 +287,32 @@ export class ManualControlClient {
    * right (network drop, server-side abrupt close). Unreachable after this class's own teardown
    * paths (`teardownSocket` nulls every handler, including this one, before calling `close()`), so
    * this only ever fires for a genuinely unexpected drop. */
+  /** The engage handshake produced neither `engaged` nor `denied` in time — see
+   * {@link ENGAGE_TIMEOUT_MS}. Treated as a refusal rather than a silent return to idle, so the
+   * button re-enables with a reason attached instead of looking like a click that did nothing. */
+  private abandonEngage(): void {
+    this.engageTimer = null;
+    if (this._state() !== 'engaging') {
+      return;
+    }
+    this._deniedReason.set('The station never confirmed control. Nothing is being sent — try again.');
+    this._state.set('denied');
+    this.teardownSocket();
+  }
+
+  private clearEngageTimer(): void {
+    if (this.engageTimer !== null) {
+      clearTimeout(this.engageTimer);
+      this.engageTimer = null;
+    }
+  }
+
   private handleSocketGone(): void {
     if (!this.ws) {
       return;
     }
     this.ws = null;
+    this.clearEngageTimer();
     this.stopSendLoop();
     if (this.isSessionLive()) {
       this._state.set('released');
@@ -316,6 +360,7 @@ export class ManualControlClient {
 
   private teardownSocket(): void {
     this.stopSendLoop();
+    this.clearEngageTimer(); // the single choke point — release()/denied/watchdog all pass here
     const ws = this.ws;
     this.ws = null;
     if (ws) {
