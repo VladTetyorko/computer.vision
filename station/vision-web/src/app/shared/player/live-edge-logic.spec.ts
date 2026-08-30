@@ -30,6 +30,13 @@ describe('shouldSnapToLive', () => {
     expect(shouldSnapToLive('visibilityRestored', 10, 20)).toBe(false);
     expect(shouldSnapToLive('visibilityRestored', 21, 20)).toBe(true);
   });
+
+  it('"firstAttach" always snaps, regardless of the measured latency — fix/stream-start-latency', () => {
+    expect(shouldSnapToLive('firstAttach', null)).toBe(true);
+    expect(shouldSnapToLive('firstAttach', 0)).toBe(true);
+    expect(shouldSnapToLive('firstAttach', 0.1)).toBe(true);
+    expect(shouldSnapToLive('firstAttach', 100)).toBe(true);
+  });
 });
 
 describe('transportLatencyLabel', () => {

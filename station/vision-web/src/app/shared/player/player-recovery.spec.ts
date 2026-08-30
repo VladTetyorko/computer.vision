@@ -14,12 +14,14 @@ import {
   extractWhepStatsSnapshot,
   initialTransportState,
   isStalled,
+  isWhepPrePlayMiss,
   isWhepStillWaitingForTrack,
   reconnectDelayMs,
   reduceRecovery,
   reduceTransportRecovery,
   reduceWhepIce,
   shouldAttemptWhep,
+  shouldAttemptWhepUpgrade,
   type PacingState,
   type RecoveryState,
   type TransportRecoveryState,
@@ -295,6 +297,30 @@ describe('reduceTransportRecovery — WHEP-first, HLS-fallback (docs/plans/done/
     });
   });
 
+  it('fix/stream-start-latency: playlistNotReady on webrtc before ever playing stays webrtc — no permanent downgrade for a WHEP path-not-ready cold start', () => {
+    const connecting: TransportRecoveryState = {
+      transport: 'webrtc',
+      recovery: { phase: 'connecting', attempt: 0 },
+    };
+    // `'playlistNotReady'` is deliberately absent from `isWhepFailure` — this is the whole fix:
+    // `player.ts#beginWhepAttach` dispatches this event (not `'fatalError'`) for a pre-play WHEP POST
+    // 404/non-2xx (`isWhepPrePlayMiss`), so the cold-start retry cadence applies instead of an
+    // immediate, permanent fallback to HLS.
+    expect(reduceTransportRecovery(connecting, 'playlistNotReady')).toEqual({
+      transport: 'webrtc',
+      recovery: { phase: 'waiting', attempt: 1 },
+    });
+
+    const waiting: TransportRecoveryState = {
+      transport: 'webrtc',
+      recovery: { phase: 'waiting', attempt: 1 },
+    };
+    expect(reduceTransportRecovery(waiting, 'playlistNotReady')).toEqual({
+      transport: 'webrtc',
+      recovery: { phase: 'waiting', attempt: 2 },
+    });
+  });
+
   it('firstSegment on webrtc moves to playing, transport stays webrtc', () => {
     const connecting: TransportRecoveryState = {
       transport: 'webrtc',
@@ -528,6 +554,50 @@ describe('shouldAttemptWhep', () => {
   it('is true again once the cooldown has fully elapsed', () => {
     const state = advancePacing(INITIAL_PACING_STATE, 'whepAttempted', 0);
     expect(shouldAttemptWhep(state, true, WHEP_RETRY_COOLDOWN_MS)).toBe(true);
+  });
+});
+
+describe('isWhepPrePlayMiss', () => {
+  it('is true for a 404 before ever playing — the common mediamtx "no publisher yet" shape', () => {
+    expect(isWhepPrePlayMiss(404, true)).toBe(true);
+  });
+
+  it('is true for any other non-2xx before ever playing, not just 404', () => {
+    expect(isWhepPrePlayMiss(500, true)).toBe(true);
+    expect(isWhepPrePlayMiss(503, true)).toBe(true);
+    expect(isWhepPrePlayMiss(400, true)).toBe(true);
+  });
+
+  it('is false for a 2xx (the caller never calls this for a success response, but it should not lie)', () => {
+    expect(isWhepPrePlayMiss(200, true)).toBe(false);
+    expect(isWhepPrePlayMiss(204, true)).toBe(false);
+  });
+
+  it('is false once this attach has already played, regardless of status — a genuine reconnect concern instead', () => {
+    expect(isWhepPrePlayMiss(404, false)).toBe(false);
+    expect(isWhepPrePlayMiss(500, false)).toBe(false);
+  });
+});
+
+describe('shouldAttemptWhepUpgrade', () => {
+  it('is true only while parked on a calmly playing hls session with a whepUrl configured', () => {
+    expect(shouldAttemptWhepUpgrade('hls', 'playing', true)).toBe(true);
+  });
+
+  it('is false with no whepUrl configured — nothing to upgrade to', () => {
+    expect(shouldAttemptWhepUpgrade('hls', 'playing', false)).toBe(false);
+  });
+
+  it('is false while already on webrtc — nothing to upgrade', () => {
+    expect(shouldAttemptWhepUpgrade('webrtc', 'playing', true)).toBe(false);
+  });
+
+  it('is false while hls itself is mid-recovery — that belongs to beginNextCycle, not a background probe', () => {
+    expect(shouldAttemptWhepUpgrade('hls', 'connecting', true)).toBe(false);
+    expect(shouldAttemptWhepUpgrade('hls', 'waiting', true)).toBe(false);
+    expect(shouldAttemptWhepUpgrade('hls', 'reconnecting', true)).toBe(false);
+    expect(shouldAttemptWhepUpgrade('hls', 'error', true)).toBe(false);
+    expect(shouldAttemptWhepUpgrade('hls', 'stopped', true)).toBe(false);
   });
 });
 
