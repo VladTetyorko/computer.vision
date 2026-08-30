@@ -4,7 +4,7 @@
   </vision-page-bar>
 
   <ol class="stepper" aria-label="Onboarding steps">
-    @for (item of facade.steps; track item.step) {
+    @for (item of facade.steps(); track item.step) {
       <li
         class="stepper-item"
         [class.active]="facade.store.step() === item.step"
@@ -18,15 +18,15 @@
 
   <section class="card wizard-card">
     @switch (facade.store.step()) {
-      <!-- ---- Step 1: Profile ------------------------------------------------------------- -->
-      @case ('profile') {
-        <h2>Profile</h2>
+      <!-- ---- Step 1: Identify (docs/plans/active/WAREHOUSE-UX-PLAN.md D1) -------------------- -->
+      @case ('identify') {
+        <h2>Identify</h2>
         <p class="muted hint">What is it, and what does it look like?</p>
 
         <div class="field">
-          <label class="label" for="p-name">Display name</label>
+          <label class="label" for="id-name">Display name</label>
           <input
-            id="p-name"
+            id="id-name"
             name="displayName"
             class="field-md"
             [ngModel]="facade.store.displayName()"
@@ -37,21 +37,9 @@
         </div>
 
         <div class="field">
-          <label class="label" for="p-reg">Registration / tail number (optional)</label>
-          <input
-            id="p-reg"
-            name="registrationNumber"
-            class="field-sm"
-            [ngModel]="facade.store.registrationNumber()"
-            (ngModelChange)="facade.store.registrationNumber.set($event)"
-            placeholder="N12345"
-          />
-        </div>
-
-        <div class="field">
-          <label class="label" for="p-category">Category</label>
+          <label class="label" for="id-category">Category</label>
           <select
-            id="p-category"
+            id="id-category"
             name="category"
             class="field-md"
             [ngModel]="facade.store.category()"
@@ -62,6 +50,63 @@
               <option [value]="option.slug">{{ option.name }}</option>
             }
           </select>
+          <!-- The equipment short-circuit's own tell (WAREHOUSE-UX-PLAN.md §3.4/D4) — named here,
+               not just implied by the footer's swapped button, so the operator knows *why* the
+               wizard is about to skip straight to Hand-over. -->
+          @if (facade.store.category() && !facade.store.categoryConnected()) {
+            <p class="muted hint">
+              This category is equipment, not a vehicle — no device to connect. You'll receive it
+              straight into inventory.
+            </p>
+          }
+        </div>
+
+        <div class="field">
+          <label class="label" for="id-reg">Registration / tail number (optional)</label>
+          <input
+            id="id-reg"
+            name="registrationNumber"
+            class="field-sm"
+            [ngModel]="facade.store.registrationNumber()"
+            (ngModelChange)="facade.store.registrationNumber.set($event)"
+            placeholder="N12345"
+          />
+        </div>
+
+        <div class="field">
+          <label class="label" for="id-serial">Serial number (optional)</label>
+          <input
+            id="id-serial"
+            name="serialNumber"
+            class="field-sm"
+            [ngModel]="facade.store.serialNumber()"
+            (ngModelChange)="facade.store.serialNumber.set($event)"
+            placeholder="e.g. SN-00231"
+          />
+        </div>
+
+        <div class="field">
+          <label class="label" for="id-make">Make (optional)</label>
+          <input
+            id="id-make"
+            name="make"
+            class="field-sm"
+            [ngModel]="facade.store.make()"
+            (ngModelChange)="facade.store.make.set($event)"
+            placeholder="e.g. DJI"
+          />
+        </div>
+
+        <div class="field">
+          <label class="label" for="id-model">Model (optional)</label>
+          <input
+            id="id-model"
+            name="model"
+            class="field-sm"
+            [ngModel]="facade.store.model()"
+            (ngModelChange)="facade.store.model.set($event)"
+            placeholder="e.g. Mavic 3"
+          />
         </div>
 
         <div class="field photo-field">
@@ -106,746 +151,782 @@
           </div>
         </div>
 
-        @if (!facade.store.canAdvanceProfile()) {
+        @if (!facade.store.canAdvanceIdentify()) {
           <p class="disabled-reason">Enter a display name and choose a category.</p>
         }
       }
 
-      <!-- ---- Step 2: Connect (the pre-existing 3-choice component, moved here verbatim) ---- -->
+      <!-- ---- Step 2: Connect — the fit-out table (docs/plans/active/SOURCE-ONBOARDING-CONTEXT.md §6,
+           WAREHOUSE-UX-PLAN.md §3.4 wave W6). One card per role; each finder sub-view below is
+           moved verbatim from the pre-W6 single-method Connect step, now parameterized by `role`
+           only where the underlying store method actually takes one (register's own field
+           setters) — `scan`/`useCandidate` stay hardcoded to Sight and `scanForDrones`/
+           `useDroneVehicle`/the drone-config sub-flow stay hardcoded to Sense, exactly like the
+           store itself (see `OnboardingStore`'s own class-doc paragraph on this). -->
       @case ('connect') {
         <h2>Connect</h2>
+        <p class="muted hint">Fill in Sense (telemetry), Sight (video), or both — at least one row is needed.</p>
 
-        @if (!facade.store.connectMethod()) {
-          <p class="muted hint">How do you want to connect it?</p>
-          <div class="method-grid">
-            <button type="button" class="method-tile" (click)="facade.store.chooseMethod('register')">
-              <span class="method-glyph glyph-register" aria-hidden="true"></span>
-              <span class="method-title">Enter a stream address</span>
-              <span class="method-sub">Paste a camera's stream URL if you already have one (RTSP, MJPEG, HTTP).</span>
-            </button>
-            <button type="button" class="method-tile" (click)="facade.store.chooseMethod('discover')">
-              <span class="method-glyph glyph-discover" aria-hidden="true"></span>
-              <span class="method-title">Find cameras on my network</span>
-              <span class="method-sub">Scan your local network and pick from what's found — no address needed.</span>
-            </button>
-            <button type="button" class="method-tile" (click)="facade.store.chooseMethod('simulate')">
-              <span class="method-glyph glyph-simulate" aria-hidden="true"></span>
-              <span class="method-title">Use a test source</span>
-              <span class="method-sub">No hardware needed — a video file or a moving test drone.</span>
-            </button>
-            <button type="button" class="method-tile" (click)="facade.store.chooseMethod('listen')">
-              <span class="method-glyph glyph-listen" aria-hidden="true"></span>
-              <span class="method-title">Find nearby drones</span>
-              <span class="method-sub">Listen for drones already broadcasting telemetry — nothing to type.</span>
-            </button>
-            <button type="button" class="method-tile" (click)="facade.store.chooseDroneMethod()">
-              <span class="method-glyph glyph-drone" aria-hidden="true"></span>
-              <span class="method-title">Add a real drone</span>
-              <span class="method-sub">
-                Connect a flight controller (Betaflight, INAV, ArduPilot) — we'll walk you through it
-                with the connection settings pre-filled.
-              </span>
-            </button>
-          </div>
-        } @else {
-          <div class="row method-chosen-row">
-            <button
-              type="button"
-              class="btn secondary small back-btn"
-              (click)="facade.onConnectBack()"
-              aria-label="Back"
-            >
-              ‹
-            </button>
-            <span class="muted">{{ facade.connectMethodLabels[facade.store.connectMethod()!] }}</span>
-          </div>
+        @for (role of facade.fitOutRoles; track role) {
+          <div class="role-card">
+            <div class="role-card-head">
+              <span class="role-label">{{ facade.store.fitOutRoleLabels[role] }}</span>
+              <span class="muted">{{ facade.store.fitOutRoleHints[role] }}</span>
+            </div>
 
-          @switch (facade.store.connectMethod()) {
-            @case ('register') {
-              <div class="register-form">
-                <div class="field">
-                  <label class="label" for="c-protocol">Protocol</label>
-                  <select
-                    id="c-protocol"
-                    name="protocol"
-                    class="field-sm"
-                    [ngModel]="facade.store.protocolSelect()"
-                    (ngModelChange)="facade.store.protocolSelect.set($event)"
-                    required
-                  >
-                    <option value="" disabled>Choose a protocol…</option>
-                    @for (option of facade.store.registerableProtocols; track option.value) {
-                      <option [value]="option.value">{{ option.value }} — {{ option.hint }}</option>
-                    }
-                    <option [value]="facade.store.customProtocolOption">Custom… — a protocol not listed above</option>
-                  </select>
-                </div>
-
-                @if (facade.store.isCustomProtocol()) {
-                  <div class="field">
-                    <label class="label" for="c-protocol-custom">Custom protocol</label>
-                    <input
-                      id="c-protocol-custom"
-                      name="customProtocol"
-                      class="field-sm"
-                      [ngModel]="facade.store.customProtocol()"
-                      (ngModelChange)="facade.store.customProtocol.set($event)"
-                      placeholder="e.g. onvif"
-                      required
-                    />
-                  </div>
+            @if (facade.store.rows()[role].value === 'none') {
+              <div class="method-grid">
+                @for (method of facade.fitOutFindMethods[role]; track method) {
+                  <button type="button" class="method-tile" (click)="facade.store.chooseRowFind(role, method)">
+                    <span class="method-glyph" [class]="'glyph-' + method" aria-hidden="true"></span>
+                    <span class="method-title">{{ facade.findMethodLabels[method] }}</span>
+                    <span class="method-sub">{{ facade.findMethodHints[method] }}</span>
+                  </button>
                 }
-
-                <div class="field wide">
-                  <label class="label" for="c-uri">Stream address</label>
-                  <input
-                    id="c-uri"
-                    name="uri"
-                    class="field-lg"
-                    [ngModel]="facade.store.uri()"
-                    (ngModelChange)="facade.store.uri.set($event)"
-                    [placeholder]="facade.store.uriPlaceholder()"
-                    required
-                  />
-                </div>
+                <button type="button" class="method-tile" (click)="facade.store.setRowValue(role, 'simulate')">
+                  <span class="method-glyph glyph-simulate" aria-hidden="true"></span>
+                  <span class="method-title">Use a test source</span>
+                  <span class="method-sub">No hardware needed — a video file or a moving test drone.</span>
+                </button>
               </div>
-
-              @if (facade.settings.advancedMode()) {
-                <div class="advanced">
-                  <div class="spread">
-                    <h3>Stream options</h3>
-                    <button type="button" class="btn secondary small" (click)="facade.store.addOptionRow()">
-                      Add option
-                    </button>
-                  </div>
-                  <p class="muted hint">
-                    Passed straight through to the adapter as <code>StreamDescriptor.options</code> —
-                    e.g. <code>rtsp_transport = tcp</code>.
-                  </p>
-                  @if (facade.store.protocol() === 'srt') {
-                    <p class="muted hint">
-                      SRT: <code>mode</code> = <code>listener</code> (accept the drone/encoder
-                      dialing in — the common case) or <code>caller</code> (this app dials out to
-                      an encoder instead); <code>latency</code> in ms tunes the loss-recovery
-                      buffer (defaults to ~120). <code>streamid</code>/<code>passphrase</code> are
-                      also available.
-                    </p>
-                  } @else if (facade.store.protocol() === 'udp') {
-                    <p class="muted hint">
-                      UDP: leave the URI's host as <code>0.0.0.0</code> to accept from any sender,
-                      or give a specific host to accept only from that source. MPEG-TS framing is
-                      assumed; <code>fifo_size</code>/<code>overrun_nonfatal</code>/<code>buffer_size</code>
-                      are available for a lossy link.
-                    </p>
-                  }
-                  @for (row of facade.store.options(); track $index) {
-                    <div class="option-row">
-                      <input
-                        [value]="row.key"
-                        (input)="facade.store.updateOptionKey($index, $any($event.target).value)"
-                        placeholder="key"
-                        [attr.aria-label]="'Option ' + ($index + 1) + ' key'"
-                      />
-                      <input
-                        [value]="row.value"
-                        (input)="facade.store.updateOptionValue($index, $any($event.target).value)"
-                        placeholder="value"
-                        [attr.aria-label]="'Option ' + ($index + 1) + ' value'"
-                      />
-                      <button
-                        type="button"
-                        class="btn secondary small"
-                        (click)="facade.store.removeOptionRow($index)"
-                        aria-label="Remove option"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  }
-                </div>
+            } @else if (facade.store.rows()[role].value === 'simulate') {
+              <div class="row method-chosen-row">
+                <button
+                  type="button"
+                  class="btn secondary small back-btn"
+                  (click)="facade.store.setRowValue(role, 'none')"
+                  aria-label="Back"
+                >
+                  ‹
+                </button>
+                <span class="muted">Test source</span>
+              </div>
+              @if (role === 'sight' && facade.showLegacySimulateConfig()) {
+                <p class="muted hint">Uses the test setup below — mode, video file/flight plan.</p>
               } @else {
                 <p class="muted hint">
-                  Advanced stream options are hidden. Turn on advanced mode in
-                  <a href="/settings">Settings</a> to edit them.
+                  A plain simulated {{ role === 'sense' ? 'telemetry' : 'video' }} source — no
+                  further setup needed.
                 </p>
               }
-            }
-
-            @case ('discover') {
-              <div class="row scan-row">
-                <label class="row scan-timeout">
-                  <span class="muted">Timeout</span>
-                  <select
-                    [ngModel]="facade.store.scanTimeout()"
-                    (ngModelChange)="facade.store.scanTimeout.set($event)"
-                    name="scanTimeout"
-                    [disabled]="facade.store.scanning()"
-                  >
-                    @for (timeout of facade.store.scanTimeouts; track timeout) {
-                      <option [value]="timeout">{{ timeout / 1000 }}s</option>
-                    }
-                  </select>
-                </label>
-                <button type="button" class="btn" (click)="facade.store.scan()" [disabled]="facade.store.scanning()">
-                  {{ facade.store.scanning() ? 'Scanning…' : 'Scan' }}
+            } @else {
+              <div class="row method-chosen-row">
+                <button
+                  type="button"
+                  class="btn secondary small back-btn"
+                  (click)="facade.onRowBack(role)"
+                  aria-label="Back"
+                >
+                  ‹
                 </button>
+                <span class="muted">{{ facade.findMethodLabels[facade.store.rows()[role].findMethod!] }}</span>
               </div>
 
-              <p class="muted hint">
-                Passive, standards-based discovery only: ONVIF WS-Discovery, mDNS, and local V4L2
-                enumeration. Nothing is port-scanned.
-              </p>
-
-              @if (facade.store.scanResult(); as result) {
-                @if (result.failedMethods.length > 0) {
-                  <vision-notice variant="danger">
-                    Failed: {{ result.failedMethods.join(', ') }} — these found nothing because they
-                    errored, not because the network is empty.
-                  </vision-notice>
-                }
-
-                @if (result.devices.length === 0) {
-                  <div class="empty"><p>Nothing responded.</p></div>
-                } @else {
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Method</th>
-                        <th>Name</th>
-                        <th>Address</th>
-                        <th>Suggested category</th>
-                        <th>Details</th>
-                        <th aria-label="Actions"></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      @for (candidate of result.devices; track candidate.method + candidate.address) {
-                        <tr>
-                          <td class="muted">{{ candidate.method }}</td>
-                          <td>{{ candidate.name }}</td>
-                          <td class="mono muted truncate" [title]="candidate.address">
-                            {{ candidate.address }}
-                          </td>
-                          <td>
-                            @if (candidate.suggestedCategory) {
-                              {{ candidate.suggestedCategory }}
-                            } @else {
-                              <span class="faint">unknown</span>
-                            }
-                          </td>
-                          <!-- docs/plans/done/VISUAL-REFRESH-PLAN.md F5 rule 4 — at most one chip per row; this
-                               row already has none, so an unbounded per-key chip dump collapses to
-                               one muted, comma-joined cell (see `drone-scan-logic.ts#detailsSummary`,
-                               same idiom `features/devices/devices.html`'s Capabilities column uses). -->
-                          <td class="details muted truncate" [title]="facade.detailsSummary(candidate.details)">
-                            {{ facade.detailsSummary(candidate.details) || '—' }}
-                          </td>
-                          <td class="actions">
-                            <button type="button" class="btn secondary small" (click)="facade.store.useCandidate(candidate)">
-                              Use
-                            </button>
-                          </td>
-                        </tr>
-                      }
-                    </tbody>
-                  </table>
-                }
-              } @else {
-                <div class="empty"><p class="faint">No scan run yet.</p></div>
-              }
-            }
-
-            <!-- ---- "Listen for drones" (docs/plans/active/DRONE-INFRA-PLAN.md I-b) — a MAVLink-heartbeat-only
-                 scan, distinct from the general "Discover on network" method above. No timeout
-                 picker: the scanner self-time-boxes (~5-10s). -->
-            @case ('listen') {
-              <div class="row scan-row">
-                <button type="button" class="btn" (click)="facade.store.scanForDrones()" [disabled]="facade.store.droneScanning()">
-                  {{ facade.store.droneScanning() ? 'Listening…' : facade.store.droneScanResult() ? 'Scan again' : 'Scan' }}
-                </button>
-              </div>
-
-              <p class="muted hint">
-                Listens for MAVLink heartbeats on UDP 14550 (~5-10 seconds, then stops on its own —
-                leaving this page cancels it). Every distinct vehicle heard is listed below, whether
-                or not it's already registered.
-              </p>
-
-              @if (facade.store.droneScanning()) {
-                <div class="empty"><p class="faint">Listening for heartbeats…</p></div>
-              } @else if (facade.store.droneScanResult(); as result) {
-                @if (result.failedMethods.length > 0) {
-                  <vision-notice variant="danger">
-                    The MAVLink scanner failed — check that nothing else is bound to its port.
-                  </vision-notice>
-                }
-
-                @if (result.devices.length === 0) {
-                  <div class="empty">
-                    <p>No drones heard on UDP 14550 — check the link recipes in infra/edge/.</p>
-                    <button type="button" class="btn secondary small" (click)="facade.store.scanForDrones()">
-                      Scan again
-                    </button>
-                  </div>
-                } @else {
-                  <ul class="vehicle-list">
-                    @for (vehicle of result.devices; track vehicle.address + vehicle.name) {
-                      <li class="vehicle-row" [class.claimed]="facade.droneVehicleClaimed(vehicle)">
-                        <div class="vehicle-main">
-                          <span class="vehicle-name">{{ vehicle.name }}</span>
-                          <div class="vehicle-chips">
-                            @for (chip of facade.droneVehicleChips(vehicle); track chip.key) {
-                              <span class="chip" [title]="chip.value">{{ chip.label }}: {{ chip.value }}</span>
-                            }
-                          </div>
-                        </div>
-                        @if (facade.droneVehicleClaimed(vehicle)) {
-                          <div class="vehicle-actions">
-                            <button type="button" class="btn secondary small" disabled>Use</button>
-                            <p class="disabled-reason">Already registered</p>
-                          </div>
-                        } @else {
-                          <button type="button" class="btn secondary small" (click)="facade.store.useDroneVehicle(vehicle)">
-                            Use
-                          </button>
-                        }
-                      </li>
-                    }
-                  </ul>
-                }
-              } @else {
-                <div class="empty"><p class="faint">No scan run yet.</p></div>
-              }
-            }
-
-            <!-- ---- "Add a real drone" (docs/plans/active/DRONE-INFRA-PLAN.md I-g) — a guided firmware×link picker
-                 then parameterized copy-paste config, both sub-states of this one method (not a
-                 WizardStep of their own — see onboarding-logic.ts's ConnectMethod doc comment).
-                 Finishing the config hands off straight to the "listen" case above, verbatim. -->
-            @case ('drone') {
-              @switch (facade.store.droneSubStep()) {
-                @case ('picker') {
-                  <p class="muted hint">
-                    Pick the firmware and the link carrying its MAVLink telemetry — every combination
-                    maps to one recipe from <code>infra/edge/</code>, labeled honestly when it's
-                    degraded or not supported.
-                  </p>
-
-                  <div class="field">
-                    <span class="label">Firmware</span>
-                    <div class="segmented" role="group" aria-label="Firmware">
-                      @for (firmware of facade.firmwareOptions; track firmware) {
-                        <button
-                          type="button"
-                          class="btn secondary small"
-                          [class.active]="facade.store.droneFirmware() === firmware"
-                          (click)="facade.store.chooseDroneFirmware(firmware)"
-                        >
-                          {{ facade.firmwareLabels[firmware] }}
-                        </button>
-                      }
-                    </div>
-                  </div>
-
-                  <div class="field">
-                    <span class="label">Link</span>
-                    <div class="segmented" role="group" aria-label="Link">
-                      @for (link of facade.linkOptions; track link) {
-                        <button
-                          type="button"
-                          class="btn secondary small"
-                          [class.active]="facade.store.droneLink() === link"
-                          (click)="facade.store.chooseDroneLink(link)"
-                        >
-                          {{ facade.linkLabels[link] }}
-                        </button>
-                      }
-                    </div>
-                    @if (facade.store.droneLink(); as link) {
-                      <p class="muted hint">{{ facade.linkHints[link] }}</p>
-                    }
-                  </div>
-
-                  @if (facade.store.droneCompatibility(); as compat) {
-                    <div class="drone-compat">
-                      <span
-                        class="chip"
-                        [class.ok]="compat.level === 'full'"
-                        [class.warn]="compat.level === 'monitor-only'"
-                        [class.danger]="compat.level === 'no-go'"
+              @switch (facade.store.rows()[role].findMethod) {
+                @case ('register') {
+                  <div class="register-form">
+                    <div class="field">
+                      <label class="label" [attr.for]="'connect-protocol-' + role">Protocol</label>
+                      <select
+                        [id]="'connect-protocol-' + role"
+                        name="protocol"
+                        class="field-sm"
+                        [ngModel]="facade.store.rows()[role].protocolSelect"
+                        (ngModelChange)="facade.store.setRowProtocolSelect(role, $event)"
+                        required
                       >
-                        @switch (compat.level) {
-                          @case ('full') { Full support }
-                          @case ('monitor-only') { Monitor-only }
-                          @case ('no-go') { Not supported }
+                        <option value="" disabled>Choose a protocol…</option>
+                        @for (option of facade.store.registerableProtocols; track option.value) {
+                          <option [value]="option.value">{{ option.value }} — {{ option.hint }}</option>
                         }
-                      </span>
-                      <p class="muted hint">{{ compat.note }}</p>
+                        <option [value]="facade.store.customProtocolOption">Custom… — a protocol not listed above</option>
+                      </select>
                     </div>
 
-                    <div class="row">
-                      <button
-                        type="button"
-                        class="btn"
-                        [disabled]="compat.level === 'no-go'"
-                        (click)="facade.store.continueToDroneConfig()"
-                      >
-                        Continue to configuration
-                      </button>
+                    @if (facade.store.rowIsCustomProtocol(role)) {
+                      <div class="field">
+                        <label class="label" [attr.for]="'connect-protocol-custom-' + role">Custom protocol</label>
+                        <input
+                          [id]="'connect-protocol-custom-' + role"
+                          name="customProtocol"
+                          class="field-sm"
+                          [ngModel]="facade.store.rows()[role].customProtocol"
+                          (ngModelChange)="facade.store.setRowCustomProtocol(role, $event)"
+                          placeholder="e.g. onvif"
+                          required
+                        />
+                      </div>
+                    }
+
+                    <div class="field wide">
+                      <label class="label" [attr.for]="'connect-uri-' + role">Stream address</label>
+                      <input
+                        [id]="'connect-uri-' + role"
+                        name="uri"
+                        class="field-lg"
+                        [ngModel]="facade.store.rows()[role].uri"
+                        (ngModelChange)="facade.store.setRowUri(role, $event)"
+                        [placeholder]="facade.store.rowUriPlaceholder(role)"
+                        required
+                      />
                     </div>
-                    @if (compat.level === 'no-go') {
-                      <p class="disabled-reason">
-                        This combination can't carry MAVLink telemetry today — pick a different
-                        firmware or link.
+                  </div>
+
+                  @if (facade.settings.advancedMode()) {
+                    <div class="advanced">
+                      <div class="spread">
+                        <h3>Stream options</h3>
+                        <button type="button" class="btn secondary small" (click)="facade.store.addRowOption(role)">
+                          Add option
+                        </button>
+                      </div>
+                      <p class="muted hint">
+                        Passed straight through to the adapter as <code>StreamDescriptor.options</code> —
+                        e.g. <code>rtsp_transport = tcp</code>.
                       </p>
-                    }
+                      @if (facade.store.rowProtocol(role) === 'srt') {
+                        <p class="muted hint">
+                          SRT: <code>mode</code> = <code>listener</code> (accept the drone/encoder
+                          dialing in — the common case) or <code>caller</code> (this app dials out to
+                          an encoder instead); <code>latency</code> in ms tunes the loss-recovery
+                          buffer (defaults to ~120). <code>streamid</code>/<code>passphrase</code> are
+                          also available.
+                        </p>
+                      } @else if (facade.store.rowProtocol(role) === 'udp') {
+                        <p class="muted hint">
+                          UDP: leave the URI's host as <code>0.0.0.0</code> to accept from any sender,
+                          or give a specific host to accept only from that source. MPEG-TS framing is
+                          assumed; <code>fifo_size</code>/<code>overrun_nonfatal</code>/<code>buffer_size</code>
+                          are available for a lossy link.
+                        </p>
+                      }
+                      @for (opt of facade.store.rows()[role].options; track $index) {
+                        <div class="option-row">
+                          <input
+                            [value]="opt.key"
+                            (input)="facade.store.updateRowOptionKey(role, $index, $any($event.target).value)"
+                            placeholder="key"
+                            [attr.aria-label]="'Option ' + ($index + 1) + ' key'"
+                          />
+                          <input
+                            [value]="opt.value"
+                            (input)="facade.store.updateRowOptionValue(role, $index, $any($event.target).value)"
+                            placeholder="value"
+                            [attr.aria-label]="'Option ' + ($index + 1) + ' value'"
+                          />
+                          <button
+                            type="button"
+                            class="btn secondary small"
+                            (click)="facade.store.removeRowOption(role, $index)"
+                            aria-label="Remove option"
+                          >
+                            ×
+                          </button>
+                        </div>
+                      }
+                    </div>
                   } @else {
-                    <p class="disabled-reason">Choose both a firmware and a link to see compatibility.</p>
+                    <p class="muted hint">
+                      Advanced stream options are hidden. Turn on advanced mode in
+                      <a href="/settings">Settings</a> to edit them.
+                    </p>
                   }
                 }
 
-                @case ('config') {
-                  <p class="muted hint">
-                    Copy these onto the aircraft/link — this platform's own reachable address and
-                    MAVLink port are already filled in below.
-                  </p>
-
-                  <div class="field">
-                    <label class="label" for="drone-address">This platform's address</label>
-                    @if (facade.store.networkAddresses().length > 0) {
+                @case ('discover') {
+                  <div class="row scan-row">
+                    <label class="row scan-timeout">
+                      <span class="muted">Timeout</span>
                       <select
-                        id="drone-address"
-                        name="droneAddress"
-                        [ngModel]="facade.store.selectedServerAddress()"
-                        (ngModelChange)="facade.store.setSelectedServerAddress($event)"
+                        [ngModel]="facade.store.scanTimeout()"
+                        (ngModelChange)="facade.store.scanTimeout.set($event)"
+                        name="scanTimeout"
+                        [disabled]="facade.store.scanning()"
                       >
-                        @for (addr of facade.store.networkAddresses(); track addr.address) {
-                          <option [value]="addr.address">{{ addr.address }} ({{ addr.interfaceName }})</option>
+                        @for (timeout of facade.store.scanTimeouts; track timeout) {
+                          <option [value]="timeout">{{ timeout / 1000 }}s</option>
                         }
                       </select>
-                    } @else {
-                      <input
-                        id="drone-address"
-                        name="droneAddress"
-                        [ngModel]="facade.store.selectedServerAddress()"
-                        (ngModelChange)="facade.store.setSelectedServerAddress($event)"
-                        placeholder="Couldn't detect an address — enter this host's LAN IP"
-                      />
-                    }
-                    <p class="muted hint">
-                      MAVLink port <span class="mono">{{ facade.store.mavlinkPort() }}</span>
-                      @if (facade.store.networkAddresses().length > 1) {
-                        — multiple network interfaces detected, switch above if this isn't the right one.
-                      }
-                    </p>
+                    </label>
+                    <button type="button" class="btn" (click)="facade.store.scan()" [disabled]="facade.store.scanning()">
+                      {{ facade.store.scanning() ? 'Scanning…' : 'Scan' }}
+                    </button>
                   </div>
 
-                  @for (block of facade.store.droneConfigBlocks(); track block.title) {
-                    <div class="config-block">
-                      <div class="spread">
-                        <h3>{{ block.title }}</h3>
-                        <div class="row">
-                          <button type="button" class="btn secondary small" (click)="facade.copyBlock(block)">Copy</button>
-                          @if (block.filename) {
-                            <button type="button" class="btn secondary small" (click)="facade.downloadBlock(block)">
-                              Download {{ block.filename }}
+                  <p class="muted hint">
+                    Passive, standards-based discovery only: ONVIF WS-Discovery, mDNS, and local V4L2
+                    enumeration. Nothing is port-scanned.
+                  </p>
+
+                  @if (facade.store.scanResult(); as result) {
+                    @if (result.failedMethods.length > 0) {
+                      <vision-notice variant="danger">
+                        Failed: {{ result.failedMethods.join(', ') }} — these found nothing because
+                        they errored, not because the network is empty.
+                      </vision-notice>
+                    }
+
+                    @if (result.devices.length === 0) {
+                      <div class="empty"><p>Nothing responded.</p></div>
+                    } @else {
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Method</th>
+                            <th>Name</th>
+                            <th>Address</th>
+                            <th>Suggested category</th>
+                            <th>Details</th>
+                            <th aria-label="Actions"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @for (candidate of result.devices; track candidate.method + candidate.address) {
+                            <tr>
+                              <td class="muted">{{ candidate.method }}</td>
+                              <td>{{ candidate.name }}</td>
+                              <td class="mono muted truncate" [title]="candidate.address">
+                                {{ candidate.address }}
+                              </td>
+                              <td>
+                                @if (candidate.suggestedCategory) {
+                                  {{ candidate.suggestedCategory }}
+                                } @else {
+                                  <span class="faint">unknown</span>
+                                }
+                              </td>
+                              <td class="details muted truncate" [title]="facade.detailsSummary(candidate.details)">
+                                {{ facade.detailsSummary(candidate.details) || '—' }}
+                              </td>
+                              <td class="actions">
+                                <button type="button" class="btn secondary small" (click)="facade.store.useCandidate(candidate)">
+                                  Use
+                                </button>
+                              </td>
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    }
+                  } @else {
+                    <div class="empty"><p class="faint">No scan run yet.</p></div>
+                  }
+                }
+
+                <!-- "Listen for drones" (docs/plans/active/DRONE-INFRA-PLAN.md I-b) — only ever
+                     rendered on the Sense row (FIT_OUT_FIND_METHODS). -->
+                @case ('listen') {
+                  <div class="row scan-row">
+                    <button
+                      type="button"
+                      class="btn"
+                      (click)="facade.store.scanForDrones()"
+                      [disabled]="facade.store.droneScanning()"
+                    >
+                      {{ facade.store.droneScanning() ? 'Listening…' : facade.store.droneScanResult() ? 'Scan again' : 'Scan' }}
+                    </button>
+                  </div>
+
+                  <p class="muted hint">
+                    Listens for MAVLink heartbeats on UDP 14550 (~5-10 seconds, then stops on its own —
+                    leaving this page cancels it). Every distinct vehicle heard is listed below, whether
+                    or not it's already registered.
+                  </p>
+
+                  @if (facade.store.droneScanning()) {
+                    <div class="empty"><p class="faint">Listening for heartbeats…</p></div>
+                  } @else if (facade.store.droneScanResult(); as result) {
+                    @if (result.failedMethods.length > 0) {
+                      <vision-notice variant="danger">
+                        The MAVLink scanner failed — check that nothing else is bound to its port.
+                      </vision-notice>
+                    }
+
+                    @if (result.devices.length === 0) {
+                      <div class="empty">
+                        <p>No drones heard on UDP 14550 — check the link recipes in infra/edge/.</p>
+                        <button type="button" class="btn secondary small" (click)="facade.store.scanForDrones()">
+                          Scan again
+                        </button>
+                      </div>
+                    } @else {
+                      <ul class="vehicle-list">
+                        @for (vehicle of result.devices; track vehicle.address + vehicle.name) {
+                          <li class="vehicle-row" [class.claimed]="facade.droneVehicleClaimed(vehicle)">
+                            <div class="vehicle-main">
+                              <span class="vehicle-name">{{ vehicle.name }}</span>
+                              <div class="vehicle-chips">
+                                @for (chip of facade.droneVehicleChips(vehicle); track chip.key) {
+                                  <span class="chip" [title]="chip.value">{{ chip.label }}: {{ chip.value }}</span>
+                                }
+                              </div>
+                            </div>
+                            @if (facade.droneVehicleClaimed(vehicle)) {
+                              <div class="vehicle-actions">
+                                <button type="button" class="btn secondary small" disabled>Use</button>
+                                <p class="disabled-reason">Already registered</p>
+                              </div>
+                            } @else {
+                              <button type="button" class="btn secondary small" (click)="facade.store.useDroneVehicle(vehicle)">
+                                Use
+                              </button>
+                            }
+                          </li>
+                        }
+                      </ul>
+                    }
+                  } @else {
+                    <div class="empty"><p class="faint">No scan run yet.</p></div>
+                  }
+                }
+
+                <!-- "Add a real drone" (docs/plans/active/DRONE-INFRA-PLAN.md I-g) — only ever
+                     rendered on the Sense row. Finishing the config hands off straight to the
+                     "listen" case above, verbatim. -->
+                @case ('drone') {
+                  @switch (facade.store.droneSubStep()) {
+                    @case ('picker') {
+                      <p class="muted hint">
+                        Pick the firmware and the link carrying its MAVLink telemetry — every combination
+                        maps to one recipe from <code>infra/edge/</code>, labeled honestly when it's
+                        degraded or not supported.
+                      </p>
+
+                      <div class="field">
+                        <span class="label">Firmware</span>
+                        <div class="segmented" role="group" aria-label="Firmware">
+                          @for (firmware of facade.firmwareOptions; track firmware) {
+                            <button
+                              type="button"
+                              class="btn secondary small"
+                              [class.active]="facade.store.droneFirmware() === firmware"
+                              (click)="facade.store.chooseDroneFirmware(firmware)"
+                            >
+                              {{ facade.firmwareLabels[firmware] }}
                             </button>
                           }
                         </div>
                       </div>
-                      <pre class="config-body mono">{{ block.body }}</pre>
-                    </div>
-                  }
 
-                  <div class="row">
-                    <button type="button" class="btn" (click)="facade.store.finishDroneConfigAndListen()">
-                      Continue — listen for it
+                      <div class="field">
+                        <span class="label">Link</span>
+                        <div class="segmented" role="group" aria-label="Link">
+                          @for (link of facade.linkOptions; track link) {
+                            <button
+                              type="button"
+                              class="btn secondary small"
+                              [class.active]="facade.store.droneLink() === link"
+                              (click)="facade.store.chooseDroneLink(link)"
+                            >
+                              {{ facade.linkLabels[link] }}
+                            </button>
+                          }
+                        </div>
+                        @if (facade.store.droneLink(); as link) {
+                          <p class="muted hint">{{ facade.linkHints[link] }}</p>
+                        }
+                      </div>
+
+                      @if (facade.store.droneCompatibility(); as compat) {
+                        <div class="drone-compat">
+                          <span
+                            class="chip"
+                            [class.ok]="compat.level === 'full'"
+                            [class.warn]="compat.level === 'monitor-only'"
+                            [class.danger]="compat.level === 'no-go'"
+                          >
+                            @switch (compat.level) {
+                              @case ('full') { Full support }
+                              @case ('monitor-only') { Monitor-only }
+                              @case ('no-go') { Not supported }
+                            }
+                          </span>
+                          <p class="muted hint">{{ compat.note }}</p>
+                        </div>
+
+                        <div class="row">
+                          <button
+                            type="button"
+                            class="btn"
+                            [disabled]="compat.level === 'no-go'"
+                            (click)="facade.store.continueToDroneConfig()"
+                          >
+                            Continue to configuration
+                          </button>
+                        </div>
+                        @if (compat.level === 'no-go') {
+                          <p class="disabled-reason">
+                            This combination can't carry MAVLink telemetry today — pick a different
+                            firmware or link.
+                          </p>
+                        }
+                      } @else {
+                        <p class="disabled-reason">Choose both a firmware and a link to see compatibility.</p>
+                      }
+                    }
+
+                    @case ('config') {
+                      <p class="muted hint">
+                        Copy these onto the aircraft/link — this platform's own reachable address and
+                        MAVLink port are already filled in below.
+                      </p>
+
+                      <div class="field">
+                        <label class="label" for="drone-address">This platform's address</label>
+                        @if (facade.store.networkAddresses().length > 0) {
+                          <select
+                            id="drone-address"
+                            name="droneAddress"
+                            [ngModel]="facade.store.selectedServerAddress()"
+                            (ngModelChange)="facade.store.setSelectedServerAddress($event)"
+                          >
+                            @for (addr of facade.store.networkAddresses(); track addr.address) {
+                              <option [value]="addr.address">{{ addr.address }} ({{ addr.interfaceName }})</option>
+                            }
+                          </select>
+                        } @else {
+                          <input
+                            id="drone-address"
+                            name="droneAddress"
+                            [ngModel]="facade.store.selectedServerAddress()"
+                            (ngModelChange)="facade.store.setSelectedServerAddress($event)"
+                            placeholder="Couldn't detect an address — enter this host's LAN IP"
+                          />
+                        }
+                        <p class="muted hint">
+                          MAVLink port <span class="mono">{{ facade.store.mavlinkPort() }}</span>
+                          @if (facade.store.networkAddresses().length > 1) {
+                            — multiple network interfaces detected, switch above if this isn't the right one.
+                          }
+                        </p>
+                      </div>
+
+                      @for (block of facade.store.droneConfigBlocks(); track block.title) {
+                        <div class="config-block">
+                          <div class="spread">
+                            <h3>{{ block.title }}</h3>
+                            <div class="row">
+                              <button type="button" class="btn secondary small" (click)="facade.copyBlock(block)">Copy</button>
+                              @if (block.filename) {
+                                <button type="button" class="btn secondary small" (click)="facade.downloadBlock(block)">
+                                  Download {{ block.filename }}
+                                </button>
+                              }
+                            </div>
+                          </div>
+                          <pre class="config-body mono">{{ block.body }}</pre>
+                        </div>
+                      }
+
+                      <div class="row">
+                        <button type="button" class="btn" (click)="facade.store.finishDroneConfigAndListen()">
+                          Continue — listen for it
+                        </button>
+                      </div>
+                    }
+                  }
+                }
+              }
+            }
+          </div>
+        }
+
+        <!-- The legacy whole-vehicle Simulate sub-form (docs/plans/active/SOURCE-ONBOARDING-CONTEXT.md §7/§9)
+             — only when Sight is `simulate` and Sense isn't a real link
+             (`fit-out-logic.ts#usesLegacySimulationPath`); its rich mode picker isn't expressible
+             per row, so it renders once here, below both role cards. -->
+        @if (facade.showLegacySimulateConfig()) {
+          <div class="role-card">
+            <div class="role-card-head">
+              <span class="role-label">Test source setup</span>
+            </div>
+
+            <div class="field wide">
+              <label class="label" for="sim-mode">Mode</label>
+              <select
+                id="sim-mode"
+                name="simMode"
+                [ngModel]="facade.store.simMode()"
+                (ngModelChange)="facade.store.simMode.set($event)"
+              >
+                <option value="direct">Play a file directly</option>
+                <option value="rtsp">Transmit a file over RTSP</option>
+                <option value="testDrone">Test drone (moving, no file)</option>
+                <option value="synthetic">Synthetic pattern (still, no telemetry)</option>
+              </select>
+            </div>
+
+            @if (facade.store.simNeedsVideoPath()) {
+              <div class="field wide">
+                <label class="label" for="sim-video-path">Server-side video path</label>
+                <input
+                  id="sim-video-path"
+                  name="simVideoPath"
+                  class="field-lg"
+                  [ngModel]="facade.store.simVideoPath()"
+                  (ngModelChange)="facade.store.simVideoPath.set($event)"
+                  placeholder="/srv/videos/flight.mp4"
+                  required
+                />
+              </div>
+            }
+
+            @if (facade.store.simNeedsHomePoint()) {
+              <div class="field wide flight-plan-field">
+                <span class="label">Flight plan</span>
+                @if (facade.store.flightPlanSummary(); as summary) {
+                  <div class="row flight-plan-summary">
+                    <span class="chip accent">{{ summary }}</span>
+                    <button type="button" class="btn secondary small" (click)="facade.store.openFlightPlanDialog()">
+                      Edit
+                    </button>
+                    <button type="button" class="btn secondary small" (click)="facade.store.clearFlightPlan()">
+                      Clear
                     </button>
                   </div>
+                } @else {
+                  <div class="row flight-plan-summary">
+                    <button type="button" class="btn secondary small" (click)="facade.store.openFlightPlanDialog()">
+                      Draw flight plan on map
+                    </button>
+                    <span class="muted hint">No plan drawn — flies a circle around the home point below.</span>
+                  </div>
                 }
-              }
-            }
-
-            @case ('simulate') {
-              <div class="field wide">
-                <label class="label" for="sim-mode">Mode</label>
-                <select
-                  id="sim-mode"
-                  name="simMode"
-                  [ngModel]="facade.store.simMode()"
-                  (ngModelChange)="facade.store.simMode.set($event)"
-                >
-                  <option value="direct">Play a file directly</option>
-                  <option value="rtsp">Transmit a file over RTSP</option>
-                  <option value="testDrone">Test drone (moving, no file)</option>
-                  <option value="synthetic">Synthetic pattern (still, no telemetry)</option>
-                </select>
               </div>
 
-              @if (facade.store.simNeedsVideoPath()) {
-                <div class="field wide">
-                  <label class="label" for="sim-video-path">Server-side video path</label>
-                  <input
-                    id="sim-video-path"
-                    name="simVideoPath"
-                    class="field-lg"
-                    [ngModel]="facade.store.simVideoPath()"
-                    (ngModelChange)="facade.store.simVideoPath.set($event)"
-                    placeholder="/srv/videos/flight.mp4"
-                    required
-                  />
+              <details class="field wide home-point-fallback">
+                <summary>Home point (used only without a flight plan)</summary>
+                <div class="row">
+                  <div class="field">
+                    <label class="label" for="sim-lat">Home latitude</label>
+                    <input
+                      id="sim-lat"
+                      name="simLatitude"
+                      type="number"
+                      step="any"
+                      [ngModel]="facade.store.simLatitude()"
+                      (ngModelChange)="facade.store.simLatitude.set($event)"
+                      placeholder="optional"
+                    />
+                  </div>
+
+                  <div class="field">
+                    <label class="label" for="sim-lon">Home longitude</label>
+                    <input
+                      id="sim-lon"
+                      name="simLongitude"
+                      type="number"
+                      step="any"
+                      [ngModel]="facade.store.simLongitude()"
+                      (ngModelChange)="facade.store.simLongitude.set($event)"
+                      placeholder="optional"
+                    />
+                  </div>
                 </div>
+              </details>
+
+              <label class="field checkbox-field">
+                <input
+                  type="checkbox"
+                  name="simAutoStart"
+                  [ngModel]="facade.store.simAutoStart()"
+                  (ngModelChange)="facade.store.simAutoStart.set($event)"
+                />
+                <span>Start streaming immediately</span>
+              </label>
+            }
+
+            <p class="muted hint">
+              {{ facade.store.simModeHint() }}
+              @if (facade.store.simNeedsVideoPath()) {
+                The path must exist on the machine running the platform, not your browser.
+              }
+            </p>
+          </div>
+        }
+
+        @if (!facade.store.canAdvanceConnect()) {
+          <p class="disabled-reason">Fill in at least one row — Sense or Sight — to continue.</p>
+        }
+      }
+
+      <!-- ---- Step 3: Prove — Test + Verify per filled row (WAREHOUSE-UX-PLAN.md §3.4 wave W6,
+           UX-DESIGN §5.1 "test-before-save"; DRONE-ONBOARDING-PLAN.md §3.1 stage 3/O6) --------- -->
+      @case ('prove') {
+        <h2>Prove</h2>
+        <p class="muted hint">Before this becomes an asset, make sure what you connected is actually there.</p>
+
+        @for (role of facade.fitOutRoles; track role) {
+          @if (facade.store.rows()[role].value === 'find') {
+            <div class="role-card">
+              <div class="role-card-head">
+                <span class="role-label">{{ facade.store.fitOutRoleLabels[role] }}</span>
+                <span class="muted">{{ facade.store.fitOutRoleHints[role] }}</span>
+              </div>
+
+              @if (facade.store.telemetryOnlyLink(role)) {
+                <p class="muted hint">Make sure this platform can actually hear it.</p>
+              } @else {
+                <p class="muted hint">Make sure it actually produces a frame.</p>
               }
 
-              @if (facade.store.simNeedsHomePoint()) {
-                <div class="field wide flight-plan-field">
-                  <span class="label">Flight plan</span>
-                  @if (facade.store.flightPlanSummary(); as summary) {
-                    <div class="row flight-plan-summary">
-                      <span class="chip accent">{{ summary }}</span>
-                      <button type="button" class="btn secondary small" (click)="facade.store.openFlightPlanDialog()">
-                        Edit
-                      </button>
-                      <button type="button" class="btn secondary small" (click)="facade.store.clearFlightPlan()">
-                        Clear
-                      </button>
+              <div class="row">
+                <button
+                  type="button"
+                  class="btn"
+                  (click)="facade.store.testRow(role)"
+                  [disabled]="facade.store.proveByRole()[role].probing"
+                >
+                  {{
+                    facade.store.proveByRole()[role].probing
+                      ? 'Testing…'
+                      : (facade.store.proveByRole()[role].lastProbeResult || facade.store.proveByRole()[role].lastProbeError)
+                        ? 'Retry'
+                        : 'Run test'
+                  }}
+                </button>
+              </div>
+
+              @if (facade.store.proveByRole()[role].probing) {
+                <div class="empty"><p class="faint">Connecting…</p></div>
+              } @else if (facade.store.proveByRole()[role].lastProbeError; as error) {
+                <vision-notice variant="danger">{{ error }}</vision-notice>
+              } @else if (facade.store.proveByRole()[role].lastProbeResult; as result) {
+                <div class="test-result">
+                  @if (result.frameJpegBase64) {
+                    <img
+                      class="test-frame"
+                      [src]="'data:image/jpeg;base64,' + result.frameJpegBase64"
+                      alt="Decoded test frame from the connection"
+                    />
+                  }
+                  <dl class="facts">
+                    @if (result.widthPx !== undefined && result.heightPx !== undefined) {
+                      <div class="fact">
+                        <dt>Resolution</dt>
+                        <dd class="mono">{{ result.widthPx }}×{{ result.heightPx }}</dd>
+                      </div>
+                    } @else {
+                      <div class="fact">
+                        <dt>Video</dt>
+                        <dd>None — telemetry link</dd>
+                      </div>
+                    }
+                    @if (result.codec) {
+                      <div class="fact"><dt>Codec</dt><dd>{{ result.codec }}</dd></div>
+                    }
+                    @if (result.fps !== undefined) {
+                      <div class="fact"><dt>FPS</dt><dd class="mono">{{ result.fps }}</dd></div>
+                    }
+                    <div class="fact">
+                      <dt>Telemetry</dt>
+                      <dd>{{ result.telemetryDetected ? 'Detected' : 'Not detected' }}</dd>
                     </div>
-                  } @else {
-                    <div class="row flight-plan-summary">
-                      <button type="button" class="btn secondary small" (click)="facade.store.openFlightPlanDialog()">
-                        Draw flight plan on map
-                      </button>
-                      <span class="muted hint">No plan drawn — flies a circle around the home point below.</span>
-                    </div>
+                  </dl>
+                  @if (result.warnings && result.warnings.length > 0) {
+                    <ul class="warnings">
+                      @for (warning of result.warnings; track warning) {
+                        <li>{{ warning }}</li>
+                      }
+                    </ul>
                   }
                 </div>
-
-                <details class="field wide home-point-fallback">
-                  <summary>Home point (used only without a flight plan)</summary>
-                  <div class="row">
-                    <div class="field">
-                      <label class="label" for="sim-lat">Home latitude</label>
-                      <input
-                        id="sim-lat"
-                        name="simLatitude"
-                        type="number"
-                        step="any"
-                        [ngModel]="facade.store.simLatitude()"
-                        (ngModelChange)="facade.store.simLatitude.set($event)"
-                        placeholder="optional"
-                      />
-                    </div>
-
-                    <div class="field">
-                      <label class="label" for="sim-lon">Home longitude</label>
-                      <input
-                        id="sim-lon"
-                        name="simLongitude"
-                        type="number"
-                        step="any"
-                        [ngModel]="facade.store.simLongitude()"
-                        (ngModelChange)="facade.store.simLongitude.set($event)"
-                        placeholder="optional"
-                      />
-                    </div>
-                  </div>
-                </details>
-
-                <label class="field checkbox-field">
-                  <input
-                    type="checkbox"
-                    name="simAutoStart"
-                    [ngModel]="facade.store.simAutoStart()"
-                    (ngModelChange)="facade.store.simAutoStart.set($event)"
-                  />
-                  <span>Start streaming immediately</span>
-                </label>
-              }
-
-              <p class="muted hint">
-                {{ facade.store.simModeHint() }}
-                @if (facade.store.simNeedsVideoPath()) {
-                  The path must exist on the machine running the platform, not your browser.
-                }
-              </p>
-            }
-          }
-        }
-
-        @if (facade.store.connectMethod() && !facade.store.canAdvanceConnect()) {
-          <p class="disabled-reason">
-            @switch (facade.store.connectMethod()) {
-              @case ('discover') {
-                Pick "Use" on a discovered candidate, or switch to entering a stream address instead.
-              }
-              @case ('listen') {
-                Pick "Use" on a heard vehicle, or switch to entering a stream address instead.
-              }
-              @case ('drone') {
-                Finish the picker and configuration steps above, then listen for the vehicle.
-              }
-              @case ('register') {
-                Choose a protocol and enter the stream address.
-              }
-              @case ('simulate') {
-                Enter the server-side video path.
-              }
-            }
-          </p>
-        }
-      }
-
-      <!-- ---- Step 3: Test (UX-DESIGN §5.1 "test-before-save"; skipped for Simulate) -------- -->
-      @case ('test') {
-        <h2>Test</h2>
-        <!-- Wording is protocol-aware (docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md §2 B3): a
-             flight-controller link has no video and never will, so demanding a frame from one told
-             the operator to produce something that cannot exist. -->
-        @if (facade.store.telemetryOnlyLink()) {
-          <p class="muted hint">Before this becomes an asset, make sure this platform can actually hear it.</p>
-        } @else {
-          <p class="muted hint">Before this becomes an asset, make sure it actually produces a frame.</p>
-        }
-
-        <div class="row">
-          <button type="button" class="btn" (click)="facade.store.probe()" [disabled]="facade.store.probing()">
-            {{ facade.store.probing() ? 'Testing…' : facade.store.lastProbeResult() || facade.store.lastProbeError() ? 'Retry' : 'Run test' }}
-          </button>
-        </div>
-
-        @if (facade.store.probing()) {
-          <div class="empty"><p class="faint">Connecting…</p></div>
-        } @else if (facade.store.lastProbeError(); as error) {
-          <vision-notice variant="danger">{{ error }}</vision-notice>
-        } @else if (facade.store.lastProbeResult(); as result) {
-          <div class="test-result">
-            <!-- `frameJpegBase64` is absent, not empty, on a telemetry-only 200 — see
-                 `core/api/models.ts#ProbeDeviceResult`'s own "two legal 200 shapes". -->
-            @if (result.frameJpegBase64) {
-              <img
-                class="test-frame"
-                [src]="'data:image/jpeg;base64,' + result.frameJpegBase64"
-                alt="Decoded test frame from the connection"
-              />
-            }
-            <dl class="facts">
-              @if (result.widthPx !== undefined && result.heightPx !== undefined) {
-                <div class="fact">
-                  <dt>Resolution</dt>
-                  <dd class="mono">{{ result.widthPx }}×{{ result.heightPx }}</dd>
-                </div>
               } @else {
-                <div class="fact">
-                  <dt>Video</dt>
-                  <dd>None — telemetry link</dd>
-                </div>
+                <div class="empty"><p class="faint">Not tested yet.</p></div>
               }
-              @if (result.codec) {
-                <div class="fact"><dt>Codec</dt><dd>{{ result.codec }}</dd></div>
-              }
-              @if (result.fps !== undefined) {
-                <div class="fact"><dt>FPS</dt><dd class="mono">{{ result.fps }}</dd></div>
-              }
-              <div class="fact">
-                <dt>Telemetry</dt>
-                <dd>{{ result.telemetryDetected ? 'Detected' : 'Not detected' }}</dd>
-              </div>
-            </dl>
-            @if (result.warnings && result.warnings.length > 0) {
-              <ul class="warnings">
-                @for (warning of result.warnings; track warning) {
-                  <li>{{ warning }}</li>
-                }
-              </ul>
-            }
-          </div>
-        } @else {
-          <div class="empty"><p class="faint">Not tested yet.</p></div>
-        }
 
-        @if (!facade.store.canAdvanceTest()) {
-          @if (facade.store.telemetryOnlyLink()) {
-            <p class="disabled-reason">Run the test and hear the vehicle before continuing.</p>
-          } @else {
-            <p class="disabled-reason">Run the test and get a successful frame before continuing.</p>
+              <div class="prove-divider">
+                <p class="label">Verify</p>
+                <p class="muted hint">
+                  Optional — listens to the aircraft's own telemetry link and reports what it hears.
+                  You can continue either way.
+                </p>
+
+                <div class="row">
+                  <button
+                    type="button"
+                    class="btn"
+                    (click)="facade.store.verifyRow(role)"
+                    [disabled]="facade.store.proveByRole()[role].verifying"
+                  >
+                    {{
+                      facade.store.proveByRole()[role].verifying
+                        ? 'Listening…'
+                        : (facade.store.proveByRole()[role].lastVerifyResult
+                            || facade.store.proveByRole()[role].lastVerifyError
+                            || facade.store.proveByRole()[role].verifyDisabled)
+                          ? 'Retry'
+                          : 'Observe vehicle'
+                    }}
+                  </button>
+                </div>
+
+                @if (facade.store.proveByRole()[role].verifying) {
+                  <div class="empty"><p class="faint">Listening to the link…</p></div>
+                } @else if (facade.store.proveByRole()[role].verifyDisabled) {
+                  <vision-notice icon="help">
+                    Vehicle verification isn't enabled on this deployment
+                    (<code class="mono">vision.onboarding.probe.enabled</code>). You can still
+                    continue and register the asset.
+                  </vision-notice>
+                } @else if (facade.store.proveByRole()[role].lastVerifyError; as error) {
+                  <vision-notice variant="warn">{{ error }}</vision-notice>
+                } @else if (facade.store.proveByRole()[role].lastVerifyResult; as profile) {
+                  <div class="test-result">
+                    <dl class="facts">
+                      @if (profile.sysid !== null) {
+                        <div class="fact"><dt>System id</dt><dd class="mono">{{ profile.sysid }}</dd></div>
+                      }
+                      <div class="fact"><dt>Firmware</dt><dd>{{ profile.firmware ?? '—' }}</dd></div>
+                      @if (profile.firmwareVersion) {
+                        <div class="fact"><dt>Version</dt><dd class="mono">{{ profile.firmwareVersion }}</dd></div>
+                      }
+                      @if (profile.vehicleKind) {
+                        <div class="fact"><dt>Vehicle kind</dt><dd>{{ profile.vehicleKind }}</dd></div>
+                      }
+                      <div class="fact"><dt>Messages seen</dt><dd class="mono">{{ profile.messages.length }}</dd></div>
+                    </dl>
+
+                    @if (profile.messages.length > 0) {
+                      <div class="table-scroll">
+                        <table>
+                          <thead><tr><th>Message</th><th>Rate</th><th>Count</th></tr></thead>
+                          <tbody>
+                            @for (message of profile.messages; track message.messageId) {
+                              <tr>
+                                <td>{{ message.name }}</td>
+                                <td class="mono">{{ message.hz }} Hz</td>
+                                <td class="mono">{{ message.count }}</td>
+                              </tr>
+                            }
+                          </tbody>
+                        </table>
+                      </div>
+                    }
+
+                    @if (!profile.complete) {
+                      <vision-notice variant="warn" icon="alert">
+                        {{ profile.incompleteReason ?? 'The observation window ended before every signal arrived.' }}
+                      </vision-notice>
+                    }
+                  </div>
+                } @else {
+                  <div class="empty"><p class="faint">Not observed yet.</p></div>
+                }
+              </div>
+            </div>
           }
         }
-      }
 
-      <!-- ---- Step 3.5: Verify (docs/plans/active/DRONE-ONBOARDING-PLAN.md §3.1 stage 3/O6) — observes
-           the candidate's own vehicle link before it becomes an asset. Distinct from Test above
-           (one decoded video frame): this listens for MAVLink telemetry and reports what it heard.
-           Advisory only — canAdvanceFromVerify is unconditionally true (see its own doc comment),
-           so nothing here ever blocks Next. vision.onboarding.probe.enabled defaults false (D17),
-           so "not enabled on this deployment" is the expected, common first-class state below, not
-           an error. -------------------------------------------------------------------------- -->
-      @case ('verify') {
-        <h2>Verify</h2>
-        <p class="muted hint">Optional — listens to the aircraft's own telemetry link and reports what it hears. You can continue either way.</p>
-
-        <div class="row">
-          <button type="button" class="btn" (click)="facade.store.verify()" [disabled]="facade.store.verifying()">
-            {{ facade.store.verifying() ? 'Listening…' : (facade.store.lastVerifyResult() || facade.store.lastVerifyError() || facade.store.verifyDisabled()) ? 'Retry' : 'Observe vehicle' }}
-          </button>
-        </div>
-
-        @if (facade.store.verifying()) {
-          <div class="empty"><p class="faint">Listening to the link…</p></div>
-        } @else if (facade.store.verifyDisabled()) {
-          <vision-notice icon="help">
-            Vehicle verification isn't enabled on this deployment (<code class="mono">vision.onboarding.probe.enabled</code>). You can still continue and register the asset.
-          </vision-notice>
-        } @else if (facade.store.lastVerifyError(); as error) {
-          <vision-notice variant="warn">{{ error }}</vision-notice>
-        } @else if (facade.store.lastVerifyResult(); as profile) {
-          <div class="test-result">
-            <dl class="facts">
-              @if (profile.sysid !== null) {
-                <div class="fact"><dt>System id</dt><dd class="mono">{{ profile.sysid }}</dd></div>
-              }
-              <div class="fact"><dt>Firmware</dt><dd>{{ profile.firmware ?? '—' }}</dd></div>
-              @if (profile.firmwareVersion) {
-                <div class="fact"><dt>Version</dt><dd class="mono">{{ profile.firmwareVersion }}</dd></div>
-              }
-              @if (profile.vehicleKind) {
-                <div class="fact"><dt>Vehicle kind</dt><dd>{{ profile.vehicleKind }}</dd></div>
-              }
-              <div class="fact"><dt>Messages seen</dt><dd class="mono">{{ profile.messages.length }}</dd></div>
-            </dl>
-
-            @if (profile.messages.length > 0) {
-              <div class="table-scroll">
-                <table>
-                  <thead><tr><th>Message</th><th>Rate</th><th>Count</th></tr></thead>
-                  <tbody>
-                    @for (message of profile.messages; track message.messageId) {
-                      <tr>
-                        <td>{{ message.name }}</td>
-                        <td class="mono">{{ message.hz }} Hz</td>
-                        <td class="mono">{{ message.count }}</td>
-                      </tr>
-                    }
-                  </tbody>
-                </table>
-              </div>
-            }
-
-            @if (!profile.complete) {
-              <vision-notice variant="warn" icon="alert">
-                {{ profile.incompleteReason ?? 'The observation window ended before every signal arrived.' }}
-              </vision-notice>
-            }
-          </div>
-        } @else {
-          <div class="empty"><p class="faint">Not observed yet.</p></div>
+        @if (!facade.store.canAdvanceProve()) {
+          <p class="disabled-reason">Run the test and get a successful result on every row above before continuing.</p>
         }
-
-        <p class="faint">Advisory only — this never blocks continuing to Create.</p>
       }
 
-      <!-- ---- Step 4: Create ----------------------------------------------------------------- -->
-      @case ('create') {
-        <h2>Create</h2>
+      <!-- ---- Step 4: Register (WAREHOUSE-UX-PLAN.md §3.4 wave W6 — unchanged in substance from
+           the pre-W6 Create step, now with `identity` and N devices instead of one) ------------ -->
+      @case ('register') {
+        <h2>Register</h2>
         <p class="muted hint">Everything looks right? This is the last step.</p>
 
         <dl class="facts">
@@ -854,7 +935,14 @@
           @if (facade.store.registrationNumber()) {
             <div class="fact"><dt>Registration</dt><dd>{{ facade.store.registrationNumber() }}</dd></div>
           }
-          <div class="fact"><dt>Connection</dt><dd>{{ facade.connectionSummary() }}</dd></div>
+          @if (facade.store.serialNumber()) {
+            <div class="fact"><dt>Serial number</dt><dd class="mono">{{ facade.store.serialNumber() }}</dd></div>
+          }
+          @if (facade.store.make() || facade.store.model()) {
+            <div class="fact"><dt>Make / model</dt><dd>{{ facade.store.make() }} {{ facade.store.model() }}</dd></div>
+          }
+          <div class="fact"><dt>Sense</dt><dd>{{ facade.rowSummary('sense') }}</dd></div>
+          <div class="fact"><dt>Sight</dt><dd>{{ facade.rowSummary('sight') }}</dd></div>
         </dl>
 
         @if (facade.store.photoPreviewUrl(); as preview) {
@@ -862,19 +950,20 @@
         }
 
         <button type="button" class="btn" (click)="facade.store.createAsset()" [disabled]="facade.store.creating()">
-          {{ facade.store.creating() ? 'Creating…' : 'Create asset' }}
+          {{ facade.store.creating() ? 'Creating…' : facade.registerActionLabel() }}
         </button>
       }
 
-      <!-- ---- Step 4.5: fix a sysid collision (docs/plans/active/FLEET-RADIO-PLAN.md R5/F0) ---------------
-           Reached only from Create, only when the Verify step's probe collided with a sysid an
-           already-registered device claims — every other path skips straight to Assign. Its own
-           "Write sysid"/"Continue" actions live in the case body, not the generic footer (see that
-           footer's own template comment further down). Advisory only — Continue always proceeds. -->
+      <!-- ---- Step 4.5: fix a sysid collision (docs/plans/active/FLEET-RADIO-PLAN.md R5/F0) -----
+           Reached only from Register (or the equipment short-circuit's Receive — though a
+           collision there is vacuous, Prove never runs), only when a Prove-step row's probe
+           collided with a sysid an already-registered device claims — every other path skips
+           straight to Hand-over. Its own "Write sysid"/"Continue" actions live in the case body,
+           not the generic footer. Advisory only — Continue always proceeds. ------------------- -->
       @case ('sysid') {
         <h2>Fix the sysid collision</h2>
         <p class="muted hint">
-          This vehicle answers to system id <span class="mono">{{ facade.store.sysidCollision() }}</span>,
+          This vehicle answers to system id <span class="mono">{{ facade.sysidCollision() }}</span>,
           which another vehicle in the fleet already claims — until it gets a distinct id, one of the
           two will be invisible or unreliable on this link. You can fix it now, or continue and fix it
           later from the asset's readiness page.
@@ -920,83 +1009,134 @@
         </div>
       }
 
-      <!-- ---- Step 5: Assign — "Who flies this?" (docs/plans/done/OPS-UX-PLAN.md §2 A3) ------------------- -->
-      @case ('assign') {
-        <h2>Who flies this?</h2>
-        <p class="muted hint">
-          "{{ facade.store.createdAssetDisplayName() }}" is saved. Assign the pilots who may fly it —
-          you can always change this later from the roster.
-        </p>
+      <!-- ---- Step 5: Hand over (docs/plans/done/OPS-UX-PLAN.md §2 A3; WAREHOUSE-UX-PLAN.md §3.4
+           D3, wave W6 — replaces the pre-W6 "Pilots"/Assign step). "Issue to" a custodian, or
+           "Leave in stock" — both end in a completed sub-state naming the next verb, not an
+           automatic redirect. -------------------------------------------------------------- -->
+      @case ('handover') {
+        <h2>Hand over</h2>
 
-        @if (facade.store.assignmentError(); as error) {
-          <!-- The asset already exists by the time this can ever render — worded so a failed
-               assignment is never mistaken for a failed creation (see `onboarding-store.ts`'s own
-               "Step 5" class-doc paragraph). -->
-          <vision-notice variant="danger" icon="alert">
-            The asset was created, but assigning pilots failed: {{ error }}. Manage pilots from
-            <a routerLink="/manage/roster">the roster</a> instead.
-          </vision-notice>
-        }
-
-        @if (facade.store.pilotCandidatesLoading()) {
-          <p class="muted">Loading pilots…</p>
-        } @else if (facade.store.pilotCandidates().length === 0) {
-          <vision-empty
-            title="No pilots to offer yet"
-            [message]="
-              facade.store.ownerGroupName()
-                ? 'Nobody in ' + facade.store.ownerGroupName() + ' is a pilot yet.'
-                : 'Could not determine your group.'
-            "
-          >
-            <a class="btn secondary" routerLink="/manage/roster">Go to roster</a>
-          </vision-empty>
-        } @else {
-          <p class="label">Pilots in {{ facade.store.ownerGroupName() }}</p>
-          <ul class="pilot-list">
-            @for (candidate of facade.store.pilotCandidates(); track candidate.userId) {
-              <li>
-                <label class="checkbox-field pilot-row">
-                  <input
-                    type="checkbox"
-                    [checked]="facade.store.selectedPilotIds().has(candidate.userId)"
-                    (change)="facade.store.togglePilot(candidate.userId)"
-                  />
-                  <span>{{ candidate.displayName }} ({{ candidate.username }})</span>
-                </label>
-              </li>
+        @if (facade.store.handoverOutcome(); as outcome) {
+          <vision-notice variant="ok" icon="check">
+            @switch (outcome) {
+              @case ('issued') {
+                "{{ facade.store.createdAssetDisplayName() }}" was issued. You can always change
+                custody later from the asset's page.
+              }
+              @case ('stocked') {
+                "{{ facade.store.createdAssetDisplayName() }}" is left in stock — issue it whenever
+                it's ready to fly.
+              }
             }
-          </ul>
+          </vision-notice>
+
+          <div class="row wizard-nav">
+            <a class="btn" [routerLink]="[...facade.store.handoverNext().path]" [queryParams]="facade.store.handoverNext().queryParams ?? {}">
+              {{ facade.store.handoverNext().label }}
+            </a>
+          </div>
+        } @else {
+          <p class="muted hint">
+            "{{ facade.store.createdAssetDisplayName() }}" is saved. Who takes it?
+          </p>
+
+          @if (facade.store.handoverError(); as error) {
+            <!-- The asset already exists by the time this can ever render — worded so a failed
+                 hand-over is never mistaken for a failed creation (see `onboarding-store.ts`'s own
+                 "Step 5" class-doc paragraph). -->
+            <vision-notice variant="danger" icon="alert">
+              The asset was created, but issuing it failed: {{ error }}. You can try again, or leave
+              it in stock and issue it later from <a routerLink="/manage/roster">the roster</a>.
+            </vision-notice>
+          }
+
+          @if (facade.store.pilotCandidatesLoading()) {
+            <p class="muted">Loading pilots…</p>
+          } @else if (facade.store.pilotCandidates().length === 0) {
+            <vision-empty
+              title="No pilots to offer yet"
+              [message]="
+                facade.store.ownerGroupName()
+                  ? 'Nobody in ' + facade.store.ownerGroupName() + ' is a pilot yet.'
+                  : 'Could not determine your group.'
+              "
+            >
+              <a class="btn secondary" routerLink="/manage/roster">Go to roster</a>
+            </vision-empty>
+          } @else {
+            <p class="label">Issue to — {{ facade.store.ownerGroupName() }}</p>
+            <ul class="pilot-list">
+              @for (candidate of facade.store.pilotCandidates(); track candidate.userId) {
+                <li>
+                  <label class="checkbox-field pilot-row">
+                    <input
+                      type="radio"
+                      name="custodian"
+                      [checked]="facade.store.selectedCustodianId() === candidate.userId"
+                      (change)="facade.store.selectCustodian(candidate.userId)"
+                    />
+                    <span>{{ candidate.displayName }} ({{ candidate.username }})</span>
+                  </label>
+                </li>
+              }
+            </ul>
+
+            <div class="field">
+              <label class="label" for="handover-location">Location (optional)</label>
+              <input
+                id="handover-location"
+                name="handoverLocation"
+                class="field-md"
+                [ngModel]="facade.store.handoverLocation()"
+                (ngModelChange)="facade.store.setHandoverLocation($event)"
+                placeholder="Hangar 2"
+              />
+            </div>
+          }
+
+          <div class="row wizard-nav">
+            <button
+              type="button"
+              class="btn secondary"
+              (click)="facade.store.leaveInStock()"
+              [disabled]="facade.store.handingOver()"
+            >
+              Leave in stock
+            </button>
+            <button
+              type="button"
+              class="btn"
+              (click)="facade.store.issueToCustodian()"
+              [disabled]="facade.store.handingOver() || !facade.store.selectedCustodianId()"
+            >
+              {{ facade.store.handingOver() ? 'Issuing…' : 'Issue to' }}
+            </button>
+          </div>
         }
       }
     }
 
-    <!-- Assign carries its own footer (Skip/Assign-and-finish), never the generic Back/Next pair —
-         there is nothing to go "back" to (the asset already exists) and no forward step past it.
-         Sysid (docs/plans/active/FLEET-RADIO-PLAN.md R5/F0) is the same: its own "Write sysid"/
-         "Continue" actions live inline in that @case above, so it renders no footer here at all —
-         neither Back (the asset already exists) nor a generic Next. -->
-    @if (facade.store.step() === 'assign') {
+    <!-- Hand-over and Sysid carry their own footers inline in their own `@case` above — neither
+         renders anything here: Hand-over has nothing to go "back" to (the asset already exists)
+         and no forward step past it; Sysid is the same, plus its own "Write sysid"/"Continue"
+         actions wouldn't fit the generic Back/Next pair anyway. -->
+    @if (facade.store.step() !== 'handover' && facade.store.step() !== 'sysid') {
       <div class="row wizard-nav">
-        <button type="button" class="btn secondary" (click)="facade.store.skipAssignment()" [disabled]="facade.store.assigningPilots()">
-          Skip for now
-        </button>
-        <button type="button" class="btn" (click)="facade.store.confirmPilots()" [disabled]="facade.store.assigningPilots()">
-          {{
-            facade.store.assigningPilots()
-              ? 'Assigning…'
-              : facade.store.selectedPilotIds().size === 0
-                ? 'Finish'
-                : 'Assign & finish'
-          }}
-        </button>
-      </div>
-    } @else if (facade.store.step() !== 'sysid') {
-      <div class="row wizard-nav">
-        @if (facade.store.step() !== 'profile') {
+        @if (facade.store.step() !== 'identify') {
           <button type="button" class="btn secondary" (click)="facade.store.back()">Back</button>
         }
-        @if (facade.store.step() !== 'create') {
+        @if (facade.store.step() === 'identify' && !facade.store.categoryConnected()) {
+          <!-- The equipment short-circuit (WAREHOUSE-UX-PLAN.md §3.4/D4) — "Receive" performs the
+               create call directly, skipping Connect/Prove/Register as rendered steps entirely. -->
+          <button
+            type="button"
+            class="btn"
+            (click)="facade.store.receiveEquipmentAsset()"
+            [disabled]="facade.store.creating() || !facade.store.canAdvanceIdentify()"
+          >
+            {{ facade.store.creating() ? 'Receiving…' : facade.registerActionLabel() }}
+          </button>
+        } @else if (facade.store.step() !== 'register') {
           <button type="button" class="btn" [disabled]="!facade.store.canAdvance()" (click)="facade.store.next()">Next</button>
         }
       </div>

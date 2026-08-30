@@ -1,14 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { Membership, UserSummary } from '../../core/api/models';
+import { emptyFitOutRows, type FitOutRowDraft, type FitOutRows } from '../../core/onboarding/fit-out-logic';
 import {
   buildCreateAssetRequest,
+  buildIdentityRequest,
   buildPostSimulationAssetEdit,
   buildProbeRequest,
   buildVerifyRequest,
-  canAdvanceFromConnect,
-  canAdvanceFromProfile,
-  canAdvanceFromTest,
-  canAdvanceFromVerify,
+  canAdvanceFromIdentify,
   creatorOwnershipGroup,
   defaultPilotSelection,
   isTelemetryOnlyProtocol,
@@ -16,122 +15,146 @@ import {
   pilotsInGroup,
   prevStep,
   simulateNeedsVideoPath,
-  type ConnectDraft,
+  visibleSteps,
+  type IdentifyDraft,
+  type StepContext,
 } from './onboarding-logic';
 
-function connectDraft(partial: Partial<ConnectDraft> = {}): ConnectDraft {
+function identify(partial: Partial<IdentifyDraft> = {}): IdentifyDraft {
   return {
-    method: 'register',
-    protocol: 'rtsp',
-    uri: 'rtsp://192.168.1.50:554/stream',
-    simMode: 'direct',
-    simVideoPath: '',
+    displayName: 'Falcon-2',
+    category: 'drone',
+    registrationNumber: '',
+    serialNumber: '',
+    make: '',
+    model: '',
     ...partial,
   };
 }
 
+function ctx(partial: Partial<StepContext> = {}): StepContext {
+  return { connected: true, needsProve: true, ...partial };
+}
+
+function row(partial: Partial<FitOutRowDraft> & Pick<FitOutRowDraft, 'role'>): FitOutRowDraft {
+  return {
+    value: 'none',
+    findMethod: null,
+    protocolSelect: '',
+    customProtocol: '',
+    uri: '',
+    options: [],
+    ...partial,
+  };
+}
+
+function rows(sense: Partial<FitOutRowDraft> = {}, sight: Partial<FitOutRowDraft> = {}): FitOutRows {
+  return { sense: row({ role: 'sense', ...sense }), sight: row({ role: 'sight', ...sight }) };
+}
+
+describe('visibleSteps', () => {
+  it('shows all five for a connected category', () => {
+    expect(visibleSteps(true)).toEqual(['identify', 'connect', 'prove', 'register', 'handover']);
+  });
+
+  it('collapses to just Identify and Hand over for equipment', () => {
+    expect(visibleSteps(false)).toEqual(['identify', 'handover']);
+  });
+});
+
 describe('nextStep', () => {
-  it('goes profile -> connect regardless of method', () => {
-    expect(nextStep('profile', null)).toBe('connect');
-    expect(nextStep('profile', 'simulate')).toBe('connect');
+  it('goes identify -> connect for a connected category', () => {
+    expect(nextStep('identify', ctx({ connected: true }))).toBe('connect');
   });
 
-  it('goes connect -> test for register/discover/listen/drone', () => {
-    expect(nextStep('connect', 'register')).toBe('test');
-    expect(nextStep('connect', 'discover')).toBe('test');
-    expect(nextStep('connect', 'listen')).toBe('test');
-    expect(nextStep('connect', 'drone')).toBe('test');
+  it('goes identify -> register directly for equipment (the Receive short-circuit)', () => {
+    expect(nextStep('identify', ctx({ connected: false }))).toBe('register');
   });
 
-  it('skips test entirely for simulate — connect -> create', () => {
-    expect(nextStep('connect', 'simulate')).toBe('create');
+  it('goes connect -> prove when a row needs proving', () => {
+    expect(nextStep('connect', ctx({ needsProve: true }))).toBe('prove');
   });
 
-  it('goes test -> verify', () => {
-    expect(nextStep('test', 'register')).toBe('verify');
+  it('skips prove entirely when no row needs it — connect -> register', () => {
+    expect(nextStep('connect', ctx({ needsProve: false }))).toBe('register');
   });
 
-  it('goes verify -> create', () => {
-    expect(nextStep('verify', 'register')).toBe('create');
+  it('goes prove -> register', () => {
+    expect(nextStep('prove', ctx())).toBe('register');
   });
 
-  it('is a no-op past create', () => {
-    expect(nextStep('create', 'register')).toBe('create');
+  it('is a no-op past register', () => {
+    expect(nextStep('register', ctx())).toBe('register');
   });
 
-  it('is a no-op past assign — the wizard reaches it only via a successful create, never via next()', () => {
-    expect(nextStep('assign', 'register')).toBe('assign');
+  it('is a no-op past handover — the wizard reaches it only via a successful create, never via next()', () => {
+    expect(nextStep('handover', ctx())).toBe('handover');
   });
 
   it('is a no-op past sysid — the wizard reaches it only via OnboardingStore#finishCreate, never via next()', () => {
-    expect(nextStep('sysid', 'register')).toBe('sysid');
+    expect(nextStep('sysid', ctx())).toBe('sysid');
   });
 });
 
 describe('prevStep', () => {
-  it('is a no-op before profile', () => {
-    expect(prevStep('profile', null)).toBe('profile');
+  it('is a no-op before identify', () => {
+    expect(prevStep('identify', ctx())).toBe('identify');
   });
 
-  it('goes connect -> profile', () => {
-    expect(prevStep('connect', 'register')).toBe('profile');
+  it('goes connect -> identify', () => {
+    expect(prevStep('connect', ctx())).toBe('identify');
   });
 
-  it('goes test -> connect', () => {
-    expect(prevStep('test', 'register')).toBe('connect');
+  it('goes prove -> connect', () => {
+    expect(prevStep('prove', ctx())).toBe('connect');
   });
 
-  it('goes verify -> test', () => {
-    expect(prevStep('verify', 'register')).toBe('test');
+  it('goes register -> prove when the connect draft needed proving', () => {
+    expect(prevStep('register', ctx({ connected: true, needsProve: true }))).toBe('prove');
   });
 
-  it('goes create -> verify for register/discover', () => {
-    expect(prevStep('create', 'register')).toBe('verify');
-    expect(prevStep('create', 'discover')).toBe('verify');
+  it('skips prove entirely for register -> connect when nothing needed proving', () => {
+    expect(prevStep('register', ctx({ connected: true, needsProve: false }))).toBe('connect');
   });
 
-  it('skips test entirely for simulate — create -> connect', () => {
-    expect(prevStep('create', 'simulate')).toBe('connect');
+  it('goes register -> identify for equipment, regardless of needsProve', () => {
+    expect(prevStep('register', ctx({ connected: false }))).toBe('identify');
   });
 
-  it('goes assign -> create — its own immediate predecessor, never further (onboarding.html never renders a Back button here regardless)', () => {
-    expect(prevStep('assign', 'register')).toBe('create');
-    expect(prevStep('assign', 'simulate')).toBe('create');
+  it('goes handover -> register — its own immediate predecessor, never further (onboarding.html never renders a Back button here regardless)', () => {
+    expect(prevStep('handover', ctx())).toBe('register');
   });
 
-  it('goes sysid -> create — its own immediate predecessor, never further (onboarding.html never renders a Back button here regardless)', () => {
-    expect(prevStep('sysid', 'register')).toBe('create');
-    expect(prevStep('sysid', 'simulate')).toBe('create');
+  it('goes sysid -> register — its own immediate predecessor, never further (onboarding.html never renders a Back button here regardless)', () => {
+    expect(prevStep('sysid', ctx())).toBe('register');
   });
 
-  it('round-trips with nextStep for every method', () => {
-    for (const method of ['register', 'discover', 'simulate', 'listen', 'drone'] as const) {
-      let step = nextStep('profile', method);
-      step = nextStep(step, method);
-      // simulate skips both test and verify (connect -> create directly); every other method
-      // passes through both.
-      if (method !== 'simulate') {
-        step = nextStep(step, method);
-        step = nextStep(step, method);
-      }
-      expect(step).toBe('create');
-      let back = prevStep(step, method);
-      if (method !== 'simulate') {
-        back = prevStep(back, method);
-        back = prevStep(back, method);
-      }
-      back = prevStep(back, method);
-      expect(back).toBe('profile');
-    }
+  it('round-trips with nextStep for a connected category needing prove', () => {
+    const context = ctx({ connected: true, needsProve: true });
+    let step = nextStep('identify', context);
+    step = nextStep(step, context);
+    step = nextStep(step, context);
+    expect(step).toBe('register');
+    let back = prevStep(step, context);
+    back = prevStep(back, context);
+    back = prevStep(back, context);
+    expect(back).toBe('identify');
+  });
+
+  it('round-trips with nextStep for equipment', () => {
+    const context = ctx({ connected: false });
+    const step = nextStep('identify', context);
+    expect(step).toBe('register');
+    expect(prevStep(step, context)).toBe('identify');
   });
 });
 
-describe('canAdvanceFromProfile', () => {
+describe('canAdvanceFromIdentify', () => {
   it('requires a non-blank name and category', () => {
-    expect(canAdvanceFromProfile('Falcon-2', 'drone')).toBe(true);
-    expect(canAdvanceFromProfile('', 'drone')).toBe(false);
-    expect(canAdvanceFromProfile('Falcon-2', '')).toBe(false);
-    expect(canAdvanceFromProfile('   ', '   ')).toBe(false);
+    expect(canAdvanceFromIdentify('Falcon-2', 'drone')).toBe(true);
+    expect(canAdvanceFromIdentify('', 'drone')).toBe(false);
+    expect(canAdvanceFromIdentify('Falcon-2', '')).toBe(false);
+    expect(canAdvanceFromIdentify('   ', '   ')).toBe(false);
   });
 });
 
@@ -144,70 +167,23 @@ describe('simulateNeedsVideoPath', () => {
   });
 });
 
-describe('canAdvanceFromConnect', () => {
-  it('requires protocol and uri for register', () => {
-    expect(canAdvanceFromConnect(connectDraft({ method: 'register' }))).toBe(true);
-    expect(canAdvanceFromConnect(connectDraft({ method: 'register', protocol: '' }))).toBe(false);
-    expect(canAdvanceFromConnect(connectDraft({ method: 'register', uri: '   ' }))).toBe(false);
+describe('isTelemetryOnlyProtocol', () => {
+  it('recognizes mavlink whatever case or padding the select hands over', () => {
+    expect(isTelemetryOnlyProtocol('mavlink')).toBe(true);
+    expect(isTelemetryOnlyProtocol('MAVLink')).toBe(true);
+    expect(isTelemetryOnlyProtocol('  mavlink  ')).toBe(true);
   });
 
-  it('never advances directly from discover — a candidate must first flip the method to register', () => {
-    expect(
-      canAdvanceFromConnect(connectDraft({ method: 'discover', protocol: 'rtsp', uri: 'rtsp://x' })),
-    ).toBe(false);
+  it('leaves every video protocol alone, so its Prove row keeps asking for a frame', () => {
+    for (const protocol of ['rtsp', 'mjpeg', 'srt', 'udp', 'v4l2', 'file', 'sim']) {
+      expect(isTelemetryOnlyProtocol(protocol)).toBe(false);
+    }
   });
 
-  it('never advances directly from listen either (docs/plans/active/DRONE-INFRA-PLAN.md I-b) — same candidate-must-flip-to-register rule', () => {
-    expect(
-      canAdvanceFromConnect(connectDraft({ method: 'listen', protocol: 'mavlink', uri: 'udp://0.0.0.0:14550' })),
-    ).toBe(false);
-  });
-
-  it('never advances directly from drone either (docs/plans/active/DRONE-INFRA-PLAN.md I-g) — it hands off to listen before anything can advance', () => {
-    expect(
-      canAdvanceFromConnect(connectDraft({ method: 'drone', protocol: 'mavlink', uri: 'udp://0.0.0.0:14550' })),
-    ).toBe(false);
-  });
-
-  it('never advances with no method chosen yet', () => {
-    expect(canAdvanceFromConnect(connectDraft({ method: null }))).toBe(false);
-  });
-
-  it('requires a video path for the file-based simulate modes', () => {
-    expect(canAdvanceFromConnect(connectDraft({ method: 'simulate', simMode: 'direct', simVideoPath: '' }))).toBe(
-      false,
-    );
-    expect(
-      canAdvanceFromConnect(connectDraft({ method: 'simulate', simMode: 'direct', simVideoPath: '/a.mp4' })),
-    ).toBe(true);
-  });
-
-  it('needs no video path for synthetic/testDrone simulate modes', () => {
-    expect(
-      canAdvanceFromConnect(connectDraft({ method: 'simulate', simMode: 'synthetic', simVideoPath: '' })),
-    ).toBe(true);
-    expect(
-      canAdvanceFromConnect(connectDraft({ method: 'simulate', simMode: 'testDrone', simVideoPath: '' })),
-    ).toBe(true);
-  });
-});
-
-describe('canAdvanceFromTest', () => {
-  it('always allows advancing for simulate — the step is skipped entirely', () => {
-    expect(canAdvanceFromTest('simulate', undefined)).toBe(true);
-    expect(canAdvanceFromTest('simulate', false)).toBe(true);
-  });
-
-  it('requires a successful probe for register/discover', () => {
-    expect(canAdvanceFromTest('register', true)).toBe(true);
-    expect(canAdvanceFromTest('register', false)).toBe(false);
-    expect(canAdvanceFromTest('register', undefined)).toBe(false);
-    expect(canAdvanceFromTest('discover', true)).toBe(true);
-  });
-
-  it('requires a successful probe for listen too — it always flips to register before reaching this step', () => {
-    expect(canAdvanceFromTest('listen', true)).toBe(true);
-    expect(canAdvanceFromTest('listen', undefined)).toBe(false);
+  it('is false for the not-yet-chosen protocol a fresh row starts in', () => {
+    expect(isTelemetryOnlyProtocol('')).toBe(false);
+    expect(isTelemetryOnlyProtocol(null)).toBe(false);
+    expect(isTelemetryOnlyProtocol(undefined)).toBe(false);
   });
 });
 
@@ -231,92 +207,98 @@ describe('buildProbeRequest', () => {
   });
 });
 
-describe('canAdvanceFromVerify', () => {
-  it('is always true, for every method — a vehicle-link observation may never strand the wizard (OQ3 resolved advisory-only, and probing defaults off)', () => {
-    expect(canAdvanceFromVerify('register')).toBe(true);
-    expect(canAdvanceFromVerify('simulate')).toBe(true);
-    expect(canAdvanceFromVerify(null)).toBe(true);
-  });
-});
-
 describe('buildVerifyRequest', () => {
   it('builds the same trimmed {protocol, uri, options} shape as buildProbeRequest', () => {
     expect(buildVerifyRequest({ protocol: '  mavlink  ', uri: '  udp://0.0.0.0:14550  ' })).toEqual({
       protocol: 'mavlink',
       uri: 'udp://0.0.0.0:14550',
     });
+  });
+});
+
+describe('buildIdentityRequest', () => {
+  it('is undefined when every field is blank', () => {
+    expect(buildIdentityRequest(identify())).toBeUndefined();
+  });
+
+  it('includes only the non-blank, trimmed fields', () => {
     expect(
-      buildVerifyRequest({ protocol: 'mavlink', uri: 'udp://0.0.0.0:14550', options: { sysid: '7' } }),
-    ).toEqual({ protocol: 'mavlink', uri: 'udp://0.0.0.0:14550', options: { sysid: '7' } });
+      buildIdentityRequest(identify({ registrationNumber: '  N12345  ', serialNumber: 'SN-1' })),
+    ).toEqual({ serialNumber: 'SN-1', registration: 'N12345' });
+  });
+
+  it('includes make/model too', () => {
+    expect(buildIdentityRequest(identify({ make: 'DJI', model: 'Mavic 3' }))).toEqual({
+      make: 'DJI',
+      model: 'Mavic 3',
+    });
   });
 });
 
 describe('buildCreateAssetRequest', () => {
-  const profile = { displayName: 'Falcon-2', registrationNumber: '', category: 'drone' };
-  const connect = { protocol: 'rtsp', uri: 'rtsp://192.168.1.50:554/stream' };
-
-  it('creates the asset with the device embedded, named after the asset', () => {
-    expect(buildCreateAssetRequest(profile, connect)).toEqual({
+  it('creates the asset with one device embedded, named after the asset', () => {
+    const oneRow = rows({}, { value: 'find', protocolSelect: 'rtsp', uri: 'rtsp://192.168.1.50:554/stream' });
+    expect(buildCreateAssetRequest(identify(), oneRow)).toEqual({
       displayName: 'Falcon-2',
       category: 'drone',
       devices: [{ name: 'Falcon-2', protocol: 'rtsp', uri: 'rtsp://192.168.1.50:554/stream' }],
     });
   });
 
-  it('includes registrationNumber in attributes when given', () => {
-    const request = buildCreateAssetRequest({ ...profile, registrationNumber: 'N12345' }, connect);
-    expect(request.attributes).toEqual({ registrationNumber: 'N12345' });
-  });
-
-  it('omits attributes entirely when registrationNumber is blank', () => {
-    expect(buildCreateAssetRequest(profile, connect)).not.toHaveProperty('attributes');
-  });
-
-  it('includes device options when given', () => {
-    const request = buildCreateAssetRequest(profile, { ...connect, options: { rtsp_transport: 'tcp' } });
-    expect(request.devices?.[0]).toEqual({
-      name: 'Falcon-2',
-      protocol: 'rtsp',
-      uri: 'rtsp://192.168.1.50:554/stream',
-      options: { rtsp_transport: 'tcp' },
-    });
-  });
-
-  it('trims displayName/category/protocol/uri', () => {
-    const request = buildCreateAssetRequest(
-      { displayName: '  Falcon-2  ', registrationNumber: '', category: '  drone  ' },
-      { protocol: '  rtsp  ', uri: '  rtsp://x  ' },
+  it('embeds both devices, role-suffixed, when both rows are filled — a camera + FC in one visit', () => {
+    const both = rows(
+      { value: 'find', protocolSelect: 'mavlink', uri: 'udp://0.0.0.0:14550' },
+      { value: 'find', protocolSelect: 'rtsp', uri: 'rtsp://192.168.1.50:554/stream' },
     );
+    const request = buildCreateAssetRequest(identify(), both);
+    expect(request.devices?.map((d) => d.name)).toEqual(['Falcon-2 — Sense', 'Falcon-2 — Sight']);
+  });
+
+  it('includes identity when any field is given', () => {
+    const request = buildCreateAssetRequest(identify({ registrationNumber: 'N12345' }), emptyFitOutRows());
+    expect(request.identity).toEqual({ registration: 'N12345' });
+  });
+
+  it('omits identity entirely when every field is blank', () => {
+    expect(buildCreateAssetRequest(identify(), emptyFitOutRows())).not.toHaveProperty('identity');
+  });
+
+  it('omits devices entirely for the equipment short-circuit — zero rows filled', () => {
+    expect(buildCreateAssetRequest(identify(), emptyFitOutRows())).not.toHaveProperty('devices');
+  });
+
+  it('trims displayName/category', () => {
+    const request = buildCreateAssetRequest(identify({ displayName: '  Falcon-2  ', category: '  drone  ' }), emptyFitOutRows());
     expect(request.displayName).toBe('Falcon-2');
     expect(request.category).toBe('drone');
-    expect(request.devices?.[0]).toMatchObject({ protocol: 'rtsp', uri: 'rtsp://x' });
   });
 });
 
 describe('buildPostSimulationAssetEdit', () => {
   it('omits displayName when blank', () => {
-    expect(buildPostSimulationAssetEdit({ displayName: '   ', registrationNumber: '' })).toEqual({});
+    expect(buildPostSimulationAssetEdit(identify({ displayName: '   ' }))).toEqual({});
   });
 
   it('includes a trimmed displayName when given', () => {
-    expect(buildPostSimulationAssetEdit({ displayName: '  Falcon-2  ', registrationNumber: '' })).toEqual({
+    expect(buildPostSimulationAssetEdit(identify({ displayName: '  Falcon-2  ' }))).toEqual({
       displayName: 'Falcon-2',
     });
   });
 
-  it('includes registrationNumber in attributes when given', () => {
-    expect(
-      buildPostSimulationAssetEdit({ displayName: 'Falcon-2', registrationNumber: 'N12345' }),
-    ).toEqual({ displayName: 'Falcon-2', attributes: { registrationNumber: 'N12345' } });
+  it('includes identity when any field is given', () => {
+    expect(buildPostSimulationAssetEdit(identify({ registrationNumber: 'N12345' }))).toEqual({
+      displayName: 'Falcon-2',
+      identity: { registration: 'N12345' },
+    });
   });
 
   it('never includes a category', () => {
-    const edit = buildPostSimulationAssetEdit({ displayName: 'Falcon-2', registrationNumber: 'N12345' });
+    const edit = buildPostSimulationAssetEdit(identify({ registrationNumber: 'N12345' }));
     expect(edit).not.toHaveProperty('category');
   });
 });
 
-// --- Step 5: "Who flies this?" (docs/plans/done/OPS-UX-PLAN.md §2 A3) -------------------------------
+// --- Hand over: "Who takes this?" (docs/plans/done/OPS-UX-PLAN.md §2 A3) -------------------------------
 
 function membership(partial: Partial<Membership> = {}): Membership {
   return { groupId: 'group-1', groupName: 'Alpha Squad', role: 'PILOT', ...partial };
@@ -391,33 +373,5 @@ describe('defaultPilotSelection', () => {
 
   it('selects nobody when no group could be resolved at all', () => {
     expect(defaultPilotSelection('user-1', undefined)).toEqual([]);
-  });
-});
-
-describe('isTelemetryOnlyProtocol', () => {
-  it('recognizes mavlink whatever case or padding the select hands over', () => {
-    expect(isTelemetryOnlyProtocol('mavlink')).toBe(true);
-    expect(isTelemetryOnlyProtocol('MAVLink')).toBe(true);
-    expect(isTelemetryOnlyProtocol('  mavlink  ')).toBe(true);
-  });
-
-  it('leaves every video protocol alone, so their Test step keeps asking for a frame', () => {
-    for (const protocol of ['rtsp', 'mjpeg', 'srt', 'udp', 'v4l2', 'file', 'sim']) {
-      expect(isTelemetryOnlyProtocol(protocol)).toBe(false);
-    }
-  });
-
-  it('is false for the not-yet-chosen protocol the step starts in', () => {
-    expect(isTelemetryOnlyProtocol('')).toBe(false);
-    expect(isTelemetryOnlyProtocol(null)).toBe(false);
-    expect(isTelemetryOnlyProtocol(undefined)).toBe(false);
-  });
-});
-
-describe('canAdvanceFromTest with a frameless probe', () => {
-  it('passes a telemetry-only probe, which returns ok:true with no frame at all', () => {
-    // The second legal 200 shape (docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md §3) — the gate
-    // asks "did the last probe succeed", never "was there a picture".
-    expect(canAdvanceFromTest('register', true)).toBe(true);
   });
 });

@@ -21,7 +21,7 @@ Opened 2026-08-29 · Branch `feat/warehouse-ux` (cut from master `59b879a5`) · 
 | W3 persistence + API | spring-integrator | done | `5a712e71` |
 | W4 inventory page | web-ui | ready (W1 + W3 both done) | |
 | W5 readiness ← maintenance | application-service | done | `445e145b` |
-| W6 wizard | web-ui | ready (W3 done) | |
+| W6 wizard | web-ui | done | `PENDING_COMMIT` |
 | W7 maintenance + crew | web-ui | done | `cae23506` |
 
 Shared tree: agents commit **by path**, never stash. Unrelated dirty files (`infra/rover-sim/**`, `core/rc/manual-control-client*`, `DefaultPeerDirectory.java`) belong to another session — do not touch.
@@ -473,3 +473,124 @@ scoped to the failing files, in an earlier pass of this same wave
 errors). Recommend W4 re-run `npm run test:ci`/`ng build` once `features/inventory/inventory.ts`
 lands, and this wave's own new `core/maintenance/maintenance-logic.spec.ts` (21 `it` cases,
 reviewed by hand — pure functions, no DI) be confirmed green in that run.
+
+## W6 status (add-vehicle wizard rebuild) — done
+
+Built against W3's contract above with no re-reads of `station/vision-api` source beyond the one
+targeted read of `DefaultAssetCustodyService#issue` noted below. File scope kept to
+`features/onboarding/**`, `core/onboarding/**` (new), plus small additive edits to the two shared
+files `core/api/models.ts`/`vision-api.ts` (see below), this file, and `station/vision-web/MODULE.md`
+— did not touch `features/inventory|assets|devices|asset-detail/**` (W4), `app.routes.ts`,
+`nav-entries.ts`, `features/maintenance|roster|org-settings/**` (W7), or any other session's dirty
+files (`infra/rover-sim/**`, `core/rc/manual-control-client*`, `DefaultPeerDirectory.java`).
+
+**What shipped:** the wizard is now **Identify · Connect · Prove · Register · Hand over**
+(WAREHOUSE-UX-PLAN.md §3.4/§4 row W6, SOURCE-ONBOARDING-CONTEXT.md §6), with `sysid` kept as a
+hidden conditional interstitial, never in the visible stepper. Full per-step detail, file-level
+citations, and the exact request/DTO shapes are in `station/vision-web/MODULE.md`'s `onboarding/`
+bullet (features section) — this section covers only what W4/whoever-next needs and doesn't
+duplicate that write-up. Headline changes:
+- **Identify** = old Profile + serial/make/model. A `connected: false` category (equipment) short-
+  circuits straight to **Hand-over**, skipping Connect/Prove/Register as rendered steps; `POST
+  /api/assets` is sent with `devices` omitted.
+- **Connect** is now a two-row fit-out table (`core/onboarding/fit-out-logic.ts`) — **Sense**
+  (telemetry) and **Sight** (video), each independently `find…`/`simulate`/`—`. Closes coupling C2:
+  a vehicle with both a real flight controller and a real camera now registers both devices in one
+  visit (`fitOutDeviceSpecs` → `CreateAssetRequest.devices[]`, one entry per filled row).
+- **Prove** merges the old Test + Verify steps, run once per filled `find` row, results shown per
+  row.
+- **Register** is substance-unchanged (`POST /api/assets`), now carrying `identity` (`AssetIdentity`)
+  and N devices instead of exactly one.
+- **Hand-over** replaces "Pilots"/Assign: "Issue to" a custodian
+  (`VisionApi#setAssetCustody({action:'ISSUE', custodianId, location?})` **plus** a separate
+  `assignPilot(assetId, custodianId)` call) or "Leave in stock". Confirmed by reading
+  `DefaultAssetCustodyService#issue` (`contexts/vision-warehouse`) that `ISSUE` alone only mutates
+  `Custody`/`InventoryState` + audit — it does **not** create a pilot assignment, so the two-call
+  sequence is required to reproduce the pre-W6 Assign step's actual effect. Ends in a completed
+  sub-state (`handoverOutcome: 'issued'|'stocked'`) naming the next verb — "Open readiness ›" →
+  `/assets/:id/readiness` for a connected vehicle, "Back to inventory" → `/assets?tab=equipment` for
+  equipment — rather than an automatic router redirect.
+
+**Deliberately not used: `CreateAssetRequest.CustodySpec`'s "issue straight to a pilot at create
+time" shortcut** (documented above under "New/changed DTOs"). The wizard always creates the asset
+in stock and only ever hands it off as the separate, explicit Hand-over step — matching
+WAREHOUSE-UX-PLAN.md §3.4's own step ordering (Register then Hand-over are two distinct visible
+steps, not one). `CreateAssetRequest.identity` is used (new optional field on the TS
+`CreateAssetRequest`, additive); `CreateAssetRequest.custody` is not.
+
+**Entry-point prefill contract (for W4 or anyone else linking into `/add-source`):**
+`/add-source?deviceId=<uuid>` prefills the Connect step's matching fit-out row from that device's
+own `protocol`/`uri`/`options` — `roleForDevice` (`fit-out-logic.ts`) sends a TELEMETRY-capable
+device to the Sense row, everything else to the Sight row. Read is background/best-effort,
+silent-degrade like every other constructor-time read in this wizard (`OnboardingStore#applyDevicePrefill`):
+an unknown id, a 403, or no `deviceId` at all simply leaves both rows empty, never a blocked page.
+**Known limitation, not closed this wave:** this creates a *new* device row on the asset being
+registered, not a reference to the original `Device` by id — `CreateAssetRequest.devices[]` has no
+field for that (only a `deviceIds[]` shape would, which this fit-out table does not thread through).
+A caller linking here meaning "attach this already-registered device to a new asset" gets a
+duplicate device row with the same protocol/uri, not a move. If W4 builds an "Add vehicle from this
+link" affordance on the Devices/Links tab expecting a clean attach, it will need either a new wire
+shape or to accept this duplication as the interim behavior.
+
+**Other known limitations, flagged not fixed:**
+- **The legacy whole-vehicle Simulate path (`POST /api/simulations`) only covers one row
+  combination** (`fit-out-logic.ts#usesLegacySimulationPath`): Sight = `simulate` and Sense is not a
+  real `find` link. Any row set to `find` takes the multi-device `POST /api/assets` path instead,
+  since `/api/simulations` cannot attach to a real link on the other row — a documented gap, not
+  new backend support to close it.
+- **Registration now rides `identity.registration`, not `core/fleet/asset-attributes.ts`'s
+  `attributes['registrationNumber']` convention.** That file is left untouched (still used by
+  `features/asset-detail/**`, W4's file scope) — a discrepancy now exists between the two paths
+  until whoever owns `asset-detail`'s inline edit migrates it to `identity.registration` too. This
+  also surfaces a pre-existing persistence-layer bug worth flagging to W3/whoever owns
+  `V28__asset_inventory.sql`: its backfill (`attributes ->> 'registration'`) assumes the attribute
+  key was `'registration'`, but the frontend's actual historical convention wrote
+  `'registrationNumber'` — so that migration likely backfilled nothing for real historical data.
+- **`features/assets/assets-facade.ts`/`features/devices/devices-facade.ts` each still carry their
+  own pre-wizard single-device empty-state quick-add**, bypassing this wizard entirely — not touched
+  this wave (W4 file scope) but should eventually be deleted now that the wizard is the one
+  add-a-vehicle path.
+
+**Shared files touched (additive only) — neither committed by this wave, see below:**
+`core/api/models.ts` gained `CreateAssetRequest.identity?: AssetIdentity` and `AssetEdit.identity?:
+AssetIdentity` (the legacy-simulate path's post-create PATCH). `vision-api.ts` was not changed net
+of merging: this wave initially added its own `assetCustody` method, then found W4 had concurrently
+added an identical-purpose `setAssetCustody` method on the same shared file — resolved by removing
+this wave's duplicate and folding its doc-comment (the `issue`-doesn't-assign-a-pilot note above)
+into W4's existing method instead, so only one method exists on `VisionApi` for this call.
+**Commit boundary:** `models.ts`'s `identity` fields ended up swept into W7's own commit
+`cae23506` (confirmed via `git show HEAD:.../models.ts` — they're already present in `HEAD`, most
+likely picked up incidentally when W7 staged the whole file for its own concurrent additions) — no
+action needed, they're already safely committed. `vision-api.ts`'s doc-comment merge is **not**
+committed by this wave either: it sits inside the same uncommitted `setAssetCustody` method W4
+authored (the whole method is one contiguous uncommitted addition against `HEAD`, so there is no
+clean hunk boundary between "W4's method" and "this wave's two-line paragraph inside it" for
+`git add -p` to isolate) — it will ride along harmlessly whenever W4 commits their own `vision-api.ts`
+work (`createCategory`/`updateCategory`/`inventoryExportUrl`, none of which is this wave's). This
+wave's own commit therefore touches only `features/onboarding/**`, `core/onboarding/**`, this file,
+and `station/vision-web/MODULE.md`.
+
+**Verify:** `npx tsc --noEmit -p tsconfig.app.json`/`tsconfig.spec.json` — zero errors in any file
+this wave owns (`features/onboarding/**`, `core/onboarding/**`), confirmed by grepping tsc's output
+for those paths (two pre-existing spec-file issues fixed along the way, both mine:
+`fit-out-logic.spec.ts` passing `{}` instead of the full `{sense,sight}` shape to
+`canAdvanceFromFitOutProve`, and `onboarding-logic.spec.ts`'s `row()` test helper writing `role`
+twice — TS2783). Both configs still fail on the exact same two other in-progress waves' own files
+W7's own "Verify" paragraph above already documents: `features/inventory/inventory.routes.ts` (W4,
+`import('./inventory')` — the component file still doesn't exist on disk) and
+`features/reports/reports-logic.spec.ts` (the `CategoryCounts` fixture still not updated for W4's
+own in-progress fields on that same shared `models.ts`) — confirmed via `git status` that neither
+file is in this wave's own scope. `npm run test:ci`/`ng build --configuration production` both fail
+identically on `inventory.routes.ts`'s unresolved import (esbuild can't resolve the module at all,
+blocking the whole-project bundle outright) — retried repeatedly across this wave's session
+(including after a session-limit reset) with the identical result each time, confirming this is the
+same whole-graph blocker W7 already hit and documented, not something that cleared on its own.
+An isolated `ng test --watch=false --include='src/app/features/onboarding/*.spec.ts'
+--include='src/app/core/onboarding/*.spec.ts'` was attempted to sidestep it (following W2's own
+precedent above) but hits the identical `inventory.routes.ts` module-resolution error — unlike W2's
+type-only blocker, a missing module fails the whole-graph bundle before any test file can run, so
+this wave's own `fit-out-logic.spec.ts`/`onboarding-logic.spec.ts`/every pre-existing onboarding
+spec were reviewed by hand and confirmed against the rewritten `onboarding-logic.ts`/
+`fit-out-logic.ts`/`onboarding-store.ts`/`onboarding-facade.ts` APIs rather than run to green.
+Recommend re-running `npm run test:ci`/`ng build` once `features/inventory/inventory.ts` lands, to
+confirm this wave's own spec files and get a real `add-source` lazy-chunk bundle delta.
