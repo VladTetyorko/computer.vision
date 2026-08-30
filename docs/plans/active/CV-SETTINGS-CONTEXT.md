@@ -14,7 +14,7 @@ Spec: [CV-SETTINGS-PLAN.md](CV-SETTINGS-PLAN.md). Branch `feat/cv-settings`, cut
 | W1 perception domain | domain-modeler | built, uncommitted | | `CvProfile`/`CvProfileId`/`BindingScope`/`CvProfileBinding`/`CvProfileRepositoryPort` + tests, `contexts/vision-perception` green (see Handoffs) |
 | W4 learning domain+app | domain-modeler → application-service | built, uncommitted | | Domain: `CvModelRecord`/`ModelStatus`/`ModelTaskType`/`ModelRuntime`/`ModelAvailability`/`ModelMetrics`/`MetricsKind`/`ModelProvenance`/`TrainingRunId`/`TrainingRunRecord` + `CvModelRepositoryPort`/`TrainingRunRepositoryPort`. App: `CvModelView`/`CvModelCatalog`/`CatalogSource`/`ConfigModelCatalog`/`PromotionResult`/`TrainingRunStores`; `ModelRegistryService`/`DefaultModelRegistryService` evolved (merge+promote+rollback, `RegisteredModel` deleted); `DefaultTrainingJobService` evolved (run persistence, CANDIDATE registration, `runs`/`run`, gate relaxed to `canManageOrg`). `contexts/vision-learning` green, 234 tests total (see Handoffs). **Nothing wired**: no adapter implements the two new ports (W3), and `vision-app`/`vision-api` still call the old constructors/types (W5). |
 | W2 | | pending W1 | | |
-| W3 | | pending W1+W4 | | |
+| W3 persistence | spring-integrator | built, uncommitted | | `V29__cv_profiles.sql`/`V30__cv_model_registry.sql` + `JpaCvProfileRepository`/`JpaCvModelRepository`/`JpaTrainingRunRepository` implementing W1's/W4-domain's ports; `storage/persistence` green, 260 tests total, up from 237 (see Handoffs) |
 | W5 | | pending W2+W4 | | |
 | W6 | | pending (contract frozen, can start any time) | | |
 | W7 / W8 | | after W6 | | |
@@ -217,6 +217,78 @@ exactly, no decomposition needed.
 `CvModelRecordTest` 20, `TrainingRunRecordTest` 14), module total 210 (all green). `ModelStatus`/
 `ModelTaskType`/`ModelRuntime`/`ModelAvailability`/`MetricsKind` are pure markers with no dedicated
 test, matching `JobState`'s own precedent in this module.
+
+### W3 → W5
+
+Built in `storage/persistence/src/main/{java/com/drones/vision/adapter/persistence/{entity,mapper,repository},resources/db/migration}/`.
+Framework: plain JPA (Hibernate native bootstrap, no Spring Data), same shape as every other adapter
+in this module. `./mvnw -B -pl storage/persistence test` green, **260 tests total in the module — up
+from 237 before this wave** (Maven's own summary line; do not sum `target/surefire-reports/*.xml`,
+see storage/persistence MODULE.md Gotchas). Docker ran (not skipped) — `postgres:16` via Testcontainers.
+`contexts/vision-learning`/`contexts/vision-perception` were briefly red mid-wave from W2's/W4-app's own
+concurrent in-flight edits (unrelated to this wave's files); both cleared before the final run above.
+Build note for whoever runs this module next while a sibling wave is still in flight: use
+`./mvnw -B -pl <context modules> install -Dmaven.test.skip=true` (not `-DskipTests`, which still runs
+`testCompile` and will fail on a concurrent agent's mid-edit test file) before `./mvnw -B -pl
+storage/persistence test` (no `-am`).
+
+**Adapter beans W5 needs to wire** (constructor is `(EntityManagerFactory)` for all three, matching
+every other `Jpa*Repository` in this module):
+```java
+new JpaCvProfileRepository(entityManagerFactory)   // implements CvProfileRepositoryPort (W1)
+new JpaCvModelRepository(entityManagerFactory)     // implements CvModelRepositoryPort (W4-domain)
+new JpaTrainingRunRepository(entityManagerFactory) // implements TrainingRunRepositoryPort (W4-domain)
+```
+`TrainingRunStores(trainingRunRepositoryPort, cvModelRepositoryPort)` (W4-app's bundle record) takes
+the latter two directly — no adapter-side wrapper needed.
+
+**The four seeded built-in `CvProfile` ids** (`V29`, fixed across every deployment — useful for a UI
+default/test fixture that needs to reference one without a lookup):
+| Name | id | model | confidence | fps | detectionEnabled |
+|---|---|---|---|---|---|
+| `people-vehicles` | `f8fb1ff5-2dd8-4cb6-b0f1-5a5f4c5c056f` | `yolo26n.pt`/`latest` | 0.40 | 10 | true |
+| `wide-search` | `a42e5d7c-b977-4099-980c-b14e94518e6a` | `yoloe-26s-seg-pf.pt`/`latest` | 0.30 | 4 | true |
+| `military-vehicles` | `0ca952cf-284a-4a33-b04c-0c9da6a64602` | `orion12l.pt`/`latest` | 0.45 | 5 | true |
+| `video-only` | `5e0cd997-743f-4867-82c7-e2be176c23ad` | `yolo26n.pt`/`latest` | 0.40 | 10 | false |
+
+All four ship `tracking`/`eventRule` byte-identical to `TrackingConfig.defaults()`/`EventRuleConfig.defaults()`,
+empty `labelFilter`/`labelDenyFilter`, `built_in=true`, `group_id=NULL`, and **zero bindings** (§3.1
+rule 3 — no feature flag). `video-only`'s model/confidence/fps are carried but unused by construction
+(`detectionEnabled=false`).
+
+**Deviations from CV-SETTINGS-PLAN.md §5.3's literal column list — both flagged in the migration files'
+own header comments too, flag here if you disagree:**
+1. **`cv_profiles.model_id`/`model_version` (two columns), not one `model` column.** `ModelRef`'s
+   compact constructor requires both `id` and `version` non-blank — a single string column could not
+   round-trip that without inventing an `"id@version"` encoding this schema uses nowhere else.
+   `CvProfileMapper` reassembles `new ModelRef(entity.getModelId(), entity.getModelVersion())`.
+2. **`cv_profiles.event_rule` (jsonb, `NOT NULL`) — a column §5.3's list omits entirely.** The domain
+   `CvProfile` carries an `EventRuleConfig` (W1's own record, H9's fix); without this column a profile
+   could not round-trip through `CvProfileRepositoryPort#save`/`#findById` at all. Whole-record jsonb,
+   same convention as `tracking`.
+3. **`cv_profiles`/`cv_profile_bindings`/`cv_models`/`cv_training_runs` all joined the audited set**
+   (not excluded) — `CvProfileRepositoryPort`/`CvModelRepositoryPort`/`TrainingRunRepositoryPort` are
+   all `canManageOrg`-or-`canAdminister`-gated admin config, the same "who changed X" character as
+   `control_profiles`/`datasets`, not machine-output telemetry. `cv_profile_bindings` is a plain join
+   table but joins the audited set anyway, matching `pilot_assignments`/`map_layer_grants`'s existing
+   precedent (a routing/security decision, not raw telemetry).
+4. **`ModelProvenance` decomposes into five flat, independently-nullable columns**
+   (`dataset_id`/`training_run_id`/`base_model`/`epochs`/`trained_at`) rather than one nested jsonb
+   object — this was W4-domain's own instruction to W3 (see "For W3" note under W4-domain's handoff
+   above), followed as specified. `metrics` (the whole `ModelMetrics` record) stayed one nullable jsonb
+   column, also as specified — "no metrics yet" is a genuinely absent object, not several
+   independently-nullable fields.
+
+**Test count:** 260 tests total in `storage/persistence` (up from 237) — `CvProfileRepositoryTests` (11:
+findById empty, full round-trip incl. tracking/eventRule, upsert, findAll, findAllByGroup excludes
+built-ins+other groups, delete idempotent, binding round-trip/find-empty/upsert-by-scope/delete-idempotent,
+countBindingsFor across scope kinds), `CvModelRepositoryTests` (6: findByIdAndVersion empty, round-trip
+with/without metrics+provenance, upsert by composite key, findAll, findLive among a RETIRED row),
+`TrainingRunRepositoryTests` (4: findById empty, round-trip, upsert-in-place, findAll(limit) newest-first),
+plus two top-level migration-verification tests (`v29MigrationSeedsFourBuiltInCvProfilesWithZeroBindings`
+reads all four seeded rows back through the real adapter and asserts `tracking`/`eventRule` decode
+byte-identical to the domain defaults, `v30MigrationCreatesTheCvModelRegistryTablesOnTopOfV1ThroughV29`
+proves the composite PK and every nullable column via `information_schema`).
 
 ### W4-app → W5
 

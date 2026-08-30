@@ -28,6 +28,11 @@ import com.drones.vision.kernel.Capability;
 import com.drones.vision.map.domain.model.CameraPose;
 import com.drones.vision.map.domain.model.CameraPoseSource;
 import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.learning.domain.model.CvModelRecord;
+import com.drones.vision.perception.domain.model.CvProfile;
+import com.drones.vision.perception.domain.model.CvProfileBinding;
+import com.drones.vision.perception.domain.model.CvProfileId;
+import com.drones.vision.perception.domain.model.BindingScope;
 import com.drones.vision.learning.domain.model.Dataset;
 import com.drones.vision.learning.domain.model.DatasetId;
 import com.drones.vision.learning.domain.model.DatasetStatus;
@@ -72,6 +77,17 @@ import com.drones.vision.identity.domain.model.Membership;
 import com.drones.vision.flight.domain.model.MessageObservation;
 import com.drones.vision.flight.domain.model.TrackCorrection;
 import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.perception.domain.model.TrackingConfig;
+import com.drones.vision.perception.domain.model.EventRuleConfig;
+import com.drones.vision.learning.domain.model.ModelStatus;
+import com.drones.vision.learning.domain.model.ModelTaskType;
+import com.drones.vision.learning.domain.model.ModelRuntime;
+import com.drones.vision.learning.domain.model.ModelMetrics;
+import com.drones.vision.learning.domain.model.ModelProvenance;
+import com.drones.vision.learning.domain.model.MetricsKind;
+import com.drones.vision.learning.domain.model.JobState;
+import com.drones.vision.learning.domain.model.TrainingRunId;
+import com.drones.vision.learning.domain.model.TrainingRunRecord;
 import com.drones.vision.flight.domain.model.ParameterReading;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.platform.AuditAction;
@@ -111,6 +127,9 @@ import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import com.drones.vision.map.domain.port.CameraPoseRepositoryPort;
 import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
 import com.drones.vision.learning.domain.port.DatasetRepositoryPort;
+import com.drones.vision.perception.domain.port.CvProfileRepositoryPort;
+import com.drones.vision.learning.domain.port.CvModelRepositoryPort;
+import com.drones.vision.learning.domain.port.TrainingRunRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
@@ -141,6 +160,9 @@ import com.drones.vision.adapter.persistence.repository.JpaAssignmentRepository;
 import com.drones.vision.adapter.persistence.repository.JpaAuditTrail;
 import com.drones.vision.adapter.persistence.repository.JpaCameraPoseRepository;
 import com.drones.vision.adapter.persistence.repository.JpaCategoryRepository;
+import com.drones.vision.adapter.persistence.repository.JpaCvModelRepository;
+import com.drones.vision.adapter.persistence.repository.JpaCvProfileRepository;
+import com.drones.vision.adapter.persistence.repository.JpaTrainingRunRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDatasetRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDbAuditLogRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDetectionEventRepository;
@@ -255,14 +277,24 @@ class PostgresDockerIntegrationTest {
      * does to an aircraft, which is control-plane configuration by any reading), and {@code
      * maintenance_records}/{@code asset_notes} added by {@code V28__asset_inventory.sql}
      * (docs/plans/active/WAREHOUSE-UX-PLAN.md D7 — grounding/inspection history and crew notes are
-     * operator-authored, low-volume, accountability-relevant records, not machine-output telemetry).
+     * operator-authored, low-volume, accountability-relevant records, not machine-output telemetry),
+     * and {@code cv_profiles}/{@code cv_profile_bindings}/{@code cv_models}/{@code cv_training_runs}
+     * added by {@code V29__cv_profiles.sql}/{@code V30__cv_model_registry.sql}
+     * (docs/plans/active/CV-SETTINGS-PLAN.md, CV-SETTINGS wave W3) — canManageOrg/canAdminister-gated
+     * catalogue and profile governance is the same control-plane accountability character as {@code
+     * control_profiles}/{@code datasets}; {@code cv_profile_bindings} is a join table classified the
+     * same way {@code pilot_assignments}/{@code map_layer_grants} already are (a routing/security
+     * decision, not bulk collection data); {@code cv_training_runs} updates more often than most
+     * audited tables (roughly once per epoch) but at a training-job's bounded volume, not the
+     * per-frame/per-sample character of the excluded set below — see that migration's own header.
      */
     private static final Set<String> AUDITED_TABLES = Set.of(
             "categories", "devices", "device_capabilities", "assets", "asset_devices",
             "asset_usages", "geofence_zones", "groups", "users", "pilot_assignments",
             "marks", "datasets", "map_layers", "map_layer_grants", "map_drawings",
             "vehicle_profiles", "feature_requirements", "camera_poses", "control_profiles",
-            "maintenance_records", "asset_notes");
+            "maintenance_records", "asset_notes", "cv_profiles", "cv_profile_bindings",
+            "cv_models", "cv_training_runs");
 
     /**
      * Every other base table in the schema as of V22 — high-volume append-only event tables, the
@@ -3797,6 +3829,324 @@ class PostgresDockerIntegrationTest {
     }
 
     /**
+     * docs/plans/active/CV-SETTINGS-PLAN.md §5.3, CV-SETTINGS wave W3 — {@link CvProfileRepositoryPort}
+     * round trips, including the {@code tracking}/{@code eventRule} jsonb columns and the composite
+     * {@code (scopeKind, scopeId)} binding key. {@link #v29MigrationSeedsFourBuiltInCvProfilesWithZeroBindings}
+     * separately proves the migration's own hand-written seed JSON decodes correctly; every test
+     * here instead exercises a save written and read back through this same adapter, which is
+     * self-consistent regardless of the exact jsonb wire format Hibernate's Jackson mapper chooses.
+     */
+    @Nested
+    class CvProfileRepositoryTests {
+
+        private final CvProfileRepositoryPort repository = new JpaCvProfileRepository(entityManagerFactory);
+
+        private CvProfile profile(CvProfileId id, GroupId groupId) {
+            return new CvProfile(id, "mast-cams", "Fixed masts, low rate", false, groupId,
+                    new ModelRef("yolo26n.pt", "latest"), 0.35, 2, List.of("person"), List.of("tree"), true,
+                    TrackingConfig.defaults(), EventRuleConfig.defaults(), NOW, NOW);
+        }
+
+        @Test
+        void findByIdReturnsEmptyForUnknownProfile() {
+            assertTrue(repository.findById(CvProfileId.random()).isEmpty());
+        }
+
+        @Test
+        void savedProfileRoundTripsEveryFieldIncludingTrackingAndEventRule() {
+            CvProfile profile = profile(CvProfileId.random(), GroupId.random());
+
+            repository.save(profile);
+
+            CvProfile found = repository.findById(profile.id()).orElseThrow();
+            assertEquals(profile, found);
+            assertEquals(TrackingConfig.defaults(), found.tracking());
+            assertEquals(EventRuleConfig.defaults(), found.eventRule());
+        }
+
+        @Test
+        void saveIsAnUpsertPreservingId() {
+            CvProfileId id = CvProfileId.random();
+            GroupId groupId = GroupId.random();
+            repository.save(profile(id, groupId));
+
+            CvProfile renamed = new CvProfile(id, "renamed", "still the same profile", false, groupId,
+                    new ModelRef("yolo11n.pt", "latest"), 0.5, 5, List.of(), List.of(), false,
+                    TrackingConfig.off(), EventRuleConfig.defaults(), NOW, NOW.plusSeconds(60));
+            repository.save(renamed);
+
+            CvProfile found = repository.findById(id).orElseThrow();
+            assertEquals("renamed", found.name());
+            assertEquals(TrackingConfig.off(), found.tracking());
+            assertEquals(1, repository.findAllByGroup(groupId).size());
+        }
+
+        @Test
+        void findAllReturnsEverySavedProfile() {
+            CvProfile first = profile(CvProfileId.random(), GroupId.random());
+            CvProfile second = profile(CvProfileId.random(), GroupId.random());
+            repository.save(first);
+            repository.save(second);
+
+            List<CvProfile> all = repository.findAll();
+            assertTrue(all.contains(first));
+            assertTrue(all.contains(second));
+        }
+
+        @Test
+        void findAllByGroupExcludesBuiltInsAndOtherGroups() {
+            GroupId groupId = GroupId.random();
+            CvProfile owned = profile(CvProfileId.random(), groupId);
+            CvProfile otherGroup = profile(CvProfileId.random(), GroupId.random());
+            CvProfile builtIn = new CvProfile(CvProfileId.random(), "built-in-test", "seeded template", true, null,
+                    new ModelRef("yolo26n.pt", "latest"), 0.4, 10, List.of(), List.of(), true,
+                    TrackingConfig.defaults(), EventRuleConfig.defaults(), NOW, NOW);
+            repository.save(owned);
+            repository.save(otherGroup);
+            repository.save(builtIn);
+
+            assertEquals(List.of(owned), repository.findAllByGroup(groupId));
+        }
+
+        @Test
+        void deleteIsIdempotentAndRemovesTheProfile() {
+            CvProfile profile = profile(CvProfileId.random(), GroupId.random());
+            repository.save(profile);
+
+            repository.delete(profile.id());
+            assertTrue(repository.findById(profile.id()).isEmpty());
+
+            // second call on an already-absent id must not throw
+            repository.delete(profile.id());
+        }
+
+        @Test
+        void findBindingReturnsEmptyForAnUnboundScope() {
+            assertTrue(repository.findBinding(BindingScope.CATEGORY, "no-such-category").isEmpty());
+        }
+
+        @Test
+        void bindingRoundTripsAndIsFindableByScope() {
+            CvProfile profile = profile(CvProfileId.random(), GroupId.random());
+            repository.save(profile);
+            CvProfileBinding binding =
+                    new CvProfileBinding(BindingScope.ASSET, UUID.randomUUID().toString(), profile.id(), NOW);
+
+            repository.saveBinding(binding);
+
+            assertEquals(binding, repository.findBinding(BindingScope.ASSET, binding.scopeId()).orElseThrow());
+        }
+
+        @Test
+        void saveBindingUpsertsByScopeKindAndScopeId() {
+            CvProfile first = profile(CvProfileId.random(), GroupId.random());
+            CvProfile second = profile(CvProfileId.random(), GroupId.random());
+            repository.save(first);
+            repository.save(second);
+            String scopeId = "quadcopter-" + UUID.randomUUID();
+
+            repository.saveBinding(new CvProfileBinding(BindingScope.CATEGORY, scopeId, first.id(), NOW));
+            repository.saveBinding(new CvProfileBinding(BindingScope.CATEGORY, scopeId, second.id(), NOW));
+
+            CvProfileBinding found = repository.findBinding(BindingScope.CATEGORY, scopeId).orElseThrow();
+            assertEquals(second.id(), found.profileId());
+            assertEquals(1, repository.findAllBindings().stream()
+                    .filter(b -> b.scopeKind() == BindingScope.CATEGORY && b.scopeId().equals(scopeId))
+                    .count());
+        }
+
+        @Test
+        void deleteBindingIsIdempotent() {
+            CvProfile profile = profile(CvProfileId.random(), GroupId.random());
+            repository.save(profile);
+            String scopeId = UUID.randomUUID().toString();
+            repository.saveBinding(new CvProfileBinding(BindingScope.ASSET, scopeId, profile.id(), NOW));
+
+            repository.deleteBinding(BindingScope.ASSET, scopeId);
+            assertTrue(repository.findBinding(BindingScope.ASSET, scopeId).isEmpty());
+
+            // second call on an already-unbound scope must not throw
+            repository.deleteBinding(BindingScope.ASSET, scopeId);
+        }
+
+        @Test
+        void countBindingsForCountsAcrossEveryScopeKind() {
+            CvProfile profile = profile(CvProfileId.random(), GroupId.random());
+            repository.save(profile);
+            assertEquals(0, repository.countBindingsFor(profile.id()));
+
+            repository.saveBinding(
+                    new CvProfileBinding(BindingScope.ASSET, UUID.randomUUID().toString(), profile.id(), NOW));
+            repository.saveBinding(new CvProfileBinding(BindingScope.CATEGORY, "rover-" + UUID.randomUUID(),
+                    profile.id(), NOW));
+            repository.saveBinding(new CvProfileBinding(BindingScope.ORGANIZATION, UUID.randomUUID().toString(),
+                    profile.id(), NOW));
+
+            assertEquals(3, repository.countBindingsFor(profile.id()));
+        }
+    }
+
+    /**
+     * docs/plans/active/CV-SETTINGS-PLAN.md §3.2, §5.3, CV-SETTINGS wave W3 — {@link
+     * CvModelRepositoryPort} round trips, incl. the nullable {@code metrics} column and the five
+     * flat provenance columns.
+     */
+    @Nested
+    class CvModelRepositoryTests {
+
+        private final CvModelRepositoryPort repository = new JpaCvModelRepository(entityManagerFactory);
+
+        private CvModelRecord model(String modelId, String version, ModelStatus status) {
+            return new CvModelRecord(modelId, version, "People & vehicles", "general", false, List.of(),
+                    ModelTaskType.DETECT, ModelRuntime.PYTORCH, List.of("person", "car"), status, null,
+                    ModelProvenance.none(), null, null, NOW);
+        }
+
+        @Test
+        void findByIdAndVersionReturnsEmptyForUnknownRow() {
+            assertTrue(repository.findByIdAndVersion("no-such-model.pt", "latest").isEmpty());
+        }
+
+        @Test
+        void savedRowRoundTripsWithNoMetricsOrProvenance() {
+            CvModelRecord model = model("yolo26n.pt", "latest", ModelStatus.DRAFT);
+
+            repository.save(model);
+
+            CvModelRecord found = repository.findByIdAndVersion("yolo26n.pt", "latest").orElseThrow();
+            assertEquals(model, found);
+            assertNull(found.metrics());
+            assertEquals(ModelProvenance.none(), found.provenance());
+        }
+
+        @Test
+        void savedRowRoundTripsMetricsAndFullProvenance() {
+            UserId promotedBy = UserId.random();
+            CvModelRecord model = new CvModelRecord("mast-cams-dataset-50e.pt", "latest", "Fine-tuned buildings",
+                    "fine-tune", false, List.of("building"), ModelTaskType.DETECT, ModelRuntime.OPENVINO,
+                    List.of("building"), ModelStatus.CANDIDATE, new ModelMetrics(0.71, MetricsKind.TRAINING),
+                    new ModelProvenance(DatasetId.random(), TrainingRunId.random(), "yolo26n.pt", 50, NOW),
+                    promotedBy, NOW.plusSeconds(10), NOW);
+
+            repository.save(model);
+
+            assertEquals(model, repository.findByIdAndVersion(model.modelId(), model.version()).orElseThrow());
+        }
+
+        @Test
+        void saveIsAnUpsertByCompositeKey() {
+            CvModelRecord draft = model("cv-upsert-test.pt", "latest", ModelStatus.DRAFT);
+            repository.save(draft);
+
+            repository.save(draft.retire());
+
+            CvModelRecord found = repository.findByIdAndVersion("cv-upsert-test.pt", "latest").orElseThrow();
+            assertEquals(ModelStatus.RETIRED, found.status());
+            assertEquals(1, repository.findAll().stream()
+                    .filter(m -> m.modelId().equals("cv-upsert-test.pt") && m.version().equals("latest"))
+                    .count());
+        }
+
+        @Test
+        void findAllReturnsEveryRow() {
+            CvModelRecord first = model("cv-findall-a.pt", "latest", ModelStatus.DRAFT);
+            CvModelRecord second = model("cv-findall-b.pt", "latest", ModelStatus.DRAFT);
+            repository.save(first);
+            repository.save(second);
+
+            List<CvModelRecord> all = repository.findAll();
+            assertTrue(all.contains(first));
+            assertTrue(all.contains(second));
+        }
+
+        /**
+         * The only test in this class that promotes a row to {@link ModelStatus#LIVE} — every other
+         * status-changing test here uses {@link CvModelRecord#retire()} instead, so {@link
+         * #findLive()} has exactly one candidate row regardless of test execution order (this table
+         * is shared and not cleaned between tests, the same convention every other repository test
+         * class in this file follows).
+         */
+        @Test
+        void findLiveReturnsTheOneLiveRowAmongOthers() {
+            repository.save(model("cv-live-test-retired.pt", "latest", ModelStatus.RETIRED));
+            CvModelRecord live = model("cv-live-test-live.pt", "latest", ModelStatus.LIVE);
+            repository.save(live);
+
+            assertEquals(live, repository.findLive().orElseThrow());
+        }
+    }
+
+    /**
+     * docs/plans/active/CV-SETTINGS-PLAN.md §3.3, §5.3, CV-SETTINGS wave W3 — {@link
+     * TrainingRunRepositoryPort} round trips (fixes H7: "training metrics evaporate").
+     */
+    @Nested
+    class TrainingRunRepositoryTests {
+
+        private final TrainingRunRepositoryPort repository = new JpaTrainingRunRepository(entityManagerFactory);
+
+        private TrainingRunRecord run(TrainingRunId id, Instant startedAt, JobState state) {
+            return new TrainingRunRecord(id, DatasetId.random(), "yolo26n.pt", 50, state, 0, 0, 0.0, 0.0, null,
+                    UserId.random(), startedAt, null, "");
+        }
+
+        @Test
+        void findByIdReturnsEmptyForUnknownRun() {
+            assertTrue(repository.findById(TrainingRunId.random()).isEmpty());
+        }
+
+        @Test
+        void savedRunRoundTripsWithNoOutputModelOrFinishTime() {
+            TrainingRunRecord run = run(TrainingRunId.random(), NOW, JobState.RUNNING);
+
+            repository.save(run);
+
+            TrainingRunRecord found = repository.findById(run.runId()).orElseThrow();
+            assertEquals(run, found);
+            assertNull(found.outputModelId());
+            assertNull(found.finishedAt());
+        }
+
+        @Test
+        void saveIsAnUpsertPreservingRunId() {
+            TrainingRunId id = TrainingRunId.random();
+            TrainingRunRecord started = run(id, NOW, JobState.RUNNING);
+            repository.save(started);
+
+            TrainingRunRecord finished = new TrainingRunRecord(id, started.datasetId(), started.baseModel(),
+                    started.epochs(), JobState.SUCCEEDED, 50, 50, 0.02, 0.83, "yolo26n-50e.pt",
+                    started.startedBy(), started.startedAt(), NOW.plusSeconds(600), "done");
+            repository.save(finished);
+
+            TrainingRunRecord found = repository.findById(id).orElseThrow();
+            assertEquals(JobState.SUCCEEDED, found.state());
+            assertEquals("yolo26n-50e.pt", found.outputModelId());
+        }
+
+        /**
+         * Timestamps are offset well into the future ({@code NOW.plusSeconds(...)}) rather than
+         * around {@code NOW} itself — every other test in this class also writes rows stamped at or
+         * near {@code NOW}, and this table is shared and not cleaned between tests (same convention
+         * as every other repository test class here), so a tie at exactly {@code NOW} would make the
+         * "top two" assertion below depend on test execution order.
+         */
+        @Test
+        void findAllOrdersNewestFirstAndRespectsLimit() {
+            TrainingRunRecord oldest = run(TrainingRunId.random(), NOW.plusSeconds(1000), JobState.SUCCEEDED);
+            TrainingRunRecord middle = run(TrainingRunId.random(), NOW.plusSeconds(2000), JobState.SUCCEEDED);
+            TrainingRunRecord newest = run(TrainingRunId.random(), NOW.plusSeconds(3000), JobState.RUNNING);
+            repository.save(oldest);
+            repository.save(middle);
+            repository.save(newest);
+
+            List<TrainingRunRecord> latestTwo = repository.findAll(2);
+            assertEquals(2, latestTwo.size());
+            assertEquals(newest.runId(), latestTwo.get(0).runId());
+            assertEquals(middle.runId(), latestTwo.get(1).runId());
+        }
+    }
+
+    /**
      * docs/plans/done/SCALE-100-PLAN.md S3 -- proves the pool is real, not merely configured. Two
      * independent, mutually-reinforcing proofs: the {@link ConnectionProvider} Hibernate actually
      * runs against is {@link ClosingDatasourceConnectionProvider} (not the built-in unpooled
@@ -4162,6 +4512,109 @@ class PostgresDockerIntegrationTest {
                     .getSingleResult();
             assertEquals("NO", idColumn[0]);
             assertEquals("YES", idColumn[1], "id is database-generated, never supplied by the entity");
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * docs/plans/active/CV-SETTINGS-PLAN.md §3.1 rule 3, §3.4 (CV-SETTINGS wave W3) — proves {@code
+     * V29__cv_profiles.sql} seeded the four built-in profiles with fixed ids, {@code built_in=true}/
+     * {@code group_id=null}, and {@code tracking}/{@code event_rule} jsonb that decodes byte-identical
+     * to {@link TrackingConfig#defaults()}/{@link EventRuleConfig#defaults()} — read back through the
+     * real {@link JpaCvProfileRepository} adapter (not raw SQL), so this also proves the migration's
+     * hand-written seed JSON is actually compatible with Hibernate's Jackson 3 jsonb mapping, not just
+     * syntactically valid. "Zero bindings" (the no-feature-flag rule) is proven via {@link
+     * CvProfileRepositoryPort#countBindingsFor(CvProfileId)} rather than {@code findAllBindings()},
+     * since {@link CvProfileRepositoryTests} — sharing this same table — writes bindings of its own to
+     * *other* profile ids.
+     */
+    @Test
+    void v29MigrationSeedsFourBuiltInCvProfilesWithZeroBindings() {
+        CvProfileRepositoryPort repository = new JpaCvProfileRepository(entityManagerFactory);
+        record Seed(String id, String name, String modelId, double confidence, int fps, boolean detectionEnabled) {}
+        List<Seed> seeds = List.of(
+                new Seed("f8fb1ff5-2dd8-4cb6-b0f1-5a5f4c5c056f", "people-vehicles", "yolo26n.pt", 0.40, 10, true),
+                new Seed("a42e5d7c-b977-4099-980c-b14e94518e6a", "wide-search", "yoloe-26s-seg-pf.pt", 0.30, 4,
+                        true),
+                new Seed("0ca952cf-284a-4a33-b04c-0c9da6a64602", "military-vehicles", "orion12l.pt", 0.45, 5, true),
+                new Seed("5e0cd997-743f-4867-82c7-e2be176c23ad", "video-only", "yolo26n.pt", 0.40, 10, false));
+
+        for (Seed seed : seeds) {
+            CvProfile profile = repository.findById(CvProfileId.of(seed.id())).orElseThrow(
+                    () -> new AssertionError("missing seeded built-in profile: " + seed.name()));
+            assertEquals(seed.name(), profile.name());
+            assertTrue(profile.builtIn(), seed.name() + " must be built-in");
+            assertNull(profile.groupId(), seed.name() + " must have no owning group");
+            assertEquals(seed.modelId(), profile.model().id());
+            assertEquals("latest", profile.model().version());
+            assertEquals(seed.confidence(), profile.confidenceThreshold(), 0.0001);
+            assertEquals(seed.fps(), profile.inferenceFps());
+            assertEquals(seed.detectionEnabled(), profile.detectionEnabled());
+            assertEquals(List.of(), profile.labelFilter());
+            assertEquals(List.of(), profile.labelDenyFilter());
+            assertEquals(TrackingConfig.defaults(), profile.tracking(), seed.name() + " tracking must be the platform default");
+            assertEquals(EventRuleConfig.defaults(), profile.eventRule(), seed.name() + " eventRule must be the platform default");
+            assertEquals(0, repository.countBindingsFor(profile.id()), seed.name() + " must ship with zero bindings");
+        }
+    }
+
+    /**
+     * docs/plans/active/CV-SETTINGS-PLAN.md §3.2, §3.3, §5.3 (CV-SETTINGS wave W3, fixes H4/H7) —
+     * proves {@code V30__cv_model_registry.sql} applied cleanly on top of V1-V29: {@code cv_models}'
+     * primary key is the composite {@code (model_id, version)}, every {@link
+     * com.drones.vision.learning.domain.model.ModelProvenance} column plus {@code metrics} is
+     * nullable (a config-seeded model reports neither), and {@code cv_training_runs.run_id} is a
+     * simple, required primary key. Same "prove the migration, not the entity" split as the V22 test
+     * above.
+     */
+    @Test
+    void v30MigrationCreatesTheCvModelRegistryTablesOnTopOfV1ThroughV29() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            long pkColumns = ((Number) em.createNativeQuery(
+                            "select count(*) from information_schema.table_constraints tc "
+                                    + "join information_schema.key_column_usage kcu "
+                                    + "on tc.constraint_name = kcu.constraint_name "
+                                    + "where tc.table_name = 'cv_models' "
+                                    + "and tc.constraint_type = 'PRIMARY KEY'")
+                    .getSingleResult()).longValue();
+            assertEquals(2, pkColumns, "cv_models' primary key must be the composite (model_id, version)");
+
+            for (String nullableColumn : List.of(
+                    "metrics", "dataset_id", "training_run_id", "base_model", "epochs", "trained_at",
+                    "promoted_by", "promoted_at")) {
+                String isNullable = (String) em.createNativeQuery(
+                                "select is_nullable from information_schema.columns "
+                                        + "where table_name = 'cv_models' and column_name = '" + nullableColumn + "'")
+                        .getSingleResult();
+                assertEquals("YES", isNullable, "cv_models." + nullableColumn + " must be nullable");
+            }
+
+            String createdAtNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'cv_models' and column_name = 'created_at'")
+                    .getSingleResult();
+            assertEquals("NO", createdAtNullable, "cv_models.created_at is always known");
+
+            Object[] runIdColumn = (Object[]) em.createNativeQuery(
+                            "select is_nullable, data_type from information_schema.columns "
+                                    + "where table_name = 'cv_training_runs' and column_name = 'run_id'")
+                    .getSingleResult();
+            assertEquals("NO", runIdColumn[0], "cv_training_runs.run_id is the primary key");
+            assertEquals("uuid", runIdColumn[1]);
+
+            String outputModelNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'cv_training_runs' and column_name = 'output_model_id'")
+                    .getSingleResult();
+            assertEquals("YES", outputModelNullable, "output_model_id is null until/unless a run succeeds");
+
+            String finishedAtNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'cv_training_runs' and column_name = 'finished_at'")
+                    .getSingleResult();
+            assertEquals("YES", finishedAtNullable, "finished_at is null while a run is still RUNNING");
         } finally {
             em.close();
         }
