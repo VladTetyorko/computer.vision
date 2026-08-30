@@ -13,7 +13,7 @@ Spec: [CV-SETTINGS-PLAN.md](CV-SETTINGS-PLAN.md). Branch `feat/cv-settings`, cut
 |---|---|---|---|---|
 | W1 perception domain | domain-modeler | built, uncommitted | | `CvProfile`/`CvProfileId`/`BindingScope`/`CvProfileBinding`/`CvProfileRepositoryPort` + tests, `contexts/vision-perception` green (see Handoffs) |
 | W4 learning domain+app | domain-modeler → application-service | built, uncommitted | | Domain: `CvModelRecord`/`ModelStatus`/`ModelTaskType`/`ModelRuntime`/`ModelAvailability`/`ModelMetrics`/`MetricsKind`/`ModelProvenance`/`TrainingRunId`/`TrainingRunRecord` + `CvModelRepositoryPort`/`TrainingRunRepositoryPort`. App: `CvModelView`/`CvModelCatalog`/`CatalogSource`/`ConfigModelCatalog`/`PromotionResult`/`TrainingRunStores`; `ModelRegistryService`/`DefaultModelRegistryService` evolved (merge+promote+rollback, `RegisteredModel` deleted); `DefaultTrainingJobService` evolved (run persistence, CANDIDATE registration, `runs`/`run`, gate relaxed to `canManageOrg`). `contexts/vision-learning` green, 234 tests total (see Handoffs). **Nothing wired**: no adapter implements the two new ports (W3), and `vision-app`/`vision-api` still call the old constructors/types (W5). |
-| W2 | | pending W1 | | |
+| W2 perception application | application-service | built, uncommitted | | `application/profile/**` — `CvProfileService`/`DefaultCvProfileService`, `CvProfileResolver`, `CvProfileCache`, `CvProfileCacheSettings`, `EffectiveProfile`, `CoverageRow`, `CvProfileSpec`, `ProfileSource`; `DefaultStreamService.start` now folds the resolver in (new 8th ctor param `CvProfileResolver`). `contexts/vision-perception` green, 641 tests total, up from 605 (see Handoffs). **Nothing wired in `vision-app` yet** — no `CvProfileRepositoryPort`/`CvProfileCache`/`CvProfileResolver` bean exists, and `DefaultStreamService`'s 7-arg construction site there will not compile until W5 adds one and passes it through. |
 | W3 persistence | spring-integrator | built, uncommitted | | `V29__cv_profiles.sql`/`V30__cv_model_registry.sql` + `JpaCvProfileRepository`/`JpaCvModelRepository`/`JpaTrainingRunRepository` implementing W1's/W4-domain's ports; `storage/persistence` green, 260 tests total, up from 237 (see Handoffs) |
 | W5 | | pending W2+W4 | | |
 | W6 | web-ui | built, uncommitted | | `/vision/profiles` page (list/editor/bindings/coverage) + `CvProfile*`/`EffectiveCvProfile`/`CvCoverage*`/`TrainingRun*` TS types + 8 new `VisionApi` methods; `detection-settings.*` deleted, `/settings/detection` redirects; nav rail gained Profiles (see Handoffs) |
@@ -100,6 +100,158 @@ be useful for anything.
 
 **Test count:** 34 new tests (`CvProfileIdTest` 6, `CvProfileBindingTest` 5, `CvProfileTest` 23),
 module total 605 (all green).
+
+### W2 → W5
+
+Built in `contexts/vision-perception/src/main/java/com/drones/vision/perception/application/profile/`
+(new package) plus the minimal necessary change to `application/stream/DefaultStreamService.java`/
+`StreamService.java`. Framework-free, `./mvnw -B -pl contexts/vision-perception test` green (**641
+tests total in the module, up from 605** — +22 `DefaultCvProfileServiceTest`, +6 `CvProfileCacheTest`,
++5 `CvProfileResolverTest`, +3 new tests appended to the existing `DefaultStreamServiceTest`; the two
+pre-existing `DefaultStreamService*Test` files needed only a mechanical 8th-constructor-arg patch —
+every pre-existing assertion is byte-identical, confirmed because `assetDirectory.findByDevice`
+is never stubbed in their `setUp()`, so Mockito's default `Optional.empty()` skips profile resolution
+entirely for every test that doesn't opt in).
+
+**New/changed signatures**
+```java
+// application.profile — new package
+
+public enum ProfileSource { ASSET, CATEGORY, ORGANIZATION, PLATFORM }
+
+public record EffectiveProfile(AssetId assetId, CvProfileId profileId, String profileName,
+    ProfileSource source, PipelineConfig config) {
+    // profileId/profileName non-null iff source != PLATFORM (compact ctor enforces both directions)
+}
+
+public record CoverageRow(AssetId assetId, String name, CategoryId categoryId, CvProfileId profileId,
+    String profileName, ProfileSource source, boolean detectionEnabled, ModelRef model,
+    List<String> labelFilter, List<String> labelDenyFilter) {}
+
+public record CvProfileSpec(String name, String description, ModelRef model,
+    double confidenceThreshold, int inferenceFps, List<String> labelFilter,
+    List<String> labelDenyFilter, boolean detectionEnabled, TrackingConfig tracking,
+    EventRuleConfig eventRule) {} // create/update input; every CvProfile field but id/builtIn/groupId/timestamps
+
+public record CvProfileCacheSettings(Duration ttl) {} // positive; vision.cv.profiles.cache-ttl default 60s is W5's job
+
+public final class CvProfileCache {
+    public CvProfileCache(CvProfileRepositoryPort repository, CvProfileCacheSettings settings);
+    public Snapshot snapshot();                              // TTL-lazy reload; own writes are always fresh, never waits on TTL
+    public CvProfile save(CvProfile profile);                // write-through: repository.save then reload
+    public void delete(CvProfileId id);                      // write-through
+    public CvProfileBinding saveBinding(CvProfileBinding b); // write-through
+    public void deleteBinding(BindingScope scopeKind, String scopeId); // write-through
+    public int countBindingsFor(CvProfileId profileId);      // NEVER cached -- live pass-through, the 409 check needs it fresh
+    public record Snapshot(List<CvProfile> profiles, List<CvProfileBinding> bindings, Instant loadedAt) {
+        public Optional<CvProfile> findById(CvProfileId id);
+        public Optional<CvProfileBinding> findBinding(BindingScope scopeKind, String scopeId);
+    }
+}
+
+public final class CvProfileResolver {
+    public CvProfileResolver(CvProfileCache cache);
+    public EffectiveProfile resolve(AssetId assetId, CategoryId categoryId, GroupId groupId,
+                                     PipelineConfig platformDefault);
+    // asset binding -> category binding -> organization binding -> platform default, first match wins;
+    // no match returns platformDefault unchanged, the SAME instance (source=PLATFORM, profileId/Name=null)
+}
+
+public interface CvProfileService {
+    List<CvProfile> list(UserId actor, VisibilityScope scope);                       // never throws; built-ins always visible
+    CvProfile get(CvProfileId id, UserId actor, VisibilityScope scope);              // 404 unknown/out-of-scope non-built-in
+    CvProfile create(CvProfileSpec spec, GroupId groupId, UserId actor, VisibilityScope scope); // 403 !canManageOrg
+    CvProfile update(CvProfileId id, CvProfileSpec spec, UserId actor, VisibilityScope scope);  // 404/403/409 built-in
+    void delete(CvProfileId id, UserId actor, VisibilityScope scope);                // 404/403/409 built-in or still-bound
+    CvProfile fork(CvProfileId builtInId, String newName, GroupId groupId, UserId actor, VisibilityScope scope); // 404/403/400 not-built-in
+    CvProfileBinding bind(BindingScope scopeKind, String scopeId, CvProfileId profileId, UserId actor, VisibilityScope scope); // 404/403/400 bad scopeId
+    void unbind(BindingScope scopeKind, String scopeId, UserId actor, VisibilityScope scope); // idempotent; 403/400
+    EffectiveProfile effective(AssetId assetId, PipelineConfig platformDefault, UserId actor, VisibilityScope scope); // 404
+    List<CoverageRow> coverage(PipelineConfig platformDefault, UserId actor, VisibilityScope scope);
+}
+// DefaultCvProfileService(CvProfileCache, CvProfileResolver, AssetService, AuditTrailPort) -- one public ctor
+
+// application.stream -- changed
+
+// DefaultStreamService gained an 8th, required constructor parameter:
+public DefaultStreamService(AssetDirectoryService, VideoSourceRegistry, DetectionPort, StreamPublisherPort,
+    DetectionRepositoryPort, EventPublisherPort, DefaultStreamServiceSettings,
+    CvProfileResolver cvProfileResolver); // NEW
+```
+
+**How `start()` now uses the resolver**: before the existing tracking fold, `requestedConfig` is
+itself folded against the device's owning asset's bound `CvProfile` (`assetDirectory.findByDevice`
+→ `CvProfileResolver#resolve(asset.id(), asset.category(), asset.ownership().groupId(),
+requestedConfig)`, using `requestedConfig` itself as the platform-default fallback) — a device with
+no owning asset skips resolution and uses `requestedConfig` unchanged, and an unbound asset also
+folds to `requestedConfig` unchanged (`PipelineConfig.defaults()` byte-identical per the "no feature
+flag" decision above). Resolved exactly once per `start()` call, never re-resolved for the stream's
+life.
+
+**Exception → HTTP mapping intended (all already generic in `ApiExceptionHandler` today — no new
+exception type was added this wave):**
+| Thrown by | Exception | Meaning | Suggested HTTP |
+|---|---|---|---|
+| `create`/`update`/`delete`/`fork`/`bind`/`unbind` | `AccessDeniedException` | scope lacks `canManageOrg()` | 403 |
+| `get`/`effective` | `NoSuchElementException` | unknown id, or non-built-in outside scope | 404 |
+| `update`/`delete` | `IllegalStateException` | profile is built-in | 409 |
+| `delete` | `IllegalStateException` | profile still bound (`countBindingsFor > 0`) | 409 |
+| `fork` | `NoSuchElementException` | unknown `builtInId` | 404 |
+| `fork` | `IllegalArgumentException` | source profile is not built-in, or blank `newName` | 400 |
+| `bind`/`unbind` | `IllegalArgumentException` | `scopeId` doesn't parse for `scopeKind` | 400 |
+| `bind` | `NoSuchElementException` | unknown `profileId` | 404 |
+
+**Deviations / judgment calls made where the task brief left a gap — flag if you disagree:**
+1. **`AuditTargetType` has no `CV_PROFILE` constant** (`core/vision-platform`, out of this wave's write
+   scope) — every audit entry `DefaultCvProfileService` writes reuses `AuditTargetType.MODEL`,
+   documented in the class javadoc, mirroring `DefaultModelRegistryService`'s own precedent for
+   reusing `AuditAction.UPDATED` when no dedicated action exists. A future `vision-platform` wave
+   adding a real constant is a one-enum-value change plus swapping this one reference; not urgent.
+2. **`effective`/`coverage` take `PipelineConfig platformDefault` as an explicit method parameter, not
+   a wire query param** — this module's application layer cannot read Spring `@ConfigurationProperties`
+   (no framework imports allowed). `GET /api/cv/profiles/effective?assetId=` and `GET /api/cv/coverage`
+   have no `platformDefault` param in the frozen §5.2 contract, and none is needed — **W5's controller
+   must assemble `platformDefault` server-side**, exactly the way `StreamDetectionSupport.defaultConfig()`
+   already assembles `requestedConfig` for `start()` today, then pass it through.
+3. **`DefaultStreamService#start`'s "explicit per-call override wins over a bound profile" is NOT fully
+   achieved end-to-end by this wave alone.** `requestedConfig` is a single, fully-resolved
+   `PipelineConfig`, unlike the patch-shaped `requestedTracking` — it carries no way to tell "the
+   caller explicitly asked for confidence=0.6" from "confidence=0.6 just happens to be today's
+   default." When a profile is bound, its fields replace `requestedConfig` wholesale (every field
+   except `maxInFlightInferences`, always host capacity). Two ways W5 could close this gap, neither
+   attempted here: (a) have the caller resolve `CvProfileService#effective` first and fold its own
+   explicit fields on top before calling `start` (this method's own resolution then becomes a
+   same-answer, defense-in-depth check, safe as long as nothing rebinds between the two calls), or
+   (b) a future wave changing `start`'s signature to accept a `PipelineConfigPatch` instead of a
+   fully-resolved `PipelineConfig`. Full detail in `DefaultStreamService#start`'s own javadoc.
+4. **`CvProfileService#fork` has no dedicated endpoint in the frozen §5.2 wire contract** — built
+   anyway because the W2 task brief asked for it explicitly as a service method (built-in profiles are
+   "not editable, forkable" per plan §3.4). W5 must decide: add `POST /api/cv/profiles/fork`, or have
+   the web client do a plain read-then-`POST /api/cv/profiles` copy and never call this method at all
+   (in which case `fork` stays reachable only from a future admin tool/test, not dead — still worth
+   keeping, since the built-in→group-owned copy semantics live here, not duplicated client-side).
+5. **`CvProfileCache` owns both reads and writes over `CvProfileRepositoryPort`, entirely** — chosen so
+   `DefaultCvProfileService`'s constructor stays at 4 real collaborators (`cache`, `resolver`,
+   `assetService`, `auditTrail`) rather than taking the raw repository port as a 5th, separate
+   parameter alongside the cache that wraps it. `CvProfileCache` is therefore the port's sole caller
+   today; W3's adapter never needs its own separate access path.
+6. **`bind`/`unbind`'s `scopeId` validation reuses each kernel id type's own parser purely for its
+   format check** (`AssetId.of`/`GroupId.of`/`new CategoryId(...)`), discarding the parsed value —
+   deliberately not resolving whether the id actually exists (an unknown-but-well-formed asset/category/
+   group id binds successfully; existence isn't this wave's concern and `AssetService` has no
+   `existsById`-style check to reuse without an extra read per bind).
+
+**Test count:** 36 new tests (`DefaultCvProfileServiceTest` 22, `CvProfileCacheTest` 6,
+`CvProfileResolverTest` 5, 3 new tests appended to `DefaultStreamServiceTest`), module total 641 (all
+green), up from 605 at the W1 checkpoint.
+
+**Exact out-of-module call site that will not compile until W5 fixes it:**
+`station/vision-app` — the Spring wiring class constructing `DefaultStreamService` (7-arg call site,
+one bean definition) needs a `CvProfileResolver` bean threaded through as the 8th argument. That bean
+in turn needs a `CvProfileRepositoryPort` implementation (W3's `JpaCvProfileRepository`, per the W3→W5
+handoff above) and a `CvProfileCacheSettings` (reading `vision.cv.profiles.cache-ttl`, default 60s, not
+yet defined in any `application.properties`). Not touched by this wave, per the task's explicit
+instruction to leave `station/**` alone.
 
 ### W4-domain → W4-app/W3/W5
 

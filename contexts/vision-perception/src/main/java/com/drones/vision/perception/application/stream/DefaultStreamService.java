@@ -1,9 +1,11 @@
 package com.drones.vision.perception.application.stream;
 
 import com.drones.vision.kernel.AssetId;
+import com.drones.vision.perception.application.profile.CvProfileResolver;
 import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.perception.domain.model.DetectionState;
+import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.platform.Event;
@@ -107,6 +109,13 @@ public final class DefaultStreamService implements StreamService {
     private final StreamPipelineSettings settings;
 
     /**
+     * The asset &rarr; category &rarr; organization &rarr; platform CV configuration fold
+     * (docs/plans/active/CV-SETTINGS-PLAN.md &sect;3.1), consulted once per {@link #start} — see that
+     * method's own javadoc for exactly how and its documented limitation.
+     */
+    private final CvProfileResolver cvProfileResolver;
+
+    /**
      * Deployment-wide pull-mode wiring (docs/plans/done/MEDIA-SOT-PLAN.md wave M5, switch B) — {@code null}
      * (every constructor but the 12-argument one) means every stream this service starts uses push
      * detection, exactly as before this capability existed. Non-null switches every stream this
@@ -174,12 +183,15 @@ public final class DefaultStreamService implements StreamService {
      * DeviceRepositoryPort} this class used to hold directly
      * (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R5) — see {@link AssetDirectoryService}'s
      * own javadoc for why this reads the narrower directory seam rather than warehouse's {@code
-     * DeviceService}.
+     * DeviceService}. {@code cvProfileResolver} is a required, non-optional collaborator (unlike
+     * everything bundled into {@code serviceSettings}) — added directly per CLAUDE.md rule 10 /
+     * java-clean-code &sect;3 ("a new collaborator means updating the call sites... never one more
+     * constructor overload"), not folded into {@code serviceSettings} since it is never "off."
      */
     public DefaultStreamService(AssetDirectoryService assetDirectory, VideoSourceRegistry videoSourceRegistry,
                                  DetectionPort detectionPort, StreamPublisherPort streamPublisherPort,
                                  DetectionRepositoryPort detectionRepositoryPort, EventPublisherPort eventPublisher,
-                                 DefaultStreamServiceSettings serviceSettings) {
+                                 DefaultStreamServiceSettings serviceSettings, CvProfileResolver cvProfileResolver) {
         this.assetDirectory = Objects.requireNonNull(assetDirectory, "assetDirectory must not be null");
         this.videoSourceRegistry = Objects.requireNonNull(videoSourceRegistry, "videoSourceRegistry must not be null");
         this.detectionPort = Objects.requireNonNull(detectionPort, "detectionPort must not be null");
@@ -187,6 +199,7 @@ public final class DefaultStreamService implements StreamService {
         this.detectionRepositoryPort =
                 Objects.requireNonNull(detectionRepositoryPort, "detectionRepositoryPort must not be null");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
+        this.cvProfileResolver = Objects.requireNonNull(cvProfileResolver, "cvProfileResolver must not be null");
         Objects.requireNonNull(serviceSettings, "serviceSettings must not be null");
         this.usageTracker = serviceSettings.usageTracker().orElse(null); // nullable: no-op usage tracking when absent
         this.detectionEventRepositoryPort =
@@ -217,6 +230,28 @@ public final class DefaultStreamService implements StreamService {
      * PipelineConfig#tracking()}, which is the domain's code default on every call site today. Doing
      * it here rather than at each REST edge is what makes the device, asset, simulation and
      * demo-fleet start paths seed identically.
+     *
+     * <h2>CV profile resolution (docs/plans/active/CV-SETTINGS-PLAN.md &sect;3.1)</h2>
+     * Before any of the above, {@code requestedConfig} is folded against the device's owning
+     * asset's bound {@code CvProfile} (asset &rarr; category &rarr; organization; no binding at any
+     * level leaves {@code requestedConfig} completely unchanged) via {@link #cvProfileResolver} —
+     * resolved exactly once, here, never re-resolved for this stream's life. A device with no
+     * owning asset (an unassigned device, or {@link AssetDirectoryService#findByDevice} returning
+     * empty) skips resolution entirely and uses {@code requestedConfig} as-is.
+     *
+     * <p><b>Known limitation</b> (docs/plans/active/CV-SETTINGS-CONTEXT.md, W2 &rarr; W5 handoff): {@code
+     * requestedConfig} is a single, fully-resolved {@link PipelineConfig} with no way to distinguish
+     * "the caller explicitly asked for this field" from "this field just happens to hold today's
+     * platform default" — unlike the patch-shaped {@code requestedTracking}. When a profile is
+     * bound, its fields therefore replace {@code requestedConfig}'s wholesale (every field except
+     * {@link PipelineConfig#maxInFlightInferences()}, always host capacity — see {@code
+     * CvProfile#toPipelineConfig}), so the plan's "an explicit per-call override still wins over a
+     * bound profile" is <b>not</b> fully honored end-to-end by this method alone. Achieving that
+     * requires either the caller resolving {@code CvProfileService#effective} first and folding its
+     * own explicit fields on top before calling this method (this method's own resolution then
+     * becomes a same-answer, defense-in-depth check, safe as long as nothing rebinds between the two
+     * calls), or a future wave changing this method's signature to accept a patch-shaped {@code
+     * PipelineConfigPatch} instead of a fully-resolved {@code PipelineConfig}.
      */
     @Override
     public StreamId start(DeviceId deviceId, PipelineConfig requestedConfig, TrackingConfigPatch requestedTracking) {
@@ -235,9 +270,15 @@ public final class DefaultStreamService implements StreamService {
             throw new IllegalStateException("Device already has an active stream: " + deviceId.value());
         }
 
+        Optional<Asset> owningAsset = assetDirectory.findByDevice(deviceId);
+        PipelineConfig baseConfig = owningAsset
+                .map(asset -> cvProfileResolver.resolve(asset.id(), asset.category(), asset.ownership().groupId(),
+                        requestedConfig).config())
+                .orElse(requestedConfig);
+
         AtomicLong lockSeq = new AtomicLong();
-        PipelineConfig config = withTracking(requestedConfig,
-                requestedTracking.foldOnto(settings.trackingSeed().foldOnto(requestedConfig.tracking(),
+        PipelineConfig config = withTracking(baseConfig,
+                requestedTracking.foldOnto(settings.trackingSeed().foldOnto(baseConfig.tracking(),
                         lockSeq::incrementAndGet), lockSeq::incrementAndGet));
 
         try {

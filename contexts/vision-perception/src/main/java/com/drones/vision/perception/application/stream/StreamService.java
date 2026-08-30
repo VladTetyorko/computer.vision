@@ -57,6 +57,10 @@ public interface StreamService {
      * and demo-fleet start paths all converge here, so the deployment default cannot come out
      * depending on which button an operator pressed.
      *
+     * <p>{@code config} is also folded against the device's owning asset's bound {@code CvProfile},
+     * if any (docs/plans/active/CV-SETTINGS-PLAN.md &sect;3.1) — see {@link DefaultStreamService#start}'s
+     * own javadoc for exactly how, and its documented limitation on per-call overrides.
+     *
      * @param deviceId the device to pull frames from
      * @param config   pipeline settings for this stream; its tracking component is the bottom layer
      *                 of the fold above
