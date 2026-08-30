@@ -59,6 +59,9 @@ export class RosterFacade {
   private readonly users = signal<readonly UserSummary[]>([]);
   private readonly pilotsByAsset = signal<ReadonlyMap<string, readonly AssignedPilot[]>>(new Map());
 
+  /** `userId → display name` — reused by {@link custodianLabel} below; the roster already loads every user for pilot-name resolution, so custody resolution rides the same map rather than a second fetch. */
+  private readonly nameById = computed(() => new Map(this.users().map((user) => [user.userId, user.displayName])));
+
   private readonly queryParamMap = toSignal(this.route.queryParamMap, {
     initialValue: this.route.snapshot.queryParamMap,
   });
@@ -177,6 +180,21 @@ export class RosterFacade {
       queryParamsHandling: 'merge',
       replaceUrl: true,
     });
+  }
+
+  /**
+   * The "By asset" pivot's custody column (WAREHOUSE-UX-PLAN.md §3.2 D3, wave W7) — "may fly"
+   * (`pilotNames` above) vs. "has it". `undefined` when the asset is in stock (no `custodianId`) or
+   * when `custody` itself hasn't been fetched yet (an older cached fixture, or a read that only
+   * carried the pre-W3 fields) — either way the row degrades to "In stock" rather than a fabricated
+   * name, never a blank.
+   */
+  custodianLabel(asset: AssetSummary): string | undefined {
+    const custodianId = asset.custody?.custodianId;
+    if (!custodianId) {
+      return undefined;
+    }
+    return this.nameById().get(custodianId) ?? custodianId.slice(0, 8);
   }
 
   /** Re-reads one asset's own pilots after `<vision-pilots-card>` reports a change — cheap, one call. */

@@ -23,6 +23,7 @@ import type {
   CreateGroupRequest,
   CreateDrawingRequest,
   CreateLayerRequest,
+  CreateMaintenanceRecordRequest,
   CreateMarkRequest,
   CreateUserRequest,
   CvModelsResponse,
@@ -46,8 +47,10 @@ import type {
   GeofenceZoneRequest,
   GeolocateMarkRequest,
   GroupSummary,
+  InventoryActionRequest,
   LabelAnnotationsRequest,
   LiveSubscription,
+  MaintenanceRecord,
   MapDrawingResponse,
   MapLayer,
   MapMark,
@@ -310,6 +313,45 @@ export class VisionApi {
    */
   createAsset(request: CreateAssetRequest): Promise<AssetDetails> {
     return firstValueFrom(this.http.post<AssetDetails>('/api/assets', request));
+  }
+
+  // --- Maintenance / inventory (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.2/§4 W7) ------------------
+  // No fleet-wide maintenance endpoint exists (WAREHOUSE-UX-CONTEXT.md W7 handoff) — a caller reads
+  // one asset's own record list at a time, same shape as `listAssetPilots` below.
+
+  /** One asset's maintenance history, open and closed, oldest-first (server order) — `404` unknown or out-of-scope asset. */
+  listAssetMaintenance(assetId: string): Promise<MaintenanceRecord[]> {
+    return firstValueFrom(
+      this.http.get<MaintenanceRecord[]>(`/api/assets/${encodeURIComponent(assetId)}/maintenance`),
+    );
+  }
+
+  /** Opens a record *without* grounding the asset — see {@link setAssetInventory}'s `GROUND` action for that. `canManage`-gated, `403` audited. */
+  createMaintenanceRecord(assetId: string, request: CreateMaintenanceRecordRequest): Promise<MaintenanceRecord> {
+    return firstValueFrom(
+      this.http.post<MaintenanceRecord>(`/api/assets/${encodeURIComponent(assetId)}/maintenance`, request),
+    );
+  }
+
+  /** Closes one open record (idempotent on an already-closed one is not guaranteed — callers only ever close a record they can see is still open). `canManage`-gated. */
+  closeMaintenanceRecord(assetId: string, recordId: string): Promise<MaintenanceRecord> {
+    return firstValueFrom(
+      this.http.post<MaintenanceRecord>(
+        `/api/assets/${encodeURIComponent(assetId)}/maintenance/${encodeURIComponent(recordId)}/close`,
+        {},
+      ),
+    );
+  }
+
+  /**
+   * `GROUND` (opens a blocking-capable record and sets `inventoryState` to `MAINTENANCE` in one
+   * call — `kind`/`summary` required), `RELEASE` (returns to `IN_STOCK`), or `RETIRE`. Returns the
+   * asset's full `AssetDetails`. `canManage`-gated, `403` audited.
+   */
+  setAssetInventory(assetId: string, request: InventoryActionRequest): Promise<AssetDetails> {
+    return firstValueFrom(
+      this.http.post<AssetDetails>(`/api/assets/${encodeURIComponent(assetId)}/inventory`, request),
+    );
   }
 
   usageTelemetry(usageId: string, limit = 200): Promise<TelemetrySample[]> {

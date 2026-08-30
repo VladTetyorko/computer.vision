@@ -129,7 +129,7 @@ describe('app.routes — every URL in the F4 route table resolves (no dead link)
       { path: 'monitor/alerts', className: 'AlertsPage' },
       { path: 'manage/categories', className: 'CategoriesPage' },
       { path: 'manage/reports', className: 'ReportsPage' },
-      { path: 'manage/roster', className: 'RosterPage' },
+      { path: 'manage/roster', className: 'CrewPage' },
     ];
     for (const { path, className } of wave4) {
       const route = findRouteByPath(routes, path);

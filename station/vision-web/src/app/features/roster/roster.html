@@ -1,56 +1,67 @@
-<div class="page">
+<div [class.page]="!embedded()">
+  <!-- `[class.page]` not a bare class — `embedded()` mounts inside `CrewPage`'s own `.page`
+       (WAREHOUSE-UX-PLAN.md §4 W7); a second nested `.page` would double its 24/32/64px padding. -->
+  <!-- Shared by both header shapes below — see `roster.ts`'s own `embedded` doc comment. -->
+  <ng-template #rosterFiltersTpl>
+    @if (facade.hasAnyAssets()) {
+      <div class="segmented" role="tablist" aria-label="Roster view">
+        <button
+          type="button"
+          class="btn secondary small"
+          role="tab"
+          [class.active]="facade.pivot() === 'asset'"
+          [attr.aria-selected]="facade.pivot() === 'asset'"
+          (click)="facade.setPivot('asset')"
+        >
+          By asset
+        </button>
+        <button
+          type="button"
+          class="btn secondary small"
+          role="tab"
+          [class.active]="facade.pivot() === 'pilot'"
+          [attr.aria-selected]="facade.pivot() === 'pilot'"
+          (click)="facade.setPivot('pilot')"
+        >
+          By pilot
+        </button>
+      </div>
+
+      <input
+        type="search"
+        name="rosterSearch"
+        class="roster-search"
+        placeholder="Search assets or pilots…"
+        aria-label="Search assets or pilots"
+        [ngModel]="facade.searchQuery()"
+        (ngModelChange)="facade.searchQuery.set($event)"
+      />
+    }
+  </ng-template>
+
   <!-- docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2 (Wave 2, committed) / §2.4 (this wave): `page-head` stays
        gone. The `By asset | By pilot` pivot joins search in the bar's own `[pageBarFilters]` slot —
        the same projection idiom every other Wave 2/3 page uses, not a change to the bar component
        itself. The fleet-level gap indicator that used to live here moved into its own headline
        `.kpi-tiles` row below (docs/plans/done/OPS-UX-PLAN.md §3 B3) — see that block's own comment. -->
-  <vision-page-bar
-    title="Pilots / roster"
-    icon="pilot"
-    [count]="facade.rows().length"
-    countNoun="asset"
-    hint="Every asset's pilot assignments in one place — pick a row to assign or remove a pilot."
-  >
-    @if (facade.hasAnyAssets()) {
+  @if (!embedded()) {
+    <vision-page-bar
+      title="Pilots / roster"
+      icon="pilot"
+      [count]="facade.rows().length"
+      countNoun="asset"
+      hint="Every asset's pilot assignments in one place — pick a row to assign or remove a pilot."
+    >
       <!-- `<ng-container pageBarFilters>` carries the slot's own selector once, on one root node —
            an `@if` whose body has several root siblings can't otherwise be content-projected
            correctly (NG8011: the projector can't tell which sibling to match against the slot). -->
-      <ng-container pageBarFilters>
-        <div class="segmented" role="tablist" aria-label="Roster view">
-          <button
-            type="button"
-            class="btn secondary small"
-            role="tab"
-            [class.active]="facade.pivot() === 'asset'"
-            [attr.aria-selected]="facade.pivot() === 'asset'"
-            (click)="facade.setPivot('asset')"
-          >
-            By asset
-          </button>
-          <button
-            type="button"
-            class="btn secondary small"
-            role="tab"
-            [class.active]="facade.pivot() === 'pilot'"
-            [attr.aria-selected]="facade.pivot() === 'pilot'"
-            (click)="facade.setPivot('pilot')"
-          >
-            By pilot
-          </button>
-        </div>
-
-        <input
-          type="search"
-          name="rosterSearch"
-          class="roster-search"
-          placeholder="Search assets or pilots…"
-          aria-label="Search assets or pilots"
-          [ngModel]="facade.searchQuery()"
-          (ngModelChange)="facade.searchQuery.set($event)"
-        />
-      </ng-container>
-    }
-  </vision-page-bar>
+      <ng-container pageBarFilters><ng-container *ngTemplateOutlet="rosterFiltersTpl" /></ng-container>
+    </vision-page-bar>
+  } @else {
+    <div class="embedded-toolbar">
+      <ng-container *ngTemplateOutlet="rosterFiltersTpl" />
+    </div>
+  }
 
   <!-- docs/plans/done/OPS-UX-PLAN.md §3 B3: both roster gap questions as headline tiles, not a
        small page-bar chip only one of them had — "N assets have no pilot" (already computed;
@@ -111,6 +122,20 @@
                       } @else {
                         <span class="dot ok"></span>
                         <span class="truncate" [title]="row.pilotNames.join(', ')">{{ row.pilotNames.join(', ') }}</span>
+                      }
+                    </span>
+                    <!-- Custodian — "has it" — next to "may fly" above (WAREHOUSE-UX-PLAN.md §3.2 D3, this
+                         wave's own ask: keep it one quiet text, no new chip colour). Plain muted text,
+                         never a chip — this row's one chip budget (if it had one) is already spent by
+                         nothing here, and adding a second stateful chip would violate F5 regardless. -->
+                    <span
+                      class="muted roster-custodian truncate"
+                      [title]="facade.custodianLabel(row.asset) ?? 'In stock — nobody currently has it'"
+                    >
+                      @if (facade.custodianLabel(row.asset); as custodian) {
+                        Has: {{ custodian }}
+                      } @else {
+                        In stock
                       }
                     </span>
                   </button>

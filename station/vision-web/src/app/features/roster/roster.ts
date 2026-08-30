@@ -1,4 +1,5 @@
-import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, input } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { EmptyState } from '../../shared/ui/empty-state';
@@ -34,10 +35,17 @@ import { RosterFacade } from './roster-facade';
  * subtitle carries real instruction, so it stays a `hint`; the count chip and search live in the bar
  * as before, joined this wave by the pivot toggle (`[pageBarFilters]`) and a fleet-level gap
  * indicator next to it.
+ *
+ * **`embedded` (docs/plans/active/WAREHOUSE-UX-PLAN.md §4 wave W7).** `/manage/roster` now routes to
+ * `CrewPage` (`features/roster/crew.ts`), which mounts this component as its "Roster" tab —
+ * `embedded` true swaps the sticky `<vision-page-bar>` (title "Pilots / roster") for a plain
+ * `.embedded-toolbar` row carrying the identical pivot toggle + search, since `Crew`'s own bar
+ * already owns the page title/tab switcher directly above it. See `OrgSettingsPage`'s identical
+ * `embedded` doc comment for why a second stacked sticky bar would be redundant chrome.
  */
 @Component({
   selector: 'vision-roster',
-  imports: [FormsModule, RouterLink, PageBar, EmptyState, Stat, TwoPane, PilotsCard, PilotAssignmentsPanel],
+  imports: [FormsModule, RouterLink, NgTemplateOutlet, PageBar, EmptyState, Stat, TwoPane, PilotsCard, PilotAssignmentsPanel],
   templateUrl: './roster.html',
   styleUrl: './roster.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -45,6 +53,9 @@ import { RosterFacade } from './roster-facade';
 })
 export class RosterPage {
   protected readonly facade = inject(RosterFacade);
+
+  /** `true` when mounted inside `CrewPage` — see this class's own doc comment. */
+  readonly embedded = input(false);
 
   /**
    * The "By pilot" pivot's own row state text (docs/plans/done/VISUAL-REFRESH-PLAN.md F5 — dot + plain text,

@@ -22,7 +22,7 @@ Opened 2026-08-29 · Branch `feat/warehouse-ux` (cut from master `59b879a5`) · 
 | W4 inventory page | web-ui | ready (W1 + W3 both done) | |
 | W5 readiness ← maintenance | application-service | done | `445e145b` |
 | W6 wizard | web-ui | ready (W3 done) | |
-| W7 maintenance + crew | web-ui | ready (W3 done) | |
+| W7 maintenance + crew | web-ui | done | `<pending — see W7 status section>` |
 
 Shared tree: agents commit **by path**, never stash. Unrelated dirty files (`infra/rover-sim/**`, `core/rc/manual-control-client*`, `DefaultPeerDirectory.java`) belong to another session — do not touch.
 
@@ -401,3 +401,75 @@ All 6 new `AssetInventoryController`/`InventoryExportController` handlers, plus 
   validation into `DefaultAssetService#create` (D4 — the rule is now category-`connected`-dependent,
   which the DTO layer cannot evaluate on its own). Renamed to
   `createReturns400ForZeroDevicesInAConnectedCategory` and restubbed to match the real call path.
+
+## W7 status (Maintenance page + Crew tabs) — done
+
+Built against W3's contract above with no re-reads of `station/vision-api` source. File scope kept
+to `features/maintenance/**` (new), `features/roster/**`, `features/org-settings/**`,
+`core/maintenance/**` (new), plus this file and `station/vision-web/MODULE.md` — did not touch
+`app.routes.ts`, `nav-entries.ts`, `features/hubs/**`, `features/inventory|assets|devices|asset-detail/**`
+(W4), or `features/onboarding/**` (W6).
+
+**What shipped:**
+- `/fleet/maintenance` — `MaintenancePage`/`MaintenanceFacade`, registered in
+  `features/roster/roster.routes.ts` (not `hubs.routes.ts` — see the redirect handoff below). KPI
+  tiles (Grounded/Inspection due/In repair/Retired), a "Ground a vehicle" form
+  (`setAssetInventory({action:'GROUND', kind, summary})`), an open-records table (Close/Release per
+  row), a "Recently closed" history (last 20). Pure logic + spec:
+  `core/maintenance/maintenance-logic.ts`/`.spec.ts`.
+- `/manage/roster` is now **Crew** (`CrewPage`) — `?tab=roster|org` tabs, each mounting the
+  pre-existing `RosterPage`/`OrgSettingsPage` wholesale via a new `embedded` input (not copied).
+  `/org` is now a guard-only redirect (`org-to-crew-guard.ts`) to `/manage/roster?tab=org`. Roster's
+  "By asset" pivot rows show the asset's custodian next to the pilot-assignment dots (D3).
+- `core/api/models.ts`/`vision-api.ts` gained the client-side mirror of this section's own DTOs:
+  `InventoryState`, `AssetIdentity`, `AssetCustody` (on `AssetSummary`, optional in TS — see the
+  next paragraph), `MaintenanceKind`, `MaintenanceRecord`, `CreateMaintenanceRecordRequest`,
+  `InventoryAction`/`InventoryActionRequest`, and `VisionApi#listAssetMaintenance`/
+  `#createMaintenanceRecord`/`#closeMaintenanceRecord`/`#setAssetInventory`.
+
+**One deliberate deviation from a byte-exact DTO mirror:** the backend always sends
+`identity`/`custody`/`inventoryState` on `AssetSummaryResponse` (per this section's own wire
+contract above), but this wave declared the matching `AssetSummary` TS fields **optional**
+rather than required. A required field would have broken ~12 spec files outside this wave's file
+scope that build `AssetSummary` object literals without them (`asset({...})` test-fixture helpers
+across `features/**`). Marking them optional keeps every one of those fixtures compiling untouched;
+the real wire payload still always includes them, so nothing here changes runtime behavior — only
+what TypeScript can statically assume. Flagging in case a future wave wants to do the mechanical
+sweep of updating all ~12 fixtures and tightening the type back to required.
+
+**Handoff to W4 (nav/rail, `features/hubs/**`):** this wave's own exit criterion
+(WAREHOUSE-UX-PLAN.md §4 — "`/manage/health` route redirects to a real page") is not yet met.
+`features/hubs/hubs.routes.ts` still routes `manage/health` to the `ComingSoon` scaffold; that file
+is out of this wave's declared scope (owned by W4's nav/rail work), so the redirect to
+`/fleet/maintenance` needs to land there, not here. `features/hubs/nav-entries.ts` will also want a
+"Maintenance → /fleet/maintenance" entry in the Fleet group (per this plan's original task framing)
+once W4 lands — not added here for the same reason.
+
+**Handoff to W3 (`contexts/vision-warehouse`, `station/vision-api`):** there is still no fleet-wide
+maintenance-records endpoint. `MaintenancePage` builds its open/closed tables by calling
+`GET /api/assets/{id}/maintenance` once per asset currently in `MAINTENANCE` state (never for the
+full fleet) — correct today, but O(grounded assets) requests that a real `GET
+/api/maintenance?state=open` (or folding open/closed records into `GET /api/fleet/summary`) would
+replace with one call. Follow-up for whoever next touches `vision-warehouse`'s maintenance slice.
+
+**Not built, out of this wave's declared deliverables:** the crew-notes UI over
+`AssetNoteRepositoryPort` this section's own "Deferred" note above flags for W7 — nothing in this
+wave's task brief asked for it, and no `AssetNoteService`/`POST /api/assets/{id}/notes` endpoint
+exists yet to build against; still open for a future wave.
+
+**Verify:** `npx tsc --noEmit -p tsconfig.app.json`/`tsconfig.spec.json` — zero errors in any file
+this wave owns (`features/maintenance|roster|org-settings/**`, `core/maintenance/**`,
+`app.routes.spec.ts`), confirmed by grepping tsc's output for those paths. Both configs still fail
+on two other in-progress waves' own files, isolated by `git status` (both show as `M`/untracked
+outside this wave's staged paths): `features/inventory/inventory.routes.ts` (W4, `import('./inventory')`
+— the component file doesn't exist on disk yet, mid-refactor) and
+`features/reports/reports-logic.spec.ts` (a `CategoryCounts` fixture not yet updated for W4's own
+in-progress `inStock`/`issued`/`inField`/`maintenance`/`retired` fields on that same shared
+`models.ts`). `npm run test:ci` and `ng build --configuration production` both fail identically on
+`inventory.routes.ts`'s unresolved import (esbuild can't resolve the module at all, so this blocks
+the whole-project bundle, not just its own tests) — confirmed this is a whole-graph compile, not
+scoped to the failing files, in an earlier pass of this same wave
+(`ng test --watch=false --include='src/app/core/maintenance/**'` still surfaced the identical
+errors). Recommend W4 re-run `npm run test:ci`/`ng build` once `features/inventory/inventory.ts`
+lands, and this wave's own new `core/maintenance/maintenance-logic.spec.ts` (21 `it` cases,
+reviewed by hand — pure functions, no DI) be confirmed green in that run.
