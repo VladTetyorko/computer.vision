@@ -8,6 +8,7 @@ import {
   latencyLabel,
   modeAlsoOnHint,
   rcReadinessRows,
+  resolveSessionAffordance,
   sampleIsStale,
 } from './rc-monitor-logic';
 import type { ActionBinding, ManualControlChannelBinding, ReadinessReport } from '../../core/api/models';
@@ -271,5 +272,25 @@ describe('engageBlock', () => {
 
   it('renders nothing (never a fabricated warning) when no report has loaded yet, even with other gates clear', () => {
     expect(engageBlock(BASE, undefined)).toEqual({});
+  });
+});
+
+describe('resolveSessionAffordance', () => {
+  it('is none for an asset with no telemetry device — nothing this button could open', () => {
+    expect(resolveSessionAffordance(false, false, false)).toBe('none');
+    expect(resolveSessionAffordance(false, false, true)).toBe('none');
+  });
+
+  it('is none while a video stream is live, regardless of the operator-engaged fact — starting the stream already opened the usage', () => {
+    expect(resolveSessionAffordance(true, true, false)).toBe('none');
+    expect(resolveSessionAffordance(true, true, true)).toBe('none');
+  });
+
+  it('is engage for a telemetry-only asset with no open operator usage', () => {
+    expect(resolveSessionAffordance(true, false, false)).toBe('engage');
+  });
+
+  it('is end once the operator has an open usage and no stream is live', () => {
+    expect(resolveSessionAffordance(true, false, true)).toBe('end');
   });
 });

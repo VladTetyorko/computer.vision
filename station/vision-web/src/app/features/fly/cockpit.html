@@ -314,7 +314,13 @@
           [armed]="facade.telemetry.latest()?.flightState?.armed"
           [mode]="facade.telemetry.latest()?.flightState?.mode"
           [sampleAgeSeconds]="facade.telemetry.sampleAgeSeconds()"
+          [hasTelemetryDevice]="facade.hasTelemetryDevice()"
+          [live]="facade.live()"
+          [operatorEngaged]="facade.operatorEngaged()"
+          [sessionBusy]="facade.sessionBusy()"
           (close)="panels.close()"
+          (engageAssetLink)="facade.engageSession()"
+          (endAssetSession)="facade.endSession()"
         />
       }
 

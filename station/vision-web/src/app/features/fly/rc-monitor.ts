@@ -22,6 +22,7 @@ import {
   keyLegendLines,
   latencyLabel,
   modeAlsoOnHint,
+  resolveSessionAffordance,
   sampleIsStale,
   type EngageGateInput,
 } from './rc-monitor-logic';
@@ -122,6 +123,30 @@ export class RcMonitor implements OnInit {
    * the same signal source `armed`/`mode` above already read alongside. */
   readonly sampleAgeSeconds = input<number | undefined>(undefined);
   readonly close = output<void>();
+
+  // --- Asset session (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P4) -----------------
+  // A different verb pair from `engage()`/`release()` below, which is this drawer's own RC
+  // take-control gesture (`ManualControlClient`) — `AssetSessionController#engage`/`#disengage`
+  // instead open/close the `AssetUsage` itself, no stick input involved. See
+  // `resolveSessionAffordance`'s own doc comment (`rc-monitor-logic.ts`) for the full picture.
+
+  /** `CockpitFacade.hasTelemetryDevice` — whether an "Engage link"/"End session" affordance could
+   * ever apply to this asset at all. */
+  readonly hasTelemetryDevice = input<boolean>(false);
+  /** `CockpitFacade.live` — a running video stream already opens the same kind of usage. */
+  readonly live = input<boolean>(false);
+  /** `CockpitFacade.operatorEngaged` — read honestly off the polled `recentUsages`, never a local
+   * "I clicked it" flag (see that computed's own doc comment). */
+  readonly operatorEngaged = input<boolean>(false);
+  /** `CockpitFacade.sessionBusy` — disables the button for the life of the in-flight request, the
+   * same "no double-submit" posture `flight-command-panel.ts` already applies to its own commands. */
+  readonly sessionBusy = input<boolean>(false);
+  readonly engageAssetLink = output<void>();
+  readonly endAssetSession = output<void>();
+
+  protected readonly sessionAffordance = computed(() =>
+    resolveSessionAffordance(this.hasTelemetryDevice(), this.live(), this.operatorEngaged()),
+  );
 
   protected readonly latencyLabel = latencyLabel;
   /** Drives the mode chip's faint styling alongside the armed chip's own tone drop — see

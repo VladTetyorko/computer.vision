@@ -1114,9 +1114,22 @@ export interface TelemetrySample {
   readonly extra?: Record<string, number>;
 }
 
+/** Mirrors `AssetUsage#phase` (docs/plans/active/DRONE-ONBOARDING-PLAN.md O7) — which part of a
+ * flight this usage is in, `PREFLIGHT` until the aircraft first arms. */
+export type UsagePhase = 'PREFLIGHT' | 'IN_FLIGHT' | 'LINK_LOST' | 'POSTFLIGHT' | 'ABANDONED' | 'CLOSED';
+
+/** Mirrors `AssetUsage#origin` (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2, wave R2) —
+ * which verb opened this usage: a video stream starting, or the operator's own `engage` (`features/
+ * fly/rc-monitor-logic.ts#resolveSessionAffordance`, docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md
+ * §3 P4, is the first reader). */
+export type UsageOrigin = 'STREAM' | 'OPERATOR';
+
 /**
  * Mirrors `dto.AssetUsageResponse`, embedded in `AssetDetails#recentUsages`. `endedAt` absent
  * means the usage is still open — this is how the telemetry store finds the usage to poll.
+ * `phase`/`origin` are absent for a usage the domain never stamped one on (the DTO's own
+ * `@JsonInclude(NON_NULL)`), not a fabricated default — treat a missing `origin` as "unknown", never
+ * as `STREAM`.
  */
 export interface AssetUsage {
   readonly usageId: string;
@@ -1125,6 +1138,8 @@ export interface AssetUsage {
   readonly startPosition?: GeoPosition;
   readonly lastPosition?: GeoPosition;
   readonly sampleCount: number;
+  readonly phase?: UsagePhase;
+  readonly origin?: UsageOrigin;
 }
 
 /**

@@ -53,6 +53,19 @@
   margin: 0;
 }
 
+/* ---- Session link (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P4) — a quiet,
+   secondary-styled block, deliberately styled nothing like the Take-control footer below: this is
+   not a safety control. ---------------------------------------------------------------------- */
+.session-link {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.session-link .btn {
+  align-self: flex-start;
+}
+
 /* ---- Take control footer (decision U6) ------------------------------------------------------------ */
 
 .rc-footer {
