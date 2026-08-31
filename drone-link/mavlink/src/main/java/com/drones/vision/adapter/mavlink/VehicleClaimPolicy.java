@@ -121,6 +121,18 @@ final class VehicleClaimPolicy {
         }
     }
 
+    /**
+     * {@code true} once this policy holds no registrations at all — used by {@link
+     * MavlinkGateway#releaseLobby()} to decide whether the gateway itself should now close (a
+     * lobby-held gateway with zero devices closes exactly like an ordinary {@link #remove} that
+     * empties the registry would).
+     */
+    boolean isEmpty() {
+        synchronized (lock) {
+            return registrations.isEmpty();
+        }
+    }
+
     /** Vehicles heard on this gateway's socket that no registration currently claims (docs/plans/active/DRONE-INFRA-PLAN.md I-b). */
     List<MavlinkGateway.UnclaimedVehicle> unclaimedVehicles() {
         synchronized (lock) {

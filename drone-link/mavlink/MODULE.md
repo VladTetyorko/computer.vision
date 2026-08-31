@@ -46,12 +46,16 @@ merely "chose not to".
   `public Map<DeviceId, LinkHealth.Health> claimedVehicleHealth()` (**FLEET-RADIO R4/D4** — was
   `List<LinkHealth.Health>`; the one public accessor besides the port methods — `vision-app`'s
   `SystemStatusWiring` takes it as a method reference for `MavlinkLinkStatusProvider`, which now
-  aggregates per-vehicle instead of averaging a fleet-wide list). Package-private: `static bindKey(host, port)`, `bindKeyFor(Device)`,
+  aggregates per-vehicle instead of averaging a fleet-wide list). **(ZERO-CONFIG-ONBOARDING Z2b, new)**
+  `public void holdLobby(int port)` / `public void releaseLobby(int port)` — the claim-free standing
+  lobby (see its own Gotchas entry below). Package-private: `static bindKey(host, port)`, `bindKeyFor(Device)`,
   `hasActiveHub(bindKey)`, `unclaimedVehicles(bindKey)`, `claimedVehicles(bindKey)`,
   `commandTarget(bindKey, DeviceId)`, `gateway(bindKey)`. `StreamDescriptor.options["sysid"]`
   (lenient int 1–255) pins a device to one sysid; missing/invalid → unpinned. Constructors: `()`,
   `(MavlinkSettings)`; package-private `(long silenceWindowMillis)` test seam. One `MavlinkGateway`
-  per distinct bind address, reference-counted across every device sharing it.
+  per distinct bind address, reference-counted across every device sharing it — `holdLobby`/`releaseLobby`
+  share that same reference-counting via the identical `gateways.compute` path `open`/`close` use, always
+  at `DEFAULT_BIND_HOST` ("0.0.0.0").
 - `final class MavlinkGateway` (package-private) — one per bind address (`host:port`). Owns a
   `MavlinkLink` (production: a `UdpListenLink`, binds in its own constructor, throws `IOException`
   on conflict), a `MavlinkSession` built with `MavlinkNode.groundStation()` (sysid 255/compid 190), a
@@ -59,15 +63,19 @@ merely "chose not to".
   (only when `settings.onboarding().requestMessagesOnConnect()` is `true`). Demultiplexes every
   dispatched frame by sysid only (never source address — a companion computer relaying several
   vehicles is one physical source for all of them). `register(DeviceId, Integer pinnedSysid,
-  SubmissionPublisher<Telemetry>): VehicleRegistration`, `unregister(...): boolean` (true once
-  empty — caller evicts it), `isClosed()`, `unclaimedVehicles()`, `claimedVehicles()`,
+  SubmissionPublisher<Telemetry>): VehicleRegistration`, `unregister(...): boolean` (true once it has
+  actually closed the gateway — **since Z2b**, an empty claim policy alone is no longer sufficient; a
+  live lobby hold (`lobbyHeld.get()`) suppresses the close exactly like a live device registration
+  always has), `isClosed()`, `unclaimedVehicles()`, `claimedVehicles()`,
   `commandTarget(DeviceId)`, `sink()`/`correlator()`/`peers()` (session collaborators for a TX class
   to build a mavlink-core service on), `messageInventory()`, `Map<DeviceId, LinkHealth.Health>
   claimedVehicleHealth()` (**FLEET-RADIO R4/D4** — was `List<LinkHealth.Health>`; keyed by the
   claiming device, resolving each `ClaimedVehicle`'s `PeerId` and querying `session.health().of(...)`
   per vehicle rather than returning one undifferentiated list), `close()` (package-private —
   besides `unregister`, only `MavlinkVehicleConfigurator` calls it, for a self-bound probe gateway
-  it opened itself). Constructors: `(String bindHost, int port, MavlinkSettings)` (production,
+  it opened itself). **(ZERO-CONFIG-ONBOARDING Z2b, new)** `void holdLobby()` / `void releaseLobby()`
+  / `boolean isLobbyHeld()` — the claim-free hold and its GCS heartbeat TX (own Gotchas entry below).
+  Constructors: `(String bindHost, int port, MavlinkSettings)` (production,
   delegates to the one below via `new UdpListenLink(bindHost, port)`) and package-private
   `(MavlinkLink, MavlinkSettings)` — a **FLEET-RADIO R4 test seam** (java-clean-code §3's sanctioned
   single-seam exception): widening the field type from `UdpListenLink` to `MavlinkLink` cost nothing
@@ -87,8 +95,10 @@ merely "chose not to".
   `resolve(int sysid): VehicleRegistration` (called once per dispatched frame),
   `closeAllPublishersExceptionally(Throwable)` (**FLEET-RADIO R4/D5**, package-private — called only
   by `MavlinkGateway.handleLinkFailure`; closes every currently-registered device's
-  `SubmissionPublisher` via `closeExceptionally`, under the same lock `add`/`remove` use). One
-  private monitor.
+  `SubmissionPublisher` via `closeExceptionally`, under the same lock `add`/`remove` use),
+  `boolean isEmpty()` (**ZERO-CONFIG-ONBOARDING Z2b, new** — package-private, called only by
+  `MavlinkGateway.releaseLobby()`; `true` once no registration at all remains, under the same lock).
+  One private monitor.
 - `final class VehicleRegistration` (package-private) — mutable struct: `deviceId`, `pinnedSysid`,
   `publisher` (final), mutable `claimedSysid`/`decoder`. No accessors — two collaborators only,
   both in-package.
@@ -592,6 +602,68 @@ one `FlightState`-contributing row above has fired at least once.
   does not need to, because `DefaultManualControlService#engage` re-resolves both from a fresh link on
   every call.
 
+### ZERO-CONFIG-ONBOARDING Z2b Gotchas
+
+- **The lobby hold must never appear in `VehicleClaimPolicy.registrations` — it is a completely
+  separate `AtomicBoolean lobbyHeld` on `MavlinkGateway`, not a fake `Device`.** An unpinned
+  registration claims the first sysid heard (`VehicleClaimPolicy.claim`); if a lobby hold registered
+  one to keep itself alive, it would steal the claim from whichever real device is actually meant to
+  own that vehicle. `holdLobby()`/`releaseLobby()` touch only the gateway's own flag and (on release)
+  query `claimPolicy.isEmpty()` — they never call `register`/`unregister`.
+- **`unregister()`'s self-close condition is now `empty && !lobbyHeld.get()`, and `releaseLobby()`'s
+  is the mirror: clear the flag, then close only `if (claimPolicy.isEmpty())`.** These are two
+  independent multi-step operations racing on the same gateway with no shared lock beyond
+  `VehicleClaimPolicy`'s own monitor (for `remove`/`isEmpty`) and the `AtomicBoolean` CAS (for
+  `lobbyHeld`). Both orderings were checked by hand: whichever of the two operations *reads* the
+  other's just-written state sees it (the CAS and the synchronized query are each individually
+  sequentially consistent), so there is no interleaving where both operations observe "someone else
+  is still holding this open" and the gateway leaks open forever, nor one where both decide to close
+  while the other's caller still believes it has a live registration/hold.
+- **A genuine link failure closes the gateway unconditionally, lobby held or not.**
+  `MavlinkGateway.close()` always runs `stopLobbyHeartbeat()` first (idempotent — a no-op if no hold
+  is active), so `handleLinkFailure` → `close()` (FLEET-RADIO R4/F7's existing wiring, unchanged)
+  tears down the heartbeat scheduler exactly as it tears down every other collaborator, before
+  evicting the gateway from `MavlinkTelemetrySource`'s `gateways` map. `lobbyHeld` itself is **not**
+  cleared by `close()` — harmless, since a closed gateway is discarded, never reused; only
+  `isClosed()` is the contract callers actually rely on.
+- **Healing after close reuses `open(Device)`'s existing `compute` replace-when-closed logic — it was
+  not new code to write, only to route `holdLobby(int)` through.** Both `holdLobby(int)` and
+  `open(Device)` call the identical `gateways.compute(bindKey, (key, existing) -> existing == null ||
+  existing.isClosed() ? newGateway(...) : existing)`; a lobby hold on a port whose gateway has already
+  self-closed (link failure, or a zero-device release) gets a fresh, working gateway on the very next
+  `holdLobby` call, not a resurrected dead one.
+- **GCS heartbeat TX is owned by the hold itself, not by `MavlinkTelemetrySource`.**
+  `holdLobby()` builds one `DefaultTxScheduler` + core `HeartbeatService` (constructed off the
+  gateway's own `MavlinkSession` — `session.sink()`/`session.peers()`, so identity is GCS 255/190 for
+  free) and calls `start()`; `releaseLobby()` and `close()` both call `stop()`+`scheduler.close()`
+  through the same private `stopLobbyHeartbeat()`, stored in an `AtomicReference` so a concurrent
+  close and release can't both tear it down or leak it. Mirrors
+  `MavlinkManualControlSender`'s pattern of owning a `DefaultTxScheduler` for its own TX lifetime,
+  except per-hold rather than per-instance, since a hold can be acquired and released many times.
+- **`HeartbeatService` only replies to a link's *last-learned* peer — accepted, not fixed.** Its
+  `emitHeartbeat()` (mavlink-core, unchanged) sends one heartbeat per distinct `LinkId` known to
+  `PeerDirectory#peers()`, addressed at whatever peer was most recently heard on that link. With
+  several vehicles simultaneously announcing on the same held port, the reply rotates between them —
+  each new announcer's own next heartbeat re-targets it, so every vehicle transmitting at its own
+  ≥1 Hz PX4-convention rate still gets its lock-on within a few seconds; nothing here queues or
+  fans out one heartbeat per known peer.
+- **`MavlinkHeartbeatScanner` needed no code change.** Its existing `hasActiveHub(bindKey)` check
+  already steers `scan()` onto the hub-borrow path whenever *any* gateway is registered at that
+  bind key — a lobby-held gateway satisfies that exactly like a device-backed one always has, so the
+  unclaimed-vehicle registry the lobby accumulates is already the scanner's discovery feed with zero
+  scanner changes.
+- **`MavlinkLobbyHoldTest` covers this wave** (real UDP loopback throughout, no mocks): hold-then-open
+  and open-then-hold both reuse one `MavlinkGateway` (asserted by reference identity, package-private
+  `gateway(bindKey)`) and the device's claim still works; release with zero devices closes and frees
+  the socket (a probe re-bind after release must succeed); release with a live device leaves the
+  gateway open and clears only the flag; a lobby hold alone never claims a heard sysid (stays in
+  `unclaimedVehicles` until a real device registers and claims it); a lobby hold heals after its
+  gateway has already closed; the heartbeat scheduler is proven to start on hold and stop on release
+  by actually listening for (and later for absence of) a `HEARTBEAT` reply on a hand-built fake
+  vehicle's own UDP socket, not by inspecting threads; a dedicated `FailingLink`-based gateway-level
+  test proves a genuine link failure closes a held gateway regardless of the hold; the scanner test
+  asserts both `hasActiveHub` and an actual successful `scan()` discovery through a held-only port.
+
 ## Status
 
 Real and load-bearing: RX ingest + fleet-gateway claim/re-election, guarded command TX (mode/arm/
@@ -667,3 +739,16 @@ asserted on a bare `GlobalPositionInt` with no preceding fix now prime one first
 `preExistingPositionBatteryAndHeadingMappingsAreUnchangedAlongsideFlightState`) — the position values
 themselves are unchanged, only the fixture setup. `./mvnw -B -pl drone-link/mavlink -am test` —
 **240 tests**, all green (2026-08-29).
+
+**`docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md` §11 Z2b done.** `MavlinkTelemetrySource`
+gained `holdLobby(int port)`/`releaseLobby(int port)` — the claim-free "standing lobby" that keeps a
+gateway's socket bound (and its GCS heartbeat replying) with zero device registrations, so a vehicle
+broadcasting to a well-known port (PX4 convention: :14550) locks unicast onto this app before any
+operator has added a device for it. Mechanism: an `AtomicBoolean lobbyHeld` + `AtomicReference`-held
+`DefaultTxScheduler`/`HeartbeatService` pair directly on `MavlinkGateway`, never a fake `Device` or a
+`VehicleClaimPolicy` registration — see the Gotchas section above for the full race-safety and
+heal-after-close reasoning. `VehicleClaimPolicy` gained one new query, `isEmpty()`. No new
+`MavlinkSettings` knob was needed — the hold reuses `MavlinkGateway`'s existing `coreSettings`
+(derived from `MavlinkSettings.closeJoinTimeout()`) and mavlink-core's own 1 Hz `HeartbeatService`
+default. New `MavlinkLobbyHoldTest` (9 tests, real UDP loopback, no mocks).
+`./mvnw -B -pl drone-link/mavlink -am test` — **249 tests**, all green (2026-08-31).

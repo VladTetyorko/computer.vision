@@ -6,7 +6,9 @@ import com.drones.mavlink.SysId;
 import com.drones.mavlink.codec.FrameSink;
 import com.drones.mavlink.codec.MavFrame;
 import com.drones.mavlink.config.MavlinkCoreSettings;
+import com.drones.mavlink.service.HeartbeatService;
 import com.drones.mavlink.session.Correlator;
+import com.drones.mavlink.session.DefaultTxScheduler;
 import com.drones.mavlink.session.LinkHealth;
 import com.drones.mavlink.session.MavlinkNode;
 import com.drones.mavlink.session.MavlinkSession;
@@ -28,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.SubmissionPublisher;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * One shared MAVLink gateway per distinct bind address ({@code host:port}), reference-counted
@@ -98,13 +101,26 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * {@code CommandService}/{@code ManualControlService} directly from these rather than this class
  * hand-rolling a send-and-await seam of its own — the whole point of W4.
  *
+ * <h2>Standing lobby hold (claim-free) — docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §11 Z2b</h2>
+ * {@link #holdLobby()}/{@link #releaseLobby()} let {@link MavlinkTelemetrySource} keep this gateway
+ * bound with <b>zero</b> device registrations, for zero-config discovery: nothing here is ever
+ * added to {@link VehicleClaimPolicy}'s own registrations, so a lobby hold can never claim a sysid
+ * an unpinned real device would otherwise get — every heard-but-unclaimed sysid still lands in
+ * {@link #unclaimedVehicles()} exactly as it always has. Its only two effects are (1) suppressing
+ * {@link #unregister}'s self-close while zero devices are registered, and (2) transmitting a GCS
+ * {@code HEARTBEAT} (via a {@link HeartbeatService} this hold owns outright) so a PX4-convention
+ * vehicle broadcasting to this port locks unicast onto us the moment it is heard — see {@link
+ * #holdLobby()}'s own javadoc for the mechanism and the known "vision never initiates" line this
+ * flips.
+ *
  * <h2>Threading</h2>
  * {@link #register}/{@link #unregister}/{@link #unclaimedVehicles()}/{@link
- * #claimedVehicles()}/{@link #commandTarget(DeviceId)} are called from whatever thread calls
- * {@link MavlinkTelemetrySource#open}/{@code close}/the TX port classes; frame routing and claim/
- * re-election decisions happen only on the underlying session's one reader thread for this
- * gateway's single link. All mutable claim/registration state lives in {@link VehicleClaimPolicy},
- * guarded by its own monitor.
+ * #claimedVehicles()}/{@link #commandTarget(DeviceId)}/{@link #holdLobby()}/{@link #releaseLobby()}
+ * are called from whatever thread calls {@link MavlinkTelemetrySource#open}/{@code close}/{@code
+ * holdLobby}/{@code releaseLobby}/the TX port classes; frame routing and claim/re-election
+ * decisions happen only on the underlying session's one reader thread for this gateway's single
+ * link. All mutable claim/registration state lives in {@link VehicleClaimPolicy}, guarded by its
+ * own monitor; the lobby hold's own state is guarded independently (see {@link #holdLobby()}).
  *
  * <p>Not a domain/port type — package-private, owned entirely by {@link MavlinkTelemetrySource},
  * the only class that constructs, registers with, or queries one.
@@ -114,12 +130,15 @@ final class MavlinkGateway {
     private static final System.Logger LOG = System.getLogger(MavlinkGateway.class.getName());
 
     private final MavlinkLink link;
+    private final MavlinkCoreSettings coreSettings;
     private final MavlinkSession session;
     private final VehicleClaimPolicy claimPolicy;
     private final Subscription subscription;
     private final MavlinkMessageInventory messageInventory;
     private final MavlinkConnectRemediator connectRemediator;
     private final AtomicBoolean closed = new AtomicBoolean(false);
+    private final AtomicBoolean lobbyHeld = new AtomicBoolean(false);
+    private final AtomicReference<LobbyHeartbeat> lobbyHeartbeat = new AtomicReference<>();
 
     /**
      * Binds {@code bindHost:port} immediately (throws {@link IOException} on a bind conflict --
@@ -148,7 +167,8 @@ final class MavlinkGateway {
      */
     MavlinkGateway(MavlinkLink link, MavlinkSettings settings) {
         this.link = link;
-        this.session = new MavlinkSession(MavlinkNode.groundStation(), coreSettings(settings));
+        this.coreSettings = coreSettings(settings);
+        this.session = new MavlinkSession(MavlinkNode.groundStation(), coreSettings);
         session.addLink(link);
         // FLEET-RADIO-PLAN.md R4/F7: mavlink-core used to swallow a genuine read failure into a
         // silent reader-thread exit. Wired before any registration exists, so a failure occurring
@@ -188,18 +208,92 @@ final class MavlinkGateway {
 
     /**
      * Releases a device's registration and its claim, if any, so another registration may pick it
-     * up. Closes this gateway once this was the last registration.
+     * up. Closes this gateway once this call leaves it with no remaining registrations <b>and</b>
+     * no standing lobby hold (see {@link #holdLobby()}) — a lobby hold keeps a gateway with zero
+     * devices alive exactly as if a device were still registered against it.
      *
-     * @return {@code true} once this gateway has no remaining registrations — the caller should
-     *         evict it from {@code MavlinkTelemetrySource}'s gateway map so the next {@code open()}
-     *         for this bind address builds a fresh one
+     * @return {@code true} once this call has actually closed the gateway — the caller should
+     *         evict it from {@code MavlinkTelemetrySource}'s gateway map so the next {@code open()}/
+     *         {@code holdLobby()} for this bind address builds a fresh one
      */
     boolean unregister(VehicleRegistration registration) {
         boolean empty = claimPolicy.remove(registration);
-        if (empty) {
+        if (empty && !lobbyHeld.get()) {
+            close();
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Marks this gateway as held by the zero-config standing lobby (docs/plans/active/
+     * ZERO-CONFIG-ONBOARDING-CONTEXT.md §11 Z2b) — a <b>claim-free</b> hold that only prevents
+     * {@link #unregister}'s self-close from firing while this gateway has zero device
+     * registrations. It is never added to {@link VehicleClaimPolicy}'s own {@code registrations},
+     * so it can never win a sysid a real, unpinned device would otherwise claim — see {@code
+     * MavlinkTelemetrySource#holdLobby(int)} for the caller-facing contract this implements.
+     * Idempotent: a call while already held starts nothing a second time.
+     *
+     * <p>On the transition into "held," starts a GCS {@code HEARTBEAT} broadcast on a fresh {@link
+     * DefaultTxScheduler}/{@link HeartbeatService} pair that this hold owns outright — created here,
+     * torn down by whichever of {@link #releaseLobby()}/{@link #close()} happens first (see {@link
+     * #stopLobbyHeartbeat()}). This is the "vision never initiates MAVLink traffic" line the
+     * zero-config plan flips: a vehicle broadcasting to this port per the PX4 broadcast-until-heard
+     * convention locks unicast onto the first GCS heartbeat it hears, closing the handshake without
+     * an operator ever touching a form. Identity is already GCS 255/190 through this gateway's own
+     * {@link #session} (see the constructor) — {@link HeartbeatService} only supplies the message
+     * <i>content</i>, defaulted to {@link com.drones.mavlink.service.HeartbeatContent#groundStation()}.
+     * Accepted caveat (documented, not fixed here): {@link HeartbeatService} replies on every link
+     * it has heard <i>any</i> peer on, so several vehicles announcing simultaneously on the same
+     * link take turns rather than all locking on at once — every vehicle transmitting at least once
+     * a second still gets its own lock-on within a few seconds.
+     */
+    void holdLobby() {
+        if (!lobbyHeld.compareAndSet(false, true)) {
+            return;
+        }
+        DefaultTxScheduler scheduler = new DefaultTxScheduler(coreSettings.closeJoinTimeout());
+        HeartbeatService heartbeatService = new HeartbeatService(session.sink(), scheduler, session.peers(), coreSettings);
+        heartbeatService.start();
+        lobbyHeartbeat.set(new LobbyHeartbeat(scheduler, heartbeatService));
+        if (closed.get()) {
+            // Closed concurrently -- e.g. a link failure racing this call on the session's own
+            // reader thread (handleLinkFailure) -- between our CAS above and here: close() already
+            // ran and, by its own idempotent-CAS guard, will never run again to stop what we just
+            // started. Clean up ourselves so a hold racing a link failure can never leak a scheduler
+            // thread.
+            stopLobbyHeartbeat();
+        }
+        LOG.log(Level.INFO, () -> "MAVLink lobby hold acquired on " + link.id() + "; GCS heartbeat TX started");
+    }
+
+    /**
+     * Releases a hold acquired by {@link #holdLobby()}. Idempotent: releasing while not held does
+     * nothing. Always stops the GCS heartbeat TX the hold started (a released lobby must never keep
+     * transmitting); closes this gateway too, exactly like {@link #unregister} would, if it now has
+     * neither a hold nor any device registration left.
+     */
+    void releaseLobby() {
+        if (!lobbyHeld.compareAndSet(true, false)) {
+            return;
+        }
+        stopLobbyHeartbeat();
+        LOG.log(Level.INFO, () -> "MAVLink lobby hold released on " + link.id());
+        if (claimPolicy.isEmpty()) {
             close();
         }
-        return empty;
+    }
+
+    /** {@code true} while a hold from {@link #holdLobby()} is in effect. */
+    boolean isLobbyHeld() {
+        return lobbyHeld.get();
+    }
+
+    private void stopLobbyHeartbeat() {
+        LobbyHeartbeat heartbeat = lobbyHeartbeat.getAndSet(null);
+        if (heartbeat != null) {
+            heartbeat.close();
+        }
     }
 
     /** Vehicles heard on this gateway's socket that no registration currently claims (docs/plans/active/DRONE-INFRA-PLAN.md I-b). */
@@ -319,6 +413,7 @@ final class MavlinkGateway {
         if (!closed.compareAndSet(false, true)) {
             return;
         }
+        stopLobbyHeartbeat();
         subscription.close();
         messageInventory.close();
         if (connectRemediator != null) {
@@ -346,5 +441,18 @@ final class MavlinkGateway {
      * {@code HEARTBEAT} has actually arrived), and where to send a reply.
      */
     record CommandTarget(int sysid, String firmware, Integer mavType, InetSocketAddress sourceAddress) {
+    }
+
+    /**
+     * The lobby hold's own TX resources (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §11
+     * Z2b) — created by {@link #holdLobby()}, torn down together by {@link #stopLobbyHeartbeat()}.
+     * A private, gateway-owned pairing, not a reusable type: nothing outside this class ever sees
+     * one.
+     */
+    private record LobbyHeartbeat(DefaultTxScheduler scheduler, HeartbeatService service) {
+        void close() {
+            service.stop();
+            scheduler.close();
+        }
     }
 }
