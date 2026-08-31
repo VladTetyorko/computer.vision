@@ -841,12 +841,16 @@ class UsageTrackerTest {
     // --- engage/disengage (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2, wave R2) -----
 
     @Test
-    void engageOpensAnOperatorOwnedUsageWithNoStreamAndNoDeviceTraffic() {
-        // "no video stream and no device traffic involved" -- the task brief's own words for what
-        // #engage must do, unlike the deleted onTelemetryDeviceDiscovered it replaces.
+    void engageOpensTelemetryForTheAssetsTelemetryCapableDevicesWithNoVideoStreamInvolved() {
+        // docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P4, closes
+        // docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md §B4: #engage now carries its own
+        // telemetry traffic -- unlike the deleted onTelemetryDeviceDiscovered it replaces, no video
+        // stream is ever involved, but a telemetry subscription genuinely opens (this used to assert
+        // the opposite -- B4 is exactly the defect that made that assertion wrong).
         Device telemetryDevice = telemetryDevice("tel-1");
         Asset asset = asset(Set.of(telemetryDevice.id()));
         when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
         ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
         UsageTracker tracker = tracker(List.of(source));
 
@@ -858,7 +862,8 @@ class UsageTrackerTest {
         assertEquals(UsagePhase.PREFLIGHT, opened.phase());
         assertNull(opened.endedAt());
         verify(usageRepository, times(1)).save(opened);
-        assertTrue(source.openedDevices.isEmpty(), "engage must never open a telemetry subscription");
+        assertEquals(List.of(telemetryDevice.id()), source.openedDevices,
+                "engage must open telemetry for the asset's telemetry-capable device -- no video stream required");
     }
 
     @Test
@@ -1028,6 +1033,142 @@ class UsageTrackerTest {
         AssetUsage last = captor.getValue();
         assertEquals(engaged.id(), last.id());
         assertTrue(last.endedAt() != null, "the demoted usage must still be closeable by the ordinary stream stop");
+    }
+
+    // -- engage-opened telemetry (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P4, closes
+    // docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md §B4) -- the collision matrix ------
+
+    @Test
+    void engageThenStreamStartDoesNotDoubleSubscribeTelemetry() {
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        UsageTracker tracker = tracker(List.of(source));
+
+        tracker.engage(asset.id());
+        assertEquals(List.of(telemetryDevice.id()), source.openedDevices,
+                "engage on a telemetry-only asset must open telemetry for its device");
+
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+
+        assertEquals(1, source.openedDevices.size(),
+                "a stream starting on a device engage already subscribed must never double-open it");
+    }
+
+    @Test
+    void streamStartThenEngagePromotesWithoutDoubleSubscribingTelemetry() {
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        UsageTracker tracker = tracker(List.of(source));
+
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+        assertEquals(1, source.openedDevices.size(), "the stream start must open telemetry for the device");
+
+        AssetUsage promoted = tracker.engage(asset.id());
+
+        assertEquals(UsageOrigin.OPERATOR, promoted.origin());
+        assertEquals(1, source.openedDevices.size(),
+                "engage on an already-streaming device must promote, not double-subscribe telemetry");
+    }
+
+    @Test
+    void engageThenDisengageWhileStreamRunsLeavesTelemetrySubscriptionOpen() {
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        UsageTracker tracker = tracker(List.of(source));
+        tracker.engage(asset.id());
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random()); // device still active afterward
+
+        Optional<AssetUsage> result = tracker.disengage(asset.id());
+
+        assertTrue(result.isPresent());
+        assertNull(result.get().endedAt(), "a still-running stream means demote, not close");
+        assertEquals(UsageOrigin.STREAM, result.get().origin());
+        assertTrue(source.closedDevices.isEmpty(),
+                "the still-running stream's telemetry subscription must survive disengage");
+    }
+
+    @Test
+    void engageThenDisengageWithNoStreamClosesTelemetrySubscriptionAndTheUsage() throws InterruptedException {
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        UsageTracker tracker = tracker(List.of(source));
+        tracker.engage(asset.id());
+        assertEquals(1, source.openedDevices.size());
+
+        Optional<AssetUsage> result = tracker.disengage(asset.id());
+
+        assertTrue(result.isPresent());
+        assertTrue(result.get().endedAt() != null, "no device was ever active -- disengage must close outright");
+        assertEquals(UsagePhase.CLOSED, result.get().phase());
+        assertTrue(source.closeLatch.await(1, TimeUnit.SECONDS),
+                "the telemetry subscription engage opened must be unsubscribed/closed on disengage");
+        assertTrue(source.closedDevices.contains(telemetryDevice.id()));
+    }
+
+    @Test
+    void engageThenStreamStartThenStreamStopKeepsTelemetryAliveForTheStillEngagedUsage() {
+        // The gap this closes: before this wave, deviceStreamStopped tore telemetry down unconditionally
+        // once the last device stopped, even for an OPERATOR-origin usage -- silently undoing what
+        // #engage opened the moment a paired video stream (if any) happened to stop.
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        UsageTracker tracker = tracker(List.of(source));
+        AssetUsage engaged = tracker.engage(asset.id());
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+
+        tracker.onStreamStopped(telemetryDevice.id());
+
+        assertTrue(source.closedDevices.isEmpty(),
+                "the engaged usage's telemetry subscription must survive the last stream stopping");
+        // The usage itself must also still be open (unchanged pre-existing rule) -- proven the same
+        // way collisionRule1 does, since there is no repository read: disengage must still find it.
+        Optional<AssetUsage> disengaged = tracker.disengage(asset.id());
+        assertTrue(disengaged.isPresent());
+        assertEquals(engaged.id(), disengaged.get().id());
+        assertTrue(disengaged.get().endedAt() != null);
+    }
+
+    @Test
+    void engageOpenedTelemetryKeepsLatestTelemetryFreshForIdleCloseActivityTracking() {
+        // docs/plans/done/OPERATOR-UX-5-PLAN.md finding U1 / this module's MODULE.md Gotchas: the
+        // idle-close sweep (vision-warehouse, DefaultUsageIdleCloseService) reads "last activity" via
+        // AssetLiveStatePort#latestTelemetry, which StreamBackedAssetLiveState delegates straight to
+        // UsageTracker#latestTelemetry. Before this wave, an engage-only (no stream) usage never had
+        // any traffic to report there, so it would eventually look idle even while the aircraft kept
+        // transmitting. With #engage opening telemetry itself, a sample it receives must keep
+        // latestTelemetry current exactly like a stream-driven one always has.
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        UsageTracker tracker = tracker(List.of(source));
+        tracker.engage(asset.id());
+
+        Telemetry sample = telemetry(telemetryDevice.id(), 50.0, 30.0, 95.0);
+        source.emit(telemetryDevice.id(), sample);
+
+        assertEquals(Optional.of(sample), tracker.latestTelemetry(asset.id()),
+                "the idle-close sweep's activity signal must reflect engage-opened telemetry traffic too");
     }
 
     private static Telemetry telemetry(DeviceId deviceId, double lat, double lon, double battery) {
