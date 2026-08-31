@@ -618,6 +618,12 @@
                         </div>
                       }
 
+                      <p class="muted hint">
+                        Prefer not to copy config by hand? If the device supports Improv Serial,
+                        <a routerLink="/provision-wifi">provision Wi-Fi over USB</a> instead — plug it
+                        into this computer and send it Wi-Fi credentials directly.
+                      </p>
+
                       <div class="row">
                         <button type="button" class="btn" (click)="facade.store.finishDroneConfigAndListen()">
                           Continue — listen for it
