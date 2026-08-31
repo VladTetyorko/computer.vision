@@ -85,9 +85,13 @@ export interface DeviceEdit {
 }
 
 /**
- * Mirrors `dto.RegisterDeviceRequest`. `capabilities` is optional; a missing/empty value
- * defaults server-side to `[VIDEO]`. `origin` is optional and defaults server-side to `LIVE`. No
- * `type` field — see `Device`.
+ * Mirrors `dto.RegisterDeviceRequest`. `capabilities` is optional; a missing/empty value is
+ * defaulted server-side **from `protocol`** (`mavlink` → `[TELEMETRY]`, everything else →
+ * `[VIDEO]`) — not a blanket `[VIDEO]` default (verified against the DTO's own current doc
+ * comment; the discovery inbox's "attach to existing asset" flow, `core/discovery/discovery-inbox-logic.ts#buildDeviceSpecFromCandidate`,
+ * relies on exactly this to leave `capabilities` unset for a candidate's suggested stream). An
+ * explicit list, when sent, always wins over the default. `origin` is optional and defaults
+ * server-side to `LIVE`. No `type` field — see `Device`.
  */
 export interface RegisterDeviceRequest {
   readonly name: string;
@@ -936,6 +940,67 @@ export interface ScanRequest {
 export interface ScanResult {
   readonly devices: readonly DiscoveredDevice[];
   readonly failedMethods: readonly string[];
+}
+
+// --- Discovery inbox (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P2, §11, wave Z2d) ---
+// `GET /api/discovery/inbox` (manageOrg) — the persisted, deduplicated "found devices" list a
+// standing MAVLink lobby / periodic ONVIF-mDNS-V4L2 sweep / mediamtx path scanner all feed
+// (`DiscoveryInboxRunner`, vision-app). Poll-only v1: no SSE topic yet
+// (`DiscoveryInboxController`'s own class doc) — a 30s client poll matches the backend's own sweep
+// cadence, so nothing is lost between polls.
+
+/** Mirrors `warehouse.domain.model.DiscoveryCandidate.CandidateStatus`. No `EXPIRED` — staleness
+ *  is derived from `lastSeen` and shown as an age (`core/discovery/discovery-inbox-logic.ts#candidateAgeLabel`),
+ *  never stored as a status of its own. */
+export type DiscoveryCandidateStatus = 'NEW' | 'DISMISSED' | 'REGISTERED';
+
+/**
+ * Mirrors `dto.DiscoveryCandidateResponse` — one row in the discovery inbox. Unlike
+ * `DiscoveredDevice` (the transient `POST /api/discovery/scan` shape), this carries the
+ * suggested stream's full `options()` map, not the lossy `details["sysid"]`-only workaround.
+ * `suggestedCategory`/`suggestedStreamProtocol`/`suggestedStreamUri`/`suggestedStreamOptions`/
+ * `registeredAssetId` are each independently absent (never `null`) when the mechanism has nothing
+ * to offer there; `details` is always present, at minimum `{}` (mirrors `DiscoveredDevice#details`).
+ */
+export interface DiscoveryCandidate {
+  readonly id: string;
+  readonly method: string;
+  readonly name: string;
+  readonly address: string;
+  readonly suggestedCategory?: string;
+  readonly suggestedStreamProtocol?: string;
+  readonly suggestedStreamUri?: string;
+  readonly suggestedStreamOptions?: Record<string, string>;
+  readonly details: Record<string, string>;
+  readonly firstSeen: string;
+  readonly lastSeen: string;
+  readonly status: DiscoveryCandidateStatus;
+  readonly registeredAssetId?: string;
+}
+
+/**
+ * Mirrors `dto.RegisterDiscoveryCandidateRequest` — the Add dialog's own minimal payload
+ * (`core/discovery/discovery-inbox-logic.ts#buildRegisterCommand`). `ownership` is never a field
+ * here — the backend always derives it from the caller, the same rule `CreateAssetRequest`
+ * follows. `attributes`/`identity` are typed for wire-parity but never sent by the one-click Add
+ * dialog (deliberately not the full onboarding wizard — see that dialog's own doc comment).
+ */
+export interface RegisterDiscoveryCandidateRequest {
+  readonly displayName: string;
+  readonly category: string;
+  readonly attributes?: Record<string, string>;
+  readonly identity?: AssetIdentity;
+}
+
+/**
+ * Mirrors `dto.RegisterDiscoveryCandidateResponse` — a minimal pointer at the asset the candidate
+ * became (not the full `AssetDetails` shape; see that DTO's own doc comment for why). The Add
+ * dialog routes to `/assets/{assetId}` with this on success.
+ */
+export interface RegisterDiscoveryCandidateResponse {
+  readonly assetId: string;
+  readonly displayName: string;
+  readonly category: string;
 }
 
 // --- Device probe (docs/plans/done/UX-REWORK-PLAN.md §U-d — the onboarding wizard's Test step) -----------

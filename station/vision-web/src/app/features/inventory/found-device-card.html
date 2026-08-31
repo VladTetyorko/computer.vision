@@ -1,0 +1,47 @@
+<div class="card found-device-card" [class.resolved]="candidate().status !== 'NEW'">
+  <div class="row spread">
+    <h3 class="truncate" [title]="candidate().name">{{ candidate().name }}</h3>
+    <span class="chip">{{ methodLabel() }}</span>
+  </div>
+
+  <dl class="found-device-facts">
+    <div class="fact">
+      <dt>Address</dt>
+      <dd class="mono truncate" [title]="candidate().address">{{ candidate().address }}</dd>
+    </div>
+    @if (candidate().suggestedStreamProtocol; as protocol) {
+      <div class="fact">
+        <dt>Suggested</dt>
+        <dd>{{ protocol }}</dd>
+      </div>
+    }
+  </dl>
+
+  <p class="muted found-device-age">{{ ageLabel() }}</p>
+
+  @switch (candidate().status) {
+    @case ('NEW') {
+      <div class="row found-device-actions">
+        <button type="button" class="btn small" [disabled]="busy()" (click)="add.emit()">Add</button>
+        @if (actions().canAttach) {
+          <button type="button" class="btn secondary small" [disabled]="busy()" (click)="attachTo.emit()">
+            Attach to existing…
+          </button>
+        }
+        <button type="button" class="btn secondary small" [disabled]="busy()" (click)="dismiss.emit()">Dismiss</button>
+      </div>
+    }
+    @case ('REGISTERED') {
+      <div class="found-device-resolved">
+        @if (candidate().registeredAssetId; as assetId) {
+          <a [routerLink]="['/assets', assetId]">Open asset ›</a>
+        } @else {
+          <span class="muted">Registered</span>
+        }
+      </div>
+    }
+    @case ('DISMISSED') {
+      <p class="muted found-device-resolved">Dismissed</p>
+    }
+  }
+</div>

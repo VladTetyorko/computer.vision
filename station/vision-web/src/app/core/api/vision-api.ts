@@ -44,6 +44,7 @@ import type {
   DetectionResult,
   Device,
   DeviceEdit,
+  DiscoveryCandidate,
   EffectiveCvProfile,
   FleetMaintenanceRecord,
   FleetReadiness,
@@ -86,6 +87,8 @@ import type {
   RegionResponse,
   RegionsResponse,
   RegisterDeviceRequest,
+  RegisterDiscoveryCandidateRequest,
+  RegisterDiscoveryCandidateResponse,
   RemediationRequest,
   RemediationResult,
   RenameLayerRequest,
@@ -279,6 +282,34 @@ export class VisionApi {
 
   scan(request: ScanRequest = {}): Promise<ScanResult> {
     return firstValueFrom(this.http.post<ScanResult>('/api/discovery/scan', request));
+  }
+
+  // --- Discovery inbox (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §11, wave Z2d) -------
+  // manageOrg-gated server-side (`DiscoveryInboxController`); poll-only, no SSE topic yet — see
+  // `DiscoveryCandidate`'s own doc comment in `models.ts`.
+
+  listDiscoveryInboxCandidates(): Promise<DiscoveryCandidate[]> {
+    return firstValueFrom(this.http.get<DiscoveryCandidate[]>('/api/discovery/inbox'));
+  }
+
+  registerDiscoveryCandidate(
+    id: string,
+    request: RegisterDiscoveryCandidateRequest,
+  ): Promise<RegisterDiscoveryCandidateResponse> {
+    return firstValueFrom(
+      this.http.post<RegisterDiscoveryCandidateResponse>(
+        `/api/discovery/inbox/${encodeURIComponent(id)}/register`,
+        request,
+      ),
+    );
+  }
+
+  /** "Not now" — reversible in spirit only via the inbox's own "show dismissed" toggle; there is
+   *  no un-dismiss endpoint (a later scan hit for the same identity revives it server-side). */
+  dismissDiscoveryCandidate(id: string): Promise<DiscoveryCandidate> {
+    return firstValueFrom(
+      this.http.post<DiscoveryCandidate>(`/api/discovery/inbox/${encodeURIComponent(id)}/dismiss`, {}),
+    );
   }
 
   // --- Device probe (docs/plans/done/UX-REWORK-PLAN.md §U-d — the onboarding wizard's Test step) ---------

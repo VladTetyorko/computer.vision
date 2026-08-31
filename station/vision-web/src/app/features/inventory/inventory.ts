@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, effect, inject, input } from '@angu
 import { FormsModule } from '@angular/forms';
 import { CategoriesPage } from '../categories/categories';
 import { DevicesPage } from '../devices/devices';
+import { FoundDevices } from './found-devices';
 import { Notice } from '../../shared/ui/notice';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { Stat } from '../../shared/ui/stat';
@@ -34,10 +35,17 @@ import type { VehicleInventoryStateFilter, VehicleReadinessFilter } from './vehi
  * `InventoryFacade#visibleTabs` hides Links/Categories from a pilot outright — the tab button never
  * renders, so `setTabFromQueryParam`'s own clamp is what a stale `?tab=links` bookmark meets, not a
  * route bounce to `/fly`.
+ *
+ * **`<vision-found-devices>`** (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P2, §11,
+ * wave Z2d) — the discovery inbox's "Found devices" section, mounted with no inputs right below the
+ * page bar, visible on every tab (it's a fleet-wide inbox, not vehicle/equipment-scoped) and
+ * rendering nothing at all while the inbox is empty. It owns its own store injection
+ * (`DiscoveryInboxStore`) and poll lifecycle entirely independently of `InventoryFacade` — see that
+ * component's own class doc for why (the `architecture.spec.ts` non-routed-child carve-out).
  */
 @Component({
   selector: 'vision-inventory',
-  imports: [FormsModule, PageBar, Stat, Notice, VehiclesTable, DevicesPage, CategoriesPage],
+  imports: [FormsModule, PageBar, Stat, Notice, VehiclesTable, DevicesPage, CategoriesPage, FoundDevices],
   templateUrl: './inventory.html',
   styleUrl: './inventory.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
