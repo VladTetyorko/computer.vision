@@ -1,6 +1,8 @@
 # Zero-config onboarding — devices announce, streams push, commands need only telemetry
 
-**Opened:** 2026-08-30 · **Status:** research + proposal; nothing built · **Branch:** none yet
+**Opened:** 2026-08-30 · **Status:** Z1–Z5 BUILT on `feat/zero-config-onboarding` (2026-08-31, unmerged;
+every wave's scoped build green, live smoke pending) · Z6 (firmware, outside this repo) open · **Build
+record in §12**
 
 **Ask (condensed):** *"Look at the MAVLink flow and commands, and at adding assets. Today it is
 overwhelming: for the ESP32 I must flash the vision host's URL into the firmware, join both to one
@@ -323,3 +325,31 @@ a **`MediamtxPathScanner`** (`DeviceDiscoveryPort`, method `mediamtx`) polls
 separating device pushes from vision's own published paths (MEDIA-SOT). No new REST endpoint, no
 compose change beyond reachability of `:9997` on the internal network. The hook upgrade (sub-second
 announce) stays available later; SSE and the hook graduate together.
+
+---
+
+## 12. Build record (2026-08-31, branch `feat/zero-config-onboarding`)
+
+| Wave | Commit | What shipped | Gate |
+|---|---|---|---|
+| Z1 backend | `16828768` | `engage` opens telemetry per TELEMETRY device (claim-set idempotency); `deviceStreamStopped` teardown now origin-gated — the second, unspecced half of B4. **B4 closed.** | vision-perception 647 tests |
+| Z1 web | `66fb220e` | Fly cockpit engage/disengage — session verb's first caller; engaged-state derived from the server's `recentUsages` poll, never optimistic | 3135 web tests |
+| Z2a | `40f4e9f9` | Discovery inbox service + `DiscoveryCandidate`; duplicate rule shared via new `AssetService#findDuplicateDevice`; **first `createFromCandidate` production caller** | vision-warehouse 364 tests |
+| Z2b | `41924b50` | Claim-free lobby hold (`holdLobby`/`releaseLobby`) + GCS heartbeat reply via core `HeartbeatService`; real-UDP tests incl. a fake vehicle receiving the reply | drone-link/mavlink 249 tests |
+| Z2c | `f09ec9b4` | V31 `discovery_candidates` (unique `identity_key`, audit trigger), `DiscoveryInboxController` (list/register/dismiss, manageOrg), `DiscoveryInboxRunner` sweep (30s, holds lobby, scans, reports). SSE deferred — poll-only v1 matches the sweep cadence | persistence 267 + api 941 + app 293, real Docker Postgres |
+| Z2d | `3ef24023` | "Found devices" on Inventory: 30s mount-gated poll, one-click Add, attach-to-existing (register+assign; REGISTERED flip left to the next sweep), dismiss + show-dismissed | 3217 web tests |
+| Z3 | `46420975` | `MediamtxPathScanner` — ready `ingest/` paths become candidates; reuses `VisionPublishProperties.Mediamtx` so mediamtx's address has one owner | discovery 58 + app 298 tests |
+| Z4 (adapter half) | `54717b9e` | ONVIF `GetCapabilities→GetProfiles→GetStreamUri` — discovered cameras carry a playable RTSP URL; honest credentials-required note; stale V4L2 MODULE.md claim fixed | discovery 40 tests |
+| Z5 | `14d06341` | `/provision-wifi` — Improv Serial over Web Serial (codec verified against the reference SDK), serial port behind one injectable gateway, honest capability/error states | 3193 web tests |
+
+**Deliberately not done, still open:** Z6 firmware (broadcast-until-heard + Improv + video push —
+lives in `~/Arduino/ardupoilot-start`, its bench harness `infra/rover-sim/link_test.cpp` already
+exists uncommitted); Z4's wire-DTO half (`DiscoveredDeviceResponse` options-drop) and the
+interface-ranking bug — small, unscheduled; SSE topic + mediamtx `runOnAvailable` hook (graduate
+together); per-path publish tokens before any shared deployment (§6); live smoke of the whole loop
+(rover/SITL heartbeat → card → click → engage → arm) — **not yet run**, needs real hardware/SITL.
+
+**Behavior change to know before merging:** `vision.discovery.lobby.enabled` and
+`vision.discovery.inbox.enabled` default **true** — vision now binds `:14550` at boot, answers
+with GCS heartbeats, and sweeps discovery every 30s. Set either to `false` to restore the old
+passive behavior.
