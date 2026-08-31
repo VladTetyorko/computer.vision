@@ -249,3 +249,65 @@ existing-asset, delete the `simulated` category) compose with, and are not repla
 | OQ-A | Is firmware work in `~/Arduino/ardupoilot-start` in scope for the same effort (Z6), or does vision ship Z1–Z5 and wait? | ship Z1–Z5; firmware follows |
 | OQ-B | Flip `vision.onboarding.probe.enabled` to true by default (making probe/readiness/sysid-fix real), or keep opt-in? | keep opt-in one more cycle; revisit after Z2 |
 | OQ-C | Does the ESP32 rover get a camera that pushes (SRT/WHIP from a companion), or stays the camera a separate pull device? | separate pull device; pairing via the inbox's "attach to existing" |
+
+---
+
+## 11. Frozen Z2 contract (2026-08-31, after code scout)
+
+Facts that shaped it: an **unpinned gateway registration claims the first sysid heard** — so the
+lobby must be a claim-free hold, never a fake `Device`; mavlink-core **cannot IP-broadcast** (no
+`setBroadcast`, `RoutingFrameSink` refuses never-heard peers) — and does not need to: the vehicle
+broadcasts, vision replies via the **existing unused `HeartbeatService`** (1 Hz, GCS 255/190) so the
+vehicle locks on; `@Scheduled` is banned — sweeps use the hand-rolled runner idiom
+(`UsageIdleCloseRunner` shape); next Flyway migration is **V31**.
+
+### Z2a — warehouse (`contexts/vision-warehouse`)
+
+- `DiscoveryCandidate(DiscoveryCandidateId, String identityKey, DiscoveredDevice discovered,
+  Instant firstSeen, Instant lastSeen, CandidateStatus status, AssetId registeredAsset?)`;
+  `CandidateStatus { NEW, DISMISSED, REGISTERED }`. No `EXPIRED` — staleness is derived from
+  `lastSeen` and *shown as age* (honesty rule), never stored.
+- `identityKey = method + "|" + address` + (`"|sysid=" + n` when the candidate carries one).
+- `DiscoveryInboxService`: `report(DiscoveredDevice)` (upsert by identityKey; refresh
+  `lastSeen`/details; DISMISSED stays dismissed — the operator's gesture outlives the announcer;
+  a candidate matching an already-registered device by the `(protocol, uri, sysid)` duplicate key
+  is recorded REGISTERED, never NEW), `candidates()`, `dismiss(id, actor)`,
+  `register(id, RegisterFromCandidateCommand, scope, actor)` → delegates to the existing
+  `AssetService#createFromCandidate` (its first production caller) and stamps
+  REGISTERED + assetId. `DiscoveryCandidateRepositoryPort` is the out-port.
+- Candidate stores the **domain** `DiscoveredDevice` verbatim — `suggestedStream.options()` is not
+  dropped (the wire-DTO drop stays a Z4 fix).
+
+### Z2b — adapter (`drone-link/mavlink`; **no mavlink-core changes**)
+
+- `MavlinkTelemetrySource#holdLobby(port)` / `releaseLobby(port)` — idempotent, claim-free hold on
+  the shared `gateways` map: creates the gateway if absent, prevents self-close while held even
+  with zero device registrations, heals after a link-failure self-close on the next hold call.
+  With a lobby held, `MavlinkHeartbeatScanner` always takes its existing hub-borrow path and the
+  unclaimed-vehicle registry is the candidate feed.
+- GCS heartbeat TX armed **only while a lobby hold exists**: core `HeartbeatService` +
+  `DefaultTxScheduler`, stopped on release/close. Known caveat (accepted): heartbeats go to each
+  link's last-learned peer, so with several simultaneously-announcing new vehicles the reply
+  rotates; every vehicle transmitting ≥1 Hz still gets its lock-on within seconds.
+
+### Z2c — wiring (`vision-app`, `vision-api`, `storage/persistence`)
+
+- `V31__discovery_inbox.sql` + `DiscoveryCandidateEntity` + `JpaDiscoveryCandidateRepository`
+  (+ `PersistenceUnit` registration, audit trigger per V21 convention).
+- `DiscoveryInboxRunner` (runner idiom, `@Bean(initMethod="start", destroyMethod="close")`):
+  every sweep — re-assert the lobby hold, `DiscoveryService.scan` (all methods, short timeout),
+  `report` each hit. Properties (root `application.properties`):
+  `vision.discovery.lobby.enabled=true`, `vision.discovery.inbox.enabled=true`,
+  `vision.discovery.inbox.sweep-seconds=30`, `vision.discovery.inbox.scan-timeout-seconds=5`.
+- REST: `GET /api/discovery/inbox`, `POST /api/discovery/inbox/{id}/register` (manageOrg, body =
+  the operator's Identify overrides: displayName, category, …), `POST
+  /api/discovery/inbox/{id}/dismiss`. Live updates follow the existing SSE topic idiom.
+
+### Z2d — web (`station/vision-web`)
+
+- Found-device cards (Inventory/Manage + badge): candidate name, method chip, age since
+  `lastSeen`, one-click **Add** (opens the wizard's Identify/confirm with everything prefilled →
+  register endpoint), **attach to existing asset**, and **Dismiss**. Stale-not-live rendering rules
+  apply; a card is never shown as "online" — only "last heard <age>".
+
+Order: Z2a ∥ Z2b first (disjoint), then Z2c, then Z2d (after Z1-web lands to avoid tree overlap).
