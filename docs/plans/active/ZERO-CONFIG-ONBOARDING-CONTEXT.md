@@ -311,3 +311,15 @@ vehicle locks on; `@Scheduled` is banned — sweeps use the hand-rolled runner i
   apply; a card is never shown as "online" — only "last heard <age>".
 
 Order: Z2a ∥ Z2b first (disjoint), then Z2c, then Z2d (after Z1-web lands to avoid tree overlap).
+
+### Z3 amendment (2026-08-31) — poll, not hook
+
+§8's Z3 row assumed a mediamtx `runOnAvailable` hook curling the backend. The official mediamtx
+Docker image is scratch-based — no shell, no curl — so the hook cannot run inside the container as
+deployed. Corrected mechanism, same outcome and same latency as the rest of the inbox:
+a **`MediamtxPathScanner`** (`DeviceDiscoveryPort`, method `mediamtx`) polls
+`GET /v3/paths/list` on the Control API each sweep and reports every **ready** path under the
+**`ingest/` prefix** as a candidate (`rtsp://<public-host>:8554/<path>`). The prefix is the filter
+separating device pushes from vision's own published paths (MEDIA-SOT). No new REST endpoint, no
+compose change beyond reachability of `:9997` on the internal network. The hook upgrade (sub-second
+announce) stays available later; SSE and the hook graduate together.
