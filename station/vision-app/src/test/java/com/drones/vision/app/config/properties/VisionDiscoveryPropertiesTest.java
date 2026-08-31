@@ -70,12 +70,39 @@ class VisionDiscoveryPropertiesTest {
     @Test
     void explicitLobbyAndInboxAreCarriedThrough() {
         VisionDiscoveryProperties properties = new VisionDiscoveryProperties(14550, null, null,
-                new VisionDiscoveryProperties.Lobby(false), new VisionDiscoveryProperties.Inbox(false, 60, 10));
+                new VisionDiscoveryProperties.Lobby(false), new VisionDiscoveryProperties.Inbox(false, 60, 10), null);
 
         assertFalse(properties.lobby().enabled());
         assertFalse(properties.inbox().enabled());
         assertEquals(60, properties.inbox().sweepSeconds());
         assertEquals(10, properties.inbox().scanTimeoutSeconds());
+    }
+
+    /**
+     * docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §11 "Z3 amendment" -- {@code mediamtx}
+     * defaults as a whole when absent, exactly as {@code lobby}/{@code inbox} already do.
+     */
+    @Test
+    void mediamtxDefaultsWhenAbsent() {
+        VisionDiscoveryProperties properties = new VisionDiscoveryProperties(14550);
+
+        assertTrue(properties.mediamtx().enabled());
+        assertEquals("ingest/", properties.mediamtx().pathPrefix());
+    }
+
+    @Test
+    void explicitMediamtxIsCarriedThrough() {
+        VisionDiscoveryProperties properties = new VisionDiscoveryProperties(14550, null, null, null, null,
+                new VisionDiscoveryProperties.Mediamtx(false, "custom/"));
+
+        assertFalse(properties.mediamtx().enabled());
+        assertEquals("custom/", properties.mediamtx().pathPrefix());
+    }
+
+    @Test
+    void blankMediamtxPathPrefixIsRejected() {
+        assertThrows(IllegalArgumentException.class, () -> new VisionDiscoveryProperties.Mediamtx(true, ""));
+        assertThrows(IllegalArgumentException.class, () -> new VisionDiscoveryProperties.Mediamtx(true, null));
     }
 
     @Test

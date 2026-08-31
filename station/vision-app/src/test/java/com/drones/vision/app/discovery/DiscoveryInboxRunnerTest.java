@@ -63,7 +63,7 @@ class DiscoveryInboxRunnerTest {
 
     private static VisionDiscoveryProperties properties(boolean lobbyEnabled) {
         return new VisionDiscoveryProperties(14_550, null, null, new VisionDiscoveryProperties.Lobby(lobbyEnabled),
-                new VisionDiscoveryProperties.Inbox(true, FAST_SWEEP_SECONDS, FAST_SWEEP_SECONDS));
+                new VisionDiscoveryProperties.Inbox(true, FAST_SWEEP_SECONDS, FAST_SWEEP_SECONDS), null);
     }
 
     private static DiscoveredDevice discoveredDevice() {

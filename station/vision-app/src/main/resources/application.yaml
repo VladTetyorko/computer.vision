@@ -551,6 +551,26 @@ vision:
       sweep-seconds: 30
       # How long each sweep's DiscoveryService.scan call may take before returning what it has.
       scan-timeout-seconds: 5
+    # MediamtxPathScanner (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P3, §11 "Z3
+    # amendment (2026-08-31) -- poll, not hook"): each inbox sweep also polls mediamtx's Control
+    # API GET /v3/paths/list and reports every READY path under path-prefix below as a candidate --
+    # the "device pushes video, operator never types a URL" half of zero-config onboarding. No new
+    # REST endpoint on this app's own side; mediamtx's own runOnAvailable hook can't run inside the
+    # official scratch-based Docker image (no shell/curl), which is why this is a poll, not a hook.
+    # Reachability of mediamtx's Control API/RTSP base is NOT configured here -- this scanner reuses
+    # vision.publish.mediamtx.api-base/rtsp-base above (the same properties MediamtxStreamPublisher
+    # already uses to reach this exact mediamtx instance), so there is exactly one place, not two,
+    # that can go stale about where mediamtx is.
+    mediamtx:
+      # Whether this scanner is registered at all (ANDed with vision.discovery.enabled above).
+      enabled: true
+      # mediamtx path-name prefix a device push must live under to be reported as a candidate --
+      # the convention devices push to, e.g. rtsp://<locked-host>:8554/ingest/<kind>-<id> (see
+      # mediamtx.yml's own comments for the full convention). Paths outside this prefix are
+      # vision's own published streams (MEDIA-SOT, e.g. the per-stream paths
+      # MediamtxStreamPublisher creates) and are NEVER reported -- reporting them would mean
+      # vision discovering its own video output as if it were a newly found camera.
+      path-prefix: ingest/
 
   # --- vision-api: server-push data plane (see docs/plans/done/REALTIME-PLAN.md §4) ---
   live:
