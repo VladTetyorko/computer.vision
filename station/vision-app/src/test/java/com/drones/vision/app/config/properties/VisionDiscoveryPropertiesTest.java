@@ -4,7 +4,9 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Plain unit tests (no Spring context) for {@link VisionDiscoveryProperties}'s compact-constructor
@@ -49,5 +51,46 @@ class VisionDiscoveryPropertiesTest {
         // declares (see the class itself), which is what application.yaml's commented
         // vision.discovery.mavlink-port line documents as "the default".
         assertEquals(14550, Integer.parseInt(VisionDiscoveryProperties.DEFAULT_MAVLINK_PORT));
+    }
+
+    /**
+     * docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md &sect;11, Z2c — {@code lobby}/{@code
+     * inbox} default as a whole when absent, exactly as {@code mdns}/{@code v4l2} already do.
+     */
+    @Test
+    void lobbyAndInboxDefaultWhenAbsent() {
+        VisionDiscoveryProperties properties = new VisionDiscoveryProperties(14550);
+
+        assertTrue(properties.lobby().enabled());
+        assertTrue(properties.inbox().enabled());
+        assertEquals(30, properties.inbox().sweepSeconds());
+        assertEquals(5, properties.inbox().scanTimeoutSeconds());
+    }
+
+    @Test
+    void explicitLobbyAndInboxAreCarriedThrough() {
+        VisionDiscoveryProperties properties = new VisionDiscoveryProperties(14550, null, null,
+                new VisionDiscoveryProperties.Lobby(false), new VisionDiscoveryProperties.Inbox(false, 60, 10));
+
+        assertFalse(properties.lobby().enabled());
+        assertFalse(properties.inbox().enabled());
+        assertEquals(60, properties.inbox().sweepSeconds());
+        assertEquals(10, properties.inbox().scanTimeoutSeconds());
+    }
+
+    @Test
+    void zeroOrNegativeSweepSecondsIsRejected() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new VisionDiscoveryProperties.Inbox(true, 0, 5));
+        assertThrows(IllegalArgumentException.class,
+                () -> new VisionDiscoveryProperties.Inbox(true, -1, 5));
+    }
+
+    @Test
+    void zeroOrNegativeScanTimeoutSecondsIsRejected() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new VisionDiscoveryProperties.Inbox(true, 30, 0));
+        assertThrows(IllegalArgumentException.class,
+                () -> new VisionDiscoveryProperties.Inbox(true, 30, -1));
     }
 }

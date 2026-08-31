@@ -27,6 +27,7 @@ import com.drones.vision.warehouse.domain.port.AssetNoteRepositoryPort;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
+import com.drones.vision.warehouse.domain.port.DiscoveryCandidateRepositoryPort;
 import com.drones.vision.warehouse.domain.port.MaintenanceRepositoryPort;
 import com.drones.vision.adapter.persistence.config.PersistenceUnit;
 import com.drones.vision.adapter.persistence.repository.*;
@@ -293,5 +294,21 @@ public class PersistenceWiringConfiguration {
     @Bean
     public AssetNoteRepositoryPort assetNoteRepositoryPort(EntityManagerFactory entityManagerFactory) {
         return new JpaAssetNoteRepository(entityManagerFactory);
+    }
+
+    /**
+     * docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md &sect;11, Z2c — the discovery inbox's
+     * persisted "found devices" rows ({@code V31__discovery_inbox.sql}), same shape as the
+     * twenty-four above. Wired unconditionally like every other port here: {@code
+     * vision.discovery.inbox.enabled} only gates whether {@code
+     * com.drones.vision.app.discovery.DiscoveryInboxRunner} ever calls {@code
+     * DiscoveryInboxService#report} against it (see {@code DiscoveryInboxWiringConfiguration}), not
+     * whether the table/repository exists — matching {@link #vehicleProfileRepositoryPort}'s own
+     * precedent.
+     */
+    @Bean
+    public DiscoveryCandidateRepositoryPort discoveryCandidateRepositoryPort(
+            EntityManagerFactory entityManagerFactory) {
+        return new JpaDiscoveryCandidateRepository(entityManagerFactory);
     }
 }

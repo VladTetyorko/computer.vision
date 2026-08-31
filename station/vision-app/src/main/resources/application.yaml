@@ -532,6 +532,25 @@ vision:
     # v4l2:
     #   dev-base: /dev
     #   sys-base: /sys
+    # Standing MAVLink lobby (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §11, Z2c): whether
+    # DiscoveryInboxRunner re-asserts a claim-free hold on the MAVLink gateway every sweep, so it is
+    # listening -- and answering with a GCS heartbeat -- from boot, not only while a device or a scan
+    # happens to be open. Default true: a brand-new vehicle broadcasting to mavlink-port above locks
+    # on within seconds with zero operator action, the whole point of this feature. Set to false to
+    # keep the inbox's scan+report half without the standing auto-reply-to-any-broadcasting-vehicle
+    # behavior.
+    lobby:
+      enabled: true
+    # The discovery inbox (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P2, §11, Z2c): a
+    # persisted, deduplicated "found devices" list a background sweep feeds, instead of discovery
+    # being only a manual POST /api/discovery/scan button. Default true for the same zero-config
+    # reason as lobby.enabled above.
+    inbox:
+      enabled: true
+      # How often DiscoveryInboxRunner sweeps (holds the lobby, scans, reports hits).
+      sweep-seconds: 30
+      # How long each sweep's DiscoveryService.scan call may take before returning what it has.
+      scan-timeout-seconds: 5
 
   # --- vision-api: server-push data plane (see docs/plans/done/REALTIME-PLAN.md §4) ---
   live:

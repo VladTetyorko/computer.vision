@@ -16,6 +16,7 @@ import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.LifecycleState;
 import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.kernel.UsageId;
@@ -49,6 +50,7 @@ import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetSpec;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
+import com.drones.vision.warehouse.application.asset.DuplicateDeviceMatch;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.Custody;
 import com.drones.vision.warehouse.domain.model.Identity;
@@ -471,6 +473,11 @@ class AfterActionAssemblerTest {
         @Override
         public Asset createFromCandidate(AssetSpec spec, Ownership ownership, UserId actor) {
             throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Optional<DuplicateDeviceMatch> findDuplicateDevice(StreamDescriptor candidate) {
+            return Optional.empty();
         }
 
         @Override

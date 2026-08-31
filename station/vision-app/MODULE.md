@@ -33,6 +33,7 @@ com.drones.vision.app
   onboarding/            PassportCaptureObserver (UsagePhaseObserver impl)
   geo/                   TrackProjectionRunner, VisualGeoRunner (poller ApplicationRunners)
   usage/                 UsageIdleCloseRunner (self-scheduled sweep, same shape as geo/'s runners)
+  discovery/             DiscoveryInboxRunner (self-scheduled sweep, same shape as usage/'s runner)
   stream/                LiveFrameFallbackStreamService (StreamService decorator)
   bootstrap/             SimulationResumeRunner (the one remaining ApplicationRunner-as-bean)
   devsupport/            8 Noop*/constant-holder classes — see table below
@@ -52,8 +53,9 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 | `TrainingWiringConfiguration` | Training, Cv | `datasetUploadPort`, `trainingStores`, `replaySources`, `datasetService`, `labelingService` (takes `AssetDirectoryService`, not `AssetService`), `trainingPort`, `trainingJobService` all `@ConditionalOnProperty(vision.training.enabled=true)`, no fallback. `modelRegistryPort`/`modelRegistryService` are a **separate** switch since CV-SETTINGS-PLAN §5 (CV-SETTINGS-CONTEXT.md's W4-app → W5 handoff decoupled the registry from training): `@ConditionalOnProperty(vision.cv.registry.enabled=true)`, whose own `application.yaml` default follows `vision.cv.enabled` via the `${vision.cv.enabled:false}` placeholder — a CV-only deployment gets the registry for free unless it explicitly opts out (`vision.cv.registry.enabled=false`); a training-only deployment does **not** get it for free any more. Channel-consuming beans route through `CvWiring.controlPlaneChannel(...)` |
 | `CvProfileWiringConfiguration` | — | **Every bean unconditional**, no `@Conditional*` at all (CV-SETTINGS-PLAN §3.1/§5, CV-SETTINGS-CONTEXT.md's W2 → W5 handoff): `cvProfileCacheSettings` (from `VisionCvProperties.Profiles#cacheTtl()`, default 60s), `cvProfileCache` (write-through, lazy-TTL-reload), `cvProfileResolver` (asset→category→organization→platform fold, shared with `ApplicationServiceWiring#streamService` and `CvWiring#streamDetectionSupport`), `cvProfileService` (`DefaultCvProfileService`, behind `CvProfileController`) — profiles ship built-in (4 seeded rows, `V29__cv_profiles.sql`) regardless of `vision.cv.enabled`/`vision.cv.registry.enabled`, the same "ships built-in" posture `TrackingWiring#cvTrackerRoster` takes |
 | `DiscoveryWiringConfiguration` | Discovery, Mavlink | `onvifWsDiscoveryScanner`/`mdnsScanner`/`v4l2Scanner`/`mavlinkHeartbeatScanner` — each COP `vision.discovery.enabled` default true. `discoveryService` and `mavlinkPort` **unconditional** (`DiscoveryController` needs the service regardless; `DefaultDiscoveryService` tolerates an empty port list). `mavlinkHeartbeatScanner` lives in adapter-mavlink, not adapter-discovery like its 3 siblings, because it borrows `mavlinkTelemetrySource`'s open socket and adapters can't depend on each other |
+| `DiscoveryInboxWiringConfiguration` | Discovery | `discoveryInboxService(DiscoveryCandidateRepositoryPort, AssetService)` → `DefaultDiscoveryInboxService`, **unconditional** (`DiscoveryInboxController`, vision-api, needs it regardless of whether the sweep runs — an operator can still read/register/dismiss by hand with the runner off). `discoveryInboxRunner` (`initMethod="start"`, `destroyMethod="close"`) COP `vision.discovery.inbox.enabled=true` (matchIfMissing=true, the default — ZERO-CONFIG-ONBOARDING-CONTEXT.md §11 Z2c deliberately overrides CLAUDE.md's usual opt-in-guardrail default, since shipping the sweep off by default would defeat the whole zero-config purpose) |
 | `FeedTransmitterWiring` | Publish, Rtsp, Mjpeg, Mavlink, Rc, Onboarding | `rtspFeedTransmitter`, `mjpegFeedTransmitter` (`destroyMethod="close"` — owns a shared `HttpServer`), `mavlinkFeedTransmitter`, `feedTransmitterRegistry` — all unconditional |
-| `PersistenceWiringConfiguration` | Persistence | **Every bean unconditional**, no `@Conditional*` anywhere — 22 one-line `Jpa*Repository(entityManagerFactory)` ports (WAREHOUSE-UX W3 added `maintenanceRepositoryPort`/`assetNoteRepositoryPort`) + `persistenceEntityManagerFactory` (`destroyMethod="close"`, opens a real JDBC connection eagerly). No in-memory fallback exists for any repository port (Postgres is the only store) |
+| `PersistenceWiringConfiguration` | Persistence | **Every bean unconditional**, no `@Conditional*` anywhere — 23 one-line `Jpa*Repository(entityManagerFactory)` ports (WAREHOUSE-UX W3 added `maintenanceRepositoryPort`/`assetNoteRepositoryPort`; ZERO-CONFIG-ONBOARDING Z2c added `discoveryCandidateRepositoryPort`) + `persistenceEntityManagerFactory` (`destroyMethod="close"`, opens a real JDBC connection eagerly). No in-memory fallback exists for any repository port (Postgres is the only store) |
 | `AuthWiringConfiguration` | — | `passwordHasherPort`, `authService`, `userService`, `groupService`, `scopeResolver`, `assignmentService` (`DefaultAssignmentService(assignmentRepositoryPort, assetService)` — takes `AssetService`, not `AssetRepositoryPort`), `activityService` — all unconditional. `devPrincipalResolver`/`noopSessionAuthenticator` COP `vision.auth.enabled=false` (matchIfMissing=true, the default); `securityContextPrincipalResolver`/`securitySessionAuthenticator` COP `vision.auth.enabled=true`. Repository ports (`UserRepositoryPort`/`GroupRepositoryPort`) come from `PersistenceWiringConfiguration`, orthogonal to `vision.auth.enabled` |
 | `RateLimitWiring` | Api | Whole-class COP `vision.api.rate-limit.enabled=true` (default false): `rateLimitFilterRegistration` — `FilterRegistrationBean<RateLimitFilter>` on `/api/*` |
 | `SystemStatusWiring` | — | Two mutually-exclusive beans per subsystem, each repeating the exact enabling expression its real resource already uses (never `@ConditionalOnBean` — order-sensitive, see Gotchas): `cvServiceStatus`/`cvServiceStatusDisabled`, `videoPublishStatus`/`videoPublishStatusDisabled` (COP `vision.publish.enabled`). `mavlinkLinkStatus` is **unconditional** (mavlink telemetry source always exists; reports `UNKNOWN` with no claimed vehicle, never `DISABLED`); **FLEET-RADIO R4** — the class now also declares `@EnableConfigurationProperties(VisionMavlinkProperties.class)` (matching `TelemetryWiring`'s/`DiscoveryWiringConfiguration`'s own identical declarations of the same class) and `mavlinkLinkStatus` takes a second parameter, `VisionMavlinkProperties`, building a `MavlinkSettings.LinkStatus` from its three D7 threshold fields to construct `MavlinkLinkStatusProvider` |
@@ -92,7 +94,7 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 | `VisionLiveProperties` | `vision.live` | selects `LiveUpdateRegistry` vs. `NoopLiveUpdatePublisher` (all 6 ports) |
 | `VisionTrainingProperties` | `vision.training` | gates `TrainingWiringConfiguration`'s whole bean cluster |
 | `VisionCvProperties` | `vision.cv` | `CvWiring`/`adapter-cv-grpc` channel + detection settings |
-| `VisionDiscoveryProperties` | `vision.discovery` | `adapter-discovery` scan budgets |
+| `VisionDiscoveryProperties` | `vision.discovery` | `adapter-discovery` scan budgets; ZERO-CONFIG-ONBOARDING Z2c added two nested records to the canonical constructor's 4th/5th components — `Lobby(boolean enabled)` (default `true`, `DiscoveryInboxWiringConfiguration`'s `mavlinkTelemetrySource.holdLobby(...)` gate) and `Inbox(boolean enabled, int sweepSeconds, int scanTimeoutSeconds)` (defaults `true`/`30`/`5`, compact-constructor validated both ints `> 0`) — both default to `true`/on, a deliberate exception to the repo's usual opt-in-guardrail default (see `DiscoveryInboxWiringConfiguration` row above) |
 | `VisionSimulationProperties` | `vision.simulation` | `adapter-simulation` video/telemetry settings + resume-on-boot |
 | `VisionPublishProperties` | `vision.publish` | `PublishWiring`/`adapter-publish-hls` (mediamtx, encoder, resilience, cadence, replay, source-proxy) |
 | `VisionRcProperties` | `vision.rc` | `adapter-mavlink`'s RC-override cadence/watchdog |
@@ -258,7 +260,13 @@ maps to a real handler, so it can't quietly outlive the gap it records.
   sibling adapter jar lets this module's whole suite pass green while a real cross-module wiring bug
   goes undetected — reinstall changed siblings first (`./mvnw -pl <adapters> install -DskipTests`).
   Always `mvn clean` too: a non-clean `target/` can serve stale pre-refactor classes and report
-  "nothing to compile."
+  "nothing to compile." **CLAUDE.md's own documented upstream-install command (`core/*`,
+  `contexts/*`) does not cover `drone-link/**`** — a concurrent agent adding a public method to
+  `adapter-mavlink` (e.g. `MavlinkTelemetrySource#holdLobby(int)`, ZERO-CONFIG-ONBOARDING Z2b/Z2c) can
+  leave a stale, pre-that-method jar in `~/.m2` even after following CLAUDE.md's build recipe exactly,
+  producing a `cannot find symbol` compile error against source that plainly declares the method
+  (confirm with `stat` on the jar vs. the source file before assuming the code is wrong). Fix:
+  `./mvnw -B -pl drone-link/mavlink-core,drone-link/mavlink install -DskipTests` before retrying.
 - **Onboarding's two flags are independent and easy to misconfigure:** `vision.onboarding.passport.enabled=true`
   with `probe.enabled=false` (the default) makes every passport-capture attempt silently fail forever
   — `NoopVehicleConfigPort` has nothing to probe. The wiring logs one startup `WARNING` naming both
@@ -353,3 +361,36 @@ the pre-W5 277-minus-the-two-broken-tests baseline: the new `CvRegistryExplicitO
 `PostgresDockerIntegrationTest`'s 29 nested classes executed, not skipped). Default-config bar held
 throughout: every pre-existing green suite stayed green, the two flipped assertions were pinning
 behavior this wave deliberately changed (not accidentally broken), proven fixed rather than silenced.
+
+**ZERO-CONFIG-ONBOARDING wave Z2c done.** New unconditional `DiscoveryInboxWiringConfiguration` (2
+beans: `discoveryInboxService`, gated `discoveryInboxRunner` — see the wiring-map table above) +
+`discovery.DiscoveryInboxRunner`, the module's second hand-rolled sweep runner built to the exact same
+shape as `usage.UsageIdleCloseRunner` (own single-thread daemon `ScheduledExecutorService`, `AtomicBoolean`
+start/close idempotency guards, `@Bean(initMethod="start", destroyMethod="close")`, `sweepSafely`
+catching every `RuntimeException` so one bad sweep never kills the schedule — no `@Scheduled`, banned
+repo-wide). Each sweep: hold the standing MAVLink lobby if `vision.discovery.lobby.enabled` (via the
+already-unconditionally-wired `mavlinkTelemetrySource`, `TelemetryWiring`), scan
+(`discoveryService.scan(new DiscoveryScanSpec(scanTimeoutSeconds, Set.of()))`), then report every hit
+to `discoveryInboxService`. `PersistenceWiringConfiguration` gained `discoveryCandidateRepositoryPort`
+(23rd unconditional repository bean). `VisionDiscoveryProperties` extended with `Lobby`/`Inbox` nested
+records — see that row above; both new flags default `true`, a deliberate frozen-contract exception to
+CLAUDE.md's usual opt-in-guardrail default, since an off-by-default sweep would defeat the entire
+zero-config-onboarding point.
+
+Found and fixed mid-wave: a **stale `~/.m2` `adapter-mavlink` jar** (built before a concurrent Z2b wave
+added `MavlinkTelemetrySource#holdLobby(int)` to the module's source) produced a `cannot find symbol`
+compile error even after following CLAUDE.md's documented upstream-install recipe exactly — that
+recipe covers `core/*`/`contexts/*` only, not `drone-link/**`. Fixed by explicitly reinstalling
+`drone-link/mavlink-core,drone-link/mavlink` first; flagged as a new Gotchas entry above so the next
+agent doesn't waste time suspecting the newly-written code instead.
+
+`./mvnw -B -pl core/vision-kernel,core/vision-platform,contexts/vision-warehouse,contexts/vision-identity,contexts/vision-flight,contexts/vision-perception,contexts/vision-map,contexts/vision-events,contexts/vision-learning,contexts/vision-simulation
+install -DskipTests` then `./mvnw -B -pl drone-link/mavlink-core,drone-link/mavlink install -DskipTests`
+(the fix above) then `./mvnw -B -pl storage/persistence,station/vision-api,station/vision-app test
+-DskipWeb` as one combined three-module command — `storage/persistence` **267** (+7), `station/vision-api`
+**941** (+9), `station/vision-app` **293** (+15: `DiscoveryInboxRunnerTest` 7,
+`VisionDiscoveryPropertiesTest` +4, `DiscoveryInboxWiringTest` 2, `DiscoveryInboxDisabledWiringTest` 2)
+— all green on the first run after the jar fix, `ArchitectureTest`/`ContextArchitectureTest`/
+`EndpointAuthorizationTest` all unaffected (no new ArchUnit violation), Docker ran for real (Postgres
+Testcontainer migrated through `V31`, `DiscoveryCandidateRepositoryTests` executed). Default-config bar
+held throughout — every pre-existing green suite stayed green.

@@ -147,6 +147,13 @@ import com.drones.vision.learning.domain.port.TrainingSampleRepositoryPort;
 import com.drones.vision.identity.domain.port.UserRepositoryPort;
 import com.drones.vision.flight.domain.port.VehicleProfileRepositoryPort;
 
+// docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §11, Z2c (V31__discovery_inbox.sql)
+import com.drones.vision.warehouse.domain.model.CandidateStatus;
+import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
+import com.drones.vision.warehouse.domain.model.DiscoveryCandidate;
+import com.drones.vision.warehouse.domain.model.DiscoveryCandidateId;
+import com.drones.vision.warehouse.domain.port.DiscoveryCandidateRepositoryPort;
+
 import com.drones.vision.adapter.persistence.config.ClosingDatasourceConnectionProvider;
 import com.drones.vision.adapter.persistence.config.PersistencePoolSettings;
 import com.drones.vision.adapter.persistence.config.PersistenceUnit;
@@ -168,6 +175,7 @@ import com.drones.vision.adapter.persistence.repository.JpaDbAuditLogRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDetectionEventRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDetectionRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDeviceRepository;
+import com.drones.vision.adapter.persistence.repository.JpaDiscoveryCandidateRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDrawingRepository;
 import com.drones.vision.adapter.persistence.repository.JpaFeatureRequirementRepository;
 import com.drones.vision.adapter.persistence.repository.JpaGeofenceRepository;
@@ -286,7 +294,11 @@ class PostgresDockerIntegrationTest {
      * same way {@code pilot_assignments}/{@code map_layer_grants} already are (a routing/security
      * decision, not bulk collection data); {@code cv_training_runs} updates more often than most
      * audited tables (roughly once per epoch) but at a training-job's bounded volume, not the
-     * per-frame/per-sample character of the excluded set below — see that migration's own header.
+     * per-frame/per-sample character of the excluded set below — see that migration's own header;
+     * and {@code discovery_candidates} added by {@code V31__discovery_inbox.sql} (docs/plans/active/
+     * ZERO-CONFIG-ONBOARDING-CONTEXT.md §11, Z2c) — "who dismissed/registered this candidate, and
+     * when" is control-plane accountability, and write volume is sweep-driven (see that migration's
+     * own header).
      */
     private static final Set<String> AUDITED_TABLES = Set.of(
             "categories", "devices", "device_capabilities", "assets", "asset_devices",
@@ -294,7 +306,7 @@ class PostgresDockerIntegrationTest {
             "marks", "datasets", "map_layers", "map_layer_grants", "map_drawings",
             "vehicle_profiles", "feature_requirements", "camera_poses", "control_profiles",
             "maintenance_records", "asset_notes", "cv_profiles", "cv_profile_bindings",
-            "cv_models", "cv_training_runs");
+            "cv_models", "cv_training_runs", "discovery_candidates");
 
     /**
      * Every other base table in the schema as of V22 — high-volume append-only event tables, the
@@ -4143,6 +4155,125 @@ class PostgresDockerIntegrationTest {
             assertEquals(2, latestTwo.size());
             assertEquals(newest.runId(), latestTwo.get(0).runId());
             assertEquals(middle.runId(), latestTwo.get(1).runId());
+        }
+    }
+
+    /**
+     * docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §11, Z2c — round trips {@link
+     * DiscoveryCandidateRepositoryPort} against {@code V31__discovery_inbox.sql}, including the
+     * nullable {@code suggestedStream} triple (protocol/uri/options travel together as {@code null}
+     * when a discovery mechanism could not produce a ready-to-use stream) and the non-nullable
+     * {@code details} map.
+     */
+    @Nested
+    class DiscoveryCandidateRepositoryTests {
+
+        private final DiscoveryCandidateRepositoryPort repository =
+                new JpaDiscoveryCandidateRepository(entityManagerFactory);
+
+        private DiscoveredDevice withStream(String address) {
+            return new DiscoveredDevice("mavlink", "New quad", URI.create(address), new CategoryId("quadcopter"),
+                    new StreamDescriptor("mavlink", URI.create(address), Map.of("sysid", "7")),
+                    Map.of("sysid", "7", "raw", "heartbeat"));
+        }
+
+        private DiscoveredDevice withoutStream(String address) {
+            return new DiscoveredDevice("onvif", "New camera", URI.create(address), null, null,
+                    Map.of("scopes", "onvif://www.onvif.org/Profile/Streaming"));
+        }
+
+        @Test
+        void findByIdReturnsEmptyForUnknownCandidate() {
+            assertTrue(repository.findById(DiscoveryCandidateId.random()).isEmpty());
+        }
+
+        @Test
+        void findByIdentityKeyReturnsEmptyForAnUnreportedIdentity() {
+            assertTrue(repository.findByIdentityKey("mavlink|udp://never-reported:14550").isEmpty());
+        }
+
+        @Test
+        void savedCandidateWithAStreamRoundTripsEveryField() {
+            DiscoveredDevice discovered = withStream("udp://10.0.0.5:14550");
+            DiscoveryCandidate candidate =
+                    DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(), discovered, NOW);
+
+            repository.save(candidate);
+
+            DiscoveryCandidate found = repository.findById(candidate.id()).orElseThrow();
+            assertEquals(candidate, found);
+            assertEquals(Map.of("sysid", "7"), found.discovered().suggestedStream().options());
+            assertEquals(Map.of("sysid", "7", "raw", "heartbeat"), found.discovered().details());
+        }
+
+        @Test
+        void savedCandidateWithNoSuggestedStreamRoundTripsTheAbsenceExactly() {
+            DiscoveredDevice discovered = withoutStream("onvif://192.168.1.20/onvif/device_service");
+            DiscoveryCandidate candidate =
+                    DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(), discovered, NOW);
+
+            repository.save(candidate);
+
+            DiscoveryCandidate found = repository.findById(candidate.id()).orElseThrow();
+            assertEquals(candidate, found);
+            assertNull(found.discovered().suggestedStream());
+            assertNull(found.discovered().suggestedCategory());
+        }
+
+        @Test
+        void findByIdentityKeyFindsTheUpsertTargetAndSaveIsAnUpsertPreservingId() {
+            DiscoveredDevice discovered = withStream("udp://10.0.0.6:14550");
+            DiscoveryCandidateId id = DiscoveryCandidateId.random();
+            DiscoveryCandidate candidate = DiscoveryCandidate.newlyReported(id, discovered, NOW);
+            repository.save(candidate);
+
+            DiscoveryCandidate reSeen = repository.findByIdentityKey(candidate.identityKey())
+                    .orElseThrow()
+                    .reSeen(discovered, NOW.plusSeconds(60));
+            repository.save(reSeen);
+
+            DiscoveryCandidate found = repository.findById(id).orElseThrow();
+            assertEquals(id, found.id());
+            assertEquals(NOW.plusSeconds(60), found.lastSeen());
+            assertEquals(NOW, found.firstSeen(), "firstSeen must survive a re-report unchanged");
+        }
+
+        @Test
+        void dismissedAndRegisteredStatusesRoundTrip() {
+            DiscoveryCandidate dismissed = DiscoveryCandidate
+                    .newlyReported(DiscoveryCandidateId.random(), withStream("udp://10.0.0.7:14550"), NOW)
+                    .dismiss();
+            repository.save(dismissed);
+            assertEquals(CandidateStatus.DISMISSED, repository.findById(dismissed.id()).orElseThrow().status());
+
+            AssetId owningAsset = AssetId.random();
+            DiscoveryCandidate registered = DiscoveryCandidate
+                    .newlyReported(DiscoveryCandidateId.random(), withStream("udp://10.0.0.8:14550"), NOW)
+                    .registeredTo(owningAsset);
+            repository.save(registered);
+
+            DiscoveryCandidate found = repository.findById(registered.id()).orElseThrow();
+            assertEquals(CandidateStatus.REGISTERED, found.status());
+            assertEquals(owningAsset, found.registeredAsset());
+        }
+
+        @Test
+        void findAllOrdersNewestReportedFirst() {
+            DiscoveryCandidate older = DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(),
+                    withStream("udp://10.0.0.9:14550"), NOW.plusSeconds(5000));
+            DiscoveryCandidate newer = DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(),
+                    withStream("udp://10.0.0.10:14550"), NOW.plusSeconds(6000));
+            repository.save(older);
+            repository.save(newer);
+            Set<DiscoveryCandidateId> ours = Set.of(older.id(), newer.id());
+
+            List<DiscoveryCandidateId> ourOrder = repository.findAll().stream()
+                    .map(DiscoveryCandidate::id)
+                    .filter(ours::contains)
+                    .toList();
+
+            assertEquals(List.of(newer.id(), older.id()), ourOrder,
+                    "findAll must span every candidate and stay newest-lastSeen-first");
         }
     }
 
