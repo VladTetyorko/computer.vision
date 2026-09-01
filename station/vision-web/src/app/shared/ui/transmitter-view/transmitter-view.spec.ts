@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { describe, expect, it } from 'vitest';
-import { TransmitterView } from './transmitter-view';
+import { TransmitterView, type ActionKeyRow } from './transmitter-view';
 import { KEY_STEP } from '../../../core/rc/control-surface-logic';
 import type {
   ActionBinding,
@@ -83,6 +83,7 @@ interface RenderProps {
   readonly buttons?: readonly number[];
   readonly interactive?: boolean;
   readonly holding?: string;
+  readonly keyRows?: readonly ActionKeyRow[];
 }
 
 function render(props: RenderProps) {
@@ -97,9 +98,22 @@ function render(props: RenderProps) {
   fixture.componentRef.setInput('buttons', props.buttons ?? []);
   fixture.componentRef.setInput('interactive', props.interactive ?? false);
   fixture.componentRef.setInput('holding', props.holding);
+  fixture.componentRef.setInput('keyRows', props.keyRows ?? []);
   fixture.detectChanges();
   return fixture;
 }
+
+/** A key row builder — `id: 'MODE_1'` (with `dangerous: false`) is the default, overridable per
+ * test (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D3, wave W2). */
+const keyRow = (overrides: Partial<ActionKeyRow> = {}): ActionKeyRow => ({
+  id: 'MODE_1',
+  keyLabel: '1',
+  text: 'Guided',
+  dangerous: false,
+  pressed: false,
+  holding: false,
+  ...overrides,
+});
 
 describe('TransmitterView', () => {
   it('draws a rover as one steer/drive pad', () => {
@@ -231,5 +245,68 @@ describe('TransmitterView', () => {
 
     const unknown = render({ channelMap: [STEERING, ROVER_THROTTLE], vehicleKind: 'UNKNOWN' });
     expect(unknown.nativeElement.querySelector('vision-notice')).not.toBeNull();
+  });
+
+  describe('keyRows (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D3, wave W2 — keyboard action-key legend)', () => {
+    it('renders nothing extra when keyRows is empty (the default)', () => {
+      const fixture = render({ channelMap: [STEERING, ROVER_THROTTLE] });
+      expect(fixture.nativeElement.querySelector('.tv-keys')).toBeNull();
+    });
+
+    it('renders one row per key row, labelled by keyLabel, gauge plus its text', () => {
+      const fixture = render({
+        channelMap: [STEERING, ROVER_THROTTLE],
+        keyRows: [
+          keyRow({ id: 'EMERGENCY_STOP', keyLabel: 'Space', text: 'Emergency stop', dangerous: false }),
+          keyRow({ id: 'TOGGLE_ARM', keyLabel: 'Shift+Enter', text: 'Arm', dangerous: true }),
+        ],
+      });
+      const rows = fixture.nativeElement.querySelectorAll('.tv-keys .tv-row');
+      expect(rows.length).toBe(2);
+      expect(rows[0].querySelector('.tv-row-id')?.textContent?.trim()).toBe('Space');
+      expect(rows[0].querySelector('.tv-cell-text')?.textContent?.trim()).toBe('Emergency stop');
+      expect(rows[0].querySelector('vision-switch-gauge')).not.toBeNull();
+      expect(rows[1].querySelector('.tv-row-id')?.textContent?.trim()).toBe('Shift+Enter');
+      expect(rows[1].querySelector('.tv-cell-text')?.textContent?.trim()).toBe('Arm');
+    });
+
+    it('lights the cell text when the chord is pressed, and marks an unpressed dangerous one instead', () => {
+      const pressed = render({
+        channelMap: [STEERING, ROVER_THROTTLE],
+        keyRows: [keyRow({ pressed: true, dangerous: true })],
+      });
+      const pressedText = pressed.nativeElement.querySelector('.tv-cell-text') as HTMLElement;
+      expect(pressedText.classList.contains('lit')).toBe(true);
+      expect(pressedText.classList.contains('dangerous')).toBe(false); // lit takes priority
+
+      const idle = render({
+        channelMap: [STEERING, ROVER_THROTTLE],
+        keyRows: [keyRow({ pressed: false, dangerous: true })],
+      });
+      const idleText = idle.nativeElement.querySelector('.tv-cell-text') as HTMLElement;
+      expect(idleText.classList.contains('lit')).toBe(false);
+      expect(idleText.classList.contains('dangerous')).toBe(true);
+    });
+
+    it('shows the hold-to-fire fill only on a row whose own holding flag is true', () => {
+      const fixture = render({
+        channelMap: [STEERING, ROVER_THROTTLE],
+        keyRows: [
+          // A hold in progress means the chord is still physically down — same as a switch mid-hold
+          // still sitting in the position that started it (`ControlActionDispatcher`'s own
+          // `holdContinues` cancels the hold the instant the key comes back up).
+          keyRow({ id: 'TOGGLE_ARM', keyLabel: 'Shift+Enter', dangerous: true, pressed: true, holding: true }),
+          keyRow({ id: 'MODE_1', keyLabel: '1', dangerous: false, pressed: false, holding: false }),
+        ],
+      });
+      const rows = fixture.nativeElement.querySelectorAll('.tv-keys .tv-row');
+      expect(rows[0].querySelector('.sg-fill')).not.toBeNull();
+      expect(rows[1].querySelector('.sg-fill')).toBeNull();
+    });
+
+    it('a layout with no bound controls but live keyRows does not show the "Nothing is bound" empty state', () => {
+      const fixture = render({ channelMap: [], keyRows: [keyRow()] });
+      expect(fixture.nativeElement.querySelector('.tv-empty')).toBeNull();
+    });
   });
 });

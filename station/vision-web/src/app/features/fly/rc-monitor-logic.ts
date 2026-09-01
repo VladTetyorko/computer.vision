@@ -3,8 +3,11 @@ import type { ManualControlEngageState } from '../../core/rc/manual-control-clie
 import type { RcSourceKind } from '../../core/rc/rc-source.service';
 import { controlLabel } from '../../core/rc/control-action-logic';
 import { padsFrom } from '../../core/rc/control-surface-logic';
+import { resolveActionKey, toggleArmVerb, type ActionKeyId } from '../../core/rc/keyboard-action-logic';
+import { holdingMatchesRow } from '../../core/rc/transmitter-view-logic';
 import { featureStatusTone } from '../../core/readiness/readiness-logic';
 import { freshness, humanAge } from '../../core/telemetry/telemetry-logic';
+import type { ActionKeyRow } from '../../shared/ui/transmitter-view/transmitter-view';
 
 /**
  * Pure, component-adjacent logic behind `rc-monitor.ts` (docs/plans/active/CONTROLLER-UX-PLAN.md §2.2,
@@ -183,6 +186,74 @@ export function keyLegendLines(channelMap: readonly ManualControlChannelBinding[
     }
   }
   return lines;
+}
+
+// --- Keyboard action-key rows (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D3, wave W2) --------------
+
+/** The action-key chords, in the fixed order the transmitter picture lists them — mirrors
+ * `keyboard-action-logic.ts#ActionKeyId`'s own four-mode-digit ceiling as an iteration order only,
+ * never a second copy of what each digit means. */
+const ACTION_KEY_IDS: readonly ActionKeyId[] = ['EMERGENCY_STOP', 'TOGGLE_ARM', 'MODE_1', 'MODE_2', 'MODE_3', 'MODE_4'];
+
+/**
+ * The transmitter picture's keyboard action-key rows (wave W1 left this drawer's key legend not
+ * listing Space/`Shift`+`Enter`/`1`-`4` — its own MODULE.md "Not built" note — this closes that gap).
+ * Built with the identical gauge+text row shape `core/rc/transmitter-view-logic.ts#actionSwitchRows`
+ * builds for a bound switch, so a keyboard hold-to-fire reads with exactly the same visual idiom as
+ * a switch hold-to-fire (never a second one).
+ *
+ * One row per {@link ACTION_KEY_IDS} entry that `keyboard-action-logic.ts#resolveActionKey` actually
+ * resolves *right now* against live data — a mode digit past what `selectableModes` reports resolves
+ * to `undefined` and is simply omitted, never a placeholder row (CLAUDE.md's "degrade honestly": no
+ * row beats a fabricated mode name). `TOGGLE_ARM`'s row text is `'Arm'`/`'Disarm'`, read off the
+ * same {@link toggleArmVerb} the dispatcher itself resolves against at the moment a hold completes —
+ * this legend can never promise a different verb than what actually sends. `dangerous` (and so
+ * whether the row shows the gauge's hold sweep) is read straight off `resolveActionKey`'s own
+ * catalogue-driven flag rather than re-derived here: `EMERGENCY_STOP` is always immediate,
+ * `TOGGLE_ARM` is always a hold, and a mode digit only holds when the catalogue itself marks
+ * `SET_MODE` dangerous — the identical rule `ControlActionDispatcher` applies to the same key, off
+ * the same `ControlActionRules`.
+ *
+ * @param selectableModes the vehicle's own mode names (`FlightCapability.selectableModes`) — what
+ *   `1`-`4` read from, never a hardcoded list
+ * @param dangerousActions the catalogue's own danger flags (`ControlProfileStore#rules().dangerous`)
+ *   — the identical set the dispatcher itself binds against
+ * @param armed latest telemetry's armed flag — what the Arm/Disarm row's verb reads
+ * @param pressedKeys `KeyboardRcInputService#actionKeysDown()` — which chords are physically held
+ *   down right now
+ * @param holding `ControlActionDispatcher#holding()`'s free-text in-flight hold notice, matched back
+ *   to its row the same way a bound switch's own row is matched (`holdingMatchesRow`)
+ */
+export function actionKeyRows(
+  selectableModes: readonly string[],
+  dangerousActions: ReadonlySet<ControlAction>,
+  armed: boolean | undefined,
+  pressedKeys: ReadonlySet<ActionKeyId>,
+  holding: string | undefined,
+): readonly ActionKeyRow[] {
+  const rows: ActionKeyRow[] = [];
+  for (const id of ACTION_KEY_IDS) {
+    const resolved = resolveActionKey(id, selectableModes, dangerousActions);
+    if (!resolved) {
+      // e.g. a mode digit past what the vehicle actually reports -- an honest omission, not a guess.
+      continue;
+    }
+    const text =
+      id === 'EMERGENCY_STOP'
+        ? 'Emergency stop'
+        : id === 'TOGGLE_ARM'
+          ? (toggleArmVerb(armed) === 'arm' ? 'Arm' : 'Disarm')
+          : (resolved.parameter ?? resolved.label);
+    rows.push({
+      id,
+      keyLabel: resolved.label,
+      text,
+      dangerous: resolved.dangerous,
+      pressed: pressedKeys.has(id),
+      holding: holdingMatchesRow(holding, resolved.label),
+    });
+  }
+  return rows;
 }
 
 // --- Readiness rows under the footer (docs/plans/active/CONTROLLER-UX-PLAN.md §5 wave R) ------------

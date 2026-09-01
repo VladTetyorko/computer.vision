@@ -3,7 +3,7 @@ import { NgTemplateOutlet } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { SidePanel } from '../../shared/ui/side-panel';
 import { Notice } from '../../shared/ui/notice';
-import { TransmitterView } from '../../shared/ui/transmitter-view/transmitter-view';
+import { TransmitterView, type ActionKeyRow } from '../../shared/ui/transmitter-view/transmitter-view';
 import { RcInputService } from '../../core/rc/rc-input.service';
 import { VirtualRcInputService } from '../../core/rc/virtual-rc-input.service';
 import { KeyboardRcInputService } from '../../core/rc/keyboard-rc-input.service';
@@ -15,6 +15,7 @@ import { activeProfileFor } from '../../core/rc/control-action-logic';
 import { VisionApi } from '../../core/api/vision-api';
 import { FlightCommandPanel } from './flight-command-panel';
 import {
+  actionKeyRows,
   armedChip,
   armAlsoOnHint,
   engageBlock,
@@ -185,6 +186,26 @@ export class RcMonitor implements OnInit {
    * per pad this layout actually has, built from the same map the transmitter picture already
    * draws. */
   protected readonly keyLegend = computed(() => keyLegendLines(this.normalizedChannelMap()));
+  /** The transmitter picture's keyboard action-key rows (docs/plans/active/MAVLINK-COMMANDS-PLAN.md
+   * D3, wave W2 — closes wave W1's own "key legend doesn't list the action keys" gap). `[]` whenever
+   * the keyboard isn't the selected source: `KeyboardRcInputService` only attaches its window
+   * listeners then (`RcSource#keyboard.setEnabled`), so advertising Space/`Shift`+`Enter`/`1`-`4`
+   * outside that selection would be discoverability for chords that, right now, do nothing. Reads
+   * `capabilities()?.selectableModes` (the same capability read `ControlActionDispatcher` makes on
+   * its own account) and `profiles.rules().dangerous` (the identical `ControlActionRules` the
+   * dispatcher binds), so this legend's dangerous/hold state can never disagree with what actually
+   * fires. */
+  protected readonly keyActionRows = computed<readonly ActionKeyRow[]>(() =>
+    this.source.kind() === 'keyboard'
+      ? actionKeyRows(
+          this.capabilities()?.selectableModes ?? [],
+          this.profiles.rules().dangerous,
+          this.armed(),
+          this.keyboard.actionKeysDown(),
+          this.dispatcher.holding(),
+        )
+      : [],
+  );
   protected readonly vehicleKind = computed<VehicleKind>(
     () => this.client.vehicleKind() ?? this.capabilities()?.vehicleKind ?? 'UNKNOWN',
   );

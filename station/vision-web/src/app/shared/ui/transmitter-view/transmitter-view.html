@@ -74,7 +74,27 @@
     </div>
   }
 
-  @if (!caveat() && pads().length === 0 && rows().length === 0) {
+  @if (keyRows().length > 0) {
+    <div class="tv-switches tv-keys">
+      @for (row of keyRows(); track row.id) {
+        <div class="tv-row">
+          <span class="tv-row-id mono">{{ row.keyLabel }}</span>
+          <vision-switch-gauge
+            [positions]="keyGaugePositions"
+            [active]="row.pressed ? 'HIGH' : undefined"
+            [holding]="row.holding"
+          />
+          <span class="tv-row-actions">
+            <span class="tv-cell-text" [class.lit]="row.pressed" [class.dangerous]="!row.pressed && row.dangerous">{{
+              row.text
+            }}</span>
+          </span>
+        </div>
+      }
+    </div>
+  }
+
+  @if (!caveat() && pads().length === 0 && rows().length === 0 && keyRows().length === 0) {
     <p class="tv-empty faint">Nothing is bound in this layout yet.</p>
   }
 

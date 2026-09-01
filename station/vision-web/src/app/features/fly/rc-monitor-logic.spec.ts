@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  actionKeyRows,
   armedChip,
   armAlsoOnHint,
   engageBlock,
@@ -11,7 +12,7 @@ import {
   resolveSessionAffordance,
   sampleIsStale,
 } from './rc-monitor-logic';
-import type { ActionBinding, ManualControlChannelBinding, ReadinessReport } from '../../core/api/models';
+import type { ActionBinding, ControlAction, ManualControlChannelBinding, ReadinessReport } from '../../core/api/models';
 
 const BASE = {
   hasAsset: true,
@@ -201,6 +202,68 @@ describe('keyLegendLines', () => {
 
   it('reads the bound control\'s own label, never a hardcoded function name', () => {
     expect(keyLegendLines([axis('THROTTLE', 2, 'Power')])).toEqual(['W/S power']);
+  });
+});
+
+const NO_DANGER = new Set<ControlAction>();
+const MODE_DANGEROUS = new Set<ControlAction>(['SET_MODE']);
+
+describe('actionKeyRows (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D3, wave W2)', () => {
+  it('always lists Space and Shift+Enter, Space never dangerous, Shift+Enter always dangerous', () => {
+    const rows = actionKeyRows([], NO_DANGER, false, new Set(), undefined);
+    expect(rows[0]).toMatchObject({ id: 'EMERGENCY_STOP', keyLabel: 'Space', text: 'Emergency stop', dangerous: false });
+    expect(rows[1]).toMatchObject({ id: 'TOGGLE_ARM', keyLabel: 'Shift+Enter', dangerous: true });
+  });
+
+  it('mode rows appear/disappear with the vehicle\'s own selectableModes — never a hardcoded list', () => {
+    const none = actionKeyRows([], NO_DANGER, false, new Set(), undefined);
+    expect(none.map((r) => r.id)).toEqual(['EMERGENCY_STOP', 'TOGGLE_ARM']);
+
+    const two = actionKeyRows(['MANUAL', 'HOLD'], NO_DANGER, false, new Set(), undefined);
+    expect(two.map((r) => r.id)).toEqual(['EMERGENCY_STOP', 'TOGGLE_ARM', 'MODE_1', 'MODE_2']);
+    expect(two.find((r) => r.id === 'MODE_1')).toMatchObject({ keyLabel: '1', text: 'MANUAL' });
+    expect(two.find((r) => r.id === 'MODE_2')).toMatchObject({ keyLabel: '2', text: 'HOLD' });
+  });
+
+  it('shows nothing for a digit past the reported mode list, never a placeholder row', () => {
+    const rows = actionKeyRows(['MANUAL', 'HOLD'], NO_DANGER, false, new Set(), undefined);
+    expect(rows.some((r) => r.id === 'MODE_3' || r.id === 'MODE_4')).toBe(false);
+  });
+
+  it("Arm/Disarm's row text follows the live armed flag, not a remembered toggle", () => {
+    const disarmed = actionKeyRows([], NO_DANGER, false, new Set(), undefined);
+    expect(disarmed.find((r) => r.id === 'TOGGLE_ARM')?.text).toBe('Arm');
+
+    const armed = actionKeyRows([], NO_DANGER, true, new Set(), undefined);
+    expect(armed.find((r) => r.id === 'TOGGLE_ARM')?.text).toBe('Disarm');
+
+    const unknown = actionKeyRows([], NO_DANGER, undefined, new Set(), undefined);
+    expect(unknown.find((r) => r.id === 'TOGGLE_ARM')?.text).toBe('Arm'); // unknown reads as the safer "arm"
+  });
+
+  it('a mode digit only holds when the catalogue itself marks SET_MODE dangerous — same rule the dispatcher uses', () => {
+    const calm = actionKeyRows(['GUIDED'], NO_DANGER, false, new Set(), undefined);
+    expect(calm.find((r) => r.id === 'MODE_1')?.dangerous).toBe(false);
+
+    const cautious = actionKeyRows(['GUIDED'], MODE_DANGEROUS, false, new Set(), undefined);
+    expect(cautious.find((r) => r.id === 'MODE_1')?.dangerous).toBe(true);
+  });
+
+  it('pressed reflects membership in the live held-key set', () => {
+    const rows = actionKeyRows([], NO_DANGER, false, new Set(['EMERGENCY_STOP']), undefined);
+    expect(rows.find((r) => r.id === 'EMERGENCY_STOP')?.pressed).toBe(true);
+    expect(rows.find((r) => r.id === 'TOGGLE_ARM')?.pressed).toBe(false);
+  });
+
+  it("holding is true only for the row the dispatcher's own hold notice names", () => {
+    const rows = actionKeyRows([], NO_DANGER, false, new Set(), 'Hold Shift+Enter to arm');
+    expect(rows.find((r) => r.id === 'TOGGLE_ARM')?.holding).toBe(true);
+    expect(rows.find((r) => r.id === 'EMERGENCY_STOP')?.holding).toBe(false);
+  });
+
+  it('holding is false for every row while nothing is mid-hold', () => {
+    const rows = actionKeyRows(['MANUAL'], MODE_DANGEROUS, false, new Set(), undefined);
+    expect(rows.every((r) => r.holding === false)).toBe(true);
   });
 });
 

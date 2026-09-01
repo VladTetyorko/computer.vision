@@ -42,6 +42,7 @@
       [buttons]="source.buttons()"
       [interactive]="interactive()"
       [holding]="dispatcher.holding()"
+      [keyRows]="keyActionRows()"
       (valuesChange)="onValuesChange($event)"
     />
     @if (interactive()) {

@@ -597,6 +597,71 @@ describe('RcMonitor — keyboard source (docs/plans/active/CONTROLLER-UX-PLAN.md
   });
 });
 
+describe('RcMonitor — keyboard action-key rows (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D3, wave W2)', () => {
+  const selectKeyboard = (fixture: { nativeElement: HTMLElement; detectChanges: () => void }) => {
+    const buttons = fixture.nativeElement.querySelectorAll('.rc-source button') as NodeListOf<HTMLButtonElement>;
+    buttons[2].click();
+    fixture.detectChanges();
+  };
+
+  it('shows no key rows before the keyboard source is selected', () => {
+    const fixture = render(new FakeRcInputService(), new FakeManualControlClient());
+    fixture.componentRef.setInput('capabilities', ROVER_CAPABILITY);
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('.tv-keys')).toBeNull();
+  });
+
+  it("lists Space/Shift+Enter always, the vehicle's own selectableModes for the digits, and the live-armed verb", () => {
+    const fixture = render(new FakeRcInputService(), new FakeManualControlClient());
+    fixture.componentRef.setInput('capabilities', ROVER_CAPABILITY); // selectableModes: ['MANUAL', 'HOLD']
+    fixture.componentRef.setInput('armed', true);
+    fixture.detectChanges();
+    selectKeyboard(fixture);
+
+    const rows = fixture.nativeElement.querySelectorAll('.tv-keys .tv-row');
+    const view = Array.from(rows).map((row) => ({
+      id: (row as HTMLElement).querySelector('.tv-row-id')?.textContent?.trim(),
+      text: (row as HTMLElement).querySelector('.tv-cell-text')?.textContent?.trim(),
+    }));
+    expect(view).toEqual([
+      { id: 'Space', text: 'Emergency stop' },
+      { id: 'Shift+Enter', text: 'Disarm' }, // armed
+      { id: '1', text: 'MANUAL' },
+      { id: '2', text: 'HOLD' },
+    ]);
+  });
+
+  it('shows nothing for digits past the reported mode list — a two-mode rover gets no row 3 or 4', () => {
+    const fixture = render(new FakeRcInputService(), new FakeManualControlClient());
+    fixture.componentRef.setInput('capabilities', ROVER_CAPABILITY);
+    fixture.detectChanges();
+    selectKeyboard(fixture);
+
+    const ids = Array.from(fixture.nativeElement.querySelectorAll('.tv-keys .tv-row-id')).map((el) =>
+      (el as HTMLElement).textContent?.trim(),
+    );
+    expect(ids).toEqual(['Space', 'Shift+Enter', '1', '2']);
+  });
+
+  it('lights the cell text while the operator physically holds the chord', () => {
+    const fixture = render(new FakeRcInputService(), new FakeManualControlClient());
+    fixture.componentRef.setInput('capabilities', ROVER_CAPABILITY);
+    fixture.detectChanges();
+    selectKeyboard(fixture);
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1' }));
+    fixture.detectChanges();
+
+    const modeRow = Array.from(fixture.nativeElement.querySelectorAll('.tv-keys .tv-row')).find(
+      (row) => (row as HTMLElement).querySelector('.tv-row-id')?.textContent?.trim() === '1',
+    ) as HTMLElement;
+    expect(modeRow.querySelector('.tv-cell-text')?.classList.contains('lit')).toBe(true);
+
+    window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Digit1' }));
+  });
+});
+
 describe('RcMonitor — readiness rows under Take control (docs/plans/active/CONTROLLER-UX-PLAN.md §5 wave R)', () => {
   it('renders nothing while the readiness read is still in flight, and the button stays enabled', async () => {
     const fixture = render(new FakeRcInputService(), new FakeManualControlClient());

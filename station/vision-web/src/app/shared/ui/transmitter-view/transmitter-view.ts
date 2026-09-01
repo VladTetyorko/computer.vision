@@ -2,7 +2,14 @@ import { ChangeDetectionStrategy, Component, computed, input, output } from '@an
 import { RouterLink } from '@angular/router';
 import { Notice } from '../notice';
 import { SwitchGauge } from '../switch-gauge/switch-gauge';
-import type { ActionBinding, ControlCatalog, ManualControlChannelBinding, VehicleKind } from '../../../core/api/models';
+import type {
+  ActionBinding,
+  ControlCatalog,
+  ManualControlChannelBinding,
+  SwitchPosition,
+  VehicleKind,
+} from '../../../core/api/models';
+import type { ActionKeyId } from '../../../core/rc/keyboard-action-logic';
 import {
   KEY_STEP,
   REST_VALUE,
@@ -55,7 +62,40 @@ import {
  * holds at idle (`control-surface-logic.ts#springsBack`). Both come from the same
  * {@link knobLeftPercent}/{@link knobTopPercent} math the knob itself uses, evaluated at
  * `REST_VALUE`, so the mark and a truly-at-rest knob always coincide exactly.
+ *
+ * <h2>Keyboard action-key rows draw the same way a bound switch does</h2>
+ * `keyRows` (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D3, wave W2) is the transmitter picture's
+ * own keyboard operating surface — Space/`Shift`+`Enter`/`1`-`4` — drawn as one `tv-row` per chord,
+ * the identical gauge+text shape the bound-switch rows above use, so a keyboard hold-to-fire reads
+ * with exactly the same visual language as a switch hold-to-fire (never a second idiom). This
+ * component only draws whatever `features/fly/rc-monitor-logic.ts#actionKeyRows` resolved — it has
+ * no notion of `selectableModes`, armed state, or which chord is currently held.
  */
+/**
+ * One row of the keyboard action-key legend (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D3, wave
+ * W2) — Space (e-stop), `Shift`+`Enter` (arm/disarm) and `1`-`4` (the vehicle's own mode names),
+ * drawn with the identical gauge+text shape `core/rc/transmitter-view-logic.ts#ActionSwitchRow`
+ * uses for a bound switch. Built by `features/fly/rc-monitor-logic.ts#actionKeyRows` off live
+ * capability/telemetry data — this component never resolves a chord itself, it only draws the row
+ * it's given.
+ */
+export interface ActionKeyRow {
+  readonly id: ActionKeyId;
+  /** How the chord reads — "Space", "Shift+Enter", "1".."4". */
+  readonly keyLabel: string;
+  /** What it fires: "Emergency stop", the live-armed-state "Arm"/"Disarm" verb, or the vehicle's
+   * own mode name — never invented text. */
+  readonly text: string;
+  /** Whether this chord needs the dangerous hold before it fires — the same flag that puts a
+   * switch's own unlit cell in `--color-danger-text` and shows the gauge's hold sweep. */
+  readonly dangerous: boolean;
+  /** Whether the chord is physically held down right now. */
+  readonly pressed: boolean;
+  /** Whether this row is the one currently mid-hold — draws the same `vision-switch-gauge`
+   * sweep-fill a bound switch's own hold shows. */
+  readonly holding: boolean;
+}
+
 @Component({
   selector: 'vision-transmitter-view',
   imports: [Notice, SwitchGauge, RouterLink],
@@ -79,6 +119,11 @@ export class TransmitterView {
   readonly interactive = input<boolean>(false);
   /** `ControlActionDispatcher.holding()`'s free-text hold-to-fire notice, or `undefined`. */
   readonly holding = input<string | undefined>(undefined);
+  /** The keyboard action-key legend rows (MAVLINK-COMMANDS-PLAN.md D3, wave W2). `[]` (default)
+   * draws nothing — `rc-monitor.ts` only ever supplies rows while the keyboard is the selected
+   * source, since `KeyboardRcInputService` only attaches its window listeners then; showing rows
+   * for chords that aren't, right now, wired to anything would be dishonest discoverability. */
+  readonly keyRows = input<readonly ActionKeyRow[]>([]);
   /** Where the "Set up ›" link on the unmapped line goes. */
   readonly setupLink = input<string>('/manage/controller');
 
@@ -95,6 +140,11 @@ export class TransmitterView {
   );
   protected readonly unmappedLabel = computed(() => this.unmapped().map((u) => u.label).join(', '));
   protected readonly caveat = computed(() => profileCaveat(this.vehicleKind()));
+
+  /** Every action-key row draws as a single-cell gauge — a chord is either down or not, the same
+   * one-detent shape a bound `BUTTON` draws (`transmitter-view-logic.ts#positionsForKind`'s own
+   * `BUTTON: ['HIGH']`). One shared array instance rather than a literal per row. */
+  protected readonly keyGaugePositions: readonly SwitchPosition[] = ['HIGH'];
 
   protected readonly knobLeftPercent = knobLeftPercent;
   protected readonly knobTopPercent = knobTopPercent;

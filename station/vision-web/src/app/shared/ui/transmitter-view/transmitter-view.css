@@ -161,6 +161,16 @@
   color: var(--text-faint);
 }
 
+/* Keyboard action-key rows (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D3, wave W2) draw with the
+   exact same `.tv-row`/`.tv-cell-text` rules above — one visual idiom, whether the hold-to-fire
+   control is a physical switch or a key. A hairline only appears when bound-switch rows precede
+   this list (the adjacent-sibling selector), quietly separating "what your transmitter is bound to"
+   from "what your keyboard does" without a second heading register. */
+.tv-switches + .tv-keys {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-8);
+}
+
 .tv-unmapped {
   display: flex;
   align-items: center;
