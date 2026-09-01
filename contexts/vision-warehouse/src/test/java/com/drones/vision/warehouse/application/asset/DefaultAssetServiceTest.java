@@ -40,6 +40,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -329,6 +330,52 @@ class DefaultAssetServiceTest {
 
         assertEquals(Set.of(existing.id()), created.devices());
         verify(deviceService, never()).register(any(), any());
+    }
+
+    // --- Duplicate query (the non-throwing form of the check above, docs/plans/active/
+    // ZERO-CONFIG-ONBOARDING-CONTEXT.md §11 Z2a — the discovery inbox's first caller) -----------
+
+    @Test
+    void findDuplicateDeviceReturnsEmptyWhenNoActiveDeviceMatches() {
+        when(deviceService.devices(false)).thenReturn(List.of());
+        StreamDescriptor candidate = new StreamDescriptor("mavlink", URI.create("mavlink://x"), Map.of("sysid", "1"));
+
+        assertEquals(Optional.empty(), service.findDuplicateDevice(candidate));
+    }
+
+    @Test
+    void findDuplicateDeviceReturnsTheOwningAssetWhenTheMatchingDeviceBelongsToOne() {
+        StreamDescriptor stream = new StreamDescriptor("mavlink", URI.create("mavlink://same-uri"), Map.of("sysid", "1"));
+        Device existing = new Device(DeviceId.random(), "existing", Set.of(Capability.TELEMETRY), stream);
+        Asset owner = asset(Set.of(existing.id()));
+        when(deviceService.devices(false)).thenReturn(List.of(existing));
+        when(assetRepository.findByDeviceId(existing.id())).thenReturn(Optional.of(owner));
+
+        Optional<DuplicateDeviceMatch> match = service.findDuplicateDevice(stream);
+
+        assertTrue(match.isPresent());
+        assertEquals(existing.id(), match.get().deviceId());
+        assertEquals(owner.id(), match.get().owningAsset());
+    }
+
+    @Test
+    void findDuplicateDeviceReturnsAMatchWithNoOwningAssetWhenTheDeviceIsNotYetAssigned() {
+        StreamDescriptor stream =
+                new StreamDescriptor("mavlink", URI.create("mavlink://unowned"), Map.of("sysid", "1"));
+        Device existing = new Device(DeviceId.random(), "existing", Set.of(Capability.TELEMETRY), stream);
+        when(deviceService.devices(false)).thenReturn(List.of(existing));
+        when(assetRepository.findByDeviceId(existing.id())).thenReturn(Optional.empty());
+
+        Optional<DuplicateDeviceMatch> match = service.findDuplicateDevice(stream);
+
+        assertTrue(match.isPresent());
+        assertEquals(existing.id(), match.get().deviceId());
+        assertNull(match.get().owningAsset());
+    }
+
+    @Test
+    void findDuplicateDeviceRejectsNullCandidate() {
+        assertThrows(NullPointerException.class, () -> service.findDuplicateDevice(null));
     }
 
     // --- Reading -------------------------------------------------------------

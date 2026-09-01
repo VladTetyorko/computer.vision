@@ -8,6 +8,7 @@ import { DEVICES_ROUTES } from './features/devices/devices.routes';
 import { INVENTORY_ROUTES } from './features/inventory/inventory.routes';
 import { WAREHOUSE_ROUTES } from './features/warehouse/warehouse.routes';
 import { ONBOARDING_ROUTES } from './features/onboarding/onboarding.routes';
+import { PROVISIONING_ROUTES } from './features/provisioning/provisioning.routes';
 import { ASSET_DETAIL_ROUTES } from './features/asset-detail/asset-detail.routes';
 import { REPLAY_ROUTES } from './features/replay/replay.routes';
 import { LIVE_ROUTES } from './features/live/live.routes';
@@ -94,6 +95,7 @@ export const routes: Routes = [
       ...INVENTORY_ROUTES,
       ...WAREHOUSE_ROUTES,
       ...ONBOARDING_ROUTES,
+      ...PROVISIONING_ROUTES,
       ...ASSET_DETAIL_ROUTES,
       ...READINESS_ROUTES,
       ...REPLAY_ROUTES,

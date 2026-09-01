@@ -2,6 +2,8 @@ package com.drones.vision.app.config.wiring;
 
 import com.drones.vision.adapter.discovery.mdns.MdnsScanner;
 import com.drones.vision.adapter.discovery.mdns.ScanBudget;
+import com.drones.vision.adapter.discovery.mediamtx.MediamtxPathScanner;
+import com.drones.vision.adapter.discovery.mediamtx.MediamtxScannerSettings;
 import com.drones.vision.adapter.discovery.onvif.OnvifWsDiscoveryScanner;
 import com.drones.vision.adapter.discovery.v4l2.V4l2Scanner;
 import com.drones.vision.adapter.mavlink.MavlinkHeartbeatScanner;
@@ -10,6 +12,7 @@ import com.drones.vision.adapter.mavlink.MavlinkTelemetrySource;
 import com.drones.vision.app.config.properties.VisionApplicationProperties;
 import com.drones.vision.app.config.properties.VisionDiscoveryProperties;
 import com.drones.vision.app.config.properties.VisionMavlinkProperties;
+import com.drones.vision.app.config.properties.VisionPublishProperties;
 import com.drones.vision.warehouse.application.discovery.DefaultDiscoveryService;
 import com.drones.vision.warehouse.application.discovery.DiscoveryService;
 import com.drones.vision.warehouse.domain.port.DeviceDiscoveryPort;
@@ -26,13 +29,27 @@ import java.util.List;
  * Wires {@code adapter-discovery}'s scanners and the {@link
  * DiscoveryService} implementation, per docs/plans/done/DISCOVERY-PLAN.md Task D4.
  *
- * <p>The four scanner beans ({@link OnvifWsDiscoveryScanner}, {@link
- * MdnsScanner}, {@link V4l2Scanner}, {@link MavlinkHeartbeatScanner}) are
- * gated by {@code vision.discovery.enabled} (default {@code true}): each
- * opens a real socket/JmDNS instance/filesystem walk when invoked, so
+ * <p>The five scanner beans ({@link OnvifWsDiscoveryScanner}, {@link
+ * MdnsScanner}, {@link V4l2Scanner}, {@link MavlinkHeartbeatScanner}, {@link
+ * MediamtxPathScanner}) are gated by {@code vision.discovery.enabled} (default {@code true}): each
+ * opens a real socket/JmDNS instance/filesystem walk/HTTP call when invoked, so
  * setting the property to {@code false} keeps the context clean in
  * restricted environments (e.g. no multicast, no {@code /dev}) without
  * touching the discovery feature's other wiring.
+ *
+ * <p>{@link #mediamtxPathScanner} (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §11 "Z3
+ * amendment (2026-08-31) — poll, not hook") additionally requires {@link
+ * VisionDiscoveryProperties.Mediamtx#enabled()} — the two-flag {@code @ConditionalOnProperty}
+ * array checks both {@code vision.discovery.enabled} and {@code vision.discovery.mediamtx.enabled}
+ * together (Spring ANDs every name in a {@code @ConditionalOnProperty} array). It reads mediamtx's
+ * Control API/RTSP reachability from {@link VisionPublishProperties.Mediamtx#apiBase()}/{@code
+ * #rtspBase()} — the SAME properties {@code PublishWiring#mediamtxStreamPublisher} already uses to
+ * reach this exact mediamtx instance — rather than a parallel {@code
+ * vision.discovery.mediamtx.api-url} pair, so the two consumers of "where mediamtx is" can never
+ * silently disagree; {@link VisionPublishProperties} is registered by {@link
+ * PublishWiring}'s own {@code @EnableConfigurationProperties} and is available here as a plain
+ * autowired bean regardless of {@code vision.publish.enabled} (only the publisher beans themselves
+ * are conditional on that flag, not the properties record).
  *
  * <p>{@link #mavlinkHeartbeatScanner} (docs/plans/active/DRONE-INFRA-PLAN.md I-b) lives in
  * {@code adapter-mavlink}, not {@code adapter-discovery} like the other
@@ -119,6 +136,24 @@ public class DiscoveryWiringConfiguration {
         return new MavlinkHeartbeatScanner(mavlinkTelemetrySource, properties.mavlinkPort(),
                 new MavlinkSettings.Scan(scan.activeHubPollCount(), scan.activeHubMinPollInterval(),
                         scan.selfBindMinReadTimeout(), scan.selfBindMaxReadTimeout()));
+    }
+
+    /**
+     * docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P3, §11 "Z3 amendment": polls
+     * mediamtx's Control API {@code GET /v3/paths/list} each sweep and reports every ready path
+     * under {@link VisionDiscoveryProperties.Mediamtx#pathPrefix()} as a candidate — see class
+     * javadoc for why {@code apiBase}/{@code rtspBase} are read from {@link
+     * VisionPublishProperties.Mediamtx} rather than a separate property pair.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "vision.discovery", name = {"enabled", "mediamtx.enabled"},
+            havingValue = "true", matchIfMissing = true)
+    public MediamtxPathScanner mediamtxPathScanner(VisionDiscoveryProperties properties,
+                                                     VisionPublishProperties publishProperties) {
+        VisionDiscoveryProperties.Mediamtx mediamtx = properties.mediamtx();
+        VisionPublishProperties.Mediamtx publishMediamtx = publishProperties.mediamtx();
+        return new MediamtxPathScanner(new MediamtxScannerSettings(publishMediamtx.apiBase(),
+                publishMediamtx.rtspBase(), mediamtx.pathPrefix()));
     }
 
     @Bean

@@ -233,3 +233,50 @@ export function engageBlock(gate: EngageGateInput, readiness: ReadinessReport | 
   const rows = rcReadinessRows(readiness);
   return rows.length > 0 ? { rows } : {};
 }
+
+// --- Session link (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P4) -------------------
+// Not to be confused with `engageDisabledReason`/`engageBlock` above, which gate the *Take-control*
+// button (`ManualControlClient`, an RC input concern) — this is `AssetSessionController`'s own,
+// unrelated `engage`/`disengage` verb pair, opening or closing an `AssetUsage` with no RC input
+// involved at all. Named `SessionAffordance`/`resolveSessionAffordance` deliberately, not
+// `engage*`, to keep the two apart in this file where both live side by side.
+
+/** What this drawer's session-link block shows: nothing, an "Engage link" button, or an
+ * "End session" one — never both at once. */
+export type SessionAffordance = 'none' | 'engage' | 'end';
+
+/**
+ * Before this wave, an asset with only a `TELEMETRY` device (a rover with no camera, or an
+ * aircraft being readied before its camera comes up) had **no working path** to becoming
+ * commandable at all — the Fly cockpit's arm/mode/RC commands silently depended on a video stream
+ * having been started first, purely as a side effect (`UsageTracker#deviceStreamStarted` opening
+ * the `AssetUsage` the command panel's `canCommand` gate needs). `engage` now opens that same kind
+ * of usage directly (the parallel perception-side change this wave depends on — see
+ * `AssetSessionController`'s own javadoc), so this drawer needs a place to call it.
+ *
+ * `'none'` whenever a video stream is already `live` — starting the stream already opens (or
+ * reuses) the usage the command panel needs, so a second competing verb here would only add
+ * clutter for a video-capable asset, and `AssetSessionController#disengage`'s own contract makes an
+ * "End session" button actively misleading while live: it would only *demote* the usage's origin
+ * back to `STREAM` (a running stream must always have somewhere to record telemetry against), not
+ * end anything an operator watching this drawer would recognise as "ending". `'none'` also whenever
+ * the asset has no `TELEMETRY` device at all — nothing this button could open would ever make the
+ * command panel commandable.
+ *
+ * Otherwise: `'end'` once `operatorEngaged` is true, else `'engage'`. `operatorEngaged` is not a
+ * local "I clicked it" flag — there is no `GET .../session` read endpoint
+ * (`VisionApi#engageAssetSession`'s own doc comment), so the caller derives it honestly from the
+ * asset's own polled `recentUsages`: an open usage (`selectOpenUsage`) whose `origin === 'OPERATOR'`
+ * (`CockpitFacade#operatorEngaged`). CLAUDE.md's "degrade honestly" rule, applied to a state chip
+ * exactly like every other one on this drawer.
+ */
+export function resolveSessionAffordance(
+  hasTelemetryDevice: boolean,
+  live: boolean,
+  operatorEngaged: boolean,
+): SessionAffordance {
+  if (!hasTelemetryDevice || live) {
+    return 'none';
+  }
+  return operatorEngaged ? 'end' : 'engage';
+}

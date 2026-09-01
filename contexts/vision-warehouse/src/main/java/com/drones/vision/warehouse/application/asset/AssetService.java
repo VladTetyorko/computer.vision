@@ -5,9 +5,11 @@ import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.LifecycleState;
 import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.UserId;
 
 import java.util.List;
+import java.util.Optional;
 import com.drones.vision.platform.VisibilityScope;
 
 /**
@@ -79,6 +81,19 @@ public interface AssetService {
      *                                           already owns it
      */
     Asset createFromCandidate(AssetSpec spec, Ownership ownership, UserId actor);
+
+    /**
+     * Whether {@code candidate} already matches an active, registered device on {@code (protocol,
+     * uri, sysid)} — the same identity {@link #createFromCandidate} refuses a duplicate on, asked
+     * as a query instead of enforced by throwing. For a caller (the discovery inbox, docs/plans/active/
+     * ZERO-CONFIG-ONBOARDING-CONTEXT.md &sect;11 Z2a) that must record "this candidate is already
+     * registered" as a fact rather than reject the candidate outright.
+     *
+     * @param candidate the stream descriptor to check, e.g. a discovery candidate's suggested stream
+     * @return the matching device (and its owning asset, if any is known) — see {@link
+     *         DuplicateDeviceMatch}; empty if no active device carries this identity
+     */
+    Optional<DuplicateDeviceMatch> findDuplicateDevice(StreamDescriptor candidate);
 
     /**
      * Lists assets that have not been soft-deleted, as summaries.

@@ -1,0 +1,42 @@
+/* Same `.backdrop`/`.dialog.card` modal shape as `shared/ui/confirm-dialog.css` — each dialog in
+   this app carries its own copy of these rules (view encapsulation; `confirm-dialog.css`'s own
+   comment on `geofence-zone-dialog.ts` documents the same "mirrors that convention" relationship
+   rather than a shared global class), same z-index/backdrop tokens so every modal in the app reads
+   as one family regardless of which component drew it. Wider than the plain confirm dialog to fit
+   a name field + category picker without cramming. */
+:host {
+  display: contents;
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-16);
+  background: var(--hud-bg-strong);
+  backdrop-filter: blur(2px);
+}
+
+.dialog {
+  width: min(26rem, 100%);
+  margin-bottom: 0;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.dialog h3 {
+  margin: 0;
+}
+
+.dialog p {
+  margin: 0;
+}
+
+.dialog-actions {
+  justify-content: flex-end;
+}

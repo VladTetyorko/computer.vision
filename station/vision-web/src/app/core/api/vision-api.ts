@@ -9,6 +9,7 @@ import type {
   AssetEdit,
   AssetStats,
   AssetSummary,
+  AssetUsage,
   AssignedPilot,
   Assignment,
   AuditEntry,
@@ -43,6 +44,7 @@ import type {
   DetectionResult,
   Device,
   DeviceEdit,
+  DiscoveryCandidate,
   EffectiveCvProfile,
   FleetMaintenanceRecord,
   FleetReadiness,
@@ -85,6 +87,8 @@ import type {
   RegionResponse,
   RegionsResponse,
   RegisterDeviceRequest,
+  RegisterDiscoveryCandidateRequest,
+  RegisterDiscoveryCandidateResponse,
   RemediationRequest,
   RemediationResult,
   RenameLayerRequest,
@@ -280,6 +284,34 @@ export class VisionApi {
     return firstValueFrom(this.http.post<ScanResult>('/api/discovery/scan', request));
   }
 
+  // --- Discovery inbox (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §11, wave Z2d) -------
+  // manageOrg-gated server-side (`DiscoveryInboxController`); poll-only, no SSE topic yet — see
+  // `DiscoveryCandidate`'s own doc comment in `models.ts`.
+
+  listDiscoveryInboxCandidates(): Promise<DiscoveryCandidate[]> {
+    return firstValueFrom(this.http.get<DiscoveryCandidate[]>('/api/discovery/inbox'));
+  }
+
+  registerDiscoveryCandidate(
+    id: string,
+    request: RegisterDiscoveryCandidateRequest,
+  ): Promise<RegisterDiscoveryCandidateResponse> {
+    return firstValueFrom(
+      this.http.post<RegisterDiscoveryCandidateResponse>(
+        `/api/discovery/inbox/${encodeURIComponent(id)}/register`,
+        request,
+      ),
+    );
+  }
+
+  /** "Not now" — reversible in spirit only via the inbox's own "show dismissed" toggle; there is
+   *  no un-dismiss endpoint (a later scan hit for the same identity revives it server-side). */
+  dismissDiscoveryCandidate(id: string): Promise<DiscoveryCandidate> {
+    return firstValueFrom(
+      this.http.post<DiscoveryCandidate>(`/api/discovery/inbox/${encodeURIComponent(id)}/dismiss`, {}),
+    );
+  }
+
   // --- Device probe (docs/plans/done/UX-REWORK-PLAN.md §U-d — the onboarding wizard's Test step) ---------
   // "Test before save" (UX-DESIGN §5.1): connects to a candidate connection and decodes one frame
   // without registering anything. A probe that can't produce a frame is a 422 with a specific
@@ -357,6 +389,35 @@ export class VisionApi {
    */
   createAsset(request: CreateAssetRequest): Promise<AssetDetails> {
     return firstValueFrom(this.http.post<AssetDetails>('/api/assets', request));
+  }
+
+  // --- Asset session (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P4) -----------------
+  // `AssetSessionController`'s operator `engage`/`disengage` pair — opens or closes an `AssetUsage`
+  // directly, no video stream involved, so a telemetry-only asset (or one whose camera isn't up
+  // yet) has a way to say "this asset is in use" at all. Fire-and-confirm, not fire-and-forget:
+  // there is no `GET .../session` read endpoint, so neither method's *return* is treated as the
+  // engaged/disengaged state to render. `features/fly/cockpit-facade.ts#operatorEngaged` instead
+  // rereads the fact honestly off `AssetDetails#recentUsages` (already polled every 5s) via
+  // `selectOpenUsage` + `origin === 'OPERATOR'` — the same "poll is the truth" rule every other
+  // cockpit fact already follows, rather than a local "I clicked it" flag that could drift from
+  // what the server actually did (a 200 here doesn't guarantee the poll lands before the operator
+  // looks — see that computed's own doc comment).
+
+  /** `200` — the usage now open for this asset (newly opened, promoted from a stream-origin usage,
+   * or unchanged if already operator-engaged). The response is logged, not rendered; see this
+   * section's own comment for why. */
+  engageAssetSession(assetId: string): Promise<AssetUsage> {
+    return firstValueFrom(
+      this.http.post<AssetUsage>(`/api/assets/${encodeURIComponent(assetId)}/session`, {}),
+    );
+  }
+
+  /** `204` — idempotent: a no-op if the asset isn't operator-engaged, a demote-not-close if a video
+   * stream is still running (`AssetSessionController#disengage`'s own javadoc). */
+  disengageAssetSession(assetId: string): Promise<void> {
+    return firstValueFrom(
+      this.http.delete<void>(`/api/assets/${encodeURIComponent(assetId)}/session`),
+    );
   }
 
   // --- Maintenance / inventory (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.2/§4 W7/W9) ---------------

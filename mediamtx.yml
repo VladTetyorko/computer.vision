@@ -58,5 +58,21 @@ authInternalUsers:
 # docs/plans/done/MEDIA-SOT-PLAN.md D2) is accepted with no explicit per-path configuration block --
 # exactly what the plain RTSP push path already relies on today, and what MediamtxProxyPublisher's
 # dynamically created paths (POST /v3/config/paths/add/{streamId}) need too.
+#
+# The SAME all_others catch-all is also the "inbox" push convention for zero-config device
+# onboarding (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P3, §11 "Z3 amendment
+# (2026-08-31) -- poll, not hook"): a camera/companion that can push RTSP (or, later, WHIP/SRT)
+# publishes to rtsp://<this-host>:8554/ingest/<kind>-<id> -- e.g. ingest/rover-a1b2c3 -- with no
+# path pre-declared here, no credentials, and no operator action on vision's side. The ingest/
+# prefix is not a mediamtx concept (this file grants every path under all_others identically); it
+# is the convention MediamtxPathScanner (device-discovery/onvif-mdns-v4l2, adapter-discovery)
+# reads back out: each discovery-inbox sweep polls GET /v3/paths/list on the Control API above and
+# reports every READY path whose name starts with ingest/ as a "found device" candidate, while
+# every path OUTSIDE that prefix -- including the per-stream paths MediamtxStreamPublisher itself
+# creates when this app republishes a decoded/detected stream for HLS/WHEP viewing (MEDIA-SOT) --
+# is silently skipped, so vision never discovers its own video output as if it were a new camera.
+# Once an ingest/ candidate is registered as a Device, its stream address is this mediamtx path's
+# own RTSP URL, not the pushing device's address -- vision's ordinary RTSP pull path
+# (video-input/rtsp) then treats mediamtx itself as "the camera", unchanged from any other source.
 paths:
   all_others:

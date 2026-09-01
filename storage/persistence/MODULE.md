@@ -16,8 +16,8 @@ All version pins come from `spring-boot-dependencies` (this module's grandparent
 
 **Used by:** vision-app (`PersistenceWiringConfiguration`, unconditional).
 
-**Build/test:** `./mvnw -B -pl storage/persistence test` — 260 tests (last measured, CV-SETTINGS W3; up
-from 237 before that wave — count from Maven's own summary line, see Gotchas), one shared `postgres:16`
+**Build/test:** `./mvnw -B -pl storage/persistence test` — 267 tests (last measured, ZERO-CONFIG-ONBOARDING
+Z2c; up from 260 before that wave — count from Maven's own summary line, see Gotchas), one shared `postgres:16`
 Testcontainers container per test class. Requires a running Docker daemon — there is no non-Docker
 path; tests skip cleanly (not fail) when Docker is unavailable. Use a **two-step** build when a
 sibling context module is mid-flight elsewhere in the reactor: `./mvnw -B -pl
@@ -29,10 +29,10 @@ resolves the just-installed jars instead of recompiling upstream).
 
 ## API surface
 
-Package layout: `repository/` (31 `Jpa*Repository`/`Jpa*Store` classes + `TelemetryBatchSettings`),
-`mapper/` (29 mapper classes — one `toEntity`/`toDomain` pair per aggregate, `public static` methods
+Package layout: `repository/` (32 `Jpa*Repository`/`Jpa*Store` classes + `TelemetryBatchSettings`),
+`mapper/` (30 mapper classes — one `toEntity`/`toDomain` pair per aggregate, `public static` methods
 on a `public final class` with a private constructor), `config/` (`PersistenceUnit`, `JpaOperations`,
-`PersistencePoolSettings`, `ClosingDatasourceConnectionProvider`), `entity/` (37 classes/records: 32
+`PersistencePoolSettings`, `ClosingDatasourceConnectionProvider`), `entity/` (38 classes/records: 33
 `@Entity` types, `AssignmentId`/`CvProfileBindingId`/`CvModelId` (`@IdClass`), `LayerGrantEmbeddable`
 (`@Embeddable`), `DbAuditOperation` (plain enum)). No `controller/`, `dto/`, or `service/` package —
 this module is a driven adapter only.
@@ -76,6 +76,7 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 | `JpaCvProfileRepository` | `CvProfileRepositoryPort` | `merge` upsert for both `CvProfile` (by id) and `CvProfileBinding` (by composite `(scope_kind, scope_id)`); `findAllByGroup` needs no extra filtering to exclude built-ins — a built-in's `group_id` is always `NULL` and no `UUID` param ever matches `NULL` in JPQL; `delete`/`deleteBinding` real hard deletes, idempotent; audited (CV-SETTINGS-PLAN.md §5.3, `V29`) |
 | `JpaCvModelRepository` | `CvModelRepositoryPort` | `merge` upsert on composite `(model_id, version)`; `findLive` does not itself enforce "exactly one LIVE row" — that invariant is `ModelRegistryService`'s job (W4-app); audited (CV-SETTINGS-PLAN.md §5.3, `V30`) |
 | `JpaTrainingRunRepository` | `TrainingRunRepositoryPort` | `merge` upsert by `runId` (written once at start, again as `TrainingProgress` arrives); `findAll(limit)` orders newest-first by `started_at`, the column `idx_cv_training_runs_started_at` indexes; audited (CV-SETTINGS-PLAN.md §5.3, `V30`, fixes H7: "training metrics evaporate") |
+| `JpaDiscoveryCandidateRepository` | `DiscoveryCandidateRepositoryPort` | `merge` upsert by `DiscoveryCandidateId` (a re-reported identity mutates `lastSeen`/`status` in place rather than inserting a new row); `findByIdentityKey` is the upsert-target lookup the inbox sweep uses every cycle — backed by the unique index on `identity_key`, not a table scan; `findAll` orders `lastSeen desc` (newest-reported first, the inbox's natural read order); audited (ZERO-CONFIG-ONBOARDING-CONTEXT.md §11 Z2c, `V31`) |
 
 ### `entity` — mapping conventions (not repeated per class)
 
@@ -145,8 +146,23 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
   `String`s — matching `ModelRef` staying a two-string pair rather than a typed id.
 - **`TrainingRunEntity`** keeps its own domain id (`runId`) as primary key, same shape as every other
   domain-owned-id aggregate; `state` is `@Enumerated(EnumType.STRING)` reusing `JobState` directly.
+- **`DiscoveryCandidateEntity` flattens `DiscoveredDevice#suggestedStream` (a `StreamDescriptor`) into
+  three columns** (`suggested_stream_protocol`/`suggested_stream_uri`/`suggested_stream_options`, `V31`)
+  rather than nesting it as jsonb — same reasoning as `AssetEntity`'s `Identity`/`Custody` flatten: the
+  fields are independently meaningful (a candidate can be nameable/categorizable with no stream at all,
+  the `Optional<StreamDescriptor>` case), and `suggested_stream_options` is itself the one jsonb column
+  in the trio (a `Map<String,String>`, same `@JdbcTypeCode(SqlTypes.JSON)` convention as every other
+  map-typed column in this module) — carrying the **full** options map is the module's one hard
+  requirement here (ZERO-CONFIG-ONBOARDING-CONTEXT.md §11 Z2c: vision-api's `DiscoveryCandidateResponse`
+  must not repeat `DiscoveredDeviceResponse`'s documented options-drop defect, so nothing between the
+  domain record and the wire may drop it either). `details` (`Map<String,String>`, free-form
+  protocol-specific facts) is `NOT NULL DEFAULT '{}'` rather than nullable — `DiscoveredDevice#details`
+  is always a real (possibly empty) map, never absent, so there is no null case to represent.
+  `status` is `@Enumerated(EnumType.STRING)` reusing `CandidateStatus` directly. `identity_key` is a
+  plain unique-indexed `String` column, not a synthesized id — the port's `findByIdentityKey` is the
+  sweep's upsert-target lookup, called once per discovered device every cycle.
 
-## Schema (`src/main/resources/db/migration`) — migration ledger, V1 through V30
+## Schema (`src/main/resources/db/migration`) — migration ledger, V1 through V31
 
 | Migration | What it does |
 |---|---|
@@ -180,6 +196,7 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 | `V28__asset_inventory.sql` | `assets` += `serial_number`/`make`/`model`/`registration` (from `Identity`), `custodian_id`/`location`/`custody_since` (from `Custody`), `inventory_state` (stored values only — `IN_STOCK`/`MAINTENANCE`/`RETIRED`, default `IN_STOCK`), `created_at`/`updated_at`; backfills `registration` from the pre-existing `attributes->>'registration'` key then removes that key (WAREHOUSE-UX-PLAN.md D8); `categories` += `connected BOOLEAN NOT NULL DEFAULT TRUE`, seeding three passive categories (`battery`/`spare`/`radio`) with `connected=false`; new `maintenance_records` (audited) and `asset_notes` (audited) tables; `asset_usages.pilot_id` (nullable UUID, schema-only — no domain field maps it yet, same status as `first_armed_at`/`last_disarmed_at`) |
 | `V29__cv_profiles.sql` | `cv_profiles` (audited) + `cv_profile_bindings` (audited, composite PK `(scope_kind, scope_id)`); seeds the four built-in profiles (`people-vehicles`/`wide-search`/`military-vehicles`/`video-only`, fixed ids) with `built_in=true`/`group_id=NULL` and `tracking`/`event_rule` byte-identical to `TrackingConfig.defaults()`/`EventRuleConfig.defaults()`; **zero bindings seeded** (CV-SETTINGS-PLAN.md §3.1 rule 3 — no feature flag, every existing stream keeps resolving to `PipelineConfig.defaults()`); two deviations from §5.3's literal column list, both flagged in the migration's own header: `model_id`/`model_version` split (not one `model` column) and an added `event_rule` column (missing from §5.3 entirely) |
 | `V30__cv_model_registry.sql` | `cv_models` (audited, composite PK `(model_id, version)`, every provenance column + `metrics` nullable) + `cv_training_runs` (audited, `idx_cv_training_runs_started_at` for `findAll(limit)`'s newest-first order); no seed rows — the config-seeded model roster merges with the worker's live `ListModels` response at the application layer, not baked into this schema (fixes H4/H7) |
+| `V31__discovery_inbox.sql` | `discovery_candidates` (audited): domain-owned `id` PK, `identity_key` (the mDNS/ONVIF/MAVLink-derived stable key `DiscoveryCandidate` upserts on), `method`/`name`/`address`, flattened `suggested_category`/`suggested_stream_protocol`/`suggested_stream_uri`/`suggested_stream_options` (nullable as a group — a candidate with no offered stream), `details` jsonb `NOT NULL DEFAULT '{}'`, `first_seen`/`last_seen` `TIMESTAMPTZ`, `status`, nullable `registered_asset_id` (no FK — the same "no cross-aggregate FK" posture every other table in this schema takes, see Conventions); unique index on `identity_key` (the upsert target) + index on `last_seen` (the inbox list's sort column) |
 
 A second, conditional Flyway location, `src/main/resources/db/seed/dev`, holds
 `V90001__dev_accounts.sql` (the `admin`/`manager`/`pilot` DEV-ONLY accounts) — it only joins Flyway's
@@ -206,13 +223,17 @@ automatically.**
   `asset_usages`, `geofence_zones`, `groups`, `users`, `pilot_assignments`, `marks`, `datasets`,
   `map_layers`, `map_layer_grants`, `map_drawings`, `vehicle_profiles`, `feature_requirements`,
   `camera_poses`, `control_profiles`, `maintenance_records`, `asset_notes`, `cv_profiles`,
-  `cv_profile_bindings`, `cv_models`, `cv_training_runs`. The last four (`V29`/`V30`) join the audited
-  set on the same "control-plane accountability" reasoning as `control_profiles`/`datasets` —
-  `cv_profile_bindings` is a security/routing decision over a join row, the same reasoning that already
-  put `pilot_assignments`/`map_layer_grants` in the audited set despite both being plain join tables
-  too; `cv_training_runs` updates more often than most audited tables (roughly once per epoch) but its
-  write volume is bounded by a job's epoch count, not the per-frame/per-sample character of the
-  excluded set below.
+  `cv_profile_bindings`, `cv_models`, `cv_training_runs`, `discovery_candidates`. The four before last
+  (`V29`/`V30`) join the audited set on the same "control-plane accountability" reasoning as
+  `control_profiles`/`datasets` — `cv_profile_bindings` is a security/routing decision over a join row,
+  the same reasoning that already put `pilot_assignments`/`map_layer_grants` in the audited set despite
+  both being plain join tables too; `cv_training_runs` updates more often than most audited tables
+  (roughly once per epoch) but its write volume is bounded by a job's epoch count, not the per-frame/
+  per-sample character of the excluded set below. `discovery_candidates` (`V31`) joins for the same
+  reason as `maintenance_records`/`asset_notes`: `register`/`dismiss` are operator decisions over
+  auto-discovered hardware, and the audit trail is the record of who acted on which candidate — its
+  write volume (one row per re-reported device per sweep, deduplicated by `identity_key`'s unique
+  index) is bounded by the fleet's own device count, not per-frame/per-sample.
 - **Excluded** (high-volume append-only, or a trigger would be actively wrong): `telemetry_samples`,
   `detection_results`, `detection_events`, `training_samples`, `sample_images`, `asset_images` (a
   `bytea` column would duplicate image bytes into every audit row), `audit_entries` (auditing an
@@ -363,8 +384,8 @@ buffered samples per open usage; `DEFAULT_BATCH_WINDOW_MILLIS` is non-zero on pu
 
 ## Status
 
-Fully implements every repository port the platform currently defines (31 `Jpa*Repository`/`Jpa*Store`
-classes; see API surface) against a schema migrated through `V30`. Wired into vision-app
+Fully implements every repository port the platform currently defines (32 `Jpa*Repository`/`Jpa*Store`
+classes; see API surface) against a schema migrated through `V31`. Wired into vision-app
 unconditionally via `PersistenceWiringConfiguration` — Postgres is the only store.
 
 Open items, all deliberate rather than oversights:
@@ -400,6 +421,17 @@ nullable provenance/metrics column via `information_schema`. 237 → 260 tests (
 line); `BUILD SUCCESS`, Docker ran (not skipped). See CV-SETTINGS-CONTEXT.md's W3→W5 handoff for the
 adapter bean names and the four fixed built-in profile UUIDs vision-app's wiring needs.
 
+**ZERO-CONFIG-ONBOARDING wave Z2c done.** New `V31__discovery_inbox.sql` + `DiscoveryCandidateEntity`/
+`mapper.DiscoveryCandidateMapper`/`repository.JpaDiscoveryCandidateRepository` implementing
+`warehouse`'s `DiscoveryCandidateRepositoryPort` (built by an earlier, disjoint domain/application
+wave in this same Z2c task — this module's write scope was persistence only). `PostgresDockerIntegrationTest`
+gained one `DiscoveryCandidateRepositoryTests` nested class (7 cases: empty-lookup by id and by
+identity key, a full stream round-trip, a no-stream round-trip proving the trio of stream columns is
+genuinely absent rather than empty-string, the identity-key upsert path preserving the row's id across
+a re-report, `DISMISSED`/`REGISTERED` status round-tripping, and newest-first ordering). 260 → 267
+tests (Maven's own summary line); `BUILD SUCCESS`, Docker ran (not skipped — Testcontainers started a
+real `postgres:16`, Flyway migrated through `V31`, every nested class in the table above executed).
+
 See `docs/plans/README.md` for the plan-status authority behind the phase references throughout this
 file (MVP2, POSTGRES-ONLY-CONTEXT, SCALE-100, FIXED-CAMERA-GEO, VISUAL-GEO-V2, DRONE-ONBOARDING,
-CONTROLLER-SETUP-CONTEXT, ARCHITECTURE-AUDIT-2026-08-26, CV-SETTINGS).
+CONTROLLER-SETUP-CONTEXT, ARCHITECTURE-AUDIT-2026-08-26, CV-SETTINGS, ZERO-CONFIG-ONBOARDING-CONTEXT).

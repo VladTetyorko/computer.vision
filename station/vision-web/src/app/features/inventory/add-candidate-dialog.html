@@ -1,0 +1,46 @@
+<div class="backdrop" (keydown.escape)="$event.stopPropagation()">
+  <div class="dialog card" role="dialog" aria-modal="true" aria-label="Add found device">
+    <h3>Add to inventory</h3>
+    <p class="muted">
+      {{ methodLabel(candidate().method) }} · {{ candidate().address }}
+    </p>
+
+    <div class="field">
+      <label class="label" for="found-device-name">Name</label>
+      <input
+        #nameField
+        id="found-device-name"
+        type="text"
+        name="displayName"
+        class="field-md"
+        [ngModel]="draft().displayName"
+        (ngModelChange)="setDisplayName($event)"
+        [disabled]="busy()"
+      />
+    </div>
+
+    <div class="field">
+      <label class="label" for="found-device-category">Category</label>
+      <select
+        id="found-device-category"
+        name="category"
+        class="field-md"
+        [ngModel]="draft().category"
+        (ngModelChange)="setCategory($event)"
+        [disabled]="busy()"
+      >
+        <option value="" disabled>Choose a category…</option>
+        @for (option of categories(); track option.slug) {
+          <option [value]="option.slug">{{ option.name }}</option>
+        }
+      </select>
+    </div>
+
+    <div class="row dialog-actions">
+      <button type="button" class="btn" (click)="submit()" [disabled]="busy() || !canSubmit()">
+        {{ busy() ? 'Adding…' : 'Add' }}
+      </button>
+      <button type="button" class="btn secondary" (click)="cancelled.emit()" [disabled]="busy()">Cancel</button>
+    </div>
+  </div>
+</div>

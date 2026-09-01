@@ -1,0 +1,35 @@
+<div class="backdrop" (keydown.escape)="$event.stopPropagation()">
+  <div class="dialog card" role="dialog" aria-modal="true" aria-label="Attach found device to an existing asset">
+    <h3>Attach to existing asset</h3>
+    <p class="muted">
+      {{ candidate().name }} — {{ methodLabel(candidate().method) }} · {{ candidate().address }}
+    </p>
+
+    <div class="field">
+      <label class="label" for="found-device-asset">Asset</label>
+      <select
+        id="found-device-asset"
+        name="assetId"
+        class="field-lg"
+        [ngModel]="selectedAssetId()"
+        (ngModelChange)="selectedAssetId.set($event)"
+        [disabled]="busy()"
+      >
+        <option value="" disabled>Choose an asset…</option>
+        @for (asset of assets(); track asset.assetId) {
+          <option [value]="asset.assetId">{{ asset.displayName }} — {{ asset.categoryName }}</option>
+        }
+      </select>
+      @if (assets().length === 0) {
+        <p class="muted hint">No assets in inventory yet — use Add instead.</p>
+      }
+    </div>
+
+    <div class="row dialog-actions">
+      <button type="button" class="btn" (click)="submit()" [disabled]="busy() || !canSubmit()">
+        {{ busy() ? 'Attaching…' : 'Attach' }}
+      </button>
+      <button type="button" class="btn secondary" (click)="cancelled.emit()" [disabled]="busy()">Cancel</button>
+    </div>
+  </div>
+</div>

@@ -64,6 +64,31 @@
       <p class="muted hint">These do nothing until this drone accepts commands.</p>
     }
 
+    <!-- Session link (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P4) — a calm,
+         reversible act, not a safety control (no danger/big styling, unlike Take-control below).
+         Opens/closes the AssetUsage a telemetry-only asset needs before it is commandable at all;
+         see rc-monitor-logic.ts#resolveSessionAffordance for the full gating rule, including why a
+         video-capable asset that is already streaming never sees this block. -->
+    @switch (sessionAffordance()) {
+      @case ('engage') {
+        <div class="session-link">
+          <p class="muted hint">
+            No video stream is running for this drone — engage its link directly to start sending commands.
+          </p>
+          <button type="button" class="btn secondary" [disabled]="sessionBusy()" (click)="engageAssetLink.emit()">
+            {{ sessionBusy() ? 'Engaging…' : 'Engage link' }}
+          </button>
+        </div>
+      }
+      @case ('end') {
+        <div class="session-link">
+          <button type="button" class="btn secondary" [disabled]="sessionBusy()" (click)="endAssetSession.emit()">
+            {{ sessionBusy() ? 'Ending…' : 'End session' }}
+          </button>
+        </div>
+      }
+    }
+
     <!-- Mode/Arm/Disarm (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C10) — below the sticks now
          (decision U3), each row naming the switch that fires the same command when one is bound. -->
     <vision-flight-command-panel

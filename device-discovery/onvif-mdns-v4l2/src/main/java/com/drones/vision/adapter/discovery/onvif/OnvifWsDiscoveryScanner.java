@@ -1,6 +1,7 @@
 package com.drones.vision.adapter.discovery.onvif;
 
 import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
 import com.drones.vision.warehouse.domain.port.DeviceDiscoveryPort;
 
@@ -13,12 +14,18 @@ import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -38,13 +45,30 @@ import java.util.regex.Pattern;
  * ProbeMatch} (missing/blank {@code XAddrs}, truncated XML, an unparsable
  * address, ...) is skipped — it never fails or aborts the scan.
  *
- * <p>Every candidate's {@link DiscoveredDevice#suggestedStream()} is {@code
- * null}: producing a playable RTSP URI requires an authenticated {@code
- * GetStreamUri} SOAP call, which needs device credentials the discovery flow
- * does not have. That call is added by {@code adapter-onvif} in Phase 4; for
- * now the candidate carries the device's ONVIF service address ({@code
- * XAddrs}) and best-effort name/scopes so the user can still register it
- * manually.
+ * <p>After WS-Discovery collection, every ProbeMatch candidate is followed
+ * up with an anonymous ONVIF {@code GetCapabilities}/{@code GetProfiles}/
+ * {@code GetStreamUri} SOAP-over-HTTP chain ({@link OnvifDeviceClient}) to
+ * try to turn its ONVIF device-service address into a playable {@code
+ * suggestedStream}. A camera that requires credentials (HTTP 401 or a SOAP
+ * auth fault) keeps {@code suggestedStream = null} but gets an honest
+ * {@code details["note"]} instead of a guessed URL; a camera that times out,
+ * refuses the connection, or answers with something unparsable is returned
+ * exactly as before this chain existed — {@code suggestedStream = null},
+ * no note. Either way the candidate is still returned so the user can
+ * register it manually (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md
+ * &sect;3 P3, wave Z4).
+ *
+ * <p>{@link #scan(Duration)}'s {@code timeout} bounds <em>both</em> phases
+ * together, not the probe collection alone: {@link #PROBE_COLLECTION_SHARE}
+ * of the budget goes to WS-Discovery collection, the rest to the follow-up
+ * chain (run concurrently across every candidate, one virtual thread each,
+ * bounded by the same overall deadline — mirroring {@code
+ * DefaultDiscoveryService}'s own per-port fan-out/bounded-wait pattern) —
+ * see {@link #completeStreams(Collection, long)}. A single slow or
+ * unresponsive camera's follow-up calls are bounded by {@link
+ * OnvifDeviceClient}'s own per-request {@code HttpClient} timeout, so it
+ * cannot delay any other candidate's follow-up, let alone extend the scan
+ * past its budget.
  *
  * <p>Plain class, no framework dependency — instantiated directly by {@code
  * vision-app}'s wiring configuration.
@@ -61,6 +85,19 @@ public final class OnvifWsDiscoveryScanner implements DeviceDiscoveryPort {
     /** Larger than any realistic ONVIF ProbeMatch response; max theoretical UDP/IPv4 payload. */
     private static final int RECEIVE_BUFFER_SIZE = 65_507;
 
+    /**
+     * Share of {@link #scan(Duration)}'s {@code timeout} spent on WS-Discovery {@code ProbeMatch}
+     * collection; the remainder is left for the {@code GetCapabilities}/{@code GetProfiles}/
+     * {@code GetStreamUri} follow-up chain. An even split is deliberately simple (docs/plans/
+     * active/LAYERING-REFACTOR-PLAN.md &sect;1.3's out-of-scope-constant precedent, same as this
+     * class's multicast address/buffer size) rather than a configurable {@code ScanBudget}-style
+     * record — there is exactly one tunable here, below the module's two-tunable settings-record
+     * threshold.
+     */
+    private static final double PROBE_COLLECTION_SHARE = 0.5;
+
+    private static final String CREDENTIALS_REQUIRED_NOTE = "credentials required — stream URL cannot be suggested";
+
     private static final Pattern XADDRS_PATTERN =
             Pattern.compile("<[^:>]*:?XAddrs[^>]*>(.*?)</[^:>]*:?XAddrs>", Pattern.DOTALL | Pattern.CASE_INSENSITIVE);
     private static final Pattern SCOPES_PATTERN =
@@ -73,6 +110,7 @@ public final class OnvifWsDiscoveryScanner implements DeviceDiscoveryPort {
             Pattern.compile("onvif://www\\.onvif\\.org/name/(\\S+)", Pattern.CASE_INSENSITIVE);
 
     private final InetSocketAddress probeTarget;
+    private final OnvifDeviceClient deviceClient;
 
     /** Uses the standard WS-Discovery multicast address, {@code 239.255.255.250:3702}. */
     public OnvifWsDiscoveryScanner() {
@@ -87,6 +125,7 @@ public final class OnvifWsDiscoveryScanner implements DeviceDiscoveryPort {
      */
     public OnvifWsDiscoveryScanner(InetSocketAddress probeTarget) {
         this.probeTarget = Objects.requireNonNull(probeTarget, "probeTarget must not be null");
+        this.deviceClient = new OnvifDeviceClient();
     }
 
     @Override
@@ -98,12 +137,14 @@ public final class OnvifWsDiscoveryScanner implements DeviceDiscoveryPort {
     public List<DiscoveredDevice> scan(Duration timeout) {
         Objects.requireNonNull(timeout, "timeout must not be null");
         long budgetNanos = timeout.isNegative() ? 0L : timeout.toNanos();
-        long deadlineNanos = System.nanoTime() + budgetNanos;
+        long startNanos = System.nanoTime();
+        long deadlineNanos = startNanos + budgetNanos;
+        long probeDeadlineNanos = startNanos + (long) (budgetNanos * PROBE_COLLECTION_SHARE);
 
         Map<URI, DiscoveredDevice> found = new LinkedHashMap<>();
         try (DatagramSocket socket = new DatagramSocket()) {
             sendProbe(socket);
-            collectResponses(socket, deadlineNanos, found);
+            collectResponses(socket, probeDeadlineNanos, found);
         } catch (IOException e) {
             // Socket creation or the initial send failed outright -- a genuine
             // failure per the port contract; the caller (DiscoveryService)
@@ -111,7 +152,82 @@ public final class OnvifWsDiscoveryScanner implements DeviceDiscoveryPort {
             // collectResponses and never reach here.
             throw new UncheckedIOException("ONVIF WS-Discovery scan failed", e);
         }
-        return List.copyOf(found.values());
+        return List.copyOf(completeStreams(found.values(), deadlineNanos));
+    }
+
+    /**
+     * Runs the {@code GetCapabilities}/{@code GetProfiles}/{@code GetStreamUri} follow-up chain
+     * for every probe candidate concurrently (one virtual thread each, mirroring {@code
+     * DefaultDiscoveryService}'s own fan-out), then waits for each — up to its remaining share of
+     * {@code deadlineNanos} — falling back to the original, unmodified candidate if that wait
+     * itself times out or is interrupted (defensive: {@link OnvifDeviceClient#probeStream} already
+     * self-bounds via its per-request HTTP timeout and never throws, so this fallback should not
+     * normally trigger).
+     */
+    private List<DiscoveredDevice> completeStreams(Collection<DiscoveredDevice> candidates, long deadlineNanos) {
+        List<DiscoveredDevice> ordered = List.copyOf(candidates);
+        if (ordered.isEmpty()) {
+            return ordered;
+        }
+        List<CompletableFuture<DiscoveredDevice>> futures = new ArrayList<>(ordered.size());
+        for (DiscoveredDevice candidate : ordered) {
+            futures.add(completeOneAsync(candidate, deadlineNanos));
+        }
+
+        List<DiscoveredDevice> result = new ArrayList<>(ordered.size());
+        for (int i = 0; i < ordered.size(); i++) {
+            DiscoveredDevice fallback = ordered.get(i);
+            long remainingNanos = Math.max(0L, deadlineNanos - System.nanoTime());
+            try {
+                result.add(futures.get(i).get(remainingNanos, TimeUnit.NANOSECONDS));
+            } catch (TimeoutException | ExecutionException e) {
+                LOG.log(System.Logger.Level.DEBUG,
+                        () -> "ONVIF stream follow-up for " + fallback.address() + " abandoned: " + e);
+                result.add(fallback);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                result.add(fallback);
+            }
+        }
+        return result;
+    }
+
+    private CompletableFuture<DiscoveredDevice> completeOneAsync(DiscoveredDevice candidate, long deadlineNanos) {
+        CompletableFuture<DiscoveredDevice> future = new CompletableFuture<>();
+        Thread.ofVirtual().name("onvif-streamuri-" + candidate.address()).start(() -> {
+            try {
+                future.complete(completeOne(candidate, deadlineNanos));
+            } catch (Throwable t) {
+                future.completeExceptionally(t);
+            }
+        });
+        return future;
+    }
+
+    private DiscoveredDevice completeOne(DiscoveredDevice candidate, long deadlineNanos) {
+        long remainingNanos = deadlineNanos - System.nanoTime();
+        if (remainingNanos <= 0) {
+            return candidate;
+        }
+        StreamProbeOutcome outcome = deviceClient.probeStream(candidate.address(), Duration.ofNanos(remainingNanos));
+        return switch (outcome) {
+            case StreamProbeOutcome.Found found -> withStream(candidate, found.uri());
+            case StreamProbeOutcome.AuthRequired ignored -> withCredentialsNote(candidate);
+            case StreamProbeOutcome.Unavailable ignored -> candidate;
+        };
+    }
+
+    private static DiscoveredDevice withStream(DiscoveredDevice candidate, URI streamUri) {
+        StreamDescriptor stream = new StreamDescriptor("rtsp", streamUri, Map.of());
+        return new DiscoveredDevice(candidate.method(), candidate.name(), candidate.address(),
+                candidate.suggestedCategory(), stream, candidate.details());
+    }
+
+    private static DiscoveredDevice withCredentialsNote(DiscoveredDevice candidate) {
+        Map<String, String> details = new LinkedHashMap<>(candidate.details());
+        details.put("note", CREDENTIALS_REQUIRED_NOTE);
+        return new DiscoveredDevice(candidate.method(), candidate.name(), candidate.address(),
+                candidate.suggestedCategory(), null, details);
     }
 
     private void sendProbe(DatagramSocket socket) throws IOException {

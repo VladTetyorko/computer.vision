@@ -14,8 +14,9 @@ vision-app depends on — see Gotchas)
 ## Package layout
 
 `controller/` (every `@RestController`, now including `AssetInventoryController`/
-`InventoryExportController` — WAREHOUSE-UX W3, `CvProfileController` — CV-SETTINGS W5) · `dto/` (wire
-records only, ~184 — house rule "zero DTO leakage": no domain type is ever serialized directly) ·
+`InventoryExportController` — WAREHOUSE-UX W3, `CvProfileController` — CV-SETTINGS W5,
+`DiscoveryInboxController` — ZERO-CONFIG-ONBOARDING Z2c) · `dto/` (wire
+records only, ~187 — house rule "zero DTO leakage": no domain type is ever serialized directly) ·
 `security/` (`CurrentUser`/
 `PrincipalResolver`/`StreamAccess`/`OpenByDesign` — the authorization seam, see Conventions) ·
 `live/` (SSE connection registry, per-topic ring buffers, per-connection visibility filtering) ·
@@ -178,6 +179,9 @@ the full mechanism.
 | GeofenceController | PUT | `/api/geofences/{id}` | Replace a zone wholesale | administer |
 | GeofenceController | DELETE | `/api/geofences/{id}` | Delete a zone | administer |
 | DiscoveryController | POST | `/api/discovery/scan` | ONVIF/mDNS/V4L2 device scan | **unscoped** (ledger) |
+| DiscoveryInboxController | GET | `/api/discovery/inbox` | List every reported discovery candidate, newest-reported first | manageOrg |
+| DiscoveryInboxController | POST | `/api/discovery/inbox/{id}/register` | Register a candidate as a new asset | manageOrg (checked inside `DiscoveryInboxService#register`, ownership from `CurrentUser`, never the body — see Conventions) |
+| DiscoveryInboxController | POST | `/api/discovery/inbox/{id}/dismiss` | Dismiss a candidate (idempotent-in-effect: dismissing an already-dismissed candidate just re-stamps status) | manageOrg |
 | SimulationController | POST | `/api/simulations` | Start a synthetic (or video-fed) simulated asset | manageOrg |
 | SimulationController | DELETE | `/api/simulations/{assetId}` | Stop it (idempotent) | scope |
 | AuthController | POST | `/api/auth/login` | Session login (always-200 dev admin when auth disabled) | open |
@@ -245,6 +249,17 @@ coalesced (leading+trailing, ~150ms default) per topic, not per connection, so e
 depending on topic). Tunables live in `VisionApiProperties.Live` (coalesce/heartbeat/buffer
 sizes/send-timeout/buffer-eviction), bound from `vision.api.live.*`.
 
+**Discovery inbox is poll-only, not SSE (ZERO-CONFIG-ONBOARDING Z2c, deliberate v1 scope call).**
+`GET /api/discovery/inbox` is a cheap, indexed (`identity_key`/`last_seen`), idempotent read a client
+can poll on its own cadence — the background sweep that populates it already runs on a fixed period
+(`vision.discovery.inbox.sweep-seconds`, default 30s in `vision-app`), so there is no sub-second event
+to push and a poll interval matched to the sweep period loses nothing a live topic would have delivered
+sooner. No `DiscoveryLiveUpdatePort`/topic was added to `LiveUpdateRegistry` this wave: doing so would
+mean a sixth `@Qualifier("liveUpdateRegistry")` selector bean in `ApplicationServiceWiring`
+(`vision-app`, out of this wave's write scope) and a consuming panel in `vision-web` (owned by a
+concurrent agent in the same task), neither of which exists yet to justify the wiring. Revisit if/when
+a UI wave wants sub-30s latency on new-candidate appearance.
+
 **Scoped delivery**: `MapVisibility` gates the `map` topic by `MapAccessPolicy.canView`; `LiveAssetAccess`
 gates per-asset `telemetry`/`detections`/`geo` by `StreamAccess.visibleAsset`. Both filter at
 subscribe time (a caller never even subscribes to something out of scope) **and** re-check on every
@@ -308,6 +323,22 @@ genuine zero (a never-flown asset reports `0`). Both `from(...)` factories widen
 `totalFlightSeconds` as explicit parameters rather than gaining a second overload — see `AssetRowFacts`
 in Conventions for who supplies real values and who passes `null`.
 
+**ZERO-CONFIG-ONBOARDING Z2c additions** — `DiscoveryCandidateResponse(id, method, name, address,
+suggestedCategory, suggestedStreamProtocol, suggestedStreamUri, suggestedStreamOptions, details,
+firstSeen, lastSeen, status, registeredAssetId)` (`@JsonInclude(NON_NULL)`, static
+`from(DiscoveryCandidate)`) carries `suggestedStreamOptions` as the **full** `Map<String,String>` —
+this is the one field this DTO exists to get right that its sibling `DiscoveredDeviceResponse`
+(`DiscoveryController`) documented-defect drops, so a reader must not copy that shape here.
+`RegisterDiscoveryCandidateRequest(displayName, category, attributes, identity)` builds a
+`RegisterFromCandidateCommand` via `toCommand(Ownership)` — the `Ownership` argument always comes from
+`CurrentUser#ownership()` in the controller, never a request field (see Conventions).
+`RegisterDiscoveryCandidateResponse(assetId, displayName, category)` is deliberately **not** the full
+`AssetDetailsResponse` shape — `register` only has the freshly-created `Asset` in hand (the service
+returns that, not the mutated `DiscoveryCandidate`), and building the full details response would need
+extra collaborators (`AssetRowFacts`, image lookup) this endpoint has no call to pull in; a caller
+wanting the full asset shape follows up with `GET /api/assets/{id}`, same posture as `AssetInventoryController`'s
+own after-mutation responses.
+
 ## Conventions
 
 - **Out-of-scope single-resource reads answer 404, not 403.** A caller must never be able to prove a
@@ -361,6 +392,17 @@ in Conventions for who supplies real values and who passes `null`.
   room for `AssetRowFacts` either, and pass `null, null` explicitly (each documented in place) rather
   than silently omitting the parameters; a caller wanting an accurate join after those endpoints
   should follow up with `GET /api/assets/{id}`.
+- **`DiscoveryInboxController`'s three handlers split authorization the same way `AuditController`/
+  `GroupAdminController` already do, for the same reason each does it that way**: `list`/`dismiss` gate
+  explicitly in-controller (`currentUser.scope().canManageOrg()`, throwing `AccessDeniedException`
+  itself) because `DiscoveryInboxService#candidates()`/`#dismiss(id, userId)` carry no scope parameter
+  to check against — same shape as `AuditController#list`, which has no application-service layer of
+  its own to put the check in either. `register` instead passes `currentUser.scope()` and
+  `currentUser.ownership()` straight through to `DiscoveryInboxService#register(...)`, which performs
+  its own `canManageOrg()`+`includesGroup` checks internally — same shape as `GroupAdminController#create`
+  delegating to `GroupService`. All three still reach `CurrentUser.scope()` directly inside the
+  controller method body, so `EndpointAuthorizationTest`'s call-graph walk is satisfied without an
+  `@OpenByDesign`/ledger entry either way.
 - Rationale for any of the above beyond what's stated here lives in the plan doc cited inline, under
   `docs/plans/`.
 
@@ -512,3 +554,18 @@ skipped), `station/vision-api` **932** (+31 from 901: `CvProfileControllerTest` 
 `ModelRegistryControllerTest#models` case and its removed `GET /api/cv/registry/models` coverage),
 `station/vision-app` **278** (see that module's own MODULE.md entry) — all green, default-config bar
 held throughout.
+
+**ZERO-CONFIG-ONBOARDING wave Z2c done.** New `DiscoveryInboxController` (3 handlers: `list`,
+`register`, `dismiss` — see the endpoint table, DTO conventions, and the Conventions note above for the
+auth split and the deliberate poll-only-not-SSE decision) + 3 new `dto/` records
+(`DiscoveryCandidateResponse`/`RegisterDiscoveryCandidateRequest`/`RegisterDiscoveryCandidateResponse`).
+Also fixed a pre-existing compile break in `AfterActionAssemblerTest`'s `FakeAssetService` (missing
+`findDuplicateDevice` override, added trivially returning `Optional.empty()`) found while wiring this
+wave's own test — unrelated to discovery, but blocking the module's test compile either way.
+`./mvnw -B -pl storage/persistence,station/vision-api,station/vision-app test -DskipWeb` (after `-am
+install -Dmaven.test.skip=true` on the upstream context modules, then a separate `-am install
+-DskipTests` on `drone-link/mavlink-core,drone-link/mavlink` specifically — see
+`station/vision-app/MODULE.md`'s own Z2c entry for why that second install was needed) —
+`station/vision-api` **941** (+9 over 932: `DiscoveryInboxControllerTest`'s 9 cases), `storage/persistence`
+**267** (+7, see that module's own MODULE.md entry), `station/vision-app` **293** (+15, see that
+module's own MODULE.md entry) — all green, Docker ran for real, default-config bar held throughout.

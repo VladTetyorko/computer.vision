@@ -67,6 +67,10 @@ const ROUTED_PAGES = [
   // Profiles (docs/plans/active/CV-SETTINGS-PLAN.md §4, wave W6) — replaces `settings/detection-settings`
   // outright (deleted this wave; `/settings/detection` now redirects here).
   'vision-profiles/vision-profiles',
+  // Improv Wi-Fi provisioning over Web Serial (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md
+  // §4/§8, wave Z5) — pure frontend, no `VisionApi` call anywhere in the flow; the page injects only
+  // its facade, which itself wraps `WebSerialGateway` (a hardware gateway, not a `*Store`).
+  'provisioning/provisioning',
 ];
 
 // All feature .ts sources, inlined as raw strings at build time. Keys look like

@@ -15,6 +15,7 @@ import com.drones.vision.adapter.persistence.entity.DbAuditLogEntity;
 import com.drones.vision.adapter.persistence.entity.DetectionEventEntity;
 import com.drones.vision.adapter.persistence.entity.DetectionResultEntity;
 import com.drones.vision.adapter.persistence.entity.DeviceEntity;
+import com.drones.vision.adapter.persistence.entity.DiscoveryCandidateEntity;
 import com.drones.vision.adapter.persistence.entity.FeatureRequirementEntity;
 import com.drones.vision.adapter.persistence.entity.GeofenceZoneEntity;
 import com.drones.vision.adapter.persistence.entity.GroupEntity;
@@ -265,6 +266,9 @@ public final class PersistenceUnit {
         configuration.addAnnotatedClass(CvProfileBindingEntity.class);
         configuration.addAnnotatedClass(CvModelEntity.class);
         configuration.addAnnotatedClass(TrainingRunEntity.class);
+        // docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §11, Z2c (V31__discovery_inbox.sql) --
+        // the discovery inbox's persisted "found devices" rows.
+        configuration.addAnnotatedClass(DiscoveryCandidateEntity.class);
         return configuration.buildSessionFactory();
     }
 

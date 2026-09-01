@@ -139,6 +139,29 @@ public final class DefaultAssetService implements AssetService {
      * @throws IllegalStateException if an active device already carries this (protocol, uri, sysid)
      */
     private void requireNoDuplicate(StreamDescriptor candidate) {
+        matchDevice(candidate).ifPresent(device -> {
+            String owner = assetRepository.findByDeviceId(device.id())
+                    .map(asset -> " already registered to asset " + asset.displayName())
+                    .orElse(" already registered to device " + device.name());
+            throw new IllegalStateException(
+                    "Candidate " + candidate.protocol() + " " + candidate.uri() + " is" + owner);
+        });
+    }
+
+    @Override
+    public Optional<DuplicateDeviceMatch> findDuplicateDevice(StreamDescriptor candidate) {
+        Objects.requireNonNull(candidate, "candidate must not be null");
+        return matchDevice(candidate)
+                .map(device -> new DuplicateDeviceMatch(device.id(),
+                        assetRepository.findByDeviceId(device.id()).map(Asset::id).orElse(null)));
+    }
+
+    /**
+     * The one place that walks every active device looking for a {@code (protocol, uri, sysid)}
+     * match — shared by {@link #requireNoDuplicate} (which throws) and {@link #findDuplicateDevice}
+     * (which answers), so the two never drift.
+     */
+    private Optional<Device> matchDevice(StreamDescriptor candidate) {
         String candidateSysid = candidate.options().get("sysid");
         for (Device device : deviceService.devices(false)) {
             StreamDescriptor existing = device.stream();
@@ -146,13 +169,10 @@ public final class DefaultAssetService implements AssetService {
                     && existing.uri().equals(candidate.uri())
                     && Objects.equals(existing.options().get("sysid"), candidateSysid);
             if (sameAirframe) {
-                String owner = assetRepository.findByDeviceId(device.id())
-                        .map(asset -> " already registered to asset " + asset.displayName())
-                        .orElse(" already registered to device " + device.name());
-                throw new IllegalStateException(
-                        "Candidate " + candidate.protocol() + " " + candidate.uri() + " is" + owner);
+                return Optional.of(device);
             }
         }
+        return Optional.empty();
     }
 
     // --- Reading -------------------------------------------------------------

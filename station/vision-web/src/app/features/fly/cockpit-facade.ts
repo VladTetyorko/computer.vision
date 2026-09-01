@@ -19,7 +19,7 @@ import { resolveInteractionMode } from '../../core/map-data/drawings-logic';
 import { WeatherStore } from '../../core/weather/weather-store';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { videoDevices } from '../../core/fleet/device-logic';
-import { ageSeconds, humanAge, telemetryDevices } from '../../core/telemetry/telemetry-logic';
+import { ageSeconds, humanAge, selectOpenUsage, telemetryDevices } from '../../core/telemetry/telemetry-logic';
 import { canCommandReturnHome, deriveDiagnostics, derivePreflight, flightBanner } from '../../core/telemetry/flight-state-logic';
 import { capitalizeLabel, filterEvents, formatConfidence } from '../../core/events/events-logic';
 import { parseWindLimitMps } from '../../core/weather/weather-logic';
@@ -297,6 +297,18 @@ export class CockpitFacade {
 
   readonly telemetryDevicesList = computed(() => telemetryDevices(this.asset()?.devices ?? []));
   readonly hasTelemetryDevice = computed(() => this.telemetryDevicesList().length > 0);
+
+  /**
+   * Whether the asset's own open usage — if any — was opened by the operator's `engage` rather than
+   * a video stream starting (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P4). Read
+   * honestly off the same `AssetDetails#recentUsages` this class's 5s asset poll already refreshes
+   * (`selectOpenUsage`, `core/telemetry/telemetry-logic.ts`), never off a local "I clicked it" flag
+   * — there is no `GET .../session` read endpoint (`VisionApi#engageAssetSession`'s own doc
+   * comment), so this poll is the only honest source. `features/fly/rc-monitor.ts` feeds this and
+   * `hasTelemetryDevice`/`live` into `resolveSessionAffordance` to decide what its session-link
+   * block shows.
+   */
+  readonly operatorEngaged = computed(() => selectOpenUsage(this.asset()?.recentUsages ?? [])?.origin === 'OPERATOR');
 
   // --- Flight-controller state: failsafe banner + pre-flight checklist (docs/plans/done/FC-INTEGRATIONS-PLAN.md
   // F-d) — both pure derivations over the same `TelemetryStore.latest()` sample every other OSD chip
@@ -974,6 +986,52 @@ export class CockpitFacade {
       this.explicitlyStopped.set(true);
     } finally {
       this.busy.set(false);
+    }
+  }
+
+  // --- Asset session (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P4) -----------------
+  // A separate `sessionBusy` signal, not `busy` above — engaging/disengaging is a distinct verb from
+  // Start/Stop and must not disable that button (or read as "stream busy") while it runs.
+
+  readonly sessionBusy = signal(false);
+
+  /**
+   * `rc-monitor.ts`'s "Engage link" button. No confirm step — same posture as {@link start}, and
+   * for the same reason: this is a calm, reversible act, not a destructive one. Re-runs
+   * {@link loadAsset} on success so `operatorEngaged` flips as soon as the write actually lands,
+   * rather than leaving the operator staring at a stale "Engage link" for up to the 5s poll period
+   * — the fact still only ever comes from that same read, never from this call's own response.
+   */
+  async engageSession(): Promise<void> {
+    const assetId = this.activeAssetId();
+    if (!assetId) {
+      return;
+    }
+    this.sessionBusy.set(true);
+    try {
+      const ok = await this.fleet.engageAsset(assetId);
+      if (ok) {
+        await this.loadAsset(assetId);
+      }
+    } finally {
+      this.sessionBusy.set(false);
+    }
+  }
+
+  /** `rc-monitor.ts`'s "End session" button. Same immediate-reload reasoning as {@link engageSession}. */
+  async endSession(): Promise<void> {
+    const assetId = this.activeAssetId();
+    if (!assetId) {
+      return;
+    }
+    this.sessionBusy.set(true);
+    try {
+      const ok = await this.fleet.disengageAsset(assetId);
+      if (ok) {
+        await this.loadAsset(assetId);
+      }
+    } finally {
+      this.sessionBusy.set(false);
     }
   }
 

@@ -1,0 +1,32 @@
+/* Form fields — this component's own copy, same convention `onboarding.css` documents ("no page
+   imports another's stylesheet"). */
+.field {
+  margin-bottom: var(--space-16);
+}
+
+.field:last-child {
+  margin-bottom: 0;
+}
+
+.password-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Direct-child only — the "Device link" heading sits inside its own `<header>` (which already gets
+   the global `.card > header` margin-bottom) and must not double up on this. */
+.card > h3 {
+  margin: 0 0 var(--space-16);
+}
+
+.card p {
+  margin: 0 0 var(--space-8);
+}
+
+.card p:last-child {
+  margin-bottom: 0;
+}
+
+.what-next {
+  margin-top: var(--space-24);
+}

@@ -1,0 +1,41 @@
+/* Structural-label header (`.claude/skills/frontend-style` §8/§6) — same quiet uppercase treatment
+   `drone-picker.css#.picker-group-label` uses for its own section headers, redefined locally since
+   Angular's view encapsulation means that component's class isn't reachable from here. */
+:host {
+  display: block;
+}
+
+.found-devices {
+  margin-bottom: var(--space-24);
+}
+
+.found-devices-head {
+  flex-wrap: wrap;
+  margin-bottom: var(--space-8);
+}
+
+.found-devices-title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.found-devices-toggles {
+  flex-wrap: wrap;
+  gap: var(--space-16);
+  font-size: 0.8rem;
+}
+
+/* Same responsive card-grid idiom as `features/fly/drone-picker.css#.picker-grid` — auto-fill so
+   the count of columns follows the viewport, never a fixed count that overflows on a phone. */
+.found-devices-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+  gap: var(--space-16);
+}

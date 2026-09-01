@@ -109,6 +109,11 @@
     </button>
   </vision-page-bar>
 
+  <!-- Discovery inbox (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P2, §11, wave Z2d) —
+       fleet-wide, not tab-scoped, so it renders above the tab bar regardless of which tab is active;
+       renders nothing at all while the inbox is empty (see the component's own class doc). -->
+  <vision-found-devices />
+
   @if (facade.tab() === 'vehicles') {
     <!-- ---- "Fleet at a glance" KPI strip (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3 — ported from
          the deleted Reports page's own KPI section, `inventory-page-logic.ts#inventoryKpis`; same

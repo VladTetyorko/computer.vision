@@ -378,6 +378,33 @@ export class FleetStore {
   }
 
   /**
+   * `AssetSessionController#engage` (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P4) —
+   * the operator's own "this asset is in use" verb, no video stream needed. `run()`-wrapped like
+   * every other mutation here, so a `409` (deactivated/deleted asset) surfaces as one toast. No
+   * `refresh()` here — engaging touches neither the device nor stream list this store tracks; the
+   * asset's own `recentUsages` (where the new usage actually shows up) is `CockpitFacade`'s own 5s
+   * asset poll, not this store's concern. The "is it engaged" fact always comes from that poll,
+   * never from this call's own return — see `VisionApi#engageAssetSession`'s doc comment.
+   */
+  async engageAsset(assetId: string): Promise<boolean> {
+    console.info(`${LOG_PREFIX} POST /api/assets/${assetId}/session`);
+    const result = await this.run(() => this.api.engageAssetSession(assetId));
+    return result !== null;
+  }
+
+  /** `AssetSessionController#disengage` — the operator's "end session" verb; idempotent, and a
+   * demote-not-close if a video stream is still running (that controller's own javadoc). Same "no
+   * `refresh()`" reasoning as {@link engageAsset}. */
+  async disengageAsset(assetId: string): Promise<boolean> {
+    console.info(`${LOG_PREFIX} DELETE /api/assets/${assetId}/session`);
+    const result = await this.run(async () => {
+      await this.api.disengageAssetSession(assetId);
+      return true;
+    });
+    return result ?? false;
+  }
+
+  /**
    * Creates a simulated asset (docs/main/CYCLES-PLAN.md §4) and refreshes the device/stream lists so
    * the new device shows up immediately. Returns `null` on failure (already toasted by `run()`);
    * the caller decides the specific success toast/Watch action since that depends on whether

@@ -22,10 +22,12 @@ import com.drones.vision.flight.domain.port.TelemetrySourcePort;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Flow;
@@ -83,14 +85,21 @@ import com.drones.vision.perception.application.stream.StreamService;
  *       <b>last</b> currently-active device, closes the open usage (via {@link
  *       UsageSessionService#close}) and unsubscribes/closes every telemetry
  *       subscription opened for it — <b>unless</b> the open usage is {@link UsageOrigin#OPERATOR},
- *       in which case it stays open (see {@link #engage}'s collision-rule note) and only the
- *       telemetry subscriptions tear down.</li>
+ *       in which case <em>both</em> the usage and its telemetry subscriptions stay open: {@link
+ *       #engage} exists precisely so a session is commandable independent of any stream
+ *       (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md &sect;3 P4), so the last stream
+ *       stopping must never silently undo it. Only {@link #disengage} ever tears an
+ *       {@link UsageOrigin#OPERATOR OPERATOR}-origin usage's telemetry down.</li>
  *   <li>{@link #engage(AssetId)} / {@link #disengage(AssetId)} — the explicit operator verb
  *       (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2, wave R2) that opens/closes a usage
- *       directly, with <b>no video stream and no device traffic involved</b> — for a telemetry-only
- *       aircraft, or one being prepared before streaming, that an operator wants to mark "in use."
- *       See each method's own javadoc for how they resolve colliding with a stream that is already
- *       (or still) running.</li>
+ *       directly, with <b>no video stream ever required</b> — for a telemetry-only aircraft, or one
+ *       being prepared before streaming, that an operator wants to mark "in use." {@link #engage}
+ *       carries its own device traffic since docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md
+ *       &sect;3 P4 (closing docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md &sect;B4): it
+ *       opens a {@link TelemetrySourcePort} subscription for every one of the asset's {@link
+ *       Capability#TELEMETRY}-capable devices, so a telemetry-only aircraft becomes commandable
+ *       without ever pairing it with a video device. See each method's own javadoc for how they
+ *       resolve colliding with a stream that is already (or still) running.</li>
  * </ul>
  *
  * <h2>{@code onTelemetryDeviceDiscovered} — deleted, not wired (wave R2)</h2>
@@ -134,7 +143,11 @@ import com.drones.vision.perception.application.stream.StreamService;
  * never subscribes a {@link TelemetrySubscriber} straight to a {@link TelemetrySourcePort#open}
  * result — it wraps it in a {@link SupervisedPublisher} so a telemetry source error/completion is
  * retried with the same capped exponential backoff instead of silently ending telemetry for the
- * rest of the usage. Unlike the video path, this does <b>not</b> publish a {@code PIPELINE_ERROR}
+ * rest of the usage. {@link #subscribeTelemetry} has two callers ({@link #deviceStreamStarted} and,
+ * since docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md &sect;3 P4, {@link #engage}) that can
+ * race for the same asset; it claims each device id under {@code tracking}'s monitor before opening
+ * anything, so whichever caller runs first wins the open and the other is a safe no-op — see that
+ * method's own javadoc. Unlike the video path, this does <b>not</b> publish a {@code PIPELINE_ERROR}
  * event on an outage — this class has no {@link com.drones.vision.platform.EventPublisherPort}
  * (and no {@code StreamId} to publish one against; telemetry is tracked per-asset/device, not
  * per-stream), and {@link TelemetrySubscriber#onError} was already, deliberately, a completely
@@ -231,13 +244,24 @@ public final class UsageTracker {
     }
 
     /**
-     * Opens (or promotes) a usage for {@code assetId} directly, with no video stream and no device
-     * traffic involved — the explicit operator verb
-     * docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2/R2 introduces for a telemetry-only
-     * aircraft, or one being prepared before streaming, that an operator wants to mark "in use"
-     * without a stream ever starting. Stamped with {@link UsageOrigin#OPERATOR} and no {@code
-     * streamId} (same "or {@code null} for a legacy/streamless usage" honesty {@link
-     * AssetUsage#streamId()} already documents).
+     * Opens (or promotes) a usage for {@code assetId} directly, with no video stream ever required
+     * — the explicit operator verb docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2/R2
+     * introduces for a telemetry-only aircraft, or one being prepared before streaming, that an
+     * operator wants to mark "in use" without a stream ever starting. Stamped with {@link
+     * UsageOrigin#OPERATOR} and no {@code streamId} (same "or {@code null} for a legacy/streamless
+     * usage" honesty {@link AssetUsage#streamId()} already documents).
+     *
+     * <h2>Telemetry (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md &sect;3 P4, closes
+     * docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md &sect;B4)</h2>
+     * Once the usage above is resolved, this method opens a {@link TelemetrySourcePort} subscription
+     * — via the same {@link #subscribeTelemetry} path {@link #deviceStreamStarted} uses — for every
+     * one of the asset's {@link Capability#TELEMETRY}-capable devices a registered source supports.
+     * Before this, a telemetry-only aircraft's MAVLink gateway only ever opened as a side effect of a
+     * <em>video</em> stream starting, so it could never become commandable without being paired with
+     * a video device purely to trigger that subscription (the workaround B4 documented). {@link
+     * #subscribeTelemetry} is idempotent per device: calling it here never double-opens a device a
+     * running stream already subscribed, and {@link #deviceStreamStarted}'s own call likewise never
+     * double-opens one this method already claimed — see that method's own javadoc.
      *
      * <h2>Collision: a stream is already running</h2>
      * If the asset already has an open usage whose origin is not already {@link
@@ -253,7 +277,8 @@ public final class UsageTracker {
      * whichever stream opened it as an honest historical fact.
      *
      * <p>Idempotent: engaging an asset that is already {@link UsageOrigin#OPERATOR}-engaged returns
-     * the existing usage unchanged.
+     * the existing usage unchanged; its telemetry subscriptions (already open) are left exactly as
+     * they were.
      *
      * @param assetId the asset to engage
      * @return the open usage, now attributed to {@link UsageOrigin#OPERATOR} (newly opened,
@@ -264,7 +289,7 @@ public final class UsageTracker {
      */
     public AssetUsage engage(AssetId assetId) {
         Objects.requireNonNull(assetId, "assetId must not be null");
-        requireActiveAsset(assetId); // no device traffic is ever opened here -- see class javadoc
+        Asset asset = requireActiveAsset(assetId); // devices() needed below to open telemetry -- see class javadoc
         Tracking tracking = trackingByAsset.computeIfAbsent(assetId, id -> new Tracking());
         AssetUsage result;
         UsageId openedUsageId = null;
@@ -293,6 +318,12 @@ public final class UsageTracker {
         if (openedNow) {
             notifyPhaseObserver(assetId, openedUsageId, null, openedPhase);
         }
+        // docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P4, closes
+        // docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md §B4: engage carries its own
+        // telemetry traffic now, independent of any video stream -- subscribeTelemetry claims each
+        // device id before opening it, so this is a safe no-op for a device a running stream (or an
+        // earlier engage call) already subscribed.
+        subscribeTelemetry(asset, tracking);
         return result;
     }
 
@@ -307,10 +338,15 @@ public final class UsageTracker {
      * Instead it <b>demotes</b> the usage back to {@link UsageOrigin#STREAM} — the operator's claim
      * on the session is withdrawn, but the session itself lives on exactly as if the stream had
      * opened it, which (from the runtime's point of view) is now the whole truth: nothing but the
-     * stream is still watching it. The ordinary stream-driven close in {@link #onStreamStopped}
-     * takes over from there once the last device actually stops. Only when no device is currently
-     * active does this method close the usage outright, via the same {@code
-     * FlightPhaseRule#onSessionClosed} transform {@link #onStreamStopped} uses.
+     * stream is still watching it. Every telemetry subscription this call's {@link #engage} opened
+     * is left exactly as it was — a running stream may still be reading from the very same
+     * subscription (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md &sect;3 P4), so nothing here
+     * ever tears one down while a device is active. The ordinary stream-driven close in {@link
+     * #onStreamStopped} takes over from there once the last device actually stops. Only when no
+     * device is currently active does this method close the usage outright, via the same {@code
+     * FlightPhaseRule#onSessionClosed} transform {@link #onStreamStopped} uses — which also
+     * unsubscribes/closes every telemetry subscription still open for the asset, exactly like an
+     * ordinary stream-driven close does.
      *
      * <p>A no-op — returns {@link Optional#empty()} — if the asset has no currently open usage, or
      * its open usage was not opened/promoted by {@link #engage} in the first place (an ordinary
@@ -541,6 +577,7 @@ public final class UsageTracker {
             return;
         }
         boolean allDevicesStopped;
+        boolean tearDownTelemetry;
         AssetUsage usageToClose = null;
         UsageId closedUsageId = null;
         UsagePhase closedPhase = null;
@@ -559,8 +596,10 @@ public final class UsageTracker {
                 if (tracking.usage.origin() == UsageOrigin.OPERATOR) {
                     // docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2/R2 collision rule: an
                     // operator-engaged usage survives every device going inactive -- only #disengage
-                    // closes it. Telemetry subscriptions still tear down below (there is nothing
-                    // left for them to read from), the usage itself just stays open.
+                    // closes it. docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P4: its
+                    // telemetry subscriptions now survive too (see tearDownTelemetry below) -- #engage
+                    // exists precisely so commandability outlives any one stream, so the last stream
+                    // stopping must never silently undo it.
                 } else {
                     // docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.3: the explicit-close half of the
                     // state machine -- IN_FLIGHT/LINK_LOST both close to ABANDONED (the platform stopped
@@ -584,8 +623,14 @@ public final class UsageTracker {
                     }
                 }
             }
+            // docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P4: read tracking.usage's
+            // CURRENT state (after the branch above may have nulled it) -- telemetry only tears down
+            // once nothing needs it any more: no active device AND no surviving OPERATOR-origin
+            // (#engage'd) usage. Only #disengage ever closes an OPERATOR usage's telemetry.
+            tearDownTelemetry = allDevicesStopped
+                    && !(tracking.usage != null && tracking.usage.origin() == UsageOrigin.OPERATOR);
         }
-        if (allDevicesStopped) {
+        if (tearDownTelemetry) {
             unsubscribeTelemetry(tracking);
         }
         if (usageToClose != null) {
@@ -596,8 +641,30 @@ public final class UsageTracker {
         }
     }
 
+    /**
+     * Opens a {@link TelemetrySourcePort} subscription for every one of {@code asset}'s {@link
+     * Capability#TELEMETRY}-capable devices a registered source supports — called from both {@link
+     * #deviceStreamStarted} (on the asset's first currently-active device) and {@link #engage}
+     * (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md &sect;3 P4), which can reach the same
+     * asset in either order or concurrently.
+     *
+     * <p><b>Idempotent per device.</b> Each {@code deviceId} is claimed under {@code tracking}'s
+     * monitor (a plain {@link Set#add} — fast, in-memory) before this method does anything else with
+     * it; only the caller that wins the claim actually opens a subscription. This is what lets {@link
+     * #engage} and {@link #deviceStreamStarted} call this method for the same asset in any order —
+     * whichever runs second finds every device it would have opened already claimed and does
+     * nothing — without either one needing to know which of the two opened what. The claim is
+     * released only by {@link #unsubscribeTelemetry}, alongside the subscriptions themselves.
+     */
     private void subscribeTelemetry(Asset asset, Tracking tracking) {
         for (DeviceId deviceId : asset.devices()) {
+            boolean claimed;
+            synchronized (tracking) {
+                claimed = tracking.telemetryDeviceIds.add(deviceId);
+            }
+            if (!claimed) {
+                continue; // already open, or claimed by the other caller racing for the same asset
+            }
             Optional<Device> deviceOpt = assetDirectory.findDevice(deviceId);
             if (deviceOpt.isEmpty()) {
                 continue;
@@ -625,7 +692,10 @@ public final class UsageTracker {
     }
 
     /**
-     * Unsubscribes and releases every telemetry subscription opened for a now-closed usage.
+     * Unsubscribes and releases every telemetry subscription currently open for the asset —
+     * called once nothing (neither an active device nor an {@link UsageOrigin#OPERATOR}-origin
+     * usage {@link #engage} opened) still needs them, see {@link #deviceStreamStopped}/{@link
+     * #disengage}'s own call sites for exactly when that is.
      * {@link SupervisedPublisher#stop()} runs synchronously here — cheap, in-memory, and it must
      * happen before this method returns so a pending scheduled reopen can never race a legitimate
      * close (docs/plans/done/MVP2-PLAN.md §S, S-a, same reasoning as {@code DefaultStreamService#stop}). The
@@ -633,12 +703,15 @@ public final class UsageTracker {
      * background thread instead, for the same reason {@code DefaultStreamService} defers its own
      * source teardown: an adapter's {@code close()} is not guaranteed to be fast, and this method is
      * itself called synchronously from {@code DefaultStreamService#stop}, which must return promptly.
+     * Also clears {@link Tracking#telemetryDeviceIds} — {@link #subscribeTelemetry}'s per-device
+     * claim set — so a later re-engage/restream starts every device's claim fresh.
      */
     private void unsubscribeTelemetry(Tracking tracking) {
         List<TelemetrySubscription> subscriptions;
         synchronized (tracking) {
             subscriptions = List.copyOf(tracking.telemetrySubscriptions);
             tracking.telemetrySubscriptions.clear();
+            tracking.telemetryDeviceIds.clear();
         }
         for (TelemetrySubscription subscription : subscriptions) {
             subscription.supervisedPublisher().stop();
@@ -849,6 +922,8 @@ public final class UsageTracker {
         /** docs/plans/done/MVP3-PLAN.md C-a: the freshest sample ever seen, kept even once {@link #usage} closes — see {@link #latestTelemetry(AssetId)}. */
         private Telemetry lastSample;
         private final List<TelemetrySubscription> telemetrySubscriptions = new ArrayList<>();
+        /** docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P4: device ids currently claimed/open for telemetry -- guards {@code UsageTracker#subscribeTelemetry} against opening the same device's {@code TelemetrySourcePort} twice when {@code #engage} and a device stream starting race for the same asset. Cleared alongside {@link #telemetrySubscriptions} by {@code UsageTracker#unsubscribeTelemetry}. */
+        private final Set<DeviceId> telemetryDeviceIds = new HashSet<>();
         /** docs/plans/done/SCALE-100-PLAN.md S4: folds into {@link #usage} not yet written via {@code usageSessionService.save}. */
         private int unflushedSummaryUpdates;
         /** docs/plans/done/SCALE-100-PLAN.md S4: the armed time-bound summary flush, if any — see {@code UsageTracker#registerSummaryUpdate}. */

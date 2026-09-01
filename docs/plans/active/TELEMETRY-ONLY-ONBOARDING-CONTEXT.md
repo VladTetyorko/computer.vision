@@ -185,3 +185,15 @@ Whole flow, firmware running as a host process against `:8081`:
 | `/ws/manual-control`, 179 stick frames | firmware applied `throttle=+0.40 steering=+0.60`, exactly the axes sent |
 
 The session for that last block was opened on a paired `sim` video device — see B4.
+
+---
+
+## Update 2026-08-31 — B4 closed by ZERO-CONFIG-ONBOARDING wave Z1
+
+`UsageTracker#engage` now opens a telemetry subscription per `TELEMETRY`-capable device (and
+`deviceStreamStopped`'s formerly unconditional teardown is origin-gated), and the Fly cockpit calls
+`POST/DELETE /api/assets/{id}/session` — so a telemetry-only asset is commandable with no video
+stream and no fake camera. Commits `16828768` (perception) + `66fb220e` (web) on
+`feat/zero-config-onboarding`; full record in
+`docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md` §12. B5 (misleading flag-off error message)
+remains open.
