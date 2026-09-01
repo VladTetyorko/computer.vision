@@ -11,6 +11,8 @@ import com.drones.vision.flight.domain.model.CommandResult;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.flight.domain.model.FlightCapability;
+import com.drones.vision.flight.domain.model.ReadinessReport;
+import com.drones.vision.flight.domain.model.ReadinessVerdict;
 import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.LifecycleState;
@@ -24,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
+import java.time.Instant;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Set;
@@ -55,6 +58,7 @@ class DefaultFlightCommandServiceTest {
     private AssetService assetService;
     private FlightCommandPort flightCommandPort;
     private AuditTrailPort auditTrail;
+    private ReadinessService readinessService;
     private FlightCommandService service;
 
     private final UserId actor = UserId.random();
@@ -66,7 +70,13 @@ class DefaultFlightCommandServiceTest {
         assetService = mock(AssetService.class);
         flightCommandPort = mock(FlightCommandPort.class);
         auditTrail = mock(AuditTrailPort.class);
-        service = new DefaultFlightCommandService(assetService, flightCommandPort, auditTrail);
+        readinessService = mock(ReadinessService.class);
+        // Default: no maintenance blocker, so every pre-existing test (which never touches
+        // readinessService) sees the same behavior as before this collaborator was added. Only
+        // arm() ever consults it.
+        when(readinessService.evaluate(any(), any())).thenReturn(
+                new ReadinessReport(assetId, ReadinessVerdict.GO, Instant.EPOCH, Instant.EPOCH, List.of(), List.of()));
+        service = new DefaultFlightCommandService(assetService, flightCommandPort, auditTrail, readinessService);
 
         telemetryDevice = new Device(DeviceId.random(), "FC", Set.of(Capability.TELEMETRY),
                 new StreamDescriptor("mavlink", URI.create("udp://127.0.0.1:14550"), java.util.Map.of()));
@@ -371,6 +381,83 @@ class DefaultFlightCommandServiceTest {
                 () -> service.disarm(assetId, false, actor, VisibilityScope.unbounded()));
         verify(flightCommandPort, never()).disarm(any(), anyBoolean());
         verify(auditTrail, never()).record(any());
+    }
+
+    // --- ASSET-FLOWS-PLAN S1: arm is gated by maintenance grounding, other verbs never are ---
+
+    private void groundAssetForMaintenance(String summary) {
+        when(readinessService.evaluate(assetId, VisibilityScope.unbounded())).thenReturn(new ReadinessReport(
+                assetId, ReadinessVerdict.NO_GO, Instant.EPOCH, Instant.EPOCH, List.of(),
+                List.of(DefaultReadinessService.MAINTENANCE_BLOCKER_PREFIX + "GROUNDING:" + summary)));
+    }
+
+    @Test
+    void armRefusesWhenAssetIsMaintenanceGroundedWithoutTouchingThePort() {
+        stubDetails(telemetryDevice);
+        groundAssetForMaintenance("Propeller crack found");
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> service.arm(assetId, true, actor, VisibilityScope.unbounded()));
+
+        assertTrue(ex.getMessage().contains("Propeller crack found"), "got: " + ex.getMessage());
+        verify(flightCommandPort, never()).arm(any(), anyBoolean());
+        ArgumentCaptor<AuditEntry> captor = ArgumentCaptor.forClass(AuditEntry.class);
+        verify(auditTrail).record(captor.capture());
+        assertEquals("REFUSED:maintenance-grounded", captor.getValue().details().get("result"));
+    }
+
+    @Test
+    void disarmStillWorksWhenAssetIsMaintenanceGrounded() {
+        stubDetails(telemetryDevice);
+        groundAssetForMaintenance("Propeller crack found");
+        when(flightCommandPort.supports(telemetryDevice)).thenReturn(true);
+        when(flightCommandPort.disarm(telemetryDevice, true)).thenReturn(CommandResult.ACCEPTED);
+
+        CommandResult result = service.disarm(assetId, true, actor, VisibilityScope.unbounded());
+
+        assertEquals(CommandResult.ACCEPTED, result);
+        verify(flightCommandPort).disarm(telemetryDevice, true);
+    }
+
+    @Test
+    void emergencyStopStillWorksWhenAssetIsMaintenanceGrounded() {
+        stubDetails(telemetryDevice);
+        groundAssetForMaintenance("Propeller crack found");
+        when(flightCommandPort.supports(telemetryDevice)).thenReturn(true);
+        when(flightCommandPort.emergencyStop(telemetryDevice)).thenReturn(CommandResult.ACCEPTED);
+
+        CommandResult result = service.emergencyStop(assetId, actor, VisibilityScope.unbounded());
+
+        assertEquals(CommandResult.ACCEPTED, result);
+        verify(flightCommandPort).emergencyStop(telemetryDevice);
+    }
+
+    @Test
+    void returnToHomeStillWorksWhenAssetIsMaintenanceGrounded() {
+        stubDetails(telemetryDevice);
+        groundAssetForMaintenance("Propeller crack found");
+        when(flightCommandPort.supports(telemetryDevice)).thenReturn(true);
+        when(flightCommandPort.returnToHome(telemetryDevice)).thenReturn(CommandResult.ACCEPTED);
+
+        CommandResult result = service.returnToHome(assetId, actor, VisibilityScope.unbounded());
+
+        assertEquals(CommandResult.ACCEPTED, result);
+        verify(flightCommandPort).returnToHome(telemetryDevice);
+    }
+
+    @Test
+    void setModeStillWorksWhenAssetIsMaintenanceGrounded() {
+        stubDetails(telemetryDevice);
+        groundAssetForMaintenance("Propeller crack found");
+        when(flightCommandPort.supports(telemetryDevice)).thenReturn(true);
+        when(flightCommandPort.capabilities(telemetryDevice))
+                .thenReturn(new FlightCapability(true, true, true, List.of("Loiter", "RTL"), VehicleKind.COPTER));
+        when(flightCommandPort.setMode(telemetryDevice, "Loiter")).thenReturn(CommandResult.ACCEPTED);
+
+        CommandResult result = service.setMode(assetId, "Loiter", actor, VisibilityScope.unbounded());
+
+        assertEquals(CommandResult.ACCEPTED, result);
+        verify(flightCommandPort).setMode(telemetryDevice, "Loiter");
     }
 
     // --- Stage 2: capabilities (scoped read) ---

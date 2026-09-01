@@ -14,6 +14,9 @@ import com.drones.vision.flight.domain.model.FlightPhaseRule;
 import com.drones.vision.kernel.FlightState;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.GroupId;
+import com.drones.vision.warehouse.domain.model.MaintenanceId;
+import com.drones.vision.warehouse.domain.model.MaintenanceKind;
+import com.drones.vision.warehouse.domain.model.MaintenanceRecord;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.StreamId;
@@ -31,6 +34,7 @@ import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 import com.drones.vision.flight.domain.port.TelemetrySourcePort;
 import com.drones.vision.warehouse.application.directory.AssetDirectoryService;
 import com.drones.vision.warehouse.application.directory.DefaultAssetDirectoryService;
+import com.drones.vision.warehouse.application.maintenance.MaintenanceQuery;
 import com.drones.vision.warehouse.application.usage.UsageSessionService;
 import com.drones.vision.warehouse.application.usage.DefaultUsageSessionService;
 import com.drones.vision.flight.application.telemetry.TelemetryService;
@@ -42,6 +46,8 @@ import org.mockito.ArgumentCaptor;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -56,6 +62,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -85,6 +92,7 @@ class UsageTrackerTest {
     private AssetDirectoryService assetDirectoryService;
     private UsageSessionService usageSessionService;
     private TelemetryService telemetryService;
+    private FakeMaintenanceQuery maintenanceQuery;
 
     @BeforeEach
     void setUp() {
@@ -99,19 +107,21 @@ class UsageTrackerTest {
         assetDirectoryService = new DefaultAssetDirectoryService(assetRepository, deviceRepository);
         usageSessionService = new DefaultUsageSessionService(usageRepository);
         telemetryService = new DefaultTelemetryService(telemetryRepository);
+        maintenanceQuery = new FakeMaintenanceQuery();
     }
 
     private UsageTracker tracker(List<TelemetrySourcePort> sources) {
         return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
-                UsageTrackerSettings.defaults());
+                UsageTrackerSettings.defaults(maintenanceQuery));
     }
 
     private UsageTracker tracker(List<TelemetrySourcePort> sources, TelemetryLiveUpdatePort liveUpdatePublisherPort) {
-        UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults(maintenanceQuery);
         return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
                 new UsageTrackerSettings(Optional.of(liveUpdatePublisherPort), defaults.telemetryObserver(),
                         defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(),
-                        defaults.summaryBatchSettings(), defaults.phaseSettings(), defaults.usagePhaseObserver()));
+                        defaults.summaryBatchSettings(), defaults.phaseSettings(), defaults.usagePhaseObserver(),
+                        defaults.maintenanceQuery()));
     }
 
     /**
@@ -121,11 +131,12 @@ class UsageTrackerTest {
      * tracker no longer names that type (docs/plans/active/DOMAIN-SEPARATION-W1.md §5, C2).
      */
     private UsageTracker tracker(List<TelemetrySourcePort> sources, GeofenceMonitor geofenceMonitor) {
-        UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults(maintenanceQuery);
         return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
                 new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), Optional.of(geofenceMonitor::evaluate),
                         defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(),
-                        defaults.summaryBatchSettings(), defaults.phaseSettings(), defaults.usagePhaseObserver()));
+                        defaults.summaryBatchSettings(), defaults.phaseSettings(), defaults.usagePhaseObserver(),
+                        defaults.maintenanceQuery()));
     }
 
     /**
@@ -134,11 +145,12 @@ class UsageTrackerTest {
      * deterministically.
      */
     private UsageTracker trackerWithFastRetry(List<TelemetrySourcePort> sources) {
-        UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults(maintenanceQuery);
         return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
                 new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), defaults.telemetryObserver(),
                         TimeUnit.MILLISECONDS.toNanos(20), TimeUnit.MILLISECONDS.toNanos(20),
-                        defaults.summaryBatchSettings(), defaults.phaseSettings(), defaults.usagePhaseObserver()));
+                        defaults.summaryBatchSettings(), defaults.phaseSettings(), defaults.usagePhaseObserver(),
+                        defaults.maintenanceQuery()));
     }
 
     /**
@@ -148,11 +160,11 @@ class UsageTrackerTest {
      */
     private UsageTracker trackerWithSummaryBatching(List<TelemetrySourcePort> sources,
                                                      UsageSummaryBatchSettings summaryBatchSettings) {
-        UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults(maintenanceQuery);
         return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
                 new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), defaults.telemetryObserver(),
                         defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(), summaryBatchSettings,
-                        defaults.phaseSettings(), defaults.usagePhaseObserver()));
+                        defaults.phaseSettings(), defaults.usagePhaseObserver(), defaults.maintenanceQuery()));
     }
 
     /**
@@ -162,11 +174,12 @@ class UsageTrackerTest {
      */
     private UsageTracker trackerWithPhaseSettings(List<TelemetrySourcePort> sources,
                                                    UsagePhaseSettings phaseSettings) {
-        UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults(maintenanceQuery);
         return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
                 new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), defaults.telemetryObserver(),
                         defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(),
-                        UsageSummaryBatchSettings.immediate(), phaseSettings, defaults.usagePhaseObserver()));
+                        UsageSummaryBatchSettings.immediate(), phaseSettings, defaults.usagePhaseObserver(),
+                        defaults.maintenanceQuery()));
     }
 
     /**
@@ -182,11 +195,29 @@ class UsageTrackerTest {
      */
     private UsageTracker trackerWithPhaseObserver(List<TelemetrySourcePort> sources, UsagePhaseSettings phaseSettings,
                                                    UsagePhaseObserver usagePhaseObserver) {
-        UsageTrackerSettings defaults = UsageTrackerSettings.defaults();
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults(maintenanceQuery);
         return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
                 new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), defaults.telemetryObserver(),
                         defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(),
-                        UsageSummaryBatchSettings.immediate(), phaseSettings, usagePhaseObserver));
+                        UsageSummaryBatchSettings.immediate(), phaseSettings, usagePhaseObserver,
+                        defaults.maintenanceQuery()));
+    }
+
+    /**
+     * docs/plans/active/ASSET-FLOWS-PLAN.md S1's hand-fake {@link MaintenanceQuery}: empty (nothing
+     * grounded) unless a test calls {@link #addRecord}.
+     */
+    private static final class FakeMaintenanceQuery implements MaintenanceQuery {
+        private final Map<AssetId, List<MaintenanceRecord>> recordsByAsset = new HashMap<>();
+
+        void addRecord(AssetId assetId, MaintenanceRecord record) {
+            recordsByAsset.computeIfAbsent(assetId, id -> new ArrayList<>()).add(record);
+        }
+
+        @Override
+        public List<MaintenanceRecord> openBlockers(AssetId assetId) {
+            return List.copyOf(recordsByAsset.getOrDefault(assetId, List.of()));
+        }
     }
 
     private static UsagePhaseSettings phaseSettings(AtomicReference<Instant> clock) {
@@ -902,6 +933,61 @@ class UsageTrackerTest {
 
         org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () -> tracker.engage(asset.id()));
         verify(usageRepository, never()).save(any());
+    }
+
+    // --- ASSET-FLOWS-PLAN S1: engage refuses on a maintenance-grounded asset -------------------
+
+    @Test
+    void engageRefusesWhenAssetIsMaintenanceGroundedWithoutOpeningAnyUsage() {
+        Asset asset = asset(Set.of(telemetryDevice("tel-1").id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        maintenanceQuery.addRecord(asset.id(), new MaintenanceRecord(MaintenanceId.random(), asset.id(),
+                MaintenanceKind.GROUNDING, Instant.EPOCH, null, UserId.random(), "Propeller crack found", null));
+        UsageTracker tracker = tracker(List.of());
+
+        IllegalStateException ex = org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> tracker.engage(asset.id()));
+
+        assertTrue(ex.getMessage().contains(asset.id().value().toString()), "got: " + ex.getMessage());
+        verify(usageRepository, never()).save(any());
+    }
+
+    @Test
+    void engageProceedsWhenAnOpenMaintenanceRecordDoesNotBlockFlight() {
+        // REPAIR/NOTE are informational (MaintenanceKind#blocksFlight() == false) -- only
+        // GROUNDING/INSPECTION_DUE gate engage.
+        Asset asset = asset(Set.of(telemetryDevice("tel-1").id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        maintenanceQuery.addRecord(asset.id(), new MaintenanceRecord(MaintenanceId.random(), asset.id(),
+                MaintenanceKind.REPAIR, Instant.EPOCH, null, UserId.random(), "Swapping a prop", null));
+        UsageTracker tracker = tracker(List.of());
+
+        AssetUsage opened = tracker.engage(asset.id());
+
+        assertEquals(UsageOrigin.OPERATOR, opened.origin());
+    }
+
+    @Test
+    void onStreamStartedStillOpensAUsageForAMaintenanceGroundedAsset() {
+        // Deliberate scope decision (docs/plans/active/ASSET-FLOWS-PLAN.md S1, wave BK1): only the
+        // explicit operator verb #engage is gated. The stream-triggered session-open path
+        // (#onStreamStarted / #deviceStreamStarted) is NOT gated here, because by the time it fires
+        // the video pipeline has already started and the STREAM_STARTED event already published
+        // (DefaultStreamService#startStream calls pipeline.start() and publishes the event before
+        // ever calling usageTracker#onStreamStarted, and its exception handler never calls
+        // pipeline.close()) -- refusing at this point would leak a running pipeline rather than
+        // prevent anything, so a grounded asset's stream is still allowed to open a usage exactly as
+        // before this wave.
+        Device cam = videoDevice("cam-1");
+        Asset asset = asset(Set.of(cam.id()));
+        when(assetRepository.findByDeviceId(cam.id())).thenReturn(Optional.of(asset));
+        maintenanceQuery.addRecord(asset.id(), new MaintenanceRecord(MaintenanceId.random(), asset.id(),
+                MaintenanceKind.GROUNDING, Instant.EPOCH, null, UserId.random(), "Propeller crack found", null));
+        UsageTracker tracker = tracker(List.of());
+
+        tracker.onStreamStarted(cam.id(), StreamId.random());
+
+        verify(usageRepository, times(1)).save(any());
     }
 
     @Test

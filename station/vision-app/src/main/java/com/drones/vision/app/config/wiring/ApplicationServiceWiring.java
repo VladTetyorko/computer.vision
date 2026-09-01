@@ -58,6 +58,7 @@ import com.drones.vision.warehouse.application.device.*;
 import com.drones.vision.warehouse.application.maintenance.*;
 import com.drones.vision.warehouse.application.fleet.*;
 import com.drones.vision.flight.application.*;
+import com.drones.vision.flight.application.alerting.*;
 import com.drones.vision.flight.application.geofence.*;
 import com.drones.vision.map.application.*;
 import com.drones.vision.map.application.mark.*;
@@ -73,12 +74,16 @@ import com.drones.vision.flight.application.telemetry.*;
 
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import jakarta.persistence.EntityManagerFactory;
+
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.Telemetry;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -87,6 +92,7 @@ import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BiConsumer;
 
 /**
  * Wires the {@code vision-application} service layer — the largest slice of what used to be one
@@ -336,6 +342,40 @@ public class ApplicationServiceWiring {
     }
 
     /**
+     * Evaluates live telemetry against the {@code vision.ops.battery.*} thresholds and raises {@code
+     * BATTERY_LOW} events on the rising edge (docs/plans/active/ASSET-FLOWS-PLAN.md §2, wave S4) —
+     * threaded into {@link #usageTracker} below exactly like {@link #geofenceMonitor} is, composed
+     * into the same single {@code telemetryObserver} seam.
+     *
+     * <p>{@code criticalPercent}/{@code warningPercent} carry the D6 frozen-contract defaults (10/25)
+     * inline, so this bean behaves correctly whether or not root {@code application.yaml} documents
+     * the {@code vision.ops.battery.*} block yet (BK3's own wave, this cycle) — once it does, both
+     * this bean and {@code GET /api/ops/thresholds} read the identical property keys/defaults, the
+     * "one severity source" the frozen contract asks for.
+     */
+    @Bean
+    public BatteryMonitor batteryMonitor(EventPublisherPort eventPublisherPort,
+                                          EventLiveUpdatePort eventLiveUpdatePort,
+                                          @Value("${vision.ops.battery.critical-percent:10}") double criticalPercent,
+                                          @Value("${vision.ops.battery.warning-percent:25}") double warningPercent) {
+        return new BatteryMonitor(eventPublisherPort, eventLiveUpdatePort,
+                new BatteryAlertSettings(criticalPercent, warningPercent));
+    }
+
+    /**
+     * Raises one {@code LINK_LOST} event per link-failure edge (docs/plans/active/ASSET-FLOWS-PLAN.md §2,
+     * wave S4) — see {@link LinkLossNotifier}'s own javadoc for the FLEET-RADIO R4 signal this
+     * notifies for and the one remaining call-site wiring step (perception's {@code
+     * UsageTracker#subscribeTelemetry}, out of this wave's file scope) that makes this bean's output
+     * reach the bell.
+     */
+    @Bean
+    public LinkLossNotifier linkLossNotifier(EventPublisherPort eventPublisherPort,
+                                              EventLiveUpdatePort eventLiveUpdatePort) {
+        return new LinkLossNotifier(eventPublisherPort, eventLiveUpdatePort);
+    }
+
+    /**
      * Read-only device/asset identity lookups for {@link #usageTracker}
      * (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D1/R3) — see {@link AssetDirectoryService}'s
      * own javadoc for why this is a narrower seam than {@link #assetService}/{@link #deviceService}
@@ -392,6 +432,17 @@ public class ApplicationServiceWiring {
      * notified. Same defaulting idiom as {@link #streamService}'s {@code detectionDemandPort}.
      * {@code phaseSettings} stays {@link UsagePhaseSettings#defaults()} exactly as it was before this
      * bean took an observer at all — nothing in this module binds {@code vision.flight.phase.*} yet.
+     *
+     * <p>{@code batteryMonitor} (docs/plans/active/ASSET-FLOWS-PLAN.md §2, wave S4) is composed into
+     * the same single {@code telemetryObserver} seam alongside {@code geofenceMonitor} — {@code
+     * UsageTrackerSettings} carries exactly one observer slot, so both monitors run off one lambda
+     * rather than {@code UsageTracker} growing a second collaborator.
+     *
+     * <p>{@code maintenanceQuery} (docs/plans/active/ASSET-FLOWS-PLAN.md S1) is the same warehouse
+     * read port {@code DefaultReadinessService} (flight) already uses for the equivalent arm gate —
+     * queried directly by {@code UsageTracker#engage} rather than routed through flight's {@code
+     * ReadinessService}, since {@code UsageTracker} already depends on warehouse (the pure leaf) and
+     * {@code MaintenanceQuery} is filed in warehouse's {@code application} package for exactly this.
      */
     @Bean
     public UsageTracker usageTracker(AssetDirectoryService assetDirectoryService,
@@ -400,16 +451,23 @@ public class ApplicationServiceWiring {
                                       List<TelemetrySourcePort> telemetrySources,
                                       TelemetryLiveUpdatePort telemetryLiveUpdatePort,
                                       GeofenceMonitor geofenceMonitor,
+                                      BatteryMonitor batteryMonitor,
+                                      MaintenanceQuery maintenanceQuery,
                                       VisionPersistenceProperties persistenceProperties,
                                       ObjectProvider<UsagePhaseObserver> usagePhaseObserver) {
-        // geofenceMonitor::evaluate, not the monitor itself: UsageTracker (perception) takes a
-        // BiConsumer seam so it never depends on the flight context — docs/plans/active/DOMAIN-SEPARATION-W1.md §5 C2
-        UsageTrackerSettings defaultSettings = UsageTrackerSettings.defaults();
+        // geofenceMonitor::evaluate/batteryMonitor::evaluate, not the monitors themselves: UsageTracker
+        // (perception) takes a BiConsumer seam so it never depends on the flight context —
+        // docs/plans/active/DOMAIN-SEPARATION-W1.md §5 C2
+        UsageTrackerSettings defaultSettings = UsageTrackerSettings.defaults(maintenanceQuery);
+        BiConsumer<AssetId, Telemetry> telemetryObserver = (assetId, sample) -> {
+            geofenceMonitor.evaluate(assetId, sample);
+            batteryMonitor.evaluate(assetId, sample);
+        };
         return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, telemetrySources,
-                new UsageTrackerSettings(Optional.of(telemetryLiveUpdatePort), Optional.of(geofenceMonitor::evaluate),
+                new UsageTrackerSettings(Optional.of(telemetryLiveUpdatePort), Optional.of(telemetryObserver),
                         defaultSettings.sourceInitialBackoffNanos(), defaultSettings.sourceMaxBackoffNanos(),
                         persistenceProperties.telemetry().toSummarySettings(), UsagePhaseSettings.defaults(),
-                        usagePhaseObserver.getIfAvailable(() -> UsagePhaseObserver.NOOP)));
+                        usagePhaseObserver.getIfAvailable(() -> UsagePhaseObserver.NOOP), maintenanceQuery));
     }
 
     /**
@@ -716,8 +774,9 @@ public class ApplicationServiceWiring {
     @Bean
     public FlightCommandService flightCommandService(AssetService assetService,
                                                        FlightCommandPort flightCommandPort,
-                                                       AuditTrailPort auditTrailPort) {
-        return new DefaultFlightCommandService(assetService, flightCommandPort, auditTrailPort);
+                                                       AuditTrailPort auditTrailPort,
+                                                       ReadinessService readinessService) {
+        return new DefaultFlightCommandService(assetService, flightCommandPort, auditTrailPort, readinessService);
     }
 
     /**

@@ -5,6 +5,8 @@ import com.drones.vision.kernel.AssetId;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.warehouse.domain.model.Device;
+import com.drones.vision.warehouse.domain.model.MaintenanceKind;
+import com.drones.vision.warehouse.domain.model.MaintenanceRecord;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.flight.domain.model.FlightPhase;
 import com.drones.vision.kernel.GeoPosition;
@@ -14,6 +16,7 @@ import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.kernel.UsageId;
 import com.drones.vision.kernel.UsageOrigin;
 import com.drones.vision.warehouse.application.directory.AssetDirectoryService;
+import com.drones.vision.warehouse.application.maintenance.MaintenanceQuery;
 import com.drones.vision.warehouse.application.usage.UsageSessionService;
 import com.drones.vision.flight.application.telemetry.TelemetryService;
 import com.drones.vision.flight.domain.port.TelemetryLiveUpdatePort;
@@ -181,6 +184,7 @@ public final class UsageTracker {
     private final UsageSummaryBatchSettings summaryBatchSettings;
     private final UsagePhaseSettings phaseSettings;
     private final UsagePhaseObserver usagePhaseObserver;
+    private final MaintenanceQuery maintenanceQuery;
 
     /** One dedicated daemon thread scheduling every telemetry subscription's reopen retries; see {@code DefaultStreamService}'s own field of the same shape for why this is shared rather than per-subscription. */
     private final ScheduledExecutorService retryScheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
@@ -195,8 +199,8 @@ public final class UsageTracker {
      * The single canonical constructor (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md Finding
      * R1) — every collaborator beyond the mandatory services and telemetry sources is bundled into
      * {@code settings}; see {@link UsageTrackerSettings} for what each field controls and {@link
-     * UsageTrackerSettings#defaults()} for the behavior every pre-R1 shortest constructor used to
-     * default to. {@code assetDirectory}/{@code usageSessionService} (warehouse) and {@code
+     * UsageTrackerSettings#defaults(MaintenanceQuery)} for the behavior every pre-R1 shortest
+     * constructor used to default to. {@code assetDirectory}/{@code usageSessionService} (warehouse) and {@code
      * telemetryService} (flight) replace the four repository ports this class used to hold directly
      * (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md Finding R3/R5, wave R3) — see this class's
      * own javadoc.
@@ -217,6 +221,7 @@ public final class UsageTracker {
         this.summaryBatchSettings = settings.summaryBatchSettings();
         this.phaseSettings = settings.phaseSettings();
         this.usagePhaseObserver = settings.usagePhaseObserver();
+        this.maintenanceQuery = settings.maintenanceQuery();
     }
 
     /**
@@ -285,11 +290,13 @@ public final class UsageTracker {
      *         promoted, or already engaged)
      * @throws NullPointerException     if {@code assetId} is {@code null}
      * @throws NoSuchElementException   if no asset has that id
-     * @throws IllegalStateException    if the asset is not in service
+     * @throws IllegalStateException    if the asset is not in service, or is grounded for
+     *                                  maintenance (docs/plans/active/ASSET-FLOWS-PLAN.md S1)
      */
     public AssetUsage engage(AssetId assetId) {
         Objects.requireNonNull(assetId, "assetId must not be null");
         Asset asset = requireActiveAsset(assetId); // devices() needed below to open telemetry -- see class javadoc
+        requireNotMaintenanceGrounded(assetId);
         Tracking tracking = trackingByAsset.computeIfAbsent(assetId, id -> new Tracking());
         AssetUsage result;
         UsageId openedUsageId = null;
@@ -425,6 +432,30 @@ public final class UsageTracker {
             throw new IllegalStateException("Asset is not in service: " + asset.displayName());
         }
         return asset;
+    }
+
+    /**
+     * Refuses {@link #engage} for an asset carrying an open flight-blocking {@code
+     * MaintenanceRecord} ({@code GROUNDING}/{@code INSPECTION_DUE} — {@link MaintenanceKind#blocksFlight()})
+     * — docs/plans/active/ASSET-FLOWS-PLAN.md S1. Queries {@link MaintenanceQuery} directly rather
+     * than routing through {@code vision-flight}'s {@code ReadinessService}: this class already
+     * depends on warehouse (the pure leaf every context may read) and {@code MaintenanceQuery} is
+     * filed in warehouse's {@code application} package precisely so a cross-context caller like this
+     * one need not import {@code domain.port}. Unlike {@code DefaultFlightCommandService#arm} and
+     * {@code DefaultManualControlService#engage}, this refusal is <em>not</em> audited: {@code
+     * engage(AssetId)} carries no acting-user context to attribute an audit entry to, and {@link
+     * #requireActiveAsset}'s sibling "not in service" refusal on the very same call path has never
+     * been audited either — this stays consistent with that existing precedent rather than growing a
+     * new constructor parameter purely to attribute one more refusal.
+     */
+    private void requireNotMaintenanceGrounded(AssetId assetId) {
+        boolean grounded = maintenanceQuery.openBlockers(assetId).stream()
+                .filter(MaintenanceRecord::isOpen)
+                .anyMatch(record -> record.kind().blocksFlight());
+        if (grounded) {
+            throw new IllegalStateException("Asset " + assetId.value()
+                    + " is grounded for maintenance and may not be engaged");
+        }
     }
 
     /**

@@ -8,6 +8,7 @@ import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.flight.domain.model.CommandResult;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.flight.domain.model.FlightCapability;
+import com.drones.vision.flight.domain.model.ReadinessReport;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.flight.domain.port.FlightCommandPort;
@@ -79,6 +80,15 @@ import com.drones.vision.platform.VisibilityScope;
  * scoped-read convention rather than the command gate. An {@link VisibilityScope#unbounded()} scope
  * includes every asset, so neither gate fires for ADMIN / auth-off.
  *
+ * <h2>Maintenance-grounding gate (docs/plans/active/ASSET-FLOWS-PLAN.md, S1)</h2>
+ * {@link #arm} additionally refuses — {@link IllegalStateException} (409), audited {@code
+ * REFUSED:maintenance-grounded} — when {@link ReadinessService#evaluate} reports an open
+ * flight-blocking {@code MaintenanceRecord}. This mirrors {@link
+ * DefaultManualControlService#engage} exactly and runs after the scope gate but before any device
+ * is resolved, so a grounded asset's port is never touched. No other command method is gated:
+ * disarm, emergency-stop, RTH and mode are energy-reducing/recovery verbs that must stay available
+ * on a vehicle that may already be airborne.
+ *
  * <h2>Threading</h2>
  * Holds no mutable state — all shared state is reached through the injected collaborators.
  */
@@ -95,16 +105,19 @@ public final class DefaultFlightCommandService implements FlightCommandService {
     private static final String ATTR_RESULT = "result";
     private static final String REFUSED_PREFIX = "REFUSED:";
     private static final String DENIED_OUT_OF_SCOPE = "DENIED:out of scope";
+    private static final String RESULT_REFUSED_MAINTENANCE = "REFUSED:maintenance-grounded";
 
     private final AssetService assetService;
     private final FlightCommandPort flightCommandPort;
     private final AuditTrailPort auditTrail;
+    private final ReadinessService readinessService;
 
     public DefaultFlightCommandService(AssetService assetService, FlightCommandPort flightCommandPort,
-                                        AuditTrailPort auditTrail) {
+                                        AuditTrailPort auditTrail, ReadinessService readinessService) {
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
         this.flightCommandPort = Objects.requireNonNull(flightCommandPort, "flightCommandPort must not be null");
         this.auditTrail = Objects.requireNonNull(auditTrail, "auditTrail must not be null");
+        this.readinessService = Objects.requireNonNull(readinessService, "readinessService must not be null");
     }
 
     @Override
@@ -135,7 +148,9 @@ public final class DefaultFlightCommandService implements FlightCommandService {
     @Override
     public CommandResult arm(AssetId assetId, boolean force, UserId actor, VisibilityScope scope) {
         requireCommandArgs(assetId, actor, scope);
-        Device device = resolveForCommand(assetId, actor, scope, COMMAND_ARM);
+        AssetDetails details = resolveScopedAsset(assetId, actor, scope, COMMAND_ARM);
+        requireNotMaintenanceGrounded(assetId, actor, scope, COMMAND_ARM);
+        Device device = commandableDevice(details, assetId);
         return sendAndAudit(assetId, actor, COMMAND_ARM, device, d -> flightCommandPort.arm(d, force));
     }
 
@@ -191,6 +206,17 @@ public final class DefaultFlightCommandService implements FlightCommandService {
      * never drift between them.
      */
     private Device resolveForCommand(AssetId assetId, UserId actor, VisibilityScope scope, String command) {
+        return commandableDevice(resolveScopedAsset(assetId, actor, scope, command), assetId);
+    }
+
+    /**
+     * Resolves the asset and enforces the command scope gate (auditing a denial). Split out from
+     * {@link #resolveForCommand} so {@link #arm} can insert the maintenance-grounding gate between
+     * the scope check and device resolution, mirroring {@link DefaultManualControlService#engage}'s
+     * scope-then-grounding-then-device order — every other command method still goes through {@link
+     * #resolveForCommand} unchanged.
+     */
+    private AssetDetails resolveScopedAsset(AssetId assetId, UserId actor, VisibilityScope scope, String command) {
         AssetDetails details = assetService.details(assetId); // NoSuchElementException -> 404
         Asset asset = details.summary().asset();
         if (!scope.includes(asset.id(), asset.ownership())) {
@@ -202,9 +228,35 @@ public final class DefaultFlightCommandService implements FlightCommandService {
             throw new AccessDeniedException(
                     "Asset " + assetId.value() + " is outside your scope; you may not command it");
         }
+        return details;
+    }
+
+    private Device commandableDevice(AssetDetails details, AssetId assetId) {
         return firstCommandableDevice(details.devices())
                 .orElseThrow(() -> new IllegalStateException("Asset " + assetId.value()
                         + " has no active MAVLink telemetry device to command"));
+    }
+
+    /**
+     * Refuses a command when the asset carries an open flight-blocking {@code MaintenanceRecord}
+     * (custody grounding or an equivalent {@code GROUNDING}/{@code INSPECTION_DUE} record) — the
+     * same {@link ReadinessService#evaluate} + {@link DefaultReadinessService#MAINTENANCE_BLOCKER_PREFIX}
+     * idiom {@link DefaultManualControlService#engage} already uses. Only {@link #arm} calls this:
+     * energy-reducing/recovery verbs (disarm, emergency-stop, RTH, mode) must stay available on an
+     * already-moving vehicle (docs/plans/active/ASSET-FLOWS-PLAN.md &sect;2).
+     */
+    private void requireNotMaintenanceGrounded(AssetId assetId, UserId actor, VisibilityScope scope, String command) {
+        ReadinessReport report = readinessService.evaluate(assetId, scope);
+        List<String> maintenanceBlockers = report.blockers().stream()
+                .filter(blocker -> blocker.startsWith(DefaultReadinessService.MAINTENANCE_BLOCKER_PREFIX))
+                .toList();
+        if (maintenanceBlockers.isEmpty()) {
+            return;
+        }
+        audit(actor, assetId, command, RESULT_REFUSED_MAINTENANCE);
+        throw new IllegalStateException("Asset " + assetId.value()
+                + " is grounded for maintenance and may not be armed: "
+                + String.join(" ", maintenanceBlockers));
     }
 
     private Optional<Device> firstCommandableDevice(List<Device> devices) {

@@ -3,6 +3,7 @@ package com.drones.vision.perception.application.pipeline;
 import com.drones.vision.flight.domain.port.TelemetryLiveUpdatePort;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.Telemetry;
+import com.drones.vision.warehouse.application.maintenance.MaintenanceQuery;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -35,12 +36,17 @@ import java.util.function.BiConsumer;
  * @param phaseSettings             the clock and {@code FlightPhaseRule} phase-tracking runs against
  * @param usagePhaseObserver        notified on every open/phase-change; never {@code null} — pass
  *                                  {@link UsagePhaseObserver#NOOP} for "do nothing"
+ * @param maintenanceQuery          docs/plans/active/ASSET-FLOWS-PLAN.md S1 — consulted by {@link
+ *                                  UsageTracker#engage} to refuse an operator-initiated session open
+ *                                  on a maintenance-grounded asset; required (no safe no-op default
+ *                                  for a safety gate, mirroring {@code ReadinessService} in {@code
+ *                                  DefaultManualControlService})
  */
 public record UsageTrackerSettings(Optional<TelemetryLiveUpdatePort> liveUpdatePublisherPort,
                                     Optional<BiConsumer<AssetId, Telemetry>> telemetryObserver,
                                     long sourceInitialBackoffNanos, long sourceMaxBackoffNanos,
                                     UsageSummaryBatchSettings summaryBatchSettings, UsagePhaseSettings phaseSettings,
-                                    UsagePhaseObserver usagePhaseObserver) {
+                                    UsagePhaseObserver usagePhaseObserver, MaintenanceQuery maintenanceQuery) {
 
     public UsageTrackerSettings {
         Objects.requireNonNull(liveUpdatePublisherPort, "liveUpdatePublisherPort must not be null");
@@ -48,16 +54,18 @@ public record UsageTrackerSettings(Optional<TelemetryLiveUpdatePort> liveUpdateP
         Objects.requireNonNull(summaryBatchSettings, "summaryBatchSettings must not be null");
         Objects.requireNonNull(phaseSettings, "phaseSettings must not be null");
         Objects.requireNonNull(usagePhaseObserver, "usagePhaseObserver must not be null");
+        Objects.requireNonNull(maintenanceQuery, "maintenanceQuery must not be null");
     }
 
     /**
      * Reproduces the pre-R1 shortest constructor's behavior exactly: no live-update announcements,
      * no telemetry observer, production backoff bounds, immediate summary writes, default phase
-     * settings, no phase observer.
+     * settings, no phase observer. {@code maintenanceQuery} has no such "pre-R1" default — it is a
+     * new required collaborator (ASSET-FLOWS-PLAN S1), so every caller must supply one explicitly.
      */
-    public static UsageTrackerSettings defaults() {
+    public static UsageTrackerSettings defaults(MaintenanceQuery maintenanceQuery) {
         return new UsageTrackerSettings(Optional.empty(), Optional.empty(), SupervisedPublisher.INITIAL_BACKOFF_NANOS,
                 SupervisedPublisher.MAX_BACKOFF_NANOS, UsageSummaryBatchSettings.immediate(),
-                UsagePhaseSettings.defaults(), UsagePhaseObserver.NOOP);
+                UsagePhaseSettings.defaults(), UsagePhaseObserver.NOOP, maintenanceQuery);
     }
 }
