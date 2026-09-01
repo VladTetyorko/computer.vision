@@ -1,6 +1,7 @@
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
 import type { ControlFunction, ManualControlChannelBinding } from '../api/models';
 import { REST_VALUE, axesFrom, padsFrom, springsBack } from './control-surface-logic';
+import { actionKeyIdFor, isTypingTarget, type ActionKeyId } from './keyboard-action-logic';
 
 /**
  * `KeyboardRcInputService` — the keyboard's half of the RC input seam
@@ -37,6 +38,21 @@ import { REST_VALUE, axesFrom, padsFrom, springsBack } from './control-surface-l
  * on-screen surface — it cannot be unplugged, so `RcSource.live()` never demotes it on that account).
  * Listeners are only ever attached while {@link setEnabled}`(true)` — an unselected keyboard source
  * must not steal `W`/`A`/`S`/`D` from the rest of the page.
+ *
+ * <h2>Action keys ride the same deadmen, not the ramp</h2>
+ * `Space`/`Shift+Enter`/`1`-`4` (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D3) are edge-triggered,
+ * not ramped: this service only tracks *which of them are currently physically held*
+ * ({@link actionKeysDown}), republishing it every {@link TICK_MS} tick — with a fresh `Set` identity
+ * even when nothing changed — for as long as any is down, piggybacking on the same tick loop the axis
+ * ramp already runs. That heartbeat is what lets `ControlActionDispatcher`'s frame-driven 600 ms hold
+ * check keep re-evaluating "has enough time passed yet" while, say, `Shift+Enter` is held and no
+ * axis is moving — reusing that check rather than this service (or the dispatcher) starting a second
+ * `setTimeout`-style hold timer. Resolving *what* a held key currently means — mode names, arm vs.
+ * disarm, the danger/hold policy — is entirely the dispatcher's job
+ * (`core/rc/keyboard-action-logic.ts`); this service only ever reports which physical keys are down,
+ * the same "source, not client" split the axis half already keeps. The same `blur`/
+ * `visibilitychange(hidden)`/`setEnabled(false)` deadmen above clear these too, immediately — a lost
+ * `keyup` can never let a re-focus complete an abandoned arm hold.
  */
 @Injectable()
 export class KeyboardRcInputService {
@@ -57,6 +73,18 @@ export class KeyboardRcInputService {
   private readonly heldKeys = new Map<string, KeyTarget>();
   private tickHandle: ReturnType<typeof setInterval> | null = null;
   private lastTickAt = 0;
+
+  /** Physical key `code` → the action it drives, for whichever of Space/Shift+Enter/1-4 are
+   * currently held (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D3). */
+  private readonly heldActionKeys = new Map<string, ActionKeyId>();
+  private readonly _actionKeysDown = signal<ReadonlySet<ActionKeyId>>(new Set());
+
+  /** Which action keys are physically down right now — `ControlActionDispatcher`'s own edge/hold
+   * state machine reads this every RC frame, exactly as it reads switch positions off
+   * `RcSource.buttons()`. A fresh `Set` every tick while any is held (see the class doc's "Action
+   * keys ride the same deadmen" section), so the dispatcher's reactive effect keeps re-running even
+   * while no axis is moving. */
+  readonly actionKeysDown = this._actionKeysDown.asReadonly();
 
   constructor() {
     inject(DestroyRef).onDestroy(() => this.setEnabled(false));
@@ -112,6 +140,18 @@ export class KeyboardRcInputService {
     if (isTypingTarget(event.target)) {
       return;
     }
+
+    const actionId = actionKeyIdFor(event.code, event.shiftKey);
+    if (actionId) {
+      event.preventDefault();
+      if (!this.heldActionKeys.has(event.code)) {
+        this.heldActionKeys.set(event.code, actionId);
+        this.emitActionKeys();
+        this.ensureTicking();
+      }
+      return;
+    }
+
     const target = resolveKey(event.code, this._bindings());
     if (!target) {
       return;
@@ -124,6 +164,13 @@ export class KeyboardRcInputService {
   };
 
   private readonly onKeyUp = (event: KeyboardEvent): void => {
+    if (this.heldActionKeys.delete(event.code)) {
+      this.emitActionKeys();
+      if (this.heldKeys.size === 0 && this.heldActionKeys.size === 0) {
+        this.stopTicking();
+      }
+      return;
+    }
     this.releaseKey(event.code);
   };
 
@@ -131,6 +178,11 @@ export class KeyboardRcInputService {
     for (const code of [...this.heldKeys.keys()]) {
       this.releaseKey(code);
     }
+    if (this.heldActionKeys.size > 0) {
+      this.heldActionKeys.clear();
+      this.emitActionKeys();
+    }
+    this.stopTicking();
   };
 
   private releaseKey(code: string): void {
@@ -146,9 +198,16 @@ export class KeyboardRcInputService {
         this.setValue(binding.sourceIndex, REST_VALUE);
       }
     }
-    if (this.heldKeys.size === 0) {
+    if (this.heldKeys.size === 0 && this.heldActionKeys.size === 0) {
       this.stopTicking();
     }
+  }
+
+  /** Publishes {@link actionKeysDown} with a brand-new `Set` — deliberately not a value-equal
+   * short-circuit, since the tick loop relies on this always registering as "changed" so the
+   * dispatcher's effect re-runs on every tick, not only when membership actually differs. */
+  private emitActionKeys(): void {
+    this._actionKeysDown.set(new Set(this.heldActionKeys.values()));
   }
 
   private findBinding(fn: ControlFunction): ManualControlChannelBinding | undefined {
@@ -180,28 +239,37 @@ export class KeyboardRcInputService {
     const now = Date.now();
     const elapsedMs = now - this.lastTickAt;
     this.lastTickAt = now;
-    if (this.heldKeys.size === 0) {
+    if (this.heldKeys.size === 0 && this.heldActionKeys.size === 0) {
       this.stopTicking();
       return;
     }
 
-    // Net direction per function — two keys held for the same function (the one-pad W/↑ redundancy,
-    // or opposite keys like W+S) fold to one sign rather than ramping at double speed or fighting.
-    const netByFunction = new Map<ControlFunction, number>();
-    for (const target of this.heldKeys.values()) {
-      netByFunction.set(target.function, (netByFunction.get(target.function) ?? 0) + target.direction);
+    if (this.heldKeys.size > 0) {
+      // Net direction per function — two keys held for the same function (the one-pad W/↑ redundancy,
+      // or opposite keys like W+S) fold to one sign rather than ramping at double speed or fighting.
+      const netByFunction = new Map<ControlFunction, number>();
+      for (const target of this.heldKeys.values()) {
+        netByFunction.set(target.function, (netByFunction.get(target.function) ?? 0) + target.direction);
+      }
+
+      for (const [fn, net] of netByFunction) {
+        if (net === 0) {
+          continue;
+        }
+        const binding = this.findBinding(fn);
+        if (!binding) {
+          continue;
+        }
+        const current = this._values().get(binding.sourceIndex) ?? REST_VALUE;
+        this.setValue(binding.sourceIndex, rampedValue(binding, current, net > 0 ? 1 : -1, elapsedMs));
+      }
     }
 
-    for (const [fn, net] of netByFunction) {
-      if (net === 0) {
-        continue;
-      }
-      const binding = this.findBinding(fn);
-      if (!binding) {
-        continue;
-      }
-      const current = this._values().get(binding.sourceIndex) ?? REST_VALUE;
-      this.setValue(binding.sourceIndex, rampedValue(binding, current, net > 0 ? 1 : -1, elapsedMs));
+    if (this.heldActionKeys.size > 0) {
+      // Republished every tick, not only on change — see the class doc's "Action keys ride the same
+      // deadmen" section for why this heartbeat is what lets the dispatcher's 600 ms hold check keep
+      // advancing while, e.g., only Shift+Enter is held and no axis is moving.
+      this.emitActionKeys();
     }
   }
 }
@@ -213,8 +281,9 @@ export class KeyboardRcInputService {
 export const RAMP_MS = 250;
 
 /** How often the ramp advances while a key is held, in ms — smooth enough (~60Hz) that a held key
- * reads as continuous motion rather than visible steps. */
-const TICK_MS = 16;
+ * reads as continuous motion rather than visible steps. Also the republish interval for
+ * {@link KeyboardRcInputService#actionKeysDown} while any action key is held (exported for specs). */
+export const TICK_MS = 16;
 
 interface KeyTarget {
   readonly function: ControlFunction;
@@ -267,15 +336,4 @@ function resolveKey(code: string, bindings: readonly ManualControlChannelBinding
     return { function: 'ROLL', direction: code === 'ArrowRight' ? 1 : -1 };
   }
   return undefined;
-}
-
-/** Never steals a keystroke meant for a form field — `W`/`A`/`S`/`D`/arrows are ordinary typing and
- * navigation keys anywhere outside this drawer's own controls, so a global listener must stay out
- * of an `<input>`/`<select>`/`<textarea>`/`contenteditable` regardless of focus. */
-function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-  const tag = target.tagName;
-  return tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || target.isContentEditable;
 }

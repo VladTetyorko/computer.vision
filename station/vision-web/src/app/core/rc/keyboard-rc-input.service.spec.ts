@@ -1,6 +1,6 @@
 import { TestBed } from '@angular/core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { KeyboardRcInputService, RAMP_MS } from './keyboard-rc-input.service';
+import { KeyboardRcInputService, RAMP_MS, TICK_MS } from './keyboard-rc-input.service';
 import type { ManualControlChannelBinding } from '../api/models';
 
 const axis = (
@@ -263,6 +263,133 @@ describe('KeyboardRcInputService', () => {
 
     expect(service.axes()[THROTTLE.sourceIndex]).toBe(0);
     document.body.removeChild(input);
+  });
+
+  describe('action keys (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D3)', () => {
+    it('reports Space as EMERGENCY_STOP the instant it is pressed', () => {
+      const service = create();
+      service.setEnabled(true);
+
+      press('Space');
+
+      expect(service.actionKeysDown()).toEqual(new Set(['EMERGENCY_STOP']));
+    });
+
+    it('reports Shift+Enter as TOGGLE_ARM, and a bare Enter as nothing', () => {
+      const service = create();
+      service.setEnabled(true);
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Enter' }));
+      expect(service.actionKeysDown().size).toBe(0);
+
+      window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Enter', shiftKey: true }));
+      expect(service.actionKeysDown()).toEqual(new Set(['TOGGLE_ARM']));
+    });
+
+    it('reports digits 1-4 as their own mode keys', () => {
+      const service = create();
+      service.setEnabled(true);
+
+      press('Digit3');
+
+      expect(service.actionKeysDown()).toEqual(new Set(['MODE_3']));
+    });
+
+    it('does not register auto-repeat as a fresh press — the held set stays a one-element set', () => {
+      const service = create();
+      service.setEnabled(true);
+
+      press('Space');
+      press('Space'); // the browser's own auto-repeat, key never actually released
+
+      expect(service.actionKeysDown()).toEqual(new Set(['EMERGENCY_STOP']));
+    });
+
+    it('clears on release', () => {
+      const service = create();
+      service.setEnabled(true);
+
+      press('Space');
+      release('Space');
+
+      expect(service.actionKeysDown().size).toBe(0);
+    });
+
+    it('republishes with a fresh identity every tick while held, so a reactive reader keeps re-evaluating', () => {
+      const service = create();
+      service.setEnabled(true);
+
+      press('Space');
+      const first = service.actionKeysDown();
+      vi.advanceTimersByTime(TICK_MS);
+      const second = service.actionKeysDown();
+
+      expect(second).not.toBe(first);
+      expect(second).toEqual(first);
+    });
+
+    it('a window blur clears any held action key immediately, same as it clears axis keys', () => {
+      const service = create();
+      service.setEnabled(true);
+
+      press('Space');
+      expect(service.actionKeysDown().size).toBe(1);
+
+      window.dispatchEvent(new Event('blur'));
+
+      expect(service.actionKeysDown().size).toBe(0);
+    });
+
+    it('the tab hiding clears any held action key, same as a blur', () => {
+      const service = create();
+      service.setEnabled(true);
+
+      press('Digit1');
+      expect(service.actionKeysDown().size).toBe(1);
+
+      Object.defineProperty(document, 'hidden', { value: true, configurable: true });
+      document.dispatchEvent(new Event('visibilitychange'));
+
+      expect(service.actionKeysDown().size).toBe(0);
+      Object.defineProperty(document, 'hidden', { value: false, configurable: true });
+    });
+
+    it('disabling clears any held action key and stops listening entirely', () => {
+      const service = create();
+      service.setEnabled(true);
+
+      press('Space');
+      service.setEnabled(false);
+      expect(service.actionKeysDown().size).toBe(0);
+
+      press('Space'); // no longer listening
+      expect(service.actionKeysDown().size).toBe(0);
+    });
+
+    it('ignores an action key typed into a form field, exactly like an axis key', () => {
+      const service = create();
+      service.setEnabled(true);
+
+      const input = document.createElement('input');
+      document.body.appendChild(input);
+      input.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1', bubbles: true }));
+
+      expect(service.actionKeysDown().size).toBe(0);
+      document.body.removeChild(input);
+    });
+
+    it('an axis key and an action key can be held at the same time, independently', () => {
+      const service = create();
+      service.bind(ROVER_MAP);
+      service.setEnabled(true);
+
+      press('KeyW');
+      press('Space');
+      vi.advanceTimersByTime(80);
+
+      expect(service.axes()[THROTTLE.sourceIndex]).toBeGreaterThan(0);
+      expect(service.actionKeysDown()).toEqual(new Set(['EMERGENCY_STOP']));
+    });
   });
 
   it('re-binding to a fresh map clears any ramped value', () => {
