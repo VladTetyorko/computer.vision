@@ -91,4 +91,54 @@ class MavlinkSettingsTest {
         assertTrue(settings.onboarding().requestMessagesOnConnect());
         assertEquals(List.of(vfrHud), settings.onboarding().onConnectMessageRequests());
     }
+
+    // ---- MAVLINK-COMMANDS-PLAN P1 / D2a: ackTimeout re-scoped to per-attempt, commandRetries added ----
+
+    @Test
+    void defaultsCarryTheD2aRetryPolicy() {
+        MavlinkSettings settings = MavlinkSettings.defaults();
+
+        assertEquals(Duration.ofMillis(700), settings.ackTimeout(),
+                "D2a: ackTimeout defaults to the per-attempt wait, 700ms");
+        assertEquals(2, settings.commandRetries(), "D2a: commandRetries defaults to 2 (3 attempts total)");
+    }
+
+    @Test
+    void commandRetriesRejectsANegativeValue() {
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class, () -> new MavlinkSettings(
+                "0.0.0.0", Duration.ofSeconds(30), 32, Duration.ofSeconds(5), Duration.ofMillis(700), -1,
+                MavlinkSettings.Scan.defaults(), MavlinkSettings.Transmit.defaults(), MavlinkSettings.Rc.defaults(),
+                MavlinkSettings.Inventory.defaults(), MavlinkSettings.Onboarding.defaults(),
+                MavlinkSettings.LinkStatus.defaults()));
+        assertTrue(ex.getMessage().contains("commandRetries"), ex.getMessage());
+    }
+
+    @Test
+    void bothBackCompatConstructorsDefaultCommandRetriesToTheD2aDefault() {
+        MavlinkSettings viaEightArg = new MavlinkSettings("0.0.0.0", Duration.ofSeconds(30), 32,
+                Duration.ofSeconds(5), Duration.ofMillis(700), MavlinkSettings.Scan.defaults(),
+                MavlinkSettings.Transmit.defaults(), MavlinkSettings.Rc.defaults());
+        MavlinkSettings viaNineArg = new MavlinkSettings("0.0.0.0", Duration.ofSeconds(30), 32,
+                Duration.ofSeconds(5), Duration.ofMillis(700), MavlinkSettings.Scan.defaults(),
+                MavlinkSettings.Transmit.defaults(), MavlinkSettings.Rc.defaults(), MavlinkSettings.Inventory.defaults());
+
+        assertEquals(2, viaEightArg.commandRetries(),
+                "the pre-P1 8-arg overload (still used by vision-app's TelemetryWiring) must pick up "
+                        + "the new retry default automatically");
+        assertEquals(2, viaNineArg.commandRetries());
+    }
+
+    @Test
+    void withAckTimeoutAndWithCommandRetriesReplaceOnlyThatOneField() {
+        MavlinkSettings settings = MavlinkSettings.defaults();
+
+        MavlinkSettings shorterTimeout = settings.withAckTimeout(Duration.ofMillis(50));
+        assertEquals(Duration.ofMillis(50), shorterTimeout.ackTimeout());
+        assertEquals(settings.commandRetries(), shorterTimeout.commandRetries());
+        assertEquals(settings.bindHost(), shorterTimeout.bindHost());
+
+        MavlinkSettings noRetries = settings.withCommandRetries(0);
+        assertEquals(0, noRetries.commandRetries());
+        assertEquals(settings.ackTimeout(), noRetries.ackTimeout());
+    }
 }

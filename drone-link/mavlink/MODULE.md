@@ -116,13 +116,22 @@ merely "chose not to".
   on `vision-flight`'s requirement table — the message set is pure configuration.
 - `public final class MavlinkFlightCommander implements FlightCommandPort` — `setMode`/
   `returnToHome`/`arm`/`disarm`/`emergencyStop`/`auxFunction`/`capabilities`. Every command is one
-  `COMMAND_LONG` from a fresh, per-call `CommandService` built on the resolved device's gateway,
-  **zero retries** (single-shot: `NO_ACK` on silence, never a resend). `static final int
-  TARGET_COMPONENT_AUTOPILOT = 1`. Only ArduPilot/INAV (`autopilot` ARDUPILOTMEGA) is commandable;
-  Betaflight (`autopilot` GENERIC) is rejected before `FlightModes` is even consulted, even though
-  its own table has an RTL-named mode. **`emergencyStop` is vehicle-kind-gated (FLEET-RADIO R4b)** —
-  see its own Gotchas section below; it is no longer a single, uniform command for every device.
-  Constructors `(MavlinkTelemetrySource)`, `(MavlinkTelemetrySource, Duration ackTimeout)`.
+  `COMMAND_LONG` from a fresh, per-call `CommandService` built on the resolved device's gateway.
+  **(MAVLINK-COMMANDS-PLAN P1)** No longer single-shot: `send`'s private `retryable` parameter gates
+  a bounded retry (`MavlinkSettings.commandRetries()`, default 2, i.e. 3 attempts) at `ackTimeout()`
+  per attempt (default 700ms) — only for *absolute-state* commands, which today is all four callers
+  (`setMode`/`armOrDisarm`/`emergencyStopRover`/`auxFunction`, all pass `true`); a future
+  relative/incremental command must pass `false` at its own call site. A terminal `COMMAND_ACK`
+  (e.g. `DENIED`) never retries — only silence does (`mavlink-core`'s `RequestResponse`, unmodified).
+  See the MAVLINK-COMMANDS-PLAN P1 Gotchas below for the force-magic split and the retry eligibility
+  rule in full. `static final int TARGET_COMPONENT_AUTOPILOT = 1`. Only ArduPilot/INAV (`autopilot`
+  ARDUPILOTMEGA) is commandable; Betaflight (`autopilot` GENERIC) is rejected before `FlightModes` is
+  even consulted, even though its own table has an RTL-named mode. **`emergencyStop` is
+  vehicle-kind-gated (FLEET-RADIO R4b)** — see its own Gotchas section below; it is no longer a
+  single, uniform command for every device. Constructors: `(MavlinkTelemetrySource)` and
+  `(MavlinkTelemetrySource, Duration ackTimeout)` are back-compat overloads (the latter is
+  `vision-app`'s `TelemetryWiring` call site, out of this module's reach — see Gotchas for the
+  production gap this leaves); `(MavlinkTelemetrySource, MavlinkSettings)` is canonical.
 - `public final class MavlinkManualControlSender implements ManualControlPort` — `RC_CHANNELS_OVERRIDE`
   (#70) relay. `engage(Device): ManualControlLink` / `send(link, RcChannels)` / `release(link)`;
   its `AdapterLink` carries `vehicleKind()` (resolved from the heartbeat heard at `engage` time,
@@ -208,7 +217,10 @@ merely "chose not to".
   `static String name(int autopilot, int mavType, long customMode)` (`"Mode <n>"` fallback for an
   unknown table/entry), `static Integer customModeFor(int autopilot, int mavType, String modeName)`,
   `static List<String> selectableModes(int autopilot, int mavType)` (**ArduPilot-only** — Betaflight
-  returns empty even though it has a table, since its RC link never processes `DO_SET_MODE`),
+  returns empty even though it has a table, since its RC link never processes `DO_SET_MODE`; **
+  MAVLINK-COMMANDS-PLAN P1** also excludes `ARDUPILOT_ROVER`'s `"Initialising"` — custom_mode 16, a
+  boot transient nothing should ever be commanded into — from this list only; `name`/`customModeFor`
+  still resolve it both ways, so it stays fully decodable inbound),
   `static VehicleKind vehicleKind(int mavType)` (**autopilot-independent** — a quadrotor is a
   quadrotor regardless of firmware; `UNKNOWN` for anything unrecognized), `static
   Optional<UnidentifiedReason> unidentifiedReason(int mavType)` (**FLEET-RADIO R2**) — the *why*
@@ -233,13 +245,23 @@ merely "chose not to".
   absent/malformed — **no fallback track**, unlike this module's other lenient options),
   `Position positionAt(double metersAlongRoute)`.
 - `public record MavlinkSettings(String bindHost, Duration silenceWindow, int maxUnclaimedVehicles,
-  Duration closeJoinTimeout, Duration ackTimeout, Scan scan, Transmit transmit, Rc rc, Inventory
-  inventory, Onboarding onboarding, LinkStatus linkStatus)` — this module's tunables, `vision-app` maps
-  `vision.mavlink.*`/`vision.rc.*` onto one. `static defaults()`, `withSilenceWindow`/`withInventory`/
-  `withOnboarding`/`withLinkStatus`. Back-compat 8-arg and 9-arg constructors default every field
-  added after them, **including `linkStatus`** (`LinkStatus.defaults()` — FLEET-RADIO R4 kept both
-  overloads' arity unchanged per CLAUDE.md rule 10 / java-clean-code §3: a new collaborator updates
-  call sites and back-compat delegation targets, never a new overload). Nested:
+  Duration closeJoinTimeout, Duration ackTimeout, int commandRetries, Scan scan, Transmit transmit,
+  Rc rc, Inventory inventory, Onboarding onboarding, LinkStatus linkStatus)` — this module's
+  tunables, `vision-app` maps `vision.mavlink.*`/`vision.rc.*` onto one. **(MAVLINK-COMMANDS-PLAN P1)**
+  `ackTimeout` is now documented as the **per-attempt** wait (re-scoped from a single whole-command
+  wait — its type and default-field position are unchanged, only its meaning); `commandRetries` is
+  new, inserted right after it, `>= 0` enforced in the compact constructor. `static defaults()` →
+  `ackTimeout = 700ms`, `commandRetries = 2` (`DEFAULT_ACK_TIMEOUT_MILLIS`/`DEFAULT_COMMAND_RETRIES`,
+  D2a — worst case 3 attempts × 700ms ≈ 2.1s, inside the old single-wait 2s budget).
+  `withSilenceWindow`/`withAckTimeout`/`withCommandRetries`/`withInventory`/`withOnboarding`/
+  `withLinkStatus`. Back-compat 8-arg and 9-arg constructors default every field added after them,
+  **including `commandRetries`** now (to `DEFAULT_COMMAND_RETRIES`) and `linkStatus` (`LinkStatus.
+  defaults()` — FLEET-RADIO R4 kept both overloads' arity unchanged per CLAUDE.md rule 10 /
+  java-clean-code §3: a new collaborator updates call sites and back-compat delegation targets, never
+  a new overload). **`vision-app`'s `TelemetryWiring#toMavlinkSettings` calls the 8-arg overload**, so
+  every deployment picks up `commandRetries = 2` automatically the moment this module is rebuilt —
+  see the MAVLINK-COMMANDS-PLAN P1 Gotchas below for the one place this back-compat design does *not*
+  close the loop (the `ackTimeout` actually wired into `MavlinkFlightCommander` in production). Nested:
   - `record LinkStatus(double dropRateWarnPercent, double dropRateAlarmPercent, Duration
     failureGrace)` (**FLEET-RADIO R4/D7**, new) — `MavlinkLinkStatusProvider`'s per-vehicle drop-rate
     severity thresholds (`dropRateAlarmPercent >= dropRateWarnPercent` enforced in the compact
@@ -664,6 +686,60 @@ one `FlightState`-contributing row above has fired at least once.
   test proves a genuine link failure closes a held gateway regardless of the hold; the scanner test
   asserts both `hasActiveHub` and an actual successful `scan()` discovery through a held-only port.
 
+### MAVLINK-COMMANDS-PLAN P1 Gotchas
+
+- **The force-arm magic was `21196` (the force-*disarm* magic) until this wave — a live defect, not
+  a matter of style.** `MAV_CMD_COMPONENT_ARM_DISARM`'s param2 "force" magic is `2989` on the arm
+  path and `21196` on the disarm path (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2b, verified
+  against ArduPilot's own arming docs and issues #32996/#26521); `armOrDisarm` sent `21196` on both
+  before this wave. It "worked" for a forced arm only because ArduPilot firmware silently *bypasses
+  every pre-arm check* on receiving the wrong magic instead of correctly rejecting the malformed
+  request — every forced arm ever sent by this class before this wave has been an accidental
+  safety-check bypass, not the deliberate "I know what I'm doing, force it" the `force=true` flag is
+  supposed to mean. Now split into `ARM_FORCE_MAGIC = 2989f` / `DISARM_FORCE_MAGIC = 21196f`,
+  selected by which value `armParam` is; the forced-disarm value is unchanged (still correctly
+  `21196` — `emergencyStop`'s unconditional forced disarm is byte-identical to before).
+- **Retry eligibility is frozen at the call site, not derived from the command type.** `send`'s
+  private `boolean retryable` parameter is the one place this decision lives (docs/plans/active/
+  MAVLINK-COMMANDS-PLAN.md D2a) — `true` only for *absolute-state* commands, where resending after
+  silence is safe because the state requested does not change between attempts (`mavlink-core`'s
+  `CommandService` itself increments `confirmation` per attempt, so the vehicle can tell a resend
+  from a fresh request, per MAVLink's own confirmation-field contract). All four current callers
+  (`setMode`, `armOrDisarm`, `emergencyStopRover`, `auxFunction`) pass `true`, each with an inline
+  comment naming why. Any future *relative/incremental* command (e.g. a delta `DO_REPOSITION`) **must
+  pass `false`** — resending it would double-apply the delta, which the whole point of silence-only
+  retry must never risk. A terminal `COMMAND_ACK` (`DENIED`, `UNSUPPORTED`, …) never triggers a
+  retry regardless of `retryable` — `mavlink-core`'s `RequestResponse.retryOrFail` only resends on
+  `TimeoutException`, confirmed by reading it directly and covered by
+  `aDeniedAckIsTerminalAndNeverTriggersARetry`.
+- **`vision.mavlink.command-retries` default of 2 is gated on `infra/rover-sim`'s F0 idempotency
+  case** (a repeated `COMMAND_LONG` with a rising `confirmation` must be a firmware no-op, never a
+  double-effect) — run by a different wave/agent in parallel with this one. Shipped as 2 regardless,
+  per this wave's own instruction; if F0 finds the firmware non-idempotent, the fix is one line
+  (`DEFAULT_COMMAND_RETRIES` in `MavlinkSettings`, or `vision.mavlink.command-retries: 0` in
+  `application.yaml`), not a design change — the retry machinery itself doesn't care what the budget
+  is, `armReturnsNoAckAfterExhaustingEveryConfiguredAttempt` reads the live default rather than
+  hardcoding "3" for exactly this reason.
+- **Known production gap: `vision-app`'s `TelemetryWiring`/`VisionMavlinkProperties` were out of this
+  wave's file scope, so the *deployed* `ackTimeout` does not actually become 700ms.**
+  `TelemetryWiring#mavlinkFlightCommander` still calls `MavlinkFlightCommander`'s 2-arg
+  `(MavlinkTelemetrySource, Duration)` back-compat constructor with `properties.ackTimeout()`
+  (`VisionMavlinkProperties`'s `@DefaultValue("2s")`, unchanged) — so production gets the *new*
+  `commandRetries = 2` (via `MavlinkSettings`'s 8-arg back-compat constructor default, which
+  `toMavlinkSettings` does call) layered onto the *old* 2s per-attempt timeout, not the intended
+  700ms. Worst case for a fully-silent vehicle is therefore **~6s (3 × 2s), not the ~2.1s this wave's
+  own D2a decision claims** — a real, currently-unaddressed latency regression risk, not merely an
+  aesthetic gap. Closing it needs a future wave to add a `commandRetries` field to
+  `VisionMavlinkProperties`, thread it through `TelemetryWiring`, and switch that wiring onto
+  `MavlinkFlightCommander`'s canonical `(MavlinkTelemetrySource, MavlinkSettings)` constructor instead
+  of the 2-arg one — none of which this wave's brief (`drone-link/mavlink/**` plus the
+  `application.yaml` `mavlink:` block only) permits touching. The `application.yaml` block documents
+  this gap inline next to `ack-timeout`/`command-retries`.
+- **`MavlinkFlightCommanderTest`'s retry tests read `MavlinkSettings.defaults()` for the expected
+  attempt count rather than hardcoding it**, so they stay correct if a future wave (e.g. the
+  F0-triggered flip above) changes `DEFAULT_COMMAND_RETRIES`; the ack-on-retry test additionally
+  `assumeTrue`s `commandRetries() >= 1` so it skips cleanly (not red) if that default ever drops to 0.
+
 ## Status
 
 Real and load-bearing: RX ingest + fleet-gateway claim/re-election, guarded command TX (mode/arm/
@@ -752,3 +828,26 @@ heal-after-close reasoning. `VehicleClaimPolicy` gained one new query, `isEmpty(
 (derived from `MavlinkSettings.closeJoinTimeout()`) and mavlink-core's own 1 Hz `HeartbeatService`
 default. New `MavlinkLobbyHoldTest` (9 tests, real UDP loopback, no mocks).
 `./mvnw -B -pl drone-link/mavlink -am test` — **249 tests**, all green (2026-08-31).
+
+**`docs/plans/active/MAVLINK-COMMANDS-PLAN.md` P1 done.** Three independent fixes: (1) the force-arm
+magic defect — `2989`/`21196` split, previously both paths sent `21196` and an ArduPilot firmware bug
+silently converted every forced arm into an unintended safety-check bypass (see the P1 Gotchas above
+for the full defect writeup); (2) bounded retry for absolute-state commands — `MavlinkSettings`
+gained `commandRetries` (default 2) alongside `ackTimeout` re-scoped to per-attempt (default 700ms),
+`MavlinkFlightCommander#send` gated by a frozen-at-call-site `retryable` parameter, all four current
+callers eligible; (3) `FlightModes.selectableModes` trims ArduRover's `"Initialising"` (custom_mode
+16, a boot transient) from the operator-facing list while `name`/`customModeFor` keep it fully
+decodable inbound. New tests: `armSucceedsWhenTheAckOnlyArrivesOnTheSecondAttempt`,
+`armReturnsNoAckAfterExhaustingEveryConfiguredAttempt`, `aDeniedAckIsTerminalAndNeverTriggersARetry`
+(`MavlinkFlightCommanderTest`); `defaultsCarryTheD2aRetryPolicy`, `commandRetriesRejectsANegativeValue`,
+`bothBackCompatConstructorsDefaultCommandRetriesToTheD2aDefault`,
+`withAckTimeoutAndWithCommandRetriesReplaceOnlyThatOneField` (`MavlinkSettingsTest`); existing
+`armSendsComponentArmDisarmWithForceMagicAndReturnsAccepted` updated to assert `2989.0f`;
+`selectableModesForARoverIncludesDockAndCircleButTrimsInitialising` (renamed/extended) asserts
+`Initialising` absent from the selectable list while a sibling test still proves `name()` resolves it.
+**Known gap, not closed by this wave** (out of its file scope): `vision-app`'s `TelemetryWiring` still
+wires `MavlinkFlightCommander` off `VisionMavlinkProperties.ackTimeout()` (2s default) via the 2-arg
+back-compat constructor, so production's actual per-attempt wait stays 2s, not 700ms, until a future
+wave threads a `commandRetries` field through `VisionMavlinkProperties`/`TelemetryWiring` — see the P1
+Gotchas above for the worst-case latency this leaves (~6s, not the ~2.1s D2a intends).
+`./mvnw -B -pl drone-link/mavlink -am test` — **256 tests**, all green (2026-09-01).

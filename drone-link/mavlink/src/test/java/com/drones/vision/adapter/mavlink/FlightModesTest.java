@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -92,10 +93,16 @@ class FlightModesTest {
     }
 
     @Test
-    void selectableModesForARoverIncludesDockCircleAndInitialising() {
+    void selectableModesForARoverIncludesDockAndCircleButTrimsInitialising() {
+        // docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2c: Initialising (custom_mode 16) is a boot
+        // transient nothing should ever be commanded into, so it is the one entry excluded from the
+        // selectable list even though the completed table still knows it (see #resolvesTheArduRoverModes...
+        // below, which proves it stays decodable inbound).
         List<String> rover = FlightModes.selectableModes(AUTOPILOT_ARDUPILOTMEGA, MAV_TYPE_GROUND_ROVER);
-        assertTrue(rover.contains("Dock") && rover.contains("Circle") && rover.contains("Initialising"),
+        assertTrue(rover.contains("Dock") && rover.contains("Circle"),
                 "expected the completed rover mode table, got: " + rover);
+        assertFalse(rover.contains("Initialising"),
+                "Initialising is a boot transient and must not be offered as selectable: " + rover);
     }
 
     @Test

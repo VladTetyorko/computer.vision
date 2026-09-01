@@ -27,7 +27,9 @@ import java.util.concurrent.ExecutionException;
  * {@link #capabilities(Device)} snapshot. docs/plans/active/MAVLINK-CORE-PLAN.md W4 rewired the actual
  * send/await machinery onto {@code mavlink-core}'s {@link CommandService} — every resolve/reject
  * rule and every wire-level byte below is preserved exactly; only <i>how</i> a command physically
- * gets sent and awaited changed.
+ * gets sent and awaited changed. docs/plans/active/MAVLINK-COMMANDS-PLAN.md P1 then (a) split the
+ * arm/disarm "force" magic, which had been an accidental defect (see {@link #ARM_FORCE_MAGIC}), and
+ * (b) turned single-shot sends into a bounded retry for absolute-state commands (see {@link #send}).
  *
  * <h2>Resolving a vehicle to command</h2>
  * A device names a {@link MavlinkTelemetrySource} bind address ({@code udp://host:port}, plus an
@@ -61,13 +63,21 @@ import java.util.concurrent.ExecutionException;
  * ({@code mavlink-core}'s {@code MavlinkNode.groundStation()}, sysid 255 / compid 190 — the same
  * convention this class always used) to the vehicle's autopilot component ({@value
  * #TARGET_COMPONENT_AUTOPILOT}). A fresh, stateless {@link CommandService} is built per call from
- * the resolved device's gateway ({@link MavlinkGateway#sink()}/{@link MavlinkGateway#correlator()})
- * with <b>zero retries</b> — deliberately, to preserve this class's pre-existing single-shot wire
- * behaviour exactly (one {@code COMMAND_LONG}, {@code confirmation=0}, one wait up to the
- * configured ack timeout, {@link CommandResult#NO_ACK} on silence). {@code MAV_RESULT_ACCEPTED} →
- * {@link CommandResult#ACCEPTED}; any other terminal result → {@link IllegalStateException} naming
- * it; no ack within the timeout → {@link CommandResult#NO_ACK} (UDP is lossy in both directions;
- * the command may still have landed).
+ * the resolved device's gateway ({@link MavlinkGateway#sink()}/{@link MavlinkGateway#correlator()}).
+ * docs/plans/active/MAVLINK-COMMANDS-PLAN.md P1 re-scoped this from a single-shot send into a
+ * bounded retry: every command this class sends today is <i>absolute-state</i> (arm/disarm's
+ * param1 is a state, not a toggle; {@code DO_SET_MODE}/{@code DO_AUX_FUNCTION}'s target level is
+ * absolute too), so a silently-dropped {@code COMMAND_LONG} is safe to resend verbatim — {@link
+ * CommandService} itself increments {@code confirmation} per attempt, so the vehicle can tell a
+ * resend from a fresh request. {@link #send}'s {@code retryable} parameter freezes this eligibility
+ * rule at the call site: {@code commandRetries} attempts beyond the first, each waiting up to
+ * {@code ackTimeout} ({@code vision.mavlink.command-retries} / {@code vision.mavlink.ack-timeout}),
+ * only for commands that opt in; a future relative/incremental command (e.g. a delta {@code
+ * DO_REPOSITION}) must pass {@code retryable=false}. {@code MAV_RESULT_ACCEPTED} → {@link
+ * CommandResult#ACCEPTED}; any other terminal result → {@link IllegalStateException} naming it
+ * (never retried — {@code mavlink-core}'s {@code RequestResponse} only retries on outright silence,
+ * never on a terminal refusal like {@code DENIED}); silence through every attempt → {@link
+ * CommandResult#NO_ACK} (UDP is lossy in both directions; the command may still have landed).
  *
  * <p>Plain class with no framework dependency — instantiated directly by {@code vision-app}'s
  * wiring configuration, given the same {@link MavlinkTelemetrySource} instance used for real
@@ -83,25 +93,31 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
     /** ARM_DISARM param1: 1 = arm, 0 = disarm. */
     private static final float ARM = 1.0f;
     private static final float DISARM = 0.0f;
-    /** ARM_DISARM param2 "force" magic value — bypass the autopilot's own pre-arm/disarm checks. */
-    private static final float ARM_DISARM_FORCE = 21196.0f;
+
+    /**
+     * ARM_DISARM param2 force-<b>arm</b> magic (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2b,
+     * mavlink-commands/R1-command-catalog.md) — distinct from {@link #DISARM_FORCE_MAGIC}. Before
+     * this wave both the arm and disarm paths sent {@code 21196} (the force-<b>disarm</b> magic) on
+     * a forced request; on the arm path that only "worked" because of an acknowledged ArduPilot
+     * firmware bug (issues #32996 / #26521) that silently force-arms on the wrong magic instead of
+     * correctly rejecting the malformed request — every forced arm before this wave has been
+     * bypassing pre-arm safety checks by firmware accident, not by the deliberate design {@code
+     * force=true} is supposed to request.
+     */
+    private static final float ARM_FORCE_MAGIC = 2989.0f;
+
+    /**
+     * ARM_DISARM param2 force-<b>disarm</b> magic (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2b)
+     * — unchanged from before this wave; this was always the correct value here, and remains the
+     * one {@link #emergencyStop} sends for its unconditional forced disarm.
+     */
+    private static final float DISARM_FORCE_MAGIC = 21196.0f;
+
     private static final float ARM_DISARM_NO_FORCE = 0.0f;
 
     /** {@code MAV_CMD_DO_AUX_FUNCTION}'s switch-level parameter range — 0 low, 1 middle, 2 high. */
     private static final int AUX_LEVEL_LOW = 0;
     private static final int AUX_LEVEL_HIGH = 2;
-
-    /**
-     * Zero -- {@link CommandService}'s own retry mechanism (silent resend with {@code confirmation}
-     * incremented) is deliberately not used here: this class's pre-existing, SITL-proven wire
-     * behaviour sends exactly one {@code COMMAND_LONG} and reports {@link CommandResult#NO_ACK} on
-     * silence, and W4's job is to preserve that byte-for-byte, not to adopt a new retry policy as a
-     * side effect of the library swap.
-     */
-    private static final int NO_RETRIES = 0;
-
-    /** Default duration to wait for a {@code COMMAND_ACK} before reporting {@link CommandResult#NO_ACK}. */
-    static final long ACK_TIMEOUT_MILLIS = 2_000L;
 
     /** {@code MAV_COMP_ID_AUTOPILOT1} — the conventional command target component, and the component id this module's own claim policy assumes every vehicle's telemetry/acks come from (see {@link VehicleClaimPolicy}). */
     static final int TARGET_COMPONENT_AUTOPILOT = 1;
@@ -122,19 +138,51 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
     private final MavlinkTelemetrySource telemetrySource;
     private final Duration ackTimeout;
 
+    /**
+     * Retry budget for the absolute-state commands that opt in via {@link #send}'s {@code
+     * retryable} parameter (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2a) — {@code
+     * vision.mavlink.command-retries}, plumbed through {@link MavlinkSettings#commandRetries()}.
+     */
+    private final int commandRetries;
+
+    /**
+     * Back-compat overload predating {@link MavlinkSettings} being threaded through this class
+     * (docs/plans/active/MAVLINK-COMMANDS-PLAN.md P1) — {@link #ackTimeout} and {@link
+     * #commandRetries} both take {@link MavlinkSettings#defaults()}'s values.
+     */
     public MavlinkFlightCommander(MavlinkTelemetrySource telemetrySource) {
-        this(telemetrySource, Duration.ofMillis(ACK_TIMEOUT_MILLIS));
+        this(telemetrySource, MavlinkSettings.defaults());
     }
 
     /**
-     * @param ackTimeout how long to wait for a {@code COMMAND_ACK} before reporting {@link
-     *                   CommandResult#NO_ACK} — {@code vision.mavlink.ack-timeout}
-     *                   (docs/plans/active/LAYERING-REFACTOR-PLAN.md wave F2), replacing this class's own
-     *                   {@link #ACK_TIMEOUT_MILLIS} constant as the actual value used
+     * Back-compat overload for {@code vision-app}'s existing {@code TelemetryWiring} call site
+     * (out of this wave's file scope — docs/plans/active/MAVLINK-COMMANDS-PLAN.md P1's brief is
+     * {@code drone-link/mavlink/**} plus the {@code application.yaml} {@code mavlink:} block only).
+     * {@code ackTimeout} is now the <b>per-attempt</b> wait, re-scoped by this same wave from a
+     * single whole-command wait (see {@link MavlinkSettings#ackTimeout()}); {@link #commandRetries}
+     * defaults to {@link MavlinkSettings#defaults()}'s value since this overload has no seam of its
+     * own to receive a caller-supplied one. <b>Known gap</b> (see this module's MODULE.md): until a
+     * future wave adds {@code commandRetries} to {@code VisionMavlinkProperties} and threads it
+     * through {@code TelemetryWiring}, production keeps sending {@code properties.ackTimeout()}
+     * (today still defaulted at 2s, not 700ms) as the per-attempt wait here — i.e. the new retry
+     * budget applies, but at the old, larger per-attempt timeout, so a fully-silent vehicle takes up
+     * to {@code (commandRetries + 1) * 2s} rather than the ~2.1s this wave intended.
      */
     public MavlinkFlightCommander(MavlinkTelemetrySource telemetrySource, Duration ackTimeout) {
+        this(telemetrySource, MavlinkSettings.defaults().withAckTimeout(ackTimeout));
+    }
+
+    /**
+     * Canonical constructor (docs/plans/active/MAVLINK-COMMANDS-PLAN.md P1). {@code
+     * settings.ackTimeout()} is the per-attempt wait and {@code settings.commandRetries()} the
+     * retry budget for commands that opt in (see {@link #send}'s {@code retryable} parameter) —
+     * together bounding worst-case latency to {@code (commandRetries + 1) * ackTimeout}.
+     */
+    public MavlinkFlightCommander(MavlinkTelemetrySource telemetrySource, MavlinkSettings settings) {
         this.telemetrySource = Objects.requireNonNull(telemetrySource, "telemetrySource must not be null");
-        this.ackTimeout = Objects.requireNonNull(ackTimeout, "ackTimeout must not be null");
+        Objects.requireNonNull(settings, "settings must not be null");
+        this.ackTimeout = settings.ackTimeout();
+        this.commandRetries = settings.commandRetries();
     }
 
     @Override
@@ -147,9 +195,11 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
         Objects.requireNonNull(modeName, "modeName must not be null");
         ResolvedTarget resolved = resolveReachableTarget(device);
         int customMode = resolveCustomMode(resolved.target(), modeName);
+        // DO_SET_MODE's target mode is absolute, not incremental -- retry-eligible per
+        // docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2a.
         return send(resolved, MavCmd.MAV_CMD_DO_SET_MODE,
                 MODE_FLAG_CUSTOM_MODE_ENABLED, (float) customMode, 0f, 0f, 0f, 0f, 0f,
-                "set-mode " + modeName);
+                "set-mode " + modeName, true);
     }
 
     @Override
@@ -172,9 +222,12 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
     private CommandResult armOrDisarm(Device device, float armParam, boolean force, String verb) {
         ResolvedTarget resolved = resolveReachableTarget(device);
         requireCommandableFirmware(resolved.target());
+        float forceMagic = armParam == ARM ? ARM_FORCE_MAGIC : DISARM_FORCE_MAGIC;
+        // COMPONENT_ARM_DISARM's param1 is an absolute state (armed/disarmed), not a toggle --
+        // retry-eligible per docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2a.
         return send(resolved, MavCmd.MAV_CMD_COMPONENT_ARM_DISARM,
-                armParam, force ? ARM_DISARM_FORCE : ARM_DISARM_NO_FORCE, 0f, 0f, 0f, 0f, 0f,
-                force ? verb + " (forced)" : verb);
+                armParam, force ? forceMagic : ARM_DISARM_NO_FORCE, 0f, 0f, 0f, 0f, 0f,
+                force ? verb + " (forced)" : verb, true);
     }
 
     /**
@@ -241,9 +294,11 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
      */
     private CommandResult emergencyStopRover(ResolvedTarget resolved) {
         int holdMode = resolveCustomMode(resolved.target(), ROVER_HOLD_MODE_NAME);
+        // Hold is an absolute mode target -- this is the rover e-stop D2a names explicitly as
+        // retry-eligible.
         return send(resolved, MavCmd.MAV_CMD_DO_SET_MODE,
                 MODE_FLAG_CUSTOM_MODE_ENABLED, (float) holdMode, 0f, 0f, 0f, 0f, 0f,
-                "emergency stop (Hold)");
+                "emergency stop (Hold)", true);
     }
 
     @Override
@@ -256,10 +311,12 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
         requireCommandableFirmware(resolved.target());
         // param1 = the RCx_OPTION function number, param2 = 0 low / 1 middle / 2 high. What the
         // number means is the vehicle's business: this adapter deliberately keeps no table of aux
-        // functions, because a stale copy of the firmware's own list is worse than none.
+        // functions, because a stale copy of the firmware's own list is worse than none. The level
+        // is an absolute switch position, not an increment -- retry-eligible per
+        // docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2a.
         return send(resolved, MavCmd.MAV_CMD_DO_AUX_FUNCTION,
                 (float) function, (float) level, 0f, 0f, 0f, 0f, 0f,
-                "aux-function " + function + " at level " + level);
+                "aux-function " + function + " at level " + level, true);
     }
 
     @Override
@@ -324,9 +381,21 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
         return customMode;
     }
 
+    /**
+     * @param retryable whether this command may be silently resent on ack timeout
+     *                   (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2a) — {@code true} only for
+     *                   absolute-state commands, where a resend after silence is safe because the
+     *                   state it requests does not change between attempts: {@code
+     *                   COMPONENT_ARM_DISARM}, {@code DO_SET_MODE}, {@code DO_AUX_FUNCTION}, and the
+     *                   rover {@code Hold} e-stop are the only callers today, and all four pass
+     *                   {@code true}. Any future <i>relative/incremental</i> command (e.g. a delta
+     *                   reposition) must pass {@code false} at its own call site — resending it would
+     *                   double-apply the delta, which silence-triggered retry must never risk.
+     */
     private CommandResult send(ResolvedTarget resolved, MavCmd command,
                                 float param1, float param2, float param3, float param4,
-                                float param5, float param6, float param7, String description) {
+                                float param5, float param6, float param7, String description,
+                                boolean retryable) {
         String bindKey = resolved.bindKey();
         MavlinkGateway.CommandTarget target = resolved.target();
         MavlinkGateway gateway = telemetrySource.gateway(bindKey);
@@ -334,7 +403,8 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
             throw new IllegalArgumentException("MAVLink gateway for device's stream is no longer open");
         }
         PeerId peerId = new PeerId(new SysId(target.sysid()), new CompId(TARGET_COMPONENT_AUTOPILOT));
-        CommandService commandService = new CommandService(gateway.sink(), gateway.correlator(), ackTimeout, NO_RETRIES);
+        int retries = retryable ? commandRetries : 0;
+        CommandService commandService = new CommandService(gateway.sink(), gateway.correlator(), ackTimeout, retries);
 
         LOG.log(System.Logger.Level.INFO,
                 () -> "Sending " + description + " to MAVLink sysid " + target.sysid() + " at " + target.sourceAddress());
@@ -355,7 +425,8 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
         }
         if (outcome.status() == CommandService.CommandOutcome.Status.NO_ACK) {
             LOG.log(System.Logger.Level.WARNING, "No COMMAND_ACK from MAVLink sysid " + target.sysid()
-                    + " for " + description + " within " + ackTimeout.toMillis() + "ms");
+                    + " for " + description + " within " + ackTimeout.toMillis() + "ms per attempt ("
+                    + (retries + 1) + " attempt(s) total)");
             return CommandResult.NO_ACK;
         }
         MavResult result = outcome.mavResult();

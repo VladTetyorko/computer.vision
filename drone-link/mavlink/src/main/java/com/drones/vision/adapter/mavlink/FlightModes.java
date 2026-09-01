@@ -82,6 +82,15 @@ final class FlightModes {
     private static final Map<Integer, String> BETAFLIGHT = Map.of(
             0, "Acro", 1, "Angle", 2, "Horizon", 3, "AltHold", 4, "PosHold", 5, "Autopilot", 6, "RTL", 7, "Failsafe");
 
+    /**
+     * {@code ARDUPILOT_ROVER}'s custom_mode 16 name (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2c/O1
+     * &sect;0) — a boot transient nothing should ever be commanded into. {@link #selectableModes}
+     * excludes it by this exact string; {@link #name}/{@link #customModeFor} still resolve it both
+     * ways, so it stays decodable inbound (telemetry may legitimately report a vehicle in this state
+     * during its own boot window) even though it is never offered as something to command into.
+     */
+    private static final String ARDUPILOT_ROVER_INITIALISING = "Initialising";
+
     private FlightModes() {
     }
 
@@ -166,6 +175,14 @@ final class FlightModes {
      * {@code mavType} outside every family also return empty. Names are returned <b>sorted
      * alphabetically</b> for a stable, testable order (the underlying {@link Map#ofEntries} tables
      * have no meaningful iteration order of their own).
+     *
+     * <p><b>docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2c:</b> {@value #ARDUPILOT_ROVER_INITIALISING}
+     * (ArduRover custom_mode 16) is excluded from this list — it is a boot transient, never a state an
+     * operator should command a vehicle into. This is the only entry filtered; every other mode in
+     * every table (including {@code ARDUPILOT_PLANE}'s differently-spelled "Initializing", left alone
+     * since it was not what this decision was about) is still offered exactly as before. {@link #name}
+     * and {@link #customModeFor} are untouched by this filter, so the mode stays fully decodable
+     * inbound — a vehicle genuinely booting may still report it, and this class will still name it.
      */
     static List<String> selectableModes(int autopilot, int mavType) {
         if (autopilot != AUTOPILOT_ARDUPILOTMEGA) {
@@ -175,7 +192,9 @@ final class FlightModes {
         if (table == null) {
             return List.of();
         }
-        return table.values().stream().distinct().sorted().toList();
+        return table.values().stream()
+                .filter(name -> !ARDUPILOT_ROVER_INITIALISING.equals(name))
+                .distinct().sorted().toList();
     }
 
     /**

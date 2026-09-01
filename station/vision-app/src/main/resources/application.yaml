@@ -1050,7 +1050,18 @@ vision:
     #   silence-window: 30s
     #   max-unclaimed-vehicles: 32
     #   close-join-timeout: 5s
-    #   ack-timeout: 2s
+    #   docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2a re-scoped ack-timeout from a single whole-command
+    #   wait to the per-attempt wait, and added command-retries as the retry budget on top of it: worst
+    #   case (command-retries + 1) * ack-timeout, so 3 attempts * 700ms = ~2.1s, inside the old 2s
+    #   single-wait budget. Only MavlinkFlightCommander's absolute-state commands retry (arm/disarm,
+    #   set-mode, aux-function, the rover Hold e-stop) -- a terminal COMMAND_ACK (e.g. DENIED) never
+    #   retries, only silence does. KNOWN GAP (see drone-link/mavlink/MODULE.md): command-retries has no
+    #   VisionMavlinkProperties field yet, so this key is documentation only -- uncommenting it does
+    #   nothing until a future wave adds the field and threads it through TelemetryWiring; ack-timeout
+    #   below IS live, but production still passes it into MavlinkFlightCommander's old 2-arg
+    #   constructor at today's 2s default, not 700ms, until that same future wave lands.
+    #   ack-timeout: 700ms
+    #   command-retries: 2
     #   MavlinkLinkStatusProvider's per-vehicle drop-rate severity thresholds and the promptness bound
     #   this wave's own link-failure regression test holds a notification to (FLEET-RADIO-PLAN.md D7).
     #   A connected vehicle's drop rate at/above drop-rate-warn-percent reports DEGRADED; at/above

@@ -427,7 +427,10 @@ class MavlinkFlightCommanderTest {
             assertEquals(101, commandLong.targetSystem());
             assertEquals(MavCmd.MAV_CMD_COMPONENT_ARM_DISARM, commandLong.command().entry());
             assertEquals(1.0f, commandLong.param1(), "param1 must be 1.0 (arm)");
-            assertEquals(21196.0f, commandLong.param2(), "param2 must be the 21196 force magic value");
+            // docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2b: 2989 is the force-ARM magic, not 21196
+            // (the force-DISARM magic) -- see #emergencyStopOnACopterIsAnUnconditionalForcedDisarm...
+            // below for the force-DISARM-path assertion, still correctly 21196.
+            assertEquals(2989.0f, commandLong.param2(), "param2 must be the 2989 force-arm magic value");
             assertEquals(CommandResult.ACCEPTED, result);
         } finally {
             telemetrySource.close(deviceId);
@@ -563,6 +566,149 @@ class MavlinkFlightCommanderTest {
         }
     }
 
+    // ---- MAVLINK-COMMANDS-PLAN P1 / D2a: bounded retry for absolute-state commands --------
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void armSucceedsWhenTheAckOnlyArrivesOnTheSecondAttempt() throws Exception {
+        // Only meaningful once the default retry budget is >= 1 -- see this wave's own note that
+        // infra/rover-sim's F0 idempotency case gates whether that default stays 2 or drops to 0.
+        org.junit.jupiter.api.Assumptions.assumeTrue(MavlinkSettings.defaults().commandRetries() >= 1,
+                "default commandRetries is 0 -- nothing to retry, skipping");
+
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 131, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_QUADROTOR)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "ardupilot", Duration.ofSeconds(10));
+
+            AtomicReference<CommandLong> secondAttempt = new AtomicReference<>();
+            AtomicReference<Exception> vehicleError = new AtomicReference<>();
+            Thread vehicleThread = new Thread(() -> {
+                try {
+                    vehicle.awaitCommandLong(Duration.ofSeconds(10)); // attempt 1: drop it, no reply
+                    CommandLong retried = vehicle.awaitCommandLong(Duration.ofSeconds(10)); // attempt 2
+                    secondAttempt.set(retried);
+                    vehicle.replyAck(MavCmd.MAV_CMD_COMPONENT_ARM_DISARM, MavResult.MAV_RESULT_ACCEPTED);
+                } catch (Exception e) {
+                    vehicleError.set(e);
+                }
+            }, "fake-vehicle-131");
+            vehicleThread.start();
+
+            CommandResult result = commander.arm(device, false);
+
+            vehicleThread.join(Duration.ofSeconds(10).toMillis());
+            assertNull(vehicleError.get(), "vehicle-side listener must not error: " + vehicleError.get());
+            assertNotNull(secondAttempt.get(), "expected a second COMMAND_LONG (the retry) after the first went unanswered");
+            assertEquals(CommandResult.ACCEPTED, result,
+                    "an ack arriving on the retried attempt must still resolve as ACCEPTED");
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void armReturnsNoAckAfterExhaustingEveryConfiguredAttempt() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+        // commandRetries + 1 -- read from the same settings the commander itself defaults to, so
+        // this test stays correct even if a future wave (e.g. the F0-triggered flip this wave's
+        // own note anticipates) changes the default rather than hardcoding "3".
+        int expectedAttempts = MavlinkSettings.defaults().commandRetries() + 1;
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 132, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_QUADROTOR)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "ardupilot", Duration.ofSeconds(10));
+
+            java.util.concurrent.atomic.AtomicInteger attemptsSeen = new java.util.concurrent.atomic.AtomicInteger();
+            AtomicReference<Exception> vehicleError = new AtomicReference<>();
+            Thread vehicleThread = new Thread(() -> {
+                try {
+                    for (int i = 0; i < expectedAttempts; i++) {
+                        vehicle.awaitCommandLong(Duration.ofSeconds(10)); // drain every attempt, never reply
+                        attemptsSeen.incrementAndGet();
+                    }
+                } catch (Exception e) {
+                    vehicleError.set(e);
+                }
+            }, "fake-vehicle-132");
+            vehicleThread.start();
+
+            CommandResult result = commander.arm(device, false);
+
+            vehicleThread.join(Duration.ofSeconds(10).toMillis());
+            assertNull(vehicleError.get(), "vehicle-side listener must not error: " + vehicleError.get());
+            assertEquals(expectedAttempts, attemptsSeen.get(),
+                    "expected exactly commandRetries+1 COMMAND_LONGs on the wire, one per attempt");
+            assertEquals(CommandResult.NO_ACK, result, "silence on every attempt must still resolve as NO_ACK");
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void aDeniedAckIsTerminalAndNeverTriggersARetry() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 133, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_QUADROTOR)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "ardupilot", Duration.ofSeconds(10));
+
+            AtomicReference<CommandLong> unexpectedSecondAttempt = new AtomicReference<>();
+            AtomicReference<Exception> vehicleError = new AtomicReference<>();
+            Thread vehicleThread = new Thread(() -> {
+                try {
+                    vehicle.awaitCommandLong(Duration.ofSeconds(10));
+                    vehicle.replyAck(MavCmd.MAV_CMD_COMPONENT_ARM_DISARM, MavResult.MAV_RESULT_DENIED);
+                    // mavlink-core's RequestResponse only retries on outright silence (TimeoutException),
+                    // never on a terminal refusal (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2a) -- so
+                    // even though COMPONENT_ARM_DISARM is retry-eligible, a DENIED ack must end this
+                    // command in exactly one attempt. Prove it: no second COMMAND_LONG should show up.
+                    try {
+                        unexpectedSecondAttempt.set(vehicle.awaitCommandLong(Duration.ofMillis(600)));
+                    } catch (AssertionError timedOutAsExpected) {
+                        // no retry -- this is the success path for this test
+                    }
+                } catch (Exception e) {
+                    vehicleError.set(e);
+                }
+            }, "fake-vehicle-133");
+            vehicleThread.start();
+
+            IllegalStateException ex =
+                    assertThrows(IllegalStateException.class, () -> commander.arm(device, false));
+
+            vehicleThread.join(Duration.ofSeconds(10).toMillis());
+            assertNull(vehicleError.get(), "vehicle-side listener must not error: " + vehicleError.get());
+            assertNull(unexpectedSecondAttempt.get(),
+                    "a DENIED ack must not trigger a retry -- no second COMMAND_LONG should have been sent");
+            assertTrue(ex.getMessage().contains("MAV_RESULT_DENIED"),
+                    "expected the DENIED result named in the failure, got: " + ex.getMessage());
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
     // ---- FLEET-RADIO R4b: emergencyStop is vehicle-kind-gated -----------------------------
 
     @Test
@@ -595,7 +741,8 @@ class MavlinkFlightCommanderTest {
             assertEquals(MavCmd.MAV_CMD_COMPONENT_ARM_DISARM, commandLong.command().entry(),
                     "a copter's emergency stop must still be a forced disarm, not a mode change");
             assertEquals(0.0f, commandLong.param1(), "param1 must be 0.0 (disarm)");
-            assertEquals(21196.0f, commandLong.param2(), "param2 must be the 21196 force magic value");
+            assertEquals(21196.0f, commandLong.param2(),
+                    "param2 must be the 21196 force-disarm magic value (D2b: unchanged from before this wave)");
             assertEquals(CommandResult.ACCEPTED, result);
         } finally {
             telemetrySource.close(deviceId);
@@ -768,7 +915,8 @@ class MavlinkFlightCommanderTest {
                     "an unidentified vehicle kind must fall back to the universal forced disarm, "
                             + "never a guessed mode change");
             assertEquals(0.0f, commandLong.param1(), "param1 must be 0.0 (disarm)");
-            assertEquals(21196.0f, commandLong.param2(), "param2 must be the 21196 force magic value");
+            assertEquals(21196.0f, commandLong.param2(),
+                    "param2 must be the 21196 force-disarm magic value (D2b: unchanged from before this wave)");
             assertEquals(CommandResult.ACCEPTED, result);
         } finally {
             telemetrySource.close(deviceId);

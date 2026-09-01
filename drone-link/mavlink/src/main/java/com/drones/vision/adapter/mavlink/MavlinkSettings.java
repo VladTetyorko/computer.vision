@@ -32,12 +32,30 @@ public record MavlinkSettings(
         int maxUnclaimedVehicles,
         Duration closeJoinTimeout,
         Duration ackTimeout,
+        int commandRetries,
         Scan scan,
         Transmit transmit,
         Rc rc,
         Inventory inventory,
         Onboarding onboarding,
         LinkStatus linkStatus) {
+
+    /**
+     * docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2a — {@link #ackTimeout()}'s per-<b>attempt</b> wait
+     * (re-scoped from a single whole-command wait): 3 attempts (default {@link #commandRetries()} + 1)
+     * finish in ~2.1s, inside the old single-wait 2s budget.
+     */
+    private static final long DEFAULT_ACK_TIMEOUT_MILLIS = 700L;
+
+    /**
+     * docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2a — default retry budget for <b>absolute-state</b>
+     * commands only (arm/disarm, {@code DO_SET_MODE}, {@code DO_AUX_FUNCTION}, the rover {@code Hold}
+     * e-stop — see {@code MavlinkFlightCommander#send}'s own javadoc for the eligibility rule). Gated
+     * on {@code infra/rover-sim}'s F0 idempotency case (a repeated {@code COMMAND_LONG} with a rising
+     * {@code confirmation} must be a no-op, never a double-effect) — an operator who wants today's
+     * single-shot behaviour back sets {@code vision.mavlink.command-retries: 0}.
+     */
+    private static final int DEFAULT_COMMAND_RETRIES = 2;
 
     public MavlinkSettings {
         Objects.requireNonNull(bindHost, "bindHost must not be null");
@@ -50,6 +68,9 @@ public record MavlinkSettings(
         }
         Objects.requireNonNull(closeJoinTimeout, "closeJoinTimeout must not be null");
         Objects.requireNonNull(ackTimeout, "ackTimeout must not be null");
+        if (commandRetries < 0) {
+            throw new IllegalArgumentException("commandRetries must be >= 0: " + commandRetries);
+        }
         Objects.requireNonNull(scan, "scan must not be null");
         Objects.requireNonNull(transmit, "transmit must not be null");
         Objects.requireNonNull(rc, "rc must not be null");
@@ -63,12 +84,17 @@ public record MavlinkSettings(
      * vision-app}'s {@code TelemetryWiring#toMavlinkSettings} (out of this wave's file scope, per
      * docs/plans/active/DRONE-ONBOARDING-PLAN.md O1's brief: {@code drone-link/mavlink/**} only).
      * Defaults {@link #inventory()} to {@link Inventory#defaults()}, exactly like every other field
-     * this record has ever added.
+     * this record has ever added — including, since docs/plans/active/MAVLINK-COMMANDS-PLAN.md P1,
+     * {@link #commandRetries()} (defaulted to {@value #DEFAULT_COMMAND_RETRIES}): this is the exact
+     * overload {@code TelemetryWiring#toMavlinkSettings} still calls, so every deployment picks up the
+     * new retry default automatically the moment this module is rebuilt, with no config seam of its
+     * own yet to change it away from {@value #DEFAULT_COMMAND_RETRIES} through this particular
+     * overload (see this module's MODULE.md Gotchas).
      */
     public MavlinkSettings(String bindHost, Duration silenceWindow, int maxUnclaimedVehicles,
                             Duration closeJoinTimeout, Duration ackTimeout, Scan scan, Transmit transmit, Rc rc) {
-        this(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout, scan, transmit, rc,
-                Inventory.defaults(), Onboarding.defaults(), LinkStatus.defaults());
+        this(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout, DEFAULT_COMMAND_RETRIES,
+                scan, transmit, rc, Inventory.defaults(), Onboarding.defaults(), LinkStatus.defaults());
     }
 
     /**
@@ -78,8 +104,8 @@ public record MavlinkSettings(
     public MavlinkSettings(String bindHost, Duration silenceWindow, int maxUnclaimedVehicles,
                             Duration closeJoinTimeout, Duration ackTimeout, Scan scan, Transmit transmit, Rc rc,
                             Inventory inventory) {
-        this(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout, scan, transmit, rc,
-                inventory, Onboarding.defaults(), LinkStatus.defaults());
+        this(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout, DEFAULT_COMMAND_RETRIES,
+                scan, transmit, rc, inventory, Onboarding.defaults(), LinkStatus.defaults());
     }
 
     /** Reproduces every literal this module's classes hardcode today. */
@@ -89,7 +115,8 @@ public record MavlinkSettings(
                 Duration.ofSeconds(30),
                 32,
                 Duration.ofSeconds(5),
-                Duration.ofSeconds(2),
+                Duration.ofMillis(DEFAULT_ACK_TIMEOUT_MILLIS),
+                DEFAULT_COMMAND_RETRIES,
                 Scan.defaults(),
                 Transmit.defaults(),
                 Rc.defaults(),
@@ -105,7 +132,29 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withSilenceWindow(Duration newSilenceWindow) {
         return new MavlinkSettings(bindHost, newSilenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                scan, transmit, rc, inventory, onboarding, linkStatus);
+                commandRetries, scan, transmit, rc, inventory, onboarding, linkStatus);
+    }
+
+    /**
+     * Copy of this settings object with just {@link #ackTimeout()} replaced — same test/tuning
+     * convenience as {@link #withSilenceWindow}; also backs {@code MavlinkFlightCommander}'s own
+     * back-compat {@code (MavlinkTelemetrySource, Duration)} constructor (docs/plans/active/
+     * MAVLINK-COMMANDS-PLAN.md P1), which re-scopes its {@code Duration} argument from a single
+     * whole-command wait to the new per-attempt one.
+     */
+    public MavlinkSettings withAckTimeout(Duration newAckTimeout) {
+        return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, newAckTimeout,
+                commandRetries, scan, transmit, rc, inventory, onboarding, linkStatus);
+    }
+
+    /**
+     * Copy of this settings object with just {@link #commandRetries()} replaced — same test/tuning
+     * convenience as {@link #withSilenceWindow}; lets a test dial the retry budget down to 0 (today's
+     * byte-for-byte single-shot behaviour) or up, without needing every other field's default.
+     */
+    public MavlinkSettings withCommandRetries(int newCommandRetries) {
+        return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
+                newCommandRetries, scan, transmit, rc, inventory, onboarding, linkStatus);
     }
 
     /**
@@ -115,7 +164,7 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withInventory(Inventory newInventory) {
         return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                scan, transmit, rc, newInventory, onboarding, linkStatus);
+                commandRetries, scan, transmit, rc, newInventory, onboarding, linkStatus);
     }
 
     /**
@@ -124,7 +173,7 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withOnboarding(Onboarding newOnboarding) {
         return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                scan, transmit, rc, inventory, newOnboarding, linkStatus);
+                commandRetries, scan, transmit, rc, inventory, newOnboarding, linkStatus);
     }
 
     /**
@@ -135,7 +184,7 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withLinkStatus(LinkStatus newLinkStatus) {
         return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                scan, transmit, rc, inventory, onboarding, newLinkStatus);
+                commandRetries, scan, transmit, rc, inventory, onboarding, newLinkStatus);
     }
 
     /** {@code MavlinkHeartbeatScanner}'s hub-poll/self-bind-timeout budgets. */
