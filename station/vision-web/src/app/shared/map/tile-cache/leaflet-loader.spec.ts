@@ -1,6 +1,7 @@
 import { computed } from '@angular/core';
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  MAP_LAYERS,
   defaultMapLayerIdForTheme,
   effectiveMapLayerId,
   isMapLayerExplicit,
@@ -13,7 +14,7 @@ describe('defaultMapLayerIdForTheme', () => {
     expect(defaultMapLayerIdForTheme('light')).toBe('standard');
   });
 
-  it('picks CARTO Dark Matter for the dark theme', () => {
+  it('picks the filtered-dark OSM layer for the dark theme', () => {
     expect(defaultMapLayerIdForTheme('dark')).toBe('night');
   });
 });
@@ -70,5 +71,30 @@ describe('mapLayerDef', () => {
 
   it('looks up a real id', () => {
     expect(mapLayerDef('night').id).toBe('night');
+  });
+});
+
+// docs/plans/active/OPERATOR-UX-6-PLAN.md M1: `night` used to be CARTO Dark Matter, which now
+// returns "API KEY REQUIRED" tiles — every dark-theme map was dead. `night` renders OSM raster
+// (same source as `standard`) through a CSS filter on the tile pane instead, with no API key.
+describe('night basemap (M1 fix)', () => {
+  it('carries a tileFilter, unlike every other layer', () => {
+    expect(mapLayerDef('night').tileFilter).toBe(
+      'invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9) saturate(0.6)',
+    );
+    for (const layer of MAP_LAYERS) {
+      if (layer.id !== 'night') {
+        expect(layer.tileFilter).toBeUndefined();
+      }
+    }
+  });
+
+  it('shares its tile source with standard (OSM raster, no CARTO/API-key dependency)', () => {
+    expect(mapLayerDef('night').url).toBe(mapLayerDef('standard').url);
+    expect(mapLayerDef('night').attribution).toBe(mapLayerDef('standard').attribution);
+  });
+
+  it('attributes OSM only — no CARTO credit for tiles CARTO no longer serves', () => {
+    expect(mapLayerDef('night').attribution).not.toMatch(/carto/i);
   });
 });

@@ -11,6 +11,7 @@ import {
   draftLabel,
   groupByKind,
   kindsFor,
+  microsFor,
   movedControl,
   nextFreeChannel,
   parameterKindOf,
@@ -166,6 +167,21 @@ describe('nextFreeChannel', () => {
   it('is 1 for an empty layout', () => {
     expect(nextFreeChannel(draft([]))).toBe(1);
   });
+
+  // FLEET-RADIO R3/F17: ArduPilot reads only channels 1-16 from an RC_CHANNELS_OVERRIDE, so
+  // `ControlBinding` throws on 17/18. This page must never hand the operator a channel the server
+  // will reject -- when every usable channel is taken it clamps to 16 rather than inventing a 17th.
+  it('never offers a channel past the 16 the vehicle can actually read', () => {
+    const full = draft(
+      Array.from({ length: 16 }, (_unused, index) => ({
+        ...blankControlDraft('AXIS', index, draft([])),
+        role: 'CHANNEL' as const,
+        rcChannel: index + 1,
+      })),
+    );
+
+    expect(nextFreeChannel(full)).toBe(16);
+  });
 });
 
 describe('withKind', () => {
@@ -238,6 +254,33 @@ describe('toUpdateRequest', () => {
 
   it('trims the name, so a trailing space is not what a layout is called', () => {
     expect(toUpdateRequest(draft([], '  Rover  ')).name).toBe('Rover');
+  });
+});
+
+describe('microsFor', () => {
+  it('rests a unidirectional control at its minimum', () => {
+    expect(microsFor('UNIDIRECTIONAL')).toEqual({ min: 1000, center: 1000, max: 2000 });
+  });
+
+  it('rests a centered control at the midpoint', () => {
+    expect(microsFor('CENTERED')).toEqual({ min: 1000, center: 1500, max: 2000 });
+  });
+
+  it('agrees with what toUpdateRequest actually sends', () => {
+    const control: ControlDraft = {
+      ...blankControlDraft('AXIS', 1, draft([])),
+      role: 'CHANNEL',
+      function: 'THROTTLE',
+      rcChannel: 3,
+      travel: 'CENTERED',
+    };
+    const sent = toUpdateRequest(draft([control])).channelMap[0];
+    const derived = microsFor('CENTERED');
+    expect({ minMicros: sent.minMicros, centerMicros: sent.centerMicros, maxMicros: sent.maxMicros }).toEqual({
+      minMicros: derived.min,
+      centerMicros: derived.center,
+      maxMicros: derived.max,
+    });
   });
 });
 

@@ -6,6 +6,7 @@ import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.kernel.DeviceOrigin;
 import com.drones.vision.platform.Event;
 import com.drones.vision.platform.EventType;
 import com.drones.vision.kernel.LifecycleState;
@@ -65,7 +66,7 @@ public final class DefaultDeviceService implements DeviceService {
         Objects.requireNonNull(actor, "actor must not be null");
 
         Device device = new Device(DeviceId.random(), registration.name(), registration.capabilities(),
-                registration.stream());
+                registration.stream(), LifecycleState.ACTIVE, registration.origin());
         Device saved = deviceRepository.save(device);
         eventPublisher.publish(Event.of(null, EventType.DEVICE_ONLINE, "Device registered: " + saved.name()));
         audit(actor, AuditAction.CREATED, saved,
@@ -95,8 +96,9 @@ public final class DefaultDeviceService implements DeviceService {
         String name = edit.name() != null ? edit.name() : device.name();
         Set<Capability> capabilities = edit.capabilities() != null ? edit.capabilities() : device.capabilities();
         StreamDescriptor stream = edit.stream() != null ? edit.stream() : device.stream();
+        DeviceOrigin origin = edit.origin() != null ? edit.origin() : device.origin();
 
-        Device saved = deviceRepository.save(device.withDetails(name, capabilities, stream));
+        Device saved = deviceRepository.save(device.withDetails(name, capabilities, stream, origin));
         Map<String, String> changes = changes(device, saved);
         if (!changes.isEmpty()) {
             // A no-op edit writes no audit line: a trail padded with "changed nothing" entries is
@@ -187,6 +189,9 @@ public final class DefaultDeviceService implements DeviceService {
         if (!before.stream().equals(after.stream())) {
             changes.put("stream", before.stream().protocol() + " " + before.stream().uri()
                     + " → " + after.stream().protocol() + " " + after.stream().uri());
+        }
+        if (before.origin() != after.origin()) {
+            changes.put("origin", before.origin() + " → " + after.origin());
         }
         return changes;
     }

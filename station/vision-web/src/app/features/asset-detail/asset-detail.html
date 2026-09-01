@@ -155,11 +155,11 @@
             />
             <dl class="facts freshest-facts">
               @for (row of facade.freshestFacts(); track row.label) {
-                <div class="fact"><dt>{{ row.label }}</dt><dd [class.mono]="row.mono">{{ row.value }}</dd></div>
+                <div class="fact"><dt>{{ row.label }}</dt><dd [class.mono]="row.mono" [class.faint]="row.faint">{{ row.value }}</dd></div>
               }
               <div class="fact">
                 <dt>Sample</dt>
-                <dd [class.stale-text]="facade.freshestStale()">{{ facade.freshestAgeSeconds()?.toFixed(0) ?? '—' }}s ago</dd>
+                <dd [class.stale-text]="facade.freshestStale()">{{ freshestAgeLabel() }}</dd>
               </div>
             </dl>
           </section>
@@ -460,12 +460,12 @@
                 @if (facade.latestSampleFor(device.id); as sample) {
                   <dl class="facts">
                     @for (row of deviceFacts(device.id); track row.label) {
-                      <div class="fact"><dt>{{ row.label }}</dt><dd [class.mono]="row.mono">{{ row.value }}</dd></div>
+                      <div class="fact"><dt>{{ row.label }}</dt><dd [class.mono]="row.mono" [class.faint]="row.faint">{{ row.value }}</dd></div>
                     }
                     <div class="fact">
                       <dt>Sample</dt>
                       <dd [class.stale-text]="deviceStale(device.id)">
-                        {{ deviceSampleAgeSeconds(device.id)?.toFixed(0) ?? '—' }}s ago
+                        {{ deviceAgeLabel(device.id) }}
                       </dd>
                     </div>
                   </dl>
@@ -519,36 +519,68 @@
           @if (a.lastUsedAt) {
             <div class="fact"><dt>Last used</dt><dd class="mono">{{ a.lastUsedAt }}</dd></div>
           }
-          <!-- Registration/tail number (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3) — the `registrationNumber`
-               attributes-key convention, display + inline edit. -->
-          <div class="fact">
-            <dt>Registration</dt>
-            <dd>
-              @if (isEditorOpen('registration')) {
-                <span class="inline-form registration-edit">
+          <!-- Identity (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4, wave W4) — Serial/Make/Model/
+               Registration, backed by `AssetIdentity`/`PATCH .../identity`; replaces the old
+               single-field `attributes.registrationNumber` inline edit. `effectiveRegistration()`
+               still reads the legacy attribute as a display-time fallback for an asset created
+               before this wave (`asset-detail-logic.ts#effectiveRegistration`'s own doc comment) —
+               the edit form itself only ever writes `identity`, never the old attribute key. -->
+          @if (isEditorOpen('identity')) {
+            <div class="fact">
+              <dt>Identity</dt>
+              <dd>
+                <span class="inline-form identity-edit">
                   <input
-                    [value]="registrationNumberDraft()"
-                    (input)="registrationNumberDraft.set($any($event.target).value)"
+                    [value]="identityDraft().serialNumber"
+                    (input)="setIdentityDraftField('serialNumber', $any($event.target).value)"
+                    placeholder="Serial"
+                    aria-label="Serial number"
+                  />
+                  <input
+                    [value]="identityDraft().make"
+                    (input)="setIdentityDraftField('make', $any($event.target).value)"
+                    placeholder="Make"
+                    aria-label="Make"
+                  />
+                  <input
+                    [value]="identityDraft().model"
+                    (input)="setIdentityDraftField('model', $any($event.target).value)"
+                    placeholder="Model"
+                    aria-label="Model"
+                  />
+                  <input
+                    [value]="identityDraft().registration"
+                    (input)="setIdentityDraftField('registration', $any($event.target).value)"
                     placeholder="N12345"
                     aria-label="Registration / tail number"
                   />
-                  <button type="button" class="btn small" (click)="confirmEditRegistrationNumber()" [disabled]="facade.busy()">
+                </span>
+                <span class="row">
+                  <button type="button" class="btn small" (click)="confirmEditIdentity()" [disabled]="facade.busy()">
                     Save
                   </button>
-                  <button type="button" class="btn secondary small" (click)="cancelEditRegistrationNumber()">
+                  <button type="button" class="btn secondary small" (click)="cancelEditIdentity()">
                     Cancel
                   </button>
                 </span>
-              } @else {
+              </dd>
+            </div>
+          } @else {
+            <div class="fact"><dt>Serial</dt><dd>{{ facade.identity()?.serialNumber ?? '—' }}</dd></div>
+            <div class="fact"><dt>Make</dt><dd>{{ facade.identity()?.make ?? '—' }}</dd></div>
+            <div class="fact"><dt>Model</dt><dd>{{ facade.identity()?.model ?? '—' }}</dd></div>
+            <div class="fact">
+              <dt>Registration</dt>
+              <dd>
                 <span class="row registration-row">
-                  <span>{{ facade.registrationNumber() ?? '—' }}</span>
-                  <button type="button" class="btn secondary small" (click)="openEditRegistrationNumber()">
+                  <span>{{ facade.effectiveRegistration() ?? '—' }}</span>
+                  <button type="button" class="btn secondary small" (click)="openEditIdentity()">
                     Edit
                   </button>
                 </span>
-              }
-            </dd>
-          </div>
+              </dd>
+            </div>
+          }
         </dl>
         @if (detailPairs(a.attributes).length > 0) {
           <dl class="facts">
@@ -561,8 +593,10 @@
         }
 
         <!-- Attributes editor (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3) — advanced mode only; raw
-             key/value surgery, including the registrationNumber key the inline edit above already
-             covers more conveniently for the common case. -->
+             key/value surgery. The legacy `registrationNumber` attribute key still lives here for an
+             asset that has one and hasn't been re-saved through the Identity editor above yet
+             (`effectiveRegistration()`'s own fallback) — the Identity editor itself never touches
+             this map, only `identity`. -->
         @if (facade.settings.advancedMode()) {
           <div class="attributes-editor">
             @if (!isEditorOpen('attributes')) {

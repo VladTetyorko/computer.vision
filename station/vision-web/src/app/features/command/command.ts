@@ -13,6 +13,7 @@ import { AssetPanel } from './asset-panel';
 import { ZonesPanel } from './zones-panel';
 import { MarksPanel } from './marks-panel';
 import { SetupChecklist } from './setup-checklist';
+import { CommandRailRow } from './rail-row';
 import { CommandFacade } from './command-facade';
 
 /** Command's mutually-exclusive overlay group (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — Zones, Marks (since
@@ -72,6 +73,7 @@ type CommandOverlay = 'zones' | 'marks' | 'layers' | 'draw';
     ZonesPanel,
     MarksPanel,
     SetupChecklist,
+    CommandRailRow,
     SidePanel,
     LayerManager,
     DrawingToolbar,

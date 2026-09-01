@@ -12,6 +12,7 @@ import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.flight.domain.model.RcChannels;
 import com.drones.vision.kernel.StreamDescriptor;
+import com.drones.vision.flight.domain.model.UnidentifiedReason;
 import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.flight.domain.port.ManualControlLink;
 
@@ -31,6 +32,7 @@ import java.net.URI;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -173,6 +175,60 @@ class MavlinkManualControlSenderTest {
 
             sender.release(link);
             assertFalse(link.active());
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void engageOnARecognizedVehicleReportsNoUnidentifiedReason() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkManualControlSender sender = sender(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 131, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_QUADROTOR)) {
+            telemetrySource.open(device);
+            awaitReachable(telemetrySource, bindKey, deviceId, Duration.ofSeconds(10));
+
+            ManualControlLink link = sender.engage(device);
+
+            assertEquals(VehicleKind.COPTER, link.vehicleKind());
+            assertEquals(Optional.empty(), link.unidentifiedReason());
+
+            sender.release(link);
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void engageOnAGimbalReportsNotAVehicleNotJustUnknown() throws Exception {
+        // FLEET-RADIO R2 expected result #6: a gimbal heartbeating on the link must not read like a
+        // vehicle this platform simply failed to recognize.
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkManualControlSender sender = sender(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 132, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_GIMBAL)) {
+            telemetrySource.open(device);
+            awaitReachable(telemetrySource, bindKey, deviceId, Duration.ofSeconds(10));
+
+            ManualControlLink link = sender.engage(device);
+
+            assertEquals(VehicleKind.UNKNOWN, link.vehicleKind());
+            assertEquals(Optional.of(UnidentifiedReason.NOT_A_VEHICLE), link.unidentifiedReason());
+
+            sender.release(link);
         } finally {
             telemetrySource.close(deviceId);
         }

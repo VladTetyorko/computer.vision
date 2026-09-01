@@ -1,4 +1,8 @@
-import type { TelemetrySample } from '../../core/api/models';
+import type { AssetIdentity, MaintenanceRecord, TelemetrySample } from '../../core/api/models';
+import type { KpiTile } from '../../core/fleet/asset-stats-logic';
+import { hasFix } from '../../core/geo/geo-logic';
+import { hoursSinceClose } from '../../core/maintenance/maintenance-logic';
+import { humanAge } from '../../core/telemetry/telemetry-logic';
 
 /**
  * Pure logic behind the asset detail page (docs/main/CYCLES-PLAN.md §11, CD-b items 2–3): picking the
@@ -43,12 +47,31 @@ export function freshestSample(
 // a second time, so this is the "second consumer → pull it out" moment (mirrors
 // `groupTelemetryByDevice`'s own history above).
 
-/** One row of a telemetry facts grid. `mono` marks the one row (Position) that also carried the
- *  `.mono` class in the original inline markup — tabular-nums coordinates, not the free-form units. */
+/** One row of a telemetry facts grid. `mono` marks a row rendering tabular-nums (a real coordinate/
+ *  number), `faint` marks a structural "not yet known" label rather than a numeric reading — the
+ *  two are mutually exclusive in practice, but both are plain booleans so a row can carry neither. */
 export interface TelemetryFactRow {
   readonly label: string;
   readonly value: string;
   readonly mono?: boolean;
+  readonly faint?: boolean;
+}
+
+/**
+ * The Position row: a real `lat, lon` when the sample carries one, `'No GPS fix yet'` when the
+ * sample reports lat/lon but no real fix (exactly `(0, 0)` — docs/plans/active/OPERATOR-UX-4-PLAN.md
+ * finding N1, `core/geo/geo-logic.ts#hasFix`), or `'—'` when the sample carries no position field
+ * at all (nothing reported yet, a different honest gap). `'No GPS fix yet'` renders in the faint
+ * structural register, not `.mono` — it is a label saying what is known, not a number.
+ */
+function positionFact(sample: TelemetrySample | undefined): TelemetryFactRow {
+  if (sample?.latitude === undefined || sample?.longitude === undefined) {
+    return { label: 'Position', value: '—', mono: true };
+  }
+  if (!hasFix({ latitude: sample.latitude, longitude: sample.longitude })) {
+    return { label: 'Position', value: 'No GPS fix yet', faint: true };
+  }
+  return { label: 'Position', value: `${sample.latitude.toFixed(5)}, ${sample.longitude.toFixed(5)}`, mono: true };
 }
 
 /**
@@ -60,18 +83,42 @@ export interface TelemetryFactRow {
  */
 export function telemetryFactRows(sample: TelemetrySample | undefined): readonly TelemetryFactRow[] {
   return [
-    {
-      label: 'Position',
-      value:
-        sample?.latitude !== undefined && sample?.longitude !== undefined
-          ? `${sample.latitude.toFixed(5)}, ${sample.longitude.toFixed(5)}`
-          : '—',
-      mono: true,
-    },
+    positionFact(sample),
     { label: 'Altitude', value: sample?.altitudeMeters !== undefined ? `${sample.altitudeMeters.toFixed(0)} m` : '—' },
     { label: 'Heading', value: sample?.headingDegrees !== undefined ? `${sample.headingDegrees.toFixed(0)}°` : '—' },
     { label: 'Battery', value: sample?.batteryPercent !== undefined ? `${sample.batteryPercent.toFixed(0)}%` : '—' },
   ];
+}
+
+/**
+ * `<humanAge> ago`, or `'—'` when no sample has arrived yet — never the old bare-suffix bug
+ * (`'—s ago'`: the template used to append the literal `s ago` regardless of whether an age was
+ * known). One age vocabulary (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N4,
+ * `core/telemetry/telemetry-logic.ts#humanAge`) for both the overview's freshest-sample card and the
+ * per-device "Full telemetry" drawer rows.
+ */
+export function sampleAgeLabel(seconds: number | undefined): string {
+  return seconds === undefined ? '—' : `${humanAge(seconds)} ago`;
+}
+
+/**
+ * Redacts a sample's own lat/lon when they carry no real GPS fix (docs/plans/active/OPERATOR-UX-4-PLAN.md
+ * finding N1), keeping every other field intact — heading/battery/flightState are still worth
+ * surfacing on the map marker popup even while the vehicle has no lock. Feeds the position card's
+ * own `<vision-tactical-map>` follow marker (`AssetDetailFacade#mapAssets`): without this, a `(0, 0)`
+ * `TelemetryStore.latest()` sample would satisfy `shared/map/tactical-map/tactical-map-logic.ts#followMarker`'s
+ * own (unrelated, unpatched here) fix check and recentre the map on Null Island — this instead makes
+ * that helper's existing "no fix → fall back to the trail's last point, or nothing" branch fire, the
+ * same honest degrade a battery-only sample already gets.
+ */
+export function withFixOnlyPosition(sample: TelemetrySample | undefined): TelemetrySample | undefined {
+  if (!sample || (sample.latitude === undefined && sample.longitude === undefined)) {
+    return sample;
+  }
+  if (hasFix({ latitude: sample.latitude, longitude: sample.longitude })) {
+    return sample;
+  }
+  return { ...sample, latitude: undefined, longitude: undefined };
 }
 
 // --- Attributes editor (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3 — advanced-mode key/value editor) ----
@@ -104,4 +151,69 @@ export function attributeRowsToRecord(rows: readonly AttributeRow[]): Record<str
     }
   }
   return result;
+}
+
+// --- Identity (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4, wave W4 — replaces the single
+// Registration inline-edit with a 4-field Identity fact group backed by `AssetIdentity`) ------------
+
+/**
+ * `serialNumber`/`make`/`model`/`registration` form fields → the `PATCH /api/assets/{id}` body's
+ * `identity` replacement (`AssetEdit#identity`'s own doc comment: "present replaces the asset's
+ * identity wholesale — absent fields mean unknown, not unchanged"). A blank field is omitted rather
+ * than sent as `""`, matching `withRegistrationNumber`'s own trim-and-omit convention — clearing a
+ * field in the form and saving means "this is now unknown", the honest reading of the backend's own
+ * "absent means unknown" contract.
+ */
+export function buildIdentityEdit(serialNumber: string, make: string, model: string, registration: string): AssetIdentity {
+  const clean = (value: string): string | undefined => {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  };
+  return {
+    serialNumber: clean(serialNumber),
+    make: clean(make),
+    model: clean(model),
+    registration: clean(registration),
+  };
+}
+
+/**
+ * Moved to `core/fleet/asset-attributes.ts` in wave W4 (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3)
+ * once the Inventory page's own detail panel needed the identical `identity.registration`/legacy-
+ * attribute fallback — see that module's own doc comment for the full migration-gap writeup.
+ * Re-exported here so this page's own pre-existing import site keeps working verbatim.
+ */
+export { effectiveRegistration } from '../../core/fleet/asset-attributes';
+
+/**
+ * The most recently closed maintenance record among an asset's own history — "Since service"
+ * (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4's KPI-band addition) reads *when this closed*, not
+ * when it opened, so a long-open repair that just wrapped up still reads as "just serviced." Ties
+ * broken by nothing further (an asset closing two records at the identical instant is not a case
+ * worth resolving deterministically beyond "pick one"). `undefined` for an asset with no closed
+ * record at all — a genuinely honest "never serviced," never a fabricated one.
+ */
+export function mostRecentlyClosedRecord(records: readonly MaintenanceRecord[]): MaintenanceRecord | undefined {
+  const closed = records.filter((record) => record.closedAt !== undefined);
+  if (closed.length === 0) {
+    return undefined;
+  }
+  return [...closed].sort((a, b) => Date.parse(b.closedAt as string) - Date.parse(a.closedAt as string))[0];
+}
+
+/** `<humanAge> ago`, or `'—'` for an asset with no closed maintenance record yet — same register as {@link sampleAgeLabel}. */
+export function formatSinceService(hours: number | undefined): string {
+  return hours === undefined ? '—' : `${humanAge(hours * 3600)} ago`;
+}
+
+/**
+ * The KPI band's "Since service" tile (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4) — appended after
+ * `core/fleet/asset-stats-logic.ts#kpiTiles`'s own five flight-stat tiles, not folded into that
+ * function: it reads maintenance records, a different fetch this page's facade owns independently of
+ * `AssetStats`, and mirrors `AssetStats`'s own "never fabricate, always `'—'`" discipline rather than
+ * this file's own telemetry-fact discipline.
+ */
+export function sinceServiceTile(records: readonly MaintenanceRecord[], nowMs: number): KpiTile {
+  const record = mostRecentlyClosedRecord(records);
+  return { label: 'Since service', value: formatSinceService(record ? hoursSinceClose(record, nowMs) : undefined) };
 }

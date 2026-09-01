@@ -133,16 +133,36 @@ vision:
     #   batch-size: 100
     #   batch-window: 200ms
 
-  # --- Session auth (docs/plans/done/U-AUTH-PLAN.md wave 3) ---
+  # --- Idle-usage-close sweep (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U1, wave W1) ---
+  usage:
+    # UsageIdleCloseRunner sweeps every open AssetUsage once at startup and then
+    # on this cadence, closing any whose last observed activity (its freshest
+    # telemetry sample, or startedAt if none was ever seen) is older than
+    # idle-close below -- endedAt is stamped at that last-activity instant, never
+    # "now". Before this sweep existed, a usage was only ever closed by an
+    # explicit clean stop; a crashed process, a killed station, or a lost
+    # MAVLink link on an offline rover left it open forever, and the web UI
+    # rendered it as "Flying now" indefinitely. Unconditional -- this fixes a
+    # data-correctness defect, not an optional feature.
+    idle-close: 10m
+    sweep-period: 60s
+
+  # --- Session auth (docs/plans/done/U-AUTH-PLAN.md wave 3; default flipped by
+  # docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R7) ---
   auth:
-    # false (default): NOTHING is secured -- the Spring Security filter chain is
-    # permit-all + CSRF-off, so every existing test and the running SPA behave
-    # exactly as before auth existed; CurrentUser returns the fixed dev principal
-    # (auto-admin) and /api/auth/* report that dev admin with authEnabled=false.
-    # true: a session is required for /api/** except /api/auth/login|logout and
-    # static/SPA routes -- but a session only has someone to log in as if
-    # vision.persistence.seed-dev-users is also true (see above), or real users
-    # were created through UserService.
+    # true (default, set explicitly): a session is required for /api/** and /ws/**
+    # except /api/auth/login|logout and static/SPA routes -- but a session only has
+    # someone to log in as if vision.persistence.seed-dev-users is also true (see
+    # above), or real users were created through UserService. This is the safe
+    # default for a platform deployed onto operator-controlled servers (CLAUDE.md,
+    # "Deployment maintenance") -- a deployment that never touches this key still
+    # gets access control.
+    # false: the dev/demo escape hatch. NOTHING is secured -- the Spring Security
+    # filter chain becomes permit-all + CSRF-off, CurrentUser returns the fixed dev
+    # principal (auto-admin, unbounded VisibilityScope) for every request, and
+    # /api/auth/* report that dev admin with authEnabled=false. Turn this on for a
+    # local run or a demo stack with no login flow set up -- never for anything
+    # reachable by someone who isn't already trusted with the whole fleet.
     enabled: false
 
   # --- adapter-publish-hls: stream egress (Phase 1, see docs/plans/done/PHASE1-PLAN.md Task U5) ---
@@ -278,6 +298,27 @@ vision:
     # box is off, the backend degrades gracefully (no boxes, video unaffected).
     endpoint: localhost:50051
     # endpoint: 192.168.0.106:50051
+    # Split-deployment channel routing (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6) --
+    # both keys below are unset by default, so `endpoint` above stays the single source of truth for
+    # a one-process deployment: CvWiring builds one channel, shared by Inference/DetectStream AND
+    # every Training/*+Geolocation/* RPC, exactly as today. Point these at the `cv-split` Compose
+    # profile's two services (docker-compose.yml, `docker compose up -d --scale cv-service=0
+    # --profile cv-split cv-service-inference cv-service-training`) to split inference (the ~50ms
+    # per-frame hot path) from training/geolocation (long-running fine-tune jobs, occasional region
+    # ingest) onto two separate processes/hosts:
+    #   inference:
+    #     Ordered failover target list for the inference channel (Inference/DetectStream), tried in
+    #     order by grpc-java's own pick_first policy on connection failure. A single entry behaves
+    #     byte-identically to `endpoint` above -- host-mapped to 50061 by cv-split.
+    #     targets: [localhost:50061]
+    #   training:
+    #     Single target for the training/geolocation channel (Training/*, Geolocation/*) -- host-mapped
+    #     to 50062 by cv-split. Setting this to the SAME host:port as `endpoint`/`inference.targets`
+    #     opens a second, redundant TCP connection to the same process -- only meaningful pointed at a
+    #     genuinely separate host. Known limitation: CvChannelSupervisor still watches only the
+    #     inference channel, so the geolocation gate reflects the inference host's reachability, not
+    #     this one's.
+    #     target: localhost:50062
     # Widest a raw BGR24 frame may be before GrpcDetectionPort downscales +
     # JPEG-encodes it before sending (docs/plans/done/REMOTE-CV-PLAN.md P1 item 5); lower
     # this over a slow/metered link (e.g. 480 over VPN) to shrink the per-frame
@@ -318,9 +359,19 @@ vision:
     # upload:
     #   timeout: 300s
     #   chunk-bytes: 262144
-    # GrpcModelRegistryPort's per-call deadline (ListModels/PromoteModel).
-    # registry:
-    #   call-timeout: 10s
+    # ModelRegistryPort/ModelRegistryService (GrpcModelRegistryPort, and the /api/cv/registry/*
+    # endpoints they back) -- docs/plans/active/CV-SETTINGS-PLAN.md §5, CV-SETTINGS-CONTEXT.md's
+    # W4-app -> W5 handoff.
+    registry:
+      # Whether the model registry is wired at all. Deliberately follows `vision.cv.enabled` above
+      # by default (the ${...:default} placeholder), rather than defaulting to false outright: a
+      # deployment that already turned detection on has a cv-service worker to register models
+      # against, so the registry comes along for free unless explicitly opted out below. Set this
+      # to false to disable JUST the registry (e.g. detection on, promote/rollback off), or leave
+      # both this and vision.cv.enabled unset/false to keep today's fully-off behavior.
+      enabled: ${vision.cv.enabled:false}
+      # GrpcModelRegistryPort's per-call deadline (ListModels/PromoteModel/Rollback).
+      # call-timeout: 10s
     # Bounded reconnect for the shared cv-service channel (docs/plans/active/CV-RECONNECT-PLAN.md).
     # A fail-fast gRPC call issued while the channel is in TRANSIENT_FAILURE returns the cached failure
     # WITHOUT starting a new connect attempt -- only the channel's OWN reconnect backoff retries, and
@@ -396,6 +447,14 @@ vision:
     #   How long one GET /api/streams/{id}/detections poll counts as demand (the poll half, for
     #   Wall/Live pages that never open the SSE detections:<assetId> topic at all).
     #   poll-ttl: 10s
+    # CvProfileCache's lazy-reload TTL (docs/plans/active/CV-SETTINGS-PLAN.md §3.1,
+    # CV-SETTINGS-CONTEXT.md's W2 -> W5 handoff). Profiles ship unconditionally -- no feature flag,
+    # the four built-in profiles exist regardless of vision.cv.enabled/vision.cv.registry.enabled --
+    # so this is the only tunable. Every write (create/update/delete/bind/unbind) refreshes the
+    # cached snapshot immediately regardless of this TTL; it only bounds staleness after a write
+    # made by a DIFFERENT JVM (e.g. a second app instance) sharing the same database.
+    # profiles:
+    #   cache-ttl: 60s
 
   # --- Tracking engine (docs/plans/done/TRACKING-PLAN.md, docs/extracts/TRACKING-ORCHESTRATION.md 4.3) ---
   # Every key below is commented out: each documents VisionTrackingProperties' default rather than
@@ -473,6 +532,45 @@ vision:
     # v4l2:
     #   dev-base: /dev
     #   sys-base: /sys
+    # Standing MAVLink lobby (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §11, Z2c): whether
+    # DiscoveryInboxRunner re-asserts a claim-free hold on the MAVLink gateway every sweep, so it is
+    # listening -- and answering with a GCS heartbeat -- from boot, not only while a device or a scan
+    # happens to be open. Default true: a brand-new vehicle broadcasting to mavlink-port above locks
+    # on within seconds with zero operator action, the whole point of this feature. Set to false to
+    # keep the inbox's scan+report half without the standing auto-reply-to-any-broadcasting-vehicle
+    # behavior.
+    lobby:
+      enabled: true
+    # The discovery inbox (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P2, §11, Z2c): a
+    # persisted, deduplicated "found devices" list a background sweep feeds, instead of discovery
+    # being only a manual POST /api/discovery/scan button. Default true for the same zero-config
+    # reason as lobby.enabled above.
+    inbox:
+      enabled: true
+      # How often DiscoveryInboxRunner sweeps (holds the lobby, scans, reports hits).
+      sweep-seconds: 30
+      # How long each sweep's DiscoveryService.scan call may take before returning what it has.
+      scan-timeout-seconds: 5
+    # MediamtxPathScanner (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P3, §11 "Z3
+    # amendment (2026-08-31) -- poll, not hook"): each inbox sweep also polls mediamtx's Control
+    # API GET /v3/paths/list and reports every READY path under path-prefix below as a candidate --
+    # the "device pushes video, operator never types a URL" half of zero-config onboarding. No new
+    # REST endpoint on this app's own side; mediamtx's own runOnAvailable hook can't run inside the
+    # official scratch-based Docker image (no shell/curl), which is why this is a poll, not a hook.
+    # Reachability of mediamtx's Control API/RTSP base is NOT configured here -- this scanner reuses
+    # vision.publish.mediamtx.api-base/rtsp-base above (the same properties MediamtxStreamPublisher
+    # already uses to reach this exact mediamtx instance), so there is exactly one place, not two,
+    # that can go stale about where mediamtx is.
+    mediamtx:
+      # Whether this scanner is registered at all (ANDed with vision.discovery.enabled above).
+      enabled: true
+      # mediamtx path-name prefix a device push must live under to be reported as a candidate --
+      # the convention devices push to, e.g. rtsp://<locked-host>:8554/ingest/<kind>-<id> (see
+      # mediamtx.yml's own comments for the full convention). Paths outside this prefix are
+      # vision's own published streams (MEDIA-SOT, e.g. the per-stream paths
+      # MediamtxStreamPublisher creates) and are NEVER reported -- reporting them would mean
+      # vision discovering its own video output as if it were a newly found camera.
+      path-prefix: ingest/
 
   # --- vision-api: server-push data plane (see docs/plans/done/REALTIME-PLAN.md §4) ---
   live:
@@ -719,6 +817,13 @@ vision:
       # parameter name costs a full timeout: MAVLink gives an autopilot no way to say "I don't have
       # that", so it simply says nothing.
       # request-timeout: 3s
+      # The parameter names a probe asks each vehicle for. Empty (default) means the verified list in
+      # MavlinkSettings.Onboarding.defaults() -- every name there was checked against live firmware,
+      # and it deliberately asks for both spellings of the renamed system id (ArduPilot 4.7 renamed
+      # SYSID_THISMAV to MAV_SYSID; docs/plans/active/FLEET-RADIO-PLAN.md F0). Setting this REPLACES
+      # that list outright rather than adding to it -- a short list is the way to cut probe time on a
+      # fleet whose firmware you already know, at the cost of readiness rows going UNKNOWN.
+      # parameters: [MAV_SYSID, SYSID_THISMAV, BATT_MONITOR]
     remediate:
       message-interval:
         # false (default): no MAV_CMD_SET_MESSAGE_INTERVAL is ever sent. true: every gateway asks
@@ -945,7 +1050,24 @@ vision:
     #   silence-window: 30s
     #   max-unclaimed-vehicles: 32
     #   close-join-timeout: 5s
-    #   ack-timeout: 2s
+    #   docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2a re-scoped ack-timeout from a single whole-command
+    #   wait to the per-attempt wait, and added command-retries as the retry budget on top of it: worst
+    #   case (command-retries + 1) * ack-timeout, so 3 attempts * 700ms = ~2.1s, inside the old 2s
+    #   single-wait budget. Only MavlinkFlightCommander's absolute-state commands retry (arm/disarm,
+    #   set-mode, aux-function, the rover Hold e-stop) -- a terminal COMMAND_ACK (e.g. DENIED) never
+    #   retries, only silence does. Both keys are LIVE: wave P4 (169f8665) added
+    #   VisionMavlinkProperties.commandRetries and rewired TelemetryWiring onto the canonical
+    #   settings-based MavlinkFlightCommander constructor, so production defaults are 700ms x 3
+    #   attempts and uncommenting either key below overrides for real.
+    #   ack-timeout: 700ms
+    #   command-retries: 2
+    #   MavlinkLinkStatusProvider's per-vehicle drop-rate severity thresholds and the promptness bound
+    #   this wave's own link-failure regression test holds a notification to (FLEET-RADIO-PLAN.md D7).
+    #   A connected vehicle's drop rate at/above drop-rate-warn-percent reports DEGRADED; at/above
+    #   drop-rate-alarm-percent it reports DOWN instead (alarm must be >= warn).
+    #   drop-rate-warn-percent: 5.0
+    #   drop-rate-alarm-percent: 20.0
+    #   link-failure-grace: 2s
     #   MavlinkHeartbeatScanner's poll/self-bind-timeout budget.
     #   scan:
     #     active-hub-poll-count: 5
@@ -960,3 +1082,36 @@ vision:
     #     default-position-rate-hz: 5.0
     #     default-failsafe-battery-percent: 15.0
     #     default-sysid: 1
+    #   MAVLINK-COMMANDS-PLAN.md P2: MavlinkStreamNegotiator's on-claim stream negotiation, driven by
+    #   MavlinkSettings.StreamNegotiation. On every claim (initial or silence-window re-election) the
+    #   gateway sends one MAV_CMD_REQUEST_MESSAGE(512) for AUTOPILOT_VERSION, then one
+    #   MAV_CMD_SET_MESSAGE_INTERVAL(511) per message below (param2 = the rate, in microseconds). This
+    #   has NO enable flag of its own by design (a real GCS always does this at connect) -- there is
+    #   nothing to uncomment to turn it off. UNSUPPORTED/DENIED/NO_ACK on any one message is logged and
+    #   otherwise ignored; it never fails the claim.
+    #   KNOWN GAP (see drone-link/mavlink/MODULE.md): unlike ack-timeout/command-retries above, there is
+    #   no VisionMavlinkProperties field for this at all, so the six ids/rate below cannot be overridden
+    #   from configuration yet -- but unlike command-retries' gap, this one is NOT dormant: TelemetryWiring
+    #   builds MavlinkSettings via the 8-arg constructor, which now always appends
+    #   StreamNegotiation.defaults() (mirroring MavlinkSettings.defaults()'s own literal), so production
+    #   gets exactly the defaults below the moment this module is rebuilt, with no wiring change required.
+    #   Interaction with the on-connect-message-request flag above (Onboarding#requestMessagesOnConnect,
+    #   Mechanism A): MAV_CMD_SET_MESSAGE_INTERVAL's COMMAND_ACK correlates only on (sysid, command id),
+    #   never on message id, so this negotiator's own interval chain and Mechanism A's on-connect chain
+    #   cannot both hold a live wait for the same peer at once. When that flag is on, this negotiator
+    #   skips its own interval chain entirely (Mechanism A already owns that job for that peer); its
+    #   AUTOPILOT_VERSION probe still runs regardless, since it uses a different correlator key.
+    #   stream-negotiation:
+    #     streams:
+    #       - message-id: 30    # ATTITUDE
+    #         interval: 250ms
+    #       - message-id: 33    # GLOBAL_POSITION_INT
+    #         interval: 250ms
+    #       - message-id: 74    # VFR_HUD
+    #         interval: 250ms
+    #       - message-id: 65    # RC_CHANNELS
+    #         interval: 250ms
+    #       - message-id: 24    # GPS_RAW_INT
+    #         interval: 250ms
+    #       - message-id: 147   # BATTERY_STATUS
+    #         interval: 250ms

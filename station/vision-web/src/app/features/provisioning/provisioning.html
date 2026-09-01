@@ -1,0 +1,165 @@
+<div class="page page--form">
+  <vision-page-bar
+    title="Provision Wi-Fi"
+    icon="chip"
+    hint="Connect a device over USB and send it Wi-Fi credentials directly — the open Improv Serial standard used by ESPHome/Nabu Casa. The device is never told this platform's own address; once it's on Wi-Fi it announces itself and shows up in the discovery inbox on its own."
+  />
+
+  @if (!facade.supported) {
+    <vision-empty
+      icon="alert"
+      title="Web Serial isn't available in this browser"
+      message="This page needs the Web Serial API, which only Chromium-family browsers (Chrome, Edge, Opera, Brave) support, and only over HTTPS or on localhost. Open this page in one of those browsers, or use the config-copy instructions in the setup wizard instead."
+    />
+  } @else {
+    <section class="card">
+      <header>
+        <h3>Device link</h3>
+        @switch (facade.session()) {
+          @case ('idle') {
+            <span class="chip">Not connected</span>
+          }
+          @case ('connecting') {
+            <span class="chip">Connecting…</span>
+          }
+          @case ('open') {
+            <span class="chip accent">Connected</span>
+          }
+          @case ('link-lost') {
+            <span class="chip danger">Disconnected</span>
+          }
+          @case ('request-failed') {
+            <span class="chip danger">Not connected</span>
+          }
+        }
+      </header>
+
+      @switch (facade.session()) {
+        @case ('idle') {
+          <p class="muted hint">
+            Plug the device into this computer over USB, then connect — the browser will ask you to
+            pick the serial port.
+          </p>
+          <div class="row">
+            <button type="button" class="btn" (click)="facade.connect()">Connect device</button>
+          </div>
+        }
+        @case ('connecting') {
+          <p class="muted hint">Waiting for the browser's device picker…</p>
+        }
+        @case ('request-failed') {
+          <vision-notice variant="danger" icon="alert">{{ facade.sessionError() }}</vision-notice>
+          <div class="row">
+            <button type="button" class="btn" (click)="facade.connect()">Try again</button>
+          </div>
+        }
+        @case ('link-lost') {
+          <vision-notice variant="warn" icon="alert">
+            The device disconnected — check the USB cable and reconnect.
+          </vision-notice>
+          <div class="row">
+            <button type="button" class="btn" (click)="facade.connect()">Reconnect</button>
+          </div>
+        }
+        @case ('open') {
+          @if (facade.awaitingFirstState() && !facade.handshakeTimedOut()) {
+            <p class="muted hint">Waiting for the device to respond…</p>
+          }
+          @if (facade.handshakeTimedOut() && facade.awaitingFirstState()) {
+            <vision-notice variant="warn" icon="alert">
+              No response yet — confirm the device is running Improv-capable firmware, or disconnect
+              and try a different port. Still listening.
+            </vision-notice>
+          }
+          @if (facade.deviceStateLabel(); as stateLabel) {
+            <div class="row">
+              <span
+                class="chip"
+                [class.ok]="facade.deviceStateTone() === 'ok'"
+                [class.warn]="facade.deviceStateTone() === 'warn'"
+                >{{ stateLabel }}</span
+              >
+            </div>
+          }
+          @if (facade.deviceErrorMessage(); as errorMessage) {
+            <vision-notice variant="danger" icon="alert">{{ errorMessage }}</vision-notice>
+          }
+          <div class="row">
+            <button type="button" class="btn secondary" (click)="facade.disconnect()">Disconnect</button>
+          </div>
+        }
+      }
+    </section>
+
+    @if (facade.session() === 'open' && !facade.awaitingFirstState()) {
+      @if (facade.provisioned()) {
+        <section class="card">
+          <vision-notice variant="ok" icon="check">Device provisioned — connected to Wi-Fi.</vision-notice>
+          @if (facade.redirectUrl(); as redirectUrl) {
+            <p>
+              The device offered its own address:
+              <a [href]="redirectUrl" target="_blank" rel="noopener noreferrer" class="mono">{{ redirectUrl }}</a>
+            </p>
+          }
+          <p class="muted hint">
+            No server address was ever typed into the device — once it finishes joining your network it
+            will announce itself, and the platform's discovery inbox picks it up from there.
+          </p>
+          <div class="row">
+            <button type="button" class="btn" (click)="facade.startOver()">Provision another device</button>
+          </div>
+        </section>
+      } @else {
+        <section class="card">
+          <h3>Wi-Fi credentials</h3>
+          <div class="field">
+            <label class="label" for="wifi-ssid">Network name (SSID)</label>
+            <input
+              id="wifi-ssid"
+              type="text"
+              name="ssid"
+              autocomplete="off"
+              class="field-md"
+              [ngModel]="facade.ssid()"
+              (ngModelChange)="onSsidInput($event)"
+              [disabled]="facade.sending()"
+            />
+          </div>
+          <div class="field">
+            <label class="label" for="wifi-password">Password</label>
+            <div class="row password-row">
+              <input
+                id="wifi-password"
+                [type]="facade.passwordVisible() ? 'text' : 'password'"
+                name="password"
+                autocomplete="off"
+                class="field-md"
+                [ngModel]="facade.password()"
+                (ngModelChange)="onPasswordInput($event)"
+                [disabled]="facade.sending()"
+              />
+              <button type="button" class="btn secondary small" (click)="facade.togglePasswordVisible()">
+                {{ facade.passwordVisible() ? 'Hide' : 'Show' }}
+              </button>
+            </div>
+            <p class="disabled-reason">Leave blank for an open network. Never saved — sent to the device and forgotten.</p>
+          </div>
+          <div class="row">
+            <button type="button" class="btn" [disabled]="!facade.canSend()" (click)="facade.send()">
+              {{ facade.sending() ? 'Sending…' : 'Send' }}
+            </button>
+          </div>
+          @if (facade.sending()) {
+            <p class="muted hint">Sending Wi-Fi credentials — do not unplug the device.</p>
+          }
+        </section>
+      }
+    }
+
+    <p class="muted hint what-next">
+      <strong>What happens next:</strong> once the device joins your Wi-Fi network, it announces itself
+      on the local network — no server address is ever typed into it, here or anywhere else. Open the
+      discovery inbox to add it once it shows up.
+    </p>
+  }
+</div>

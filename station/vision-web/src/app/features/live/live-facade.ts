@@ -1,7 +1,6 @@
 import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import type { BoxesMode, Transport } from '../../shared/player/player';
-import { DEFAULT_DECLUTTER_LEVEL } from '../../shared/player/detection-overlay-logic';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { SettingsStore } from '../../core/settings/settings-store';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
@@ -86,16 +85,14 @@ export class LiveFacade {
   });
   readonly live = computed(() => this.stream() !== undefined);
 
-  /** Per-tile declutter-level toggle (docs/main/CYCLES-PLAN.md §11 item 6) — defaults to
-   * {@link DEFAULT_DECLUTTER_LEVEL} ('priority'); burn-in no longer exists at all
-   * (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1), so there is nothing left to re-derive against a
-   * stream's own state. A plain `signal`, not the old `linkedSignal` over a derived `streamBurnedIn`
-   * primitive — see `CockpitFacade#boxesMode`'s identical simplification. Widened from a two-state
-   * toggle to four named declutter levels as of wave W4
-   * (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.6). This page has no FOLLOW-lock plumbing at
-   * all, so `<vision-player>`'s `lockedTrackId` input is simply never bound here — it stays its own
-   * default `0`, an honest "no lock known" rather than a fabricated one. */
-  readonly boxesMode = signal<BoxesMode>(DEFAULT_DECLUTTER_LEVEL);
+  /** The shared, persisted declutter level (docs/plans/active/CV-SETTINGS-PLAN.md wave W7, H12) —
+   * aliases `SettingsStore.declutterLevel` directly, the same instance `CockpitFacade`/`WallTile`
+   * read/write, replacing this page's own previously-unshared in-memory signal (see
+   * `CockpitFacade#boxesMode`'s identical simplification, and that field's own doc comment for the
+   * full rationale). This page has no FOLLOW-lock plumbing at all, so `<vision-player>`'s
+   * `lockedTrackId` input is simply never bound here — it stays its own default `0`, an honest "no
+   * lock known" rather than a fabricated one. */
+  readonly boxesMode = this.settings.declutterLevel;
 
   // --- Deliberately-stopped state (docs/plans/done/MVP2-PLAN.md §S, S-b) ---------------------------------
   // `explicitlyStopped` is this page's own Stop action; `hasBeenLive` tracks whether *this page
@@ -262,7 +259,10 @@ export class LiveFacade {
     }
     this.busy.set(true);
     try {
-      await this.fleet.start(device.id, this.settings.effective());
+      // No settings argument (wave W7, H2) — the server resolves the CV config from the profile
+      // hierarchy, never from a browser-local draft this app no longer keeps (see
+      // `CockpitFacade.start`'s identical change for the full rationale).
+      await this.fleet.start(device.id);
       this.explicitlyStopped.set(false); // a fresh attach — see `stopped`'s own doc comment
     } finally {
       this.busy.set(false);
@@ -285,17 +285,5 @@ export class LiveFacade {
 
   back(): Promise<boolean> {
     return this.router.navigate(['/assets']);
-  }
-
-  onConfidence(value: string): void {
-    this.settings.adjust({ confidenceThreshold: Number(value) });
-  }
-
-  onFps(value: string): void {
-    this.settings.adjust({ inferenceFps: Number(value) });
-  }
-
-  onModel(model: string): void {
-    this.settings.adjust({ model });
   }
 }

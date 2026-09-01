@@ -46,8 +46,13 @@ const MIN_MICROS = 1000;
 const CENTER_MICROS = 1500;
 const MAX_MICROS = 2000;
 
-/** Highest RC channel the domain accepts (`ControlBinding`'s own `[1,18]`). */
-const MAX_RC_CHANNEL = 18;
+/**
+ * Highest RC channel the domain accepts (`ControlBinding`'s own `[1,16]`). Narrowed from 18 by
+ * FLEET-RADIO R3/F17: ArduPilot reads only channels 1-16 from an `RC_CHANNELS_OVERRIDE`, so a
+ * binding on 17 or 18 could never reach a servo. Exported so the setup wizard's Advanced channel
+ * picker and the all-controls editor build the same list from one source.
+ */
+export const MAX_RC_CHANNEL = 16;
 
 /**
  * The channels worth offering: what the relay actually puts on the wire, straight from the served
@@ -355,16 +360,27 @@ export function parameterKindOf(catalog: ControlCatalog | undefined, action: Con
   return catalog?.actions.find((a) => a.name === action)?.parameter ?? 'NONE';
 }
 
+/**
+ * The pulse-width envelope one `CHANNEL` row's travel derives, in this file's own protocol
+ * constants — exported so a second consumer (the setup wizard's Advanced disclosure, wave X4) can
+ * show an operator the same derived µs {@link toChannelBinding} sends, without a second file
+ * restating 1000/1500/2000 as its own copy of the same protocol constants.
+ */
+export function microsFor(travel: ControlTravel): { readonly min: number; readonly center: number; readonly max: number } {
+  return { min: MIN_MICROS, center: travel === 'CENTERED' ? CENTER_MICROS : MIN_MICROS, max: MAX_MICROS };
+}
+
 function toChannelBinding(control: ControlDraft): ControlBinding {
+  const micros = microsFor(control.travel);
   return {
     source: control.source,
     kind: control.kind,
     function: control.function,
     sourceIndex: control.sourceIndex,
     rcChannel: control.rcChannel,
-    minMicros: MIN_MICROS,
-    centerMicros: control.travel === 'CENTERED' ? CENTER_MICROS : MIN_MICROS,
-    maxMicros: MAX_MICROS,
+    minMicros: micros.min,
+    centerMicros: micros.center,
+    maxMicros: micros.max,
     deadband: 0,
     reversed: control.reversed,
   };

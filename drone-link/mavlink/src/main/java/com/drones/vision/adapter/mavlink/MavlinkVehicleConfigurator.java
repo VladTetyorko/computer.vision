@@ -3,6 +3,7 @@ package com.drones.vision.adapter.mavlink;
 import com.drones.mavlink.CompId;
 import com.drones.mavlink.PeerId;
 import com.drones.mavlink.SysId;
+import com.drones.mavlink.VehicleClass;
 import com.drones.mavlink.service.CapabilityReport;
 import com.drones.mavlink.service.CapabilityService;
 import com.drones.mavlink.service.MessageIntervalService;
@@ -13,6 +14,7 @@ import com.drones.mavlink.session.HeartbeatInfo;
 import com.drones.mavlink.session.Peer;
 import com.drones.vision.flight.domain.model.MessageIntervalOutcome;
 import com.drones.vision.flight.domain.model.MessageObservation;
+import com.drones.vision.flight.domain.model.ParameterAliases;
 import com.drones.vision.flight.domain.model.ParameterReading;
 import com.drones.vision.flight.domain.model.ParameterWriteOutcome;
 import com.drones.vision.flight.domain.model.RemediationResultCode;
@@ -35,6 +37,7 @@ import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 /**
  * The MAVLink half of vehicle onboarding (docs/plans/active/DRONE-ONBOARDING-PLAN.md wave O4):
@@ -99,6 +102,18 @@ public final class MavlinkVehicleConfigurator implements VehicleConfigPort {
     /** @see #budget(Duration, int) */
     private static final Duration EXCHANGE_SLACK = Duration.ofSeconds(2);
 
+    /**
+     * How long to wait before retrying an exchange whose first send failed synchronously because
+     * {@code mavlink-core}'s {@code Correlator} rejected registration -- another exchange for the
+     * very same {@code (sysid, command)} key is already live. This is the {@code MAV_CMD_REQUEST_MESSAGE}
+     * / {@code MAV_CMD_SET_MESSAGE_INTERVAL} keys this class shares with {@link MavlinkStreamNegotiator},
+     * which fires on every claim and can genuinely still be mid-exchange with the same aircraft when
+     * an operator calls {@link #probe} or {@link #requestMessageInterval} (MAVLINK-COMMANDS-PLAN P2).
+     * Short and unconfigured on purpose: this is contention between two in-process collaborators
+     * sharing one correlator slot, not a network condition, so there is nothing to tune per deployment.
+     */
+    private static final Duration CORRELATOR_CONTENTION_BACKOFF = Duration.ofMillis(100);
+
     private final MavlinkTelemetrySource telemetrySource;
     private final MavlinkSettings settings;
 
@@ -153,8 +168,8 @@ public final class MavlinkVehicleConfigurator implements VehicleConfigPort {
             MessageIntervalService service = new MessageIntervalService(
                     new CommandService(lease.gateway().sink(), lease.gateway().correlator(),
                             settings.ackTimeout(), retries));
-            CommandService.CommandOutcome outcome = await(
-                    service.setMessageInterval(target.peerId(), messageId, interval),
+            CommandService.CommandOutcome outcome = awaitWithContentionRetry(
+                    () -> service.setMessageInterval(target.peerId(), messageId, interval),
                     budget(settings.ackTimeout(), retries));
             if (outcome == null) {
                 return new MessageIntervalOutcome(messageId, interval, RemediationResultCode.NO_ACK,
@@ -308,8 +323,8 @@ public final class MavlinkVehicleConfigurator implements VehicleConfigPort {
     private CapabilityReport requestCapabilities(MavlinkGateway gateway, LinkTarget target) {
         CapabilityService service = new CapabilityService(gateway.sink(), gateway.correlator(),
                 settings.onboarding().capabilityTimeout(), settings.onboarding().capabilityRetries());
-        CapabilityReport report = await(service.requestAutopilotVersion(target.peerId()),
-                budget(settings.onboarding().capabilityTimeout(), settings.onboarding().capabilityRetries()));
+        Duration budget = budget(settings.onboarding().capabilityTimeout(), settings.onboarding().capabilityRetries());
+        CapabilityReport report = awaitWithContentionRetry(() -> service.requestAutopilotVersion(target.peerId()), budget);
         return report == null ? noCapabilityReport() : report;
     }
 
@@ -325,15 +340,38 @@ public final class MavlinkVehicleConfigurator implements VehicleConfigPort {
                 .toList();
     }
 
+    /**
+     * Reads the configured parameter list, then re-asks under older spellings for whatever the first
+     * pass left unanswered (docs/plans/active/FLEET-RADIO-PLAN.md F0).
+     *
+     * <p>Two passes rather than one, because the two are not equally likely. A firmware carries
+     * exactly one spelling of a renamed parameter, so putting both in a single batch guarantees one
+     * entry nobody can answer — and since {@link ParameterService#readAll} fans out concurrently, one
+     * unanswerable entry holds the whole batch open for the full retry budget. Every probe of every
+     * vehicle would pay that, forever, once per rename. Asking the alternates only on miss inverts
+     * it: current firmware answers in pass one and never reaches pass two, and only a vehicle old
+     * enough to need the fallback waits for it.
+     */
     private List<ParameterReading> readInto(LinkLease lease, LinkTarget target, List<String> names) {
         if (names.isEmpty()) {
             return List.of();
         }
         ParameterService parameters = parameterService(lease);
-        // All in flight at once, deliberately: an absent name costs a full timeout (MAVLink gives an
-        // autopilot no way to say "no such parameter"), and batching would serialise those waits
-        // instead of overlapping them. Measured against ArduPilot 4.7, twenty concurrent
-        // PARAM_REQUEST_READs lose nothing -- every name that exists comes back.
+        List<ParameterReading> readings = new ArrayList<>(readBatch(parameters, target, names));
+        List<String> fallbacks = unansweredSpellings(names, readings);
+        if (!fallbacks.isEmpty()) {
+            readings.addAll(readBatch(parameters, target, fallbacks));
+        }
+        return readings.stream().sorted(Comparator.comparing(ParameterReading::name)).toList();
+    }
+
+    /**
+     * All in flight at once, deliberately: an absent name costs a full timeout (MAVLink gives an
+     * autopilot no way to say "no such parameter"), and batching would serialise those waits instead
+     * of overlapping them. Measured against ArduPilot 4.7, twenty concurrent PARAM_REQUEST_READs lose
+     * nothing -- every name that exists comes back.
+     */
+    private List<ParameterReading> readBatch(ParameterService parameters, LinkTarget target, List<String> names) {
         Map<String, ParameterOutcome> answered = await(parameters.readAll(target.peerId(), names),
                 budget(settings.onboarding().parameterTimeout(), settings.onboarding().parameterRetries()));
         if (answered == null) {
@@ -346,7 +384,21 @@ public final class MavlinkVehicleConfigurator implements VehicleConfigPort {
                 .filter(outcome -> Float.isFinite(outcome.value().value()))
                 .map(outcome -> new ParameterReading(outcome.value().name(), outcome.value().value(),
                         typeTagOf(outcome.value().type())))
-                .sorted(Comparator.comparing(ParameterReading::name))
+                .toList();
+    }
+
+    /**
+     * The other spellings of every requested name no reading yet accounts for; empty is the norm.
+     * Package-private as a test seam: this is the whole decision the two-pass read turns on, and the
+     * path it guards (a vehicle old enough to answer only the previous spelling) is one no SITL image
+     * this repo ships can produce.
+     */
+    static List<String> unansweredSpellings(List<String> requested, List<ParameterReading> readings) {
+        return requested.stream()
+                .filter(name -> readings.stream().noneMatch(r -> ParameterAliases.sameParameter(r.name(), name)))
+                .flatMap(name -> ParameterAliases.spellingsOf(name).stream())
+                .filter(spelling -> !requested.contains(spelling))
+                .distinct()
                 .toList();
     }
 
@@ -400,20 +452,20 @@ public final class MavlinkVehicleConfigurator implements VehicleConfigPort {
         return name.toString();
     }
 
-    private static String vehicleKind(int mavType) {
-        return switch (mavType) {
-            case 1 -> "fixed wing";
-            case 2 -> "quadcopter";
-            case 3 -> "coaxial helicopter";
-            case 4 -> "helicopter";
-            case 10 -> "ground rover";
-            case 11 -> "surface boat";
-            case 12 -> "submarine";
-            case 13 -> "hexacopter";
-            case 14 -> "octocopter";
-            case 15 -> "tricopter";
-            default -> null;
-        };
+    /**
+     * The shared {@link VehicleClass#label} for {@code mavType} — feeds {@link
+     * VehicleProfile#vehicleKind()}, the free-text field the probe persists. {@code null} only for
+     * a genuinely unrecognized number; a recognized-but-unsupported airframe or a non-vehicle
+     * instrument still gets its own real label (e.g. {@code "gimbal"}), never {@code null}, since
+     * "we know what's on this link and it isn't flyable" is different information than "we have no
+     * idea" (FLEET-RADIO R1, F1c). Package-private so {@code VehicleTaxonomyAgreementTest} can
+     * assert it against {@code MavlinkHeartbeatScanner}'s own vehicle-kind lookup directly — before
+     * this wave the two disagreed on the very same vehicles ({@code "fixed wing"} vs. {@code
+     * "fixed-wing"}, {@code "ground rover"} vs. {@code "rover"}, {@code "surface boat"} vs. {@code
+     * "boat"}); both now read {@link VehicleClass}, the one {@code MAV_TYPE} table.
+     */
+    static String vehicleKind(int mavType) {
+        return VehicleClass.label(mavType);
     }
 
     private Integer soleObservedSysid(MavlinkGateway gateway) {
@@ -600,6 +652,63 @@ public final class MavlinkVehicleConfigurator implements VehicleConfigPort {
         } catch (ExecutionException e) {
             LOG.log(System.Logger.Level.DEBUG, () -> "MAVLink onboarding exchange failed: " + e.getCause());
             return null;
+        }
+    }
+
+    /**
+     * Like {@link #await(java.util.concurrent.CompletableFuture, Duration)}, but for an exchange
+     * that shares its correlator key with {@link MavlinkStreamNegotiator} ({@code
+     * requestCapabilities}/{@code requestMessageInterval} — see {@link #CORRELATOR_CONTENTION_BACKOFF}).
+     * {@code exchange} is a supplier, not a future, because a retry must open a <b>fresh</b> exchange
+     * (a new send, a new registration) — replaying an already-failed future would just fail again.
+     *
+     * <p>Only the specific, honest, in-process contention case is retried: a first send that fails
+     * because the correlator's slot is momentarily held by another exchange from elsewhere in this
+     * module. A real reply, a real timeout against the aircraft, or any other fault is returned (or
+     * reported as {@code null}) exactly as the plain {@code await} already would — this exists so a
+     * caller gets a genuine wait against the aircraft, not an instant, misleading "no reply" the
+     * moment two local collaborators happen to want the same key at the same instant.
+     */
+    private static <T> T awaitWithContentionRetry(Supplier<java.util.concurrent.CompletableFuture<T>> exchange,
+                                                    Duration budget) {
+        Instant deadline = Instant.now().plus(budget);
+        while (true) {
+            Duration remaining = Duration.between(Instant.now(), deadline);
+            if (remaining.isNegative() || remaining.isZero()) {
+                return null;
+            }
+            java.util.concurrent.CompletableFuture<T> future = exchange.get();
+            try {
+                return future.get(remaining.toMillis(), TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                future.cancel(true);
+                return null;
+            } catch (TimeoutException e) {
+                future.cancel(true);
+                return null;
+            } catch (ExecutionException e) {
+                if (!(e.getCause() instanceof IllegalStateException)) {
+                    LOG.log(System.Logger.Level.DEBUG, () -> "MAVLink onboarding exchange failed: " + e.getCause());
+                    return null;
+                }
+                LOG.log(System.Logger.Level.DEBUG,
+                        "correlator slot busy (MavlinkStreamNegotiator likely mid-exchange with the same "
+                                + "aircraft) -- retrying after " + CORRELATOR_CONTENTION_BACKOFF);
+                sleepQuietly(minDuration(CORRELATOR_CONTENTION_BACKOFF, remaining));
+            }
+        }
+    }
+
+    private static Duration minDuration(Duration a, Duration b) {
+        return a.compareTo(b) <= 0 ? a : b;
+    }
+
+    private static void sleepQuietly(Duration duration) {
+        try {
+            Thread.sleep(duration.toMillis());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 

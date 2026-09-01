@@ -1,12 +1,9 @@
-<div class="page">
-  <vision-page-bar
-    title="Organization"
-    icon="building-org"
-    hint="Grants are limited to your own scope."
-    [count]="facade.barCount()"
-    [countNoun]="facade.barCountNoun()"
-  >
-    <div pageBarFilters class="segmented" role="tablist" aria-label="Organization sections">
+<div [class.page]="!embedded()">
+  <!-- `[class.page]` not a bare class — `embedded()` mounts inside `CrewPage`'s own `.page`
+       (WAREHOUSE-UX-PLAN.md §4 W7); a second nested `.page` would double its 24/32/64px padding. -->
+  <!-- Shared by both header shapes below — see `org-settings.ts`'s own `embedded` doc comment. -->
+  <ng-template #sectionTabsTpl>
+    <div class="segmented" role="tablist" aria-label="Organization sections">
       <button
         type="button"
         class="btn secondary small"
@@ -28,118 +25,152 @@
         Groups
       </button>
     </div>
-  </vision-page-bar>
+  </ng-template>
+  <ng-template #createButtonTpl>
+    @if (facade.tab() === 'users' && !facade.userFormOpen()) {
+      <button type="button" class="btn" (click)="facade.openUserForm()">Create user</button>
+    } @else if (facade.tab() === 'groups' && !facade.groupFormOpen()) {
+      <button type="button" class="btn" (click)="facade.openGroupForm()">Create group</button>
+    }
+  </ng-template>
+
+  @if (!embedded()) {
+    <vision-page-bar
+      title="Organization"
+      icon="building-org"
+      hint="Grants are limited to your own scope."
+      [count]="facade.barCount()"
+      [countNoun]="facade.barCountNoun()"
+    >
+      <ng-container pageBarFilters><ng-container *ngTemplateOutlet="sectionTabsTpl" /></ng-container>
+      <ng-container pageBarActions><ng-container *ngTemplateOutlet="createButtonTpl" /></ng-container>
+    </vision-page-bar>
+  } @else {
+    <div class="embedded-toolbar">
+      <ng-container *ngTemplateOutlet="sectionTabsTpl" />
+      <ng-container *ngTemplateOutlet="createButtonTpl" />
+    </div>
+  }
 
   @if (facade.tab() === 'users') {
-    <section class="card">
-      <!-- docs/plans/done/OPS-UX-PLAN.md §3 B4: this form creates the account directly, with a password the
-           admin themselves types in below — nothing is emailed or otherwise sent to the new user. "Invite"
-           implied a message going out that never does; a real invite flow (a one-time link the invitee sets
-           their own password from) is wave D, not built yet. -->
-      <header><h2>Create a user</h2></header>
-      <form class="org-form" (ngSubmit)="facade.submitUser()">
-        <div class="org-form-grid">
-          <label class="org-field">
-            <span class="label">Username</span>
-            <input
-              type="text"
-              name="username"
-              class="field-sm"
-              autocapitalize="none"
-              autocomplete="off"
-              [ngModel]="facade.newUsername()"
-              (ngModelChange)="facade.newUsername.set($event)"
-              [disabled]="facade.creatingUser()"
-              required
-            />
-          </label>
-          <label class="org-field">
-            <span class="label">Display name</span>
-            <input
-              type="text"
-              name="displayName"
-              class="field-md"
-              autocomplete="off"
-              [ngModel]="facade.newDisplayName()"
-              (ngModelChange)="facade.newDisplayName.set($event)"
-              [disabled]="facade.creatingUser()"
-              required
-            />
-          </label>
-          <label class="org-field">
-            <span class="label">Email</span>
-            <input
-              type="email"
-              name="email"
-              class="field-md"
-              autocapitalize="none"
-              autocomplete="off"
-              [ngModel]="facade.newEmail()"
-              (ngModelChange)="facade.newEmail.set($event)"
-              [disabled]="facade.creatingUser()"
-              required
-            />
-          </label>
-          <label class="org-field">
-            <span class="label">Temporary password</span>
-            <input
-              type="password"
-              name="password"
-              class="field-sm"
-              autocomplete="new-password"
-              [ngModel]="facade.newPassword()"
-              (ngModelChange)="facade.newPassword.set($event)"
-              [disabled]="facade.creatingUser()"
-              required
-            />
-          </label>
-          <label class="org-field">
-            <span class="label">Group</span>
-            <select
-              name="group"
-              class="field-sm"
-              [ngModel]="facade.newGroupId()"
-              (ngModelChange)="facade.newGroupId.set($event)"
-              [disabled]="facade.creatingUser()"
-            >
-              <option value="">No group</option>
-              @for (node of facade.flatGroups(); track node.group.id) {
-                <option [value]="node.group.id">{{ node.group.name }}</option>
-              }
-            </select>
-          </label>
-          <label class="org-field">
-            <span class="label">Role in group</span>
-            <select
-              name="role"
-              class="field-sm"
-              [ngModel]="facade.newRole()"
-              (ngModelChange)="facade.newRole.set($event)"
-              [disabled]="facade.creatingUser() || !facade.newGroupId()"
-            >
-              @for (option of facade.roleOptions; track option.value) {
-                <option [value]="option.value">{{ option.label }}</option>
-              }
-            </select>
-          </label>
-        </div>
-        <div class="org-form-actions">
-          <label class="org-check">
-            <input
-              type="checkbox"
-              name="enabled"
-              [ngModel]="facade.newEnabled()"
-              (ngModelChange)="facade.newEnabled.set($event)"
-              [disabled]="facade.creatingUser()"
-            />
-            <span>Can sign in immediately</span>
-          </label>
-          <button type="submit" class="btn" [disabled]="!facade.canSubmitUser()">
-            {{ facade.creatingUser() ? 'Creating…' : 'Create user' }}
-          </button>
-        </div>
-      </form>
-    </section>
+    @if (facade.userFormOpen()) {
+      <section class="card">
+        <!-- docs/plans/done/OPS-UX-PLAN.md §3 B4: this form creates the account directly, with a password the
+             admin themselves types in below — nothing is emailed or otherwise sent to the new user. "Invite"
+             implied a message going out that never does; a real invite flow (a one-time link the invitee sets
+             their own password from) is wave D, not built yet. -->
+        <header><h2>Create a user</h2></header>
+        <!-- O1 (docs/plans/active/OPERATOR-UX-6-PLAN.md): `Escape` bound on the form itself, bubbling from
+             whichever field has focus, closes the panel — same local-listener idiom as
+             `zones-panel.html`/`layer-manager.html`'s own inline-cancel bindings, not a document-level
+             listener (this panel is inline page content, not a floating overlay). -->
+        <form class="org-form" (ngSubmit)="facade.submitUser()" (keydown.escape)="facade.closeUserForm()">
+          <div class="org-form-grid">
+            <label class="org-field">
+              <span class="label">Username</span>
+              <input
+                type="text"
+                name="username"
+                class="field-sm"
+                autocapitalize="none"
+                autocomplete="off"
+                [ngModel]="facade.newUsername()"
+                (ngModelChange)="facade.newUsername.set($event)"
+                [disabled]="facade.creatingUser()"
+                required
+              />
+            </label>
+            <label class="org-field">
+              <span class="label">Display name</span>
+              <input
+                type="text"
+                name="displayName"
+                class="field-md"
+                autocomplete="off"
+                [ngModel]="facade.newDisplayName()"
+                (ngModelChange)="facade.newDisplayName.set($event)"
+                [disabled]="facade.creatingUser()"
+                required
+              />
+            </label>
+            <label class="org-field">
+              <span class="label">Email</span>
+              <input
+                type="email"
+                name="email"
+                class="field-md"
+                autocapitalize="none"
+                autocomplete="off"
+                [ngModel]="facade.newEmail()"
+                (ngModelChange)="facade.newEmail.set($event)"
+                [disabled]="facade.creatingUser()"
+                required
+              />
+            </label>
+            <label class="org-field">
+              <span class="label">Temporary password</span>
+              <input
+                type="password"
+                name="password"
+                class="field-sm"
+                autocomplete="new-password"
+                [ngModel]="facade.newPassword()"
+                (ngModelChange)="facade.newPassword.set($event)"
+                [disabled]="facade.creatingUser()"
+                required
+              />
+            </label>
+            <label class="org-field">
+              <span class="label">Group</span>
+              <select
+                name="group"
+                class="field-sm"
+                [ngModel]="facade.newGroupId()"
+                (ngModelChange)="facade.newGroupId.set($event)"
+                [disabled]="facade.creatingUser()"
+              >
+                <option value="">No group</option>
+                @for (node of facade.flatGroups(); track node.group.id) {
+                  <option [value]="node.group.id">{{ node.group.name }}</option>
+                }
+              </select>
+            </label>
+            <label class="org-field">
+              <span class="label">Role in group</span>
+              <select
+                name="role"
+                class="field-sm"
+                [ngModel]="facade.newRole()"
+                (ngModelChange)="facade.newRole.set($event)"
+                [disabled]="facade.creatingUser() || !facade.newGroupId()"
+              >
+                @for (option of facade.roleOptions; track option.value) {
+                  <option [value]="option.value">{{ option.label }}</option>
+                }
+              </select>
+            </label>
+          </div>
+          <div class="org-form-actions">
+            <label class="org-check">
+              <input
+                type="checkbox"
+                name="enabled"
+                [ngModel]="facade.newEnabled()"
+                (ngModelChange)="facade.newEnabled.set($event)"
+                [disabled]="facade.creatingUser()"
+              />
+              <span>Can sign in immediately</span>
+            </label>
+            <div class="org-form-buttons">
+              <button type="button" class="btn secondary" (click)="facade.closeUserForm()">Cancel</button>
+              <button type="submit" class="btn" [disabled]="!facade.canSubmitUser()">
+                {{ facade.creatingUser() ? 'Creating…' : 'Create user' }}
+              </button>
+            </div>
+          </div>
+        </form>
+      </section>
+    }
 
     <section class="card">
       <header>
@@ -149,7 +180,7 @@
       @if (!facade.org.loaded() && facade.org.loading()) {
         <p class="muted">Loading…</p>
       } @else if (facade.org.users().length === 0) {
-        <vision-empty title="No users yet" message="Invite your first teammate with the form above." />
+        <vision-empty title="No users yet" message="Add your first teammate with the Create user button above." />
       } @else {
         <ul class="org-list">
           @for (user of facade.org.users(); track user.userId) {
@@ -193,46 +224,51 @@
       }
     </section>
   } @else {
-    <section class="card">
-      <header><h2>Create a group</h2></header>
-      <form class="org-form" (ngSubmit)="facade.submitGroup()">
-        <div class="org-form-grid">
-          <label class="org-field">
-            <span class="label">Group name</span>
-            <input
-              type="text"
-              name="groupName"
-              class="field-md"
-              autocomplete="off"
-              [ngModel]="facade.newGroupName()"
-              (ngModelChange)="facade.newGroupName.set($event)"
-              [disabled]="facade.creatingGroup()"
-              required
-            />
-          </label>
-          <label class="org-field">
-            <span class="label">Parent group</span>
-            <select
-              name="parent"
-              class="field-sm"
-              [ngModel]="facade.newParentId()"
-              (ngModelChange)="facade.newParentId.set($event)"
-              [disabled]="facade.creatingGroup()"
-            >
-              <option value="">No parent (top level)</option>
-              @for (node of facade.flatGroups(); track node.group.id) {
-                <option [value]="node.group.id">{{ node.group.name }}</option>
-              }
-            </select>
-          </label>
-        </div>
-        <div class="org-form-actions">
-          <button type="submit" class="btn" [disabled]="!facade.canSubmitGroup()">
-            {{ facade.creatingGroup() ? 'Creating…' : 'Create group' }}
-          </button>
-        </div>
-      </form>
-    </section>
+    @if (facade.groupFormOpen()) {
+      <section class="card">
+        <header><h2>Create a group</h2></header>
+        <form class="org-form" (ngSubmit)="facade.submitGroup()" (keydown.escape)="facade.closeGroupForm()">
+          <div class="org-form-grid">
+            <label class="org-field">
+              <span class="label">Group name</span>
+              <input
+                type="text"
+                name="groupName"
+                class="field-md"
+                autocomplete="off"
+                [ngModel]="facade.newGroupName()"
+                (ngModelChange)="facade.newGroupName.set($event)"
+                [disabled]="facade.creatingGroup()"
+                required
+              />
+            </label>
+            <label class="org-field">
+              <span class="label">Parent group</span>
+              <select
+                name="parent"
+                class="field-sm"
+                [ngModel]="facade.newParentId()"
+                (ngModelChange)="facade.newParentId.set($event)"
+                [disabled]="facade.creatingGroup()"
+              >
+                <option value="">No parent (top level)</option>
+                @for (node of facade.flatGroups(); track node.group.id) {
+                  <option [value]="node.group.id">{{ node.group.name }}</option>
+                }
+              </select>
+            </label>
+          </div>
+          <div class="org-form-actions">
+            <div class="org-form-buttons">
+              <button type="button" class="btn secondary" (click)="facade.closeGroupForm()">Cancel</button>
+              <button type="submit" class="btn" [disabled]="!facade.canSubmitGroup()">
+                {{ facade.creatingGroup() ? 'Creating…' : 'Create group' }}
+              </button>
+            </div>
+          </div>
+        </form>
+      </section>
+    }
 
     <section class="card">
       <header>
@@ -242,7 +278,7 @@
       @if (!facade.org.loaded() && facade.org.loading()) {
         <p class="muted">Loading…</p>
       } @else if (facade.org.groups().length === 0) {
-        <vision-empty title="No groups yet" message="Create your first group with the form above." />
+        <vision-empty title="No groups yet" message="Create your first group with the Create group button above." />
       } @else {
         <ul class="org-tree">
           @for (node of facade.flatGroups(); track node.group.id) {

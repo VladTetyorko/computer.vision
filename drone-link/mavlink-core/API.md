@@ -12,7 +12,7 @@ so the boundary is visible in every import.
 
 | Level | Package | Built in | Depends on |
 |---|---|---|---|
-| L0 kernel | `com.drones.mavlink` (root) | W1 | nothing — `SysId`, `CompId`, `PeerId` only |
+| L0 kernel | `com.drones.mavlink` (root) | W1 (+ `VehicleClass`, FLEET-RADIO R1) | nothing — `SysId`, `CompId`, `PeerId`, `VehicleClass` |
 | L1 transport | `com.drones.mavlink.transport` | W1 | L0 |
 | L2 codec | `com.drones.mavlink.codec` | W1 | L0, L1 |
 | L3 session | `com.drones.mavlink.session` | W2 | L0, L1, L2 |
@@ -28,6 +28,16 @@ Enforced by ArchUnit in W1.
 compact constructors, and `PeerId(SysId system, CompId component)`. They live in the root package rather
 than under `session` because L2's `MavHeader` and `FrameSink` need them: a message's origin is a wire-level
 fact, not a session-level one.
+
+**L0 — `VehicleClass` (added additively, FLEET-RADIO R1, following the O2 precedent below of extending this
+frozen contract with new protocol-knowledge types rather than amending it).** `enum VehicleClass { COPTER,
+PLANE, ROVER, SUBMARINE, UNSUPPORTED_VEHICLE, NOT_A_VEHICLE, UNKNOWN }` — the project's one `HEARTBEAT.type`
+(`MAV_TYPE`) → family table, `static VehicleClass of(int mavType)` and `static String label(int mavType)`.
+Belongs at L0, not `service` or `config`, for the same reason `SysId`/`PeerId` do: it is a wire-level
+protocol fact (what kind of airframe a `MAV_TYPE` number denotes) usable by any level, not session or
+service state. Zero project dependencies, same constraint as the rest of this package — a context's own
+`VehicleKind` is a different, narrower enum translated from this one at the adapter boundary
+(`drone-link/mavlink`'s `FlightModes.vehicleKind`), never imported here.
 
 ---
 
@@ -118,10 +128,10 @@ Who is out there, what am I waiting for, what runs periodically.
 | `CorrelationKeys` | class | the one place a correlated reply's key is defined, for **both** directions. Request side: `forCommandAck(SysId,int)` · `forParamValue(SysId,String)` · `forAutopilotVersion(SysId)`; reply side: a package-local class→`MatchKey` table. Also `normalizeParamId(String)` · `paramDiscriminator(String)` |
 | `Correlator` | interface | `CompletableFuture<MavFrame> await(MatchKey, Duration)` · `void cancel(MatchKey)` |
 | `TxScheduler` | interface | `Handle repeat(String name, Duration period, Runnable)` · `Handle` has `void close()` |
-| `LinkHealth` | interface | `Health of(PeerId)`; `record Health(boolean connected, Instant lastHeard, long received, long lost, double dropRate)` |
+| `LinkHealth` | interface | `Health of(PeerId)`; `record Health(PeerId peerId, boolean connected, Instant lastHeard, long received, long lost, double dropRate)` (**`peerId` added FLEET-RADIO R4/D4** — see the note below the table) |
 | `RoutingFrameSink` | class | the `FrameSink` implementation that resolves a `PeerId`'s link via `PeerDirectory` and delegates to that link's `FrameWriter` (see L2's routing note) |
 | `MavlinkNode` | record | `SysId system, CompId component`; `static groundStation()` → **255 / 190** |
-| `MavlinkSession` | class | `MavlinkSession(MavlinkNode, MavlinkCoreSettings)` · `void addLink(MavlinkLink)` · `void removeLink(LinkId)` · `PeerDirectory peers()` · `Dispatcher dispatcher()` · `Correlator correlator()` · `FrameSink sink()` · `LinkHealth health()` · `void close()` |
+| `MavlinkSession` | class | `MavlinkSession(MavlinkNode, MavlinkCoreSettings)` · `void addLink(MavlinkLink)` · `void removeLink(LinkId)` · `PeerDirectory peers()` · `Dispatcher dispatcher()` · `Correlator correlator()` · `FrameSink sink()` · `LinkHealth health()` · `void onLinkFailure(BiConsumer<LinkId, IOException> listener)` (**added FLEET-RADIO R4/F7** — see the note below the table) · `void close()` |
 
 `MavlinkSession` is the composition root: it owns one reader thread per link, drives `FrameReader`, updates
 `PeerDirectory` and `LinkHealth` from every frame, offers each frame to `Correlator` and then to
@@ -154,6 +164,25 @@ Who is out there, what am I waiting for, what runs periodically.
   and NAT can move an address between packets from one system.
 - **`LinkHealth` drop rate** is expected-vs-received `seq` accounting per `(PeerId, LinkId)`, handling the
   8-bit wrap. The MAVLink spec defines no formula (plan §2.1); ours is documented, not standard.
+- **(FLEET-RADIO R4/D4, extending this frozen contract additively, following the same precedent R1's
+  `VehicleClass` used above) `LinkHealth.Health` gained `PeerId peerId` as its first field.** A caller
+  aggregating several peers' `Health` records (e.g. into a `Map<DeviceId, Health>`) previously had no way to
+  recover which peer a given record belonged to without threading the `PeerId` alongside it by hand — the
+  identity was always known at `of(PeerId)`'s call site and simply thrown away by the return type. This is a
+  genuine signature change, not a purely additive one; the module has exactly one production constructor
+  site (`DefaultLinkHealth.of`), and both call sites there were updated to pass the id through.
+- **(FLEET-RADIO R4/F7) `MavlinkSession.onLinkFailure(BiConsumer<LinkId, IOException> listener)` is new.**
+  Before this wave, a genuine `poll()` `IOException` on a link's reader thread was logged at WARNING and the
+  thread simply returned — nothing downstream was ever told the transport itself had failed, as distinct
+  from the far end merely going quiet (which is not a transport failure and correctly reports through
+  `LinkHealth`/`PeerDirectory` staleness instead). The listener **fires synchronously on the dying reader
+  thread and must not block or throw** (a throwing listener is caught and logged, not propagated) — the same
+  threading discipline `Dispatcher` handlers already live under. It **never fires for a shutdown-triggered
+  failure** (a poll unblocked by an intentional `close()`/`removeLink()` racing with a genuine socket error):
+  `LinkRuntime` checks its own pre-existing `running` flag, already flipped by `stop()` before the join,
+  rather than adding a second "are we shutting down" signal. It **never fires for a `RuntimeException`**
+  from frame processing either — that error means one frame misbehaved, not that the transport is gone, and
+  the reader loop continues to the next `poll()`. Default listener is a no-op, not `null`.
 
 ---
 

@@ -33,6 +33,9 @@ FRAMES = {
     'ch5hi':  rc(ch5=1900),
     'ch5lo':  rc(ch5=1100),
     'ch5mid': rc(ch5=1500),   # inside the hysteresis band -- must change nothing
+    # all-RELEASE: what the app sends when the operator lets go OR when its own
+    # input watchdog trips. The two are indistinguishable on the wire.
+    'rel':    rc(ch1=0, ch3=0),
 }
 
 out = sys.argv[1]

@@ -6,6 +6,19 @@
   display: block;
 }
 
+/* The `embedded` (Crew tab) header — a plain, non-sticky row standing in for `vision-page-bar` when
+   `CrewPage`'s own bar already carries the page title (docs/plans/active/WAREHOUSE-UX-PLAN.md §4 W7, see
+   `org-settings.ts`'s own `embedded` doc comment). `space-between` mirrors `vision-page-bar`'s own
+   layout — filters left, the Create button pinned right. */
+.embedded-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: var(--space-8) var(--space-16);
+  margin-bottom: var(--space-16);
+}
+
 /* ---- Forms ---------------------------------------------------------------- */
 
 .org-form {
@@ -47,6 +60,17 @@
 
 .org-form-actions .btn {
   min-height: 40px;
+}
+
+/* Cancel + submit as one group (O1, docs/plans/active/OPERATOR-UX-6-PLAN.md) — keeps
+   `.org-form-actions`'s own `justify-content: space-between` down to exactly two children
+   (this group, plus the "Can sign in immediately" checkbox on the Users form) so the two don't
+   spread across the row unevenly on a wide viewport. */
+.org-form-buttons {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex-wrap: wrap;
 }
 
 .org-check {

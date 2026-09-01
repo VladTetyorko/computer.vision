@@ -1,14 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
 import type {
   CvModel,
+  CvProfile,
   CvTracker,
   DetectionRate,
   DetectionResult,
+  EffectiveCvProfile,
   FrameTracking,
+  StreamConfigResponse,
   TrackingCapability,
   TrackStats,
 } from '../../core/api/models';
-import type { PipelineSettings } from '../../core/settings/settings-store';
 import { HIDDEN_CLASS_TRUTH } from '../../core/detections/detections-logic';
 import {
   CAPABILITY_LEVEL_OPTIONS,
@@ -22,6 +24,7 @@ import {
   buildFollowLockPatch,
   buildHotKnobPatch,
   buildModelChangePatch,
+  buildProfileRequestFromConfig,
   buildReleaseLockPatch,
   buildTrackingEnginePatch,
   buildTrackingModePatch,
@@ -32,7 +35,11 @@ import {
   chipCandidates,
   classesOnScreenCount,
   debounce,
+  defaultAssetProfileDescription,
+  defaultAssetProfileName,
+  describeProfileSource,
   detectionStatus,
+  effectiveProfileLine,
   engineOptionsForMode,
   filterLabelsByQuery,
   findModel,
@@ -50,10 +57,14 @@ import {
   perfHint,
   reArmHint,
   recentObservedLabels,
+  resolveCvConfig,
+  resolvedConfigFromProfile,
+  resolvedConfigFromStream,
   seedLabelFilterForModel,
   sortRecentFirst,
   stagedLabelSeed,
   submitLabelFilterButtonText,
+  type ResolvedCvConfig,
 } from './cv-control-panel-logic';
 
 function model(partial: Partial<CvModel> = {}): CvModel {
@@ -83,7 +94,7 @@ function detectionResult(labels: readonly string[]): DetectionResult {
   };
 }
 
-function settings(partial: Partial<PipelineSettings> = {}): PipelineSettings {
+function resolvedConfig(partial: Partial<ResolvedCvConfig> = {}): ResolvedCvConfig {
   return {
     confidenceThreshold: 0.4,
     inferenceFps: 5,
@@ -91,6 +102,50 @@ function settings(partial: Partial<PipelineSettings> = {}): PipelineSettings {
     labelFilter: [],
     labelDenyFilter: [],
     detectionEnabled: true,
+    tracking: { mode: 'OFF', engineId: '', capabilityLevel: 0, verifyEveryMillis: 2000, followFps: 15 },
+    ...partial,
+  };
+}
+
+function streamConfig(partial: Partial<StreamConfigResponse> = {}): StreamConfigResponse {
+  return {
+    model: 'yolo26n.pt',
+    confidenceThreshold: 0.4,
+    inferenceFps: 5,
+    labelFilter: [],
+    labelDenyFilter: [],
+    detectionEnabled: true,
+    tracking: {
+      mode: 'OFF',
+      engineId: '',
+      verifyEveryMillis: 2000,
+      followFps: 15,
+      redetectIouPercent: 30,
+      maxAgeFrames: 30,
+      minHits: 3,
+      capabilityLevel: 0,
+      reupdateMaxGapMillis: 5000,
+    },
+    ...partial,
+  };
+}
+
+function cvProfile(partial: Partial<CvProfile> = {}): CvProfile {
+  return {
+    id: 'profile-1',
+    name: 'Balanced',
+    description: 'Backend defaults.',
+    builtIn: true,
+    model: 'yolo26n.pt',
+    confidenceThreshold: 0.4,
+    inferenceFps: 5,
+    labelFilter: [],
+    labelDenyFilter: [],
+    detectionEnabled: false,
+    tracking: { mode: 'OFF', engineId: '', capabilityLevel: 0, verifyEveryMillis: 2000, followFps: 15 },
+    eventRule: { labels: [], confidenceThreshold: 0.4, consecutiveToOpen: 1, absenceToCloseSeconds: 30 },
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: '2026-01-01T00:00:00Z',
     ...partial,
   };
 }
@@ -263,7 +318,7 @@ describe('cv-control-panel-logic', () => {
   describe('buildHotKnobPatch / buildModelChangePatch', () => {
     it('carries confidence/fps/labelFilter/labelDenyFilter/detectionEnabled, never model', () => {
       const patch = buildHotKnobPatch(
-        settings({
+        resolvedConfig({
           confidenceThreshold: 0.6,
           inferenceFps: 8,
           labelFilter: ['person'],
@@ -283,6 +338,100 @@ describe('cv-control-panel-logic', () => {
 
     it('builds a model-only patch', () => {
       expect(buildModelChangePatch('yoloe-26s-seg-pf.pt')).toEqual({ model: 'yoloe-26s-seg-pf.pt' });
+    });
+  });
+
+  // --- Resolved CV config (docs/plans/active/CV-SETTINGS-PLAN.md §3, wave W7) -------------------
+
+  describe('resolvedConfigFromStream', () => {
+    it('reduces a live StreamConfigResponse to a ResolvedCvConfig, tracking included', () => {
+      const config = resolvedConfigFromStream(
+        streamConfig({ confidenceThreshold: 0.7, tracking: { ...streamConfig().tracking, mode: 'FOLLOW', followFps: 20 } }),
+      );
+      expect(config.confidenceThreshold).toBe(0.7);
+      expect(config.tracking).toEqual({ mode: 'FOLLOW', engineId: '', capabilityLevel: 0, verifyEveryMillis: 2000, followFps: 20 });
+      // Session-only tracking fields (redetectIouPercent/maxAgeFrames/minHits/reupdateMaxGapMillis)
+      // are not part of a profile's own tracking shape, and are dropped here.
+      expect(config.tracking).not.toHaveProperty('redetectIouPercent');
+    });
+  });
+
+  describe('resolvedConfigFromProfile', () => {
+    it('reduces a CvProfile to a ResolvedCvConfig', () => {
+      const config = resolvedConfigFromProfile(cvProfile({ model: 'orion12l.pt', inferenceFps: 10 }));
+      expect(config.model).toBe('orion12l.pt');
+      expect(config.inferenceFps).toBe(10);
+      expect(config.tracking).toEqual({ mode: 'OFF', engineId: '', capabilityLevel: 0, verifyEveryMillis: 2000, followFps: 15 });
+    });
+  });
+
+  describe('resolveCvConfig', () => {
+    it('prefers the running stream config when both are available', () => {
+      const config = resolveCvConfig(
+        streamConfig({ model: 'from-stream.pt' }),
+        { assetId: 'a-1', profile: cvProfile({ model: 'from-profile.pt' }), source: 'ASSET' },
+      );
+      expect(config?.model).toBe('from-stream.pt');
+    });
+
+    it('falls back to the effective profile before a stream exists', () => {
+      const config = resolveCvConfig(undefined, {
+        assetId: 'a-1',
+        profile: cvProfile({ model: 'from-profile.pt' }),
+        source: 'PLATFORM',
+      });
+      expect(config?.model).toBe('from-profile.pt');
+    });
+
+    it('is undefined when neither read is available — never a fabricated middle ground', () => {
+      expect(resolveCvConfig(undefined, undefined)).toBeUndefined();
+    });
+  });
+
+  describe('describeProfileSource', () => {
+    it('names every binding scope plus PLATFORM in lowercase', () => {
+      expect(describeProfileSource('ORGANIZATION')).toBe('organization');
+      expect(describeProfileSource('CATEGORY')).toBe('category');
+      expect(describeProfileSource('ASSET')).toBe('asset');
+      expect(describeProfileSource('PLATFORM')).toBe('platform');
+    });
+  });
+
+  describe('effectiveProfileLine', () => {
+    it('names the profile and its source once resolved', () => {
+      const effective: EffectiveCvProfile = { assetId: 'a-1', profile: cvProfile({ name: 'people-vehicles' }), source: 'ASSET' };
+      expect(effectiveProfileLine('a-1', effective)).toBe('From profile "people-vehicles" (asset)');
+    });
+
+    it('reads "Platform defaults" when the stream has no asset at all', () => {
+      expect(effectiveProfileLine(undefined, undefined)).toBe('Platform defaults');
+    });
+
+    it('reads "—" when an asset exists but the effective-profile read has not landed/failed', () => {
+      expect(effectiveProfileLine('a-1', undefined)).toBe('—');
+    });
+  });
+
+  describe('buildProfileRequestFromConfig / defaultAssetProfileName / defaultAssetProfileDescription', () => {
+    it('carries every resolved field plus the given name/description', () => {
+      const config = resolvedConfig({ model: 'orion12l.pt', labelFilter: ['person'] });
+      const request = buildProfileRequestFromConfig(config, 'My profile', 'A description');
+      expect(request).toEqual({
+        name: 'My profile',
+        description: 'A description',
+        model: 'orion12l.pt',
+        confidenceThreshold: 0.4,
+        inferenceFps: 5,
+        labelFilter: ['person'],
+        labelDenyFilter: [],
+        detectionEnabled: true,
+        tracking: config.tracking,
+      });
+    });
+
+    it('names a fresh asset profile honestly, after where it came from', () => {
+      expect(defaultAssetProfileName('Rover 1')).toContain('Rover 1');
+      expect(defaultAssetProfileDescription('Rover 1')).toContain('Rover 1');
     });
   });
 

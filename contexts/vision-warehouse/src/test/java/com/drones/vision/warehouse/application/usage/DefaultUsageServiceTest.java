@@ -5,12 +5,16 @@ import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.warehouse.domain.model.Custody;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GroupId;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.kernel.UsageOrigin;
+import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
@@ -46,17 +50,19 @@ class DefaultUsageServiceTest {
     }
 
     private static Asset assetIn(AssetId id, GroupId groupId, String displayName) {
-        return new Asset(id, displayName, new CategoryId("drone"), new Ownership(UserId.random(), groupId),
-                Set.of(DeviceId.random()), java.util.Map.of());
+        return Asset.register(id, displayName, new CategoryId("drone"), new Ownership(UserId.random(), groupId),
+                Set.of(DeviceId.random()), java.util.Map.of(), Identity.NONE, Custody.NONE);
     }
 
     private static AssetUsage usage(UsageId id, AssetId assetId, Instant startedAt, Instant endedAt) {
-        return new AssetUsage(id, assetId, startedAt, endedAt, null, null, 7);
+        return new AssetUsage(id, assetId, startedAt, endedAt, null, null, 7, null, UsagePhase.PREFLIGHT,
+                UsageOrigin.STREAM);
     }
 
     private static AssetUsage usageOfStream(AssetId assetId, StreamId streamId) {
         Instant start = Instant.parse("2026-08-04T10:00:00Z");
-        return new AssetUsage(UsageId.random(), assetId, start, start.plusSeconds(90), null, null, 7, streamId);
+        return new AssetUsage(UsageId.random(), assetId, start, start.plusSeconds(90), null, null, 7, streamId,
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
     }
 
     @Test

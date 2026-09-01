@@ -1,3 +1,4 @@
+import { hasFix } from '../../core/geo/geo-logic';
 import { DestroyRef, Injectable, type Signal, computed, effect, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
@@ -194,7 +195,7 @@ export class ReplayFacade {
   // --- Map -------------------------------------------------------------------------------------
 
   private readonly positionedSamples = computed(() =>
-    (this.timeline()?.telemetry ?? []).filter((s) => s.latitude !== undefined && s.longitude !== undefined),
+    (this.timeline()?.telemetry ?? []).filter(hasFix),
   );
   readonly fullTrail = computed(() => deriveTrail(this.timeline()?.telemetry ?? []));
   readonly trail = computed(() => trailPrefix(this.timeline()?.telemetry ?? [], this.atMs()));

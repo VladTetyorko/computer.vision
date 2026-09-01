@@ -3,6 +3,7 @@ package com.drones.vision.api.proxy;
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.api.exception.HlsUpstreamUnavailableException;
 import com.drones.vision.api.live.LiveHlsAndReaderVideoDemand;
+import com.drones.vision.api.security.StreamAccess;
 import com.drones.vision.api.support.VisionApiProperties;
 import com.drones.vision.kernel.StreamId;
 import jakarta.annotation.PreDestroy;
@@ -127,6 +128,19 @@ import java.util.Set;
  * itself sent (docs/plans/done/MVP2-PLAN.md V-a proxy audit), so mediamtx's
  * own {@code no-cache} on live LL-HLS playlists reaches the browser instead
  * of silently vanishing.
+ *
+ * <h2>Authorization (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R7, finding A2)</h2>
+ * This endpoint proxies an asset's live video bytes, so it is gated exactly like {@code
+ * StreamController}'s other stream reads: {@link #proxy} calls {@link
+ * StreamAccess#requireVisible(StreamId)} before ever contacting the upstream, so a caller whose
+ * {@code VisibilityScope} does not reach the stream's device gets {@code 404} (existence is never
+ * revealed — the same "out-of-scope read answers 404, not 403" rule every other scoped read in this
+ * module follows), not a proxied video feed. A {@code streamId} path segment that is not a valid
+ * {@link StreamId} (malformed, or simply not a UUID this app minted) is treated exactly like a
+ * stream {@link StreamAccess} has never heard of: nothing to check, so the request falls through to
+ * the ordinary upstream fetch — production {@code streamId} path segments are always {@link
+ * StreamId#value()}'s canonical UUID string (see {@code MediamtxUrls}), so this can only be reached
+ * by a request this app never generated itself, which mediamtx has nothing to serve at either way.
  */
 @RestController
 public class HlsProxyController {
@@ -151,18 +165,44 @@ public class HlsProxyController {
     private final LiveHlsAndReaderVideoDemand videoDemand;
 
     /**
+     * The scope gate this controller's own javadoc ("Authorization") describes — unlike {@link
+     * #videoDemand}, this is never optional: an authorization seam that could be silently skipped by
+     * construction would defeat the point of adding it, so every constructor below requires it.
+     */
+    private final StreamAccess streamAccess;
+
+    /**
      * Test seam (docs/plans/done/SCALE-100-PLAN.md §5 S7): defaults every tunable to {@link
      * VisionApiProperties.HlsProxy#defaults()} — today's exact pre-extraction values — so the
-     * existing test suite, which constructs this controller with only its upstream {@link URI},
-     * keeps compiling and behaving identically. Package-private: production wiring always supplies
-     * an explicit {@link VisionApiProperties.HlsProxy} via the constructor below.
+     * existing test suite, which constructs this controller with only its upstream {@link URI} and a
+     * {@link StreamAccess}, keeps compiling and behaving identically. Package-private: production
+     * wiring always supplies an explicit {@link VisionApiProperties.HlsProxy} via the constructor
+     * below.
      *
      * @param hlsUpstreamBase base HTTP URL of the mediamtx sidecar's HLS egress that this
      *                        controller forwards to, e.g. {@code http://localhost:18888};
      *                        never exposed to browsers
+     * @param streamAccess    the live-operations authority seam this controller's {@code proxy}
+     *                        handler gates every fetch behind
      */
-    HlsProxyController(URI hlsUpstreamBase) {
-        this(hlsUpstreamBase, VisionApiProperties.HlsProxy.defaults(), null);
+    HlsProxyController(URI hlsUpstreamBase, StreamAccess streamAccess) {
+        this(hlsUpstreamBase, VisionApiProperties.HlsProxy.defaults(), null, streamAccess);
+    }
+
+    /**
+     * The shape before {@code videoDemand} was added (docs/plans/done/STREAM-STATE-PLAN.md &sect;3.2),
+     * kept as a convenience constructor defaulting it to {@code null} — no demand stamping, i.e.
+     * exactly this controller's pre-S4 behaviour otherwise. Same N-1-arg idiom the domain records use
+     * for the collaborators that are genuinely optional; {@code streamAccess} is not one of them (see
+     * its own field javadoc), so every constructor requires it explicitly.
+     *
+     * @param hlsUpstreamBase base HTTP URL of the mediamtx sidecar's HLS egress
+     * @param hlsProxy        this controller's timeouts and bounds
+     * @param streamAccess    the live-operations authority seam this controller's {@code proxy}
+     *                        handler gates every fetch behind
+     */
+    public HlsProxyController(URI hlsUpstreamBase, VisionApiProperties.HlsProxy hlsProxy, StreamAccess streamAccess) {
+        this(hlsUpstreamBase, hlsProxy, null, streamAccess);
     }
 
     /**
@@ -177,24 +217,15 @@ public class HlsProxyController {
      *                        {@code vision-app}'s {@code PublishWiring#hlsProxySettings}
      * @param videoDemand     stamped on every proxied fetch so an HLS viewer counts as video demand;
      *                        {@code null} when no video-demand port is wired
+     * @param streamAccess    the live-operations authority seam this controller's {@code proxy}
+     *                        handler gates every fetch behind
      */
-    /**
-     * The shape before {@code videoDemand} was added (docs/plans/done/STREAM-STATE-PLAN.md &sect;3.2),
-     * kept as a convenience constructor defaulting it to {@code null} — no demand stamping, i.e.
-     * exactly this controller's pre-S4 behaviour. Same N-1-arg idiom the domain records use.
-     *
-     * @param hlsUpstreamBase base HTTP URL of the mediamtx sidecar's HLS egress
-     * @param hlsProxy        this controller's timeouts and bounds
-     */
-    public HlsProxyController(URI hlsUpstreamBase, VisionApiProperties.HlsProxy hlsProxy) {
-        this(hlsUpstreamBase, hlsProxy, null);
-    }
-
     @Autowired
     public HlsProxyController(URI hlsUpstreamBase, VisionApiProperties.HlsProxy hlsProxy,
-                               LiveHlsAndReaderVideoDemand videoDemand) {
+                               LiveHlsAndReaderVideoDemand videoDemand, StreamAccess streamAccess) {
         this.videoDemand = videoDemand; // nullable -- see the field's own javadoc
         this.hlsUpstreamBase = Objects.requireNonNull(hlsUpstreamBase, "hlsUpstreamBase must not be null");
+        this.streamAccess = Objects.requireNonNull(streamAccess, "streamAccess must not be null");
         Objects.requireNonNull(hlsProxy, "hlsProxy must not be null");
         this.requestTimeout = hlsProxy.requestTimeout();
         this.errorBodyPreviewMaxChars = hlsProxy.errorBodyPreviewMaxChars();
@@ -214,6 +245,7 @@ public class HlsProxyController {
 
     @GetMapping("/hls/{streamId}/**")
     public ResponseEntity<InputStreamResource> proxy(@PathVariable String streamId, HttpServletRequest request) {
+        requireVisibleStream(streamId);
         stampVideoDemand(streamId);
         URI upstreamUri = buildUpstreamUri(request);
         try {
@@ -274,6 +306,25 @@ public class HlsProxyController {
             LOG.log(System.Logger.Level.WARNING, () -> "Upstream returned " + status + " for " + path
                     + (bodyPreview.isEmpty() ? "" : ": " + bodyPreview));
         }
+    }
+
+    /**
+     * The scope gate this controller's class javadoc ("Authorization") describes: {@code 404}s
+     * before the upstream is ever contacted when {@code streamId} names a stream this caller's {@link
+     * StreamAccess#requireVisible(StreamId) VisibilityScope} may not reach. A {@code streamId} that
+     * does not parse as a {@link StreamId} is treated the same as one {@link StreamAccess} has never
+     * heard of (see class javadoc) — nothing to check, so this method simply returns rather than
+     * rejecting a request {@link #stampVideoDemand} and every existing wire-level test already
+     * tolerate.
+     */
+    private void requireVisibleStream(String streamId) {
+        StreamId id;
+        try {
+            id = StreamId.of(streamId);
+        } catch (IllegalArgumentException e) {
+            return;
+        }
+        streamAccess.requireVisible(id);
     }
 
     /**

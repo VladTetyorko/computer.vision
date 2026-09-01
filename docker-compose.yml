@@ -15,7 +15,11 @@
 #                 docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b -- there is no
 #                 in-memory fallback left to opt out into.
 #   mediamtx    - RTSP ingest / HLS egress sidecar (see ARCHITECTURE.md §6)
-#   cv-service  - Python gRPC YOLO inference service (docs/plans/done/MVP1-PLAN.md §C7)
+#   cv-service  - Python gRPC YOLO inference service (docs/plans/done/MVP1-PLAN.md §C7);
+#                 combined Inference+Training+Geolocation, always on. An opt-in split
+#                 (cv-service-inference / cv-service-training, "cv-split" profile) is also
+#                 defined below for docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6 --
+#                 see the split services' own comments.
 #   vision-app  - the Java application (this repo's root ./Dockerfile)
 #
 # Resilience demo (docs/plans/done/MVP1-PLAN.md §C9 exit criterion 4): the stack also
@@ -27,6 +31,32 @@
 # outage policy (docs/plans/done/MVP1-PLAN.md §C7 bullet 3) degrades to "video/telemetry
 # keep running, boxes just don't appear" -- exactly the same path a mid-demo
 # `docker compose stop cv-service` exercises (see README.md).
+
+# Shared cv-service build/healthcheck (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6):
+# one image serves three deployment shapes -- the default combined `cv-service` below, plus the
+# opt-in split `cv-service-inference`/`cv-service-training` (behind the "cv-split" profile,
+# see those services' own comments) -- so the build/healthcheck config lives here once, not
+# copy-pasted three times to drift apart.
+x-cv-service-build: &cv-service-build
+  build:
+    context: .
+    dockerfile: cv/cv-service/Dockerfile
+  image: vision-cv-service:latest
+x-cv-service-healthcheck: &cv-service-healthcheck
+  healthcheck:
+    # No grpcurl (or any grpc-health-checking tool) in the image -- a plain
+    # TCP connect from the stdlib is enough to prove the gRPC server is
+    # accepting connections, without adding a dependency just for this.
+    # Protocol-agnostic (doesn't care which servicers this process registers),
+    # so it's identical across all three deployment shapes above.
+    test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 50051), timeout=3).close()"]
+    interval: 5s
+    timeout: 3s
+    retries: 6
+    # Model load + Ultralytics' first-predict warmup (cv/cv-service/MODULE.md
+    # "First-request latency") happen at process start, before the gRPC
+    # server is serving -- generous enough for that even on a slow machine.
+    start_period: 45s
 
 services:
   postgres:
@@ -330,24 +360,52 @@ services:
 
   cv-service:
     # Context is the repo root: the Dockerfile copies /proto (shared contract) in addition to /cv-service.
-    build:
-      context: .
-      dockerfile: cv/cv-service/Dockerfile
+    # Runs the Dockerfile's default CMD (`python -m cv_service.grpc.server`, CV_SERVICE_ROLE
+    # unset -> Settings.role defaults to "all") -- Inference + Training + Geolocation in ONE
+    # process, byte-identical to this stack's behavior before R6. No profile: always part of
+    # plain `docker compose up`, unlike the split services below.
+    <<: [*cv-service-build, *cv-service-healthcheck]
     restart: unless-stopped
     ports:
       - "50051:50051"
-    healthcheck:
-      # No grpcurl (or any grpc-health-checking tool) in the image -- a plain
-      # TCP connect from the stdlib is enough to prove the gRPC server is
-      # accepting connections, without adding a dependency just for this.
-      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('localhost', 50051), timeout=3).close()"]
-      interval: 5s
-      timeout: 3s
-      retries: 6
-      # Model load + Ultralytics' first-predict warmup (cv/cv-service/MODULE.md
-      # "First-request latency") happen at process start, before the gRPC
-      # server is serving -- generous enough for that even on a slow machine.
-      start_period: 45s
+
+  # --- Split cv-service (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6, opt-in) -----
+  #
+  # Same image as cv-service above, differing only by CV_SERVICE_ROLE (cv_service/config.py) --
+  # so a long-running, GPU-hungry Training/Geolocation job can never share a process (or a GIL)
+  # with Inference's ~50ms-budget per-frame hot path. Gated behind the "cv-split" Compose
+  # profile: `cv-service` (no profile) always starts on a plain `docker compose up`, profile
+  # gating never turns it off -- so bringing up "cv-split" ALONGSIDE it would double-serve on
+  # container port 50051 (harmless at the Docker level, since each is a separate container and
+  # host ports differ below, but wasteful and not the point). Run split mode with:
+  #
+  #   docker compose up -d --scale cv-service=0 --profile cv-split cv-service-inference cv-service-training
+  #
+  # -- the same `--scale cv-service=0` idiom the resilience demo at the top of this file already
+  # uses, so `cv-service`'s own healthy-wait is skipped for vision-app too.
+  #
+  # NOT WIRED into vision-app below: VISION_CV_ENDPOINT is still single-target (cv/grpc's
+  # GrpcCvSettings/VisionCvProperties do not yet expose `inference.targets`/`training.target` --
+  # see cv/grpc/MODULE.md "Multi-target / R6 split" for the channel-building support that already
+  # exists and the config keys a future wave wires up). Until then, point VISION_CV_ENDPOINT at
+  # cv-service-inference:50051 to get live detection under a split deployment; Training/
+  # Geolocation RPCs need a separate client pointed at cv-service-training:50051 (today: only
+  # vision-app's own CvWiring, which isn't multi-target yet either).
+  cv-service-inference:
+    profiles: ["cv-split"]
+    <<: [*cv-service-build, *cv-service-healthcheck]
+    command: ["python", "-m", "cv_service.grpc.server_inference"]
+    restart: unless-stopped
+    ports:
+      - "50061:50051"
+
+  cv-service-training:
+    profiles: ["cv-split"]
+    <<: [*cv-service-build, *cv-service-healthcheck]
+    command: ["python", "-m", "cv_service.grpc.server_training"]
+    restart: unless-stopped
+    ports:
+      - "50062:50051"
 
   vision-app:
     build:

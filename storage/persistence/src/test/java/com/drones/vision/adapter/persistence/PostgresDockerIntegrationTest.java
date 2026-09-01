@@ -29,6 +29,11 @@ import com.drones.vision.kernel.Capability;
 import com.drones.vision.map.domain.model.CameraPose;
 import com.drones.vision.map.domain.model.CameraPoseSource;
 import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.learning.domain.model.CvModelRecord;
+import com.drones.vision.perception.domain.model.CvProfile;
+import com.drones.vision.perception.domain.model.CvProfileBinding;
+import com.drones.vision.perception.domain.model.CvProfileId;
+import com.drones.vision.perception.domain.model.BindingScope;
 import com.drones.vision.learning.domain.model.Dataset;
 import com.drones.vision.learning.domain.model.DatasetId;
 import com.drones.vision.learning.domain.model.DatasetStatus;
@@ -38,8 +43,10 @@ import com.drones.vision.perception.domain.model.DetectionEventId;
 import com.drones.vision.perception.domain.model.DetectionEventState;
 import com.drones.vision.perception.domain.model.DetectionQuery;
 import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.warehouse.domain.model.Custody;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.warehouse.domain.model.DeviceCategory;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.FlightState;
 import com.drones.vision.kernel.GeoPosition;
@@ -57,6 +64,10 @@ import com.drones.vision.map.domain.model.LayerGrant;
 import com.drones.vision.map.domain.model.LayerId;
 import com.drones.vision.map.domain.model.LayerKind;
 import com.drones.vision.kernel.LifecycleState;
+import com.drones.vision.warehouse.domain.model.MaintenanceId;
+import com.drones.vision.warehouse.domain.model.MaintenanceKind;
+import com.drones.vision.warehouse.domain.model.MaintenanceRecord;
+import com.drones.vision.warehouse.domain.port.MaintenanceRepositoryPort;
 import com.drones.vision.map.domain.model.MapLayer;
 import com.drones.vision.map.domain.model.Mark;
 import com.drones.vision.map.domain.model.MarkId;
@@ -67,6 +78,17 @@ import com.drones.vision.identity.domain.model.Membership;
 import com.drones.vision.flight.domain.model.MessageObservation;
 import com.drones.vision.flight.domain.model.TrackCorrection;
 import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.perception.domain.model.TrackingConfig;
+import com.drones.vision.perception.domain.model.EventRuleConfig;
+import com.drones.vision.learning.domain.model.ModelStatus;
+import com.drones.vision.learning.domain.model.ModelTaskType;
+import com.drones.vision.learning.domain.model.ModelRuntime;
+import com.drones.vision.learning.domain.model.ModelMetrics;
+import com.drones.vision.learning.domain.model.ModelProvenance;
+import com.drones.vision.learning.domain.model.MetricsKind;
+import com.drones.vision.learning.domain.model.JobState;
+import com.drones.vision.learning.domain.model.TrainingRunId;
+import com.drones.vision.learning.domain.model.TrainingRunRecord;
 import com.drones.vision.flight.domain.model.ParameterReading;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.platform.AuditAction;
@@ -91,6 +113,7 @@ import com.drones.vision.learning.domain.model.TrainingSample;
 import com.drones.vision.learning.domain.model.TrainingSampleId;
 import com.drones.vision.kernel.UsageId;
 import com.drones.vision.warehouse.domain.model.UsagePhase;
+import com.drones.vision.kernel.UsageOrigin;
 import com.drones.vision.identity.domain.model.User;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.flight.domain.model.VehicleProfile;
@@ -105,6 +128,9 @@ import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import com.drones.vision.map.domain.port.CameraPoseRepositoryPort;
 import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
 import com.drones.vision.learning.domain.port.DatasetRepositoryPort;
+import com.drones.vision.perception.domain.port.CvProfileRepositoryPort;
+import com.drones.vision.learning.domain.port.CvModelRepositoryPort;
+import com.drones.vision.learning.domain.port.TrainingRunRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
@@ -122,6 +148,13 @@ import com.drones.vision.learning.domain.port.TrainingSampleRepositoryPort;
 import com.drones.vision.identity.domain.port.UserRepositoryPort;
 import com.drones.vision.flight.domain.port.VehicleProfileRepositoryPort;
 
+// docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §11, Z2c (V31__discovery_inbox.sql)
+import com.drones.vision.warehouse.domain.model.CandidateStatus;
+import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
+import com.drones.vision.warehouse.domain.model.DiscoveryCandidate;
+import com.drones.vision.warehouse.domain.model.DiscoveryCandidateId;
+import com.drones.vision.warehouse.domain.port.DiscoveryCandidateRepositoryPort;
+
 import com.drones.vision.adapter.persistence.config.ClosingDatasourceConnectionProvider;
 import com.drones.vision.adapter.persistence.config.PersistencePoolSettings;
 import com.drones.vision.adapter.persistence.config.PersistenceUnit;
@@ -135,15 +168,20 @@ import com.drones.vision.adapter.persistence.repository.JpaAssignmentRepository;
 import com.drones.vision.adapter.persistence.repository.JpaAuditTrail;
 import com.drones.vision.adapter.persistence.repository.JpaCameraPoseRepository;
 import com.drones.vision.adapter.persistence.repository.JpaCategoryRepository;
+import com.drones.vision.adapter.persistence.repository.JpaCvModelRepository;
+import com.drones.vision.adapter.persistence.repository.JpaCvProfileRepository;
+import com.drones.vision.adapter.persistence.repository.JpaTrainingRunRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDatasetRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDbAuditLogRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDetectionEventRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDetectionRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDeviceRepository;
+import com.drones.vision.adapter.persistence.repository.JpaDiscoveryCandidateRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDrawingRepository;
 import com.drones.vision.adapter.persistence.repository.JpaFeatureRequirementRepository;
 import com.drones.vision.adapter.persistence.repository.JpaGeofenceRepository;
 import com.drones.vision.adapter.persistence.repository.JpaGroupRepository;
+import com.drones.vision.adapter.persistence.repository.JpaMaintenanceRepository;
 import com.drones.vision.adapter.persistence.repository.JpaMapLayerRepository;
 import com.drones.vision.adapter.persistence.repository.JpaMarkRepository;
 import com.drones.vision.adapter.persistence.repository.JpaSampleImageStore;
@@ -219,21 +257,57 @@ class PostgresDockerIntegrationTest {
     private static final Instant NOW = Instant.now().truncatedTo(ChronoUnit.MILLIS);
 
     /**
+     * {@link Asset#register} stamps {@code createdAt}/{@code updatedAt} with an internal, untestable
+     * {@code Instant.now()} — unlike every other timestamp in this file, the test cannot substitute
+     * the millisecond-truncated {@link #NOW} for it. Compare with both sides truncated to milliseconds
+     * for the same reason {@link #NOW} exists: a raw {@code assertEquals(Asset, Asset)} is flaky
+     * because Postgres's {@code TIMESTAMPTZ} keeps only microsecond precision and rounds — not
+     * truncates — on the way in, so e.g. {@code .xxx614510} can come back as {@code .xxx615000}.
+     */
+    private static void assertAssetRoundTrips(Asset expected, Asset actual) {
+        assertEquals(millisTruncated(expected), millisTruncated(actual));
+    }
+
+    private static Asset millisTruncated(Asset asset) {
+        return new Asset(asset.id(), asset.displayName(), asset.category(), asset.ownership(), asset.devices(),
+                asset.attributes(), asset.state(), asset.identity(), asset.custody(), asset.inventoryState(),
+                asset.createdAt().truncatedTo(ChronoUnit.MILLIS), asset.updatedAt().truncatedTo(ChronoUnit.MILLIS));
+    }
+
+    /**
      * The control-plane / configuration tables {@code V21__db_audit_log.sql} attaches {@code
      * trg_audit_*} to — kept here, not just in the migration's own header, so {@link
      * DbAuditLogCoverageTests} fails loudly the moment a future migration adds a table and
      * nobody consciously classifies it. Mirrors that migration's "Included" list, plus {@code
      * camera_poses} added by {@code V22__fixed_camera_geo.sql} (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md
-     * decision D4 — a camera's pose is control-plane configuration, not telemetry) and {@code
+     * decision D4 — a camera's pose is control-plane configuration, not telemetry), {@code
      * control_profiles} added by {@code V24__control_profiles.sql}
      * (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md wave C4 — a saved layout decides what a switch
-     * does to an aircraft, which is control-plane configuration by any reading).
+     * does to an aircraft, which is control-plane configuration by any reading), and {@code
+     * maintenance_records}/{@code asset_notes} added by {@code V28__asset_inventory.sql}
+     * (docs/plans/active/WAREHOUSE-UX-PLAN.md D7 — grounding/inspection history and crew notes are
+     * operator-authored, low-volume, accountability-relevant records, not machine-output telemetry),
+     * and {@code cv_profiles}/{@code cv_profile_bindings}/{@code cv_models}/{@code cv_training_runs}
+     * added by {@code V29__cv_profiles.sql}/{@code V30__cv_model_registry.sql}
+     * (docs/plans/active/CV-SETTINGS-PLAN.md, CV-SETTINGS wave W3) — canManageOrg/canAdminister-gated
+     * catalogue and profile governance is the same control-plane accountability character as {@code
+     * control_profiles}/{@code datasets}; {@code cv_profile_bindings} is a join table classified the
+     * same way {@code pilot_assignments}/{@code map_layer_grants} already are (a routing/security
+     * decision, not bulk collection data); {@code cv_training_runs} updates more often than most
+     * audited tables (roughly once per epoch) but at a training-job's bounded volume, not the
+     * per-frame/per-sample character of the excluded set below — see that migration's own header;
+     * and {@code discovery_candidates} added by {@code V31__discovery_inbox.sql} (docs/plans/active/
+     * ZERO-CONFIG-ONBOARDING-CONTEXT.md §11, Z2c) — "who dismissed/registered this candidate, and
+     * when" is control-plane accountability, and write volume is sweep-driven (see that migration's
+     * own header).
      */
     private static final Set<String> AUDITED_TABLES = Set.of(
             "categories", "devices", "device_capabilities", "assets", "asset_devices",
             "asset_usages", "geofence_zones", "groups", "users", "pilot_assignments",
             "marks", "datasets", "map_layers", "map_layer_grants", "map_drawings",
-            "vehicle_profiles", "feature_requirements", "camera_poses", "control_profiles");
+            "vehicle_profiles", "feature_requirements", "camera_poses", "control_profiles",
+            "maintenance_records", "asset_notes", "cv_profiles", "cv_profile_bindings",
+            "cv_models", "cv_training_runs", "discovery_candidates");
 
     /**
      * Every other base table in the schema as of V22 — high-volume append-only event tables, the
@@ -291,7 +365,7 @@ class PostgresDockerIntegrationTest {
         @Test
         void savedTopLevelCategoryRoundTrips() {
             DeviceCategory category = new DeviceCategory(new CategoryId("cat-toplevel"), "Top Level", null,
-                    List.of("hint-a", "hint-b"));
+                    List.of("hint-a", "hint-b"), true);
 
             repository.save(category);
 
@@ -302,10 +376,11 @@ class PostgresDockerIntegrationTest {
 
         @Test
         void savedChildCategoryRoundTripsWithParent() {
-            DeviceCategory parent = new DeviceCategory(new CategoryId("cat-parent"), "Parent", null, List.of());
+            DeviceCategory parent = new DeviceCategory(new CategoryId("cat-parent"), "Parent", null, List.of(),
+                    true);
             repository.save(parent);
             DeviceCategory child = new DeviceCategory(new CategoryId("cat-child"), "Child", parent.id(),
-                    List.of("hint"));
+                    List.of("hint"), true);
             repository.save(child);
 
             Optional<DeviceCategory> found = repository.findById(child.id());
@@ -316,8 +391,8 @@ class PostgresDockerIntegrationTest {
         @Test
         void saveIsAnUpsert() {
             CategoryId id = new CategoryId("cat-upsert");
-            repository.save(new DeviceCategory(id, "Original Name", null, List.of("a")));
-            repository.save(new DeviceCategory(id, "Renamed", null, List.of("a", "b")));
+            repository.save(new DeviceCategory(id, "Original Name", null, List.of("a"), true));
+            repository.save(new DeviceCategory(id, "Renamed", null, List.of("a", "b"), true));
 
             Optional<DeviceCategory> found = repository.findById(id);
             assertTrue(found.isPresent());
@@ -327,7 +402,8 @@ class PostgresDockerIntegrationTest {
 
         @Test
         void findAllIncludesSavedCategory() {
-            DeviceCategory category = new DeviceCategory(new CategoryId("cat-findall"), "Find All", null, List.of());
+            DeviceCategory category = new DeviceCategory(new CategoryId("cat-findall"), "Find All", null, List.of(),
+                    true);
             repository.save(category);
 
             List<DeviceCategory> all = repository.findAll();
@@ -365,13 +441,30 @@ class PostgresDockerIntegrationTest {
                     new StreamDescriptor("sim", URI.create("sim://x"), Map.of()));
             repository.save(original);
             Device renamed = original.withDetails("renamed", Set.of(Capability.VIDEO, Capability.AUDIO),
-                    original.stream());
+                    original.stream(), original.origin());
             repository.save(renamed);
 
             Optional<Device> found = repository.findById(id);
             assertTrue(found.isPresent());
             assertEquals("renamed", found.get().name());
             assertEquals(Set.of(Capability.VIDEO, Capability.AUDIO), found.get().capabilities());
+        }
+
+        @Test
+        void savedDeviceRoundTripsOriginAndDefaultsExistingCallersToLive() {
+            Device live = new Device(DeviceId.random(), "camera-live", Set.of(Capability.VIDEO),
+                    new StreamDescriptor("rtsp", URI.create("rtsp://example/live"), Map.of()));
+            Device simulated = new Device(DeviceId.random(), "camera-sim", Set.of(Capability.VIDEO),
+                    new StreamDescriptor("sim", URI.create("sim://cam"), Map.of()),
+                    LifecycleState.ACTIVE, com.drones.vision.kernel.DeviceOrigin.SIMULATED);
+
+            repository.save(live);
+            repository.save(simulated);
+
+            assertEquals(com.drones.vision.kernel.DeviceOrigin.LIVE,
+                    repository.findById(live.id()).orElseThrow().origin());
+            assertEquals(com.drones.vision.kernel.DeviceOrigin.SIMULATED,
+                    repository.findById(simulated.id()).orElseThrow().origin());
         }
 
         @Test
@@ -415,14 +508,14 @@ class PostgresDockerIntegrationTest {
             deviceRepository.save(new Device(deviceId, "asset-device", Set.of(Capability.VIDEO),
                     new StreamDescriptor("sim", URI.create("sim://asset-device"), Map.of())));
             Ownership ownership = new Ownership(UserId.random(), GroupId.random());
-            Asset asset = new Asset(AssetId.random(), "my drone", new CategoryId("drone"), ownership,
-                    Set.of(deviceId), Map.of("weight-kg", "1.2"));
+            Asset asset = Asset.register(AssetId.random(), "my drone", new CategoryId("drone"), ownership,
+                    Set.of(deviceId), Map.of("weight-kg", "1.2"), Identity.NONE, Custody.NONE);
 
             repository.save(asset);
 
             Optional<Asset> found = repository.findById(asset.id());
             assertTrue(found.isPresent());
-            assertEquals(asset, found.get());
+            assertAssetRoundTrips(asset, found.get());
         }
 
         @Test
@@ -430,8 +523,8 @@ class PostgresDockerIntegrationTest {
             AssetId id = AssetId.random();
             DeviceId deviceId = DeviceId.random();
             Ownership ownership = new Ownership(UserId.random(), GroupId.random());
-            Asset original = new Asset(id, "original", new CategoryId("drone"), ownership, Set.of(deviceId),
-                    Map.of());
+            Asset original = Asset.register(id, "original", new CategoryId("drone"), ownership, Set.of(deviceId),
+                    Map.of(), Identity.NONE, Custody.NONE);
             repository.save(original);
 
             Asset deactivated = original.withState(LifecycleState.DEACTIVATED);
@@ -446,8 +539,8 @@ class PostgresDockerIntegrationTest {
         void findByDeviceIdLocatesOwningAsset() {
             DeviceId deviceId = DeviceId.random();
             Ownership ownership = new Ownership(UserId.random(), GroupId.random());
-            Asset asset = new Asset(AssetId.random(), "device-owner", new CategoryId("drone"), ownership,
-                    Set.of(deviceId), Map.of());
+            Asset asset = Asset.register(AssetId.random(), "device-owner", new CategoryId("drone"), ownership,
+                    Set.of(deviceId), Map.of(), Identity.NONE, Custody.NONE);
             repository.save(asset);
 
             Optional<Asset> found = repository.findByDeviceId(deviceId);
@@ -463,8 +556,8 @@ class PostgresDockerIntegrationTest {
         @Test
         void deleteByIdIsIdempotent() {
             Ownership ownership = new Ownership(UserId.random(), GroupId.random());
-            Asset asset = new Asset(AssetId.random(), "to-delete", new CategoryId("drone"), ownership,
-                    Set.of(DeviceId.random()), Map.of());
+            Asset asset = Asset.register(AssetId.random(), "to-delete", new CategoryId("drone"), ownership,
+                    Set.of(DeviceId.random()), Map.of(), Identity.NONE, Custody.NONE);
             repository.save(asset);
 
             repository.deleteById(asset.id());
@@ -477,8 +570,8 @@ class PostgresDockerIntegrationTest {
         @Test
         void findAllIncludesSavedAsset() {
             Ownership ownership = new Ownership(UserId.random(), GroupId.random());
-            Asset asset = new Asset(AssetId.random(), "findall-asset", new CategoryId("drone"), ownership,
-                    Set.of(DeviceId.random()), Map.of());
+            Asset asset = Asset.register(AssetId.random(), "findall-asset", new CategoryId("drone"), ownership,
+                    Set.of(DeviceId.random()), Map.of(), Identity.NONE, Custody.NONE);
             repository.save(asset);
 
             List<Asset> all = repository.findAll();
@@ -498,7 +591,8 @@ class PostgresDockerIntegrationTest {
 
         @Test
         void savedOpenUsageWithNoPositionsYetRoundTrips() {
-            AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, null, null, null, 0);
+            AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, null, null, null, 0, null,
+                    UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
 
             repository.save(usage);
 
@@ -512,7 +606,7 @@ class PostgresDockerIntegrationTest {
             GeoPosition start = new GeoPosition(50.45, 30.52, 120.0);
             GeoPosition last = new GeoPosition(50.46, 30.53, null);
             AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW,
-                    NOW.plusSeconds(60), start, last, 42);
+                    NOW.plusSeconds(60), start, last, 42, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
 
             repository.save(usage);
 
@@ -523,7 +617,8 @@ class PostgresDockerIntegrationTest {
 
         @Test
         void savedUsageWithNoStreamIdRoundTripsAsNull() {
-            AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, null, null, null, 0);
+            AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, null, null, null, 0, null,
+                    UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
 
             repository.save(usage);
 
@@ -536,7 +631,8 @@ class PostgresDockerIntegrationTest {
         void savedUsageWithAStreamIdRoundTrips() {
             StreamId streamId = StreamId.random();
             AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, NOW.plusSeconds(60),
-                    new GeoPosition(1.0, 2.0, null), new GeoPosition(3.0, 4.0, null), 7, streamId);
+                    new GeoPosition(1.0, 2.0, null), new GeoPosition(3.0, 4.0, null), 7, streamId,
+                    UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
 
             repository.save(usage);
 
@@ -551,7 +647,8 @@ class PostgresDockerIntegrationTest {
             UsageId id = UsageId.random();
             AssetId assetId = AssetId.random();
             StreamId streamId = StreamId.random();
-            AssetUsage open = new AssetUsage(id, assetId, NOW, null, null, null, 0, streamId);
+            AssetUsage open = new AssetUsage(id, assetId, NOW, null, null, null, 0, streamId, UsagePhase.PREFLIGHT,
+                    UsageOrigin.STREAM);
             repository.save(open);
 
             AssetUsage closed = open.withPositions(new GeoPosition(1.0, 2.0, null), new GeoPosition(3.0, 4.0, null))
@@ -568,11 +665,12 @@ class PostgresDockerIntegrationTest {
         @Test
         void findRecentByAssetReturnsNewestFirstBoundedByLimit() {
             AssetId assetId = AssetId.random();
-            AssetUsage oldest = new AssetUsage(UsageId.random(), assetId, NOW, NOW.plusSeconds(1), null, null, 0);
+            AssetUsage oldest = new AssetUsage(UsageId.random(), assetId, NOW, NOW.plusSeconds(1), null, null, 0,
+                    null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
             AssetUsage middle = new AssetUsage(UsageId.random(), assetId, NOW.plusSeconds(10),
-                    NOW.plusSeconds(11), null, null, 0);
+                    NOW.plusSeconds(11), null, null, 0, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
             AssetUsage newest = new AssetUsage(UsageId.random(), assetId, NOW.plusSeconds(20),
-                    NOW.plusSeconds(21), null, null, 0);
+                    NOW.plusSeconds(21), null, null, 0, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
             repository.save(oldest);
             repository.save(newest);
             repository.save(middle);
@@ -590,11 +688,12 @@ class PostgresDockerIntegrationTest {
             // only/topmost rows in the whole suite.
             AssetId assetA = AssetId.random();
             AssetId assetB = AssetId.random();
-            AssetUsage oldest = new AssetUsage(UsageId.random(), assetA, NOW, NOW.plusSeconds(1), null, null, 0);
+            AssetUsage oldest = new AssetUsage(UsageId.random(), assetA, NOW, NOW.plusSeconds(1), null, null, 0, null,
+                    UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
             AssetUsage middle = new AssetUsage(UsageId.random(), assetB, NOW.plusSeconds(10),
-                    NOW.plusSeconds(11), null, null, 0);
+                    NOW.plusSeconds(11), null, null, 0, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
             AssetUsage newest = new AssetUsage(UsageId.random(), assetA, NOW.plusSeconds(20),
-                    NOW.plusSeconds(21), null, null, 0);
+                    NOW.plusSeconds(21), null, null, 0, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
             repository.save(oldest);
             repository.save(newest);
             repository.save(middle);
@@ -613,7 +712,7 @@ class PostgresDockerIntegrationTest {
         void findByStreamFindsTheUsageThatStreamOpened() {
             StreamId streamId = StreamId.random();
             AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, NOW.plusSeconds(60),
-                    null, null, 3, streamId);
+                    null, null, 3, streamId, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
             repository.save(usage);
 
             Optional<AssetUsage> found = repository.findByStream(streamId);
@@ -625,7 +724,7 @@ class PostgresDockerIntegrationTest {
         @Test
         void findByStreamIsEmptyForAnUnknownStreamAndForStreamlessRows() {
             repository.save(new AssetUsage(UsageId.random(), AssetId.random(), NOW, NOW.plusSeconds(1),
-                    null, null, 0));
+                    null, null, 0, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM));
 
             assertTrue(repository.findByStream(StreamId.random()).isEmpty(),
                     "a stream nothing recorded is an absence, and a stream_id=NULL row must never match it");
@@ -634,8 +733,10 @@ class PostgresDockerIntegrationTest {
         @Test
         void findOpenByAssetReturnsOnlyTheCurrentlyOpenUsage() {
             AssetId assetId = AssetId.random();
-            AssetUsage closed = new AssetUsage(UsageId.random(), assetId, NOW, NOW.plusSeconds(1), null, null, 0);
-            AssetUsage open = new AssetUsage(UsageId.random(), assetId, NOW.plusSeconds(10), null, null, null, 0);
+            AssetUsage closed = new AssetUsage(UsageId.random(), assetId, NOW, NOW.plusSeconds(1), null, null, 0,
+                    null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+            AssetUsage open = new AssetUsage(UsageId.random(), assetId, NOW.plusSeconds(10), null, null, null, 0,
+                    null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
             repository.save(closed);
             repository.save(open);
 
@@ -647,7 +748,8 @@ class PostgresDockerIntegrationTest {
         @Test
         void findOpenByAssetReturnsEmptyWhenEveryUsageIsClosed() {
             AssetId assetId = AssetId.random();
-            repository.save(new AssetUsage(UsageId.random(), assetId, NOW, NOW.plusSeconds(1), null, null, 0));
+            repository.save(new AssetUsage(UsageId.random(), assetId, NOW, NOW.plusSeconds(1), null, null, 0, null,
+                    UsagePhase.PREFLIGHT, UsageOrigin.STREAM));
 
             assertTrue(repository.findOpenByAsset(assetId).isEmpty());
         }
@@ -663,7 +765,7 @@ class PostgresDockerIntegrationTest {
         @Test
         void savedUsageWithANonDefaultPhaseRoundTripsExactly() {
             AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, null, null, null, 0, null,
-                    UsagePhase.IN_FLIGHT);
+                    UsagePhase.IN_FLIGHT, UsageOrigin.STREAM);
 
             repository.save(usage);
 
@@ -673,13 +775,35 @@ class PostgresDockerIntegrationTest {
             assertEquals(usage, found.get());
         }
 
+        /**
+         * The origin twin of {@link #savedUsageWithANonDefaultPhaseRoundTripsExactly} — proves
+         * {@code V26__asset_usage_origin.sql} plus {@code AssetUsageMapper} round-trip a
+         * non-default {@link UsageOrigin} (not {@code STREAM}, the column's own database default,
+         * so a mapper that always wrote/read the default could not accidentally pass this test)
+         * exactly (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2, wave R2).
+         */
+        @Test
+        void savedUsageWithANonDefaultOriginRoundTripsExactly() {
+            AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, null, null, null, 0, null,
+                    UsagePhase.PREFLIGHT, UsageOrigin.OPERATOR);
+
+            repository.save(usage);
+
+            Optional<AssetUsage> found = repository.findById(usage.id());
+            assertTrue(found.isPresent());
+            assertEquals(UsageOrigin.OPERATOR, found.get().origin());
+            assertEquals(usage, found.get());
+        }
+
         @Test
         void saveIsAnUpsertThatCanTransitionPhase() {
             UsageId id = UsageId.random();
             AssetId assetId = AssetId.random();
-            repository.save(new AssetUsage(id, assetId, NOW, null, null, null, 0, null, UsagePhase.PREFLIGHT));
+            repository.save(
+                    new AssetUsage(id, assetId, NOW, null, null, null, 0, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM));
 
-            repository.save(new AssetUsage(id, assetId, NOW, null, null, null, 0, null, UsagePhase.IN_FLIGHT));
+            repository.save(
+                    new AssetUsage(id, assetId, NOW, null, null, null, 0, null, UsagePhase.IN_FLIGHT, UsageOrigin.STREAM));
 
             Optional<AssetUsage> found = repository.findById(id);
             assertTrue(found.isPresent());
@@ -692,13 +816,14 @@ class PostgresDockerIntegrationTest {
          * {@code phase} is {@code NULL} on disk) by nulling the column directly after a normal save,
          * bypassing the mapper (which never writes {@code null} itself, since {@link
          * AssetUsage#phase()} is non-null by construction) -- proves {@code AssetUsageMapper#toDomain}
-         * honestly defaults a legacy {@code NULL} column to {@link UsagePhase#PREFLIGHT} via {@link
-         * AssetUsage}'s own pre-O7 convenience constructor, per {@code AssetUsageEntity}'s javadoc.
+         * honestly defaults a legacy {@code NULL} column to {@link UsagePhase#PREFLIGHT} before
+         * passing it to {@link AssetUsage}'s single canonical constructor, per {@code
+         * AssetUsageEntity}'s javadoc.
          */
         @Test
         void legacyRowWithNullPhaseColumnMapsToPreflightDefault() {
             AssetUsage usage = new AssetUsage(UsageId.random(), AssetId.random(), NOW, null, null, null, 0, null,
-                    UsagePhase.LINK_LOST);
+                    UsagePhase.LINK_LOST, UsageOrigin.STREAM);
             repository.save(usage);
             EntityManager em = entityManagerFactory.createEntityManager();
             try {
@@ -715,6 +840,179 @@ class PostgresDockerIntegrationTest {
 
             assertTrue(found.isPresent());
             assertEquals(UsagePhase.PREFLIGHT, found.get().phase());
+        }
+
+        /**
+         * The fleet-wide aggregate {@link AssetController} joins onto the asset row (WAREHOUSE-UX W8)
+         * -- a closed usage contributes its exact wall-clock duration.
+         */
+        @Test
+        void totalFlightSecondsByAssetSumsAClosedUsagesExactDuration() {
+            AssetId assetId = AssetId.random();
+            AssetUsage closed = new AssetUsage(UsageId.random(), assetId, NOW, NOW.plusSeconds(90), null, null, 0,
+                    null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+            repository.save(closed);
+
+            Map<AssetId, Long> totals = repository.totalFlightSecondsByAsset();
+
+            assertEquals(90L, totals.get(assetId));
+        }
+
+        /** An open usage (no {@code endedAt}) counts as running until now, not zero. */
+        @Test
+        void totalFlightSecondsByAssetTreatsAnOpenUsageAsRunningUntilNow() {
+            AssetId assetId = AssetId.random();
+            Instant startedThirtySecondsAgo = Instant.now().minusSeconds(30).truncatedTo(ChronoUnit.MILLIS);
+            AssetUsage open = new AssetUsage(UsageId.random(), assetId, startedThirtySecondsAgo, null, null, null, 0,
+                    null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+            repository.save(open);
+
+            Long seconds = repository.totalFlightSecondsByAsset().get(assetId);
+
+            assertTrue(seconds != null && seconds >= 25 && seconds <= 120,
+                    "an open usage must count its in-progress duration up to now, not zero: " + seconds);
+        }
+
+        /** No row for an asset with no usages at all -- callers apply their own zero default. */
+        @Test
+        void totalFlightSecondsByAssetHasNoEntryForAnAssetWithNoUsages() {
+            assertFalse(repository.totalFlightSecondsByAsset().containsKey(AssetId.random()));
+        }
+    }
+
+    @Nested
+    class MaintenanceRepositoryTests {
+
+        private final MaintenanceRepositoryPort repository = new JpaMaintenanceRepository(entityManagerFactory);
+
+        private MaintenanceRecord record(AssetId assetId, boolean open) {
+            MaintenanceRecord record = new MaintenanceRecord(MaintenanceId.random(), assetId,
+                    MaintenanceKind.GROUNDING, NOW, null, UserId.random(), "prop strike", 1_800L);
+            return open ? record : record.close(NOW.plusSeconds(3600));
+        }
+
+        @Test
+        void unknownIdReturnsEmptyOptional() {
+            assertTrue(repository.findById(MaintenanceId.random()).isEmpty());
+        }
+
+        @Test
+        void savedOpenRecordRoundTrips() {
+            MaintenanceRecord open = record(AssetId.random(), true);
+
+            repository.save(open);
+
+            Optional<MaintenanceRecord> found = repository.findById(open.id());
+            assertTrue(found.isPresent());
+            assertEquals(open, found.get());
+        }
+
+        @Test
+        void saveIsAnUpsertThatCanCloseAnOpenRecord() {
+            MaintenanceRecord open = record(AssetId.random(), true);
+            repository.save(open);
+
+            MaintenanceRecord closed = open.close(NOW.plusSeconds(120));
+            repository.save(closed);
+
+            Optional<MaintenanceRecord> found = repository.findById(open.id());
+            assertTrue(found.isPresent());
+            assertEquals(closed, found.get());
+        }
+
+        @Test
+        void findByAssetReturnsTheFullHistoryNewestOpenedFirst() {
+            AssetId assetId = AssetId.random();
+            MaintenanceRecord older = new MaintenanceRecord(MaintenanceId.random(), assetId,
+                    MaintenanceKind.NOTE, NOW, null, UserId.random(), "just a note", null);
+            MaintenanceRecord newer = new MaintenanceRecord(MaintenanceId.random(), assetId,
+                    MaintenanceKind.GROUNDING, NOW.plusSeconds(10), null, UserId.random(), "prop strike", null);
+            repository.save(older);
+            repository.save(newer);
+
+            List<MaintenanceRecord> history = repository.findByAsset(assetId);
+
+            assertEquals(List.of(newer.id(), older.id()), history.stream().map(MaintenanceRecord::id).toList());
+        }
+
+        @Test
+        void findOpenByAssetReturnsOnlyTheOpenRecordsForThatAsset() {
+            AssetId assetId = AssetId.random();
+            MaintenanceRecord open = record(assetId, true);
+            MaintenanceRecord closed = record(assetId, false);
+            repository.save(open);
+            repository.save(closed);
+
+            List<MaintenanceRecord> openOnly = repository.findOpenByAsset(assetId);
+
+            assertEquals(List.of(open.id()), openOnly.stream().map(MaintenanceRecord::id).toList());
+        }
+
+        @Test
+        void findOpenReturnsOpenRecordsAcrossEveryAssetNewestOpenedFirst() {
+            // Fleet-wide (like AssetUsageRepositoryTests#findRecentReturnsNewestFirstAcrossEveryAssetBoundedByLimit),
+            // so filter to this test's own rows within the whole table.
+            MaintenanceRecord older = new MaintenanceRecord(MaintenanceId.random(), AssetId.random(),
+                    MaintenanceKind.NOTE, NOW, null, UserId.random(), "just a note", null);
+            MaintenanceRecord newer = new MaintenanceRecord(MaintenanceId.random(), AssetId.random(),
+                    MaintenanceKind.GROUNDING, NOW.plusSeconds(10), null, UserId.random(), "prop strike", null);
+            MaintenanceRecord closed = record(AssetId.random(), false);
+            repository.save(older);
+            repository.save(newer);
+            repository.save(closed);
+            Set<MaintenanceId> ours = Set.of(older.id(), newer.id(), closed.id());
+
+            List<MaintenanceId> ourOpenOrder = repository.findOpen().stream()
+                    .map(MaintenanceRecord::id)
+                    .filter(ours::contains)
+                    .toList();
+
+            assertEquals(List.of(newer.id(), older.id()), ourOpenOrder,
+                    "findOpen must span every asset, exclude closed records, and stay newest-opened-first");
+        }
+
+        @Test
+        void findRecentlyClosedReturnsClosedRecordsAcrossEveryAssetNewestClosedFirstBoundedByLimit() {
+            MaintenanceRecord olderClosed = new MaintenanceRecord(MaintenanceId.random(), AssetId.random(),
+                    MaintenanceKind.NOTE, NOW, NOW.plusSeconds(60), UserId.random(), "just a note", null);
+            MaintenanceRecord newerClosed = new MaintenanceRecord(MaintenanceId.random(), AssetId.random(),
+                    MaintenanceKind.GROUNDING, NOW, NOW.plusSeconds(120), UserId.random(), "prop strike", null);
+            MaintenanceRecord stillOpen = record(AssetId.random(), true);
+            repository.save(olderClosed);
+            repository.save(newerClosed);
+            repository.save(stillOpen);
+            Set<MaintenanceId> ours = Set.of(olderClosed.id(), newerClosed.id(), stillOpen.id());
+
+            List<MaintenanceId> ourClosedOrder = repository.findRecentlyClosed(10_000).stream()
+                    .map(MaintenanceRecord::id)
+                    .filter(ours::contains)
+                    .toList();
+
+            assertEquals(List.of(newerClosed.id(), olderClosed.id()), ourClosedOrder,
+                    "findRecentlyClosed must span every asset, exclude open records, and stay newest-closed-first");
+        }
+
+        @Test
+        void findRecentlyClosedRespectsTheLimit() {
+            AssetId assetId = AssetId.random();
+            for (int i = 0; i < 3; i++) {
+                repository.save(new MaintenanceRecord(MaintenanceId.random(), assetId, MaintenanceKind.NOTE,
+                        NOW.plusSeconds(i), NOW.plusSeconds(i + 1), UserId.random(), "note " + i, null));
+            }
+
+            assertTrue(repository.findRecentlyClosed(1).size() <= 1);
+        }
+
+        @Test
+        void flightSecondsAtRoundTripsIncludingAbsence() {
+            MaintenanceRecord withFlightSeconds = record(AssetId.random(), true);
+            MaintenanceRecord withoutFlightSeconds = new MaintenanceRecord(MaintenanceId.random(), AssetId.random(),
+                    MaintenanceKind.NOTE, NOW, null, UserId.random(), "just a note", null);
+            repository.save(withFlightSeconds);
+            repository.save(withoutFlightSeconds);
+
+            assertEquals(1_800L, repository.findById(withFlightSeconds.id()).orElseThrow().flightSecondsAt());
+            assertNull(repository.findById(withoutFlightSeconds.id()).orElseThrow().flightSecondsAt());
         }
     }
 
@@ -1812,7 +2110,8 @@ class PostgresDockerIntegrationTest {
         StreamId streamId = StreamId.random();
 
         AssetUsage usage = new AssetUsage(usageId, assetId, NOW, NOW.plusSeconds(120),
-                new GeoPosition(50.45, 30.52, 100.0), new GeoPosition(50.50, 30.60, 110.0), 2, streamId);
+                new GeoPosition(50.45, 30.52, 100.0), new GeoPosition(50.50, 30.60, 110.0), 2, streamId,
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
         new JpaAssetUsageRepository(entityManagerFactory).save(usage);
 
         Telemetry sample = new Telemetry(deviceId, NOW, 50.45, 30.52, 100.0, 0.0, 95.0, Map.of());
@@ -1854,8 +2153,8 @@ class PostgresDockerIntegrationTest {
         new JpaDeviceRepository(entityManagerFactory).save(new Device(deviceId, "restart-device",
                 Set.of(Capability.VIDEO), new StreamDescriptor("sim", URI.create("sim://restart"), Map.of())));
         Ownership ownership = new Ownership(UserId.random(), GroupId.random());
-        Asset asset = new Asset(AssetId.random(), "restart-survivor", new CategoryId("drone"), ownership,
-                Set.of(deviceId), Map.of("note", "written-before-restart"));
+        Asset asset = Asset.register(AssetId.random(), "restart-survivor", new CategoryId("drone"), ownership,
+                Set.of(deviceId), Map.of("note", "written-before-restart"), Identity.NONE, Custody.NONE);
         new JpaAssetRepository(entityManagerFactory).save(asset);
 
         EntityManagerFactory freshContext = PersistenceUnit.start(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(),
@@ -1863,7 +2162,7 @@ class PostgresDockerIntegrationTest {
         try {
             Optional<Asset> found = new JpaAssetRepository(freshContext).findById(asset.id());
             assertTrue(found.isPresent());
-            assertEquals(asset, found.get());
+            assertAssetRoundTrips(asset, found.get());
             assertFalse(found.get().attributes().isEmpty());
         } finally {
             freshContext.close();
@@ -2956,7 +3255,7 @@ class PostgresDockerIntegrationTest {
             // collide with a seeded row or another run of this same test.
             String firmware = "test-" + UUID.randomUUID().toString().substring(0, 8);
             FeatureRequirement custom =
-                    new FeatureRequirement("battery", "Battery", firmware, 1, "SYS_STATUS", 1.0, null);
+                    new FeatureRequirement("battery", "Battery", firmware, 1, "SYS_STATUS", 1.0, null, null, null);
 
             EntityManager em = entityManagerFactory.createEntityManager();
             try {
@@ -3460,18 +3759,54 @@ class PostgresDockerIntegrationTest {
      * actually seeded one row per frozen v1 feature key (SS8.1) for {@code firmware = 'ardupilot'},
      * on top of V1-V17; {@link FeatureRequirementRepositoryTests} exercises the same data through the
      * port, this asserts the raw row count landed at all.
+     *
+     * <p>V27 (FLEET-RADIO-PLAN.md R6) retired the single placeholder {@code rc-relay} row V18 seeded
+     * and replaced it with two independent, value-aware rows under that same key — see {@link
+     * #v27MigrationRetiresThePlaceholderRcRelayRowAndSeedsTwoValueAwareRowsUnderTheSameKey} — so the
+     * raw row count is now twelve, one more than the eleven frozen feature keys, not equal to them.
      */
     @Test
-    void v18MigrationSeedsElevenArdupilotFeatureRequirementRows() {
+    void v18MigrationSeedsTwelveArdupilotFeatureRequirementRows() {
         EntityManager em = entityManagerFactory.createEntityManager();
         try {
             long count = ((Number) em.createNativeQuery(
                             "select count(*) from feature_requirements where firmware = 'ardupilot'")
                     .getSingleResult()).longValue();
-            assertEquals(11, count, "one seeded row per frozen v1 feature key (SS8.1)");
+            assertEquals(12, count,
+                    "eleven frozen v1 feature keys (SS8.1), plus one extra row from V27's two-rows-under-rc-relay");
         } finally {
             em.close();
         }
+    }
+
+    /**
+     * docs/plans/active/FLEET-RADIO-PLAN.md R6 — V27 must apply cleanly on top of V1-V26, retire the
+     * V18 placeholder {@code rc-relay} row, and seed the two new value-aware rows this wave's
+     * readiness checks depend on: a GCS-sysid value requirement and an RC_OPTIONS forbidden-bits
+     * requirement, both reachable through {@link FeatureRequirementRepositoryPort} exactly like every
+     * other seeded row.
+     */
+    @Test
+    void v27MigrationRetiresThePlaceholderRcRelayRowAndSeedsTwoValueAwareRowsUnderTheSameKey() {
+        FeatureRequirementRepositoryPort repository = new JpaFeatureRequirementRepository(entityManagerFactory);
+
+        List<FeatureRequirement> rcRelayRows = repository.findByFirmware("ardupilot").stream()
+                .filter(r -> r.featureKey().equals("rc-relay"))
+                .toList();
+
+        assertEquals(2, rcRelayRows.size(), "two independent rows under the one frozen rc-relay key");
+
+        FeatureRequirement gcsSysid = rcRelayRows.stream()
+                .filter(r -> "SYSID_MYGCS".equals(r.requiredParameterName()))
+                .findFirst().orElseThrow();
+        assertEquals(255.0, gcsSysid.requiredParameterValue());
+        assertNull(gcsSysid.forbiddenParameterBits());
+
+        FeatureRequirement rcOptions = rcRelayRows.stream()
+                .filter(r -> "RC_OPTIONS".equals(r.requiredParameterName()))
+                .findFirst().orElseThrow();
+        assertNull(rcOptions.requiredParameterValue());
+        assertEquals(2L, rcOptions.forbiddenParameterBits());
     }
 
     /**
@@ -3526,6 +3861,443 @@ class PostgresDockerIntegrationTest {
             assertEquals("YES", phaseNullable, "phase is nullable -- no backfill for pre-existing rows");
         } finally {
             em.close();
+        }
+    }
+
+    /**
+     * docs/plans/active/CV-SETTINGS-PLAN.md §5.3, CV-SETTINGS wave W3 — {@link CvProfileRepositoryPort}
+     * round trips, including the {@code tracking}/{@code eventRule} jsonb columns and the composite
+     * {@code (scopeKind, scopeId)} binding key. {@link #v29MigrationSeedsFourBuiltInCvProfilesWithZeroBindings}
+     * separately proves the migration's own hand-written seed JSON decodes correctly; every test
+     * here instead exercises a save written and read back through this same adapter, which is
+     * self-consistent regardless of the exact jsonb wire format Hibernate's Jackson mapper chooses.
+     */
+    @Nested
+    class CvProfileRepositoryTests {
+
+        private final CvProfileRepositoryPort repository = new JpaCvProfileRepository(entityManagerFactory);
+
+        private CvProfile profile(CvProfileId id, GroupId groupId) {
+            return new CvProfile(id, "mast-cams", "Fixed masts, low rate", false, groupId,
+                    new ModelRef("yolo26n.pt", "latest"), 0.35, 2, List.of("person"), List.of("tree"), true,
+                    TrackingConfig.defaults(), EventRuleConfig.defaults(), NOW, NOW);
+        }
+
+        @Test
+        void findByIdReturnsEmptyForUnknownProfile() {
+            assertTrue(repository.findById(CvProfileId.random()).isEmpty());
+        }
+
+        @Test
+        void savedProfileRoundTripsEveryFieldIncludingTrackingAndEventRule() {
+            CvProfile profile = profile(CvProfileId.random(), GroupId.random());
+
+            repository.save(profile);
+
+            CvProfile found = repository.findById(profile.id()).orElseThrow();
+            assertEquals(profile, found);
+            assertEquals(TrackingConfig.defaults(), found.tracking());
+            assertEquals(EventRuleConfig.defaults(), found.eventRule());
+        }
+
+        @Test
+        void saveIsAnUpsertPreservingId() {
+            CvProfileId id = CvProfileId.random();
+            GroupId groupId = GroupId.random();
+            repository.save(profile(id, groupId));
+
+            CvProfile renamed = new CvProfile(id, "renamed", "still the same profile", false, groupId,
+                    new ModelRef("yolo11n.pt", "latest"), 0.5, 5, List.of(), List.of(), false,
+                    TrackingConfig.off(), EventRuleConfig.defaults(), NOW, NOW.plusSeconds(60));
+            repository.save(renamed);
+
+            CvProfile found = repository.findById(id).orElseThrow();
+            assertEquals("renamed", found.name());
+            assertEquals(TrackingConfig.off(), found.tracking());
+            assertEquals(1, repository.findAllByGroup(groupId).size());
+        }
+
+        @Test
+        void findAllReturnsEverySavedProfile() {
+            CvProfile first = profile(CvProfileId.random(), GroupId.random());
+            CvProfile second = profile(CvProfileId.random(), GroupId.random());
+            repository.save(first);
+            repository.save(second);
+
+            List<CvProfile> all = repository.findAll();
+            assertTrue(all.contains(first));
+            assertTrue(all.contains(second));
+        }
+
+        @Test
+        void findAllByGroupExcludesBuiltInsAndOtherGroups() {
+            GroupId groupId = GroupId.random();
+            CvProfile owned = profile(CvProfileId.random(), groupId);
+            CvProfile otherGroup = profile(CvProfileId.random(), GroupId.random());
+            CvProfile builtIn = new CvProfile(CvProfileId.random(), "built-in-test", "seeded template", true, null,
+                    new ModelRef("yolo26n.pt", "latest"), 0.4, 10, List.of(), List.of(), true,
+                    TrackingConfig.defaults(), EventRuleConfig.defaults(), NOW, NOW);
+            repository.save(owned);
+            repository.save(otherGroup);
+            repository.save(builtIn);
+
+            assertEquals(List.of(owned), repository.findAllByGroup(groupId));
+        }
+
+        @Test
+        void deleteIsIdempotentAndRemovesTheProfile() {
+            CvProfile profile = profile(CvProfileId.random(), GroupId.random());
+            repository.save(profile);
+
+            repository.delete(profile.id());
+            assertTrue(repository.findById(profile.id()).isEmpty());
+
+            // second call on an already-absent id must not throw
+            repository.delete(profile.id());
+        }
+
+        @Test
+        void findBindingReturnsEmptyForAnUnboundScope() {
+            assertTrue(repository.findBinding(BindingScope.CATEGORY, "no-such-category").isEmpty());
+        }
+
+        @Test
+        void bindingRoundTripsAndIsFindableByScope() {
+            CvProfile profile = profile(CvProfileId.random(), GroupId.random());
+            repository.save(profile);
+            CvProfileBinding binding =
+                    new CvProfileBinding(BindingScope.ASSET, UUID.randomUUID().toString(), profile.id(), NOW);
+
+            repository.saveBinding(binding);
+
+            assertEquals(binding, repository.findBinding(BindingScope.ASSET, binding.scopeId()).orElseThrow());
+        }
+
+        @Test
+        void saveBindingUpsertsByScopeKindAndScopeId() {
+            CvProfile first = profile(CvProfileId.random(), GroupId.random());
+            CvProfile second = profile(CvProfileId.random(), GroupId.random());
+            repository.save(first);
+            repository.save(second);
+            String scopeId = "quadcopter-" + UUID.randomUUID();
+
+            repository.saveBinding(new CvProfileBinding(BindingScope.CATEGORY, scopeId, first.id(), NOW));
+            repository.saveBinding(new CvProfileBinding(BindingScope.CATEGORY, scopeId, second.id(), NOW));
+
+            CvProfileBinding found = repository.findBinding(BindingScope.CATEGORY, scopeId).orElseThrow();
+            assertEquals(second.id(), found.profileId());
+            assertEquals(1, repository.findAllBindings().stream()
+                    .filter(b -> b.scopeKind() == BindingScope.CATEGORY && b.scopeId().equals(scopeId))
+                    .count());
+        }
+
+        @Test
+        void deleteBindingIsIdempotent() {
+            CvProfile profile = profile(CvProfileId.random(), GroupId.random());
+            repository.save(profile);
+            String scopeId = UUID.randomUUID().toString();
+            repository.saveBinding(new CvProfileBinding(BindingScope.ASSET, scopeId, profile.id(), NOW));
+
+            repository.deleteBinding(BindingScope.ASSET, scopeId);
+            assertTrue(repository.findBinding(BindingScope.ASSET, scopeId).isEmpty());
+
+            // second call on an already-unbound scope must not throw
+            repository.deleteBinding(BindingScope.ASSET, scopeId);
+        }
+
+        @Test
+        void countBindingsForCountsAcrossEveryScopeKind() {
+            CvProfile profile = profile(CvProfileId.random(), GroupId.random());
+            repository.save(profile);
+            assertEquals(0, repository.countBindingsFor(profile.id()));
+
+            repository.saveBinding(
+                    new CvProfileBinding(BindingScope.ASSET, UUID.randomUUID().toString(), profile.id(), NOW));
+            repository.saveBinding(new CvProfileBinding(BindingScope.CATEGORY, "rover-" + UUID.randomUUID(),
+                    profile.id(), NOW));
+            repository.saveBinding(new CvProfileBinding(BindingScope.ORGANIZATION, UUID.randomUUID().toString(),
+                    profile.id(), NOW));
+
+            assertEquals(3, repository.countBindingsFor(profile.id()));
+        }
+    }
+
+    /**
+     * docs/plans/active/CV-SETTINGS-PLAN.md §3.2, §5.3, CV-SETTINGS wave W3 — {@link
+     * CvModelRepositoryPort} round trips, incl. the nullable {@code metrics} column and the five
+     * flat provenance columns.
+     */
+    @Nested
+    class CvModelRepositoryTests {
+
+        private final CvModelRepositoryPort repository = new JpaCvModelRepository(entityManagerFactory);
+
+        private CvModelRecord model(String modelId, String version, ModelStatus status) {
+            return new CvModelRecord(modelId, version, "People & vehicles", "general", false, List.of(),
+                    ModelTaskType.DETECT, ModelRuntime.PYTORCH, List.of("person", "car"), status, null,
+                    ModelProvenance.none(), null, null, NOW);
+        }
+
+        @Test
+        void findByIdAndVersionReturnsEmptyForUnknownRow() {
+            assertTrue(repository.findByIdAndVersion("no-such-model.pt", "latest").isEmpty());
+        }
+
+        @Test
+        void savedRowRoundTripsWithNoMetricsOrProvenance() {
+            CvModelRecord model = model("yolo26n.pt", "latest", ModelStatus.DRAFT);
+
+            repository.save(model);
+
+            CvModelRecord found = repository.findByIdAndVersion("yolo26n.pt", "latest").orElseThrow();
+            assertEquals(model, found);
+            assertNull(found.metrics());
+            assertEquals(ModelProvenance.none(), found.provenance());
+        }
+
+        @Test
+        void savedRowRoundTripsMetricsAndFullProvenance() {
+            UserId promotedBy = UserId.random();
+            CvModelRecord model = new CvModelRecord("mast-cams-dataset-50e.pt", "latest", "Fine-tuned buildings",
+                    "fine-tune", false, List.of("building"), ModelTaskType.DETECT, ModelRuntime.OPENVINO,
+                    List.of("building"), ModelStatus.CANDIDATE, new ModelMetrics(0.71, MetricsKind.TRAINING),
+                    new ModelProvenance(DatasetId.random(), TrainingRunId.random(), "yolo26n.pt", 50, NOW),
+                    promotedBy, NOW.plusSeconds(10), NOW);
+
+            repository.save(model);
+
+            assertEquals(model, repository.findByIdAndVersion(model.modelId(), model.version()).orElseThrow());
+        }
+
+        @Test
+        void saveIsAnUpsertByCompositeKey() {
+            CvModelRecord draft = model("cv-upsert-test.pt", "latest", ModelStatus.DRAFT);
+            repository.save(draft);
+
+            repository.save(draft.retire());
+
+            CvModelRecord found = repository.findByIdAndVersion("cv-upsert-test.pt", "latest").orElseThrow();
+            assertEquals(ModelStatus.RETIRED, found.status());
+            assertEquals(1, repository.findAll().stream()
+                    .filter(m -> m.modelId().equals("cv-upsert-test.pt") && m.version().equals("latest"))
+                    .count());
+        }
+
+        @Test
+        void findAllReturnsEveryRow() {
+            CvModelRecord first = model("cv-findall-a.pt", "latest", ModelStatus.DRAFT);
+            CvModelRecord second = model("cv-findall-b.pt", "latest", ModelStatus.DRAFT);
+            repository.save(first);
+            repository.save(second);
+
+            List<CvModelRecord> all = repository.findAll();
+            assertTrue(all.contains(first));
+            assertTrue(all.contains(second));
+        }
+
+        /**
+         * The only test in this class that promotes a row to {@link ModelStatus#LIVE} — every other
+         * status-changing test here uses {@link CvModelRecord#retire()} instead, so {@link
+         * #findLive()} has exactly one candidate row regardless of test execution order (this table
+         * is shared and not cleaned between tests, the same convention every other repository test
+         * class in this file follows).
+         */
+        @Test
+        void findLiveReturnsTheOneLiveRowAmongOthers() {
+            repository.save(model("cv-live-test-retired.pt", "latest", ModelStatus.RETIRED));
+            CvModelRecord live = model("cv-live-test-live.pt", "latest", ModelStatus.LIVE);
+            repository.save(live);
+
+            assertEquals(live, repository.findLive().orElseThrow());
+        }
+    }
+
+    /**
+     * docs/plans/active/CV-SETTINGS-PLAN.md §3.3, §5.3, CV-SETTINGS wave W3 — {@link
+     * TrainingRunRepositoryPort} round trips (fixes H7: "training metrics evaporate").
+     */
+    @Nested
+    class TrainingRunRepositoryTests {
+
+        private final TrainingRunRepositoryPort repository = new JpaTrainingRunRepository(entityManagerFactory);
+
+        private TrainingRunRecord run(TrainingRunId id, Instant startedAt, JobState state) {
+            return new TrainingRunRecord(id, DatasetId.random(), "yolo26n.pt", 50, state, 0, 0, 0.0, 0.0, null,
+                    UserId.random(), startedAt, null, "");
+        }
+
+        @Test
+        void findByIdReturnsEmptyForUnknownRun() {
+            assertTrue(repository.findById(TrainingRunId.random()).isEmpty());
+        }
+
+        @Test
+        void savedRunRoundTripsWithNoOutputModelOrFinishTime() {
+            TrainingRunRecord run = run(TrainingRunId.random(), NOW, JobState.RUNNING);
+
+            repository.save(run);
+
+            TrainingRunRecord found = repository.findById(run.runId()).orElseThrow();
+            assertEquals(run, found);
+            assertNull(found.outputModelId());
+            assertNull(found.finishedAt());
+        }
+
+        @Test
+        void saveIsAnUpsertPreservingRunId() {
+            TrainingRunId id = TrainingRunId.random();
+            TrainingRunRecord started = run(id, NOW, JobState.RUNNING);
+            repository.save(started);
+
+            TrainingRunRecord finished = new TrainingRunRecord(id, started.datasetId(), started.baseModel(),
+                    started.epochs(), JobState.SUCCEEDED, 50, 50, 0.02, 0.83, "yolo26n-50e.pt",
+                    started.startedBy(), started.startedAt(), NOW.plusSeconds(600), "done");
+            repository.save(finished);
+
+            TrainingRunRecord found = repository.findById(id).orElseThrow();
+            assertEquals(JobState.SUCCEEDED, found.state());
+            assertEquals("yolo26n-50e.pt", found.outputModelId());
+        }
+
+        /**
+         * Timestamps are offset well into the future ({@code NOW.plusSeconds(...)}) rather than
+         * around {@code NOW} itself — every other test in this class also writes rows stamped at or
+         * near {@code NOW}, and this table is shared and not cleaned between tests (same convention
+         * as every other repository test class here), so a tie at exactly {@code NOW} would make the
+         * "top two" assertion below depend on test execution order.
+         */
+        @Test
+        void findAllOrdersNewestFirstAndRespectsLimit() {
+            TrainingRunRecord oldest = run(TrainingRunId.random(), NOW.plusSeconds(1000), JobState.SUCCEEDED);
+            TrainingRunRecord middle = run(TrainingRunId.random(), NOW.plusSeconds(2000), JobState.SUCCEEDED);
+            TrainingRunRecord newest = run(TrainingRunId.random(), NOW.plusSeconds(3000), JobState.RUNNING);
+            repository.save(oldest);
+            repository.save(middle);
+            repository.save(newest);
+
+            List<TrainingRunRecord> latestTwo = repository.findAll(2);
+            assertEquals(2, latestTwo.size());
+            assertEquals(newest.runId(), latestTwo.get(0).runId());
+            assertEquals(middle.runId(), latestTwo.get(1).runId());
+        }
+    }
+
+    /**
+     * docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §11, Z2c — round trips {@link
+     * DiscoveryCandidateRepositoryPort} against {@code V31__discovery_inbox.sql}, including the
+     * nullable {@code suggestedStream} triple (protocol/uri/options travel together as {@code null}
+     * when a discovery mechanism could not produce a ready-to-use stream) and the non-nullable
+     * {@code details} map.
+     */
+    @Nested
+    class DiscoveryCandidateRepositoryTests {
+
+        private final DiscoveryCandidateRepositoryPort repository =
+                new JpaDiscoveryCandidateRepository(entityManagerFactory);
+
+        private DiscoveredDevice withStream(String address) {
+            return new DiscoveredDevice("mavlink", "New quad", URI.create(address), new CategoryId("quadcopter"),
+                    new StreamDescriptor("mavlink", URI.create(address), Map.of("sysid", "7")),
+                    Map.of("sysid", "7", "raw", "heartbeat"));
+        }
+
+        private DiscoveredDevice withoutStream(String address) {
+            return new DiscoveredDevice("onvif", "New camera", URI.create(address), null, null,
+                    Map.of("scopes", "onvif://www.onvif.org/Profile/Streaming"));
+        }
+
+        @Test
+        void findByIdReturnsEmptyForUnknownCandidate() {
+            assertTrue(repository.findById(DiscoveryCandidateId.random()).isEmpty());
+        }
+
+        @Test
+        void findByIdentityKeyReturnsEmptyForAnUnreportedIdentity() {
+            assertTrue(repository.findByIdentityKey("mavlink|udp://never-reported:14550").isEmpty());
+        }
+
+        @Test
+        void savedCandidateWithAStreamRoundTripsEveryField() {
+            DiscoveredDevice discovered = withStream("udp://10.0.0.5:14550");
+            DiscoveryCandidate candidate =
+                    DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(), discovered, NOW);
+
+            repository.save(candidate);
+
+            DiscoveryCandidate found = repository.findById(candidate.id()).orElseThrow();
+            assertEquals(candidate, found);
+            assertEquals(Map.of("sysid", "7"), found.discovered().suggestedStream().options());
+            assertEquals(Map.of("sysid", "7", "raw", "heartbeat"), found.discovered().details());
+        }
+
+        @Test
+        void savedCandidateWithNoSuggestedStreamRoundTripsTheAbsenceExactly() {
+            DiscoveredDevice discovered = withoutStream("onvif://192.168.1.20/onvif/device_service");
+            DiscoveryCandidate candidate =
+                    DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(), discovered, NOW);
+
+            repository.save(candidate);
+
+            DiscoveryCandidate found = repository.findById(candidate.id()).orElseThrow();
+            assertEquals(candidate, found);
+            assertNull(found.discovered().suggestedStream());
+            assertNull(found.discovered().suggestedCategory());
+        }
+
+        @Test
+        void findByIdentityKeyFindsTheUpsertTargetAndSaveIsAnUpsertPreservingId() {
+            DiscoveredDevice discovered = withStream("udp://10.0.0.6:14550");
+            DiscoveryCandidateId id = DiscoveryCandidateId.random();
+            DiscoveryCandidate candidate = DiscoveryCandidate.newlyReported(id, discovered, NOW);
+            repository.save(candidate);
+
+            DiscoveryCandidate reSeen = repository.findByIdentityKey(candidate.identityKey())
+                    .orElseThrow()
+                    .reSeen(discovered, NOW.plusSeconds(60));
+            repository.save(reSeen);
+
+            DiscoveryCandidate found = repository.findById(id).orElseThrow();
+            assertEquals(id, found.id());
+            assertEquals(NOW.plusSeconds(60), found.lastSeen());
+            assertEquals(NOW, found.firstSeen(), "firstSeen must survive a re-report unchanged");
+        }
+
+        @Test
+        void dismissedAndRegisteredStatusesRoundTrip() {
+            DiscoveryCandidate dismissed = DiscoveryCandidate
+                    .newlyReported(DiscoveryCandidateId.random(), withStream("udp://10.0.0.7:14550"), NOW)
+                    .dismiss();
+            repository.save(dismissed);
+            assertEquals(CandidateStatus.DISMISSED, repository.findById(dismissed.id()).orElseThrow().status());
+
+            AssetId owningAsset = AssetId.random();
+            DiscoveryCandidate registered = DiscoveryCandidate
+                    .newlyReported(DiscoveryCandidateId.random(), withStream("udp://10.0.0.8:14550"), NOW)
+                    .registeredTo(owningAsset);
+            repository.save(registered);
+
+            DiscoveryCandidate found = repository.findById(registered.id()).orElseThrow();
+            assertEquals(CandidateStatus.REGISTERED, found.status());
+            assertEquals(owningAsset, found.registeredAsset());
+        }
+
+        @Test
+        void findAllOrdersNewestReportedFirst() {
+            DiscoveryCandidate older = DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(),
+                    withStream("udp://10.0.0.9:14550"), NOW.plusSeconds(5000));
+            DiscoveryCandidate newer = DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(),
+                    withStream("udp://10.0.0.10:14550"), NOW.plusSeconds(6000));
+            repository.save(older);
+            repository.save(newer);
+            Set<DiscoveryCandidateId> ours = Set.of(older.id(), newer.id());
+
+            List<DiscoveryCandidateId> ourOrder = repository.findAll().stream()
+                    .map(DiscoveryCandidate::id)
+                    .filter(ours::contains)
+                    .toList();
+
+            assertEquals(List.of(newer.id(), older.id()), ourOrder,
+                    "findAll must span every candidate and stay newest-lastSeen-first");
         }
     }
 
@@ -3895,6 +4667,109 @@ class PostgresDockerIntegrationTest {
                     .getSingleResult();
             assertEquals("NO", idColumn[0]);
             assertEquals("YES", idColumn[1], "id is database-generated, never supplied by the entity");
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * docs/plans/active/CV-SETTINGS-PLAN.md §3.1 rule 3, §3.4 (CV-SETTINGS wave W3) — proves {@code
+     * V29__cv_profiles.sql} seeded the four built-in profiles with fixed ids, {@code built_in=true}/
+     * {@code group_id=null}, and {@code tracking}/{@code event_rule} jsonb that decodes byte-identical
+     * to {@link TrackingConfig#defaults()}/{@link EventRuleConfig#defaults()} — read back through the
+     * real {@link JpaCvProfileRepository} adapter (not raw SQL), so this also proves the migration's
+     * hand-written seed JSON is actually compatible with Hibernate's Jackson 3 jsonb mapping, not just
+     * syntactically valid. "Zero bindings" (the no-feature-flag rule) is proven via {@link
+     * CvProfileRepositoryPort#countBindingsFor(CvProfileId)} rather than {@code findAllBindings()},
+     * since {@link CvProfileRepositoryTests} — sharing this same table — writes bindings of its own to
+     * *other* profile ids.
+     */
+    @Test
+    void v29MigrationSeedsFourBuiltInCvProfilesWithZeroBindings() {
+        CvProfileRepositoryPort repository = new JpaCvProfileRepository(entityManagerFactory);
+        record Seed(String id, String name, String modelId, double confidence, int fps, boolean detectionEnabled) {}
+        List<Seed> seeds = List.of(
+                new Seed("f8fb1ff5-2dd8-4cb6-b0f1-5a5f4c5c056f", "people-vehicles", "yolo26n.pt", 0.40, 10, true),
+                new Seed("a42e5d7c-b977-4099-980c-b14e94518e6a", "wide-search", "yoloe-26s-seg-pf.pt", 0.30, 4,
+                        true),
+                new Seed("0ca952cf-284a-4a33-b04c-0c9da6a64602", "military-vehicles", "orion12l.pt", 0.45, 5, true),
+                new Seed("5e0cd997-743f-4867-82c7-e2be176c23ad", "video-only", "yolo26n.pt", 0.40, 10, false));
+
+        for (Seed seed : seeds) {
+            CvProfile profile = repository.findById(CvProfileId.of(seed.id())).orElseThrow(
+                    () -> new AssertionError("missing seeded built-in profile: " + seed.name()));
+            assertEquals(seed.name(), profile.name());
+            assertTrue(profile.builtIn(), seed.name() + " must be built-in");
+            assertNull(profile.groupId(), seed.name() + " must have no owning group");
+            assertEquals(seed.modelId(), profile.model().id());
+            assertEquals("latest", profile.model().version());
+            assertEquals(seed.confidence(), profile.confidenceThreshold(), 0.0001);
+            assertEquals(seed.fps(), profile.inferenceFps());
+            assertEquals(seed.detectionEnabled(), profile.detectionEnabled());
+            assertEquals(List.of(), profile.labelFilter());
+            assertEquals(List.of(), profile.labelDenyFilter());
+            assertEquals(TrackingConfig.defaults(), profile.tracking(), seed.name() + " tracking must be the platform default");
+            assertEquals(EventRuleConfig.defaults(), profile.eventRule(), seed.name() + " eventRule must be the platform default");
+            assertEquals(0, repository.countBindingsFor(profile.id()), seed.name() + " must ship with zero bindings");
+        }
+    }
+
+    /**
+     * docs/plans/active/CV-SETTINGS-PLAN.md §3.2, §3.3, §5.3 (CV-SETTINGS wave W3, fixes H4/H7) —
+     * proves {@code V30__cv_model_registry.sql} applied cleanly on top of V1-V29: {@code cv_models}'
+     * primary key is the composite {@code (model_id, version)}, every {@link
+     * com.drones.vision.learning.domain.model.ModelProvenance} column plus {@code metrics} is
+     * nullable (a config-seeded model reports neither), and {@code cv_training_runs.run_id} is a
+     * simple, required primary key. Same "prove the migration, not the entity" split as the V22 test
+     * above.
+     */
+    @Test
+    void v30MigrationCreatesTheCvModelRegistryTablesOnTopOfV1ThroughV29() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            long pkColumns = ((Number) em.createNativeQuery(
+                            "select count(*) from information_schema.table_constraints tc "
+                                    + "join information_schema.key_column_usage kcu "
+                                    + "on tc.constraint_name = kcu.constraint_name "
+                                    + "where tc.table_name = 'cv_models' "
+                                    + "and tc.constraint_type = 'PRIMARY KEY'")
+                    .getSingleResult()).longValue();
+            assertEquals(2, pkColumns, "cv_models' primary key must be the composite (model_id, version)");
+
+            for (String nullableColumn : List.of(
+                    "metrics", "dataset_id", "training_run_id", "base_model", "epochs", "trained_at",
+                    "promoted_by", "promoted_at")) {
+                String isNullable = (String) em.createNativeQuery(
+                                "select is_nullable from information_schema.columns "
+                                        + "where table_name = 'cv_models' and column_name = '" + nullableColumn + "'")
+                        .getSingleResult();
+                assertEquals("YES", isNullable, "cv_models." + nullableColumn + " must be nullable");
+            }
+
+            String createdAtNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'cv_models' and column_name = 'created_at'")
+                    .getSingleResult();
+            assertEquals("NO", createdAtNullable, "cv_models.created_at is always known");
+
+            Object[] runIdColumn = (Object[]) em.createNativeQuery(
+                            "select is_nullable, data_type from information_schema.columns "
+                                    + "where table_name = 'cv_training_runs' and column_name = 'run_id'")
+                    .getSingleResult();
+            assertEquals("NO", runIdColumn[0], "cv_training_runs.run_id is the primary key");
+            assertEquals("uuid", runIdColumn[1]);
+
+            String outputModelNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'cv_training_runs' and column_name = 'output_model_id'")
+                    .getSingleResult();
+            assertEquals("YES", outputModelNullable, "output_model_id is null until/unless a run succeeds");
+
+            String finishedAtNullable = (String) em.createNativeQuery(
+                            "select is_nullable from information_schema.columns "
+                                    + "where table_name = 'cv_training_runs' and column_name = 'finished_at'")
+                    .getSingleResult();
+            assertEquals("YES", finishedAtNullable, "finished_at is null while a run is still RUNNING");
         } finally {
             em.close();
         }

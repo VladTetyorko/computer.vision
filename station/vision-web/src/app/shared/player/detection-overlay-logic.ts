@@ -34,6 +34,15 @@ const DECLUTTER_CYCLE = DECLUTTER_LEVELS;
  *  whole tier system in this wave exists to move away from). */
 export const DEFAULT_DECLUTTER_LEVEL: BoxesMode = 'priority';
 
+/** Type guard for a persisted `declutterLevel` value (`core/settings/settings-store.ts` — H12, wave
+ *  W7: the one shared, persisted declutter preference) — a corrupt/pre-wave `localStorage` value
+ *  (`undefined`, a stale `'overlay'`/`'burned'` literal, anything not one of the four current
+ *  {@link DECLUTTER_LEVELS}) is rejected here rather than adopted, mirroring every other persisted
+ *  field's own restore-time validation in that store. */
+export function isBoxesMode(value: unknown): value is BoxesMode {
+  return typeof value === 'string' && (DECLUTTER_LEVELS as readonly string[]).includes(value);
+}
+
 /** `B` (Fly) / the wall tile's own toggle button / the Live and cv-control-panel segmented controls —
  *  cycles All → Priority → Locked-only → Off → All (research §3.6). A `current` no longer present in
  *  the cycle (a stale value from before this wave, e.g. `'overlay'`/`'burned'` surviving in a

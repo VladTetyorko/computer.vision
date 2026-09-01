@@ -11,18 +11,24 @@ import com.drones.vision.flight.domain.port.VehicleProfileRepositoryPort;
 import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import com.drones.vision.identity.domain.port.GroupRepositoryPort;
 import com.drones.vision.identity.domain.port.UserRepositoryPort;
+import com.drones.vision.learning.domain.port.CvModelRepositoryPort;
 import com.drones.vision.learning.domain.port.DatasetRepositoryPort;
 import com.drones.vision.learning.domain.port.SampleImageStorePort;
+import com.drones.vision.learning.domain.port.TrainingRunRepositoryPort;
 import com.drones.vision.learning.domain.port.TrainingSampleRepositoryPort;
+import com.drones.vision.perception.domain.port.CvProfileRepositoryPort;
 import com.drones.vision.map.domain.port.CameraPoseRepositoryPort;
 import com.drones.vision.map.domain.port.DrawingRepositoryPort;
 import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
 import com.drones.vision.map.domain.port.MarkRepositoryPort;
 import com.drones.vision.map.domain.port.TrackTrailRepositoryPort;
 import com.drones.vision.warehouse.domain.port.AssetImageRepositoryPort;
+import com.drones.vision.warehouse.domain.port.AssetNoteRepositoryPort;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
+import com.drones.vision.warehouse.domain.port.DiscoveryCandidateRepositoryPort;
+import com.drones.vision.warehouse.domain.port.MaintenanceRepositoryPort;
 import com.drones.vision.adapter.persistence.config.PersistenceUnit;
 import com.drones.vision.adapter.persistence.repository.*;
 import com.drones.vision.app.config.properties.VisionPersistenceProperties;
@@ -159,6 +165,36 @@ public class PersistenceWiringConfiguration {
     }
 
     /**
+     * docs/plans/active/CV-SETTINGS-PLAN.md §3.1/§5.3, Wave W3 — CV profiles and their scope bindings,
+     * same shape as the fifteen above. Unconditional like every other bean in this class: profiles ship
+     * regardless of {@code vision.cv.enabled}/{@code vision.cv.registry.enabled}, consumed by {@code
+     * CvProfileWiringConfiguration}'s own unconditional beans.
+     */
+    @Bean
+    public CvProfileRepositoryPort cvProfileRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaCvProfileRepository(entityManagerFactory);
+    }
+
+    /**
+     * docs/plans/active/CV-SETTINGS-PLAN.md §3.2/§5.3, Wave W3 — the CV model catalogue, same shape as
+     * the sixteen above. Consumed by {@code TrainingWiringConfiguration#modelRegistryService}/{@code
+     * #trainingJobService}, both gated behind their own property (unlike this bean).
+     */
+    @Bean
+    public CvModelRepositoryPort cvModelRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaCvModelRepository(entityManagerFactory);
+    }
+
+    /**
+     * docs/plans/active/CV-SETTINGS-PLAN.md §3.3/§5.3, Wave W3 — training run records, same shape as
+     * the seventeen above. Consumed by {@code TrainingWiringConfiguration#trainingJobService}.
+     */
+    @Bean
+    public TrainingRunRepositoryPort trainingRunRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaTrainingRunRepository(entityManagerFactory);
+    }
+
+    /**
      * docs/plans/done/MAP-REWORK-PLAN.md §2.3/§4.4 — map layers (with their grant list), same shape as
      * the fifteen above. {@code V12__map_layers.sql} seeds the COP layer at a fixed id, so {@code
      * LayerResolver#copLayerId()}'s find-or-create always finds it rather than creating one.
@@ -239,5 +275,40 @@ public class PersistenceWiringConfiguration {
     @Bean
     public TrackCorrectionRepositoryPort trackCorrectionRepositoryPort(EntityManagerFactory entityManagerFactory) {
         return new JpaTrackCorrectionRepository(entityManagerFactory);
+    }
+
+    /**
+     * docs/plans/active/WAREHOUSE-UX-PLAN.md &sect;3.2 D7 (W3) — maintenance records
+     * ({@code V28__asset_inventory.sql}), same shape as the twenty-two above.
+     */
+    @Bean
+    public MaintenanceRepositoryPort maintenanceRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaMaintenanceRepository(entityManagerFactory);
+    }
+
+    /**
+     * docs/plans/active/WAREHOUSE-UX-PLAN.md &sect;3.2 D7 (W3) — append-only asset notes, same
+     * shape as the twenty-three above. No application service consumes this yet (a later wave's
+     * crew-notes surface will); wired now so the port/schema exist ahead of that UI.
+     */
+    @Bean
+    public AssetNoteRepositoryPort assetNoteRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaAssetNoteRepository(entityManagerFactory);
+    }
+
+    /**
+     * docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md &sect;11, Z2c — the discovery inbox's
+     * persisted "found devices" rows ({@code V31__discovery_inbox.sql}), same shape as the
+     * twenty-four above. Wired unconditionally like every other port here: {@code
+     * vision.discovery.inbox.enabled} only gates whether {@code
+     * com.drones.vision.app.discovery.DiscoveryInboxRunner} ever calls {@code
+     * DiscoveryInboxService#report} against it (see {@code DiscoveryInboxWiringConfiguration}), not
+     * whether the table/repository exists — matching {@link #vehicleProfileRepositoryPort}'s own
+     * precedent.
+     */
+    @Bean
+    public DiscoveryCandidateRepositoryPort discoveryCandidateRepositoryPort(
+            EntityManagerFactory entityManagerFactory) {
+        return new JpaDiscoveryCandidateRepository(entityManagerFactory);
     }
 }

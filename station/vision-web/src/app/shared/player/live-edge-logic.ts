@@ -29,8 +29,18 @@ import type { Transport } from './player-recovery';
  *    decode/render is merely throttled by the browser, not torn down, so hls.js keeps buffering
  *    underneath), which is exactly why it needs its own explicit check here rather than falling
  *    out of `reduceTransportRecovery` for free.
+ *  - `'firstAttach'` — the very first FRAG_BUFFERED (or native `'playing'`) event of a fresh attach
+ *    (fix/stream-start-latency: the Stop→Start "picture is several seconds behind reality" symptom).
+ *    `'recovered'` already snaps every *later* reattach within an attach's lifetime, but a brand new
+ *    attach's own first playback start was never covered — hls.js's default start position on a cold
+ *    `attachMedia`/`loadSource` can land behind the edge, and a stream that spent its first few
+ *    seconds cycling through cold-start retries (`scheduleColdStartRetry`) or a WHEP→HLS fallback
+ *    before ever reaching `playing` has every reason to have buffered stale segments in the
+ *    meantime. Same reasoning as `'recovered'`'s own doc comment for why trusting a threshold here
+ *    would be pointless — extended to the first time this attach ever reaches playing, not just a
+ *    reattach after a failure.
  */
-export type SnapToLiveReason = 'recovered' | 'visibilityRestored';
+export type SnapToLiveReason = 'recovered' | 'visibilityRestored' | 'firstAttach';
 
 /** How far behind (seconds) a tab-visibility restore has to measure before it's worth a hard seek. */
 export const SNAP_TO_LIVE_THRESHOLD_SECONDS = 3;
@@ -39,12 +49,12 @@ export const SNAP_TO_LIVE_THRESHOLD_SECONDS = 3;
  * Whether `shared/player/player.ts` should forward-seek the `<video>` to the live edge rather than let
  * playback resume wherever its buffer happens to sit.
  *
- * `'recovered'` always snaps, ignoring `behindLiveSeconds`/`thresholdSeconds` entirely — see the
- * reason's own doc comment for why trusting a threshold here would be pointless (the measurement
- * is almost always `null` at this exact moment: `behindLive` is reset to `null` on every teardown
- * and not re-sampled until the latency timer's next tick, which starts *after* this fires).
- * `'visibilityRestored'` only snaps once the *current* measurement clears `thresholdSeconds` —
- * a tab glanced away from for under a second shouldn't jump the video out from under the viewer
+ * `'recovered'` and `'firstAttach'` always snap, ignoring `behindLiveSeconds`/`thresholdSeconds`
+ * entirely — see each reason's own doc comment for why trusting a threshold here would be pointless
+ * (the measurement is almost always `null` at this exact moment: `behindLive` is reset to `null` on
+ * every teardown and not re-sampled until the latency timer's next tick, which starts *after* this
+ * fires). `'visibilityRestored'` only snaps once the *current* measurement clears `thresholdSeconds`
+ * — a tab glanced away from for under a second shouldn't jump the video out from under the viewer
  * for a barely-measurable drift. `null` (unmeasured, or the WHEP `0` pin — though `shared/player/player.ts`
  * never calls this for a `webrtc` transport in the first place, since WHEP has no seekable buffer
  * to fall behind) never snaps on this branch.
@@ -54,7 +64,7 @@ export function shouldSnapToLive(
   behindLiveSeconds: number | null,
   thresholdSeconds = SNAP_TO_LIVE_THRESHOLD_SECONDS,
 ): boolean {
-  if (reason === 'recovered') {
+  if (reason === 'recovered' || reason === 'firstAttach') {
     return true;
   }
   return behindLiveSeconds !== null && behindLiveSeconds > thresholdSeconds;

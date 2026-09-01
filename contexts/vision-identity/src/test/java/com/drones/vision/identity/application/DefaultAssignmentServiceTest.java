@@ -1,13 +1,18 @@
 package com.drones.vision.identity.application;
 
+import com.drones.vision.warehouse.application.asset.AssetDetails;
+import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.warehouse.application.asset.AssetStatus;
+import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.UserId;
-import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -16,7 +21,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
-import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -33,7 +37,7 @@ class DefaultAssignmentServiceTest {
 
     private static final CategoryId DRONE = new CategoryId("drone");
 
-    private AssetRepositoryPort assetRepository;
+    private AssetService assetService;
     private FakeAssignmentRepositoryPort assignmentRepository;
     private AssignmentService service;
 
@@ -43,13 +47,20 @@ class DefaultAssignmentServiceTest {
 
     @BeforeEach
     void setUp() {
-        assetRepository = mock(AssetRepositoryPort.class);
+        assetService = mock(AssetService.class);
         assignmentRepository = new FakeAssignmentRepositoryPort();
-        service = new DefaultAssignmentService(assignmentRepository, assetRepository);
+        service = new DefaultAssignmentService(assignmentRepository, assetService);
 
-        asset = new Asset(AssetId.random(), "drone", DRONE, new Ownership(UserId.random(), group),
-                Set.of(DeviceId.random()), Map.of());
-        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        asset = Asset.register(AssetId.random(), "drone", DRONE, new Ownership(UserId.random(), group),
+                Set.of(DeviceId.random()), Map.of(), Identity.NONE, Custody.NONE);
+        when(assetService.details(asset.id())).thenReturn(detailsOf(asset));
+    }
+
+    /** Minimal {@link AssetDetails} wrapping one asset — devices/recentUsages are unused by this service. */
+    private static AssetDetails detailsOf(Asset asset) {
+        AssetSummary summary = new AssetSummary(asset, "drone", AssetStatus.OFFLINE, null, null,
+                asset.inventoryState(), asset.identity(), asset.custody());
+        return new AssetDetails(summary, List.of(), List.of());
     }
 
     @Test
@@ -88,7 +99,7 @@ class DefaultAssignmentServiceTest {
     @Test
     void assignUnknownAssetThrowsNoSuchElement() {
         AssetId unknown = AssetId.random();
-        when(assetRepository.findById(unknown)).thenReturn(Optional.empty());
+        when(assetService.details(unknown)).thenThrow(new NoSuchElementException("Unknown asset: " + unknown.value()));
 
         assertThrows(NoSuchElementException.class,
                 () -> service.assign(pilot, unknown, VisibilityScope.unbounded()));
@@ -140,7 +151,7 @@ class DefaultAssignmentServiceTest {
     @Test
     void constructorRejectsNullCollaborators() {
         assertThrows(NullPointerException.class,
-                () -> new DefaultAssignmentService(null, assetRepository));
+                () -> new DefaultAssignmentService(null, assetService));
         assertThrows(NullPointerException.class,
                 () -> new DefaultAssignmentService(assignmentRepository, null));
     }

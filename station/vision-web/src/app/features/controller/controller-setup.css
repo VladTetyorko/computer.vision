@@ -1,100 +1,48 @@
-/* Two columns: the layouts you have, and the one you are editing. Collapses to one below --bp-md,
-   where an editor squeezed beside a list stops being readable long before it stops fitting. */
+/* The page is a single column of stacked cards now — layout bar, then the optional flat editor,
+   then the step rail + wizard body — rather than the old page's fixed two-column layout/editor
+   split (wave X4, docs/plans/active/CONTROLLER-UX-PLAN.md §2.3). Each block supplies its own
+   `margin-bottom` (the `.card` global class already does; `vision-step-rail`/`vision-wizard-step`
+   add their own) the same way this app's other stacked pages space themselves — no page-level
+   spacing rule needed here. */
 
-.setup-grid {
-  display: grid;
-  grid-template-columns: minmax(16rem, 22rem) 1fr;
-  gap: var(--space-16);
-  align-items: start;
-}
+/* ---- Layout bar ----------------------------------------------------------------------------- */
 
-@media (max-width: 900px) {
-  /* --bp-md */
-  .setup-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-/* ---- Layouts ------------------------------------------------------------------------------ */
-
-.layout-groups,
-.layout-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.layout-bar {
   display: flex;
   flex-direction: column;
   gap: var(--space-8);
 }
 
-.layout-groups {
+.layout-bar-row {
+  display: flex;
+  align-items: flex-end;
   gap: var(--space-16);
-}
-
-/* One heading per vehicle kind, saying what is active for it — which is what "one active at a
-   time" actually means, and what a flat list of four Active chips said the opposite of. */
-.group-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--space-8);
-  padding-bottom: var(--space-4);
-  border-bottom: 1px solid var(--border);
-}
-
-.group-name {
-  font-weight: 600;
-}
-
-.group-active {
-  color: var(--text-muted);
-  font-size: 0.75rem;
-}
-
-.layout-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
-  padding: var(--space-8);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.layout-row.selected {
-  border-color: var(--color-info);
-}
-
-.layout-pick {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  align-items: flex-start;
-  background: none;
-  border: 0;
-  padding: 0;
-  cursor: pointer;
-  color: inherit;
-  text-align: left;
-}
-
-.layout-meta {
-  display: flex;
-  gap: var(--space-4);
   flex-wrap: wrap;
 }
 
-.layout-actions {
+.layout-select {
+  display: flex;
+  flex-direction: column;
+  min-width: 16rem;
+  flex: 1;
+}
+
+.layout-chips {
   display: flex;
   align-items: center;
   gap: var(--space-4);
+  padding-bottom: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.layout-bar-spacer {
+  flex: 1;
 }
 
 .new-layout {
   display: flex;
   flex-direction: column;
   gap: var(--space-8);
-  margin-top: var(--space-24);
   padding-top: var(--space-16);
   border-top: 1px solid var(--border);
 }
@@ -110,38 +58,28 @@
   min-width: 10ch;
 }
 
-/* ---- Editor ------------------------------------------------------------------------------- */
+@media (max-width: 640px) {
+  /* --bp-sm — every layout-bar control is a full touch target on a phone, stacked rather than
+     wrapped into a cramped row. */
+  .layout-bar-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
 
-.editor {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-16);
+  .layout-bar-spacer {
+    display: none;
+  }
 }
 
-.editor-actions {
-  display: flex;
-  gap: var(--space-8);
-}
+/* ---- How the picture is drawn + what leaves the station (wave C15) -------------------------- */
+/* Two more stacked cards, same "each block supplies its own margin-bottom" rule as the rest of
+   this file — see this file's own header comment. Both sit above the wizard/all-controls views
+   below, since they are properties of the draft as a whole rather than of any one step or row. */
 
-.name-field {
-  display: flex;
-  flex-direction: column;
-  max-width: 32ch;
-}
-
-/* ---- The transmitter, and how it is drawn -------------------------------------------------- */
-
-.transmitter {
+.transmitter-drawing {
   display: flex;
   flex-direction: column;
   gap: var(--space-8);
-}
-
-.transmitter-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
-  flex-wrap: wrap;
 }
 
 .diagram-controls {
@@ -156,58 +94,6 @@
   flex-direction: column;
   gap: var(--space-4);
 }
-
-.guide-line {
-  margin: 0 0 var(--space-4);
-}
-
-.guide-actions {
-  display: flex;
-  gap: var(--space-8);
-  flex-wrap: wrap;
-}
-
-/* ---- The drawing and the one control being edited ------------------------------------------ */
-
-/* The editor sits beside the picture rather than two screens below it: pointing at a stick and
-   then hunting for its card was the page's own longest journey. */
-.work {
-  display: grid;
-  grid-template-columns: 1fr minmax(18rem, 24rem);
-  gap: var(--space-16);
-  align-items: start;
-}
-
-@media (max-width: 1200px) {
-  /* --bp-lg */
-  .work {
-    grid-template-columns: 1fr;
-  }
-}
-
-.work-main {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-16);
-  min-width: 0;
-}
-
-.work-editor {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-8);
-  padding: var(--space-16);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  position: sticky;
-  top: var(--space-16);
-}
-
-.editor-hint {
-  margin: 0;
-}
-
-/* ---- What the vehicle receives -------------------------------------------------------------- */
 
 .outputs {
   display: flex;
@@ -231,27 +117,12 @@
   gap: var(--space-4);
 }
 
-.output-pick {
-  width: 100%;
+.output-row {
   display: grid;
   grid-template-columns: 4rem minmax(8rem, 1fr) minmax(6rem, 2fr) 4rem;
   align-items: center;
   gap: var(--space-8);
-  background: none;
-  border: 1px solid transparent;
-  border-radius: var(--radius);
   padding: var(--space-4) var(--space-8);
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.output-pick:disabled {
-  cursor: default;
-}
-
-.output-pick.selected {
-  border-color: var(--color-info);
 }
 
 .output-row.idle .out-fn,
@@ -295,121 +166,4 @@
   width: var(--space-4);
   border-radius: var(--radius-sm);
   background: var(--color-info);
-}
-
-/* ---- Mapped controls ------------------------------------------------------------------------ */
-
-.mapped {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-8);
-}
-
-.control-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-
-.control-row {
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
-  padding: var(--space-4) var(--space-8);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-}
-
-.control-row.selected {
-  border-color: var(--color-info);
-}
-
-/* The row for the control just pointed at or just flicked — the same call-out the diagram gives
-   it, so the two halves of the page are visibly the same thing. */
-.control-row.detected {
-  border-color: var(--color-success);
-}
-
-.control-pick {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
-  flex-wrap: wrap;
-  background: none;
-  border: 0;
-  padding: 0;
-  color: inherit;
-  text-align: left;
-  cursor: pointer;
-  min-width: 0;
-}
-
-.control-pick:disabled {
-  cursor: default;
-}
-
-.control-name {
-  font-weight: 600;
-  min-width: 6ch;
-}
-
-.control-binding {
-  color: var(--text-muted);
-  font-size: 0.75rem;
-}
-
-.control-head {
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
-}
-
-.control-head-spacer {
-  flex: 1;
-}
-
-/* ---- The one control's fields --------------------------------------------------------------- */
-
-.control-row-fields {
-  display: flex;
-  gap: var(--space-16);
-  flex-wrap: wrap;
-  align-items: flex-end;
-}
-
-.control-row-fields label {
-  display: flex;
-  flex-direction: column;
-}
-
-.control-row-fields label.grow {
-  flex: 1;
-  min-width: 12ch;
-}
-
-.control-row-fields label.checkbox {
-  flex-direction: row;
-  align-items: center;
-  gap: var(--space-8);
-}
-
-.position-row {
-  align-items: flex-end;
-  padding-left: var(--space-8);
-  border-left: 2px solid var(--border);
-}
-
-.position-name {
-  min-width: 5ch;
-  padding-bottom: var(--space-8);
-  color: var(--text-muted);
-}
-
-.issue-list {
-  margin: 0;
-  padding-left: var(--space-16);
 }

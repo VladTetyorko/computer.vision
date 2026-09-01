@@ -16,6 +16,8 @@ import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.kernel.UsageOrigin;
+import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.kernel.UserId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -72,7 +74,8 @@ class UsageTimelineControllerTest {
     }
 
     private AssetUsage usage(Instant startedAt, Instant endedAt) {
-        return new AssetUsage(usageId, assetId, startedAt, endedAt, null, null, 2);
+        return new AssetUsage(usageId, assetId, startedAt, endedAt, null, null, 2, null, UsagePhase.PREFLIGHT,
+                UsageOrigin.STREAM);
     }
 
     // ---- recent (docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 4, F8 -- the replay library list) ----

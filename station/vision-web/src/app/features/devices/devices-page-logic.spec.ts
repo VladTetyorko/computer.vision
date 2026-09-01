@@ -4,6 +4,7 @@ import {
   buildCreateAssetRequestForDevice,
   buildWarehouseRows,
   describeDeviceState,
+  endpointConflicts,
   filterRowsByArchived,
   findWarehouseRowById,
   mapDeviceOwners,
@@ -230,6 +231,96 @@ describe('describeDeviceState', () => {
 
   it('archived outranks every other state', () => {
     expect(describeDeviceState({ lifecycle: 'DEACTIVATED', archived: true, streaming: false }).kind).toBe('archived');
+  });
+});
+
+describe('endpointConflicts (docs/plans/active/OPERATOR-UX-7-PLAN.md finding D1)', () => {
+  it('two devices reading the same video file never conflict — only bound udp/tcp sockets are exclusive', () => {
+    const shared = 'file:///home/op/Videos/drone.mp4';
+    const conflicts = endpointConflicts([
+      device({ id: 'dev-1', name: 'Warmate 2 · video', protocol: 'file', uri: shared }),
+      device({ id: 'dev-2', name: 'FPV Vyriy 3 · video', protocol: 'file', uri: shared }),
+    ]);
+    expect(conflicts.size).toBe(0);
+  });
+
+  it('returns an empty map when no two devices share a protocol+uri', () => {
+    const conflicts = endpointConflicts([
+      device({ id: 'dev-1', protocol: 'mavlink', uri: 'udp://0.0.0.0:14550' }),
+      device({ id: 'dev-2', protocol: 'rtsp', uri: 'rtsp://192.168.1.50:554/stream' }),
+    ]);
+    expect(conflicts.size).toBe(0);
+  });
+
+  it('maps each device in a shared-endpoint group to the names of the others', () => {
+    const conflicts = endpointConflicts([
+      device({ id: 'dev-1', name: 'ESP32 Rover', protocol: 'mavlink', uri: 'udp://0.0.0.0:14550' }),
+      device({ id: 'dev-2', name: 'ESP32 telemetry', protocol: 'mavlink', uri: 'udp://0.0.0.0:14550' }),
+      device({ id: 'dev-3', name: 'ESP32 Rover · telemetry', protocol: 'mavlink', uri: 'udp://0.0.0.0:14550' }),
+    ]);
+    expect(conflicts.get('dev-1')).toEqual(['ESP32 telemetry', 'ESP32 Rover · telemetry']);
+    expect(conflicts.get('dev-2')).toEqual(['ESP32 Rover', 'ESP32 Rover · telemetry']);
+    expect(conflicts.get('dev-3')).toEqual(['ESP32 Rover', 'ESP32 telemetry']);
+  });
+
+  it('requires both protocol and uri to match — same uri, different protocol is not a conflict', () => {
+    const conflicts = endpointConflicts([
+      device({ id: 'dev-1', protocol: 'rtsp', uri: '192.168.1.50:554' }),
+      device({ id: 'dev-2', protocol: 'mjpeg', uri: '192.168.1.50:554' }),
+    ]);
+    expect(conflicts.size).toBe(0);
+  });
+
+  it('excludes archived (DELETED) devices from consideration entirely', () => {
+    const conflicts = endpointConflicts([
+      device({ id: 'dev-1', name: 'Live one', protocol: 'mavlink', uri: 'udp://0.0.0.0:14550', state: 'ACTIVE' }),
+      device({ id: 'dev-2', name: 'Archived one', protocol: 'mavlink', uri: 'udp://0.0.0.0:14550', state: 'DELETED' }),
+    ]);
+    expect(conflicts.size).toBe(0);
+  });
+
+  it('treats DEACTIVATED as still-active (non-archived) for conflict purposes', () => {
+    const conflicts = endpointConflicts([
+      device({ id: 'dev-1', name: 'A', protocol: 'mavlink', uri: 'udp://0.0.0.0:14550', state: 'ACTIVE' }),
+      device({ id: 'dev-2', name: 'B', protocol: 'mavlink', uri: 'udp://0.0.0.0:14550', state: 'DEACTIVATED' }),
+    ]);
+    expect(conflicts.get('dev-1')).toEqual(['B']);
+    expect(conflicts.get('dev-2')).toEqual(['A']);
+  });
+
+  it('normalises trailing whitespace on the uri before comparing', () => {
+    const conflicts = endpointConflicts([
+      device({ id: 'dev-1', name: 'A', protocol: 'mavlink', uri: 'udp://0.0.0.0:14550' }),
+      device({ id: 'dev-2', name: 'B', protocol: 'mavlink', uri: 'udp://0.0.0.0:14550  ' }),
+    ]);
+    expect(conflicts.get('dev-1')).toEqual(['B']);
+    expect(conflicts.get('dev-2')).toEqual(['A']);
+  });
+
+  it('does not trim leading whitespace or fold case — only trailing whitespace is normalised', () => {
+    const conflicts = endpointConflicts([
+      device({ id: 'dev-1', protocol: 'mavlink', uri: 'udp://0.0.0.0:14550' }),
+      device({ id: 'dev-2', protocol: 'mavlink', uri: ' udp://0.0.0.0:14550' }),
+      device({ id: 'dev-3', protocol: 'MAVLINK', uri: 'udp://0.0.0.0:14550' }),
+    ]);
+    expect(conflicts.size).toBe(0);
+  });
+
+  it('does not let a protocol/uri split ambiguity collide two unrelated pairs', () => {
+    const conflicts = endpointConflicts([
+      device({ id: 'dev-1', protocol: 'a b', uri: 'c' }),
+      device({ id: 'dev-2', protocol: 'a', uri: 'b c' }),
+    ]);
+    expect(conflicts.size).toBe(0);
+  });
+
+  it('a solitary device on its own endpoint has no entry at all', () => {
+    const conflicts = endpointConflicts([device({ id: 'dev-1', protocol: 'mavlink', uri: 'udp://0.0.0.0:14550' })]);
+    expect(conflicts.has('dev-1')).toBe(false);
+  });
+
+  it('returns an empty map for no devices', () => {
+    expect(endpointConflicts([]).size).toBe(0);
   });
 });
 

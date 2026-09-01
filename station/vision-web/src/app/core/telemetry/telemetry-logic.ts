@@ -1,4 +1,5 @@
 import type { AssetDetails, AssetUsage, Device, GeoPosition, TelemetrySample } from '../api/models';
+import { hasFix } from '../geo/geo-logic';
 
 /**
  * Pure derivations behind `TelemetryStore` (docs/main/CYCLES-PLAN.md §2), split out so the
@@ -42,12 +43,12 @@ export function selectOpenUsage(usages: readonly AssetUsage[]): AssetUsage | und
 export function deriveTrail(samples: readonly TelemetrySample[]): readonly GeoPosition[] {
   const trail: GeoPosition[] = [];
   for (const sample of samples) {
-    if (sample.latitude === undefined || sample.longitude === undefined) {
+    if (!hasFix(sample)) {
       continue;
     }
     trail.push({
-      latitude: sample.latitude,
-      longitude: sample.longitude,
+      latitude: sample.latitude!,
+      longitude: sample.longitude!,
       altitudeMeters: sample.altitudeMeters,
     });
   }
@@ -150,6 +151,70 @@ export function telemetryAgeSeverity(age: number): TelemetryAgeSeverity {
     return 'red';
   }
   return age > STALE_AFTER_SECONDS ? 'amber' : 'fresh';
+}
+
+// --- Freshness (docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1 — "stale is not live") -----------------
+
+/**
+ * Whether a reading is fresh enough to drive a *confident* instrument — the OSD/Controller-drawer's
+ * own "is this data still live, or just the last thing we heard" question, one level coarser than
+ * {@link telemetryAgeSeverity}'s three-way chip coloring. `'none'` for no sample at all (never a
+ * fabricated tier); otherwise a direct relabeling of `telemetryAgeSeverity`'s own tiers —
+ * `'fresh'→'live'`, `'amber'→'aging'`, `'red'→'stale'` — so the two thresholds
+ * (`STALE_AFTER_SECONDS`/`TELEMETRY_AGE_RED_SECONDS`) stay defined in exactly one place and every
+ * caller (the Link group's age chip, and now the OSD's whole-group dimming/"LAST KNOWN" label and
+ * the Controller drawer's armed chip) agrees on what "stale" means. H1's own finding — a rover last
+ * heard from 4 days ago showing `ARMED` in full colour — is this function's whole reason to exist:
+ * a `'stale'` reading must never render as confidently as a `'live'` one.
+ */
+export type Freshness = 'live' | 'aging' | 'stale' | 'none';
+
+const AGE_SEVERITY_TO_FRESHNESS: Readonly<Record<TelemetryAgeSeverity, Freshness>> = {
+  fresh: 'live',
+  amber: 'aging',
+  red: 'stale',
+};
+
+export function freshness(age: number | undefined): Freshness {
+  return age === undefined ? 'none' : AGE_SEVERITY_TO_FRESHNESS[telemetryAgeSeverity(age)];
+}
+
+/** Named unit breaks for {@link humanAge} — the point past which the next-larger unit takes over. */
+const SECONDS_PER_MINUTE = 60;
+const SECONDS_PER_HOUR = 3600;
+const SECONDS_PER_DAY = 86400;
+
+/**
+ * A sample age as a human reads it, the two largest units that matter with zero remainders
+ * dropped — `12s`, `3m 10s`, `4h 2m`, `4h`, `4d 2h` — never a raw second count (H1's own finding: `353099s` on the LINK chip is a
+ * number nobody parses). Unlike `core/stream-info-logic.ts#formatDuration` (session durations,
+ * capped at hours — a live flight is never days long), this needs a day tier: a telemetry sample
+ * can legitimately be days stale (an open usage nobody closed). Deliberately unpadded (`2m`, not
+ * `02m`) — `formatDuration`'s zero-padding reads right for a ticking clock digit; this is a single
+ * glanced-at age, not a clock face. Shared by the OSD, the drawer strip, the cockpit's not-streaming
+ * card and the `/fly` picker's offline chips — one age vocabulary across the app.
+ */
+export function humanAge(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  if (total < SECONDS_PER_MINUTE) {
+    return `${total}s`;
+  }
+  if (total < SECONDS_PER_HOUR) {
+    return withRemainder(Math.floor(total / SECONDS_PER_MINUTE), 'm', total % SECONDS_PER_MINUTE, 's');
+  }
+  if (total < SECONDS_PER_DAY) {
+    const hours = Math.floor(total / SECONDS_PER_HOUR);
+    const remainderMinutes = Math.floor((total % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE);
+    return withRemainder(hours, 'h', remainderMinutes, 'm');
+  }
+  const days = Math.floor(total / SECONDS_PER_DAY);
+  const remainderHours = Math.floor((total % SECONDS_PER_DAY) / SECONDS_PER_HOUR);
+  return withRemainder(days, 'd', remainderHours, 'h');
+}
+
+/** `4h 2m` but `4h`, never `4h 0m` — a zero remainder is noise, not precision. */
+function withRemainder(major: number, majorUnit: string, minor: number, minorUnit: string): string {
+  return minor > 0 ? `${major}${majorUnit} ${minor}${minorUnit}` : `${major}${majorUnit}`;
 }
 
 /**

@@ -1,4 +1,4 @@
-import type { ControlFunction, ManualControlChannelBinding, VehicleKind } from '../api/models';
+import type { ControlFunction, ControlTravel, ManualControlChannelBinding, VehicleKind } from '../api/models';
 
 /**
  * Pure geometry and value math behind the on-screen control surface
@@ -99,9 +99,17 @@ export function springsBack(binding: ManualControlChannelBinding): boolean {
  * @param value   its current normalized value (`[-1,1]` centred, `[0,1]` unidirectional)
  */
 export function displayPercent(binding: ManualControlChannelBinding, value: number): number {
-  return binding.travel === 'UNIDIRECTIONAL'
-    ? Math.round(clamp(value, 0, 1) * 100)
-    : Math.round((clamp(value, -1, 1) + 1) * 50);
+  return displayPercentFor(binding.travel, value);
+}
+
+/**
+ * {@link displayPercent}'s own math, taking `travel` directly rather than a whole binding — the
+ * setup wizard's live detection gauge (docs/plans/active/CONTROLLER-UX-PLAN.md §2.3, wave X4) shows
+ * a percent, and where rest sits, for a control it is *in the middle of binding*: there is no
+ * {@link ManualControlChannelBinding} yet, only the travel the operator is about to choose for it.
+ */
+export function displayPercentFor(travel: ControlTravel, value: number): number {
+  return travel === 'UNIDIRECTIONAL' ? Math.round(clamp(value, 0, 1) * 100) : Math.round((clamp(value, -1, 1) + 1) * 50);
 }
 
 /**
@@ -159,12 +167,12 @@ export function axesFrom(
  *
  * Only `'UNKNOWN'` earns one, and it is stated as a fact about the vehicle rather than a scolding:
  * the platform did not recognize what it is, so it kept the historical centred map instead of
- * guessing — which means the throttle rests at mid-travel, and on a multirotor that is not idle
- * (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P8).
+ * guessing — since FLEET-RADIO R2 that means it binds nothing and engage is refused, so the
+ * only honest picture is none (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P8).
  */
 export function profileCaveat(kind: VehicleKind): string | undefined {
   return kind === 'UNKNOWN'
-    ? 'This vehicle did not report what it is, so a generic centred layout is in use — the throttle rests at mid-travel, not at idle. Check it matches your machine before you drive it.'
+    ? 'This vehicle has not reported what it is, so no stick layout is bound and control is refused until it does. The picture appears here once it identifies itself.'
     : undefined;
 }
 

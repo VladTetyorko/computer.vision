@@ -2,7 +2,8 @@ import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { describe, expect, it } from 'vitest';
-import { PageBar, pluralize } from './page-bar';
+import { PageBar } from './page-bar';
+import { pluralize } from '../text-logic';
 
 /**
  * Host harness — `PageBar` is a projection component, so the slots can only be exercised through a

@@ -1,4 +1,4 @@
-import type { FlightState, TelemetrySample } from '../api/models';
+import type { FlightState, TelemetrySample, VehicleKind } from '../api/models';
 import { BATTERY_LOW_PERCENT, STALE_AFTER_SECONDS, ageSeconds, isStale } from './telemetry-logic';
 
 /**
@@ -174,7 +174,28 @@ function telemetryLinkItem(sample: TelemetrySample | undefined, ageSecondsValue:
   return { label, state: 'ok' };
 }
 
-function gpsFixItem(fixType: number | undefined): PreflightItem {
+/**
+ * `fixType >= 3` (a 3D fix) is a correct hard gate for a **copter** — it falls out of the sky
+ * without one. It is the wrong gate for a **rover or boat**: ArduPilot's ground-vehicle `Manual`/
+ * `Acro` modes drive purely off wheel/rudder input and need no GPS at all — the sensor this row
+ * checks isn't part of the vehicle's control loop until the operator asks for a GPS-dependent mode
+ * (`Guided`/`Auto`/`RTL`). This row cannot see *which* mode is about to be selected (that is a
+ * separate, later readiness/mode question — FLEET-RADIO-PLAN.md's R6 wave, and ArduPilot's own
+ * per-mode GPS-requirement table lives in `FlightModes.java`, a Java module out of scope here), so
+ * the carve-out is unconditional on mode, same as every other row in this checklist ("is the sensor
+ * healthy", never "is the sensor needed for what you're about to do").
+ *
+ * `vehicleKind === 'ROVER'` (FLEET-RADIO-PLAN.md D2 folds the surface boat into `ROVER` — it steers
+ * and drives exactly like one) is the *only* carve-out. Every other input — `'COPTER'`, `'PLANE'`
+ * (out of this plan's scope; kept exactly as before), the literal `'UNKNOWN'` a vehicle earns by
+ * heartbeating something this platform doesn't recognize, and plain `undefined` (capabilities
+ * haven't loaded yet, or the fetch itself failed — `cockpit-facade.ts#capabilities`'s own doc
+ * comment) — all fall through to the original strict rule. `undefined` deliberately does **not**
+ * get the rover's laxer rule: softening it would make every vehicle look GPS-optional for the few
+ * seconds between telemetry starting and the capabilities fetch resolving, which is the exact
+ * "unknown silently gets the laxer rule" hazard this row must avoid.
+ */
+function gpsFixItem(fixType: number | undefined, vehicleKind: VehicleKind | undefined): PreflightItem {
   const label = 'GPS fix';
   if (fixType === undefined) {
     return { label, state: 'unknown', detail: 'No GPS reading yet.' };
@@ -182,19 +203,53 @@ function gpsFixItem(fixType: number | undefined): PreflightItem {
   if (fixType >= 3) {
     return { label, state: 'ok', detail: gpsFixLabel(fixType) };
   }
+  if (vehicleKind === 'ROVER') {
+    return { label, state: 'ok', detail: `${gpsFixLabel(fixType)} — GPS not required to drive.` };
+  }
   return { label, state: 'fail', detail: gpsFixLabel(fixType) };
 }
 
-/** Reuses `telemetry-logic.ts#BATTERY_LOW_PERCENT` (45%) — the same bar `batterySeverity`'s own "low" tier uses. */
-function batteryItem(batteryPercent: number | undefined): PreflightItem {
+/**
+ * Preflight low-battery bar, per vehicle kind. `telemetry-logic.ts#BATTERY_LOW_PERCENT` (45%) is a
+ * copter number: a copter that runs its reserve down **falls**, so its bar sits high enough to
+ * leave a real RTL margin above that. A rover or boat that runs its battery down simply **stops
+ * moving** — it doesn't fall — so holding it to a flight-reserve margin it structurally cannot need
+ * is exactly F14's defect. FLEET-RADIO-PLAN.md's D7 wants this sourced from server configuration,
+ * but there is no client-config channel in this codebase today (no endpoint serves UI thresholds
+ * from `application.yaml`; building one is properties + a controller + a client store across three
+ * modules — its own wave, not this one, and recorded as a deferral in R4c). So: a **named,
+ * per-kind table**, not a second universal literal, which is the part of D7 this wave can actually
+ * deliver — one place for a later wave to feed from the server.
+ *
+ * **25% for `ROVER`, chosen by reasoning, not measurement**: comfortably above
+ * `BATTERY_CRITICAL_PERCENT` (20%, `telemetry-logic.ts`) — the under-voltage/brownout floor that
+ * applies to every vehicle regardless of kind — so a rover still gets a real margin against a
+ * sagging pack, while nowhere near a copter's 45% flight-reserve bar, which a ground/surface
+ * vehicle has no use for. Treat this as a placeholder an operator or a later wave can retune, not a
+ * derived constant.
+ *
+ * Every other kind (`'COPTER'`, `'PLANE'`, `'UNKNOWN'`, `undefined`) falls through to
+ * `BATTERY_LOW_PERCENT` — the same "don't silently soften for an unresolved/unrecognized kind" rule
+ * {@link gpsFixItem} follows.
+ */
+const BATTERY_LOW_PERCENT_BY_KIND: Readonly<Partial<Record<VehicleKind, number>>> = {
+  ROVER: 25,
+};
+
+function batteryLowPercentFor(vehicleKind: VehicleKind | undefined): number {
+  return (vehicleKind !== undefined ? BATTERY_LOW_PERCENT_BY_KIND[vehicleKind] : undefined) ?? BATTERY_LOW_PERCENT;
+}
+
+function batteryItem(batteryPercent: number | undefined, vehicleKind: VehicleKind | undefined): PreflightItem {
   const label = 'Battery';
   if (batteryPercent === undefined) {
     return { label, state: 'unknown', detail: 'No battery reading yet.' };
   }
-  if (batteryPercent >= BATTERY_LOW_PERCENT) {
+  const threshold = batteryLowPercentFor(vehicleKind);
+  if (batteryPercent >= threshold) {
     return { label, state: 'ok', detail: `${batteryPercent.toFixed(0)}%` };
   }
-  return { label, state: 'fail', detail: `${batteryPercent.toFixed(0)}% — below ${BATTERY_LOW_PERCENT}% minimum.` };
+  return { label, state: 'fail', detail: `${batteryPercent.toFixed(0)}% — below ${threshold}% minimum.` };
 }
 
 function armableItem(flightState: FlightState | undefined): PreflightItem {
@@ -220,9 +275,16 @@ function armableItem(flightState: FlightState | undefined): PreflightItem {
  * the real clock (via a `computed()` that re-runs whenever `telemetry.latest()` itself changes, i.e.
  * roughly every poll tick — this checklist is a pre-flight glance, not a live-ticking instrument,
  * which is what the OSD's own age chip already is).
+ *
+ * `vehicleKind` (FLEET-RADIO-PLAN.md F14/R4c) feeds only the GPS fix and Battery rows — see
+ * {@link gpsFixItem}/{@link batteryLowPercentFor}'s own doc comments for the per-kind rule and why
+ * an unresolved/unrecognized kind never silently gets the rover's laxer treatment. The one call
+ * site (`cockpit-facade.ts`) passes `this.capabilities()?.vehicleKind`, which is legitimately
+ * `undefined` before the capability fetch resolves or when it fails.
  */
 export function derivePreflight(
   sample: TelemetrySample | undefined,
+  vehicleKind: VehicleKind | undefined,
   hasVideo: boolean,
   streaming: boolean,
   nowMs: number,
@@ -231,8 +293,8 @@ export function derivePreflight(
   return [
     videoFeedItem(hasVideo, streaming),
     telemetryLinkItem(sample, age),
-    gpsFixItem(sample?.flightState?.gpsFixType),
-    batteryItem(sample?.batteryPercent),
+    gpsFixItem(sample?.flightState?.gpsFixType, vehicleKind),
+    batteryItem(sample?.batteryPercent, vehicleKind),
     armableItem(sample?.flightState),
   ];
 }

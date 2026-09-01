@@ -6,84 +6,29 @@
   gap: var(--space-16);
 }
 
-/* Asset card rebuild (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §3) — a flex column so the header row, category,
-   optional facts, and the trailing "Enter cockpit →" line all get consistent spacing regardless of
-   how many facts a given card actually has (an offline asset with no fix yet has fewer than one
-   that's flown and streamed before). An `<a>`, not a `<button>` (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F12 —
-   entering a cockpit is a real navigation to `/fly/:assetId` now, not an internal state flip), so
-   `display: flex` here overrides the anchor's own inline default the same way it used to override a
-   button's. */
-.picker-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-8);
-  text-align: left;
-  text-decoration: none;
-  color: inherit;
-  cursor: pointer;
-  transition: border-color 0.15s ease, background 0.15s ease;
+/* T1 groups (docs/plans/active/OPERATOR-UX-3-PLAN.md §2 T1) — "Your vehicles" / "Simulated", each its
+   own quiet structural-label header (`.claude/skills/frontend-style` §8) over its own grid. */
+.picker-group + .picker-group {
+  margin-top: var(--space-24);
 }
 
-.picker-card:hover {
-  border-color: var(--border-strong);
-  background: var(--panel-hover);
-}
-
-.picker-card h3 {
-  margin: 0;
-  min-width: 0;
-}
-
-.picker-card p {
-  margin: 0;
-  font-size: 0.8rem;
-}
-
-.picker-card-facts {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  margin: 0;
-}
-
-/* No facts at all (never used, no fix) — take up no space rather than leaving an empty gap. */
-.picker-card-facts:empty {
-  display: none;
-}
-
-.picker-card-facts .fact {
-  display: flex;
-  align-items: baseline;
-  gap: var(--space-8);
-  font-size: 0.78rem;
-}
-
-.picker-card-facts dt {
-  flex: none;
-  color: var(--text-faint);
-  font-size: 0.66rem;
+.picker-group-label {
+  margin: 0 0 var(--space-8);
+  font-size: 0.72rem;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.picker-card-facts dd {
-  margin: 0;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  letter-spacing: 0.05em;
   color: var(--text-muted);
 }
 
-/* Cards state their action (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §2 rule 6) — `margin-top: auto` pins this
-   to the card's bottom edge regardless of how many facts render above it, so every card in a grid
-   row ends on the same line. */
-.picker-card-cta {
-  margin-top: auto;
-  padding-top: var(--space-8);
-  border-top: 1px solid var(--border);
-  font-size: 0.8rem;
-  font-weight: 600;
+/* "Your vehicles" empty leg (§2 T1) — a faint one-line invite, not a full `vision-empty` block; the
+   page's real empty state (both groups empty) is the `.card.empty` branch above this section. */
+.picker-group-empty {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.picker-group-empty a {
   color: var(--color-info);
 }
 

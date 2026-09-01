@@ -5,7 +5,7 @@ import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.identity.domain.port.GroupRepositoryPort;
 import com.drones.vision.identity.domain.port.PasswordHasherPort;
 import com.drones.vision.identity.domain.port.UserRepositoryPort;
-import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
+import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.api.security.PrincipalResolver;
 import com.drones.vision.api.security.SessionAuthenticator;
 import com.drones.vision.app.security.BcryptPasswordHasher;
@@ -95,8 +95,8 @@ public class AuthWiringConfiguration {
     /** Pilot→asset assignment roster (docs/plans/done/U-SCOPE-PLAN.md, feature 2) — behind the assignment endpoints. */
     @Bean
     public AssignmentService assignmentService(AssignmentRepositoryPort assignmentRepositoryPort,
-                                               AssetRepositoryPort assetRepositoryPort) {
-        return new DefaultAssignmentService(assignmentRepositoryPort, assetRepositoryPort);
+                                               AssetService assetService) {
+        return new DefaultAssignmentService(assignmentRepositoryPort, assetService);
     }
 
     /** A user's own activity feed (docs/plans/done/U-SCOPE-PLAN.md, feature 7) — behind {@code GET /api/me/activity}. */

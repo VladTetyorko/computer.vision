@@ -1,13 +1,14 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
-import { batterySeverity, telemetryAgeSeverity } from '../../core/telemetry/telemetry-logic';
+import { batterySeverity, humanAge, telemetryAgeSeverity } from '../../core/telemetry/telemetry-logic';
 import { gpsFixLabel, gpsSeverity } from '../../core/telemetry/flight-state-logic';
 import { formatLatency, transportLabel } from '../../core/stream-info-logic';
 import { DEFAULT_WIND_LIMIT_MPS } from '../../core/weather/weather-logic';
 import { Icon } from '../../shared/ui/icon';
 import { WeatherChip } from '../../shared/ui/weather-chip';
 import { GeoChip } from './geo-chip';
-import { positionLabel } from './fly-logic';
+import { positionFact } from './fly-logic';
+import { armedOsdText, isStaleReading, osdGroupLabel } from './fly-osd-logic';
 import type { Transport } from '../../shared/player/player';
 
 /**
@@ -80,6 +81,17 @@ import type { Transport } from '../../shared/player/player';
  * `<vision-weather-chip>` above, injecting `GeoStore` from `CockpitPage`'s own `providers` — see
  * `geo-chip.ts`'s own doc comment for the chip label/tone rules and its detail popover.
  *
+ * **Stale is not live (docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1)** — past
+ * `fly-osd-logic.ts#isStaleReading`'s threshold (the exact same `TELEMETRY_AGE_RED_SECONDS` tier the
+ * Link group's own age chip already colors red — one source, not a second invented "how stale is
+ * too stale"), the Power and Nav groups dim (`.osd-group.stale`, `fly-osd.css`), their own group
+ * label swaps from `'Power'`/`'Nav'` to `'LAST KNOWN · <humanAge>'` (`fly-osd-logic.ts#osdGroupLabel`),
+ * and the armed chip reads `'ARMED?'` rather than a confident `'ARMED'`
+ * (`fly-osd-logic.ts#armedOsdText`) — H1's own finding was a rover last heard from 4 days ago
+ * reading `POWER 90% · ARMED` in full colour, with only the LINK chip's raw `353099s` hinting
+ * anything was wrong. `ageLabel` itself is now `humanAge`-formatted everywhere (`12s`/`3m 10s`/
+ * `4h 2m`/`4d 2h`), not conditioned on staleness — a raw second count is unreadable at any age.
+ *
  * **This component was inline template/styles until wave H6 touched it** — split into
  * `fly-osd.html`/`fly-osd.css` (this repo's own three-file component convention) purely as a side
  * effect of adding the one `<vision-geo-chip />` line above; nothing about the markup/styles
@@ -113,15 +125,25 @@ export class FlyOsd {
   });
   protected readonly batterySeverityTier = computed(() => batterySeverity(this.batteryPercent()));
 
+  /** `humanAge`-formatted (`12s`/`3m 10s`/`4h 2m`/`4d 2h`), not a raw second count — H1's own
+   * finding: `353099s` on this chip is a number nobody parses. */
   protected readonly ageLabel = computed(() => {
     const age = this.store.sampleAgeSeconds();
-    return age === undefined ? '—' : `${age.toFixed(0)}s`;
+    return age === undefined ? '—' : humanAge(age);
   });
-  /** `'fresh'` (rather than a fabricated red) until a first sample actually exists. */
+  /** `'fresh'` (rather than a fabricated red) until a first sample actually exists. Unchanged by
+   * H1 — the Link group's own age chip keeps its existing red tier regardless of the whole-group
+   * dimming {@link isStale} now drives elsewhere on this strip. */
   protected readonly ageSeverityTier = computed(() => {
     const age = this.store.sampleAgeSeconds();
     return age === undefined ? 'fresh' : telemetryAgeSeverity(age);
   });
+
+  /** Whether the Power/Nav groups should read as "last known", not live — see this class's own doc
+   * comment (H1). */
+  protected readonly isStale = computed(() => isStaleReading(this.store.sampleAgeSeconds()));
+  protected readonly powerGroupLabel = computed(() => osdGroupLabel('Power', this.store.sampleAgeSeconds()));
+  protected readonly navGroupLabel = computed(() => osdGroupLabel('Nav', this.store.sampleAgeSeconds()));
 
   /** `TelemetrySample.latitude`/`.longitude` — see this class's own doc comment for why this reuses
    * `fly-logic.ts#positionLabel` rather than re-deriving the same `lat, lon` format. */
@@ -130,7 +152,7 @@ export class FlyOsd {
     if (latest?.latitude === undefined || latest.longitude === undefined) {
       return undefined;
     }
-    return positionLabel({ latitude: latest.latitude, longitude: latest.longitude });
+    return positionFact({ latitude: latest.latitude, longitude: latest.longitude })?.value;
   });
 
   protected readonly altitudeLabel = computed(() => {
@@ -165,6 +187,9 @@ export class FlyOsd {
 
   /** `true`/`false` each render their own chip; `undefined` (no flightState yet) renders none at all. */
   protected readonly armed = computed(() => this.flightState()?.armed);
+  /** `'ARMED?'` rather than a confident `'ARMED'` once {@link isStale} — see this class's own doc
+   * comment (H1). Only ever read from the template once `armed()` is defined. */
+  protected readonly armedText = computed(() => armedOsdText(this.armed() ?? false, this.store.sampleAgeSeconds()));
 
   protected readonly rssiPercent = computed(() => this.flightState()?.rssiPercent);
 

@@ -34,6 +34,29 @@ Specifically:
 - **Do not inject a port you use once** to cascade a delete you should not be cascading. Question the operation before adding the parameter.
 - Constructor injection only (no field `@Autowired`), assigned to `private final` fields.
 
+### No overload chains, no null-means-off
+
+A new collaborator means **updating the call sites**, or bundling into a settings record. It does
+not mean one more constructor overload.
+
+The repo ran the other rule for a while — *"every field a wave adds gets one more convenience ctor
+layer so every pre-existing call site keeps compiling"* — and it produced `UsageTracker` with ten
+constructors, `StreamPipeline` with nine (927 → 1530 lines), `DefaultStreamService` with eight, and
+58 collaborators whose documented contract was *"pass `null` to skip that feature"*. The rule is
+withdrawn (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md, R1). Two rules replace it:
+
+- **One public constructor per class.** Optional collaborators and tunables go into a settings or
+  collaborators record with a `defaults()` factory — the pattern `UsagePhaseSettings`,
+  `StreamPipelineSettings` and `UsageSummaryBatchSettings` already established. One parameter, not
+  one per wave. A package-private test seam is fine when a test genuinely needs to inject a clock or
+  a backoff bound; a *chain* of them is not.
+- **A parameter may not mean "off" by being `null`.** Use a no-op implementation constant
+  (`UsagePhaseObserver.NOOP`), an `Optional`, or a flag on the settings record. A reader must not
+  have to consult the module doc to learn that `null` in position seven disables detection.
+
+Updating call sites is the cost the withdrawn rule was deferring, and deferring it is what turned
+three classes on the live video path into the largest in the codebase. Pay it in the same change.
+
 ## 4. The user comes from the token
 
 Authentication is resolved at the **API edge** and nowhere else. Controllers obtain the principal from the security context (JWT claims → user id, roles), and pass it down as an argument. Services never know about tokens, headers, or Spring Security; they receive a plain `UserId`.
@@ -65,6 +88,7 @@ Javadoc on public types and non-obvious methods, explaining *why* and the contra
 
 1. Does a second implementation exist today? If no → no interface.
 2. Does this constructor now exceed five parameters? If yes → the class does too much.
-3. Am I injecting something that varies per request? If yes → it is a method parameter.
-4. Is this record describing the wire? If yes → it belongs in `…api.dto`.
-5. Can an existing service own this method instead of a new type? Usually yes.
+3. Am I adding an overload instead of updating call sites? If yes → update the call sites, or bundle into a settings record.
+4. Am I injecting something that varies per request? If yes → it is a method parameter.
+5. Is this record describing the wire? If yes → it belongs in `…api.dto`.
+6. Can an existing service own this method instead of a new type? Usually yes.

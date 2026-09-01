@@ -49,6 +49,19 @@ describe('bucketForAsset', () => {
   it('buckets an offline asset with no position as noPosition', () => {
     expect(bucketForAsset(asset({ status: 'OFFLINE' }))).toBe('noPosition');
   });
+
+  // docs/plans/active/OPERATOR-UX-4-PLAN.md finding N1 — Null Island is a no-fix report, not a place.
+  it('buckets a streaming asset whose lastKnownPosition is exactly (0, 0) as noPosition', () => {
+    expect(bucketForAsset(asset({ status: 'STREAMING', lastKnownPosition: { latitude: 0, longitude: 0 } }))).toBe(
+      'noPosition',
+    );
+  });
+
+  it('buckets an offline asset whose lastKnownPosition is exactly (0, 0) as noPosition', () => {
+    expect(bucketForAsset(asset({ status: 'OFFLINE', lastKnownPosition: { latitude: 0, longitude: 0 } }))).toBe(
+      'noPosition',
+    );
+  });
 });
 
 describe('bucketAssets', () => {
@@ -163,6 +176,23 @@ describe('buildMarker', () => {
     const marker = buildMarker(asset({ status: 'STREAMING', lastKnownPosition: POSITION }), telemetry, 0);
     expect(marker?.position).toEqual(POSITION);
     expect(marker?.batteryPercent).toBe(40);
+  });
+
+  // docs/plans/active/OPERATOR-UX-4-PLAN.md finding N1 — a (0, 0) sample is a no-fix report, treated
+  // exactly like a sample carrying no lat/lon at all.
+  it('falls back to lastKnownPosition when the latest sample is exactly (0, 0), never plots Null Island', () => {
+    const telemetry: AssetTelemetrySnapshot = {
+      latest: sample({ at: '2026-07-22T00:00:00Z', latitude: 0, longitude: 0, batteryPercent: 40 }),
+      trail: [],
+    };
+    const marker = buildMarker(asset({ status: 'STREAMING', lastKnownPosition: POSITION }), telemetry, 0);
+    expect(marker?.position).toEqual(POSITION);
+    expect(marker?.batteryPercent).toBe(40);
+  });
+
+  it('returns undefined when both lastKnownPosition and the latest sample are (0, 0) — genuinely no fix', () => {
+    const marker = buildMarker(asset({ status: 'STREAMING', lastKnownPosition: { latitude: 0, longitude: 0 } }), undefined, 0);
+    expect(marker).toBeUndefined();
   });
 
   describe('flightMode/armed/failsafe/gpsFixType (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d)', () => {

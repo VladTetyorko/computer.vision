@@ -1,13 +1,29 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.api.security.CurrentUser;
+import com.drones.vision.api.security.PrincipalResolver;
+import com.drones.vision.api.security.StreamAccess;
 import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.map.application.MapAccessPolicy;
+import com.drones.vision.perception.application.stream.ActiveStream;
+import com.drones.vision.perception.application.stream.StreamService;
 import com.drones.vision.perception.domain.model.DetectionEvent;
 import com.drones.vision.perception.domain.model.DetectionEventId;
 import com.drones.vision.perception.domain.model.DetectionEventState;
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
+import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
+import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -16,6 +32,9 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import static org.hamcrest.Matchers.hasSize;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -30,18 +49,76 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/**
+ * Every pre-existing test below runs against {@link #currentUser} — {@link
+ * CurrentUser#CurrentUser(Ownership)}'s unbounded-scope convenience constructor — so {@link
+ * EventController}'s scope gate (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R7, finding A2)
+ * is exercised separately below, via {@link #currentUserWithScope}, mirroring {@code
+ * StreamControllerTest}'s own idiom for the same reason.
+ */
 class EventControllerTest {
 
     private DetectionEventRepositoryPort detectionEventRepositoryPort;
+    private StreamService streamService;
+    /** Backs {@link StreamAccess}'s device&rarr;asset&rarr;owner resolution, unstubbed (empty) by default. */
+    private AssetRepositoryPort assetRepositoryPort;
     private MockMvc mockMvc;
 
     private final StreamId streamId = StreamId.random();
     private final AssetId assetId = AssetId.random();
+    private final UserId ownerId = UserId.random();
+    private final Ownership ownership = new Ownership(ownerId, GroupId.random());
+    /** Unbounded (auth-off-equivalent) by default, so every pre-existing test below is unaffected. */
+    private final CurrentUser currentUser = new CurrentUser(ownership);
 
     @BeforeEach
     void setUp() {
         detectionEventRepositoryPort = mock(DetectionEventRepositoryPort.class);
-        mockMvc = MockMvcBuilders.standaloneSetup(new EventController(detectionEventRepositoryPort))
+        streamService = mock(StreamService.class);
+        when(streamService.streams()).thenReturn(List.of());
+        assetRepositoryPort = mock(AssetRepositoryPort.class);
+        mockMvc = mockMvcFor(currentUser);
+    }
+
+    /**
+     * A {@link CurrentUser} answering with {@link #ownership}/{@link #ownerId} but a caller-supplied
+     * {@link VisibilityScope} — for the scope-gate tests below, which need a PILOT scope rather than
+     * the class-level {@link #currentUser}'s unbounded one. Same idiom {@code StreamControllerTest}
+     * uses; {@link PrincipalResolver#viewer()} is never called by {@link EventController}/{@link
+     * StreamAccess}, so it throws rather than fake a map viewer no test here needs.
+     */
+    private CurrentUser currentUserWithScope(VisibilityScope scope) {
+        return new CurrentUser(new PrincipalResolver() {
+            @Override
+            public UserId userId() {
+                return ownerId;
+            }
+
+            @Override
+            public Ownership ownership() {
+                return ownership;
+            }
+
+            @Override
+            public VisibilityScope scope() {
+                return scope;
+            }
+
+            @Override
+            public MapAccessPolicy.Viewer viewer() {
+                throw new UnsupportedOperationException("EventController never calls viewer()");
+            }
+        });
+    }
+
+    /**
+     * A {@link MockMvc} bound to a fresh {@link EventController} acting as {@code user} — same mocked
+     * {@link #detectionEventRepositoryPort}/{@link #streamService}/{@link #assetRepositoryPort}, only
+     * the {@link StreamAccess}'s {@link CurrentUser} changes.
+     */
+    private MockMvc mockMvcFor(CurrentUser user) {
+        StreamAccess streamAccess = new StreamAccess(streamService, assetRepositoryPort, user);
+        return MockMvcBuilders.standaloneSetup(new EventController(detectionEventRepositoryPort, streamAccess, user))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -162,5 +239,82 @@ class EventControllerTest {
         mockMvc.perform(get("/api/streams/{streamId}/events", unknown.value()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$", hasSize(0)));
+    }
+
+    /**
+     * The wave's own acceptance case (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R7, finding
+     * A2): {@link EventController#recent} filters the fleet-wide list down to what the caller's
+     * scope may see rather than 403ing the whole request — mirroring {@code StreamController#list}'s
+     * {@code filterVisible} posture. Three shapes in one request: an event on the caller's own
+     * assigned asset (kept), one on a foreign asset (dropped), and one with a {@code null} assetId —
+     * an unowned device, visible only to a caller who {@link VisibilityScope#canAdminister()}, which
+     * a PILOT never does (dropped).
+     */
+    @Test
+    void recentFiltersOutEventsOnAssetsOutsideTheCallersScope() throws Exception {
+        AssetId ownedAssetId = AssetId.random();
+        AssetId foreignAssetId = AssetId.random();
+        Asset ownedAsset = Asset.register(ownedAssetId, "my drone", new CategoryId("drone"), ownership,
+                Set.of(DeviceId.random()), Map.of(), Identity.NONE, Custody.NONE);
+        when(assetRepositoryPort.findById(ownedAssetId)).thenReturn(Optional.of(ownedAsset));
+        when(assetRepositoryPort.findById(foreignAssetId)).thenReturn(Optional.empty());
+
+        DetectionEvent onOwnAsset = event("person", DetectionEventState.OPEN, ownedAssetId, null);
+        DetectionEvent onForeignAsset = event("car", DetectionEventState.OPEN, foreignAssetId, null);
+        DetectionEvent onUnownedDevice = event("dog", DetectionEventState.OPEN, null, null);
+        when(detectionEventRepositoryPort.findRecent(isNull(), eq(EventController.DEFAULT_LIMIT)))
+                .thenReturn(List.of(onOwnAsset, onForeignAsset, onUnownedDevice));
+
+        MockMvc pilotMockMvc = mockMvcFor(currentUserWithScope(VisibilityScope.assignedAssets(Set.of(ownedAssetId))));
+
+        pilotMockMvc.perform(get("/api/events"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].label").value("person"));
+    }
+
+    /**
+     * The counterpart of {@link #recentFiltersOutEventsOnAssetsOutsideTheCallersScope}: a stream
+     * {@link StreamService} reports as genuinely running, on a device belonging to an asset the
+     * caller's scope does not reach, must 404 rather than reveal its events — the same "existence is
+     * never revealed" rule {@link StreamController#detections} already follows.
+     */
+    @Test
+    void forStreamReturns404ForARunningStreamOnADeviceOutsideTheCallersScope() throws Exception {
+        DeviceId deviceId = DeviceId.random();
+        AssetId foreignAssetId = AssetId.random();
+        Asset foreignAsset = Asset.register(foreignAssetId, "someone else's drone", new CategoryId("drone"),
+                new Ownership(UserId.random(), GroupId.random()), Set.of(deviceId), Map.of(), Identity.NONE,
+                Custody.NONE);
+        when(streamService.streams())
+                .thenReturn(List.of(new ActiveStream(streamId, deviceId, Instant.now())));
+        when(assetRepositoryPort.findByDeviceId(deviceId)).thenReturn(Optional.of(foreignAsset));
+
+        MockMvc pilotMockMvc = mockMvcFor(currentUserWithScope(VisibilityScope.assignedAssets(Set.of(AssetId.random()))));
+
+        pilotMockMvc.perform(get("/api/streams/{streamId}/events", streamId.value()))
+                .andExpect(status().isNotFound());
+    }
+
+    /** The visible-counterpart of the test above: a running stream on the caller's own assigned asset still answers. */
+    @Test
+    void forStreamStillReturnsEventsForARunningStreamOnTheCallersOwnAssignedAsset() throws Exception {
+        DeviceId deviceId = DeviceId.random();
+        AssetId ownedAssetId = AssetId.random();
+        Asset ownedAsset = Asset.register(ownedAssetId, "my drone", new CategoryId("drone"), ownership,
+                Set.of(deviceId), Map.of(), Identity.NONE, Custody.NONE);
+        when(streamService.streams())
+                .thenReturn(List.of(new ActiveStream(streamId, deviceId, Instant.now())));
+        when(assetRepositoryPort.findByDeviceId(deviceId)).thenReturn(Optional.of(ownedAsset));
+        DetectionEvent detected = event("person", DetectionEventState.OPEN, ownedAssetId, null);
+        when(detectionEventRepositoryPort.findByStream(eq(streamId), eq(EventController.DEFAULT_LIMIT)))
+                .thenReturn(List.of(detected));
+
+        MockMvc pilotMockMvc = mockMvcFor(currentUserWithScope(VisibilityScope.assignedAssets(Set.of(ownedAssetId))));
+
+        pilotMockMvc.perform(get("/api/streams/{streamId}/events", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", hasSize(1)))
+                .andExpect(jsonPath("$[0].label").value("person"));
     }
 }

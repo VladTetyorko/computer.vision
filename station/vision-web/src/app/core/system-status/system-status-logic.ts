@@ -1,5 +1,5 @@
 import type { LiveConnectionState } from '../live/live-store';
-import type { OverallHealth, SubsystemHealth } from '../api/models';
+import type { OverallHealth, SubsystemHealth, SubsystemStatus } from '../api/models';
 
 /**
  * Pure, Angular-free logic behind `core/system-status/system-status-store.ts`,
@@ -125,4 +125,79 @@ export function shellStatusLabel(severity: ShellSeverity): string {
     case 'neutral':
       return 'System status: checking…';
   }
+}
+
+// --- `/manage/system` banner verdict (OPERATOR-UX-5-PLAN.md finding U3, §2 U3) -----------------
+//
+// **Deliberately separate from `shellStatusSeverity`/`shellStatusLabel` above, not a replacement.**
+// The sidebar rollup dot is unchanged by this wave and still treats any DOWN/DEGRADED subsystem —
+// via `healthSeverity(overall)`, `overall` being the *backend's* worst-subsystem rollup — as worth
+// flagging on every page; that is its own, coarser "something needs a look" signal and stays as-is
+// (out of this wave's file scope: `shared/ui/app-sidebar/**`). `verdictFor` below answers a
+// narrower, more literal question this page's own banner asked wrong (U3's own finding: "Banner
+// `System is down.` while mediamtx is OK, SSE degraded, MAVLink unknown, CV down" — one optional
+// subsystem reporting DOWN is not the whole station being down.
+
+/** `verdictFor`'s own two-axis "can this app actually do its job right now" input — the same
+ *  `FleetStore.reachable()`/`LiveStore.connectionState()` signals `SystemStatusFacade` already
+ *  reads for its existing `backendSeverity`/`connectionSeverity` cards, bundled so the function
+ *  itself stays a plain, easily-tested `(subsystems, transport) => verdict`. */
+export interface SystemTransport {
+  readonly backendReachable: boolean | null;
+  readonly liveConnection: LiveConnectionState;
+}
+
+export interface SystemVerdict {
+  readonly severity: ShellSeverity;
+  readonly message: string;
+}
+
+/** Only `DOWN`/`DEGRADED` ever contribute — `OK`/`DISABLED`/`UNKNOWN` are excluded entirely, not
+ *  merely out-ranked, so an idle/unconfigured/healthy subsystem can never read as a fault (mirrors
+ *  `SubsystemHealth`'s own doc comment: `UNKNOWN` covers ordinary "nothing to report yet" cases —
+ *  e.g. `mavlink-link` with no vehicle claimed — as honestly as `DISABLED` does). `DOWN` outranks
+ *  `DEGRADED`; a tie keeps whichever the array lists first (deterministic, not meaningful on its
+ *  own — the backend's own subsystem ordering is not a severity ranking).
+ */
+const SUBSYSTEM_FAULT_RANK: Readonly<Record<'DOWN' | 'DEGRADED', number>> = { DOWN: 1, DEGRADED: 0 };
+
+function worstFaultySubsystem(subsystems: readonly SubsystemStatus[]): SubsystemStatus | undefined {
+  let worst: SubsystemStatus | undefined;
+  for (const subsystem of subsystems) {
+    if (subsystem.health !== 'DOWN' && subsystem.health !== 'DEGRADED') {
+      continue;
+    }
+    if (worst === undefined || SUBSYSTEM_FAULT_RANK[subsystem.health] > SUBSYSTEM_FAULT_RANK[worst.health as 'DOWN' | 'DEGRADED']) {
+      worst = subsystem;
+    }
+  }
+  return worst;
+}
+
+/**
+ * `/manage/system`'s own banner verdict (OPERATOR-UX-5-PLAN.md finding U3, §2 U3): `'danger'`
+ * ("System is down") is reserved for the two ways this app itself can't do its job — the backend
+ * REST API is unreachable, or the live SSE transport is unreachable — **never** for one subsystem
+ * (a crashed `cv-service`, `mediamtx` off) reporting `DOWN` on its own. Once both of those are
+ * healthy, the verdict names the worst *reportable* subsystem instead, capped at `'warn'`
+ * (`Degraded — CV inference down` / `Degraded — Live updates degraded`) — a station with one broken
+ * optional subsystem is degraded, not down. `subsystems.length === 0` reads `'neutral'` (never a
+ * guessed "OK" with nothing to back it — this app's usual "don't claim ok before we know" rule,
+ * `reachableSeverity`'s own doc comment above); a genuinely clean bill of health reads `'ok'`.
+ */
+export function verdictFor(subsystems: readonly SubsystemStatus[], transport: SystemTransport): SystemVerdict {
+  if (transport.backendReachable === false) {
+    return { severity: 'danger', message: 'System is down — the backend is unreachable.' };
+  }
+  if (transport.liveConnection === 'closed') {
+    return { severity: 'danger', message: 'System is down — live updates are unreachable.' };
+  }
+  const worst = worstFaultySubsystem(subsystems);
+  if (worst !== undefined) {
+    return { severity: 'warn', message: `Degraded — ${worst.label} ${worst.health === 'DOWN' ? 'down' : 'degraded'}` };
+  }
+  if (subsystems.length === 0) {
+    return { severity: 'neutral', message: 'No subsystems reported.' };
+  }
+  return { severity: 'ok', message: 'System is OK.' };
 }

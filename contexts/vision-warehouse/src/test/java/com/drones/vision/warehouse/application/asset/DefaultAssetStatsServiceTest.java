@@ -5,6 +5,8 @@ import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.kernel.UsageOrigin;
+import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.warehouse.domain.port.AssetLiveStatePort;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,11 +49,13 @@ class DefaultAssetStatsServiceTest {
     }
 
     private static AssetUsage closedUsage(AssetId assetId, Instant startedAt, Instant endedAt) {
-        return new AssetUsage(UsageId.random(), assetId, startedAt, endedAt, null, null, 0);
+        return new AssetUsage(UsageId.random(), assetId, startedAt, endedAt, null, null, 0, null,
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
     }
 
     private static AssetUsage openUsage(AssetId assetId, Instant startedAt) {
-        return new AssetUsage(UsageId.random(), assetId, startedAt, null, null, null, 0);
+        return new AssetUsage(UsageId.random(), assetId, startedAt, null, null, null, 0, null, UsagePhase.PREFLIGHT,
+                UsageOrigin.STREAM);
     }
 
     @Test

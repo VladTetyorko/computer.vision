@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { AssetSummary, UsageSummary } from '../../core/api/models';
-import { filterUsagesByTimeRange, formatUsageDuration, usageAssetOptions } from './replay-library-logic';
+import {
+  filterUsagesByTimeRange,
+  formatUsageDuration,
+  OPEN_USAGE_STALE_AFTER_SECONDS,
+  sortUsagesForDisplay,
+  usageAssetOptions,
+  usageStatus,
+} from './replay-library-logic';
 
 function usage(partial: Partial<UsageSummary> = {}): UsageSummary {
   return {
@@ -84,6 +91,89 @@ describe('filterUsagesByTimeRange', () => {
   it('keeps a still-open usage whose startedAt falls in range, endedAt never enters into it', () => {
     const open = usage({ usageId: 'open', startedAt: '2026-08-04T11:00:00.000Z', endedAt: undefined, durationSeconds: undefined });
     expect(filterUsagesByTimeRange([open], 'today', nowMs)).toEqual([open]);
+  });
+});
+
+describe('usageStatus (OPERATOR-UX-5-PLAN.md finding U1)', () => {
+  const nowMs = Date.parse('2026-08-29T12:00:00.000Z');
+
+  it('a closed flight reads its own formatUsageDuration text, plain (non-chip) register', () => {
+    const closed = usage({ endedAt: '2026-08-29T11:30:00.000Z', durationSeconds: 1800 });
+    expect(usageStatus(closed, nowMs)).toEqual({
+      kind: 'closed',
+      label: '30m 00s',
+      tone: 'neutral',
+      live: false,
+      isReplayLink: true,
+    });
+  });
+
+  it('sampleCount === 0 always reads "No samples" and is not a replay link, even for a closed flight', () => {
+    const empty = usage({ endedAt: '2026-08-29T11:30:00.000Z', durationSeconds: 1800, sampleCount: 0 });
+    expect(usageStatus(empty, nowMs)).toEqual({ kind: 'no-samples', label: 'No samples', tone: 'neutral', live: false, isReplayLink: false });
+  });
+
+  it('sampleCount === 0 wins even for a still-open usage — not "Flying now"', () => {
+    const openEmpty = usage({ startedAt: '2026-08-29T11:59:50.000Z', endedAt: undefined, durationSeconds: undefined, sampleCount: 0 });
+    expect(usageStatus(openEmpty, nowMs).kind).toBe('no-samples');
+  });
+
+  it('an open usage whose last activity is fresh (startedAt just now, durationSeconds absent) reads "Flying now", live, ok tone', () => {
+    const open = usage({ startedAt: '2026-08-29T11:59:50.000Z', endedAt: undefined, durationSeconds: undefined });
+    expect(usageStatus(open, nowMs)).toEqual({ kind: 'flying', label: 'Flying now', tone: 'ok', live: true, isReplayLink: true });
+  });
+
+  it('an open usage exactly at the stale boundary is still "Flying now" (strictly greater-than triggers stale)', () => {
+    const boundary = usage({
+      startedAt: new Date(nowMs - OPEN_USAGE_STALE_AFTER_SECONDS * 1000).toISOString(),
+      endedAt: undefined,
+      durationSeconds: undefined,
+    });
+    expect(usageStatus(boundary, nowMs).kind).toBe('flying');
+  });
+
+  it("an open usage last active 4d 2h ago reads a neutral 'Open · last sample …' chip, never Flying now", () => {
+    const staleOpen = usage({
+      startedAt: new Date(nowMs - 353_099 * 1000).toISOString(), // the H1 rover's own exact age (telemetry-logic.spec.ts)
+      endedAt: undefined,
+      durationSeconds: undefined,
+    });
+    expect(usageStatus(staleOpen, nowMs)).toEqual({
+      kind: 'open-stale',
+      label: 'Open · last sample 4d 2h ago',
+      tone: 'neutral',
+      live: false,
+      isReplayLink: true,
+    });
+  });
+
+  it('an open usage with a durationSeconds (a live elapsed-duration field, if the wire ever adds one) uses startedAt + durationSeconds, not startedAt alone', () => {
+    // started 20 minutes ago, durationSeconds says 60s of it was real activity — last activity was
+    // 19 minutes ago (startedAt + 60s), not 20 minutes ago (startedAt alone).
+    const started20mAgo = new Date(nowMs - 20 * 60 * 1000).toISOString();
+    const open = usage({ startedAt: started20mAgo, endedAt: undefined, durationSeconds: 60 });
+    const status = usageStatus(open, nowMs);
+    expect(status.kind).toBe('open-stale');
+    expect(status.label).toBe('Open · last sample 19m ago');
+  });
+});
+
+describe('sortUsagesForDisplay (OPERATOR-UX-5-PLAN.md finding U1)', () => {
+  it('demotes every sampleCount === 0 row to the end, stably preserving order otherwise', () => {
+    const a = usage({ usageId: 'a', sampleCount: 10 });
+    const empty1 = usage({ usageId: 'empty-1', sampleCount: 0 });
+    const b = usage({ usageId: 'b', sampleCount: 5 });
+    const empty2 = usage({ usageId: 'empty-2', sampleCount: 0 });
+    expect(sortUsagesForDisplay([a, empty1, b, empty2]).map((u) => u.usageId)).toEqual(['a', 'b', 'empty-1', 'empty-2']);
+  });
+
+  it('is a no-op when nothing has zero samples', () => {
+    const usages = [usage({ usageId: 'a' }), usage({ usageId: 'b' })];
+    expect(sortUsagesForDisplay(usages).map((u) => u.usageId)).toEqual(['a', 'b']);
+  });
+
+  it('returns an empty array unchanged', () => {
+    expect(sortUsagesForDisplay([])).toEqual([]);
   });
 });
 

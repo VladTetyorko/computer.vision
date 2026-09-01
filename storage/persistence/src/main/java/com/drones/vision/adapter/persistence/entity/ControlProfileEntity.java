@@ -65,7 +65,7 @@ public class ControlProfileEntity {
     @Column(name = "action_map", columnDefinition = "jsonb", nullable = false)
     private List<ActionBinding> actionMap = new ArrayList<>();
 
-    /** How the owner's transmitter is arranged; affects only how the layout is drawn (V25). */
+    /** How the owner's transmitter is arranged; affects only how the layout is drawn (V32). */
     @Column(name = "stick_mode", nullable = false)
     private short stickMode;
 

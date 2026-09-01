@@ -31,9 +31,93 @@ td.actions {
   max-width: 14rem;
 }
 
-/* "Needs attention" column: a compact rollup sentence, not a data grid — capped so a long list of
-   missing features never forces the table wider than the drone/verdict columns need. Same pairing
-   as `.name-cell` above. */
+/* "Needs attention" column (docs/plans/active/OPERATOR-UX-3-PLAN.md §2 P1): the first blocking check's
+   own label plus one `+N` count chip — capped so a long list of missing features never forces the
+   table wider than the drone/verdict columns need. Same pairing as `.name-cell` above. */
 .attention-cell {
   max-width: 22rem;
+}
+
+/* Flex row so the `+N` chip never shares truncation with the label (frontend-style §5: "one chip per
+   row max" — the verdict chip in the previous column is this row's only other chip). `min-width: 0`
+   is what lets the flex-item label actually shrink/ellipsis instead of pushing the chip out. */
+.attention-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.blocker-name {
+  min-width: 0;
+}
+
+/* Verdict stat cards double as the table's filter (§2 P1; selection language §4). A plain button
+   wraps the shared `vision-stat` tile rather than adding click/selection semantics to that
+   component itself — every other caller (reports, roster, asset-detail) keeps a purely presentational
+   tile. `:host ::ng-deep` reaches the tile's own encapsulated `.stat-tile` for the selected/hover
+   treatment — the same reach-into-a-child-component's-DOM technique `cockpit.css` already uses for
+   `vision-player`'s `.frame` (vision-web/MODULE.md Gotchas). Keyboard accessible: a real `<button>`
+   picks up this app's global `:focus-visible` outline (`styles.css`) with no extra CSS here. */
+.stat-filter {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  font: inherit;
+  color: inherit;
+}
+
+:host ::ng-deep .stat-filter:hover .stat-tile {
+  background: var(--panel-hover);
+}
+
+:host ::ng-deep .stat-filter.selected .stat-tile {
+  background: var(--color-info-soft);
+  box-shadow: inset 2px 0 0 0 var(--color-info);
+}
+
+/* docs/plans/active/OPERATOR-UX-7-PLAN.md P1, §2 P1 — "Your vehicles"/"Simulated" triage groups,
+   mirrors `features/command/command.css`'s `.rail-group`/`.rail-group-label` and
+   `features/fly/drone-picker.css`'s `.picker-group`/`.picker-group-label` exactly (frontend-style §8
+   structural-label register: uppercase, muted, +0.05em tracking) — each page keeps its own copy, no
+   shared class exists for it yet (same precedent `.kpi-tiles`/`.table-scroll` above already document). */
+.table-group + .table-group {
+  margin-top: var(--space-24);
+}
+
+.group-label {
+  margin: 0 0 var(--space-8);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.group-empty {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.group-empty a {
+  color: var(--color-info);
+}
+
+/* A never-probed/no-telemetry row's verdict cell (§2 P1: "structural-label register, no chip") —
+   this app's other typography register (frontend-style §8), the same recipe `fly-osd.css`'s
+   `.osd-group-label` uses for its own "LAST KNOWN · …" stale-group relabel: this row costs the table
+   zero chips rather than a muted `Unknown` one (frontend-style §5, one chip per row max). Inline, not
+   `styles.css`'s own block-display `.label` (that one is a form-field caption with its own
+   margin-bottom — wrong shape sitting inside a table cell next to nothing else). */
+.verdict-note {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
 }

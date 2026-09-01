@@ -53,3 +53,15 @@ dt {
 dd {
     margin: 0;
 }
+
+/* Settings link list (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1, wave W1) — plain stacked rows, no
+   bullets; `a` itself already carries the app-wide link color (styles.css). */
+.link-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 0.85rem;
+}

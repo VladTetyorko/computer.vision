@@ -16,9 +16,12 @@ import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.LifecycleState;
 import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.kernel.UsageOrigin;
+import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.map.application.MapAccessPolicy.Viewer;
 import com.drones.vision.map.application.mark.MarkService;
@@ -47,7 +50,11 @@ import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetSpec;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
+import com.drones.vision.warehouse.application.asset.DuplicateDeviceMatch;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
+import com.drones.vision.warehouse.domain.model.InventoryState;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -149,7 +156,8 @@ class AfterActionAssemblerTest {
 
     @Test
     void assembleReportsAStillOpenUsageWithoutThrowing() {
-        AssetUsage openUsage = new AssetUsage(usageId, assetId, STARTED_AT, null, null, null, 0, streamId);
+        AssetUsage openUsage = new AssetUsage(usageId, assetId, STARTED_AT, null, null, null, 0, streamId,
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
         replayService.timeline = new UsageTimeline(openUsage, STARTED_AT, Instant.now(), List.of(), List.of());
 
         AfterActionPackage pkg = assembler.assemble(assetId, usageId, VisibilityScope.unbounded(), viewer(Role.ADMIN),
@@ -193,7 +201,8 @@ class AfterActionAssemblerTest {
     @Test
     void assembleThrowsNoSuchElementWhenUsageDoesNotBelongToAsset() {
         AssetId otherAssetId = AssetId.random();
-        AssetUsage foreignUsage = new AssetUsage(usageId, otherAssetId, STARTED_AT, ENDED_AT, null, null, 0);
+        AssetUsage foreignUsage = new AssetUsage(usageId, otherAssetId, STARTED_AT, ENDED_AT, null, null, 0, null,
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
         replayService.timeline = new UsageTimeline(foreignUsage, STARTED_AT, ENDED_AT, List.of(), List.of());
 
         assertThrows(NoSuchElementException.class, () -> assembler.assemble(assetId, usageId,
@@ -397,15 +406,17 @@ class AfterActionAssemblerTest {
     }
 
     private AssetDetails assetDetails(Ownership ownership) {
+        Instant now = Instant.now();
         Asset asset = new Asset(assetId, "Drone One", new CategoryId("drone"), ownership, Set.of(deviceId),
-                Map.of(), LifecycleState.ACTIVE);
-        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null);
+                Map.of(), LifecycleState.ACTIVE, Identity.NONE, Custody.NONE, InventoryState.IN_STOCK, now, now);
+        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null,
+                asset.inventoryState(), asset.identity(), asset.custody());
         return new AssetDetails(summary, List.of(), List.of());
     }
 
     private UsageTimeline timelineWith(List<Telemetry> telemetry, List<DetectionResult> detections) {
         AssetUsage usage = new AssetUsage(usageId, assetId, STARTED_AT, ENDED_AT, null, null, telemetry.size(),
-                streamId);
+                streamId, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
         return new UsageTimeline(usage, STARTED_AT, ENDED_AT, telemetry, detections);
     }
 
@@ -462,6 +473,11 @@ class AfterActionAssemblerTest {
         @Override
         public Asset createFromCandidate(AssetSpec spec, Ownership ownership, UserId actor) {
             throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Optional<DuplicateDeviceMatch> findDuplicateDevice(StreamDescriptor candidate) {
+            return Optional.empty();
         }
 
         @Override

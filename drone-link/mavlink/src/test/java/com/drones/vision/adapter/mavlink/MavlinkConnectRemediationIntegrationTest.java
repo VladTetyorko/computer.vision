@@ -4,6 +4,7 @@ import com.drones.mavlink.CompId;
 import com.drones.mavlink.SysId;
 import com.drones.mavlink.codec.FrameReader;
 import com.drones.mavlink.codec.FrameWriter;
+import com.drones.mavlink.session.CorrelationKeys;
 import com.drones.mavlink.transport.ByteChunk;
 import com.drones.mavlink.transport.UdpTargetLink;
 
@@ -12,6 +13,7 @@ import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.warehouse.domain.model.Device;
 
+import io.dronefleet.mavlink.common.AutopilotVersion;
 import io.dronefleet.mavlink.common.CommandAck;
 import io.dronefleet.mavlink.common.CommandLong;
 import io.dronefleet.mavlink.common.MavCmd;
@@ -21,6 +23,7 @@ import io.dronefleet.mavlink.minimal.MavAutopilot;
 import io.dronefleet.mavlink.minimal.MavModeFlag;
 import io.dronefleet.mavlink.minimal.MavState;
 import io.dronefleet.mavlink.minimal.MavType;
+import io.dronefleet.mavlink.util.EnumValue;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -35,6 +38,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -45,10 +49,20 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
  * {@link MavlinkGateway} socket via {@link MavlinkTelemetrySource} -- the same pattern {@link
  * MavlinkFlightCommanderTest}/{@link MavlinkMessageInventoryIntegrationTest} already use for their
  * own required real-loopback proofs. {@link MavlinkConnectRemediatorTest} covers the finer-grained
- * sequencing/idempotency arithmetic with fast hand-fakes; this class proves that arithmetic holds,
- * and — critically — that the flag off means <b>zero</b> commands, over the real socket path a
- * physical vehicle would actually use. {@link MavlinkSitlOnConnectIntegrationTest} is the further,
- * docker-gated proof against real ArduPilot firmware.
+ * sequencing/idempotency arithmetic with fast hand-fakes; this class proves that arithmetic holds
+ * over the real socket path a physical vehicle would actually use.
+ *
+ * <p><b>MAVLINK-COMMANDS-PLAN.md P2 update:</b> {@link MavlinkStreamNegotiator} now fires its own
+ * unconditional on-claim negotiation on every claim here too, so "the flag off means zero commands"
+ * is no longer this class's claim -- {@link #withTheFlagOffNoMechanismATrafficIsEverSent} instead
+ * proves the narrower, still-true thing: <b>Mechanism A specifically</b> contributes nothing when its
+ * own flag is off. Both test methods' {@link FakeVehicle#awaitCommandLong} transparently drains and
+ * auto-answers P2's own traffic (see that method's own note) so this class's assertions stay scoped
+ * to Mechanism A alone. This test's own {@code requests} below deliberately uses message ids outside
+ * {@link MavlinkSettings.StreamNegotiation#defaults()}'s set (SYS_STATUS/SERVO_OUTPUT_RAW/SCALED_IMU2
+ * rather than the overlapping GLOBAL_POSITION_INT/VFR_HUD) so Mechanism A's own sequence can never be
+ * ambiguous with P2's. {@link MavlinkSitlOnConnectIntegrationTest} is the further, docker-gated proof
+ * against real ArduPilot firmware.
  */
 class MavlinkConnectRemediationIntegrationTest {
 
@@ -60,9 +74,9 @@ class MavlinkConnectRemediationIntegrationTest {
         int port = freePort();
         int sysid = 61;
         List<MavlinkSettings.Onboarding.MessageRequest> requests = List.of(
-                new MavlinkSettings.Onboarding.MessageRequest(1, Duration.ofMillis(300)),   // SYS_STATUS
-                new MavlinkSettings.Onboarding.MessageRequest(33, Duration.ofMillis(300)),  // GLOBAL_POSITION_INT
-                new MavlinkSettings.Onboarding.MessageRequest(74, Duration.ofMillis(300))); // VFR_HUD
+                new MavlinkSettings.Onboarding.MessageRequest(1, Duration.ofMillis(300)),    // SYS_STATUS
+                new MavlinkSettings.Onboarding.MessageRequest(36, Duration.ofMillis(300)),   // SERVO_OUTPUT_RAW
+                new MavlinkSettings.Onboarding.MessageRequest(116, Duration.ofMillis(300))); // SCALED_IMU2
         MavlinkTelemetrySource source = new MavlinkTelemetrySource(settingsWithOnConnectRequests(requests));
         DeviceId deviceId = DeviceId.random();
         FakeVehicle vehicle = null;
@@ -99,10 +113,15 @@ class MavlinkConnectRemediationIntegrationTest {
 
     @Test
     @Timeout(value = 15, unit = TimeUnit.SECONDS)
-    void withTheFlagOffNotASingleCommandIsEverSent() throws Exception {
+    void withTheFlagOffNoMechanismATrafficIsEverSent() throws Exception {
         int port = freePort();
         int sysid = 62;
         // MavlinkSettings.defaults() -- requestMessagesOnConnect() is false, same as production.
+        // P2's own MavlinkStreamNegotiator still fires unconditionally on claim (see this class's own
+        // javadoc) -- FakeVehicle#awaitCommandLong drains and auto-answers that traffic transparently,
+        // so what this assertion actually proves is narrower and still true: Mechanism A specifically
+        // (MavlinkConnectRemediator) never constructs, subscribes, or sends anything while its own
+        // flag is off.
         MavlinkTelemetrySource source = new MavlinkTelemetrySource(MavlinkSettings.defaults());
         DeviceId deviceId = DeviceId.random();
         FakeVehicle vehicle = null;
@@ -115,7 +134,8 @@ class MavlinkConnectRemediationIntegrationTest {
             // were wrongly constructed despite the flag, its first request would have arrived by now.
             FakeVehicle stillLive = vehicle;
             assertThrows(AssertionError.class, () -> stillLive.awaitCommandLong(Duration.ofSeconds(3)),
-                    "flag off must mean literally zero commands sent, not merely fewer");
+                    "flag off must mean zero Mechanism-A commands, not merely fewer -- P2's own "
+                            + "unconditional traffic is drained transparently and must not count");
         } finally {
             if (vehicle != null) {
                 vehicle.close();
@@ -152,6 +172,15 @@ class MavlinkConnectRemediationIntegrationTest {
      */
     private static final class FakeVehicle implements AutoCloseable {
         private static final long HEARTBEAT_PERIOD_MILLIS = 200L;
+
+        /**
+         * MAVLINK-COMMANDS-PLAN.md P2's {@link MavlinkStreamNegotiator} now fires unconditionally the
+         * instant a vehicle is claimed -- racing every test method's own Mechanism-A-specific
+         * assertions. {@link #awaitCommandLong} auto-answers and swallows this traffic transparently
+         * (see that method's own note) so this class's assertions stay scoped to Mechanism A alone.
+         */
+        private static final Set<Integer> NEGOTIATED_MESSAGE_IDS = MavlinkSettings.StreamNegotiation.defaults()
+                .streams().stream().map(MavlinkSettings.Onboarding.MessageRequest::messageId).collect(Collectors.toSet());
 
         private final UdpTargetLink link;
         private final FrameWriter writer;
@@ -202,7 +231,12 @@ class MavlinkConnectRemediationIntegrationTest {
             writer.broadcast(heartbeat, link.id());
         }
 
-        /** Blocks (bounded by {@code timeout}) until a {@code COMMAND_LONG} arrives, skipping anything else. */
+        /**
+         * Blocks (bounded by {@code timeout}) until a {@code COMMAND_LONG} arrives, skipping anything
+         * else -- <b>and</b> transparently auto-answering (never returning) {@link
+         * MavlinkStreamNegotiator}'s own on-claim traffic (see {@link #NEGOTIATED_MESSAGE_IDS}'s own
+         * note), so every caller here only ever sees Mechanism-A-specific traffic.
+         */
         CommandLong awaitCommandLong(Duration timeout) throws IOException {
             long deadlineNanos = System.nanoTime() + timeout.toNanos();
             AtomicReference<CommandLong> found = new AtomicReference<>();
@@ -217,7 +251,12 @@ class MavlinkConnectRemediationIntegrationTest {
                 }
                 reader.offer(chunk, frame -> {
                     if (frame.is(CommandLong.class)) {
-                        found.compareAndSet(null, frame.as(CommandLong.class));
+                        CommandLong candidate = frame.as(CommandLong.class);
+                        if (isStreamNegotiationTraffic(candidate)) {
+                            autoAnswerStreamNegotiation(candidate);
+                        } else {
+                            found.compareAndSet(null, candidate);
+                        }
                     }
                 });
             }
@@ -225,6 +264,34 @@ class MavlinkConnectRemediationIntegrationTest {
                 throw new AssertionError("expected a COMMAND_LONG within " + timeout);
             }
             return found.get();
+        }
+
+        private static boolean isStreamNegotiationTraffic(CommandLong candidate) {
+            MavCmd command = candidate.command().entry();
+            if (command == MavCmd.MAV_CMD_REQUEST_MESSAGE) {
+                return (int) candidate.param1() == CorrelationKeys.AUTOPILOT_VERSION_MESSAGE_ID;
+            }
+            return command == MavCmd.MAV_CMD_SET_MESSAGE_INTERVAL
+                    && NEGOTIATED_MESSAGE_IDS.contains((int) candidate.param1());
+        }
+
+        private void autoAnswerStreamNegotiation(CommandLong candidate) {
+            if (candidate.command().entry() == MavCmd.MAV_CMD_REQUEST_MESSAGE) {
+                replyAutopilotVersion();
+            } else {
+                replyAck(MavCmd.MAV_CMD_SET_MESSAGE_INTERVAL, MavResult.MAV_RESULT_ACCEPTED);
+            }
+        }
+
+        private void replyAutopilotVersion() {
+            AutopilotVersion version = AutopilotVersion.builder()
+                    .capabilities(EnumValue.create(0))
+                    .flightSwVersion(0)
+                    .boardVersion(0)
+                    .vendorId(0)
+                    .productId(0)
+                    .build();
+            writer.broadcast(version, link.id());
         }
 
         /** Acknowledges a specific command. */

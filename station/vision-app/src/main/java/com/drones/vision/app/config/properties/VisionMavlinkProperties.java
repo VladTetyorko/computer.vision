@@ -4,6 +4,7 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.DefaultValue;
 
 import java.time.Duration;
+import java.util.Objects;
 
 /**
  * Configuration for {@code adapter-mavlink}'s RX/TX ({@code vision.mavlink.*}), docs/plans/active/LAYERING-REFACTOR-PLAN.md
@@ -21,7 +22,27 @@ import java.time.Duration;
  * @param maxUnclaimedVehicles bound on the unclaimed-vehicle registry; default {@value
  *                             #DEFAULT_MAX_UNCLAIMED_VEHICLES}
  * @param closeJoinTimeout     bound on a shared hub/feed's close-thread join; default 5s
- * @param ackTimeout           how long a flight command waits for a {@code COMMAND_ACK}; default 2s
+ * @param ackTimeout           how long a flight command waits for a {@code COMMAND_ACK}, <b>per
+ *                             attempt</b> (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2a re-scoped
+ *                             this from a single whole-command wait); default 700ms, byte-identical
+ *                             to {@code MavlinkSettings.DEFAULT_ACK_TIMEOUT_MILLIS}
+ * @param commandRetries       retry budget for absolute-state commands only (arm/disarm, set-mode,
+ *                             aux-function, the rover {@code Hold} e-stop — docs/plans/active/
+ *                             MAVLINK-COMMANDS-PLAN.md D2a); worst case is {@code (commandRetries +
+ *                             1) * ackTimeout}, ~2.1s at the defaults below; default {@value
+ *                             #DEFAULT_COMMAND_RETRIES}, byte-identical to {@code
+ *                             MavlinkSettings.DEFAULT_COMMAND_RETRIES}
+ * @param dropRateWarnPercent  {@code MavlinkLinkStatusProvider}'s per-vehicle drop-rate percent
+ *                             (0-100) at/above which a connected vehicle reports {@code DEGRADED}
+ *                             (docs/plans/active/FLEET-RADIO-PLAN.md D7); default {@value
+ *                             #DEFAULT_DROP_RATE_WARN_PERCENT}
+ * @param dropRateAlarmPercent drop-rate percent at/above which a connected vehicle reports {@code
+ *                             DOWN} instead; must be {@code >= dropRateWarnPercent}; default {@value
+ *                             #DEFAULT_DROP_RATE_ALARM_PERCENT}
+ * @param linkFailureGrace     bound this wave's own regression test holds a link-failure
+ *                             notification to (see {@code MavlinkSettings.LinkStatus#failureGrace()}'s
+ *                             own javadoc for why production code does not otherwise branch on this
+ *                             value); default {@value #DEFAULT_LINK_FAILURE_GRACE}
  * @param scan                 {@code MavlinkHeartbeatScanner}'s poll/self-bind-timeout budget;
  *                             defaulted as a whole when absent
  * @param transmit             {@code MavlinkFeedTransmitter}'s cadence/defaults; defaulted as a
@@ -33,14 +54,39 @@ public record VisionMavlinkProperties(
         @DefaultValue("30s") Duration silenceWindow,
         @DefaultValue(VisionMavlinkProperties.DEFAULT_MAX_UNCLAIMED_VEHICLES) int maxUnclaimedVehicles,
         @DefaultValue("5s") Duration closeJoinTimeout,
-        @DefaultValue("2s") Duration ackTimeout,
+        @DefaultValue("700ms") Duration ackTimeout,
+        @DefaultValue(VisionMavlinkProperties.DEFAULT_COMMAND_RETRIES) int commandRetries,
+        @DefaultValue(VisionMavlinkProperties.DEFAULT_DROP_RATE_WARN_PERCENT) double dropRateWarnPercent,
+        @DefaultValue(VisionMavlinkProperties.DEFAULT_DROP_RATE_ALARM_PERCENT) double dropRateAlarmPercent,
+        @DefaultValue(VisionMavlinkProperties.DEFAULT_LINK_FAILURE_GRACE) Duration linkFailureGrace,
         Scan scan,
         Transmit transmit) {
 
     static final String DEFAULT_BIND_HOST = "0.0.0.0";
     static final String DEFAULT_MAX_UNCLAIMED_VEHICLES = "32";
+    static final String DEFAULT_COMMAND_RETRIES = "2";
+    static final String DEFAULT_DROP_RATE_WARN_PERCENT = "5.0";
+    static final String DEFAULT_DROP_RATE_ALARM_PERCENT = "20.0";
+    static final String DEFAULT_LINK_FAILURE_GRACE = "2s";
 
     public VisionMavlinkProperties {
+        if (commandRetries < 0) {
+            throw new IllegalArgumentException("commandRetries must be >= 0: " + commandRetries);
+        }
+        if (dropRateWarnPercent < 0 || dropRateWarnPercent > 100) {
+            throw new IllegalArgumentException("dropRateWarnPercent must be in [0,100]: " + dropRateWarnPercent);
+        }
+        if (dropRateAlarmPercent < 0 || dropRateAlarmPercent > 100) {
+            throw new IllegalArgumentException("dropRateAlarmPercent must be in [0,100]: " + dropRateAlarmPercent);
+        }
+        if (dropRateAlarmPercent < dropRateWarnPercent) {
+            throw new IllegalArgumentException("dropRateAlarmPercent must be >= dropRateWarnPercent: "
+                    + dropRateAlarmPercent + " < " + dropRateWarnPercent);
+        }
+        Objects.requireNonNull(linkFailureGrace, "linkFailureGrace must not be null");
+        if (linkFailureGrace.isZero() || linkFailureGrace.isNegative()) {
+            throw new IllegalArgumentException("linkFailureGrace must be positive: " + linkFailureGrace);
+        }
         if (scan == null) {
             scan = new Scan(Scan.DEFAULT_ACTIVE_HUB_POLL_COUNT_INT, Scan.DEFAULT_ACTIVE_HUB_MIN_POLL_INTERVAL_DURATION,
                     Scan.DEFAULT_SELF_BIND_MIN_READ_TIMEOUT_DURATION, Scan.DEFAULT_SELF_BIND_MAX_READ_TIMEOUT_DURATION);

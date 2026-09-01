@@ -108,72 +108,36 @@
   gap: var(--space-4);
 }
 
-.rail-row {
-  width: 100%;
-  display: flex;
-  align-items: center;
+/* Per-row markup (`.rail-row`, `.rail-name`, `.rail-meta`, `.severity-chip`,
+   `.fs-chip`) moved to `rail-row.css` (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N3, §2 N3) when
+   the row split into its own `<vision-command-rail-row>` component — see that file's own doc
+   comment. */
+
+/* docs/plans/active/OPERATOR-UX-4-PLAN.md finding N3, §2 N3 — two groups, mirrors `drone-picker.css`'s
+   own `.picker-group`/`.picker-group-label` exactly (frontend-style §8 structural-label register). */
+.rail-group + .rail-group {
+  margin-top: var(--space-16);
+}
+
+.rail-group-label {
+  margin: 0 0 var(--space-8);
+  padding: 0 var(--space-2);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.rail-hide-simulated {
   gap: var(--space-8);
-  text-align: left;
-  padding: var(--space-8);
-  border-left: 3px solid transparent;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  background: transparent;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  margin-bottom: var(--space-8);
+  padding: 0 var(--space-2);
+  font-size: 0.8rem;
 }
 
-.rail-row:hover {
-  background: var(--panel-hover);
-}
-
-.rail-row.critical {
-  border-left-color: var(--color-danger);
-}
-
-.rail-row.warning {
-  border-left-color: var(--color-warn);
-}
-
-/* Declared after .critical/.warning so "which row did I click" always wins the shared
-   border-left channel; severity stays visible via the row's own chip. F4's selection language
-   (docs/plans/done/VISUAL-REFRESH-PLAN.md) — `--color-info-soft` background + `--color-info` accent, the same
-   pairing `.nav-row.active` (sidebar) and `tr.row-selectable.selected`/`.asset-card.selected`
-   (assets/devices) all use — so the rail and the fleet map's own `.selected` marker ring
-   (`shared/map/fleet-map/fleet-map.css`) read as the same "this is what's selected" concept. */
-.rail-row.selected {
-  background: var(--color-info-soft);
-  border-left-color: var(--color-info);
-}
-
-.rail-name {
-  flex: 1;
-  min-width: 0;
-  font-size: 0.84rem;
-}
-
-.rail-category {
-  flex: none;
-  max-width: 6rem;
-  font-size: 0.7rem;
-}
-
-.severity-chip {
-  flex: none;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-}
-
-/* Failsafe rail chip (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — `--live` red, this app's one color
-   reserved exclusively for a genuine failsafe (never the generic `--danger` a plain critical
-   severity chip already uses), so a failsafe row reads as distinctly more urgent than any other
-   critical reason at a glance. */
-.fs-chip {
-  flex: none;
-  background: color-mix(in srgb, var(--color-live) 18%, transparent);
-  border-color: transparent;
-  color: var(--color-live);
-  font-weight: 700;
-  letter-spacing: 0.03em;
+.rail-hide-simulated input {
+  width: auto;
 }
 
 /* ---- Toggle tabs — the slim, always-present drawer handle (mirrors `features/live/live.css`'s

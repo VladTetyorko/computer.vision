@@ -1,6 +1,6 @@
 <div class="osd-groups">
-  <div class="osd-group surface-hud">
-    <span class="osd-group-label">Power</span>
+  <div class="osd-group surface-hud" [class.stale]="isStale()">
+    <span class="osd-group-label">{{ powerGroupLabel() }}</span>
     <div class="osd-group-body">
       @if (store.hasTelemetry()) {
         <span class="osd-metric" [class]="'batt-' + batterySeverityTier()">
@@ -8,7 +8,7 @@
         </span>
         @if (armed() !== undefined) {
           <span class="osd-metric" [class.armed]="armed()" [class.disarmed]="!armed()">
-            <vision-icon name="power" [size]="14" /><span class="v">{{ armed() ? 'ARMED' : 'DISARMED' }}</span>
+            <vision-icon name="power" [size]="14" /><span class="v">{{ armedText() }}</span>
           </span>
         }
       } @else {
@@ -18,8 +18,8 @@
   </div>
 
   @if (store.hasTelemetry()) {
-    <div class="osd-group surface-hud">
-      <span class="osd-group-label">Nav</span>
+    <div class="osd-group surface-hud" [class.stale]="isStale()">
+      <span class="osd-group-label">{{ navGroupLabel() }}</span>
       <div class="osd-group-body">
         @if (positionText(); as position) {
           <span class="osd-metric">

@@ -22,6 +22,17 @@ export class OrgSettingsFacade {
   readonly roleOptions = roleOptions();
   readonly roleLabel = roleLabel;
 
+  /**
+   * Whether each tab's create-form panel is revealed above its roster (O1, docs/plans/active/OPERATOR-UX-6-PLAN.md
+   * — see this facade's own class doc comment). Plain, non-persisted view toggles, the same carve-out
+   * as {@link tab} above: neither form is an overlay another route/component needs to stay consistent
+   * with, so no `UiStore` group. Independent booleans, not a shared "which form is open" enum — a
+   * future third create surface (there is none today) would not need to fight either of these for
+   * exclusivity, and each is only ever rendered while its own tab is active anyway.
+   */
+  readonly userFormOpen = signal(false);
+  readonly groupFormOpen = signal(false);
+
   /** The group hierarchy pre-flattened for the template (`@for` can't recurse) — depth drives the indent. */
   readonly flatGroups = computed(() => flattenGroupTree(this.org.groupTree()));
 
@@ -70,6 +81,15 @@ export class OrgSettingsFacade {
     return memberships.map((m) => `${this.groupName(m.groupId)} · ${roleLabel(m.role)}`).join(', ');
   }
 
+  openUserForm(): void {
+    this.userFormOpen.set(true);
+  }
+
+  /** Closed by `Cancel`, `Escape`, or a successful {@link submitUser} — see this facade's own doc comment. */
+  closeUserForm(): void {
+    this.userFormOpen.set(false);
+  }
+
   canSubmitUser(): boolean {
     return (
       !this.creatingUser() &&
@@ -105,11 +125,21 @@ export class OrgSettingsFacade {
       this.newGroupId.set('');
       this.newRole.set('PILOT');
       this.newEnabled.set(true);
+      this.closeUserForm();
     }
   }
 
   async toggleEnabled(userId: string, enabled: boolean): Promise<void> {
     await this.org.setUserEnabled(userId, enabled);
+  }
+
+  openGroupForm(): void {
+    this.groupFormOpen.set(true);
+  }
+
+  /** Closed by `Cancel`, `Escape`, or a successful {@link submitGroup} — see this facade's own doc comment. */
+  closeGroupForm(): void {
+    this.groupFormOpen.set(false);
   }
 
   canSubmitGroup(): boolean {
@@ -130,6 +160,7 @@ export class OrgSettingsFacade {
     if (created) {
       this.newGroupName.set('');
       this.newParentId.set('');
+      this.closeGroupForm();
     }
   }
 }

@@ -20,8 +20,9 @@ import com.drones.vision.flight.domain.port.VehicleConfigPort;
 import com.drones.vision.flight.domain.port.VehicleProfileRepositoryPort;
 import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.warehouse.application.maintenance.MaintenanceQuery;
+import com.drones.vision.warehouse.application.usage.UsageSessionService;
 import com.drones.vision.warehouse.domain.port.AssetLiveStatePort;
-import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -91,17 +92,19 @@ public class OnboardingWiringConfiguration {
 
     /**
      * The PROBE stage (docs/plans/active/DRONE-ONBOARDING-PLAN.md §3.1) — behind {@code
-     * OnboardingController}. Takes {@link AssetUsageRepositoryPort} (O11) because a flight passport
-     * must resolve for an <em>old</em> flight: membership is proven from the usage's own
-     * {@code assetId} rather than from the asset's capped recent-usages window.
+     * OnboardingController}. Takes {@link UsageSessionService} (docs/plans/active/
+     * ARCHITECTURE-AUDIT-2026-08-26.md R5, O11 originally) because a flight passport must resolve
+     * for an <em>old</em> flight: membership is proven from the usage's own {@code assetId} via
+     * {@link UsageSessionService#usageBelongsToAsset}, uncapped, rather than from the asset's capped
+     * recent-usages window.
      */
     @Bean
     public VehicleProfileService vehicleProfileService(AssetService assetService, VehicleConfigPort vehicleConfigPort,
                                                          VehicleProfileRepositoryPort vehicleProfileRepositoryPort,
-                                                         AssetUsageRepositoryPort assetUsageRepositoryPort,
+                                                         UsageSessionService usageSessionService,
                                                          AuditTrailPort auditTrailPort) {
         return new DefaultVehicleProfileService(assetService, vehicleConfigPort, vehicleProfileRepositoryPort,
-                assetUsageRepositoryPort, auditTrailPort);
+                usageSessionService, auditTrailPort);
     }
 
     /**
@@ -115,13 +118,19 @@ public class OnboardingWiringConfiguration {
         return new DefaultRemediationService(assetService, assetLiveStatePort, vehicleConfigPort, auditTrailPort);
     }
 
-    /** The NEGOTIATE stage (docs/plans/active/DRONE-ONBOARDING-PLAN.md §3.1) — behind {@code ReadinessController}. */
+    /**
+     * The NEGOTIATE stage (docs/plans/active/DRONE-ONBOARDING-PLAN.md §3.1) — behind {@code
+     * ReadinessController}. Takes {@link MaintenanceQuery} per docs/plans/active/
+     * WAREHOUSE-UX-CONTEXT.md's W5 handoff (OQ1, D6 default): an open, flight-blocking maintenance
+     * record now forces {@code NO_GO} regardless of every other feature's readiness.
+     */
     @Bean
     public ReadinessService readinessService(AssetService assetService,
                                               VehicleProfileRepositoryPort vehicleProfileRepositoryPort,
-                                              FeatureRequirementRepositoryPort featureRequirementRepositoryPort) {
+                                              FeatureRequirementRepositoryPort featureRequirementRepositoryPort,
+                                              MaintenanceQuery maintenanceQuery) {
         return new DefaultReadinessService(assetService, vehicleProfileRepositoryPort,
-                featureRequirementRepositoryPort);
+                featureRequirementRepositoryPort, maintenanceQuery);
     }
 
     /**

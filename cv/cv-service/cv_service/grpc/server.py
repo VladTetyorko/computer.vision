@@ -1,8 +1,9 @@
 """gRPC composition root for the Vision CV service.
 
 ``serve()``/``main()`` live here: resolve :class:`cv_service.config.Settings`
-once, build the shared `ModelRegistry`/`InferenceGate`, wire the three
-servicers (`cv_service.grpc.servicers.InferenceServicer`/`TrainingServicer`/
+once, build the shared `ModelRegistry`/`InferenceGate`, wire the servicers
+this process's `Settings.role` calls for
+(`cv_service.grpc.servicers.InferenceServicer`/`TrainingServicer`/
 `GeolocationServicer`), start the gRPC server, and handle `SIGTERM`/`SIGINT`
 for graceful shutdown. No servicer behavior lives here -- see
 `cv_service/grpc/servicers.py` for wire<->domain translation,
@@ -14,6 +15,14 @@ Run with::
 
     python -m cv_service.grpc.server
 
+which serves whatever `Settings.role` (`CV_SERVICE_ROLE`, default `all`)
+resolves to. `python -m cv_service.grpc.server_inference` and
+`cv_service.grpc.server_training` (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md
+R6) are thin wrappers around the exact same `main()` that just default the
+role for their process -- see those modules' own docstrings and this
+module's "Process roles" section below. No servicer-construction code is
+duplicated between the three: `serve()` is the one place that lives.
+
 Requires the generated stubs under ``cv_service/gen`` - run
 ``scripts/gen_proto.sh`` first (see README.md). Generated code is never
 committed. This module stays importable without the ``cv`` optional
@@ -21,6 +30,42 @@ dependency group installed (``ultralytics``/``cv2``/``torch``) -- registry
 construction is lazily imported inside ``serve()`` and degrades to the
 Phase 0 echo behavior (``registry=None``) if the extra is absent, exactly
 like before this module's own split out of the former ``cv_service/server.py``.
+
+Process roles (`Settings.role`, `CV_SERVICE_ROLE`)
+====================================================
+`Inference` is a ~50ms-budget-per-frame hot path; `Training`/`Geolocation`
+are long-running/GPU-hungry. Sharing one process (and one GIL) means a
+training run or a geolocation index build can degrade every live stream's
+detection -- the defect this knob closes
+(docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md T2/R6). Three roles,
+selected once at process start, never changed at runtime:
+
+- ``all`` (default) -- every servicer, one process. Byte-identical to every
+  deployment that predates this knob; the only mode a plain
+  ``python -m cv_service.grpc.server`` with no ``CV_SERVICE_ROLE`` set has
+  ever produced.
+- ``inference`` -- `Inference` only. `Training`/`Geolocation` are not
+  registered on the gRPC server AND their collaborators (`InferenceGate`,
+  the tracker registry) are never constructed -- this process never spends a
+  cycle or a GPU byte on training/geolocation work.
+- ``training`` -- `Training` + `Geolocation` only (they are grouped: both
+  are long-running/heavy, neither is latency-sensitive the way `Inference`
+  is). `InferenceServicer` is not registered and its `InferenceGate`/tracker
+  registry are never built.
+
+The model registry (`ModelRegistry`) is built regardless of role -- both
+`inference` (the detector) and `training` (`ListModels`/`PromoteModel`
+bookkeeping) need it. **Known limitation of a split deployment**: each
+process holds its own in-memory `ModelRegistry`. `TrainingServicer.
+PromoteModel` persists the active-model marker to `settings.model_dir` (see
+its own docstring) so the choice survives *that process's* restart, but does
+**not** reach across processes -- an `inference`-role process only picks up
+a promotion made against a different `training`-role process the next time
+it restarts and re-reads the marker (`build_default_registry`). This is
+unchanged from the pre-split `all`-in-one-process story where the "same
+registry" claim held because there was only ever one process; a split
+deployment that needs a promotion to take effect on a *running* inference
+process without a restart is not built here.
 """
 
 from __future__ import annotations
@@ -32,7 +77,7 @@ from concurrent import futures
 
 import grpc
 
-from cv_service.config import Settings
+from cv_service.config import DEFAULT_ROLE, ROLE_INFERENCE, ROLE_TRAINING, Settings
 from cv_service.inference.concurrency import InferenceGate
 from cv_service.grpc.servicers import (  # cv_pb2_grpc re-exported so tests can monkeypatch it here
     GeolocationServicer,
@@ -108,7 +153,9 @@ def _build_tracker_registry(settings: Settings):
 
 
 def serve(settings: Settings | None = None) -> grpc.Server:
-    """Build, start, and return a gRPC server.
+    """Build, start, and return a gRPC server registering whichever
+    servicer(s) ``settings.role`` calls for (see module docstring's
+    "Process roles" section).
 
     Configured with ``_KEEPALIVE_SERVER_OPTIONS`` (see module-level comment)
     so this server tolerates and reciprocates the client channel's HTTP/2
@@ -116,46 +163,56 @@ def serve(settings: Settings | None = None) -> grpc.Server:
     stream thread parked indefinitely.
     """
     settings = settings if settings is not None else Settings.from_env()
+    serves_inference = settings.role in (DEFAULT_ROLE, ROLE_INFERENCE)
+    serves_training = settings.role in (DEFAULT_ROLE, ROLE_TRAINING)
 
     server = grpc.server(
         futures.ThreadPoolExecutor(max_workers=settings.grpc_workers),
         options=_KEEPALIVE_SERVER_OPTIONS,
     )
 
-    # Build the registry ONCE and share it between both servicers, so
-    # `Training.PromoteModel` re-points the very registry the inference
-    # `DetectStream` path routes against -- one source of truth. `None`
-    # (no model loaded) is passed through explicitly: `InferenceServicer`
-    # degrades to echo, `TrainingServicer` reports an empty roster.
+    # Built regardless of role: `inference` needs it for detection,
+    # `training` needs it for ListModels/PromoteModel bookkeeping -- see the
+    # module docstring's "Known limitation of a split deployment" for what
+    # this shared-in-name-only registry does NOT give a split deployment
+    # (live cross-process promotion). `None` (no model loaded) is passed
+    # through explicitly: `InferenceServicer` degrades to echo,
+    # `TrainingServicer` reports an empty roster.
     registry = _build_default_registry(settings)
-    gate = InferenceGate(settings.max_concurrent_inferences)
-    tracker_registry = _build_tracker_registry(settings)
 
-    cv_pb2_grpc.add_InferenceServicer_to_server(
-        InferenceServicer(
-            registry=registry,
-            inference_gate=gate,
-            settings=settings,
-            tracker_registry=tracker_registry,
-        ),
-        server,
-    )
-    cv_pb2_grpc.add_TrainingServicer_to_server(
-        TrainingServicer(
-            registry=registry,
-            model_dir=settings.model_dir,
-            dataset_dir=settings.dataset_dir,
-            max_upload_bytes=settings.max_upload_bytes,
-        ),
-        server,
-    )
-    # `GeolocationServicer` builds its own encoder/matcher backend ONCE, here, at construction
-    # (same "probe/build at startup, log the roster, degrade to UNAVAILABLE per-call rather than
-    # block startup" posture as `registry`/`tracker_registry` above) -- see its own docstring.
-    cv_pb2_grpc.add_GeolocationServicer_to_server(GeolocationServicer(settings=settings), server)
+    if serves_inference:
+        gate = InferenceGate(settings.max_concurrent_inferences)
+        tracker_registry = _build_tracker_registry(settings)
+        cv_pb2_grpc.add_InferenceServicer_to_server(
+            InferenceServicer(
+                registry=registry,
+                inference_gate=gate,
+                settings=settings,
+                tracker_registry=tracker_registry,
+            ),
+            server,
+        )
+
+    if serves_training:
+        cv_pb2_grpc.add_TrainingServicer_to_server(
+            TrainingServicer(
+                registry=registry,
+                model_dir=settings.model_dir,
+                dataset_dir=settings.dataset_dir,
+                max_upload_bytes=settings.max_upload_bytes,
+            ),
+            server,
+        )
+        # `GeolocationServicer` builds its own encoder/matcher backend ONCE, here, at
+        # construction (same "probe/build at startup, log the roster, degrade to UNAVAILABLE
+        # per-call rather than block startup" posture as `registry`/`tracker_registry` above) --
+        # see its own docstring. Grouped with `training`, not `inference`: both are
+        # long-running/heavy, neither is on the per-frame hot path.
+        cv_pb2_grpc.add_GeolocationServicer_to_server(GeolocationServicer(settings=settings), server)
+
     server.add_insecure_port(f"[::]:{settings.port}")
     server.start()
-    LOGGER.info("cv-service gRPC server listening on :%d", settings.port)
+    LOGGER.info("cv-service gRPC server listening on :%d (role=%s)", settings.port, settings.role)
     return server
 
 

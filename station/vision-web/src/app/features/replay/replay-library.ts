@@ -2,11 +2,13 @@ import { ChangeDetectionStrategy, Component, effect, inject, input } from '@angu
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { EmptyState } from '../../shared/ui/empty-state';
-import { PageBar, pluralize } from '../../shared/ui/page-bar/page-bar';
+import { PageBar } from '../../shared/ui/page-bar/page-bar';
+import { pluralize } from '../../shared/ui/text-logic';
 import { TwoPane } from '../../shared/ui/two-pane/two-pane';
 import { ReplayPage } from './replay';
 import { ReplayLibraryFacade } from './replay-library-facade';
-import { formatUsageDuration } from './replay-library-logic';
+import { formatUsageDuration, usageStatus, type UsageStatus } from './replay-library-logic';
+import type { UsageSummary } from '../../core/api/models';
 
 /**
  * `/replay` — the replay library (docs/extracts/design/10-replay.md, Wave 4, closing F8: "Scrub any
@@ -81,5 +83,13 @@ export class ReplayLibraryPage {
    *  full ISO timestamp; the detail pane's "Ended" row reuses this verbatim for `endedAt`. */
   protected startedLabel(iso: string): string {
     return new Date(iso).toLocaleString(undefined, { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  }
+
+  /** The row/detail-pane's one status derivation (OPERATOR-UX-5-PLAN.md finding U1, §2 U1) — a thin
+   *  wrapper supplying `Date.now()` (the one non-pure input `usageStatus` itself never reads), so
+   *  both surfaces below call through the identical logic rather than re-deriving "is this flying"
+   *  independently. */
+  protected usageStatus(usage: UsageSummary): UsageStatus {
+    return usageStatus(usage, Date.now());
   }
 }

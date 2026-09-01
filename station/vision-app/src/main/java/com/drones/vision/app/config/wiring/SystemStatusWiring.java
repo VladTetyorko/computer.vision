@@ -3,15 +3,18 @@ package com.drones.vision.app.config.wiring;
 import com.drones.vision.adapter.cvgrpc.CvChannelSupervisor;
 import com.drones.vision.adapter.cvgrpc.CvStatusProvider;
 import com.drones.vision.adapter.mavlink.MavlinkLinkStatusProvider;
+import com.drones.vision.adapter.mavlink.MavlinkSettings;
 import com.drones.vision.adapter.mavlink.MavlinkTelemetrySource;
 import com.drones.vision.adapter.publishhls.MediamtxStreamPublisher;
 import com.drones.vision.adapter.publishhls.PublishStatusProvider;
+import com.drones.vision.app.config.properties.VisionMavlinkProperties;
 import com.drones.vision.platform.Health;
 import com.drones.vision.platform.SubsystemStatus;
 import com.drones.vision.platform.SubsystemStatusPort;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -47,6 +50,7 @@ import org.springframework.context.annotation.Configuration;
  * same thing as a feature switched off (see {@link MavlinkLinkStatusProvider}'s own javadoc).
  */
 @Configuration
+@EnableConfigurationProperties(VisionMavlinkProperties.class)
 public class SystemStatusWiring {
 
     /** {@code vision.cv.*} left at its defaults — CV never wired at all. */
@@ -67,10 +71,20 @@ public class SystemStatusWiring {
         return new CvStatusProvider(cvChannelSupervisor::getIfAvailable);
     }
 
-    /** See this class's own "{@code mavlink-link} is unconditional" javadoc section. */
+    /**
+     * See this class's own "{@code mavlink-link} is unconditional" javadoc section. {@code
+     * dropRateWarnPercent}/{@code dropRateAlarmPercent}/{@code linkFailureGrace} (docs/plans/active/
+     * FLEET-RADIO-PLAN.md D7) come from {@link VisionMavlinkProperties} rather than {@link
+     * TelemetryWiring#toMavlinkSettings}'s full {@code MavlinkSettings} — this bean needs only the
+     * three thresholds, not the whole RX/TX settings object {@code toMavlinkSettings} assembles for
+     * {@link TelemetryWiring#mavlinkTelemetrySource}.
+     */
     @Bean
-    public SubsystemStatusPort mavlinkLinkStatus(MavlinkTelemetrySource mavlinkTelemetrySource) {
-        return new MavlinkLinkStatusProvider(mavlinkTelemetrySource::claimedVehicleHealth);
+    public SubsystemStatusPort mavlinkLinkStatus(MavlinkTelemetrySource mavlinkTelemetrySource,
+                                                  VisionMavlinkProperties properties) {
+        MavlinkSettings.LinkStatus thresholds = new MavlinkSettings.LinkStatus(
+                properties.dropRateWarnPercent(), properties.dropRateAlarmPercent(), properties.linkFailureGrace());
+        return new MavlinkLinkStatusProvider(mavlinkTelemetrySource::claimedVehicleHealth, thresholds);
     }
 
     /** {@code vision.publish.enabled=false} — the {@code NoopStreamPublisher} case. */

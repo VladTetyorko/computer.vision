@@ -1,0 +1,80 @@
+/* Mirrors `features/fly/drone-picker-card.css`'s own flex-column card shape (header row → facts →
+   trailing action line), swapped from a single-link CTA to a status-aware action row/link/plain
+   text — see `found-device-card.html`'s own `@switch`. */
+:host {
+  display: block;
+}
+
+.found-device-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.found-device-card h3 {
+  margin: 0;
+  min-width: 0;
+  font-size: 0.95rem;
+}
+
+.found-device-facts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: 0;
+}
+
+.found-device-facts .fact {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  font-size: 0.78rem;
+}
+
+.found-device-facts dt {
+  flex: none;
+  color: var(--text-faint);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.found-device-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+.found-device-age {
+  margin: 0;
+  font-size: 0.74rem;
+}
+
+.found-device-actions {
+  margin-top: auto;
+  padding-top: var(--space-8);
+  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.found-device-resolved {
+  margin: 0;
+  margin-top: auto;
+  padding-top: var(--space-8);
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+}
+
+.found-device-resolved a {
+  color: var(--color-info);
+  font-weight: 600;
+}
+
+/* A resolved (REGISTERED/DISMISSED) card reads quieter than an actionable NEW one — it no longer
+   needs the same visual weight competing for attention against the cards that do. */
+.found-device-card.resolved {
+  opacity: 0.82;
+}

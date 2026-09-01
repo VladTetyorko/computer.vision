@@ -11,6 +11,8 @@ import com.drones.vision.warehouse.application.device.DeviceRegistration;
 import com.drones.vision.warehouse.application.device.DeviceService;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GroupId;
@@ -65,8 +67,8 @@ class DeviceControllerTest {
     private final CurrentUser currentUser = new CurrentUser(ownership);
     private final DeviceId deviceId = DeviceId.random();
     /** The asset {@link #deviceId} belongs to, for the authority tests near the end of this file. */
-    private final Asset ownedAsset = new Asset(AssetId.random(), "my drone", new CategoryId("drone"), ownership,
-            Set.of(deviceId), Map.of());
+    private final Asset ownedAsset = Asset.register(AssetId.random(), "my drone", new CategoryId("drone"), ownership,
+            Set.of(deviceId), Map.of(), Identity.NONE, Custody.NONE);
     /** An asset the PILOT authority tests below are deliberately NOT scoped to. */
     private final AssetId otherAssetId = AssetId.random();
 
@@ -149,6 +151,52 @@ class DeviceControllerTest {
         verify(deviceService).register(captor.capture(), any());
         assertEquals(Set.of(Capability.VIDEO), captor.getValue().capabilities());
         assertEquals("cam-1", captor.getValue().name());
+        assertEquals(com.drones.vision.kernel.DeviceOrigin.LIVE, captor.getValue().origin());
+    }
+
+    @Test
+    void registerAcceptsAnExplicitSimulatedOrigin() throws Exception {
+        Device saved = device();
+        when(deviceService.register(any(), any())).thenReturn(saved);
+
+        String body = """
+                {"name":"cam-1","protocol":"sim","uri":"sim://cam-1","origin":"SIMULATED"}
+                """;
+
+        mockMvc.perform(post("/api/devices").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated());
+
+        ArgumentCaptor<DeviceRegistration> captor =
+                ArgumentCaptor.forClass(DeviceRegistration.class);
+        verify(deviceService).register(captor.capture(), any());
+        assertEquals(com.drones.vision.kernel.DeviceOrigin.SIMULATED, captor.getValue().origin());
+    }
+
+    @Test
+    void registerReturns400ForAnUnknownOrigin() throws Exception {
+        String body = """
+                {"name":"cam-1","protocol":"sim","uri":"sim://cam-1","origin":"FAKE"}
+                """;
+
+        mockMvc.perform(post("/api/devices").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+
+        verifyNoInteractions(deviceService);
+    }
+
+    @Test
+    void registerResponseCarriesTheDeviceOrigin() throws Exception {
+        Device saved = device();
+        when(deviceService.register(any(), any())).thenReturn(saved);
+
+        String body = """
+                {"name":"cam-1","protocol":"sim","uri":"sim://cam-1"}
+                """;
+
+        mockMvc.perform(post("/api/devices").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.origin").value("LIVE"));
     }
 
     @Test
@@ -310,6 +358,27 @@ class DeviceControllerTest {
         ArgumentCaptor<DeviceEdit> captor = ArgumentCaptor.forClass(DeviceEdit.class);
         verify(deviceService).update(eq(id), captor.capture(), any());
         assertEquals("renamed", captor.getValue().name());
+    }
+
+    @Test
+    void updateAppliesAReplacementOrigin() throws Exception {
+        DeviceId id = DeviceId.random();
+        Device updated = new Device(id, "cam-1", Set.of(Capability.VIDEO),
+                new StreamDescriptor("sim", URI.create("sim://cam-1"), Map.of()),
+                LifecycleState.ACTIVE, com.drones.vision.kernel.DeviceOrigin.SIMULATED);
+        when(deviceService.update(eq(id), any(), any())).thenReturn(updated);
+
+        String body = """
+                {"origin":"simulated"}
+                """;
+
+        mockMvc.perform(patch("/api/devices/{id}", id.value()).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.origin").value("SIMULATED"));
+
+        ArgumentCaptor<DeviceEdit> captor = ArgumentCaptor.forClass(DeviceEdit.class);
+        verify(deviceService).update(eq(id), captor.capture(), any());
+        assertEquals(com.drones.vision.kernel.DeviceOrigin.SIMULATED, captor.getValue().origin());
     }
 
     @Test
@@ -595,8 +664,9 @@ class DeviceControllerTest {
     @Test
     void listFiltersOutDevicesThePilotsScopeCannotReach() throws Exception {
         Device otherDevice = device();
-        Asset otherAsset = new Asset(otherAssetId, "someone else's drone", new CategoryId("drone"),
-                new Ownership(UserId.random(), GroupId.random()), Set.of(otherDevice.id()), Map.of());
+        Asset otherAsset = Asset.register(otherAssetId, "someone else's drone", new CategoryId("drone"),
+                new Ownership(UserId.random(), GroupId.random()), Set.of(otherDevice.id()), Map.of(), Identity.NONE,
+                Custody.NONE);
         when(assetRepositoryPort.findByDeviceId(otherDevice.id())).thenReturn(Optional.of(otherAsset));
         Device ownDevice = new Device(deviceId, "cam-1", Set.of(Capability.VIDEO),
                 new StreamDescriptor("sim", URI.create("sim://cam-1"), Map.of()));

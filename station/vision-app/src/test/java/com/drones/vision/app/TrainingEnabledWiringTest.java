@@ -45,10 +45,19 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * vision.cv.enabled} left at its default {@code false} (detection stays off), {@code
  * vision.training.enabled=true} alone is enough to build {@link WiringConfiguration#cvGrpcChannel}
  * (its {@code @ConditionalOnExpression} matches on training alone) and resolve {@code
- * modelRegistryPort}/{@code modelRegistryService}/{@code ModelRegistryController} — proving a
- * training-only deployment doesn't need detection wired too. See {@link
- * CvAndTrainingSharedChannelWiringTest} for the both-enabled case that actually proves channel
- * <em>sharing</em>.
+ * trainingPort}/{@code trainingJobService}/{@code TrainingJobController} — proving a training-only
+ * deployment doesn't need detection wired too. See {@link CvAndTrainingSharedChannelWiringTest} for
+ * the both-enabled case that actually proves channel <em>sharing</em>.
+ *
+ * <p><b>{@code modelRegistryPort}/{@code modelRegistryService}/{@code ModelRegistryController} are
+ * a separate switch</b> since docs/plans/active/CV-SETTINGS-PLAN.md §5 (CV-SETTINGS-CONTEXT.md's
+ * W4-app → W5 handoff decoupled the registry from training specifically): {@code
+ * vision.cv.registry.enabled}'s own {@code application.yaml} default follows {@code
+ * vision.cv.enabled}, not {@code vision.training.enabled}, so a training-only deployment
+ * ({@code vision.cv.enabled} left unset) no longer gets the registry for free — this class sets
+ * {@code vision.cv.registry.enabled=true} explicitly to keep exercising it. See {@link
+ * CvEnabledWiringTest#cvOnlyConfigurationWiresTheModelRegistryByDefault} for the mirror case (CV
+ * on, training off) and {@link CvRegistryExplicitOptOutWiringTest} for the opt-out.
  *
  * <p>And the training-job flow (docs/plans/done/CV-TRAINING-PLAN.md §7/§8, Phase 2's last backend wave, folded
  * with upload by docs/plans/done/CV-TRAINING-V2-PLAN.md §4): {@code trainingPort}/{@code trainingJobService}/
@@ -56,7 +65,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * switch, {@code trainingPort} sharing the identical {@link WiringConfiguration#cvGrpcChannel} bean
  * {@code modelRegistryPort} already does.
  */
-@SpringBootTest(properties = {"vision.publish.enabled=false", "vision.training.enabled=true"})
+@SpringBootTest(properties = {"vision.publish.enabled=false", "vision.training.enabled=true",
+        "vision.cv.registry.enabled=true"})
 class TrainingEnabledWiringTest {
 
     @Autowired

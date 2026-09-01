@@ -6,6 +6,7 @@ import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UsageId;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -106,4 +107,28 @@ public interface AssetUsageRepositoryPort {
      * @return the usage that stream opened, or {@link Optional#empty()} if none carries that id
      */
     Optional<AssetUsage> findByStream(StreamId streamId);
+
+    /**
+     * Cumulative flight seconds per asset, fleet-wide, in one aggregate query — the "Hours" column
+     * on the Vehicles table (docs/plans/active/WAREHOUSE-UX-PLAN.md &sect;3.3, D5; docs/plans/active/
+     * WAREHOUSE-UX-CONTEXT.md W4 handoff), computed once per list render rather than once per asset
+     * (avoiding the N+1 {@code GET /api/assets/{id}/stats} would otherwise force). Semantics mirror
+     * {@code AssetStats#totalFlightSeconds}: an open usage ({@code endedAt == null}) counts its
+     * in-progress duration up to "now".
+     *
+     * <p>Default method, not abstract: adding a fleet-wide aggregate is additive and every real
+     * implementation should override it, but a hand-rolled test fake elsewhere in this tree (docs/plans/active/
+     * ARCHITECTURE-AUDIT-2026-08-26.md R5's {@code REPOSITORY_PORT_EXEMPTIONS} list — {@code
+     * DefaultLabelingServiceTest}'s {@code FakeAssetUsageRepositoryPort}) has no need to know about
+     * flight hours and should not have to implement a method it never calls; the default answers
+     * honestly with an empty map (unknown, not fabricated), matching {@link
+     * java.util.Collections#emptyMap()}'s own "nothing known" contract.
+     *
+     * @return cumulative flight seconds keyed by asset id; an asset with no usages is simply absent
+     *         (its honest value is {@code 0}, not "unknown" — a caller should default a missing key
+     *         to {@code 0L}, not {@code null})
+     */
+    default Map<AssetId, Long> totalFlightSecondsByAsset() {
+        return Map.of();
+    }
 }

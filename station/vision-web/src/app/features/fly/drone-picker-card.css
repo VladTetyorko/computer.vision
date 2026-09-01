@@ -1,0 +1,89 @@
+/* Asset card rebuild (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §3) — a flex column so the header row, category,
+   optional facts, and the trailing "Enter cockpit →" line all get consistent spacing regardless of
+   how many facts a given card actually has (an offline asset with no fix yet has fewer than one
+   that's flown and streamed before). An `<a>`, not a `<button>` (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F12 —
+   entering a cockpit is a real navigation to `/fly/:assetId` now, not an internal state flip), so
+   `display: flex` here overrides the anchor's own inline default the same way it used to override a
+   button's. */
+.picker-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  text-align: left;
+  text-decoration: none;
+  color: inherit;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.picker-card:hover {
+  border-color: var(--border-strong);
+  background: var(--panel-hover);
+}
+
+.picker-card h3 {
+  margin: 0;
+  min-width: 0;
+}
+
+.picker-card p {
+  margin: 0;
+  font-size: 0.8rem;
+}
+
+.picker-card-facts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: 0;
+}
+
+/* No facts at all (never used, no fix) — take up no space rather than leaving an empty gap. */
+.picker-card-facts:empty {
+  display: none;
+}
+
+.picker-card-facts .fact {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  font-size: 0.78rem;
+}
+
+.picker-card-facts dt {
+  flex: none;
+  color: var(--text-faint);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.picker-card-facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+}
+
+/* A no-fix position (docs/plans/active/OPERATOR-UX-4-PLAN.md finding 1, this cycle's W5 —
+   `fly-logic.ts#positionFact`'s faint register) reads even quieter than an ordinary fact value —
+   this file's own base `.picker-card-facts dd` rule above already sets `color`, so the shared
+   global `.faint` (`src/styles.css`) can't win on specificity alone; this local override matches
+   its exact token. */
+.picker-card-facts dd.faint {
+  color: var(--text-faint);
+}
+
+/* Cards state their action (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §2 rule 6) — `margin-top: auto` pins this
+   to the card's bottom edge regardless of how many facts render above it, so every card in a grid
+   row ends on the same line. */
+.picker-card-cta {
+  margin-top: auto;
+  padding-top: var(--space-8);
+  border-top: 1px solid var(--border);
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-info);
+}

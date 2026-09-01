@@ -9,62 +9,53 @@
   } @else if (!facade.loaded()) {
     <p class="muted">Loading…</p>
   } @else {
-    <div class="setup-grid">
-      <!-- ---- Layouts, grouped by the vehicle they apply to ------------------------------------ -->
-      <section class="card layouts">
-        <vision-section-header title="Layouts" subtitle="One per vehicle kind is active at a time." />
+    <!-- ---- Layout bar ------------------------------------------------------------------------ -->
+    <section class="card layout-bar">
+      <div class="layout-bar-row">
+        <label class="layout-select">
+          <span class="label">Layout</span>
+          <select [ngModel]="facade.selected()?.id" (ngModelChange)="facade.select($event)">
+            @for (profile of facade.profiles(); track profile.id) {
+              <option [value]="profile.id">{{ profile.name }} — {{ profile.kind }}</option>
+            }
+          </select>
+        </label>
 
-        <ul class="layout-groups">
-          @for (group of groups(); track group.kind) {
-            <li class="layout-group">
-              <div class="group-head">
-                <span class="group-name">{{ group.label }}</span>
-                <span class="group-active">{{ activeSummary(group) }}</span>
-              </div>
+        @if (facade.selected(); as profile) {
+          <span class="layout-chips">
+            <span class="chip">{{ profile.kind }}</span>
+            @if (profile.source === 'BUILT_IN') {
+              <span class="chip">Built-in</span>
+            }
+            @if (profile.active) {
+              <span class="chip ok">Active</span>
+            } @else {
+              <button type="button" class="btn small" (click)="facade.activate(profile.id)">Activate</button>
+            }
+          </span>
+        }
 
-              <ul class="layout-list">
-                @for (profile of group.profiles; track profile.id) {
-                  <li class="layout-row" [class.selected]="facade.selected()?.id === profile.id">
-                    <button type="button" class="layout-pick" (click)="facade.select(profile.id)">
-                      <span class="layout-name">{{ profile.name }}</span>
-                      <span class="layout-meta">
-                        @if (profile.source === 'BUILT_IN') {
-                          <span class="chip">Built-in</span>
-                        }
-                        @if (profile.active) {
-                          <span class="chip ok">Active</span>
-                        }
-                      </span>
-                    </button>
-                    <span class="layout-actions">
-                      @if (!profile.active) {
-                        <button type="button" class="btn small" (click)="facade.activate(profile.id)">Activate</button>
-                      }
-                      @if (profile.source === 'SAVED') {
-                        <vision-icon-button
-                          icon="trash"
-                          label="Delete this layout"
-                          (activated)="requestDelete(profile.id)"
-                        />
-                      }
-                    </span>
-                  </li>
-                }
-              </ul>
-            </li>
+        <span class="layout-bar-spacer"></span>
+
+        <button type="button" class="btn secondary small" (click)="togglePanel('new-layout')">New layout</button>
+        <button type="button" class="btn secondary small" (click)="togglePanel('all-controls')">
+          All controls
+          <vision-icon [name]="isPanelOpen('all-controls') ? 'chevron-up' : 'chevron-down'" [size]="14" />
+        </button>
+        @if (facade.selected(); as profile) {
+          @if (profile.source === 'SAVED') {
+            <vision-icon-button icon="trash" label="Delete this layout" (activated)="requestDelete(profile.id)" />
           }
-        </ul>
+        }
+      </div>
 
+      @if (isPanelOpen('new-layout')) {
         <div class="new-layout">
-          <span class="label">New layout</span>
-          <p class="muted hint">Starts as a copy of the built-in for that vehicle, so the sticks work before you change anything.</p>
+          <p class="muted hint">
+            Starts as a copy of the built-in for that vehicle, so the sticks work before you change anything.
+          </p>
           <div class="new-layout-row">
-            <select
-              class="kind-select"
-              aria-label="Vehicle kind"
-              [ngModel]="newKind()"
-              (ngModelChange)="newKind.set($event)"
-            >
+            <select aria-label="Vehicle kind" [ngModel]="newKind()" (ngModelChange)="newKind.set($event)">
               @for (kind of facade.catalog()?.vehicleKinds ?? []; track kind.name) {
                 <option [value]="kind.name">{{ kind.label }}</option>
               }
@@ -79,411 +70,130 @@
             <button type="button" class="btn secondary" [disabled]="newName().trim().length === 0" (click)="create()">
               Create
             </button>
+            <button type="button" class="btn secondary" (click)="closePanel('new-layout')">Cancel</button>
           </div>
         </div>
-      </section>
+      }
+    </section>
 
-      <!-- ---- Editor --------------------------------------------------------------------------- -->
-      <section class="card editor">
-        @if (facade.selected(); as profile) {
-          <vision-section-header [title]="profile.name" [subtitle]="'For ' + kindLabel(profile.kind)">
-            <span actions class="editor-actions">
-              @if (facade.editable()) {
-                <button type="button" class="btn secondary" [disabled]="!facade.dirty()" (click)="facade.discard()">
-                  Discard
-                </button>
-                <button type="button" class="btn" [disabled]="!facade.canSave() || facade.saving()" (click)="facade.save()">
-                  {{ facade.saving() ? 'Saving…' : 'Save' }}
-                </button>
-              } @else {
-                <button type="button" class="btn secondary" (click)="copySelected()">Make a copy</button>
-              }
+    @if (facade.selected()) {
+      @if (facade.draft(); as draft) {
+        <!-- How the picture is drawn (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md wave C15) — a
+             property of the saved layout, not this browser: it describes the operator's own radio,
+             which follows them between machines. Neither field changes a microsecond on the wire —
+             axis → function → channel decides that alone. -->
+        <section class="card transmitter-drawing">
+          <div class="diagram-controls">
+            <label class="inline-field">
+              <span class="label">Stick mode</span>
+              <select
+                [disabled]="!facade.editable()"
+                aria-label="Transmitter stick mode"
+                [ngModel]="stickMode()"
+                (ngModelChange)="setStickMode($event)"
+              >
+                @for (option of stickModes; track option.mode) {
+                  <option [value]="option.mode">{{ option.label }}</option>
+                }
+              </select>
+            </label>
+            <label class="inline-field">
+              <span class="label">Stick direction</span>
+              <select
+                [disabled]="!facade.editable()"
+                aria-label="Which way a stick reads on this picture"
+                [ngModel]="positiveIsUp() ? 'up' : 'down'"
+                (ngModelChange)="setPositiveIsUp($event === 'up')"
+              >
+                <option value="up">Pushing forward draws the dot up</option>
+                <option value="down">Pushing forward draws the dot down</option>
+              </select>
+            </label>
+          </div>
+          <p class="muted hint">
+            Both only change the transmitter picture above and in the cockpit — what the vehicle does is
+            decided by the channel each control drives. Change the direction if a stick reads upside down.
+          </p>
+        </section>
+
+        <!-- What leaves the station (wave C15) — the only place travel and reverse are checkable on the
+             bench rather than on the first flight. Live regardless of which view below is open. -->
+        <section class="card outputs">
+          <div class="outputs-head">
+            <span class="label">What the vehicle receives</span>
+            <span class="muted hint">
+              Live, with travel and reverse applied. A channel nothing drives is left as it was.
             </span>
-          </vision-section-header>
-
-          @if (!facade.editable()) {
-            <vision-notice variant="neutral">
-              Built-in layouts can't be edited — they're the fallback every vehicle keeps. Make a copy to change it.
-            </vision-notice>
-          }
-
-          @if (facade.draft(); as draft) {
-            @if (facade.editable()) {
-              <label class="name-field">
-                <span class="label">Name</span>
-                <input
-                  type="text"
-                  aria-label="Layout name"
-                  [ngModel]="draft.name"
-                  (ngModelChange)="facade.rename($event)"
-                />
-              </label>
+          </div>
+          <ul class="output-list">
+            @for (out of outputs(); track out.rcChannel) {
+              <li class="output-row" [class.idle]="out.micros === undefined">
+                <span class="out-ch mono">CH{{ out.rcChannel }}</span>
+                <span class="out-fn">
+                  {{ out.functionLabel ?? 'not sent' }}
+                  @if (out.reversed) {
+                    <span class="chip">reversed</span>
+                  }
+                </span>
+                <span class="out-track" aria-hidden="true">
+                  <span class="out-rest" [style.left.%]="out.restPercent"></span>
+                  @if (out.micros !== undefined) {
+                    <span class="out-marker" [style.left.%]="out.offsetPercent"></span>
+                  }
+                </span>
+                <span class="out-micros mono">{{ out.micros === undefined ? '—' : out.micros }}</span>
+              </li>
             }
+          </ul>
+        </section>
+      }
 
-            <!-- Your transmitter, drawn. The answer to "which one is Sw 5" is that it moves. -->
-            <div class="transmitter">
-              <div class="transmitter-head">
-                <span class="label">Your transmitter</span>
-                @if (rc.connected()) {
-                  <span class="chip ok"><span class="dot ok"></span>{{ rc.deviceLabel() }}</span>
-                  @if (facade.editable()) {
-                    <button type="button" class="btn small" [class.active]="guiding()" (click)="toggleGuided()">
-                      {{ guiding() ? 'Stop' : 'Guide me' }}
-                    </button>
-                    <button type="button" class="btn small secondary" [class.active]="detecting()" (click)="toggleAutodetect()">
-                      {{ detecting() ? 'Stop autodetect' : 'Autodetect' }}
-                    </button>
-                  }
-                }
-              </div>
+      @if (isPanelOpen('all-controls')) {
+        <vision-all-controls (copyRequested)="copySelected()" />
+      }
 
-              @if (guiding()) {
-                <vision-notice variant="neutral">
-                  @if (guidedStep(); as step) {
-                    <p class="guide-line">
-                      Move the control you use for <strong>{{ step.label }}</strong>.
-                    </p>
-                    <p class="muted hint">
-                      Step {{ guidedProgress().at }} of {{ guidedProgress().of }} — it will drive CH{{ step.rcChannel }},
-                      {{ step.travel === 'CENTERED' ? 'resting at centre' : 'resting at idle' }}.
-                    </p>
-                  } @else {
-                    <p class="guide-line">
-                      <strong>Sticks done — {{ guidedBound() }} bound.</strong>
-                      Switches aren't asked about here: run Autodetect and flick the ones you want, or point at them
-                      on the picture.
-                    </p>
-                  }
-                  <span class="guide-actions">
-                    @if (guidedStep()) {
-                      <button type="button" class="btn small secondary" (click)="skipGuidedStep()">
-                        I don't have one
-                      </button>
-                    } @else {
-                      <button type="button" class="btn small" (click)="toggleAutodetect()">Autodetect switches</button>
-                    }
-                    <button type="button" class="btn small secondary" (click)="toggleGuided()">
-                      {{ guidedStep() ? 'Stop' : 'Done' }}
-                    </button>
-                  </span>
-                </vision-notice>
-              }
+      @if (facade.draft(); as draft) {
+        <vision-step-rail
+          [steps]="steps()"
+          [draft]="draft"
+          [currentIndex]="currentStepIndex()"
+          (jump)="currentStepIndex.set($event)"
+        />
 
-              @if (detecting()) {
-                <vision-notice variant="neutral">
-                  Move every control you want mapped — one at a time. Hold a switch through each of its
-                  positions so it can be told apart from a stick.
-                  @if (detectedCount() > 0) {
-                    <strong>{{ detectedCount() }} found so far.</strong>
-                  }
-                </vision-notice>
-              }
-
-              @if (!rc.connected()) {
-                <p class="muted hint">
-                  Plug your transmitter in over USB in <strong>USB Joystick</strong> mode and move a stick — the browser
-                  only reveals a controller after its first input. You can still edit this layout without one; the
-                  positions below just won't light up.
-                </p>
-              } @else {
-                <div class="diagram-controls">
-                  <label class="inline-field">
-                    <span class="label">Stick mode</span>
-                    <select
-                      [disabled]="!facade.editable()"
-                      aria-label="Transmitter stick mode"
-                      [ngModel]="stickMode()"
-                      (ngModelChange)="setStickMode($event)"
-                    >
-                      @for (option of stickModes; track option.mode) {
-                        <option [value]="option.mode">{{ option.label }}</option>
-                      }
-                    </select>
-                  </label>
-                  <label class="inline-field">
-                    <span class="label">Stick direction</span>
-                    <select
-                      [disabled]="!facade.editable()"
-                      aria-label="Which way a stick reads on this picture"
-                      [ngModel]="positiveIsUp() ? 'up' : 'down'"
-                      (ngModelChange)="setPositiveIsUp($event === 'up')"
-                    >
-                      <option value="up">Pushing forward draws the dot up</option>
-                      <option value="down">Pushing forward draws the dot down</option>
-                    </select>
-                  </label>
-                </div>
-                <p class="muted hint">
-                  Both only change this picture — what the vehicle does is decided by the channel each control
-                  drives. Change the direction if a stick reads upside down here.
-                </p>
-              }
-            </div>
-
-            <!-- ---- The drawing and the one control being edited, side by side ------------------ -->
-            <div class="work">
-              <div class="work-main">
-                @if (rc.connected()) {
-                  <vision-controller-diagram
-                    [axes]="rc.axes()"
-                    [buttons]="rc.buttons()"
-                    [controls]="diagramControls()"
-                    [stickMode]="stickMode()"
-                    [positiveIsUp]="positiveIsUp()"
-                    [interactive]="facade.editable()"
-                    [highlight]="selectedControl() ?? lastDetected()"
-                    (picked)="onDiagramPick($event)"
-                  />
-                }
-
-                <!-- What leaves the station: the only place travel and reverse can be checked. -->
-                <div class="outputs">
-                  <div class="outputs-head">
-                    <span class="label">What the vehicle receives</span>
-                    <span class="muted hint">
-                      Live, with travel and reverse applied. A channel nothing drives is left as it was.
-                    </span>
-                  </div>
-                  <ul class="output-list">
-                    @for (out of outputs(); track out.rcChannel) {
-                      <li class="output-row" [class.idle]="out.micros === undefined">
-                        <button
-                          type="button"
-                          class="output-pick"
-                          [disabled]="!facade.editable() || out.controlKey === undefined"
-                          [class.selected]="out.controlKey !== undefined && selectedControl() === out.controlKey"
-                          (click)="selectChannel(out)"
-                        >
-                          <span class="out-ch mono">CH{{ out.rcChannel }}</span>
-                          <span class="out-fn">
-                            {{ out.functionLabel ?? 'not sent' }}
-                            @if (out.reversed) {
-                              <span class="chip">reversed</span>
-                            }
-                          </span>
-                          <span class="out-track" aria-hidden="true">
-                            <span class="out-rest" [style.left.%]="out.restPercent"></span>
-                            @if (out.micros !== undefined) {
-                              <span class="out-marker" [style.left.%]="out.offsetPercent"></span>
-                            }
-                          </span>
-                          <span class="out-micros mono">{{ out.micros === undefined ? '—' : out.micros }}</span>
-                        </button>
-                      </li>
-                    }
-                  </ul>
-                </div>
-
-                <!-- Everything mapped, one line each. In a built-in this is the whole story. -->
-                <div class="mapped">
-                  <span class="label">Mapped controls</span>
-                  @if (draft.controls.length === 0) {
-                    <vision-empty
-                      icon="gamepad"
-                      title="Nothing is mapped yet"
-                      message="Hit Guide me and answer for each stick, or point at a control on the picture."
-                    />
-                  } @else {
-                    <ul class="control-list">
-                      @for (control of draft.controls; track draftKey(control)) {
-                        <li
-                          class="control-row"
-                          [id]="cardId(draftKey(control))"
-                          [class.selected]="selectedControl() === draftKey(control)"
-                          [class.detected]="lastDetected() === draftKey(control)"
-                        >
-                          <button
-                            type="button"
-                            class="control-pick"
-                            [disabled]="!facade.editable()"
-                            (click)="select(draftKey(control))"
-                          >
-                            <span class="control-name">{{ draftLabel(control) }}</span>
-                            <span class="control-binding">{{ summary(control) }}</span>
-                            @if (rc.connected() && control.kind !== 'AXIS') {
-                              <span class="chip">{{ positionNow(control) }}</span>
-                            }
-                          </button>
-                          @if (facade.editable()) {
-                            <vision-icon-button
-                              icon="trash"
-                              label="Unmap this control"
-                              (activated)="removeControl(draftKey(control))"
-                            />
-                          }
-                        </li>
-                      }
-                    </ul>
-                  }
-                </div>
-
-                @if (facade.issues().length > 0) {
-                  <vision-notice variant="warn">
-                    <ul class="issue-list">
-                      @for (issue of facade.issues(); track issue) {
-                        <li>{{ issue }}</li>
-                      }
-                    </ul>
-                  </vision-notice>
-                }
-              </div>
-
-              @if (facade.editable()) {
-                <aside class="work-editor" [id]="editorId">
-                  @if (editing(); as control) {
-                    <header class="control-head">
-                      <span class="control-name">{{ draftLabel(control) }}</span>
-                      @if (rc.connected() && control.kind !== 'AXIS') {
-                        <span class="chip">{{ positionNow(control) }}</span>
-                      }
-                      <span class="control-head-spacer"></span>
-                      <vision-icon-button
-                        icon="trash"
-                        label="Unmap this control"
-                        (activated)="removeControl(draftKey(control))"
-                      />
-                    </header>
-
-                    <div class="control-row-fields">
-                      <label>
-                        <span class="label">This is a</span>
-                        <select
-                          [ngModel]="control.kind"
-                          (ngModelChange)="facade.setKind(draftKey(control), $event)"
-                        >
-                          @for (kind of kinds(control); track kind) {
-                            <option [value]="kind">{{ kind }}</option>
-                          }
-                        </select>
-                      </label>
-                      <label>
-                        <span class="label">and it</span>
-                        <select
-                          [ngModel]="control.role"
-                          (ngModelChange)="facade.setRole(draftKey(control), $event)"
-                        >
-                          <option value="CHANNEL">drives a channel</option>
-                          <option value="ACTIONS">fires commands</option>
-                        </select>
-                      </label>
-                    </div>
-
-                    @if (control.role === 'CHANNEL') {
-                      <div class="control-row-fields">
-                        <label>
-                          <span class="label">Function</span>
-                          <select
-                            [ngModel]="control.function"
-                            (ngModelChange)="facade.setFunction(draftKey(control), $event)"
-                          >
-                            @for (fn of facade.catalog()?.functions ?? []; track fn.name) {
-                              <option [value]="fn.name">{{ fn.label }}</option>
-                            }
-                          </select>
-                        </label>
-                        <label>
-                          <span class="label">Channel</span>
-                          <select
-                            [ngModel]="control.rcChannel"
-                            (ngModelChange)="facade.setChannel(draftKey(control), +$event)"
-                          >
-                            @for (channel of channels(); track channel) {
-                              <option [value]="channel">CH{{ channel }}</option>
-                            }
-                          </select>
-                        </label>
-                        <label>
-                          <span class="label">Rests at</span>
-                          <select
-                            [disabled]="control.kind === 'BUTTON'"
-                            [ngModel]="control.travel"
-                            (ngModelChange)="facade.setTravel(draftKey(control), $event)"
-                          >
-                            <option value="CENTERED">centre — travels both ways</option>
-                            <option value="UNIDIRECTIONAL">minimum — travels one way</option>
-                          </select>
-                        </label>
-                        <label class="checkbox">
-                          <input
-                            type="checkbox"
-                            [ngModel]="control.reversed"
-                            (ngModelChange)="facade.setReversed(draftKey(control), $event)"
-                          />
-                          <span>Reversed</span>
-                        </label>
-                      </div>
-                    } @else {
-                      @if (positions(control).length === 0) {
-                        <vision-notice variant="warn">
-                          A continuous axis has no positions to fire from. Call it a 2- or 3-position switch above.
-                        </vision-notice>
-                      }
-                      @for (position of positions(control); track position) {
-                        <div class="control-row-fields position-row">
-                          <span class="position-name">{{ position }}</span>
-                          <label class="grow">
-                            <span class="label">fires</span>
-                            <select
-                              [ngModel]="actionAt(control, position)?.action ?? ''"
-                              (ngModelChange)="onActionChange(draftKey(control), position, $event)"
-                            >
-                              <option value="">— nothing —</option>
-                              @for (action of facade.catalog()?.actions ?? []; track action.name) {
-                                <option [value]="action.name">{{ action.label }}</option>
-                              }
-                            </select>
-                          </label>
-
-                          @if (actionAt(control, position); as bound) {
-                            @if (parameterKind(bound.action) === 'MODE_NAME') {
-                              <label class="grow">
-                                <span class="label">mode</span>
-                                <input
-                                  type="text"
-                                  placeholder="e.g. HOLD"
-                                  [ngModel]="bound.parameter ?? ''"
-                                  (ngModelChange)="facade.setPositionParameter(draftKey(control), position, $event)"
-                                />
-                              </label>
-                            } @else if (parameterKind(bound.action) === 'AUX_FUNCTION') {
-                              <label class="grow">
-                                <span class="label">function</span>
-                                <select
-                                  [ngModel]="bound.parameter ?? ''"
-                                  (ngModelChange)="facade.setPositionParameter(draftKey(control), position, $event)"
-                                >
-                                  <option value="">— pick one —</option>
-                                  @for (fn of auxOptions(bound.parameter); track fn.number) {
-                                    <option [value]="fn.number">{{ fn.number }} · {{ fn.label }}</option>
-                                  }
-                                </select>
-                              </label>
-                            }
-                          }
-                        </div>
-                      }
-                    }
-                  } @else {
-                    <p class="muted hint editor-hint">
-                      Point at a control on the picture — or pick one from the list — to change what it does.
-                    </p>
-                  }
-                </aside>
-              }
-            </div>
-          }
-        } @else {
-          <vision-empty
-            icon="gamepad"
-            title="Pick a layout"
-            message="Choose one on the left, or create a new one for the vehicle you fly."
+        @if (steps()[currentStepIndex()]; as step) {
+          <vision-wizard-step
+            [step]="step"
+            [stepNumber]="currentStepIndex() + 1"
+            [stepCount]="steps().length"
+            [draft]="draft"
+            [catalog]="facade.catalog()"
+            [axes]="rc.axes()"
+            [buttons]="rc.buttons()"
+            [connected]="rc.connected()"
+            [knownModeNames]="facade.knownModeNames()"
+            [editable]="facade.editable()"
+            [issues]="facade.issues()"
+            [canSave]="facade.canSave()"
+            [saving]="facade.saving()"
+            (applyDraft)="facade.replaceDraft($event)"
+            (advance)="goNext()"
+            (back)="goBack()"
+            (copyRequested)="copySelected()"
+            (save)="facade.save()"
+            (saveAndActivate)="onSaveAndActivate()"
           />
         }
-      </section>
-    </div>
+      }
+    } @else {
+      <vision-empty
+        icon="gamepad"
+        title="Pick a layout"
+        message="Choose one above, or create a new one for the vehicle you fly."
+      />
+    }
   }
 
-  @for (profile of facade.profiles(); track profile.id) {
+  @if (facade.selected(); as profile) {
     @if (isConfirming(profile.id)) {
       <vision-confirm-dialog
         [message]="'Delete ' + profile.name + '? Any vehicle using it falls back to the built-in layout.'"

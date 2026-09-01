@@ -42,6 +42,9 @@ import com.drones.vision.warehouse.application.asset.AssetDetails;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
+import com.drones.vision.warehouse.domain.model.InventoryState;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.VisibilityScope;
 
@@ -70,9 +73,10 @@ class DefaultFlightCommandServiceTest {
     }
 
     private void stubDetails(Device... devices) {
-        Asset asset = new Asset(assetId, "Drone 1", DRONE, new Ownership(actor, GroupId.random()),
-                Set.of(devices[0].id()), java.util.Map.of());
-        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null);
+        Asset asset = Asset.register(assetId, "Drone 1", DRONE, new Ownership(actor, GroupId.random()),
+                Set.of(devices[0].id()), java.util.Map.of(), Identity.NONE, Custody.NONE);
+        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null,
+                InventoryState.IN_STOCK, Identity.NONE, Custody.NONE);
         when(assetService.details(assetId)).thenReturn(new AssetDetails(summary, List.of(devices), List.of()));
     }
 
@@ -135,9 +139,10 @@ class DefaultFlightCommandServiceTest {
         Device deactivated = telemetryDevice.withState(LifecycleState.DEACTIVATED);
         Device active = new Device(DeviceId.random(), "FC2", Set.of(Capability.TELEMETRY),
                 new StreamDescriptor("mavlink", URI.create("udp://127.0.0.1:14551"), java.util.Map.of()));
-        Asset asset = new Asset(assetId, "Drone 1", DRONE, new Ownership(actor, GroupId.random()),
-                Set.of(deactivated.id(), active.id()), java.util.Map.of());
-        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null);
+        Asset asset = Asset.register(assetId, "Drone 1", DRONE, new Ownership(actor, GroupId.random()),
+                Set.of(deactivated.id(), active.id()), java.util.Map.of(), Identity.NONE, Custody.NONE);
+        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null,
+                InventoryState.IN_STOCK, Identity.NONE, Custody.NONE);
         when(assetService.details(assetId))
                 .thenReturn(new AssetDetails(summary, List.of(deactivated, active), List.of()));
         when(flightCommandPort.supports(any())).thenReturn(true);
@@ -183,9 +188,10 @@ class DefaultFlightCommandServiceTest {
     @Test
     void returnToHomeAllowedWhenAssetIsWithinAGroupScope() {
         GroupId group = GroupId.random();
-        Asset asset = new Asset(assetId, "Drone 1", DRONE, new Ownership(actor, group),
-                Set.of(telemetryDevice.id()), java.util.Map.of());
-        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null);
+        Asset asset = Asset.register(assetId, "Drone 1", DRONE, new Ownership(actor, group),
+                Set.of(telemetryDevice.id()), java.util.Map.of(), Identity.NONE, Custody.NONE);
+        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null,
+                InventoryState.IN_STOCK, Identity.NONE, Custody.NONE);
         when(assetService.details(assetId))
                 .thenReturn(new AssetDetails(summary, List.of(telemetryDevice), List.of()));
         when(flightCommandPort.supports(telemetryDevice)).thenReturn(true);
@@ -371,9 +377,10 @@ class DefaultFlightCommandServiceTest {
 
     @Test
     void capabilitiesReturnsThePortSnapshotForAnInScopeAsset() {
-        Asset asset = new Asset(assetId, "Drone 1", DRONE, new Ownership(actor, GroupId.random()),
-                Set.of(telemetryDevice.id()), java.util.Map.of());
-        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null);
+        Asset asset = Asset.register(assetId, "Drone 1", DRONE, new Ownership(actor, GroupId.random()),
+                Set.of(telemetryDevice.id()), java.util.Map.of(), Identity.NONE, Custody.NONE);
+        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null,
+                InventoryState.IN_STOCK, Identity.NONE, Custody.NONE);
         when(assetService.details(any(VisibilityScope.class), eq(assetId)))
                 .thenReturn(new AssetDetails(summary, List.of(telemetryDevice), List.of()));
         when(flightCommandPort.supports(telemetryDevice)).thenReturn(true);
@@ -395,9 +402,10 @@ class DefaultFlightCommandServiceTest {
 
     @Test
     void capabilitiesReportsNotCommandableForAnAssetWithNoCommandableDevice() {
-        Asset asset = new Asset(assetId, "Warehouse cam", DRONE, new Ownership(actor, GroupId.random()),
-                Set.of(telemetryDevice.id()), java.util.Map.of());
-        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null);
+        Asset asset = Asset.register(assetId, "Warehouse cam", DRONE, new Ownership(actor, GroupId.random()),
+                Set.of(telemetryDevice.id()), java.util.Map.of(), Identity.NONE, Custody.NONE);
+        AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null,
+                InventoryState.IN_STOCK, Identity.NONE, Custody.NONE);
         when(assetService.details(any(VisibilityScope.class), eq(assetId)))
                 .thenReturn(new AssetDetails(summary, List.of(telemetryDevice), List.of()));
         when(flightCommandPort.supports(telemetryDevice)).thenReturn(false);

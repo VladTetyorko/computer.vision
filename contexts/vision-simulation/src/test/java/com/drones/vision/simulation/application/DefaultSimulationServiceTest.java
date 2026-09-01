@@ -1,11 +1,14 @@
 package com.drones.vision.simulation.application;
 
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
+import com.drones.vision.warehouse.domain.model.InventoryState;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.kernel.DeviceOrigin;
 import com.drones.vision.warehouse.domain.model.Device;
-import com.drones.vision.warehouse.domain.model.DeviceCategory;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.perception.domain.model.FeedId;
 import com.drones.vision.perception.domain.model.FeedSpec;
@@ -16,7 +19,7 @@ import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UserId;
-import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
+import java.time.Instant;
 import com.drones.vision.perception.application.stream.AssetStreamService;
 import com.drones.vision.perception.domain.port.FeedTransmitterPort;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,7 +33,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
+import java.util.NoSuchElementException;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -53,6 +56,7 @@ import com.drones.vision.warehouse.application.asset.AssetSpec;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.warehouse.application.device.DeviceRegistration;
+import com.drones.vision.warehouse.application.device.DeviceService;
 import com.drones.vision.perception.application.pipeline.FeedTransmitterRegistry;
 
 class DefaultSimulationServiceTest {
@@ -62,7 +66,7 @@ class DefaultSimulationServiceTest {
 
     private AssetService assetService;
     private AssetStreamService assetStreamService;
-    private CategoryRepositoryPort categoryRepository;
+    private DeviceService deviceService;
     private FeedTransmitterPort feedTransmitter;
     private FeedTransmitterPort mjpegTransmitter;
     private FeedTransmitterPort mavlinkTransmitter;
@@ -74,18 +78,16 @@ class DefaultSimulationServiceTest {
     void setUp() {
         assetService = mock(AssetService.class);
         assetStreamService = mock(AssetStreamService.class);
-        categoryRepository = mock(CategoryRepositoryPort.class);
+        deviceService = mock(DeviceService.class);
         feedTransmitter = mock(FeedTransmitterPort.class);
         mjpegTransmitter = mock(FeedTransmitterPort.class);
         mavlinkTransmitter = mock(FeedTransmitterPort.class);
-        service = new DefaultSimulationService(assetService, assetStreamService, categoryRepository,
+        service = new DefaultSimulationService(assetService, assetStreamService, deviceService,
                 new FeedTransmitterRegistry(List.of(feedTransmitter, mjpegTransmitter, mavlinkTransmitter)),
                 MEDIAMTX_RTSP_BASE);
         actor = UserId.random();
         ownership = new Ownership(actor, GroupId.random());
 
-        when(categoryRepository.findById(SIMULATED))
-                .thenReturn(Optional.of(new DeviceCategory(SIMULATED, "Simulated", null, List.of())));
         // Protocol-aware, like the real MavlinkFeedTransmitter#supports() -- a blanket any()->true
         // stub would wrongly make this mock "support" rtsp/mjpeg FeedSpecs too, breaking every
         // pre-existing unsupported-protocol test (the registry picks the *first* supporting
@@ -141,20 +143,6 @@ class DefaultSimulationServiceTest {
         } finally {
             file.toFile().setReadable(true);
         }
-    }
-
-    // --- Category validation ----------------------------------------------------
-
-    @Test
-    void simulateThrowsIllegalStateWhenSimulatedCategoryIsNotSeeded(@TempDir Path tempDir) throws IOException {
-        Path file = videoFile(tempDir, "clip.mp4");
-        when(categoryRepository.findById(SIMULATED)).thenReturn(Optional.empty());
-        SimulationSpec spec = new SimulationSpec(null, file.toString(), null, null, false);
-
-        IllegalStateException thrown =
-                assertThrows(IllegalStateException.class, () -> service.simulate(spec, ownership, actor));
-        assertTrue(thrown.getMessage().contains("simulated") && thrown.getMessage().contains("not seeded"));
-        verifyNoInteractions(assetService);
     }
 
     // --- Display name derivation -------------------------------------------------
@@ -215,12 +203,14 @@ class DefaultSimulationServiceTest {
         assertEquals("file", video.stream().protocol());
         assertEquals(file.toUri(), video.stream().uri());
         assertEquals(Map.of("loop", "true"), video.stream().options());
+        assertEquals(DeviceOrigin.SIMULATED, video.origin());
 
         DeviceRegistration telemetry = created.devices().get(1);
         assertEquals("My Drone · telemetry", telemetry.name());
         assertEquals(Set.of(Capability.TELEMETRY), telemetry.capabilities());
         assertEquals("sim", telemetry.stream().protocol());
         assertEquals(Map.of(), telemetry.stream().options());
+        assertEquals(DeviceOrigin.SIMULATED, telemetry.origin());
 
         assertEquals(file.toString(), created.attributes().get("source"));
     }
@@ -944,6 +934,44 @@ class DefaultSimulationServiceTest {
         verifyNoInteractions(mavlinkTransmitter);
     }
 
+    // --- fitSimulatedDevice() -----------------------------------------------------
+
+    @Test
+    void fitSimulatedDeviceRegistersASimulatedDeviceAndAssignsItToTheAsset() {
+        AssetId assetId = AssetId.random();
+        Asset realAsset = Asset.register(assetId, "My Real Drone", new CategoryId("drone"), ownership,
+                Set.of(DeviceId.random()), Map.of(), Identity.NONE, Custody.NONE);
+        when(assetService.details(assetId)).thenReturn(new AssetDetails(summaryOf(realAsset), List.of(), List.of()));
+        Device registered = new Device(DeviceId.random(), "My Real Drone · video", Set.of(Capability.VIDEO),
+                new StreamDescriptor("sim", URI.create("sim://my-real-drone-video"), Map.of()),
+                LifecycleState.ACTIVE, DeviceOrigin.SIMULATED);
+        when(deviceService.register(any(), eq(actor))).thenReturn(registered);
+
+        Device result = service.fitSimulatedDevice(assetId, Capability.VIDEO, actor);
+
+        assertEquals(registered, result);
+        ArgumentCaptor<DeviceRegistration> captor = ArgumentCaptor.forClass(DeviceRegistration.class);
+        verify(deviceService).register(captor.capture(), eq(actor));
+        assertEquals("My Real Drone · video", captor.getValue().name());
+        assertEquals(Set.of(Capability.VIDEO), captor.getValue().capabilities());
+        assertEquals("sim", captor.getValue().stream().protocol());
+        assertEquals(DeviceOrigin.SIMULATED, captor.getValue().origin());
+        verify(assetService).assignDevice(assetId, registered.id(), actor);
+    }
+
+    @Test
+    void fitSimulatedDeviceThrowsForAnUnknownAssetAndNeverRegistersADevice() {
+        AssetId unknown = AssetId.random();
+        when(assetService.details(unknown))
+                .thenThrow(new NoSuchElementException("Unknown asset: " + unknown.value()));
+
+        assertThrows(NoSuchElementException.class,
+                () -> service.fitSimulatedDevice(unknown, Capability.VIDEO, actor));
+
+        verifyNoInteractions(deviceService);
+        verify(assetService, never()).assignDevice(any(), any(), any());
+    }
+
     // --- resumeAll() -------------------------------------------------------------
 
     @Test
@@ -965,17 +993,22 @@ class DefaultSimulationServiceTest {
     }
 
     @Test
-    void resumeAllSkipsANonSimulatedAsset(@TempDir Path tempDir) throws IOException {
+    void resumeAllSkipsAnAssetWhoseVideoDeviceIsNotSimulated(@TempDir Path tempDir) throws IOException {
+        // Origin, not the asset's category, is what makes a device resumable now
+        // (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R4): a real drone with a real rtsp
+        // camera must never be mistaken for one of this app's own TX-fed feeds, even though its
+        // asset carries no category signal either way any more.
         Path file = videoFile(tempDir, "clip.mp4");
-        Device videoDevice = rtspVideoDevice(feedUri(FeedId.random()));
-        Asset asset = new Asset(AssetId.random(), "real drone", new CategoryId("drone"), ownership,
-                Set.of(videoDevice.id()), Map.of("source", file.toString()));
-        when(assetService.assets()).thenReturn(List.of(summaryOf(asset)));
+        Device liveVideoDevice = new Device(DeviceId.random(), "drone · video", Set.of(Capability.VIDEO),
+                new StreamDescriptor("rtsp", feedUri(FeedId.random()), Map.of()),
+                LifecycleState.ACTIVE, DeviceOrigin.LIVE);
+        Asset asset = Asset.register(AssetId.random(), "real drone", new CategoryId("drone"), ownership,
+                Set.of(liveVideoDevice.id()), Map.of("source", file.toString()), Identity.NONE, Custody.NONE);
+        stubFleetOf(asset, liveVideoDevice);
 
         List<AssetId> resumed = service.resumeAll();
 
         assertEquals(List.of(), resumed);
-        verify(assetService, never()).details(any());
         verifyNoInteractions(feedTransmitter);
     }
 
@@ -983,8 +1016,10 @@ class DefaultSimulationServiceTest {
     void resumeAllSkipsADeactivatedAsset(@TempDir Path tempDir) throws IOException {
         Path file = videoFile(tempDir, "clip.mp4");
         Device videoDevice = rtspVideoDevice(feedUri(FeedId.random()));
+        Instant now = Instant.now();
         Asset asset = new Asset(AssetId.random(), "drone", SIMULATED, ownership, Set.of(videoDevice.id()),
-                Map.of("source", file.toString()), LifecycleState.DEACTIVATED);
+                Map.of("source", file.toString()), LifecycleState.DEACTIVATED, Identity.NONE, Custody.NONE,
+                InventoryState.IN_STOCK, now, now);
         when(assetService.assets()).thenReturn(List.of(summaryOf(asset)));
 
         List<AssetId> resumed = service.resumeAll();
@@ -1086,9 +1121,15 @@ class DefaultSimulationServiceTest {
         verify(feedTransmitter, times(1)).start(eq(feedId), any());
     }
 
+    /**
+     * A {@link DeviceOrigin#SIMULATED} rtsp video device — {@code resumeAll} now recognizes one of
+     * this app's own TX-fed feeds by origin, not by its asset's category (docs/plans/active/
+     * ARCHITECTURE-AUDIT-2026-08-26.md R4), so every test that expects a device to be resumable
+     * needs it built with this origin.
+     */
     private Device rtspVideoDevice(URI uri) {
         return new Device(DeviceId.random(), "drone · video", Set.of(Capability.VIDEO),
-                new StreamDescriptor("rtsp", uri, Map.of()));
+                new StreamDescriptor("rtsp", uri, Map.of()), LifecycleState.ACTIVE, DeviceOrigin.SIMULATED);
     }
 
     private URI feedUri(FeedId feedId) {
@@ -1096,11 +1137,13 @@ class DefaultSimulationServiceTest {
     }
 
     private Asset simulatedAsset(Device videoDevice, Map<String, String> attributes) {
-        return new Asset(AssetId.random(), "drone", SIMULATED, ownership, Set.of(videoDevice.id()), attributes);
+        return Asset.register(AssetId.random(), "drone", SIMULATED, ownership, Set.of(videoDevice.id()), attributes,
+                Identity.NONE, Custody.NONE);
     }
 
     private AssetSummary summaryOf(Asset asset) {
-        return new AssetSummary(asset, "Simulated", AssetStatus.OFFLINE, null, null);
+        return new AssetSummary(asset, "Simulated", AssetStatus.OFFLINE, null, null, asset.inventoryState(),
+                asset.identity(), asset.custody());
     }
 
     /** Stubs {@link #assetService} so {@code resumeAll} sees exactly one asset, with one device. */
@@ -1132,8 +1175,8 @@ class DefaultSimulationServiceTest {
     }
 
     private Asset stubCreate() {
-        Asset created = new Asset(AssetId.random(), "placeholder", SIMULATED, ownership,
-                Set.of(DeviceId.random(), DeviceId.random()), Map.of());
+        Asset created = Asset.register(AssetId.random(), "placeholder", SIMULATED, ownership,
+                Set.of(DeviceId.random(), DeviceId.random()), Map.of(), Identity.NONE, Custody.NONE);
         when(assetService.create(any(), eq(ownership), eq(actor))).thenReturn(created);
         return created;
     }

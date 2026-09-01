@@ -6,6 +6,8 @@ import com.drones.mavlink.transport.LinkId;
 
 import io.dronefleet.mavlink.minimal.Heartbeat;
 
+import java.lang.System.Logger.Level;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -25,7 +27,21 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 final class DefaultPeerDirectory implements PeerDirectory {
 
+    private static final System.Logger LOG = System.getLogger(DefaultPeerDirectory.class.getName());
+
+    /**
+     * How recently the previous address must have been heard for a move to count as a <b>flap</b>
+     * rather than an ordinary re-registration. A vehicle that went quiet and came back on a new
+     * address is normal (a lease renewal, a reconnect); one that is transmitting from two addresses
+     * at once is not.
+     */
+    private static final Duration FLAP_WINDOW = Duration.ofSeconds(3);
+
+    /** Per-peer warning interval. A genuine roam must not be able to flood the log. */
+    private static final Duration WARN_INTERVAL = Duration.ofSeconds(30);
+
     private final Map<PeerId, Peer> peers = new ConcurrentHashMap<>();
+    private final Map<PeerId, Instant> lastFlapWarning = new ConcurrentHashMap<>();
 
     @Override
     public Collection<Peer> peers() {
@@ -59,13 +75,48 @@ final class DefaultPeerDirectory implements PeerDirectory {
      */
     void recordFrame(MavFrame frame) {
         PeerId id = new PeerId(frame.header().system(), frame.header().component());
+        Peer[] previous = new Peer[1];
         peers.compute(id, (key, existing) -> {
+            previous[0] = existing;
             Instant firstHeard = existing == null ? frame.receivedAt() : existing.firstHeard();
             HeartbeatInfo heartbeat = frame.is(Heartbeat.class)
                     ? heartbeatInfoOf(frame.as(Heartbeat.class))
                     : (existing == null ? null : existing.heartbeat());
             return new Peer(id, frame.link(), frame.source(), firstHeard, frame.receivedAt(), heartbeat);
         });
+        // Logged outside compute(): the remapping function must stay side-effect free.
+        warnOnAddressFlap(id, previous[0], frame);
+    }
+
+    /**
+     * Makes a peer address that keeps moving visible, because everything downstream silently
+     * follows it.
+     *
+     * <p>Every transmit to this peer goes to whatever address was recorded last, so two systems
+     * sharing one sysid do not collide loudly — they take turns. A 33&nbsp;Hz RC override stream
+     * split between them reaches each in bursts with gaps long enough to trip the vehicle's own
+     * command-loss failsafe, and the only symptom is a vehicle that keeps disarming for no visible
+     * reason. Overwriting the address is still the right behaviour (a lease renewal or a NAT
+     * rebinding genuinely moves a peer, as {@link Peer} itself notes) — doing it in silence is not.
+     */
+    private void warnOnAddressFlap(PeerId id, Peer previous, MavFrame frame) {
+        if (previous == null || previous.address().equals(frame.source())) {
+            return;
+        }
+        if (Duration.between(previous.lastHeard(), frame.receivedAt()).compareTo(FLAP_WINDOW) > 0) {
+            return;   // it had gone quiet; coming back elsewhere is a reconnect, not a conflict
+        }
+        Instant last = lastFlapWarning.get(id);
+        if (last != null && Duration.between(last, frame.receivedAt()).compareTo(WARN_INTERVAL) < 0) {
+            return;
+        }
+        lastFlapWarning.put(id, frame.receivedAt());
+        LOG.log(Level.WARNING,
+                "MAVLink sysid {0}/comp {1} is transmitting from two addresses at once: {2} then {3}."
+                        + " Everything sent to this peer follows the most recent one, so a command"
+                        + " stream is being split between them. Two vehicles sharing one sysid is the"
+                        + " usual cause; a NAT or DHCP rebinding is the benign one.",
+                id.system().value(), id.component().value(), previous.address(), frame.source());
     }
 
     private static HeartbeatInfo heartbeatInfoOf(Heartbeat heartbeat) {

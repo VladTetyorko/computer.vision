@@ -77,6 +77,29 @@ describe('buildAuditRows', () => {
     expect(rows[0].actorLabel).toBe('unknown-');
   });
 
+  it('reads the root/system principal as "Station" (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U2)', () => {
+    const rows = buildAuditRows([entry({ actor: '00000000-0000-0000-0000-000000000000' })], [], [], 0);
+    expect(rows[0].actorLabel).toBe('Station');
+  });
+
+  it('humanizes a resolvable UUID inside the summary into summaryLabel, keeping summary raw', () => {
+    const assetId = '40dd46d8-be99-451f-b8e2-c03a291aea33';
+    const rows = buildAuditRows(
+      [entry({ summary: `Flight command 'ARM' for asset ${assetId}` })],
+      [],
+      [asset({ assetId, displayName: 'Falcon-1' })],
+      0,
+    );
+    expect(rows[0].summary).toBe(`Flight command 'ARM' for asset ${assetId}`);
+    expect(rows[0].summaryLabel).toBe("Flight command 'ARM' for asset Falcon-1");
+  });
+
+  it('shortens an unresolvable UUID inside the summary to its first 8 characters', () => {
+    const unknownId = 'ffffffff-0000-1111-2222-333344445555';
+    const rows = buildAuditRows([entry({ summary: `Flight command 'ARM' for asset ${unknownId}` })], [], [], 0);
+    expect(rows[0].summaryLabel).toBe(`Flight command 'ARM' for asset ${unknownId.slice(0, 8)}`);
+  });
+
   it('resolves an ASSET target to its display name when the asset is loaded', () => {
     const rows = buildAuditRows(
       [entry({ targetType: 'ASSET', targetId: 'a-1' })],

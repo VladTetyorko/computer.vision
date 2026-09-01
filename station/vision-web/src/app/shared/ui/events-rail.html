@@ -23,13 +23,29 @@
     </div>
   }
 
+  <!-- Removed-device events are hidden by default (docs/plans/active/OPERATOR-UX-7-PLAN.md finding
+       W1) — only worth showing once at least one matched event is actually from a removed device. -->
+  @if (removedCount() > 0) {
+    <label class="row removed-toggle">
+      <input
+        type="checkbox"
+        name="includeRemoved"
+        [checked]="includeRemoved()"
+        (change)="setIncludeRemoved($any($event.target).checked)"
+      />
+      <span>Include removed devices ({{ removedCount() }})</span>
+    </label>
+  }
+
   @if (events.events().length === 0) {
     <p class="muted hint">
       No detection events yet — one opens once a configured label (person/car by default) is seen
       for a few consecutive frames.
     </p>
-  } @else if (railEvents().length === 0) {
+  } @else if (matchedEvents().length === 0) {
     <p class="muted hint">No events match this filter.</p>
+  } @else if (railEvents().length === 0) {
+    <p class="muted hint">No events from the current fleet · {{ removedCount() }} from removed devices.</p>
   } @else {
     <ul class="event-list">
       @for (event of railEvents(); track event.id) {

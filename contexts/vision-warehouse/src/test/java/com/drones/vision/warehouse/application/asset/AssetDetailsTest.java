@@ -4,9 +4,12 @@ import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.warehouse.domain.model.Custody;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GroupId;
+import com.drones.vision.warehouse.domain.model.Identity;
+import com.drones.vision.warehouse.domain.model.InventoryState;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.UserId;
@@ -24,9 +27,11 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class AssetDetailsTest {
 
     private static AssetSummary summary() {
-        Asset asset = new Asset(AssetId.random(), "my drone", new CategoryId("drone"),
-                new Ownership(UserId.random(), GroupId.random()), Set.of(DeviceId.random()), Map.of());
-        return new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null);
+        Asset asset = Asset.register(AssetId.random(), "my drone", new CategoryId("drone"),
+                new Ownership(UserId.random(), GroupId.random()), Set.of(DeviceId.random()), Map.of(), Identity.NONE,
+                Custody.NONE);
+        return new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null, InventoryState.IN_STOCK,
+                Identity.NONE, Custody.NONE);
     }
 
     private static Device device() {

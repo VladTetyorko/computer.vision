@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { FlightState, TelemetrySample } from '../api/models';
+import type { FlightState, TelemetrySample, VehicleKind } from '../api/models';
 import {
   canCommandReturnHome,
   derivePreflight,
@@ -161,7 +161,7 @@ describe('derivePreflight', () => {
   const NOW = Date.parse('2026-07-28T00:00:10.000Z');
 
   it('always returns exactly 5 rows, in a fixed order', () => {
-    const rows = derivePreflight(undefined, false, false, NOW);
+    const rows = derivePreflight(undefined, undefined, false, false, NOW);
     expect(rows.map((row) => row.label)).toEqual([
       'Video feed',
       'Telemetry link',
@@ -173,36 +173,36 @@ describe('derivePreflight', () => {
 
   describe('Video feed', () => {
     it('fails when the drone has no camera device at all', () => {
-      const [video] = derivePreflight(undefined, false, false, NOW);
+      const [video] = derivePreflight(undefined, undefined, false, false, NOW);
       expect(video).toEqual({ label: 'Video feed', state: 'fail', detail: 'No camera device on this drone.' });
     });
 
     it('is unknown (not yet verified) when a camera exists but nothing is streaming', () => {
-      const [video] = derivePreflight(undefined, true, false, NOW);
+      const [video] = derivePreflight(undefined, undefined, true, false, NOW);
       expect(video.state).toBe('unknown');
     });
 
     it('is ok while actually streaming', () => {
-      const [video] = derivePreflight(undefined, true, true, NOW);
+      const [video] = derivePreflight(undefined, undefined, true, true, NOW);
       expect(video.state).toBe('ok');
     });
   });
 
   describe('Telemetry link', () => {
     it('is unknown with no sample at all', () => {
-      const [, telemetry] = derivePreflight(undefined, false, false, NOW);
+      const [, telemetry] = derivePreflight(undefined, undefined, false, false, NOW);
       expect(telemetry.state).toBe('unknown');
     });
 
     it('is ok for a fresh sample', () => {
       const fresh = sample({ at: new Date(NOW - 2_000).toISOString() });
-      const [, telemetry] = derivePreflight(fresh, false, false, NOW);
+      const [, telemetry] = derivePreflight(fresh, undefined, false, false, NOW);
       expect(telemetry.state).toBe('ok');
     });
 
     it('fails once the sample is stale past the shared threshold', () => {
       const stale = sample({ at: new Date(NOW - 11_000).toISOString() });
-      const [, telemetry] = derivePreflight(stale, false, false, NOW);
+      const [, telemetry] = derivePreflight(stale, undefined, false, false, NOW);
       expect(telemetry.state).toBe('fail');
       expect(telemetry.detail).toContain('Stale');
     });
@@ -210,47 +210,138 @@ describe('derivePreflight', () => {
 
   describe('GPS fix', () => {
     it('is unknown with no GPS reading yet', () => {
-      const [, , gps] = derivePreflight(sample(), false, false, NOW);
+      const [, , gps] = derivePreflight(sample(), undefined, false, false, NOW);
       expect(gps.state).toBe('unknown');
     });
 
     it('fails below a 3D fix', () => {
-      const [, , gps] = derivePreflight(sample({ flightState: flightState({ gpsFixType: 2 }) }), false, false, NOW);
+      const [, , gps] = derivePreflight(sample({ flightState: flightState({ gpsFixType: 2 }) }), undefined, false, false, NOW);
       expect(gps).toEqual({ label: 'GPS fix', state: 'fail', detail: '2D' });
     });
 
     it('is ok at and above a 3D fix', () => {
-      const [, , gps] = derivePreflight(sample({ flightState: flightState({ gpsFixType: 3 }) }), false, false, NOW);
+      const [, , gps] = derivePreflight(sample({ flightState: flightState({ gpsFixType: 3 }) }), undefined, false, false, NOW);
       expect(gps).toEqual({ label: 'GPS fix', state: 'ok', detail: '3D' });
+    });
+
+    // FLEET-RADIO-PLAN.md F14/R4c: a rover/boat drives in Manual/Acro with no GPS at all — the
+    // fixType>=3 hard fail is a copter-only rule.
+    it('is NOT a fail for a rover with no GPS at all (fixType 0) — the copter-only rule does not apply', () => {
+      const [, , gps] = derivePreflight(
+        sample({ flightState: flightState({ gpsFixType: 0 }) }),
+        'ROVER',
+        false,
+        false,
+        NOW,
+      );
+      expect(gps).toEqual({ label: 'GPS fix', state: 'ok', detail: 'No GPS — GPS not required to drive.' });
+    });
+
+    it('still ok for a rover at a below-3D fix generally, not only at fixType 0', () => {
+      const [, , gps] = derivePreflight(
+        sample({ flightState: flightState({ gpsFixType: 2 }) }),
+        'ROVER',
+        false,
+        false,
+        NOW,
+      );
+      expect(gps.state).toBe('ok');
+    });
+
+    it('a copter with fixType 0 is still a fail — the ROVER carve-out does not regress copter', () => {
+      const [, , gps] = derivePreflight(
+        sample({ flightState: flightState({ gpsFixType: 0 }) }),
+        'COPTER',
+        false,
+        false,
+        NOW,
+      );
+      expect(gps).toEqual({ label: 'GPS fix', state: 'fail', detail: 'No GPS' });
+    });
+
+    it('an undefined vehicle kind (capabilities not loaded yet, or the fetch failed) keeps the strict rule, never the rover carve-out', () => {
+      const [, , gps] = derivePreflight(
+        sample({ flightState: flightState({ gpsFixType: 0 }) }),
+        undefined,
+        false,
+        false,
+        NOW,
+      );
+      expect(gps).toEqual({ label: 'GPS fix', state: 'fail', detail: 'No GPS' });
+    });
+
+    it('the literal UNKNOWN vehicle kind also keeps the strict rule', () => {
+      const [, , gps] = derivePreflight(
+        sample({ flightState: flightState({ gpsFixType: 1 }) }),
+        'UNKNOWN',
+        false,
+        false,
+        NOW,
+      );
+      expect(gps.state).toBe('fail');
+    });
+
+    it('PLANE is out of this plan\'s scope and keeps the strict rule unchanged', () => {
+      const [, , gps] = derivePreflight(
+        sample({ flightState: flightState({ gpsFixType: 2 }) }),
+        'PLANE',
+        false,
+        false,
+        NOW,
+      );
+      expect(gps.state).toBe('fail');
     });
   });
 
   describe('Battery', () => {
     it('is unknown with no battery reading yet', () => {
-      const [, , , battery] = derivePreflight(sample(), false, false, NOW);
+      const [, , , battery] = derivePreflight(sample(), undefined, false, false, NOW);
       expect(battery.state).toBe('unknown');
     });
 
-    it('fails below the 45% minimum', () => {
-      const [, , , battery] = derivePreflight(sample({ batteryPercent: 44 }), false, false, NOW);
+    it('fails below the 45% minimum for a copter (default threshold)', () => {
+      const [, , , battery] = derivePreflight(sample({ batteryPercent: 44 }), 'COPTER', false, false, NOW);
       expect(battery.state).toBe('fail');
     });
 
-    it('is ok at and above the 45% minimum', () => {
-      const [, , , battery] = derivePreflight(sample({ batteryPercent: 45 }), false, false, NOW);
+    it('is ok at and above the 45% minimum for a copter (default threshold)', () => {
+      const [, , , battery] = derivePreflight(sample({ batteryPercent: 45 }), 'COPTER', false, false, NOW);
+      expect(battery.state).toBe('ok');
+    });
+
+    it('an undefined vehicle kind uses the same 45% default as a copter', () => {
+      const [, , , battery] = derivePreflight(sample({ batteryPercent: 44 }), undefined, false, false, NOW);
+      expect(battery.state).toBe('fail');
+    });
+
+    // FLEET-RADIO-PLAN.md F14/R4c: a rover that stops moving is parked, not falling — its usable
+    // reserve is legitimately smaller than a copter's RTL-margin bar.
+    it('a rover at 30% (below the copter 45% bar) is ok — the rover threshold is lower', () => {
+      const [, , , battery] = derivePreflight(sample({ batteryPercent: 30 }), 'ROVER', false, false, NOW);
+      expect(battery).toEqual({ label: 'Battery', state: 'ok', detail: '30%' });
+    });
+
+    it('a rover below its own 25% bar still fails, naming that bar', () => {
+      const [, , , battery] = derivePreflight(sample({ batteryPercent: 24 }), 'ROVER', false, false, NOW);
+      expect(battery).toEqual({ label: 'Battery', state: 'fail', detail: '24% — below 25% minimum.' });
+    });
+
+    it('a rover exactly at its own 25% bar is ok', () => {
+      const [, , , battery] = derivePreflight(sample({ batteryPercent: 25 }), 'ROVER', false, false, NOW);
       expect(battery.state).toBe('ok');
     });
   });
 
   describe('Armable', () => {
     it('is unknown with no flightState at all', () => {
-      const [, , , , armable] = derivePreflight(sample(), false, false, NOW);
+      const [, , , , armable] = derivePreflight(sample(), undefined, false, false, NOW);
       expect(armable.state).toBe('unknown');
     });
 
     it('fails with the blockers joined verbatim when armingBlockers is non-empty', () => {
       const [, , , , armable] = derivePreflight(
         sample({ flightState: flightState({ armingBlockers: ['PreArm: Compass not calibrated', 'PreArm: GPS Glitch'] }) }),
+        undefined,
         false,
         false,
         NOW,
@@ -265,6 +356,7 @@ describe('derivePreflight', () => {
     it('is ok when armed, even with a flightState that reports no blockers', () => {
       const [, , , , armable] = derivePreflight(
         sample({ flightState: flightState({ armed: true, armingBlockers: [] }) }),
+        undefined,
         false,
         false,
         NOW,
@@ -273,7 +365,7 @@ describe('derivePreflight', () => {
     });
 
     it('is ok when disarmed but blockers are empty (flightState present)', () => {
-      const [, , , , armable] = derivePreflight(sample({ flightState: flightState({ armed: false }) }), false, false, NOW);
+      const [, , , , armable] = derivePreflight(sample({ flightState: flightState({ armed: false }) }), undefined, false, false, NOW);
       expect(armable.state).toBe('ok');
     });
   });
@@ -310,7 +402,7 @@ describe('preflightSummary (the collapsed checklist head)', () => {
   });
 
   it('treats the real 5-row derivation with nothing known yet as all-unknown but for the video row', () => {
-    const summary = preflightSummary(derivePreflight(undefined, false, false, Date.parse('2026-07-28T00:00:10.000Z')));
+    const summary = preflightSummary(derivePreflight(undefined, undefined, false, false, Date.parse('2026-07-28T00:00:10.000Z')));
     expect(summary.state).toBe('fail'); // no camera device → the Video feed row itself fails
     expect(summary.unknown).toBe(4);
   });

@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -58,6 +59,13 @@ import java.util.concurrent.SubmissionPublisher;
  * </ul>
  * Vehicles heard but claimed by nobody are not silently dropped — see {@link
  * MavlinkGateway#unclaimedVehicles()} (consumed by {@code MavlinkHeartbeatScanner}).
+ *
+ * <h2>Standing lobby hold (claim-free) — {@link #holdLobby(int)}/{@link #releaseLobby(int)}</h2>
+ * docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §11 Z2b: a caller (a discovery runner, in
+ * a later wave) can keep a gateway bound with <b>zero</b> device registrations, so the port is
+ * listening — and answering with a GCS heartbeat — from boot, not only while a device or a scan
+ * happens to be open. This never claims anything; it only widens <i>when</i> {@link
+ * #unclaimedVehicles} gets populated. See {@link #holdLobby(int)}'s own javadoc.
  *
  * <h2>Bind failures are now synchronous</h2>
  * {@code mavlink-core}'s {@code UdpListenLink} binds in its own constructor, so a bind conflict
@@ -139,13 +147,15 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
 
         SubmissionPublisher<Telemetry> publisher = new SubmissionPublisher<>();
         VehicleRegistration[] registrationHolder = new VehicleRegistration[1];
+        MavlinkGateway[] gatewayHolder = new MavlinkGateway[1];
         gateways.compute(bindKey, (key, existing) -> {
             MavlinkGateway gateway = existing == null || existing.isClosed() ? newGateway(host, port) : existing;
             registrationHolder[0] = gateway.register(device.id(), pinnedSysid, publisher);
+            gatewayHolder[0] = gateway;
             return gateway;
         });
 
-        DeviceRuntime runtime = new DeviceRuntime(bindKey, registrationHolder[0]);
+        DeviceRuntime runtime = new DeviceRuntime(bindKey, gatewayHolder[0], registrationHolder[0]);
         DeviceRuntime previous = runtimes.put(device.id(), runtime);
         if (previous != null) {
             closeRuntime(previous); // defensive: a device id must not have two live runtimes
@@ -195,18 +205,25 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
 
     /**
      * {@link LinkHealth.Health} for every vehicle currently claimed across every open gateway
-     * (every bind address, not just one) — {@code mavlink-link}'s {@code SubsystemStatusPort}
-     * plumbing (docs/plans/done/SYSTEM-STATUS-PLAN.md §4.2). Public — unlike this class's other
-     * {@code MavlinkGateway}-plumbing accessors — because {@code vision-app}'s wiring passes {@code
-     * this::claimedVehicleHealth} as the {@code Supplier<List<LinkHealth.Health>>}
-     * {@link MavlinkLinkStatusProvider} takes; that wiring class lives in a different package and
-     * cannot reach a package-private method. Empty when no gateway is open, i.e. no MAVLink-protocol
-     * device has ever been opened — a genuinely different, more honest state than "the link is down".
+     * (every bind address, not just one), keyed by {@link DeviceId} (FLEET-RADIO-PLAN.md D4) —
+     * {@code mavlink-link}'s {@code SubsystemStatusPort} plumbing (docs/plans/done/SYSTEM-STATUS-PLAN.md
+     * §4.2). Public — unlike this class's other {@code MavlinkGateway}-plumbing accessors — because
+     * {@code vision-app}'s wiring passes {@code this::claimedVehicleHealth} as the {@code
+     * Supplier<Map<DeviceId, LinkHealth.Health>>} {@link MavlinkLinkStatusProvider} takes; that
+     * wiring class lives in a different package and cannot reach a package-private method. Empty
+     * when no gateway is open, i.e. no MAVLink-protocol device has ever been opened — a genuinely
+     * different, more honest state than "the link is down".
+     *
+     * <p>A {@code DeviceId} can claim on only one gateway at a time (one {@code open()} per device),
+     * so merging every gateway's own map here can never collide two gateways' entries under the same
+     * key.
      */
-    public List<LinkHealth.Health> claimedVehicleHealth() {
-        return gateways.values().stream()
-                .flatMap(gateway -> gateway.claimedVehicleHealth().stream())
-                .toList();
+    public Map<DeviceId, LinkHealth.Health> claimedVehicleHealth() {
+        Map<DeviceId, LinkHealth.Health> merged = new HashMap<>();
+        for (MavlinkGateway gateway : gateways.values()) {
+            merged.putAll(gateway.claimedVehicleHealth());
+        }
+        return merged;
     }
 
     /**
@@ -245,6 +262,61 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
         return gateways.get(bindKey);
     }
 
+    /**
+     * Claim-free standing hold on the gateway for {@value #DEFAULT_BIND_HOST}{@code :port} — the
+     * zero-config onboarding standing lobby (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §11
+     * Z2b). Computes/creates the gateway via the exact same atomic {@link Map#compute} path {@link
+     * #open(Device)} uses, including self-healing a gateway that previously self-closed on a link
+     * failure ({@code MavlinkGateway.handleLinkFailure} closes regardless of any hold — see {@link
+     * MavlinkGateway#holdLobby()}'s own javadoc) — but registers <b>no claim</b>: nothing a hold does
+     * is ever added to a gateway's {@link VehicleClaimPolicy} registrations, so it can never steal a
+     * sysid an unpinned real device (a later {@link #open(Device)} call) would otherwise claim. Every
+     * sysid heard while held still lands in {@link #unclaimedVehicles} exactly as it always has —
+     * the lobby only widens <i>when</i> that registry is populated (bound at boot, not only while a
+     * device or a scan happens to be open), never how it is populated.
+     *
+     * <p>Idempotent: holding an already-held port is a no-op. Once held, the gateway starts
+     * transmitting a GCS {@code HEARTBEAT} on every link it has heard a peer on (see {@link
+     * MavlinkGateway#holdLobby()}) — vision has never initiated MAVLink traffic before this; a
+     * vehicle broadcasting to this port per the PX4 broadcast-until-heard convention locks unicast
+     * onto the first such heartbeat it hears, closing the whole handshake without an operator ever
+     * touching a form.
+     *
+     * @see #releaseLobby(int)
+     */
+    public void holdLobby(int port) {
+        if (port <= 0 || port > 65_535) {
+            throw new IllegalArgumentException("port must be in [1,65535], got " + port);
+        }
+        String bindKey = bindKey(DEFAULT_BIND_HOST, port);
+        gateways.compute(bindKey, (key, existing) -> {
+            MavlinkGateway gateway = existing == null || existing.isClosed()
+                    ? newGateway(DEFAULT_BIND_HOST, port) : existing;
+            gateway.holdLobby();
+            return gateway;
+        });
+    }
+
+    /**
+     * Releases a hold acquired by {@link #holdLobby(int)}. Idempotent: releasing an unheld, never-
+     * held, or unrecognized port does nothing. Always stops the GCS heartbeat TX the hold started;
+     * closes the gateway (and evicts it from the shared map, mirroring {@link #closeRuntime}'s own
+     * conditional eviction) only if this release leaves it with neither a lobby hold nor any device
+     * registration — a device still streaming through it keeps the gateway running exactly as it
+     * would have before this hold ever existed.
+     */
+    public void releaseLobby(int port) {
+        String bindKey = bindKey(DEFAULT_BIND_HOST, port);
+        MavlinkGateway gateway = gateways.get(bindKey);
+        if (gateway == null) {
+            return;
+        }
+        gateway.releaseLobby();
+        if (gateway.isClosed()) {
+            gateways.remove(bindKey, gateway);
+        }
+    }
+
     private MavlinkGateway newGateway(String host, int port) {
         try {
             return new MavlinkGateway(host, port, settings);
@@ -253,14 +325,35 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
         }
     }
 
+    /**
+     * Unregisters {@code runtime} from the exact {@link MavlinkGateway} instance it was opened
+     * against — not whatever gateway {@link #gateways} currently maps {@code runtime.bindKey()} to.
+     *
+     * <p>Those can differ: once {@link MavlinkGateway#handleLinkFailure} exists (FLEET-RADIO-PLAN.md
+     * R4), a gateway can close itself from its own reader thread, independent of any {@code
+     * unregister} call, and a fresh {@link #open} for the same bind address may already have
+     * replaced it in {@link #gateways} (see that method's {@code existing.isClosed()} check) by the
+     * time this device's {@link #close(DeviceId)} runs. Looking the gateway up by {@code bindKey}
+     * here, as this method did before R4, would then unregister from the wrong — newer, healthy —
+     * gateway instead of the failed one this runtime actually belongs to, corrupting a second
+     * device's claim bookkeeping over a race this class never needed to run. Holding the gateway
+     * reference directly in {@link DeviceRuntime} makes that impossible: {@link
+     * MavlinkGateway#unregister} is idempotent and safe to call on an already-closed gateway.
+     *
+     * <p>The map is still touched, but only for its own conditional cleanup: {@link
+     * Map#remove(Object, Object)} evicts the entry <i>only</i> if it still points at this exact
+     * gateway, so a concurrent replacement already installed by a new {@link #open} is never
+     * clobbered. {@link MavlinkGateway#unregister} now returns {@code true} only once this call has
+     * actually closed the gateway — a standing lobby hold (docs/plans/active/
+     * ZERO-CONFIG-ONBOARDING-CONTEXT.md §11 Z2b, see {@link #holdLobby(int)}) can leave the last
+     * device's departure with zero registrations yet the gateway still very much alive, and this
+     * eviction must not fire for that case.
+     */
     private void closeRuntime(DeviceRuntime runtime) {
-        gateways.compute(runtime.bindKey(), (key, gateway) -> {
-            if (gateway == null) {
-                return null;
-            }
-            boolean gatewayNowEmpty = gateway.unregister(runtime.registration());
-            return gatewayNowEmpty ? null : gateway;
-        });
+        boolean gatewayClosed = runtime.gateway().unregister(runtime.registration());
+        if (gatewayClosed) {
+            gateways.remove(runtime.bindKey(), runtime.gateway());
+        }
     }
 
     private String bindHost(URI uri) {
@@ -287,7 +380,11 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
         }
     }
 
-    /** This device's share of a {@link MavlinkGateway}: which gateway, and its registration within it. */
-    private record DeviceRuntime(String bindKey, VehicleRegistration registration) {
+    /**
+     * This device's share of a {@link MavlinkGateway}: which bind address, which exact gateway
+     * instance (see {@link #closeRuntime} for why this must be the instance actually registered
+     * against, not a re-lookup by {@code bindKey}), and its registration within it.
+     */
+    private record DeviceRuntime(String bindKey, MavlinkGateway gateway, VehicleRegistration registration) {
     }
 }

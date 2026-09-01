@@ -1,28 +1,31 @@
-// Asserts HBridgeMotorDriver's reversal behaviour against the real LEDC writes
+// Asserts Tb6612MotorDriver's behaviour against the real GPIO/LEDC writes
 // rather than the driver's own bookkeeping.
 //
-// The rover's L298N died on 2026-08-23 with its throttle leg open and its
-// steering leg oscillating and hot. That is the signature of SHOOT-THROUGH: the
-// old driveAxis() zeroed one input and energised the other in the same call,
-// which is safe in source order but not in silicon, because a bipolar bridge
-// holds stored charge for microseconds after its input goes low. The dead-time
-// checks below cover that.
+// Both axes are now bare TB6612FNG channels running the SAME reversal state
+// machine -- Idle -> Settling -> Driving -> Braking -> Coasting -> DeadTime ->
+// Idle -- because there is no longer an ESC hiding the reversal problem on
+// the throttle side. There is no shortcut from Driving one way straight to
+// Driving the other: every reversal pays the electrical dead time (both
+// direction pins low) and the speed-scaled mechanical coast (armature
+// spin-down) in full, even when the stick sweeps through centre in a single
+// control tick. "Zero" on a channel is IN1=IN2=LOW (coast), never a
+// direction pin held HIGH with PWM 0 -- the difference between an idle
+// bridge and a short brake waiting to happen the instant PWM comes back.
 //
-// The second half covers the OTHER way a reversal kills a bridge, which the
-// dead time does nothing about: energising against an armature that is still
-// spinning. A turning motor is a generator, and reversing the applied voltage
-// puts its back-EMF in series with the supply rather than against it. Both
-// halves of every leg can be behaving perfectly while that current flows. The
-// remedy is a coast at zero, scaled by the speed being left behind, and these
-// are the checks that it happens and that it is not a fixed token delay.
+// This is the one module here whose bug burns hardware rather than failing a
+// request: the rover's L298N died on 2026-08-23 with its steering leg
+// oscillating and hot, the signature of shoot-through (one input still
+// energised while the other comes up). The checks below cover the two
+// distinct ways a reversal kills a leg: the dead time protects the bridge
+// from itself, the coast protects it from the motor's own back-EMF.
 #include <stdarg.h>
 #include <stdio.h>
 
-#include <Arduino.h>  // the shim, for the captured LEDC state
+#include <Arduino.h>  // the shim, for the captured GPIO/LEDC state
 
 #include "Config.h"
-#include "HBridgeMotorDriver.h"
 #include "ILogger.h"
+#include "Tb6612MotorDriver.h"
 
 uint32_t g_hostMillis = 0;
 
@@ -30,7 +33,7 @@ namespace {
 
 class QuietLogger : public ILogger {
 public:
-  bool enabled(LogLevel level) const override { return level <= LogLevel::Warn; }
+  bool enabled(LogLevel level) const override { return level <= LogLevel::Info; }
   void write(LogLevel, const char* tag, const char* format, va_list args) override {
     fprintf(stderr, "    [%s] ", tag); vfprintf(stderr, format, args); fputc('\n', stderr);
   }
@@ -44,180 +47,319 @@ void check(bool ok, const char* what) {
 
 constexpr uint32_t kTickMs = 20;  // the firmware's 50 Hz control period
 
+const AppConfig& cfg = appConfig();
+
+/// One TB6612FNG channel's pins, so both axes can share every check below
+/// instead of duplicating them.
+struct AxisPins {
+  const char* name;
+  uint8_t     in1, in2, pwm;
+};
+
+bool atRest(const AxisPins& axis) {
+  return g_digitalLevel[axis.in1] == LOW && g_digitalLevel[axis.in2] == LOW
+         && g_ledcDuty[axis.pwm] == 0;
+}
+
 }  // namespace
 
 int main() {
-  const AppConfig& cfg = appConfig();
   QuietLogger logger;
-  HBridgeMotorDriver motors(cfg.pins, cfg.pwm, cfg.drive, logger);
+  Tb6612MotorDriver motors(cfg.pins, cfg.pwm, cfg.drive, logger);
 
-  const uint8_t fwd = cfg.pins.throttleForward;
-  const uint8_t rev = cfg.pins.throttleReverse;
-  const uint8_t left = cfg.pins.steerLeft;
-  const uint8_t right = cfg.pins.steerRight;
+  const AxisPins throttle{"throttle", cfg.pins.throttleIn1, cfg.pins.throttleIn2, cfg.pins.throttlePwm};
+  const AxisPins steering{"steering", cfg.pins.steerIn1,    cfg.pins.steerIn2,    cfg.pins.steerPwm};
 
+  printf("-- begin(): asleep, both channels at rest --\n");
   motors.begin();
-  check(g_ledcAttached[fwd] && g_ledcAttached[rev] && g_ledcAttached[left] && g_ledcAttached[right],
-        "begin() attaches all four bridge inputs");
+  check(!motors.enabled(), "begin() leaves the bridge asleep");
+  check(g_digitalLevel[cfg.pins.standby] == LOW, "...STBY is driven low before anything else");
+  check(g_ledcAttached[throttle.pwm] && g_ledcAttached[steering.pwm],
+        "begin() attaches LEDC on both PWM pins");
+  check(atRest(throttle) && atRest(steering),
+        "both channels start at rest: IN1=IN2=LOW, PWM 0");
 
-  // --- settle at full forward ---------------------------------------------
-  bool bothHotEver = false;
-  for (int i = 0; i < 60; i++) {
-    g_hostMillis += kTickMs;
-    motors.apply(1.0f, 0.0f, kTickMs);
-    if (g_ledcDuty[fwd] > 0 && g_ledcDuty[rev] > 0) bothHotEver = true;
-  }
-  check(g_ledcDuty[fwd] > 0 && g_ledcDuty[rev] == 0, "forward energises fwd only");
+  printf("\n-- disarmed: apply() drives nothing, whatever the demand --\n");
+  motors.apply(1.0f, 1.0f, kTickMs);
+  check(atRest(throttle) && atRest(steering),
+        "a demand while the bridge is asleep never reaches the pins");
 
-  // --- command full reverse, and watch the pins tick by tick ---------------
-  uint32_t gapMs = 0;
-  int      firstReverseTick = -1;
-  for (int i = 0; i < 60; i++) {
-    g_hostMillis += kTickMs;
-    motors.apply(-1.0f, 0.0f, kTickMs);
-    if (g_ledcDuty[fwd] > 0 && g_ledcDuty[rev] > 0) bothHotEver = true;
-    if (g_ledcDuty[fwd] == 0 && g_ledcDuty[rev] == 0) gapMs += kTickMs;
-    if (g_ledcDuty[rev] > 0 && firstReverseTick < 0) firstReverseTick = i;
-  }
+  printf("\n-- enable(): wakes the bridge, still at rest until the first apply() --\n");
+  motors.enable();
+  check(motors.enabled(), "enable() wakes the bridge");
+  check(g_digitalLevel[cfg.pins.standby] == HIGH, "...STBY is driven high");
+  check(atRest(throttle) && atRest(steering),
+        "waking the bridge does not itself move anything -- only apply() does");
 
-  check(!bothHotEver, "both inputs of a leg are never energised at once");
-  check(gapMs >= cfg.drive.reversalDeadTimeMs,
-        "a reversal holds both inputs low for at least reversalDeadTimeMs");
-  check(firstReverseTick >= 0 && g_ledcDuty[rev] > 0 && g_ledcDuty[fwd] == 0,
-        "reverse eventually energises rev only");
-  printf("      (gap measured %ums, configured %ums)\n", gapMs, cfg.drive.reversalDeadTimeMs);
-
-  // --- the steering leg gets the same treatment ----------------------------
-  bothHotEver = false;
-  for (int i = 0; i < 60; i++) { g_hostMillis += kTickMs; motors.apply(0.0f, 1.0f, kTickMs); }
-  check(g_ledcDuty[right] > 0 && g_ledcDuty[left] == 0, "steer right energises right only");
-
-  uint32_t steerGapMs = 0;
-  for (int i = 0; i < 60; i++) {
-    g_hostMillis += kTickMs;
-    motors.apply(0.0f, -1.0f, kTickMs);
-    if (g_ledcDuty[left] > 0 && g_ledcDuty[right] > 0) bothHotEver = true;
-    if (g_ledcDuty[left] == 0 && g_ledcDuty[right] == 0) steerGapMs += kTickMs;
-  }
-  check(!bothHotEver, "steering reversal never energises both inputs at once");
-  check(steerGapMs >= cfg.drive.reversalDeadTimeMs, "steering reversal holds a full gap too");
-
-  // --- reversing out of rest must still open the gap -----------------------
-  // energisedSign deliberately survives a spell at zero. Without that, coming
-  // to a stop would clear the direction and the very next tick could energise
-  // the opposite leg with no gap at all -- a stop-then-reverse, which is the
-  // most ordinary thing an operator does with a car.
-  for (int i = 0; i < 40; i++) { g_hostMillis += kTickMs; motors.apply(1.0f, 0.0f, kTickMs); }
-  check(g_ledcDuty[fwd] > 0, "settled forward again");
-
-  // Slew means rest takes ~10 ticks to reach, not one.
-  for (int i = 0; i < 15; i++) { g_hostMillis += kTickMs; motors.apply(0.0f, 0.0f, kTickMs); }
-  check(g_ledcDuty[fwd] == 0 && g_ledcDuty[rev] == 0, "at rest, both inputs are low");
-
-  g_hostMillis += kTickMs; motors.apply(-1.0f, 0.0f, kTickMs);
-  check(g_ledcDuty[fwd] == 0 && g_ledcDuty[rev] == 0,
-        "reversing out of rest opens the gap rather than energising immediately");
-
-  // --- stop() cuts both legs unconditionally -------------------------------
-  motors.stop();
-  check(g_ledcDuty[fwd] == 0 && g_ledcDuty[rev] == 0 && g_ledcDuty[left] == 0 && g_ledcDuty[right] == 0,
-        "stop() cuts all four inputs");
-
-  // --- the coast scales with the speed being reversed away from ------------
-  //
-  // A single fixed delay would have to be sized for a full-speed reversal, and
-  // would then make a crawl feel dead. These two runs measure the same reversal
-  // from two speeds and require the slow one to be genuinely shorter.
-  auto measureReversal = [&](float fromDemand, float toDemand) -> uint32_t {
-    motors.stop();
-    // Settle at `fromDemand` -- long enough for the accel ramp to finish.
-    for (int i = 0; i < 80; i++) { g_hostMillis += kTickMs; motors.apply(fromDemand, 0.0f, kTickMs); }
-    uint32_t zeroMs = 0;
-    bool     bothHot = false;
-    for (int i = 0; i < 80; i++) {
+  auto settle = [&](float throttleDemand, float steeringDemand, int ticks) {
+    for (int i = 0; i < ticks; i++) {
       g_hostMillis += kTickMs;
-      motors.apply(toDemand, 0.0f, kTickMs);
-      if (g_ledcDuty[fwd] > 0 && g_ledcDuty[rev] > 0) bothHot = true;
-      // Count only ticks where the axis is at rest AND has not yet turned
-      // around -- the ramp down still has the outgoing pin hot, so it does not
-      // count as coast.
-      if (g_ledcDuty[fwd] == 0 && g_ledcDuty[rev] == 0) zeroMs += kTickMs;
+      motors.apply(throttleDemand, steeringDemand, kTickMs);
     }
-    check(!bothHot, "  ...and never energises both inputs while doing so");
-    return zeroMs;
   };
 
-  const uint32_t fullReversalMs = measureReversal(1.0f, -1.0f);
-  const uint32_t crawlReversalMs = measureReversal(0.15f, -0.15f);
+  printf("\n-- driving: exactly one direction pin per channel, never both --\n");
+  settle(1.0f, 1.0f, 60);
+  check(g_digitalLevel[throttle.in1] == HIGH && g_digitalLevel[throttle.in2] == LOW
+            && g_ledcDuty[throttle.pwm] > 0,
+        "forward throttle energises IN1 only");
+  check(g_digitalLevel[steering.in1] == HIGH && g_digitalLevel[steering.in2] == LOW
+            && g_ledcDuty[steering.pwm] > 0,
+        "right steering energises IN1 only");
+  check(motors.appliedThrottle() > 0.0f && motors.appliedSteering() > 0.0f,
+        "the driver reports what it applied");
 
-  const uint32_t minCoast = cfg.drive.reversalCoastMs + cfg.drive.reversalDeadTimeMs;
-  check(fullReversalMs >= minCoast,
-        "a full-speed reversal coasts for at least reversalCoastMs + the dead time");
-  check(crawlReversalMs < fullReversalMs,
-        "a crawl reverses faster than full speed -- the coast is speed-scaled, not fixed");
-  check(crawlReversalMs >= cfg.drive.reversalDeadTimeMs,
-        "...but even a crawl still gets the full electrical dead time");
-  printf("      (full-speed coast %ums vs crawl %ums; floor %ums)\n",
-         fullReversalMs, crawlReversalMs, minCoast);
+  motors.stop();
+  check(atRest(throttle) && atRest(steering),
+        "stop() cuts both channels to IN1=IN2=LOW, PWM 0 -- coast, not brake");
 
-  // Removing the coast entirely must break these, or they prove nothing. With
-  // reversalCoastMs/PerUnit at 0 the full-speed figure collapses to the dead
-  // time alone and the scaling check below has nothing left to compare.
-  check(cfg.drive.reversalCoastMs > 0 || cfg.drive.reversalCoastPerUnitMs > 0,
-        "the configuration under test actually has a coast to measure");
+  // maxThrottle/maxSteering are a ceiling on the DEMAND, so full stick must
+  // not necessarily reach the channel's own full-scale duty for throttle
+  // (ceiling 0.60), while steering (ceiling 1.00) may.
+  settle(1.0f, 1.0f, 200);
+  const uint16_t dutyMax = cfg.pwm.dutyMax();
+  check(g_ledcDuty[throttle.pwm] < dutyMax,
+        "maxThrottle keeps full stick short of the PWM ceiling");
+  check(g_ledcDuty[steering.pwm] > 0,
+        "full steering lock reaches its own configured ceiling");
+  motors.stop();
 
-  // --- acceleration is gentler than deceleration ---------------------------
-  //
-  // Shedding duty costs nothing; adding it pushes current into an armature that
-  // is not yet moving with the field. One rate for both would have to be sized
-  // for the safe direction and would make the failsafe sluggish.
+  printf("\n-- ramps: acceleration and braking are never a step --\n");
   check(cfg.drive.accelPerSecond < cfg.drive.decelPerSecond,
-        "accelPerSecond is slower than decelPerSecond");
-
-  motors.stop();
-  int ticksToFull = 0;
-  for (int i = 0; i < 200; i++) {
-    g_hostMillis += kTickMs;
-    motors.apply(1.0f, 0.0f, kTickMs);
-    ticksToFull++;
-    if (motors.appliedThrottle() >= cfg.drive.maxThrottle - 1e-4f) break;
+        "throttle: accelPerSecond is slower than decelPerSecond -- current into a "
+        "stalled armature is the expensive direction");
+  check(cfg.drive.steerAccelPerSecond < cfg.drive.steerDecelPerSecond,
+        "steering: same asymmetry");
+  {
+    int ticksToFull = 0;
+    for (int i = 0; i < 200; i++) {
+      g_hostMillis += kTickMs; motors.apply(1.0f, 0.0f, kTickMs); ticksToFull++;
+      if (motors.appliedThrottle() >= cfg.drive.maxThrottle - 1e-4f) break;
+    }
+    int ticksToRest = 0;
+    for (int i = 0; i < 200; i++) {
+      g_hostMillis += kTickMs; motors.apply(0.0f, 0.0f, kTickMs); ticksToRest++;
+      if (motors.appliedThrottle() == 0.0f) break;
+    }
+    check(ticksToFull > 1, "reaching full throttle is a ramp, not a step");
+    check(ticksToRest < ticksToFull, "coming to rest is quicker than getting up to speed");
+    printf("      (throttle: %d ticks up, %d ticks down, at %ums each)\n",
+           ticksToFull, ticksToRest, kTickMs);
   }
-  int ticksToRest = 0;
-  for (int i = 0; i < 200; i++) {
-    g_hostMillis += kTickMs;
-    motors.apply(0.0f, 0.0f, kTickMs);
-    ticksToRest++;
-    if (motors.appliedThrottle() == 0.0f) break;
+  motors.stop();
+
+  // F2: VehicleController::loop() clamps dtMs to 2 * controlPeriodMs before
+  // ever calling apply() -- a stall (the ~13s boot delay before the first
+  // tick, a WiFi hiccup, a long log flush) must not hand ramp() a dtMs big
+  // enough to step straight to full demand. This suite has no VehicleController
+  // to drive (motor_test links only Tb6612MotorDriver + Config), so it proves
+  // the bound the clamp relies on directly against the driver: the biggest
+  // dtMs the clamp can ever pass through, however long the real gap was,
+  // steps the ramp no further than two ordinary control ticks would.
+  printf("\n-- F2: a stalled tick's clamped dtMs ramps no further than two ordinary ticks --\n");
+  {
+    // Drain to a clean Idle before each baseline: holding zero demand can
+    // only ever settle IN Idle, never leave it, so this absorbs whatever
+    // coast/dead-time wind-down a prior section left running, however long
+    // it still had to go (worst case: a full-speed reversal's
+    // reversalCoastMs + reversalCoastPerUnitMs + reversalDeadTimeMs, well
+    // under half of this window).
+    auto drainToIdle = [&] {
+      for (int i = 0; i < 40; i++) { g_hostMillis += kTickMs; motors.apply(0.0f, 0.0f, kTickMs); }
+    };
+
+    drainToIdle();
+    settle(1.0f, 0.0f, 5);
+    const float baseline = motors.appliedThrottle();
+    check(baseline > 0.0f && baseline < cfg.drive.maxThrottle - 1e-4f,
+          "setup: throttle is still mid-ramp, neither at rest nor already at the ceiling");
+
+    // Reference: two ordinary control ticks from the baseline.
+    g_hostMillis += kTickMs; motors.apply(1.0f, 0.0f, kTickMs);
+    g_hostMillis += kTickMs; motors.apply(1.0f, 0.0f, kTickMs);
+    const float twoTicksDuty = motors.appliedThrottle();
+
+    // Replay to the identical baseline, then apply once with the largest
+    // dtMs the F2 clamp can ever produce -- 2 * controlPeriodMs -- no matter
+    // how long the real stall behind it actually was.
+    motors.stop();
+    drainToIdle();
+    settle(1.0f, 0.0f, 5);
+    check(motors.appliedThrottle() == baseline, "replay reaches the identical baseline duty");
+    const uint32_t clampedDtMs = 2 * cfg.timing.controlPeriodMs;
+    g_hostMillis += 9000;  // stand-in for an arbitrarily long real stall
+    motors.apply(1.0f, 0.0f, clampedDtMs);
+    const float postGapDuty = motors.appliedThrottle();
+
+    check(postGapDuty <= twoTicksDuty + 1e-4f,
+          "a stalled tick's clamped dtMs steps the ramp no further than two "
+          "ordinary control ticks would have");
+    printf("      (post-gap duty %.4f vs two-tick reference %.4f, clamped dtMs=%ums)\n",
+           postGapDuty, twoTicksDuty, clampedDtMs);
   }
-  check(ticksToFull > 1, "reaching full throttle is a ramp, not a step");
-  check(ticksToRest < ticksToFull, "coming to rest is quicker than getting up to speed");
-  printf("      (%d ticks up, %d ticks down, at %ums each)\n", ticksToFull, ticksToRest, kTickMs);
+  motors.stop();
 
-  // --- changing your mind mid-reversal must not impose the wait ------------
-  //
-  // Latching the reversal is what makes the coast survive across ticks; the
-  // cost of getting this wrong is a rover that ignores the stick for a third of
-  // a second after a twitch, which reads as a dropped link.
-  motors.stop();
-  for (int i = 0; i < 80; i++) { g_hostMillis += kTickMs; motors.apply(1.0f, 0.0f, kTickMs); }
-  g_hostMillis += kTickMs; motors.apply(-1.0f, 0.0f, kTickMs);   // ask to reverse
-  g_hostMillis += kTickMs; motors.apply(1.0f, 0.0f, kTickMs);    // ...and immediately take it back
-  for (int i = 0; i < 5; i++) { g_hostMillis += kTickMs; motors.apply(1.0f, 0.0f, kTickMs); }
-  check(g_ledcDuty[fwd] > 0,
-        "abandoning a reversal resumes at once rather than serving out the coast");
+  printf("\n-- disable(): stops first, then sleeps the bridge --\n");
+  settle(1.0f, 1.0f, 60);
+  check(g_ledcDuty[throttle.pwm] > 0 && g_ledcDuty[steering.pwm] > 0, "driving before disable()");
+  motors.disable();
+  check(!motors.enabled(), "disable() puts the bridge to sleep");
+  check(g_digitalLevel[cfg.pins.standby] == LOW, "...STBY is driven low");
+  check(atRest(throttle) && atRest(steering),
+        "disable() cuts outputs to rest before sleeping, not after");
 
-  // --- stop() abandons an in-flight reversal -------------------------------
-  //
-  // A failsafe that left the latch set would make the FIRST command after
-  // recovery wait out a coast for a reversal that never completed.
-  motors.stop();
-  for (int i = 0; i < 80; i++) { g_hostMillis += kTickMs; motors.apply(1.0f, 0.0f, kTickMs); }
-  g_hostMillis += kTickMs; motors.apply(-1.0f, 0.0f, kTickMs);   // reversal now latched
-  motors.stop();
-  check(motors.appliedThrottle() == 0.0f, "stop() during a reversal zeroes the output");
-  for (int i = 0; i < 40; i++) { g_hostMillis += kTickMs; motors.apply(1.0f, 0.0f, kTickMs); }
-  check(g_ledcDuty[fwd] > 0,
-        "driving the ORIGINAL direction after a stop is not gated by the abandoned reversal");
+  // Race between arm and first demand: the demand the operator was holding
+  // when the bridge went to sleep must not resurrect the instant it wakes.
+  motors.apply(1.0f, 1.0f, kTickMs);
+  check(atRest(throttle) && atRest(steering), "apply() while disabled still drives nothing");
+  motors.enable();
+  check(atRest(throttle) && atRest(steering),
+        "re-enabling resumes at rest -- no demand was latent behind STBY");
+
+  printf("\n-- the reversal state machine, per axis --\n");
+  // Runs one axis through the state machine and checks every invariant that
+  // applies uniformly to both channels. `drive(v)` applies `v` to THIS axis
+  // and 0 to the other, advancing one control tick.
+  auto testAxisReversal = [&](const AxisPins& axis, auto drive) {
+    printf("  -- %s --\n", axis.name);
+
+    // Checked on every tick below, not just at the end: a direction pin held
+    // HIGH with PWM 0 is legitimate for exactly one tick -- the Settling
+    // preamble commits the new direction startSettleMs before the PWM comes
+    // up, on purpose, so a stray current the instant PWM starts never lands
+    // through inputs that are still moving. What must never happen is that
+    // state OUTLIVING the settle: a direction left "held" at zero duty as a
+    // way of representing REST is exactly the hazard "zero" is meant to rule
+    // out -- rest is IN1=IN2=LOW, never a direction pin sitting HIGH with
+    // nothing driving it.
+    uint32_t heldZeroStreakMs = 0, maxHeldZeroStreakMs = 0;
+    auto tick = [&](float value) {
+      drive(value);
+      const bool zeroDuty       = g_ledcDuty[axis.pwm] == 0;
+      const bool directionHeld  = g_digitalLevel[axis.in1] == HIGH || g_digitalLevel[axis.in2] == HIGH;
+      if (zeroDuty && directionHeld) {
+        heldZeroStreakMs += kTickMs;
+        if (heldZeroStreakMs > maxHeldZeroStreakMs) maxHeldZeroStreakMs = heldZeroStreakMs;
+      } else {
+        heldZeroStreakMs = 0;
+      }
+    };
+
+    motors.stop();
+
+    // -- no shoot-through, and the dead-time gap --------------------------
+    bool bothHotEver = false;
+    for (int i = 0; i < 60; i++) {
+      tick(1.0f);
+      if (g_digitalLevel[axis.in1] == HIGH && g_digitalLevel[axis.in2] == HIGH) bothHotEver = true;
+    }
+    // A full-forward hold, then straight to full-reverse with no explicit
+    // zero tick in between: sweeping the stick through centre in one frame
+    // must get the same gap as holding it there.
+    uint32_t gapMs = 0;
+    for (int i = 0; i < 60; i++) {
+      tick(-1.0f);
+      if (g_digitalLevel[axis.in1] == HIGH && g_digitalLevel[axis.in2] == HIGH) bothHotEver = true;
+      if (g_digitalLevel[axis.in1] == LOW && g_digitalLevel[axis.in2] == LOW) gapMs += kTickMs;
+    }
+    check(!bothHotEver, "both direction pins are never HIGH at once (no shoot-through)");
+    check(gapMs >= cfg.drive.reversalDeadTimeMs,
+          "a one-frame reversal still holds both direction pins low for at least reversalDeadTimeMs");
+    check(g_digitalLevel[axis.in2] == HIGH && g_digitalLevel[axis.in1] == LOW
+              && g_ledcDuty[axis.pwm] > 0,
+          "...and then energises IN2 only -- the opposite direction, not a partial one");
+    printf("      (gap measured %ums, configured dead time %ums)\n",
+           gapMs, cfg.drive.reversalDeadTimeMs);
+
+    // -- coast scales with the speed being reversed away from -------------
+    // One fixed delay would have to be sized for a full-speed reversal and
+    // would make a crawl feel dead.
+    auto measureReversal = [&](float from, float to) -> uint32_t {
+      motors.stop();
+      for (int i = 0; i < 80; i++) tick(from);
+      uint32_t zeroMs = 0;
+      bool bothHot = false;
+      for (int i = 0; i < 80; i++) {
+        tick(to);
+        if (g_digitalLevel[axis.in1] == HIGH && g_digitalLevel[axis.in2] == HIGH) bothHot = true;
+        if (g_digitalLevel[axis.in1] == LOW && g_digitalLevel[axis.in2] == LOW) zeroMs += kTickMs;
+      }
+      check(!bothHot, "  ...and never energises both inputs while doing so");
+      return zeroMs;
+    };
+
+    const uint32_t fullMs  = measureReversal(1.0f, -1.0f);
+    const uint32_t crawlMs = measureReversal(0.15f, -0.15f);
+    const uint32_t minCoast = cfg.drive.reversalCoastMs + cfg.drive.reversalDeadTimeMs;
+    check(fullMs >= minCoast, "a full-speed reversal coasts for at least reversalCoastMs + dead time");
+    check(crawlMs < fullMs, "a crawl reverses faster -- the coast is speed-scaled, not fixed");
+    check(crawlMs >= cfg.drive.reversalDeadTimeMs, "...but even a crawl gets the full dead time");
+    printf("      (full-speed coast %ums vs crawl %ums; floor %ums)\n", fullMs, crawlMs, minCoast);
+
+    // Zeroing the coast must break the two checks above, or they prove nothing.
+    check(cfg.drive.reversalCoastMs > 0 || cfg.drive.reversalCoastPerUnitMs > 0,
+          "the configuration under test actually has a coast to measure");
+
+    // -- abandoning a reversal must not impose the wait --------------------
+    // The cost of getting this wrong is a rover that ignores the stick for a
+    // third of a second after a twitch, which on the ground reads as a
+    // dropped link.
+    motors.stop();
+    for (int i = 0; i < 80; i++) tick(1.0f);
+    tick(-1.0f);   // start a reversal (still Braking: one decel step in)
+    tick(1.0f);    // ...and change their mind before it left Braking
+    for (int i = 0; i < 5; i++) tick(1.0f);
+    check(g_digitalLevel[axis.in1] == HIGH && g_ledcDuty[axis.pwm] > 0,
+          "abandoning a reversal resumes at once rather than serving the coast");
+
+    // -- stop() landing inside an already-running coast --------------------
+    // A failsafe that trips mid-reversal must not extend the wind-down: only
+    // the Driving/Braking -> Coasting edge may arm the timer, and every call
+    // once coasting has begun has to be a no-op, or a failsafe that keeps
+    // firing every tick would mean a reversal that started before it tripped
+    // never finishes.
+    auto reversalZeroMs = [&](bool interruptWithStop) -> uint32_t {
+      motors.stop();
+      for (int i = 0; i < 80; i++) tick(1.0f);
+      uint32_t zeroMs = 0;
+      for (int i = 0; i < 80; i++) {
+        tick(-1.0f);
+        if (g_digitalLevel[axis.in1] == LOW && g_digitalLevel[axis.in2] == LOW
+                && g_ledcDuty[axis.pwm] == 0) {
+          zeroMs += kTickMs;
+          if (interruptWithStop) motors.stop();
+        }
+      }
+      return zeroMs;
+    };
+    const uint32_t undisturbed  = reversalZeroMs(false);
+    const uint32_t interrupted  = reversalZeroMs(true);
+    check(interrupted == undisturbed,
+          "stop() landing inside a running coast does not extend it");
+    printf("      (undisturbed coast %ums, interrupted coast %ums)\n", undisturbed, interrupted);
+
+    // Settling's own exit check flips the state to Driving on the tick where
+    // nowMs first reaches untilMs, but that tick's switch-case ends there --
+    // the ramp/setPwm that would put real duty on the pins only runs on the
+    // FOLLOWING tickAxis() call. So the pins observably hold direction/PWM 0
+    // for one control tick longer than startSettleMs itself: at most a second
+    // tick, never an indefinite one, which is the actual hazard this guards.
+    const uint32_t maxHeldZero = cfg.drive.startSettleMs + kTickMs;
+    check(maxHeldZeroStreakMs <= maxHeldZero,
+          "a direction pin is only ever HIGH with PWM 0 for the settle preamble "
+          "(plus the one tick its exit is observed on), never as a resting state");
+    printf("      (longest direction-held-at-zero streak %ums, allowed up to %ums)\n",
+           maxHeldZeroStreakMs, maxHeldZero);
+  };
+
+  testAxisReversal(throttle, [&](float v) {
+    g_hostMillis += kTickMs;
+    motors.apply(v, 0.0f, kTickMs);
+  });
+  testAxisReversal(steering, [&](float v) {
+    g_hostMillis += kTickMs;
+    motors.apply(0.0f, v, kTickMs);
+  });
 
   printf(failures ? "\nmotor_test: %d FAILED\n" : "\nmotor_test: all checks passed\n", failures);
   return failures ? 1 : 0;

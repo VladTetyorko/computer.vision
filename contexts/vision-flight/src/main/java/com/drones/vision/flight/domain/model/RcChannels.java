@@ -9,19 +9,34 @@ import java.util.List;
  * to the aircraft as a MAVLink {@code RC_CHANNELS_OVERRIDE} (#70) frame
  * (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §1/§5).
  *
- * <p>The record itself accepts 1..18 channels (MAVLink #70's own extent), but no {@link
- * ControlProfile} populates past channel 8 — channels 9..18 use a different,
- * ambiguous extension release sentinel this platform does not resolve yet (see the plan's Open
- * Questions §4). Every entry is either a real microsecond pulse width in {@code [MIN_MICROS,
- * MAX_MICROS]}, or one of the two sentinels {@link #RELEASE} / {@link #IGNORE}.
+ * <p>The record accepts 1..16 channels — MAVLink #70 itself extends to 18, but ArduPilot reads only
+ * channels 1..16 (docs/plans/active/FLEET-RADIO-PLAN.md F17); a {@link ControlProfile} may bind any
+ * of them, mode switch/lights/winch on an aux channel included. Every entry is either a real
+ * microsecond pulse width in {@code [MIN_MICROS, MAX_MICROS]}, or one of the two sentinels {@link
+ * #RELEASE} / {@link #IGNORE}.
  *
- * @param microsByChannel one entry per RC channel, 1-based; length 1..18; each entry either
+ * <h2>Channels 9..16 do not share 1..8's release sentinel on the wire (F4)</h2>
+ * {@link #RELEASE}/{@link #IGNORE} here are <b>domain</b> sentinels — "release this channel back to
+ * the RC radio" / "say nothing about this channel" — and mean the same thing for every channel this
+ * record can hold. MAVLink's own wire encoding disagrees once past channel 8: for 1..8, wire {@code
+ * 0} is release; for 9..16, wire {@code 0} <em>and</em> {@code 65535} both mean ignore, and only
+ * {@code 65534} means release. This module never builds the actual MAVLink frame — that happens in
+ * {@code adapter-mavlink}, which translates this record into {@code mavlink-core}'s own {@code
+ * RcChannels} — so the sentinel translation itself lives there ({@code
+ * com.drones.mavlink.service.RcChannels#wireValue}), not in this record. A caller of this port only
+ * ever needs to know "release" as one concept.
+ *
+ * @param microsByChannel one entry per RC channel, 1-based; length 1..16; each entry either
  *                         within {@code [MIN_MICROS, MAX_MICROS]} or equal to {@link #RELEASE}/
  *                         {@link #IGNORE}; defensively copied
  */
 public record RcChannels(List<Integer> microsByChannel) {
 
-    /** "Release this channel back to the RC radio" (channels 1..8 only — see the class javadoc). */
+    /** Highest RC channel this record — and ArduPilot itself — recognises (F17). */
+    private static final int MAX_CHANNELS = 16;
+
+    /** "Release this channel back to the RC radio" for every channel (see the class javadoc for
+     *  how this is actually encoded on the wire past channel 8). */
     public static final int RELEASE = 0;
 
     /** "Leave this channel unchanged" — 65535, MAVLink #70's own ignore sentinel. */
@@ -53,9 +68,10 @@ public record RcChannels(List<Integer> microsByChannel) {
         if (microsByChannel == null) {
             throw new IllegalArgumentException("RcChannels microsByChannel must not be null");
         }
-        if (microsByChannel.isEmpty() || microsByChannel.size() > 18) {
+        if (microsByChannel.isEmpty() || microsByChannel.size() > MAX_CHANNELS) {
             throw new IllegalArgumentException(
-                    "RcChannels microsByChannel length must be within [1,18]: " + microsByChannel.size());
+                    "RcChannels microsByChannel length must be within [1," + MAX_CHANNELS + "]: "
+                            + microsByChannel.size());
         }
         for (Integer micros : microsByChannel) {
             if (micros == null) {
@@ -89,13 +105,14 @@ public record RcChannels(List<Integer> microsByChannel) {
     /**
      * A frame that releases every one of {@code channelCount} channels back to the RC radio.
      *
-     * @param channelCount number of channels to release, 1..18
+     * @param channelCount number of channels to release, 1..16
      * @return a frame of {@link #RELEASE} values, one per channel 1..{@code channelCount}
-     * @throws IllegalArgumentException if {@code channelCount} is outside {@code [1,18]}
+     * @throws IllegalArgumentException if {@code channelCount} is outside {@code [1,16]}
      */
     public static RcChannels released(int channelCount) {
-        if (channelCount < 1 || channelCount > 18) {
-            throw new IllegalArgumentException("RcChannels channelCount must be within [1,18]: " + channelCount);
+        if (channelCount < 1 || channelCount > MAX_CHANNELS) {
+            throw new IllegalArgumentException(
+                    "RcChannels channelCount must be within [1," + MAX_CHANNELS + "]: " + channelCount);
         }
         return new RcChannels(Collections.nCopies(channelCount, RELEASE));
     }

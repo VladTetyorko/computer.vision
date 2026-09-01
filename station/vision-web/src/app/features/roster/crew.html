@@ -1,0 +1,38 @@
+<div class="page">
+  <vision-page-bar
+    title="Crew"
+    icon="pilot"
+    hint="Pilots, roles, and organization membership — Roster answers 'who flies what', Org answers 'who's in the org'."
+  >
+    <ng-container pageBarFilters>
+      <div class="segmented" role="tablist" aria-label="Crew section">
+        <button
+          type="button"
+          class="btn secondary small"
+          role="tab"
+          [class.active]="tab() === 'roster'"
+          [attr.aria-selected]="tab() === 'roster'"
+          (click)="setTab('roster')"
+        >
+          Roster
+        </button>
+        <button
+          type="button"
+          class="btn secondary small"
+          role="tab"
+          [class.active]="tab() === 'org'"
+          [attr.aria-selected]="tab() === 'org'"
+          (click)="setTab('org')"
+        >
+          Org
+        </button>
+      </div>
+    </ng-container>
+  </vision-page-bar>
+
+  @if (tab() === 'roster') {
+    <vision-roster [embedded]="true" />
+  } @else {
+    <vision-org-settings [embedded]="true" />
+  }
+</div>

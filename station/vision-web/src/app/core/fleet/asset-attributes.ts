@@ -1,3 +1,5 @@
+import type { AssetSummary } from '../api/models';
+
 /**
  * The `registrationNumber` attribute-key convention (docs/plans/done/UX-REWORK-PLAN.md §U-d item 3): a
  * registration/tail number is not a first-class field on `Asset`/`AssetSummary` — it rides in the
@@ -50,4 +52,24 @@ export function withoutRegistrationNumber(attributes: Record<string, string>): R
   const rest = { ...attributes };
   delete rest[REGISTRATION_NUMBER_ATTRIBUTE_KEY];
   return rest;
+}
+
+/**
+ * `identity.registration`, falling back to the legacy `attributes.registrationNumber` key above
+ * (docs/plans/active/WAREHOUSE-UX-CONTEXT.md's own W3→W4 handoff named this migration gap: assets
+ * created before wave D1 shipped only ever got the old attribute, never the new identity field, and
+ * nothing backfills it server-side — see `station/vision-web/MODULE.md`'s W4 changelog entry for the
+ * full writeup, including the matching backend-side V28 migration-key bug). `identity.registration`
+ * wins whenever both are present — it's the field every new write (the asset detail page's own edit,
+ * onboarding's Identify step) actually targets now.
+ *
+ * Moved here from `features/asset-detail/asset-detail-logic.ts` in wave W4
+ * (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3) when the Inventory page's own Vehicles/Equipment
+ * detail panel needed the identical fallback — this codebase's own "a second consumer moves shared
+ * logic to `core/`" precedent (this file's neighbor `core/fleet/inventory-logic.ts`'s doc comment).
+ * `features/asset-detail/asset-detail-logic.ts` re-exports this verbatim so its own pre-existing
+ * import site keeps working.
+ */
+export function effectiveRegistration(asset: Pick<AssetSummary, 'identity' | 'attributes'>): string | undefined {
+  return asset.identity?.registration?.trim() || registrationNumberOf(asset.attributes);
 }

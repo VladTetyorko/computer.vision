@@ -43,7 +43,7 @@
   </div>
 
   <nav class="sidebar-body" aria-label="Main">
-    @for (mode of modes(); track mode.id) {
+    @for (mode of bodyModes(); track mode.id) {
       <div class="nav-group" role="group" [attr.aria-label]="mode.label">
         <!-- A non-interactive label, never a link — see this file's own class doc's F1 paragraph:
              this is the specific thing that makes the old /operate, /monitor, /manage hub pages
@@ -64,7 +64,9 @@
           <span class="group-label-text">{{ mode.label }}</span>
         </div>
 
-        @for (entry of tiersFor(mode.entries).primary; track entry.to) {
+        <!-- No more primary/advanced/upcoming tiers (docs/plans/active/WAREHOUSE-UX-PLAN.md wave W1) —
+             every entry in a group renders flat; see `nav-entries.ts`'s own class doc for why. -->
+        @for (entry of mode.entries; track entry.to) {
           <a
             class="nav-row"
             [routerLink]="entry.to"
@@ -79,65 +81,39 @@
             <span class="nav-row-text">{{ entry.name }}</span>
           </a>
         }
-
-        @if (tiersFor(mode.entries).advanced.length > 0) {
-          <details class="disclosure" [open]="sidebar.advancedOpen()" (toggle)="onAdvancedToggle($event)">
-            <!-- `title` unconditionally, unlike the `aria-label` beside it: collapsed to the rail
-                 this summary is a bare 12px chevron with its word hidden, so hovering it is the
-                 only way to find out which section it opens. -->
-            <summary title="Advanced" [attr.aria-label]="effectiveCollapsed() ? 'Advanced' : null">
-              <vision-icon name="chevron-right" [size]="12" class="chevron" />
-              <span>Advanced</span>
-            </summary>
-            @for (entry of tiersFor(mode.entries).advanced; track entry.to) {
-              <a
-                class="nav-row"
-                [routerLink]="entry.to"
-                routerLinkActive="active"
-                #rlaAdvanced="routerLinkActive"
-                [attr.aria-current]="rlaAdvanced.isActive ? 'page' : null"
-                [title]="entry.name"
-                [attr.aria-label]="effectiveCollapsed() ? entry.name : null"
-                (click)="closeMobile()"
-              >
-                <vision-icon [name]="entry.icon" [size]="16" />
-                <span class="nav-row-text">{{ entry.name }}</span>
-              </a>
-            }
-          </details>
-        }
-
-        @if (tiersFor(mode.entries).upcoming.length > 0) {
-          <details class="disclosure" [open]="sidebar.upcomingOpen()" (toggle)="onUpcomingToggle($event)">
-            <summary title="Upcoming" [attr.aria-label]="effectiveCollapsed() ? 'Upcoming' : null">
-              <vision-icon name="chevron-right" [size]="12" class="chevron" />
-              <span>Upcoming</span>
-            </summary>
-            @for (entry of tiersFor(mode.entries).upcoming; track entry.to) {
-              <a
-                class="nav-row dimmed"
-                [routerLink]="entry.to"
-                routerLinkActive="active"
-                #rlaUpcoming="routerLinkActive"
-                [attr.aria-current]="rlaUpcoming.isActive ? 'page' : null"
-                [title]="entry.name + ' (coming soon)'"
-                [attr.aria-label]="effectiveCollapsed() ? entry.name + ' (coming soon)' : null"
-                (click)="closeMobile()"
-              >
-                <vision-icon [name]="entry.icon" [size]="16" />
-                <span class="nav-row-text">{{ entry.name }}</span>
-              </a>
-            }
-          </details>
-        }
       </div>
     }
   </nav>
 
   <div class="sidebar-foot">
-    <!-- Additive, self-removing: renders nothing unless the backend's demo package is present
-         (`vision.demo.enabled`, default on) — see `features/demo/demo-button/demo-button.ts`. -->
-    <vision-demo-button />
+    <!-- SYSTEM — the fifth group, rendered here rather than in `.sidebar-body`
+         (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1: "SYSTEM (footer, with identity chip)"). Same
+         label-not-link markup as every body group above (NAV-IA-REDESIGN §2.1 rule 1) and the same
+         flat entry list, just a different host container. -->
+    @if (systemMode(); as system) {
+      <div class="nav-group" role="group" [attr.aria-label]="system.label">
+        <div class="group-label">
+          <span class="group-divider" aria-hidden="true"></span>
+          <span class="group-label-text">{{ system.label }}</span>
+        </div>
+        @for (entry of system.entries; track entry.to) {
+          <a
+            class="nav-row"
+            [routerLink]="entry.to"
+            routerLinkActive="active"
+            #rlaSystem="routerLinkActive"
+            [attr.aria-current]="rlaSystem.isActive ? 'page' : null"
+            [title]="entry.name"
+            [attr.aria-label]="effectiveCollapsed() ? entry.name : null"
+            (click)="closeMobile()"
+          >
+            <vision-icon [name]="entry.icon" [size]="16" />
+            <span class="nav-row-text">{{ entry.name }}</span>
+          </a>
+        }
+      </div>
+    }
+
     <vision-identity-chip />
     <!-- Single quiet status line (docs/plans/done/VISUAL-REFRESH-PLAN.md Wave 1) — live count (when > 0) +
          a bare online/offline dot (reusing `.dot`/`.dot.ok`/`.dot.danger`, the same primitive every
@@ -147,6 +123,13 @@
          it), same "CSS hides text, the template never strips it" rule `.group-label-text`/
          `.nav-row-text` above already follow — see `app-sidebar.css`'s own comment on this row. -->
     <div class="status-row">
+      <!-- Additive, self-removing: renders nothing unless the backend's demo package is present
+           (`vision.demo.enabled`, default on) — see `features/demo/demo-button/demo-button.ts`. Folded
+           in here as a small icon button, no longer its own full-width row (WAREHOUSE-UX-CONTEXT.md
+           W10, finding N1) — at a short viewport (~713px) the old dedicated row was one more thing
+           between the nav list and the fold; `app-sidebar.css`'s own comment on this row has the
+           `::ng-deep` sizing that shrinks it to match the theme-toggle/bell icon buttons beside it. -->
+      <vision-demo-button />
       @if (liveCount() > 0) {
         <span class="chip"><span class="dot live"></span>{{ liveCount() }} live</span>
       }

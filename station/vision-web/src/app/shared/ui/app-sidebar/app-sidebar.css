@@ -111,7 +111,10 @@
   color: var(--text);
 }
 
-/* ---- Body: the three mode groups, primary rows + two disclosures ------------------------------ */
+/* ---- Body: four of the five nav groups (docs/plans/active/WAREHOUSE-UX-PLAN.md wave W1 — the fifth,
+   SYSTEM, renders in `.sidebar-foot` below instead, see that section's own comment). No more
+   primary/advanced/upcoming tiers or the two `<details>` disclosures that used to render them —
+   every group's entries render flat now (`nav-entries.ts`'s own class doc has the full writeup). ---- */
 
 .sidebar-body {
   flex: 1;
@@ -225,73 +228,15 @@
   white-space: nowrap;
 }
 
-/* Upcoming (`badge: 'soon'`) rows still route somewhere real (`ComingSoon`, never a dead link) but
-   read as visibly not-yet-built (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F9) — dimmed rather than hidden. */
-.nav-row.dimmed {
-  color: var(--text-faint);
-}
-
-.nav-row.dimmed:hover {
-  color: var(--text-muted);
-}
-
-.nav-row.dimmed .chip {
-  flex: none;
-}
-
-/* ---- Advanced / Upcoming disclosures ------------------------------------------------------------ */
-
-.disclosure summary {
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
-  min-height: 2rem;
-  padding: 0 var(--space-8);
-  border-radius: var(--radius-sm);
-  color: var(--text-faint);
-  font-size: 0.76rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  cursor: pointer;
-  list-style: none;
-}
-
-.disclosure summary::-webkit-details-marker {
-  display: none;
-}
-
-.disclosure summary:hover {
-  background: var(--panel-hover);
-  color: var(--text-muted);
-}
-
-.chevron {
-  flex: none;
-  transition: transform 0.15s ease;
-}
-
-.disclosure[open] > summary .chevron {
-  transform: rotate(90deg);
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .chevron {
-    transition: none;
-  }
-}
-
-.disclosure .nav-row {
-  margin-top: var(--space-2);
-}
-
-/* ---- Foot: identity chip, notification bell, live/online status (moved verbatim in behaviour
+/* ---- Foot: SYSTEM group (docs/plans/active/WAREHOUSE-UX-PLAN.md wave W1), identity chip,
+   notification bell, live/online status (moved verbatim in behaviour
    from the old header's `.status` block — see this file's own doc comment) ------------------------- */
 
 /* Padding mirrors `.sidebar-body`'s own `var(--space-16) var(--space-8)` exactly, so the foot's
-   three blocks (demo button, identity chip, status row) start on the same x as a nav row's box
-   (8px) instead of the 16px they used to — and, with the two inner-padding corrections below, their
-   glyphs land on the same x=16 axis as every icon above them. */
+   blocks (the SYSTEM group when present, the identity chip, the status row — the demo button moved
+   into the status row itself, N1/W10) start on the same x as a nav row's box (8px) instead of the
+   16px they used to — and, with the two inner-padding corrections below, their glyphs land on the
+   same x=16 axis as every icon above them. */
 .sidebar-foot {
   flex: none;
   display: flex;
@@ -323,6 +268,31 @@
    auto` used to do alone before the toggle sat between them. */
 .status-dot {
   margin-left: auto;
+}
+
+/* Demo button, folded into this row (N1, docs/plans/active/WAREHOUSE-UX-CONTEXT.md W10) — it used to
+   be its own full-width `.sidebar-foot` row (icon + "Fill demo data" label); at a short viewport
+   (~713px) that row plus the pinned SYSTEM group left `.sidebar-body`'s scrolling nav a tiny slot
+   (measured live: 291px of visible nav against a 732px scrollHeight — FLEET's later entries and the
+   whole VISION group sat below the fold). `demo-button.css` itself is out of this task's file scope
+   (`shared/ui/app-sidebar/**` only) and its own collapsed-rail compaction is gated on
+   `:host-context(.sidebar.collapsed)` — width alone, never this row's actual constraint (height,
+   independent of collapsed state) — so this reaches into its DOM instead, the same `::ng-deep`
+   licence this file's head comment already uses for `identity-chip`/`notification-bell`. Sized to
+   match `.theme-toggle`'s own 1.9rem square exactly, so the row reads as one family of icon buttons.
+   `!important` (rare in this codebase — `features/command/command.css` is the one other precedent)
+   because `.demo-button`'s own `width: 100%` is unconditional in its source file, and Angular gives
+   no guarantee this component's styles are concatenated after that one's in the build output — a
+   plain specificity tie is not enough to trust here. */
+.status-row ::ng-deep .demo-button {
+  width: 1.9rem !important;
+  height: 1.9rem !important;
+  padding: 0 !important;
+  justify-content: center !important;
+}
+
+.status-row ::ng-deep .demo-label {
+  display: none !important;
 }
 
 /* The live-transport dot+text (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.1, `app-sidebar.ts`'s own doc
@@ -481,7 +451,6 @@
   .sidebar.collapsed .brand-name,
   .sidebar.collapsed .group-label-text,
   .sidebar.collapsed .nav-row-text,
-  .sidebar.collapsed .disclosure summary > span,
   .sidebar.collapsed .live-transport-text {
     display: none;
   }
@@ -505,11 +474,6 @@
   }
 
   .sidebar.collapsed .nav-row {
-    justify-content: center;
-    padding: 0;
-  }
-
-  .sidebar.collapsed .disclosure summary {
     justify-content: center;
     padding: 0;
   }
@@ -587,7 +551,6 @@
   .brand-name,
   .group-label-text,
   .nav-row-text,
-  .disclosure summary > span,
   .live-transport-text {
     display: none;
   }
@@ -606,11 +569,6 @@
   }
 
   .nav-row {
-    justify-content: center;
-    padding: 0;
-  }
-
-  .disclosure summary {
     justify-content: center;
     padding: 0;
   }

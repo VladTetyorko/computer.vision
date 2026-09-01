@@ -11,9 +11,10 @@ import {
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Player, type BoxesMode } from '../../shared/player/player';
-import { DEFAULT_DECLUTTER_LEVEL, cycleBoxesMode, declutterLevelLabel } from '../../shared/player/detection-overlay-logic';
+import { cycleBoxesMode, declutterLevelLabel } from '../../shared/player/detection-overlay-logic';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
+import { SettingsStore } from '../../core/settings/settings-store';
 import type { ActiveStream, Device } from '../../core/api/models';
 
 /** Start decoding slightly before a tile scrolls into view, so it is ready on arrival. */
@@ -50,15 +51,15 @@ export class WallTile {
   protected readonly visible = signal(true);
   protected readonly telemetry = inject(TelemetryStore);
   protected readonly detections = inject(DetectionsStore);
+  private readonly settings = inject(SettingsStore);
 
-  /** Defaults to {@link DEFAULT_DECLUTTER_LEVEL} ('priority') — burn-in no longer exists at all
-   * (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1), so there is nothing left to re-derive against the
-   * stream. A plain `signal`, not the old `linkedSignal` over a derived `streamBurnedIn` primitive —
-   * see `CockpitFacade#boxesMode`'s identical simplification. Widened from a two-state toggle to four
-   * named declutter levels as of wave W4 (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.6); this
-   * tile has no FOLLOW-lock plumbing at all (no `CvControlPanel` at wall scale), so `<vision-player>`'s
+  /** The shared, persisted declutter level (docs/plans/active/CV-SETTINGS-PLAN.md wave W7, H12) —
+   * aliases `SettingsStore.declutterLevel` directly, the same instance `CockpitFacade`/`LiveFacade`
+   * read/write, replacing this tile's own previously-unshared in-memory signal (see
+   * `CockpitFacade#boxesMode`'s identical simplification for the full rationale). This tile has no
+   * FOLLOW-lock plumbing at all (no `CvControlPanel` at wall scale), so `<vision-player>`'s
    * `lockedTrackId` input is simply never bound here — it stays its own default `0`. */
-  protected readonly boxesMode = signal<BoxesMode>(DEFAULT_DECLUTTER_LEVEL);
+  protected readonly boxesMode = this.settings.declutterLevel;
 
   private readonly hasTelemetryCapability = computed(() =>
     (this.device()?.capabilities ?? []).includes('TELEMETRY'),

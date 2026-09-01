@@ -33,23 +33,48 @@ import com.drones.vision.api.controller.AssetController;
  * @param hasImage           whether an image is stored for this asset (docs/plans/done/UX-REWORK-PLAN.md
  *                           §U-d item 3, CONTRACT 2) — never the image bytes themselves, only
  *                           whether {@code GET /api/assets/{id}/image} would return one
+ * @param identity           serial/make/model/registration facts (docs/plans/active/WAREHOUSE-UX-PLAN.md D1)
+ * @param custody            who currently holds this asset, or in-stock if nobody (D2)
+ * @param inventoryState     this asset's <b>effective</b> inventory state — {@code ISSUED}/{@code
+ *                           IN_FIELD} already resolved from custody/open-usage (D6, {@code
+ *                           InventoryStates#effective}), never the raw stored value
+ * @param createdAt          when this asset was first registered
+ * @param updatedAt          when this asset was last changed
+ * @param firmware           the asset's most recently observed firmware, joined from vision-flight
+ *                           at the vision-api layer (docs/plans/active/WAREHOUSE-UX-PLAN.md D5; see
+ *                           {@code com.drones.vision.api.support.AssetRowFacts#firmwareOf}); absent
+ *                           when never probed, or when the caller has no join to offer (see {@code
+ *                           AssetInventoryController}/{@code LiveUpdateRegistry}, which pass {@code
+ *                           null} for the same five-parameter-ceiling reason {@code hasImage} does)
+ * @param totalFlightSeconds cumulative flight seconds across every usage ({@code AssetStats}'s own
+ *                           semantics — an open usage counts its in-progress duration up to "now");
+ *                           absent only when the caller has no join to offer, never when the true
+ *                           value is a genuine zero (a never-flown asset reports {@code 0}, not
+ *                           absence)
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record AssetSummaryResponse(String assetId, String displayName, String category, String categoryName,
                                     String owner, String status, String lifecycle, Instant lastUsedAt,
                                     GeoPositionResponse lastKnownPosition, Map<String, String> attributes,
-                                    boolean hasImage) {
+                                    boolean hasImage, IdentityResponse identity, CustodyResponse custody,
+                                    String inventoryState, Instant createdAt, Instant updatedAt,
+                                    FirmwareResponse firmware, Long totalFlightSeconds) {
 
     /**
      * Maps an {@link AssetSummary} read model to its wire representation.
      *
-     * @param summary  the summary to map
-     * @param hasImage whether an image is stored for this asset (a separate lookup — {@link
-     *                 AssetSummary} carries no notion of one; see {@code
-     *                 com.drones.vision.api.controller.AssetController})
+     * @param summary            the summary to map
+     * @param hasImage           whether an image is stored for this asset (a separate lookup — {@link
+     *                           AssetSummary} carries no notion of one; see {@code
+     *                           com.drones.vision.api.controller.AssetController})
+     * @param firmware           the joined firmware fact, or {@code null} if the caller has none to
+     *                           offer (see this record's own javadoc)
+     * @param totalFlightSeconds the joined flight-hours fact, or {@code null} if the caller has none
+     *                           to offer (see this record's own javadoc)
      * @return the response body element for {@code summary}
      */
-    public static AssetSummaryResponse from(AssetSummary summary, boolean hasImage) {
+    public static AssetSummaryResponse from(AssetSummary summary, boolean hasImage, FirmwareResponse firmware,
+                                             Long totalFlightSeconds) {
         return new AssetSummaryResponse(
                 summary.asset().id().value().toString(),
                 summary.asset().displayName(),
@@ -61,6 +86,13 @@ public record AssetSummaryResponse(String assetId, String displayName, String ca
                 summary.lastUsedAt(),
                 GeoPositionResponse.from(summary.lastKnownPosition()),
                 summary.asset().attributes(),
-                hasImage);
+                hasImage,
+                IdentityResponse.from(summary.identity()),
+                CustodyResponse.from(summary.custody()),
+                summary.inventoryState().name(),
+                summary.asset().createdAt(),
+                summary.asset().updatedAt(),
+                firmware,
+                totalFlightSeconds);
     }
 }

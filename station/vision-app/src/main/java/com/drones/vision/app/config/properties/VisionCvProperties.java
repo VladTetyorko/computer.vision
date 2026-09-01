@@ -1,5 +1,6 @@
 package com.drones.vision.app.config.properties;
 
+import com.drones.vision.adapter.cvgrpc.CvTarget;
 import com.drones.vision.adapter.cvgrpc.WireFormat;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.boot.context.properties.bind.ConstructorBinding;
@@ -7,6 +8,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
 
 import java.net.URI;
 import java.time.Duration;
+import java.util.List;
 
 /**
  * Configuration for the gRPC connection to the Python CV service ({@code vision.cv.*}),
@@ -74,6 +76,15 @@ import java.time.Duration;
  * @param reconnect              bounded reconnect-cadence config for the shared push/channel path
  *                               (docs/plans/active/CV-RECONNECT-PLAN.md §3.3) — {@code
  *                               CvChannelSupervisor}'s own knobs; defaulted as a whole when absent
+ * @param inference              the inference channel's failover target list (docs/plans/active/
+ *                               ARCHITECTURE-AUDIT-2026-08-26.md R6, split deployment); defaulted as
+ *                               a whole when absent — see {@link #inferenceTargets()}
+ * @param training               the training/geolocation channel's single target (R6, split
+ *                               deployment); defaulted as a whole when absent — see
+ *                               {@link #trainingTarget()}/{@link #trainingTargetConfigured()}
+ * @param profiles               {@code CvProfileCache}'s lazy-reload TTL (docs/plans/active/CV-SETTINGS-PLAN.md
+ *                               §3.1, docs/plans/active/CV-SETTINGS-CONTEXT.md's W2 &rarr; W5 handoff);
+ *                               defaulted as a whole when absent — see {@link Profiles#cacheTtl()}
  */
 @ConfigurationProperties(prefix = "vision.cv")
 public record VisionCvProperties(@DefaultValue("false") boolean enabled,
@@ -93,7 +104,10 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
                                   Pull pull,
                                   @DefaultValue("false") boolean detectionDefaultEnabled,
                                   Demand demand,
-                                  Reconnect reconnect) {
+                                  Reconnect reconnect,
+                                  Inference inference,
+                                  Training training,
+                                  Profiles profiles) {
 
     static final String DEFAULT_ENDPOINT = "localhost:50051";
     static final String DEFAULT_DETECT_WIDTH = "640";
@@ -128,7 +142,11 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
             upload = new Upload(Upload.DEFAULT_TIMEOUT_DURATION, Upload.DEFAULT_CHUNK_BYTES_INT);
         }
         if (registry == null) {
-            registry = new Registry(Registry.DEFAULT_CALL_TIMEOUT_DURATION);
+            // Java-construction fallback (bypassing Spring's Environment entirely -- direct `new
+            // VisionCvProperties(...)` callers, e.g. tests): mirrors the YAML placeholder
+            // `vision.cv.registry.enabled: ${vision.cv.enabled:false}` binds by reusing this
+            // record's own top-level `enabled` (detection's switch) as the registry's default.
+            registry = new Registry(enabled, Registry.DEFAULT_CALL_TIMEOUT_DURATION);
         }
         if (pull == null) {
             pull = new Pull(Pull.DEFAULT_RTSP_BASE_URI, Pull.DEFAULT_RECONNECT_INITIAL_BACKOFF,
@@ -142,6 +160,31 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
             reconnect = new Reconnect(true, Reconnect.DEFAULT_INITIAL_BACKOFF, Reconnect.DEFAULT_MAX_BACKOFF,
                     Reconnect.DEFAULT_OUTAGE_LOG_INTERVAL);
         }
+        if (inference == null) {
+            inference = new Inference(Inference.DEFAULT_TARGETS);
+        }
+        if (training == null) {
+            training = new Training(Training.DEFAULT_TARGET);
+        }
+        if (profiles == null) {
+            profiles = new Profiles(Profiles.DEFAULT_CACHE_TTL);
+        }
+        if (!inference.targets().isEmpty()) {
+            try {
+                CvTarget.parseAll(inference.targets());
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException(
+                        "vision.cv.inference.targets entries must each be host:port, was " + inference.targets(), e);
+            }
+        }
+        if (!training.target().isBlank()) {
+            try {
+                CvTarget.parse(training.target());
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException(
+                        "vision.cv.training.target must be host:port, was " + training.target(), e);
+            }
+        }
     }
 
     /**
@@ -151,6 +194,12 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
      * {@code false} (that plan's own pinned default), the other two to their record defaults via the
      * compact constructor's {@code null} handling — so every pre-existing call site compiles
      * unchanged. Same "N-1-arg convenience ctor" idiom as every other addition to this record.
+     *
+     * <p><b>Legacy, slated for removal.</b> The "N-1-arg convenience ctor" idiom this javadoc
+     * describes is withdrawn (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R1, {@code
+     * .claude/skills/java-clean-code/SKILL.md} §3) — {@link #inference}/{@link #training} were added
+     * without a new overload here; this constructor is kept only so its existing callers keep
+     * compiling, not extended further.
      */
     public VisionCvProperties(boolean enabled, String endpoint, int detectWidth, float jpegQuality,
                                String wireFormat, String frameTransport, Duration responseTimeout,
@@ -159,7 +208,7 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
                                Pull pull) {
         this(enabled, endpoint, detectWidth, jpegQuality, wireFormat, frameTransport, responseTimeout,
                 keepAliveTime, keepAliveTimeout, keepAliveWithoutCalls, channelShutdownTimeout, plaintext, upload,
-                registry, pull, false, null, null);
+                registry, pull, false, null, null, null, null, null);
     }
 
     /**
@@ -167,6 +216,9 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
      * §C7/docs/plans/done/REMOTE-CV-PLAN.md P1 item 5, predating wave F4's extension) — every field wave F4 (and
      * docs/plans/done/MEDIA-SOT-PLAN.md wave M7) added defaults to {@code GrpcCvSettings}'s own literal, so
      * behavior constructing an instance this way is unchanged.
+     *
+     * <p><b>Legacy, slated for removal</b> — same R1 withdrawal note as the 15-arg constructor above;
+     * kept only so its existing callers keep compiling, not extended further.
      */
     public VisionCvProperties(boolean enabled, String endpoint, int detectWidth, float jpegQuality) {
         this(enabled, endpoint, detectWidth, jpegQuality, DEFAULT_WIRE_FORMAT, DEFAULT_FRAME_TRANSPORT,
@@ -210,6 +262,43 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
     }
 
     /**
+     * @return the inference channel's failover target list (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md
+     *         R6) — {@link Inference#targets()} parsed via {@code CvTarget#parseAll} when non-empty,
+     *         else a single-element list built from {@link #host()}/{@link #port()}. Deliberately
+     *         {@link #host()}/{@link #port()}, not {@code CvTarget.parse(endpoint())} — {@link
+     *         #endpoint()} tolerates an optional {@code scheme://} prefix that {@link #hostAndPort()}
+     *         already strips and {@code CvTarget.parse} does not.
+     */
+    public List<CvTarget> inferenceTargets() {
+        if (!inference.targets().isEmpty()) {
+            return CvTarget.parseAll(inference.targets());
+        }
+        return List.of(new CvTarget(host(), port()));
+    }
+
+    /**
+     * @return the training/geolocation channel's single target (R6) — {@link Training#target()}
+     *         parsed via {@code CvTarget#parse} when non-blank, else {@link #host()}/{@link #port()},
+     *         the same one-process fallback {@link #inferenceTargets()} uses
+     */
+    public CvTarget trainingTarget() {
+        if (!training.target().isBlank()) {
+            return CvTarget.parse(training.target());
+        }
+        return new CvTarget(host(), port());
+    }
+
+    /**
+     * @return whether {@code vision.cv.training.target} was actually set — {@code CvWiring} reads
+     *         this (via {@code @ConditionalOnProperty}) to decide whether the {@code
+     *         cvTrainingChannel} bean exists at all, distinct from what {@link #trainingTarget()}
+     *         would resolve to if asked regardless
+     */
+    public boolean trainingTargetConfigured() {
+        return !training.target().isBlank();
+    }
+
+    /**
      * @param timeout    per-call deadline covering dataset archive framing plus the whole upload
      *                   round trip; default 300s
      * @param chunkBytes target size of each streamed dataset zip chunk; default {@value #DEFAULT_CHUNK_BYTES}
@@ -222,10 +311,22 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
     }
 
     /**
+     * @param enabled     whether {@code ModelRegistryPort}/{@code ModelRegistryService} (and the
+     *                    {@code /api/cv/registry/*} endpoints they back) are wired at all
+     *                    (docs/plans/active/CV-SETTINGS-PLAN.md §5, CV-SETTINGS-CONTEXT.md's W4-app
+     *                    &rarr; W5 handoff). No {@code @DefaultValue} here deliberately: bound from
+     *                    the YAML placeholder {@code vision.cv.registry.enabled:
+     *                    ${vision.cv.enabled:false}} in application.yaml, so leaving both keys unset
+     *                    keeps the registry following {@link #enabled()} (detection's own switch) —
+     *                    a Spring {@code Environment} default, not a record default. The compact
+     *                    constructor's {@code registry == null} fallback (a direct-Java {@code new
+     *                    VisionCvProperties(...)} call, bypassing Spring's {@code Environment}
+     *                    entirely) mirrors the same derivation by reusing this record's own
+     *                    top-level {@link #enabled()}
      * @param callTimeout per-call deadline for {@code GrpcModelRegistryPort}'s {@code
      *                    ListModels}/{@code PromoteModel} RPCs; default 10s
      */
-    public record Registry(@DefaultValue("10s") Duration callTimeout) {
+    public record Registry(boolean enabled, @DefaultValue("10s") Duration callTimeout) {
         static final Duration DEFAULT_CALL_TIMEOUT_DURATION = Duration.ofSeconds(10);
     }
 
@@ -317,5 +418,59 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
         static final Duration DEFAULT_INITIAL_BACKOFF = Duration.ofSeconds(1);
         static final Duration DEFAULT_MAX_BACKOFF = Duration.ofSeconds(10);
         static final Duration DEFAULT_OUTAGE_LOG_INTERVAL = Duration.ofSeconds(60);
+    }
+
+    /**
+     * The inference channel's failover target list (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md
+     * R6, split deployment) — an ordered list consumed by {@code CvChannels#forTargets} via {@code
+     * CvTarget#parseAll}, tried in order by grpc-java's {@code pick_first} policy on connection
+     * failure. Empty (the default) means "no split list configured": {@link #inferenceTargets()}
+     * falls back to {@link #host()}/{@link #port()} instead, so a one-process deployment stays
+     * byte-identical to before this key existed.
+     *
+     * @param targets ordered {@code host:port} entries; default empty list
+     */
+    public record Inference(List<String> targets) {
+        static final List<String> DEFAULT_TARGETS = List.of();
+
+        public Inference {
+            if (targets == null) {
+                targets = DEFAULT_TARGETS;
+            }
+        }
+    }
+
+    /**
+     * The training/geolocation channel's single target (R6, split deployment) — consumed by {@code
+     * CvChannels#forTarget} via {@code CvTarget#parse}. Blank (the default) means "no separate
+     * training channel": {@link #trainingTarget()} falls back to {@link #host()}/{@link #port()} and
+     * {@code CvWiring} never builds the {@code cvTrainingChannel} bean at all — byte-identical to
+     * before this key existed.
+     *
+     * @param target a single {@code host:port} entry; default {@code ""}
+     */
+    public record Training(String target) {
+        static final String DEFAULT_TARGET = "";
+
+        public Training {
+            if (target == null) {
+                target = DEFAULT_TARGET;
+            }
+        }
+    }
+
+    /**
+     * {@code CvProfileCache}'s lazy-reload TTL (docs/plans/active/CV-SETTINGS-PLAN.md §3.1,
+     * CV-SETTINGS-CONTEXT.md's W2 &rarr; W5 handoff) — profiles ship unconditionally (no feature
+     * flag; built-in profiles exist regardless of {@link #enabled()}/{@link Registry#enabled()}),
+     * so this record only ever holds the one cache-freshness tunable.
+     *
+     * @param cacheTtl how long {@code CvProfileCache} serves a stale in-memory snapshot before
+     *                 reloading from {@code CvProfileRepositoryPort} on next read; every write
+     *                 (create/update/delete/bind/unbind) still refreshes the snapshot immediately
+     *                 regardless of this TTL. Default 60s
+     */
+    public record Profiles(@DefaultValue("60s") Duration cacheTtl) {
+        static final Duration DEFAULT_CACHE_TTL = Duration.ofSeconds(60);
     }
 }

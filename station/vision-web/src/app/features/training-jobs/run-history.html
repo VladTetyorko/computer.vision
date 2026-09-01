@@ -1,0 +1,64 @@
+<div class="page">
+  <vision-cv-subnav active="training" />
+
+  <vision-section-header
+    title="Training run history"
+    subtitle="Every persisted fine-tune run on this deployment, newest first — the record of what happened, not a live progress view."
+  />
+
+  @if (facade.disabled()) {
+    <vision-empty
+      icon="alert"
+      title="Training tools aren't enabled here"
+      message="This deployment hasn't turned on the CV training feature yet. Ask an administrator to enable vision.training.enabled if you need to review past runs."
+    />
+  } @else if (facade.loading() && !facade.loaded()) {
+    <p class="muted">Loading run history…</p>
+  } @else if (facade.runs().length === 0) {
+    <vision-empty
+      icon="history"
+      title="No training runs yet"
+      message="Start a fine-tune run from a dataset's own page to see its record appear here."
+    />
+  } @else {
+    <ul class="run-list">
+      @for (run of facade.runs(); track run.runId) {
+        <li>
+          <a class="run-row" [routerLink]="['/manage/training/runs', run.runId]">
+            @switch (run.state) {
+              @case ('RUNNING') {
+                <span class="chip accent"><span class="dot live"></span>{{ runStateLabel(run.state) }}</span>
+              }
+              @case ('SUCCEEDED') {
+                <span class="chip ok"><span class="dot ok"></span>{{ runStateLabel(run.state) }}</span>
+              }
+              @case ('FAILED') {
+                <span class="chip danger"><span class="dot danger"></span>{{ runStateLabel(run.state) }}</span>
+              }
+            }
+            <span class="run-item">
+              <span class="label">Progress</span>
+              <span class="value mono">{{ runProgressLabel(run) }}</span>
+            </span>
+            <span class="run-item">
+              <span class="label">Loss</span>
+              <span class="value mono">{{ formatRunMetric(run.loss) }}</span>
+            </span>
+            <span class="run-item">
+              <span class="label">mAP@50</span>
+              <span class="value mono">{{ formatRunMetric(run.map50) }}</span>
+            </span>
+            <span class="run-item dataset">
+              <span class="label">Dataset</span>
+              <span class="value truncate" [title]="runDatasetLabel(run)">{{ runDatasetLabel(run) }}</span>
+            </span>
+            <span class="run-item started">
+              <span class="label">Started</span>
+              <span class="value">{{ run.startedBy }} · {{ formatWhen(run.startedAt) }}</span>
+            </span>
+          </a>
+        </li>
+      }
+    </ul>
+  }
+</div>

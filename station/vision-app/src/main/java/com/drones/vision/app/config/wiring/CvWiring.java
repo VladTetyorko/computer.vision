@@ -1,6 +1,7 @@
 package com.drones.vision.app.config.wiring;
 
 import com.drones.vision.adapter.cvgrpc.CvChannelSupervisor;
+import com.drones.vision.adapter.cvgrpc.CvChannels;
 import com.drones.vision.adapter.cvgrpc.GrpcCvSettings;
 import com.drones.vision.adapter.cvgrpc.WireFormat;
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
@@ -13,20 +14,31 @@ import com.drones.vision.app.config.properties.VisionCvProperties;
 import com.drones.vision.app.devsupport.NoopDetectionPort;
 import com.drones.vision.app.geo.TrackProjectionRunner;
 import com.drones.vision.kernel.AssetId;
+import com.drones.vision.learning.application.ConfigModelCatalog;
+import com.drones.vision.learning.application.ModelRegistryService;
+import com.drones.vision.learning.domain.model.CvModelRecord;
+import com.drones.vision.learning.domain.model.ModelProvenance;
+import com.drones.vision.learning.domain.model.ModelRuntime;
+import com.drones.vision.learning.domain.model.ModelStatus;
+import com.drones.vision.learning.domain.model.ModelTaskType;
+import com.drones.vision.perception.application.profile.CvProfileService;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.port.DetectionPort;
 import com.drones.vision.perception.domain.port.PulledDetectionPort;
+import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
+import com.drones.vision.api.security.CurrentUser;
 import io.grpc.ManagedChannel;
-import io.grpc.ManagedChannelBuilder;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 
+import java.time.Instant;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
 /**
@@ -88,21 +100,67 @@ public class CvWiring {
      *   matching {@code GrpcDetectionPort#buildChannel} — the seconds form silently truncated any
      *   sub-second value (e.g. {@code keepalive-time: 500ms} became {@code 0}).</li>
      * </ul>
+     *
+     * <h2>Failover target list (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6)</h2>
+     * Now the <b>inference</b> channel specifically: built from {@link VisionCvProperties#inferenceTargets()}
+     * via {@code CvChannels#forTargets} rather than a hand-rolled {@code ManagedChannelBuilder.forAddress}
+     * call. {@code CvChannels#forTargets}'s own {@code applyCommonSettings} helper (verified by reading
+     * that class before this bean was rewritten) applies exactly the same plaintext-conditional-on-{@link
+     * VisionCvProperties#plaintext()} and three keepalive settings in {@code .toMillis()} this bean used
+     * to apply inline — so a deployment that leaves {@code vision.cv.inference.targets} unset (the
+     * default) gets a single-target channel byte-identical to before this rewrite: {@link
+     * VisionCvProperties#inferenceTargets()} falls back to {@link VisionCvProperties#host()}/{@link
+     * VisionCvProperties#port()}, and {@code CvChannels#forTargets} routes a one-element list straight
+     * through {@code forTarget} with no custom resolver in the path at all. Marked {@link Primary} —
+     * every pre-existing unqualified {@code ManagedChannel} injection point in this class and its
+     * siblings keeps resolving this bean even after {@link #cvTrainingChannel} exists too.
      */
     @Bean(destroyMethod = "shutdown")
     @ConditionalOnExpression("${vision.cv.enabled:false} or ${vision.training.enabled:false} "
-            + "or '${vision.cv.frame-transport:push}' == 'pull' or ${vision.geo.visual.enabled:false}")
+            + "or '${vision.cv.frame-transport:push}' == 'pull' or ${vision.geo.visual.enabled:false} "
+            + "or ${vision.cv.registry.enabled:false}")
+    @Primary
     public ManagedChannel cvGrpcChannel(VisionCvProperties cvProperties) {
         GrpcCvSettings settings = toGrpcCvSettings(cvProperties);
-        ManagedChannelBuilder<?> builder = ManagedChannelBuilder.forAddress(cvProperties.host(), cvProperties.port());
-        if (settings.plaintext()) {
-            builder.usePlaintext();
-        }
-        return builder
-                .keepAliveTime(settings.keepAliveTime().toMillis(), TimeUnit.MILLISECONDS)
-                .keepAliveTimeout(settings.keepAliveTimeout().toMillis(), TimeUnit.MILLISECONDS)
-                .keepAliveWithoutCalls(settings.keepAliveWithoutCalls())
-                .build();
+        return CvChannels.forTargets(cvProperties.inferenceTargets(), settings);
+    }
+
+    /**
+     * The <b>training/geolocation</b> channel (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6) —
+     * present only when {@code vision.cv.training.target} is actually set ({@link
+     * VisionCvProperties#trainingTargetConfigured()}), so a deployment that never sets it builds no
+     * second channel at all and every {@code Training/*}/{@code Geolocation/*} consumer keeps resolving
+     * {@link #cvGrpcChannel} exactly as before this bean existed — see {@link #controlPlaneChannel} for
+     * how consumers pick between the two.
+     *
+     * <p><b>Honest limit</b>: setting {@code vision.cv.training.target} to the same {@code host:port} as
+     * the inference target (or as {@link VisionCvProperties#endpoint()}) opens a <em>second</em>,
+     * independently-configured TCP connection to the same cv-service process — this key is meant for a
+     * genuinely split deployment (the {@code cv-split} Compose profile's {@code cv-service-training} on
+     * a different port/host than {@code cv-service-inference}), not a way to get two channels to one
+     * process for free.
+     *
+     * <p>Owns its own shutdown ({@code destroyMethod = "shutdown"}), independent of {@link
+     * #cvGrpcChannel}'s lifecycle — the two channels never share a shutdown path since they may not even
+     * both exist.
+     */
+    @Bean(name = "cvTrainingChannel", destroyMethod = "shutdown")
+    @ConditionalOnProperty(prefix = "vision.cv", name = "training.target")
+    public ManagedChannel cvTrainingChannel(VisionCvProperties cvProperties) {
+        GrpcCvSettings settings = toGrpcCvSettings(cvProperties);
+        return CvChannels.forTarget(cvProperties.trainingTarget(), settings);
+    }
+
+    /**
+     * Picks the control-plane ({@code Training/*}/{@code Geolocation/*}) channel: {@link
+     * #cvTrainingChannel} when it exists (a split deployment), else {@link #cvGrpcChannel} (the default,
+     * one-process case). Package-private — {@code TrainingWiringConfiguration}/{@code
+     * VisualGeoWiringConfiguration} both call this rather than re-deriving the same fallback, so the
+     * "training beats inference, inference is the fallback" decision has exactly one home.
+     */
+    static ManagedChannel controlPlaneChannel(ObjectProvider<ManagedChannel> cvTrainingChannel,
+                                               ObjectProvider<ManagedChannel> cvGrpcChannel) {
+        return cvTrainingChannel.getIfAvailable(cvGrpcChannel::getObject);
     }
 
     /**
@@ -153,10 +211,11 @@ public class CvWiring {
      */
     @Bean(initMethod = "start", destroyMethod = "close")
     @ConditionalOnExpression("(${vision.cv.enabled:false} or ${vision.training.enabled:false} "
-            + "or '${vision.cv.frame-transport:push}' == 'pull' or ${vision.geo.visual.enabled:false}) "
+            + "or '${vision.cv.frame-transport:push}' == 'pull' or ${vision.geo.visual.enabled:false} "
+            + "or ${vision.cv.registry.enabled:false}) "
             + "and ${vision.cv.reconnect.enabled:true}")
     public CvChannelSupervisor cvChannelSupervisor(VisionCvProperties cvProperties,
-                                                    ObjectProvider<ManagedChannel> cvGrpcChannel) {
+            @Qualifier("cvGrpcChannel") ObjectProvider<ManagedChannel> cvGrpcChannel) {
         return new CvChannelSupervisor(cvGrpcChannel.getObject(), toGrpcCvSettings(cvProperties));
     }
 
@@ -180,8 +239,9 @@ public class CvWiring {
      * which has no gate and behaves byte-identically to before this wave.
      */
     @Bean(destroyMethod = "")
-    public DetectionPort detectionPort(VisionCvProperties cvProperties, ObjectProvider<ManagedChannel> cvGrpcChannel,
-                                        ObjectProvider<CvChannelSupervisor> cvChannelSupervisor) {
+    public DetectionPort detectionPort(VisionCvProperties cvProperties,
+            @Qualifier("cvGrpcChannel") ObjectProvider<ManagedChannel> cvGrpcChannel,
+            ObjectProvider<CvChannelSupervisor> cvChannelSupervisor) {
         if (cvProperties.enabled()) {
             GrpcCvSettings settings = toGrpcCvSettings(cvProperties);
             CvChannelSupervisor supervisor = cvChannelSupervisor.getIfAvailable();
@@ -208,7 +268,7 @@ public class CvWiring {
     @Bean
     @ConditionalOnExpression("'${vision.cv.frame-transport:push}' == 'pull'")
     public PulledDetectionPort pulledDetectionPort(VisionCvProperties cvProperties,
-                                                    ObjectProvider<ManagedChannel> cvGrpcChannel) {
+            @Qualifier("cvGrpcChannel") ObjectProvider<ManagedChannel> cvGrpcChannel) {
         return new GrpcPulledDetectionPort(cvGrpcChannel.getObject(), toGrpcCvSettings(cvProperties));
     }
 
@@ -225,10 +285,35 @@ public class CvWiring {
     @Bean
     public List<CvModelResponse> cvModelRoster() {
         return List.of(
-                new CvModelResponse("yolo26n.pt", "General (people & vehicles, fast)", "general", false, List.of()),
-                new CvModelResponse("orion12l.pt", "Military vehicles", "specialized", false, List.of()),
+                new CvModelResponse("yolo26n.pt", "General (people & vehicles, fast)", "general", false, List.of(),
+                        null, null, null, null, null, null, null, null, null),
+                new CvModelResponse("orion12l.pt", "Military vehicles", "specialized", false, List.of(), null, null,
+                        null, null, null, null, null, null, null),
                 new CvModelResponse("yoloe-26s-seg-pf.pt", "Everything (incl. buildings, slower)", "open-vocab",
-                        true, List.of()));
+                        true, List.of(), null, null, null, null, null, null, null, null, null));
+    }
+
+    /**
+     * {@link ModelRegistryService#models()}'s worker-unreachable fallback, and {@code
+     * CvModelsController}'s own fallback when {@code ModelRegistryService} is not wired at all
+     * (docs/plans/active/CV-SETTINGS-PLAN.md §8 OQ5, CV-SETTINGS-CONTEXT.md's W4-app → W5 handoff) —
+     * maps {@link #cvModelRoster} (unchanged, still the picker's original three-entry list) onto the
+     * {@code CvModelRecord} shape the registry's own catalogue deals in. Every field this static
+     * roster cannot supply falls back to the same stand-in {@code DefaultModelRegistryService} itself
+     * uses when it has to synthesize a row from scratch (see {@code CvModelView#synthesize}): {@code
+     * DRAFT} status, {@link ModelProvenance#none()}, no metrics, never promoted, version {@code
+     * "latest"}, task type {@code DETECT}, runtime {@code PYTORCH}, an empty closed class set, and a
+     * fixed {@link Instant#EPOCH} {@code createdAt} sentinel — deterministic across restarts rather
+     * than "whenever this bean happens to run."
+     */
+    @Bean
+    public ConfigModelCatalog configModelCatalog(List<CvModelResponse> cvModelRoster) {
+        List<CvModelRecord> records = cvModelRoster.stream()
+                .map(model -> new CvModelRecord(model.id(), "latest", model.displayName(), model.kind(),
+                        model.openVocab(), model.defaultLabelFilter(), ModelTaskType.DETECT, ModelRuntime.PYTORCH,
+                        List.of(), ModelStatus.DRAFT, null, ModelProvenance.none(), null, null, Instant.EPOCH))
+                .toList();
+        return new ConfigModelCatalog(records);
     }
 
     /**
@@ -306,15 +391,22 @@ public class CvWiring {
     }
 
     /**
-     * Bundles {@link #streamDefaultConfig} and {@link #detectionDemandPort}'s poll-touch seam behind
-     * one bean for {@code StreamController} (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.8) — see
-     * {@link StreamDetectionSupport}'s own javadoc for why. {@code detectionDemandPort} resolves to
-     * {@code null} exactly when {@link #detectionDemandPort} itself was not created (demand gate
-     * disabled), which {@link StreamDetectionSupport} already treats as "nothing to touch."
+     * Bundles {@link #streamDefaultConfig} and {@link #detectionDemandPort}'s poll-touch seam, plus
+     * (docs/plans/active/CV-SETTINGS-PLAN.md §5.4, CV-SETTINGS-CONTEXT.md's W2 → W5 handoff) the
+     * profile-resolution collaborators {@code StreamController#start} needs to fold a bound {@code
+     * CvProfile} under an explicit request override, behind one bean for {@code StreamController}
+     * (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.8) — see {@link StreamDetectionSupport}'s own
+     * javadoc for why. {@code detectionDemandPort} resolves to {@code null} exactly when {@link
+     * #detectionDemandPort} itself was not created (demand gate disabled), which {@link
+     * StreamDetectionSupport} already treats as "nothing to touch." {@code cvProfileService} is
+     * unconditional (see {@code CvProfileWiringConfiguration}) — profiles ship regardless of {@link
+     * VisionCvProperties#enabled()}/{@link VisionCvProperties.Registry#enabled()}.
      */
     @Bean
     public StreamDetectionSupport streamDetectionSupport(PipelineConfig streamDefaultConfig,
-            ObjectProvider<LiveAndPollDetectionDemand> detectionDemandPort) {
-        return new StreamDetectionSupport(streamDefaultConfig, detectionDemandPort.getIfAvailable());
+            ObjectProvider<LiveAndPollDetectionDemand> detectionDemandPort, CvProfileService cvProfileService,
+            AssetRepositoryPort assetRepositoryPort, CurrentUser currentUser) {
+        return new StreamDetectionSupport(streamDefaultConfig, detectionDemandPort.getIfAvailable(),
+                cvProfileService, assetRepositoryPort, currentUser);
     }
 }

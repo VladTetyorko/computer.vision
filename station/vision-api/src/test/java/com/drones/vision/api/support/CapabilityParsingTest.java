@@ -61,7 +61,7 @@ class CapabilityParsingTest {
     @Test
     void createAssetDeviceSpecDefaultsAMavlinkDeviceToTelemetry() {
         DeviceRegistration registration = new CreateAssetRequest.DeviceSpec(
-                "ESP32 rover", "mavlink", "udp://0.0.0.0:14550", Map.of("sysid", "1"), null).toRegistration();
+                "ESP32 rover", "mavlink", "udp://0.0.0.0:14550", Map.of("sysid", "1"), null, null).toRegistration();
 
         assertEquals(Set.of(Capability.TELEMETRY), registration.capabilities());
     }
@@ -69,7 +69,7 @@ class CapabilityParsingTest {
     @Test
     void registerDeviceRequestDefaultsAMavlinkDeviceToTelemetry() {
         DeviceRegistration registration = new RegisterDeviceRequest(
-                "ESP32 rover", "mavlink", "udp://0.0.0.0:14550", Map.of(), null).toRegistration();
+                "ESP32 rover", "mavlink", "udp://0.0.0.0:14550", Map.of(), null, null).toRegistration();
 
         assertEquals(Set.of(Capability.TELEMETRY), registration.capabilities());
     }
@@ -77,7 +77,7 @@ class CapabilityParsingTest {
     @Test
     void aCameraRegisteredTheSameWayIsUnaffected() {
         DeviceRegistration registration = new RegisterDeviceRequest(
-                "Front camera", "rtsp", "rtsp://cam/stream", Map.of(), null).toRegistration();
+                "Front camera", "rtsp", "rtsp://cam/stream", Map.of(), null, null).toRegistration();
 
         assertEquals(Set.of(Capability.VIDEO), registration.capabilities());
     }

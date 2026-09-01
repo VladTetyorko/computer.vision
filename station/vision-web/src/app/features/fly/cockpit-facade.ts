@@ -9,6 +9,7 @@ import { DetectionsStore } from '../../core/detections/detections-store';
 import { EventsStore } from '../../core/events/events-store';
 import { GeofenceStore } from '../../core/geofence/geofence-store';
 import { GeoStore } from '../../core/geo/geo-store';
+import { hasFix } from '../../core/geo/geo-logic';
 import { LiveStore } from '../../core/live/live-store';
 import { isLiveAvailable } from '../../core/live/live-fallback-logic';
 import { MarksStore } from '../../core/map-data/marks-store';
@@ -18,15 +19,17 @@ import { resolveInteractionMode } from '../../core/map-data/drawings-logic';
 import { WeatherStore } from '../../core/weather/weather-store';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { videoDevices } from '../../core/fleet/device-logic';
-import { ageSeconds, telemetryDevices } from '../../core/telemetry/telemetry-logic';
+import { ageSeconds, humanAge, selectOpenUsage, telemetryDevices } from '../../core/telemetry/telemetry-logic';
 import { canCommandReturnHome, deriveDiagnostics, derivePreflight, flightBanner } from '../../core/telemetry/flight-state-logic';
 import { capitalizeLabel, filterEvents, formatConfidence } from '../../core/events/events-logic';
 import { parseWindLimitMps } from '../../core/weather/weather-logic';
-import type { BoxesMode, Transport } from '../../shared/player/player';
-import { DEFAULT_DECLUTTER_LEVEL, cycleBoxesMode } from '../../shared/player/detection-overlay-logic';
+import { AuthStore } from '../../core/auth/auth-store';
+import { canManageOrg } from '../../core/org/org-logic';
+import type { Transport } from '../../shared/player/player';
+import { cycleBoxesMode } from '../../shared/player/detection-overlay-logic';
 import { followMarkers, type DrawingDraft } from '../../shared/map/tactical-map/tactical-map-logic';
 import { canShowCommandPanel } from './flight-command-panel-logic';
-import { buildFollowLockPatch, buildHotKnobPatch } from './cv-control-panel-logic';
+import { buildFollowLockPatch, buildHotKnobPatch, resolveCvConfig, type ResolvedCvConfig } from './cv-control-panel-logic';
 import { resolveDetectionEnabled, videoNotice } from './stream-state-logic';
 import {
   ALL_DRONES_OPTION_VALUE,
@@ -34,10 +37,18 @@ import {
   isAllDronesOption,
   isWatchMode,
   latestFinishedUsage,
+  positionLabel,
   sortAssetsForPicker,
   trackingIdChanged,
 } from './fly-logic';
-import type { AssetDetails, AssetSummary, DetectionEvent, FlightCapability } from '../../core/api/models';
+import type {
+  AssetDetails,
+  AssetSummary,
+  DetectionEvent,
+  EffectiveCvProfile,
+  FlightCapability,
+  StreamConfigResponse,
+} from '../../core/api/models';
 
 /** Asset characteristics/usages + the header switcher's own asset list are re-read at this cadence. */
 const ASSET_POLL_INTERVAL_MS = 5_000;
@@ -106,6 +117,7 @@ export class CockpitFacade {
   /** Named `liveStore`, not `live` — this class already has a public `live` computed (below,
    * "stream() !== undefined"), unrelated to `LiveStore`'s own connection state. */
   private readonly liveStore = inject(LiveStore);
+  private readonly auth = inject(AuthStore);
 
   readonly fleet = inject(FleetStore);
   readonly settings = inject(SettingsStore);
@@ -209,16 +221,53 @@ export class CockpitFacade {
    * both "it is fine" and "we could not measure it". Never speaks about detection. */
   readonly videoNotice = computed(() => videoNotice(this.live(), this.streamState()));
 
+  // --- CV profile hierarchy / live config read-back (docs/plans/active/CV-SETTINGS-PLAN.md §3, wave
+  // W7) — the one honest replacement for the deleted `SettingsStore` CV-defaults draft (H2). Two
+  // independent reads, merged by `resolveCvConfig`: the asset's own effective profile
+  // ({@link effectiveProfile}, §3.1's hierarchy — what the *next* Start will apply) and, once a
+  // stream exists, that stream's own live config ({@link streamConfig}, `GET .../config` — H6's real
+  // readback instead of assuming from what this browser last sent). {@link resolvedCvConfig} is the
+  // one merge point every fly-time CV control (`CvControlPanel`, `CvSetupModal`, `DetectionsStrip`)
+  // renders from.
+
+  /** The asset's own effective CV profile — fetched whenever {@link activeAssetId} changes,
+   *  independent of whether a stream is running (an asset always has *some* effective profile, per
+   *  §3.1's "behavior-preserving with zero bindings" default). `undefined` before the first fetch
+   *  resolves, on any failure, or with no asset selected — every reader degrades honestly (§3.5 rule
+   *  3), never fabricating a profile name. */
+  readonly effectiveProfile = signal<EffectiveCvProfile | undefined>(undefined);
+
+  /** The running stream's own live config (`GET /api/streams/{id}/config`) — fetched whenever
+   *  {@link stream}'s own `streamId` changes, `undefined` while nothing is running, before the first
+   *  fetch resolves, or on failure. This is what makes the fly-time controls a real readback (H6)
+   *  rather than an assumption carried forward from whatever this browser last PATCHed. */
+  readonly streamConfig = signal<StreamConfigResponse | undefined>(undefined);
+
+  /** The one value every fly-time CV control renders — see this section's own doc comment. */
+  readonly resolvedCvConfig = computed<ResolvedCvConfig | undefined>(() =>
+    resolveCvConfig(this.streamConfig(), this.effectiveProfile()),
+  );
+
+  /** `canManageOrg` (`core/org/org-logic.ts`), the same predicate `/vision/profiles`
+   *  (`VisionProfilesFacade.canManage`) gates on — the Vision drawer's "Save to this asset's
+   *  profile" action is hidden for anyone who couldn't reach that page to see the result anyway.
+   *  Dev parity: `vision.auth.enabled=false`'s dev principal resolves to `ADMIN`/unbounded, so this
+   *  is always `true` in dev, unchanged behavior. */
+  readonly canManage = computed(() => canManageOrg(this.auth.user()?.topRole));
+
+  private lastEffectiveProfileAssetId: string | undefined = undefined;
+  private lastStreamConfigStreamId: string | undefined = undefined;
+
   /**
    * **The one place this cockpit decides where a detection control's position comes from**
    * (docs/plans/done/STREAM-STATE-PLAN.md §3.1) — the running stream's own server-side intent while
-   * something is running, this browser's draft otherwise. The rail's off-dot, the video-surface
-   * "Turn on" chip and the drawer's Detect switch all read this one value, so they cannot disagree
-   * with each other or with the backend; before this plan all three rendered the draft, i.e. a
-   * localStorage value that had nothing to do with the stream on screen.
+   * something is running, the asset's own resolved CV config otherwise (wave W7 — previously this
+   * browser's `SettingsStore` draft; see {@link resolvedCvConfig}'s own doc comment for why that
+   * changed). The rail's off-dot, the video-surface "Turn on" chip and the drawer's Detect switch
+   * all read this one value, so they cannot disagree with each other or with the backend.
    */
   readonly detectionOn = computed(() =>
-    resolveDetectionEnabled(this.stream()?.detectionEnabled, this.settings.effective().detectionEnabled),
+    resolveDetectionEnabled(this.stream()?.detectionEnabled, this.resolvedCvConfig()?.detectionEnabled ?? false),
   );
 
   /** True while a Detect on/off request is in flight — the switch is bound to server truth, so
@@ -249,6 +298,18 @@ export class CockpitFacade {
   readonly telemetryDevicesList = computed(() => telemetryDevices(this.asset()?.devices ?? []));
   readonly hasTelemetryDevice = computed(() => this.telemetryDevicesList().length > 0);
 
+  /**
+   * Whether the asset's own open usage — if any — was opened by the operator's `engage` rather than
+   * a video stream starting (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P4). Read
+   * honestly off the same `AssetDetails#recentUsages` this class's 5s asset poll already refreshes
+   * (`selectOpenUsage`, `core/telemetry/telemetry-logic.ts`), never off a local "I clicked it" flag
+   * — there is no `GET .../session` read endpoint (`VisionApi#engageAssetSession`'s own doc
+   * comment), so this poll is the only honest source. `features/fly/rc-monitor.ts` feeds this and
+   * `hasTelemetryDevice`/`live` into `resolveSessionAffordance` to decide what its session-link
+   * block shows.
+   */
+  readonly operatorEngaged = computed(() => selectOpenUsage(this.asset()?.recentUsages ?? [])?.origin === 'OPERATOR');
+
   // --- Flight-controller state: failsafe banner + pre-flight checklist (docs/plans/done/FC-INTEGRATIONS-PLAN.md
   // F-d) — both pure derivations over the same `TelemetryStore.latest()` sample every other OSD chip
   // already reads, no second telemetry source.
@@ -257,9 +318,18 @@ export class CockpitFacade {
   /** Re-derives whenever the tracked sample/primary-device/live state changes — a ground-check
    * glance, not a live-ticking instrument (the OSD's own age chip is that); see
    * `flight-state-logic.ts#derivePreflight`'s own doc comment for why `Date.now()` is read here,
-   * at the call site, rather than inside that pure function. */
+   * at the call site, rather than inside that pure function. `this.capabilities()?.vehicleKind` is
+   * the same read `rc-monitor.ts#activeProfile` already makes — legitimately `undefined` before the
+   * capability fetch resolves or when it fails (`capabilities`'s own doc comment below), which
+   * `derivePreflight`'s GPS/Battery rows treat as "don't soften", not as "assume rover". */
   readonly preflightItems = computed(() =>
-    derivePreflight(this.telemetry.latest(), this.primaryDevice() !== undefined, this.live(), Date.now()),
+    derivePreflight(
+      this.telemetry.latest(),
+      this.capabilities()?.vehicleKind,
+      this.primaryDevice() !== undefined,
+      this.live(),
+      Date.now(),
+    ),
   );
 
   /** Pre-arm ground check — hidden once watch-mode drops the controls entirely, or once the FC
@@ -343,6 +413,32 @@ export class CockpitFacade {
    */
   readonly dronePosition = this.weatherPosition;
 
+  // --- Not-streaming card (docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1) --------------------------
+  // `cockpit.html` renders one honest card in place of the video hero's bare "Not streaming" caption
+  // whenever `live()` is false — CLAUDE.md's "degrade honestly": say what's actually known (last
+  // seen, last position) rather than nothing.
+
+  /** `'Last seen 4d 2h ago'`, or `'Never seen'` once no sample has ever arrived for this asset —
+   * `TelemetryStore.sampleAgeSeconds()` is the same age every OSD/Controller-drawer chip already
+   * reads (H1: a stale-but-present sample still has a real answer here, even while nothing is
+   * live). */
+  readonly notStreamingLastSeen = computed(() => {
+    const age = this.telemetry.sampleAgeSeconds();
+    return age === undefined ? 'Never seen' : `Last seen ${humanAge(age)} ago`;
+  });
+
+  /** The card's "last position" line — reuses {@link dronePosition} verbatim (live fix else the
+   * asset's own last-known position) and `fly-logic.ts#positionLabel`'s identical `lat, lon`
+   * format, rather than a third rendering of "best position we have right now". `undefined` omits
+   * the line entirely — no fix has ever been reported, **or** the only position on record is
+   * exactly `(0, 0)` (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N1: a MAVLink no-fix report,
+   * never a real vehicle position) — same poka-yoke rule as every other chip on this page. Gated on
+   * `core/geo/geo-logic.ts#hasFix` rather than re-deriving the `(0, 0)` check here. */
+  readonly notStreamingPosition = computed(() => {
+    const position = this.dronePosition();
+    return hasFix(position) ? positionLabel(position) : undefined;
+  });
+
   // --- Map inset (docs/plans/done/MAP-REWORK-PLAN.md §5.1 Wave D) ------------------------------------------
   // `<vision-tactical-map>` replaced the deleted `<vision-live-map>`, which read this facade's own
   // `TelemetryStore` through DI. The new component is dumb — every overlay is an input — so the
@@ -382,13 +478,13 @@ export class CockpitFacade {
 
   readonly latencySeconds = signal<number | null>(null);
   readonly transport = signal<Transport>('hls');
-  /** Defaults to {@link DEFAULT_DECLUTTER_LEVEL} ('priority') — burn-in no longer exists at all
-   * (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1), so there is nothing left for this to re-derive
-   * against; a plain `signal`, not the old `linkedSignal` over `streamBurnedIn`. The operator's own
-   * pick — `B`, or a click in `cv-control-panel.html` — sticks across device/asset switches exactly
-   * like `transport` above. Widened from a two-state toggle to four named declutter levels as of wave
-   * W4 (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.6) — see {@link cycleBoxes}. */
-  readonly boxesMode = signal<BoxesMode>(DEFAULT_DECLUTTER_LEVEL);
+  /** The shared, persisted declutter level (docs/plans/active/CV-SETTINGS-PLAN.md wave W7, H12) —
+   * aliases `SettingsStore.declutterLevel` directly (the exact same `WritableSignal` instance, not a
+   * copy), so this facade, `LiveFacade` and `WallTile` all read/write one preference instead of each
+   * keeping its own unshared in-memory signal. `cockpit.html` still binds `[boxesMode]="facade.
+   * boxesMode()"` / `(boxesModeChange)="facade.boxesMode.set($event)"` unchanged — only what's behind
+   * the name changed. See {@link cycleBoxes}. */
+  readonly boxesMode = this.settings.declutterLevel;
 
   /**
    * The FOLLOW-locked track id, echoed up from `CvControlPanel`'s own honest tracks-poll read
@@ -547,6 +643,38 @@ export class CockpitFacade {
         this.geo.track(assetId);
       } else {
         this.geo.reset();
+      }
+    });
+
+    // The asset's own effective CV profile (docs/plans/active/CV-SETTINGS-PLAN.md §3, wave W7) —
+    // keyed on `activeAssetId()` alone, like `geo.track()` above: independent of whether a stream is
+    // running, since §3.1's hierarchy always resolves to *some* profile.
+    effect(() => {
+      const assetId = this.activeAssetId();
+      if (!trackingIdChanged(assetId, this.lastEffectiveProfileAssetId)) {
+        return;
+      }
+      this.lastEffectiveProfileAssetId = assetId;
+      if (assetId) {
+        void this.loadEffectiveProfile(assetId);
+      } else {
+        this.effectiveProfile.set(undefined);
+      }
+    });
+
+    // The running stream's own live config (wave W7, H6) — guarded on the derived streamId
+    // primitive for the same reason telemetry/detections above are: a stream object re-arriving
+    // unchanged every ~5s poll tick must not re-fetch.
+    effect(() => {
+      const streamId = this.stream()?.streamId;
+      if (!trackingIdChanged(streamId, this.lastStreamConfigStreamId)) {
+        return;
+      }
+      this.lastStreamConfigStreamId = streamId;
+      if (streamId) {
+        void this.loadStreamConfig(streamId);
+      } else {
+        this.streamConfig.set(undefined);
       }
     });
 
@@ -802,23 +930,24 @@ export class CockpitFacade {
    * `CvControlPanel#onDetectionEnabledToggle` alike (docs/plans/done/STREAM-STATE-PLAN.md §3.1), so the
    * two can never apply the same operator intent under two different rules.
    *
-   * Two writes, deliberately unequal in status. The draft is updated because it is what the next
-   * `Start` will post. The running stream is PATCHed and then **re-read** ({@link FleetStore.refresh})
-   * rather than assumed: {@link detectionOn} renders the wire, so the switch moves when the backend
-   * says it moved and not a moment sooner. A failed PATCH therefore leaves the control exactly where
-   * the stream really is — the draft still carries the operator's preference for the next start, but
-   * nothing on screen claims a live change that did not happen.
+   * **No-op before a stream exists** (wave W7, H2 — the old draft this used to write is gone): there
+   * is nothing to PATCH and nothing left to remember client-side for "the next Start" — the profile
+   * hierarchy decides that now (§3.1). The running stream is PATCHed and then **re-read**
+   * ({@link FleetStore.refresh} + {@link refreshStreamConfig}) rather than assumed: {@link
+   * detectionOn}/{@link resolvedCvConfig} render the wire, so the switch moves when the backend says
+   * it moved and not a moment sooner. A failed PATCH therefore leaves the control exactly where the
+   * stream really is — nothing on screen claims a live change that did not happen.
    */
   async setDetection(enabled: boolean): Promise<void> {
-    this.settings.adjust({ detectionEnabled: enabled });
     const streamId = this.stream()?.streamId;
-    if (!streamId) {
+    const current = this.resolvedCvConfig();
+    if (!streamId || !current) {
       return;
     }
     this.detectionPending.set(true);
     try {
-      await this.fleet.patchStreamConfig(streamId, buildHotKnobPatch(this.settings.effective()));
-      await this.fleet.refresh({ quiet: true });
+      await this.fleet.patchStreamConfig(streamId, buildHotKnobPatch({ ...current, detectionEnabled: enabled }));
+      await Promise.all([this.fleet.refresh({ quiet: true }), this.loadStreamConfig(streamId)]);
     } finally {
       this.detectionPending.set(false);
     }
@@ -836,7 +965,10 @@ export class CockpitFacade {
     console.info(`${LOG_PREFIX} starting stream for device ${device.id}`);
     this.busy.set(true);
     try {
-      await this.fleet.start(device.id, this.settings.effective());
+      // No settings argument (wave W7, H2) — the server resolves the CV config from the profile
+      // hierarchy (§3.1: PLATFORM → ORGANIZATION → CATEGORY → ASSET → SESSION), never from a
+      // browser-local draft this app no longer keeps.
+      await this.fleet.start(device.id);
       this.explicitlyStopped.set(false); // a fresh attach — see `stopped`'s own doc comment
     } finally {
       this.busy.set(false);
@@ -854,6 +986,52 @@ export class CockpitFacade {
       this.explicitlyStopped.set(true);
     } finally {
       this.busy.set(false);
+    }
+  }
+
+  // --- Asset session (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P4) -----------------
+  // A separate `sessionBusy` signal, not `busy` above — engaging/disengaging is a distinct verb from
+  // Start/Stop and must not disable that button (or read as "stream busy") while it runs.
+
+  readonly sessionBusy = signal(false);
+
+  /**
+   * `rc-monitor.ts`'s "Engage link" button. No confirm step — same posture as {@link start}, and
+   * for the same reason: this is a calm, reversible act, not a destructive one. Re-runs
+   * {@link loadAsset} on success so `operatorEngaged` flips as soon as the write actually lands,
+   * rather than leaving the operator staring at a stale "Engage link" for up to the 5s poll period
+   * — the fact still only ever comes from that same read, never from this call's own response.
+   */
+  async engageSession(): Promise<void> {
+    const assetId = this.activeAssetId();
+    if (!assetId) {
+      return;
+    }
+    this.sessionBusy.set(true);
+    try {
+      const ok = await this.fleet.engageAsset(assetId);
+      if (ok) {
+        await this.loadAsset(assetId);
+      }
+    } finally {
+      this.sessionBusy.set(false);
+    }
+  }
+
+  /** `rc-monitor.ts`'s "End session" button. Same immediate-reload reasoning as {@link engageSession}. */
+  async endSession(): Promise<void> {
+    const assetId = this.activeAssetId();
+    if (!assetId) {
+      return;
+    }
+    this.sessionBusy.set(true);
+    try {
+      const ok = await this.fleet.disengageAsset(assetId);
+      if (ok) {
+        await this.loadAsset(assetId);
+      }
+    } finally {
+      this.sessionBusy.set(false);
     }
   }
 
@@ -904,6 +1082,50 @@ export class CockpitFacade {
         error,
       });
       this.capabilities.set(undefined);
+    }
+  }
+
+  // --- Resolved CV config (docs/plans/active/CV-SETTINGS-PLAN.md §3, wave W7) -------------------
+  // Two independent reads merged by `resolveCvConfig` — a failure on either degrades honestly to
+  // `undefined` for that half rather than fabricating a value (CLAUDE.md).
+
+  private async loadEffectiveProfile(assetId: string): Promise<void> {
+    try {
+      const profile = await this.api.getEffectiveCvProfile(assetId);
+      this.effectiveProfile.set(profile);
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} could not load the effective CV profile for ${assetId} — "From profile" line stays honest`, {
+        error,
+      });
+      this.effectiveProfile.set(undefined);
+    }
+  }
+
+  private async loadStreamConfig(streamId: string): Promise<void> {
+    try {
+      const config = await this.api.getStreamConfig(streamId);
+      this.streamConfig.set(config);
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} could not read back live config for stream ${streamId} — H6 readback stays honest`, {
+        error,
+      });
+      this.streamConfig.set(undefined);
+    }
+  }
+
+  /** `<vision-cv-setup-modal>`'s `(profileSaved)` — re-reads the asset's effective profile after an explicit save. */
+  refreshEffectiveProfile(): void {
+    const assetId = this.activeAssetId();
+    if (assetId) {
+      void this.loadEffectiveProfile(assetId);
+    }
+  }
+
+  /** `(configChanged)` from any CV control that just PATCHed the stream — the H6 readback after a write. */
+  refreshStreamConfig(): void {
+    const streamId = this.stream()?.streamId;
+    if (streamId) {
+      void this.loadStreamConfig(streamId);
     }
   }
 }

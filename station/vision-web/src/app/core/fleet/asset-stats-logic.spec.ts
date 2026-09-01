@@ -90,7 +90,7 @@ describe('kpiTiles', () => {
     expect(tiles).toEqual([
       { label: 'Total flight time', value: '12h 34m', sub: undefined, live: false },
       { label: 'Flights', value: '7' },
-      { label: 'Last flown', value: '10m 00s ago' },
+      { label: 'Last flown', value: '10m ago' },
       { label: 'Avg flight', value: '10m' },
       { label: 'Battery', value: '76%' },
     ]);

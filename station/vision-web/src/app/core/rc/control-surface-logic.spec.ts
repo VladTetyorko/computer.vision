@@ -5,6 +5,7 @@ import {
   REST_VALUE,
   axesFrom,
   displayPercent,
+  displayPercentFor,
   fractionAlong,
   knobLeftPercent,
   knobTopPercent,
@@ -102,6 +103,15 @@ describe('displayPercent — the operator reads 0-100', () => {
   });
 });
 
+describe('displayPercentFor — the same math, before a binding exists', () => {
+  it('agrees with displayPercent for the same travel', () => {
+    expect(displayPercentFor('UNIDIRECTIONAL', REST_VALUE)).toBe(displayPercent(COPTER_THROTTLE, REST_VALUE));
+    expect(displayPercentFor('UNIDIRECTIONAL', 1)).toBe(displayPercent(COPTER_THROTTLE, 1));
+    expect(displayPercentFor('CENTERED', REST_VALUE)).toBe(displayPercent(ROVER_THROTTLE, REST_VALUE));
+    expect(displayPercentFor('CENTERED', -1)).toBe(displayPercent(ROVER_THROTTLE, -1));
+  });
+});
+
 describe('knob position', () => {
   it('is the same quantity as the readout, so the two cannot drift apart', () => {
     expect(knobLeftPercent(STEERING, 0)).toBe(displayPercent(STEERING, 0));
@@ -177,8 +187,8 @@ describe('axesFrom', () => {
 });
 
 describe('profileCaveat', () => {
-  it('warns only for an unrecognised vehicle, where the throttle rests at mid-travel', () => {
-    expect(profileCaveat('UNKNOWN')).toContain('mid-travel');
+  it('warns only for an unrecognised vehicle, which binds nothing and is refused control', () => {
+    expect(profileCaveat('UNKNOWN')).toContain('refused');
     expect(profileCaveat('COPTER')).toBeUndefined();
     expect(profileCaveat('ROVER')).toBeUndefined();
     expect(profileCaveat('PLANE')).toBeUndefined();

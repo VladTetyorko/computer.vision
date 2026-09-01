@@ -55,7 +55,7 @@ class FleetControllerTest {
 
     @Test
     void summaryMapsCategoriesAndAssetsShape() throws Exception {
-        CategoryCounts drone = new CategoryCounts(new CategoryId("drone"), "Drone", 2, 2, 0, 0, 1);
+        CategoryCounts drone = new CategoryCounts(new CategoryId("drone"), "Drone", 2, 2, 0, 0, 1, 1, 1, 0, 0, 0);
         AssetId assetId = AssetId.random();
         StreamId streamId = StreamId.random();
         AssetAttention row = new AssetAttention(assetId, "Drone A", new CategoryId("drone"), "Drone",
@@ -73,6 +73,11 @@ class FleetControllerTest {
                 .andExpect(jsonPath("$.categories[0].deactivated").value(0))
                 .andExpect(jsonPath("$.categories[0].deleted").value(0))
                 .andExpect(jsonPath("$.categories[0].streaming").value(1))
+                .andExpect(jsonPath("$.categories[0].inStock").value(1))
+                .andExpect(jsonPath("$.categories[0].issued").value(1))
+                .andExpect(jsonPath("$.categories[0].inField").value(0))
+                .andExpect(jsonPath("$.categories[0].maintenance").value(0))
+                .andExpect(jsonPath("$.categories[0].retired").value(0))
                 .andExpect(jsonPath("$.assets", hasSize(1)))
                 .andExpect(jsonPath("$.assets[0].assetId").value(assetId.value().toString()))
                 .andExpect(jsonPath("$.assets[0].displayName").value("Drone A"))

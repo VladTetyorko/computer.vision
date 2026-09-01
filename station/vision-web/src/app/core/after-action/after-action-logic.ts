@@ -140,7 +140,7 @@ export function deriveCaveats(parts: readonly AfterActionPartStatus[]): string[]
  * running" from a blank `endedAt` alone.
  */
 export function openFlightNotice(open: boolean): string | null {
-  return open ? 'This flight is still in progress — the package covers everything recorded up to now.' : null;
+  return open ? 'This session is still in progress — the package covers everything recorded up to now.' : null;
 }
 
 /** The manifest → view-model transform `AfterActionPanel` renders directly. */

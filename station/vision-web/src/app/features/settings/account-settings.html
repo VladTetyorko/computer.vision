@@ -85,6 +85,24 @@
     }
   </section>
 
+  <!-- ---- Settings (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1, wave W1) — Controller left the
+       sidebar rail this wave; this link list is its one remaining door, alongside the org link a
+       manager already had elsewhere (`identity-chip.ts`). Detection defaults (`/settings/detection`)
+       used to be listed here too — replaced outright by the VISION nav group's own "Profiles" entry
+       (docs/plans/active/CV-SETTINGS-PLAN.md, wave W6; `/settings/detection` now just redirects
+       there), so its link is gone rather than repointed — a manager reaches it from the sidebar. -->
+  <section class="card">
+    <header><h2>Settings</h2></header>
+    <p class="muted hint">Other configuration that lives on its own page.</p>
+    <ul class="link-list">
+      <li><span class="muted">Account — you're already here</span></li>
+      <li><a routerLink="/manage/controller">Controller</a></li>
+      @if (facade.canManage()) {
+        <li><a routerLink="/org">Organization</a></li>
+      }
+    </ul>
+  </section>
+
   <!-- ---- System --------------------------------------------------------- -->
   <section class="card">
     <header><h2>System</h2></header>

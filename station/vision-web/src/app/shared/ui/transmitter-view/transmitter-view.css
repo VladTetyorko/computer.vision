@@ -1,0 +1,190 @@
+:host {
+  display: contents;
+}
+
+.tv {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.tv-pads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-16);
+}
+
+.tv-pad-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  flex: 1 1 8rem;
+  min-width: 8rem;
+}
+
+/* A square pad, so a diagonal drag means the same amount on both controls — matches
+   features/fly/virtual-control-surface.css, which this component absorbs. */
+.tv-pad {
+  position: relative;
+  aspect-ratio: 1;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--panel-raised);
+}
+
+.tv-pad.interactive {
+  /* The browser must not steal the drag for scrolling — a pad the operator cannot drag downward
+     is a throttle they cannot lower. */
+  touch-action: none;
+  cursor: grab;
+}
+
+.tv-pad.interactive:active {
+  cursor: grabbing;
+}
+
+.tv-pad.interactive:focus-visible {
+  outline: 2px solid var(--color-info);
+  outline-offset: 2px;
+}
+
+/* A single-control pad is a track, not a square — there is no second axis to travel along. */
+.tv-pad.single-axis {
+  aspect-ratio: 6;
+}
+
+.tv-rest-v,
+.tv-rest-h {
+  position: absolute;
+  background: var(--border-strong);
+}
+
+.tv-rest-v {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+
+.tv-rest-h {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+
+/* A unidirectional control's rest is an idle stop, not a crossing point — it draws heavier and
+   (via the bound `left`/`top` percent) sits at the pad's low edge instead of its centre. */
+.tv-rest-v.heavy {
+  width: 2px;
+}
+
+.tv-rest-h.heavy {
+  height: 2px;
+}
+
+.tv-knob {
+  position: absolute;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin: -0.75rem 0 0 -0.75rem;
+  border-radius: var(--radius-pill);
+  background: var(--text);
+  pointer-events: none;
+}
+
+/* Interactive (draggable) knob reads as the app's one accent colour; a mirrored transmitter's
+   knob stays plain text-colour — nothing on this screen moves it. */
+.tv-knob.interactive {
+  background: var(--color-info);
+  box-shadow: 0 0 0 3px var(--color-info-soft);
+}
+
+.tv-readouts {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.tv-readout {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-8);
+  font-size: 0.78rem;
+}
+
+.tv-readout-name {
+  color: var(--text-muted);
+}
+
+.tv-readout-value {
+  color: var(--text);
+}
+
+.tv-switches {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.tv-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}
+
+.tv-row-id {
+  color: var(--text-muted);
+  min-width: 2.75rem;
+}
+
+.tv-row-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+/* The live position's text — the one selection language again, applied to text this time. Takes
+   priority over `.dangerous` below: what is currently selected reads as selected first. */
+.tv-cell-text.lit {
+  color: var(--color-info);
+}
+
+.tv-cell-text.dangerous {
+  color: var(--color-danger-text);
+}
+
+.tv-sep {
+  color: var(--text-faint);
+}
+
+/* Keyboard action-key rows (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D3, wave W2) draw with the
+   exact same `.tv-row`/`.tv-cell-text` rules above — one visual idiom, whether the hold-to-fire
+   control is a physical switch or a key. A hairline only appears when bound-switch rows precede
+   this list (the adjacent-sibling selector), quietly separating "what your transmitter is bound to"
+   from "what your keyboard does" without a second heading register. */
+.tv-switches + .tv-keys {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-8);
+}
+
+.tv-unmapped {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+  font-size: 0.78rem;
+}
+
+.tv-unmapped a {
+  white-space: nowrap;
+}
+
+/* An empty layout says so in one quiet line rather than leaving a hole where the pads would be. */
+.tv-empty {
+  margin: 0;
+  font-size: 0.82rem;
+}

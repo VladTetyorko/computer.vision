@@ -7,21 +7,28 @@ import com.drones.vision.adapter.persistence.entity.AssignmentEntity;
 import com.drones.vision.adapter.persistence.entity.AuditEntryEntity;
 import com.drones.vision.adapter.persistence.entity.CameraPoseEntity;
 import com.drones.vision.adapter.persistence.entity.CategoryEntity;
+import com.drones.vision.adapter.persistence.entity.CvModelEntity;
+import com.drones.vision.adapter.persistence.entity.CvProfileBindingEntity;
+import com.drones.vision.adapter.persistence.entity.CvProfileEntity;
 import com.drones.vision.adapter.persistence.entity.DatasetEntity;
 import com.drones.vision.adapter.persistence.entity.DbAuditLogEntity;
 import com.drones.vision.adapter.persistence.entity.DetectionEventEntity;
 import com.drones.vision.adapter.persistence.entity.DetectionResultEntity;
 import com.drones.vision.adapter.persistence.entity.DeviceEntity;
+import com.drones.vision.adapter.persistence.entity.DiscoveryCandidateEntity;
 import com.drones.vision.adapter.persistence.entity.FeatureRequirementEntity;
 import com.drones.vision.adapter.persistence.entity.GeofenceZoneEntity;
 import com.drones.vision.adapter.persistence.entity.GroupEntity;
 import com.drones.vision.adapter.persistence.entity.MapDrawingEntity;
 import com.drones.vision.adapter.persistence.entity.MapLayerEntity;
 import com.drones.vision.adapter.persistence.entity.MarkEntity;
+import com.drones.vision.adapter.persistence.entity.AssetNoteEntity;
+import com.drones.vision.adapter.persistence.entity.MaintenanceRecordEntity;
 import com.drones.vision.adapter.persistence.entity.SampleImageEntity;
 import com.drones.vision.adapter.persistence.entity.TelemetrySampleEntity;
 import com.drones.vision.adapter.persistence.entity.TrackCorrectionEntity;
 import com.drones.vision.adapter.persistence.entity.TrackPointEntity;
+import com.drones.vision.adapter.persistence.entity.TrainingRunEntity;
 import com.drones.vision.adapter.persistence.entity.TrainingSampleEntity;
 import com.drones.vision.adapter.persistence.entity.UserEntity;
 import com.drones.vision.adapter.persistence.entity.ControlProfileEntity;
@@ -212,6 +219,8 @@ public final class PersistenceUnit {
         configuration.addAnnotatedClass(CategoryEntity.class);
         configuration.addAnnotatedClass(DeviceEntity.class);
         configuration.addAnnotatedClass(AssetEntity.class);
+        configuration.addAnnotatedClass(MaintenanceRecordEntity.class);
+        configuration.addAnnotatedClass(AssetNoteEntity.class);
         configuration.addAnnotatedClass(AssetUsageEntity.class);
         configuration.addAnnotatedClass(TelemetrySampleEntity.class);
         configuration.addAnnotatedClass(DetectionResultEntity.class);
@@ -249,6 +258,17 @@ public final class PersistenceUnit {
         // docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.5/§3.7 (V23__track_corrections.sql) -- excluded
         // from db_audit_log, same reasoning as TrackPointEntity above.
         configuration.addAnnotatedClass(TrackCorrectionEntity.class);
+        // docs/plans/active/CV-SETTINGS-PLAN.md §5.3 (V29__cv_profiles.sql, V30__cv_model_registry.sql,
+        // CV-SETTINGS wave W3) -- CvProfileBindingEntity needs no registration of its own beyond this;
+        // unlike LayerGrantEmbeddable it is a real @Entity (its own @IdClass composite key), not an
+        // @Embeddable, so it must be listed here explicitly like every other entity.
+        configuration.addAnnotatedClass(CvProfileEntity.class);
+        configuration.addAnnotatedClass(CvProfileBindingEntity.class);
+        configuration.addAnnotatedClass(CvModelEntity.class);
+        configuration.addAnnotatedClass(TrainingRunEntity.class);
+        // docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §11, Z2c (V31__discovery_inbox.sql) --
+        // the discovery inbox's persisted "found devices" rows.
+        configuration.addAnnotatedClass(DiscoveryCandidateEntity.class);
         return configuration.buildSessionFactory();
     }
 

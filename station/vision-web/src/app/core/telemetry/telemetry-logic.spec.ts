@@ -5,7 +5,9 @@ import {
   batterySeverity,
   deriveTrail,
   findOwningAsset,
+  freshness,
   groupTelemetryByDevice,
+  humanAge,
   isStale,
   selectOpenUsage,
   shouldPoll,
@@ -81,6 +83,14 @@ describe('deriveTrail', () => {
   function sample(partial: Partial<TelemetrySample>): TelemetrySample {
     return { deviceId: 'dev-0', at: '2026-07-22T00:00:00Z', ...partial };
   }
+
+  it('drops Null Island samples — a (0,0) position is no fix, not a place (OPERATOR-UX-6)', () => {
+    const samples: TelemetrySample[] = [
+      sample({ at: '2026-07-22T00:00:00Z', latitude: 0, longitude: 0 }),
+      sample({ at: '2026-07-22T00:00:02Z', latitude: 3, longitude: 4 }),
+    ];
+    expect(deriveTrail(samples)).toEqual([{ latitude: 3, longitude: 4, altitudeMeters: undefined }]);
+  });
 
   it('keeps chronological order and maps lat/lon/altitude', () => {
     const samples: TelemetrySample[] = [
@@ -207,6 +217,58 @@ describe('telemetryAgeSeverity', () => {
   it('is red past the red threshold', () => {
     expect(telemetryAgeSeverity(10.01)).toBe('red');
     expect(telemetryAgeSeverity(60)).toBe('red');
+  });
+});
+
+describe('freshness (docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1)', () => {
+  it('is none with no sample at all — never a fabricated tier', () => {
+    expect(freshness(undefined)).toBe('none');
+  });
+
+  it('relabels telemetryAgeSeverity\'s own tiers one-for-one', () => {
+    expect(freshness(0)).toBe('live');
+    expect(freshness(5)).toBe('live');
+    expect(freshness(5.01)).toBe('aging');
+    expect(freshness(10)).toBe('aging');
+    expect(freshness(10.01)).toBe('stale');
+  });
+
+  it('is stale for a multi-day-old sample — H1\'s own rover, ~4 days old', () => {
+    expect(freshness(353099)).toBe('stale');
+  });
+});
+
+describe('humanAge', () => {
+  it('renders seconds alone under a minute', () => {
+    expect(humanAge(0)).toBe('0s');
+    expect(humanAge(12)).toBe('12s');
+    expect(humanAge(59)).toBe('59s');
+  });
+
+  it('renders minutes and seconds under an hour', () => {
+    expect(humanAge(60)).toBe('1m');
+    expect(humanAge(190)).toBe('3m 10s');
+    expect(humanAge(3599)).toBe('59m 59s');
+  });
+
+  it('renders hours and minutes under a day, dropping seconds', () => {
+    expect(humanAge(3600)).toBe('1h');
+    expect(humanAge(14520)).toBe('4h 2m');
+    expect(humanAge(86399)).toBe('23h 59m');
+  });
+
+  it('renders days and hours at and past a day, dropping minutes', () => {
+    expect(humanAge(86400)).toBe('1d');
+    expect(humanAge(352800)).toBe('4d 2h');
+  });
+
+  it('matches H1\'s own finding — a ~353099s rover sample reads 4d 2h', () => {
+    expect(humanAge(353099)).toBe('4d 2h');
+  });
+
+  it('floors fractional seconds and clamps negative input to 0s', () => {
+    expect(humanAge(12.9)).toBe('12s');
+    expect(humanAge(-5)).toBe('0s');
   });
 });
 

@@ -1,0 +1,313 @@
+<vision-two-pane
+  [detailOpen]="!!facade.selectedRow()"
+  [detailLabel]="facade.selectedRow()?.asset?.displayName ?? 'Details'"
+  (detailClose)="facade.clearSelection()"
+>
+  <section class="card" twoPaneList>
+    @if (rows().length === 0) {
+      @if (facade.hasActiveFilters()) {
+        <vision-empty title="No matches" message="Nothing currently matches this search/filter combination.">
+          <button type="button" class="btn secondary" (click)="facade.clearFilters()">Clear filters</button>
+        </vision-empty>
+      } @else if (!facade.hasAnyAssets() && connected()) {
+        <vision-empty
+          title="No vehicles yet"
+          message='Register the built-in simulated source to see the whole pipeline work without any hardware — then use "+ Add vehicle" to bring in the real thing as a first-class asset.'
+        >
+          <button type="button" class="btn" (click)="facade.registerSimulator()" [disabled]="facade.submitting()">
+            Add the simulated source
+          </button>
+        </vision-empty>
+      } @else {
+        <vision-empty
+          [title]="connected() ? 'No vehicles' : 'No equipment'"
+          [message]="connected() ? 'No connected-device categories currently hold any assets.' : 'No non-connected categories currently hold any assets.'"
+        />
+      }
+    } @else {
+      <div class="table-scroll">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Category</th>
+              <th>Serial</th>
+              @if (connected()) {
+                <th>Readiness</th>
+              }
+              <th>Custodian</th>
+              <th>State</th>
+              @if (connected()) {
+                <th>Firmware</th>
+                <th class="col-num">Hours</th>
+                <th>Last flown</th>
+                <th class="col-num">Links</th>
+              }
+              <th aria-label="Actions"></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (row of rows(); track row.asset.assetId) {
+              <tr
+                class="row-selectable"
+                [class.selected]="row.asset.assetId === facade.selectedId()"
+                [class.archived]="row.archived"
+                tabindex="0"
+                role="button"
+                [attr.aria-pressed]="row.asset.assetId === facade.selectedId()"
+                [attr.aria-label]="'View details for ' + row.asset.displayName"
+                (click)="facade.selectRow(row.asset.assetId)"
+                (keydown.enter)="facade.selectRow(row.asset.assetId)"
+                (keydown.space)="$event.preventDefault(); facade.selectRow(row.asset.assetId)"
+              >
+                <td>
+                  <div class="name-cell">
+                    <span class="name truncate" [title]="row.asset.displayName">{{ row.asset.displayName }}</span>
+                  </div>
+                </td>
+                <td class="muted truncate">{{ row.asset.categoryName }}</td>
+                <td class="mono truncate">{{ row.asset.identity?.serialNumber ?? '—' }}</td>
+                @if (connected()) {
+                  <td>
+                    @if (row.readinessVerdict; as verdict) {
+                      <span class="row-state">
+                        <span class="dot" [class.ok]="verdictTone(verdict) === 'ok'" [class.danger]="verdictTone(verdict) === 'danger'"></span>
+                        <span class="muted">{{ verdictLabel(verdict) }}</span>
+                      </span>
+                    } @else {
+                      <span class="muted">—</span>
+                    }
+                  </td>
+                }
+                <td class="truncate">{{ row.custodianName ?? '—' }}</td>
+                <td>
+                  <span
+                    class="chip"
+                    [class.faded]="row.stateChip.tone === 'muted'"
+                    [class.ok]="row.stateChip.tone === 'ok'"
+                    [class.warn]="row.stateChip.tone === 'warn'"
+                  >
+                    @if (row.stateChip.live) {
+                      <span class="dot live"></span>
+                    }
+                    {{ row.stateChip.label }}
+                  </span>
+                </td>
+                @if (connected()) {
+                  <td class="muted">{{ row.firmware }}</td>
+                  <td class="col-num mono">{{ row.hours }}</td>
+                  <td class="muted">{{ row.lastFlownLabel }}</td>
+                  <td class="col-num mono">{{ row.deviceCount }}</td>
+                }
+                <td class="row-kebab-cell" (click)="$event.stopPropagation()">
+                  <vision-kebab-menu [label]="'More actions for ' + row.asset.displayName">
+                    @if (rowActions(row).issue) {
+                      <button type="button" (click)="openIssue(row)">Issue to…</button>
+                    }
+                    @if (rowActions(row).return) {
+                      <button type="button" [disabled]="facade.busyAssetId() === row.asset.assetId" (click)="facade.returnAsset(row.asset.assetId)">
+                        Return
+                      </button>
+                    }
+                    @if (rowActions(row).ground) {
+                      <button type="button" (click)="openGround(row)">Ground…</button>
+                    }
+                    @if (rowActions(row).release) {
+                      <button type="button" [disabled]="facade.busyAssetId() === row.asset.assetId" (click)="facade.release(row.asset.assetId)">
+                        Release
+                      </button>
+                    }
+                    @if (rowActions(row).retire) {
+                      <button type="button" class="danger-action" (click)="openRetire(row)">Retire…</button>
+                    }
+                    <button type="button" (click)="facade.openAsset(row.asset.assetId)">Open</button>
+                    @if (rowActions(row).fly) {
+                      <button type="button" (click)="facade.openCockpitFor(row.asset.assetId)">Fly</button>
+                    }
+                  </vision-kebab-menu>
+                </td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    }
+  </section>
+
+  <!-- ---- Detail panel — Identity + Custody fact groups, then a Maintenance drawer
+       (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3's "Detail pane gains Identity and Custody fact
+       groups and a Maintenance drawer"). -->
+  @if (facade.selectedRow(); as row) {
+    <div twoPaneDetail>
+      <div class="detail-chips">
+        <span
+          class="chip"
+          [class.faded]="row.stateChip.tone === 'muted'"
+          [class.ok]="row.stateChip.tone === 'ok'"
+          [class.warn]="row.stateChip.tone === 'warn'"
+        >
+          @if (row.stateChip.live) {
+            <span class="dot live"></span>
+          }
+          {{ row.stateChip.label }}
+        </span>
+      </div>
+
+      <h3 class="detail-heading">Identity</h3>
+      <dl class="detail-fields">
+        <div class="detail-field">
+          <dt>Serial</dt>
+          <dd>{{ row.asset.identity?.serialNumber ?? '—' }}</dd>
+        </div>
+        <div class="detail-field">
+          <dt>Make</dt>
+          <dd>{{ row.asset.identity?.make ?? '—' }}</dd>
+        </div>
+        <div class="detail-field">
+          <dt>Model</dt>
+          <dd>{{ row.asset.identity?.model ?? '—' }}</dd>
+        </div>
+        <div class="detail-field">
+          <dt>Registration</dt>
+          <dd>{{ row.registration ?? '—' }}</dd>
+        </div>
+      </dl>
+
+      <h3 class="detail-heading">Custody</h3>
+      <dl class="detail-fields">
+        <div class="detail-field">
+          <dt>Custodian</dt>
+          <dd>{{ row.custodianName ?? '—' }}</dd>
+        </div>
+        <div class="detail-field">
+          <dt>Location</dt>
+          <dd>{{ row.asset.custody?.location ?? '—' }}</dd>
+        </div>
+        <div class="detail-field">
+          <dt>Since</dt>
+          <dd>{{ row.asset.custody?.since ?? '—' }}</dd>
+        </div>
+        <div class="detail-field">
+          <dt>Category</dt>
+          <dd>{{ row.asset.categoryName }}</dd>
+        </div>
+      </dl>
+
+      <div class="detail-section">
+        <h3 class="detail-heading">Maintenance</h3>
+        @if (facade.loadingMaintenance()) {
+          <p class="muted detail-empty">Loading…</p>
+        } @else if (facade.maintenanceRecords().length === 0) {
+          <p class="muted detail-empty">No maintenance history.</p>
+        } @else {
+          <ul class="detail-device-list">
+            @for (record of facade.maintenanceRecords(); track record.id) {
+              <li class="detail-device-row maintenance-row">
+                <span class="muted">{{ record.kind }}</span>
+                <span class="truncate" [title]="record.summary">{{ record.summary }}</span>
+                @if (!record.closedAt) {
+                  <button type="button" class="btn secondary small" (click)="facade.closeMaintenanceRecordNow(row.asset.assetId, record.id)">
+                    Close
+                  </button>
+                } @else {
+                  <span class="muted">Closed</span>
+                }
+              </li>
+            }
+          </ul>
+        }
+
+        <form class="new-record-form" (submit)="$event.preventDefault(); openNewRecord(row.asset.assetId)">
+          <select name="newRecordKind" [ngModel]="newRecordKind()" (ngModelChange)="newRecordKind.set($event)">
+            <option value="NOTE">Note</option>
+            <option value="REPAIR">Repair</option>
+            <option value="INSPECTION_DUE">Inspection due</option>
+            <option value="GROUNDING">Grounding</option>
+          </select>
+          <input
+            type="text"
+            name="newRecordSummary"
+            placeholder="Summary…"
+            [ngModel]="newRecordSummary()"
+            (ngModelChange)="newRecordSummary.set($event)"
+          />
+          <button type="submit" class="btn secondary small" [disabled]="!newRecordSummary().trim() || facade.submitting()">Open record</button>
+        </form>
+      </div>
+
+      <div class="detail-actions">
+        @if (rowActions(row).fly) {
+          <button type="button" class="btn" (click)="facade.openCockpitFor(row.asset.assetId)">Fly</button>
+        }
+        <a class="btn secondary" [routerLink]="['/assets', row.asset.assetId]">Open full ›</a>
+      </div>
+    </div>
+  }
+</vision-two-pane>
+
+<!-- ---- Issue to… (custom modal — vision-confirm-dialog can't hold a picker) -->
+@if (issueTarget(); as row) {
+  <div class="backdrop" (click)="cancelIssue()">
+    <div class="dialog" role="dialog" aria-modal="true" [attr.aria-label]="'Issue ' + row.asset.displayName" (click)="$event.stopPropagation()">
+      <div class="dialog-head">
+        <h2>Issue "{{ row.asset.displayName }}"</h2>
+      </div>
+      <label class="field">
+        <span class="field-label">To</span>
+        <select name="issueCustodianId" [ngModel]="issueCustodianId()" (ngModelChange)="issueCustodianId.set($event)">
+          <option value="">Select a person…</option>
+          @for (user of facade.custodianDirectory(); track user.userId) {
+            <option [value]="user.userId">{{ user.displayName }}</option>
+          }
+        </select>
+      </label>
+      <label class="field">
+        <span class="field-label">Location (optional)</span>
+        <input type="text" name="issueLocation" [ngModel]="issueLocation()" (ngModelChange)="issueLocation.set($event)" />
+      </label>
+      <div class="create-actions">
+        <button type="button" class="btn" [disabled]="!issueCustodianId() || facade.submitting()" (click)="confirmIssue()">Issue</button>
+        <button type="button" class="btn secondary" (click)="cancelIssue()">Cancel</button>
+      </div>
+    </div>
+  </div>
+}
+
+<!-- ---- Ground (custom modal) -->
+@if (groundTarget(); as row) {
+  <div class="backdrop" (click)="cancelGround()">
+    <div class="dialog" role="dialog" aria-modal="true" [attr.aria-label]="'Ground ' + row.asset.displayName" (click)="$event.stopPropagation()">
+      <div class="dialog-head">
+        <h2>Ground "{{ row.asset.displayName }}"</h2>
+      </div>
+      <label class="field">
+        <span class="field-label">Reason</span>
+        <select name="groundKind" [ngModel]="groundKind()" (ngModelChange)="groundKind.set($event)">
+          <option value="GROUNDING">Grounding</option>
+          <option value="INSPECTION_DUE">Inspection due</option>
+        </select>
+      </label>
+      <label class="field">
+        <span class="field-label">Summary</span>
+        <textarea name="groundSummary" rows="3" [ngModel]="groundSummary()" (ngModelChange)="groundSummary.set($event)"></textarea>
+      </label>
+      <div class="create-actions">
+        <button type="button" class="btn danger-action" [disabled]="!groundSummary().trim() || facade.submitting()" (click)="confirmGround()">
+          Ground
+        </button>
+        <button type="button" class="btn secondary" (click)="cancelGround()">Cancel</button>
+      </div>
+    </div>
+  </div>
+}
+
+<!-- ---- Retire (generic confirm — no form fields needed) -->
+@if (retireTarget(); as row) {
+  <vision-confirm-dialog
+    [message]="'Retire &quot;' + row.asset.displayName + '&quot;? This removes it from active service.'"
+    confirmLabel="Retire"
+    [busy]="facade.submitting()"
+    (confirmed)="confirmRetire()"
+    (cancelled)="retireTarget.set(undefined)"
+  />
+}

@@ -361,179 +361,20 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private long nextProbeAtNanos = 0L;
     private long outageFailureCount = 0L;
 
-    public StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
-                           Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
-                           StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
-                           EventPublisherPort eventPublisher) {
-        this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, null);
-    }
-
     /**
-     * Same as the 8-argument constructor, plus a {@link DetectionEventEngine} collaborator
-     * (docs/plans/done/MVP2-PLAN.md §E, E-a) fed every completed detection result alongside {@link
-     * #extrapolator}.
-     *
-     * @param eventEngine nullable — {@code null} (the other constructors' default) means no
-     *                     debounced {@code DetectionEvent} tracking runs for this pipeline, the
-     *                     same nullable-collaborator convention as {@code usageTracker}.
-     *                     Deliberately a single bundled collaborator rather than three more raw
-     *                     ports (asset/usage/event-store) on this constructor — see {@code
-     *                     DefaultStreamService}'s wiring for why.
+     * The single canonical constructor (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md Finding
+     * R1) — every collaborator beyond the eight mandatory arguments (stream/device identity,
+     * config, source, and the four core ports) is bundled into {@code collaborators}; see {@link
+     * StreamPipelineCollaborators} for what each field controls and {@link
+     * StreamPipelineCollaborators#defaults()} for the behavior every pre-R1 shortest constructor
+     * used to default to.
      */
     public StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
                            Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
                            StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
-                           EventPublisherPort eventPublisher, DetectionEventEngine eventEngine) {
-        this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, eventEngine, null, null);
-    }
-
-    /**
-     * Same as the 9-argument constructor, plus the collaborators needed to announce completed
-     * detection results as live updates (docs/plans/done/REALTIME-PLAN.md §4).
-     *
-     * @param assetId                 nullable — the owning asset of the device streaming, resolved
-     *                                 once by {@link DefaultStreamService} at stream start;
-     *                                 {@code null} when the device belongs to no asset, in which
-     *                                 case nothing is ever announced (mirrors {@code
-     *                                 UsageTracker}'s own "untracked device" convention)
-     * @param liveUpdatePublisherPort nullable — {@code null} (every other constructor's default)
-     *                                 means no live-update announcements for this pipeline, the
-     *                                 same nullable-collaborator convention as {@code eventEngine}
-     */
-    public StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
-                           Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
-                           StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
-                           EventPublisherPort eventPublisher, DetectionEventEngine eventEngine, AssetId assetId,
-                           DetectionLiveUpdatePort liveUpdatePublisherPort) {
-        this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, eventEngine, assetId, liveUpdatePublisherPort, null);
-    }
-
-    /**
-     * Same as the 11-argument constructor, plus a {@link Supplier} of the telemetry sample used for
-     * ego-motion compensation (see {@link #cameraAttitude()}).
-     *
-     * @param telemetrySupplier nullable — {@code null} (every other constructor's default) means
-     *                           {@link #cameraAttitude()} can never resolve for this pipeline,
-     *                           exactly as before this constructor existed. When given, it is
-     *                           called at most once per submitted detection (only when a field of
-     *                           view is configured, see {@link StreamPipelineSettings#cameraHfovDegrees()})
-     *                           and must therefore be cheap — an in-memory read of the freshest
-     *                           known sample, never blocking I/O. A {@code null} result (or a
-     *                           thrown exception, caught and treated the same way) means "no
-     *                           sample right now," not a failure.
-     */
-    public StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
-                           Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
-                           StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
-                           EventPublisherPort eventPublisher, DetectionEventEngine eventEngine, AssetId assetId,
-                           DetectionLiveUpdatePort liveUpdatePublisherPort, Supplier<Telemetry> telemetrySupplier) {
-        this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
-                System::nanoTime, StreamPipelineSettings.defaults());
-    }
-
-    /**
-     * Test seam: same as the public constructors but with an injectable
-     * nanotime source for the frame-cadence measurement and the detection
-     * outage/backoff timing, so tests can drive both off a deterministic
-     * synthetic clock instead of depending on real wall-clock timing.
-     * Defaults {@link StreamPipelineSettings} to {@link StreamPipelineSettings#defaults()}.
-     */
-    StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
-                   Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
-                   StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
-                   EventPublisherPort eventPublisher, DetectionEventEngine eventEngine,
-                   AssetId assetId, DetectionLiveUpdatePort liveUpdatePublisherPort,
-                   Supplier<Telemetry> telemetrySupplier, LongSupplier nanoTimeSource) {
-        this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
-                nanoTimeSource, StreamPipelineSettings.defaults());
-    }
-
-    /**
-     * Test/wiring seam: same as the 13-argument constructor, plus an explicit {@link
-     * StreamPipelineSettings} (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3 config extraction) instead
-     * of relying on {@link StreamPipelineSettings#defaults()} — lets a test drive the frame-cadence/
-     * detection-backoff/extrapolation tuning deterministically, and lets {@link
-     * DefaultStreamService} (wiring) supply a {@code vision-app}-bound configuration instead of this
-     * class hardcoding one. Public — unlike the other test seams here — because {@code
-     * DefaultStreamService} lives in a different feature package ({@code stream}, not {@code
-     * pipeline}) and calls this constructor directly with its own resolved {@code nanoTimeSource}/
-     * {@code settings} rather than the {@code System::nanoTime}/{@code
-     * StreamPipelineSettings#defaults()} the shorter public constructors default to.
-     */
-    public StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
-                   Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
-                   StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
-                   EventPublisherPort eventPublisher, DetectionEventEngine eventEngine,
-                   AssetId assetId, DetectionLiveUpdatePort liveUpdatePublisherPort,
-                   Supplier<Telemetry> telemetrySupplier, LongSupplier nanoTimeSource,
-                   StreamPipelineSettings settings) {
-        this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
-                nanoTimeSource, settings, System::nanoTime);
-    }
-
-    /**
-     * Wiring seam: same as the 14-argument constructor, plus an optional pull-mode detection driver
-     * (docs/plans/done/MEDIA-SOT-PLAN.md wave M5, D5/D6) — see {@link PullDetectionBinding}. Public, for the
-     * same reason the 14-argument constructor is: {@code DefaultStreamService} supplies its own
-     * resolved collaborators from a different feature package.
-     *
-     * @param pullDetection nullable — {@code null} (every other constructor's default) means push-mode
-     *                      detection exactly as before this capability existed: {@link #maybeDetect}
-     *                      samples frames and calls {@code detectionPort} directly, unchanged. When
-     *                      given, this pipeline instead subscribes to {@link
-     *                      PullDetectionBinding#results()} and forwards every arriving {@link
-     *                      DetectionResult} to the same {@link #onDetectionResult} fan-out push mode
-     *                      uses — push-mode sampling/submission never runs for this pipeline (see
-     *                      {@link #maybeDetect}'s guard).
-     */
-    public StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
-                   Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
-                   StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
-                   EventPublisherPort eventPublisher, DetectionEventEngine eventEngine,
-                   AssetId assetId, DetectionLiveUpdatePort liveUpdatePublisherPort,
-                   Supplier<Telemetry> telemetrySupplier, LongSupplier nanoTimeSource,
-                   StreamPipelineSettings settings, PullDetectionBinding pullDetection) {
-        this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
-                nanoTimeSource, settings, System::nanoTime, pullDetection);
-    }
-
-    /**
-     * Package-private seam adding {@code latencyNanoSource} — see {@link #latencyNanoSource} for why
-     * it is separate from {@code nanoTimeSource}. Only the same-package latency test injects it.
-     * Delegates to the master constructor with {@code pullDetection=null} (push mode).
-     */
-    StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
-                   Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
-                   StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
-                   EventPublisherPort eventPublisher, DetectionEventEngine eventEngine,
-                   AssetId assetId, DetectionLiveUpdatePort liveUpdatePublisherPort,
-                   Supplier<Telemetry> telemetrySupplier, LongSupplier nanoTimeSource,
-                   StreamPipelineSettings settings, LongSupplier latencyNanoSource) {
-        this(streamId, device, config, source, detectionPort, streamPublisherPort, detectionRepositoryPort,
-                eventPublisher, eventEngine, assetId, liveUpdatePublisherPort, telemetrySupplier,
-                nanoTimeSource, settings, latencyNanoSource, null);
-    }
-
-    /**
-     * Master constructor: same as the 15-argument (latency-seam) constructor, plus {@code
-     * pullDetection} — see the public 15-argument (settings + pullDetection) constructor's own javadoc.
-     */
-    StreamPipeline(StreamId streamId, Device device, PipelineConfig config,
-                   Flow.Publisher<VideoFrame> source, DetectionPort detectionPort,
-                   StreamPublisherPort streamPublisherPort, DetectionRepositoryPort detectionRepositoryPort,
-                   EventPublisherPort eventPublisher, DetectionEventEngine eventEngine,
-                   AssetId assetId, DetectionLiveUpdatePort liveUpdatePublisherPort,
-                   Supplier<Telemetry> telemetrySupplier, LongSupplier nanoTimeSource,
-                   StreamPipelineSettings settings, LongSupplier latencyNanoSource,
-                   PullDetectionBinding pullDetection) {
-        this.latencyNanoSource = Objects.requireNonNull(latencyNanoSource, "latencyNanoSource must not be null");
+                           EventPublisherPort eventPublisher, StreamPipelineCollaborators collaborators) {
+        Objects.requireNonNull(collaborators, "collaborators must not be null");
+        this.latencyNanoSource = collaborators.latencyNanoSource();
         this.streamId = Objects.requireNonNull(streamId, "streamId must not be null");
         this.device = Objects.requireNonNull(device, "device must not be null");
         this.config = Objects.requireNonNull(config, "config must not be null");
@@ -543,13 +384,15 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         this.detectionRepositoryPort =
                 Objects.requireNonNull(detectionRepositoryPort, "detectionRepositoryPort must not be null");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
-        this.eventEngine = eventEngine; // nullable: no detection-event tracking when absent
-        this.assetId = assetId; // nullable: no owning asset, or live updates not wired
-        this.liveUpdatePublisherPort = liveUpdatePublisherPort; // nullable: no live-update announcements when absent
-        this.telemetrySupplier = telemetrySupplier; // nullable: no ego-motion telemetry input when absent
-        this.nanoTimeSource = Objects.requireNonNull(nanoTimeSource, "nanoTimeSource must not be null");
-        this.pullDetection = pullDetection; // nullable: push-mode detection when absent (D5/D6)
-        Objects.requireNonNull(settings, "settings must not be null");
+        this.eventEngine = collaborators.eventEngine().orElse(null); // nullable: no detection-event tracking when absent
+        this.assetId = collaborators.assetId().orElse(null); // nullable: no owning asset, or live updates not wired
+        this.liveUpdatePublisherPort =
+                collaborators.liveUpdatePublisherPort().orElse(null); // nullable: no live-update announcements when absent
+        this.telemetrySupplier =
+                collaborators.telemetrySupplier().orElse(null); // nullable: no ego-motion telemetry input when absent
+        this.nanoTimeSource = collaborators.nanoTimeSource();
+        this.pullDetection = collaborators.pullDetection().orElse(null); // nullable: push-mode detection when absent (D5/D6)
+        StreamPipelineSettings settings = collaborators.settings();
         this.cameraHfovDegrees = settings.cameraHfovDegrees();
         this.assumedSourceFps = settings.assumedSourceFps();
         this.measuredFpsEwmaAlpha = settings.measuredFpsEwmaAlpha();
@@ -564,7 +407,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         this.trackingStats = new TrackingStatsWindow(settings.trackingStatsWindow());
         this.pipelineLatency = new PipelineLatencyWindow(settings.trackingStatsWindow());
         this.detectionRate = new DetectionRateWindow(settings.trackingStatsWindow(),
-                pullDetection == null ? DetectionRateWindow.Transport.PUSH : DetectionRateWindow.Transport.PULL);
+                this.pullDetection == null ? DetectionRateWindow.Transport.PUSH : DetectionRateWindow.Transport.PULL);
         this.rateController = new DetectionRateController(settings.adaptiveRate(), settings.cameraHfovDegrees());
         this.backoffNanos = this.detectionBackoffInitialNanos;
         // Seeded from this.config/this.detectionDemand, both already assigned above -- construction

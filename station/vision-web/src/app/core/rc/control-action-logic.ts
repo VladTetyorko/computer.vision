@@ -196,8 +196,19 @@ export function activeProfileFor(
   return forKind.find((p) => p.active && p.source === 'SAVED') ?? forKind.find((p) => p.source === 'BUILT_IN');
 }
 
-/** A short human sentence for what a bound control just did, for the toast/one-line log. */
-export function actionLabel(action: ControlAction, parameter?: string | null): string {
+/**
+ * A short human sentence for what a bound control just did, for the toast/one-line log.
+ *
+ * `vehicleKind` (docs/plans/active/FLEET-RADIO-PLAN.md R4b) feeds only `EMERGENCY_STOP`'s wording:
+ * the backend gave a rover's emergency stop a different, safer meaning — `MAV_CMD_DO_SET_MODE` into
+ * ArduRover's `Hold` (an active brake), never a forced disarm, because disarming immediately after
+ * would release the very brake the stop just applied (`MavlinkFlightCommander#emergencyStop`'s own
+ * javadoc has the full rationale) — so the label must say `Hold`, not read like "cut the motors".
+ * Every other kind, `undefined`/`UNKNOWN` included, keeps the platform's historical meaning: a
+ * forced disarm, and the label that has always said so. Mirrors the precedent
+ * `core/telemetry/flight-state-logic.ts#derivePreflight` set for a per-kind label/rule.
+ */
+export function actionLabel(action: ControlAction, parameter?: string | null, vehicleKind?: VehicleKind): string {
   switch (action) {
     case 'SET_MODE':
       return `Mode ${parameter ?? ''}`.trim();
@@ -206,7 +217,7 @@ export function actionLabel(action: ControlAction, parameter?: string | null): s
     case 'TOGGLE_ARM':
       return 'Toggle arm';
     case 'EMERGENCY_STOP':
-      return 'Emergency stop';
+      return vehicleKind === 'ROVER' ? 'Emergency stop (Hold)' : 'Emergency stop';
     case 'RETURN_TO_HOME':
       return 'Return to home';
     case 'ARM':

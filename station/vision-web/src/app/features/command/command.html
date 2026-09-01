@@ -87,37 +87,66 @@
           <span class="muted">{{ facade.entityRows().length }}</span>
         </header>
 
+        <!-- docs/plans/active/OPERATOR-UX-4-PLAN.md finding N3, §2 N3 — the same persisted preference
+             `/fly`'s picker uses (`CommandFacade#hideSimulated`'s own doc comment), only shown once
+             there is at least one simulated row to hide. -->
+        @if (facade.railGroups().simulated.length > 0) {
+          <label class="row rail-hide-simulated">
+            <input
+              type="checkbox"
+              name="hideSimulated"
+              [checked]="facade.hideSimulated()"
+              (change)="facade.toggleHideSimulated()"
+            />
+            <span>Hide simulated</span>
+          </label>
+        }
+
         @if (facade.summary() === undefined) {
           <p class="muted hint">Loading…</p>
         } @else if (facade.entityRows().length === 0) {
           <p class="muted hint">No assets registered yet.</p>
         } @else {
-          <ul class="rail-list">
-            @for (row of facade.entityRows(); track row.asset.assetId) {
-              <li>
-                <button
-                  type="button"
-                  class="rail-row"
-                  [class.selected]="row.asset.assetId === facade.selectedAssetId()"
-                  [class.critical]="row.severity === 'critical'"
-                  [class.warning]="row.severity === 'warning'"
-                  (click)="facade.selectAsset(row.asset.assetId)"
-                >
-                  <span class="dot" [class.live]="row.asset.streaming"></span>
-                  <span class="rail-name truncate">{{ row.asset.displayName }}</span>
-                  @if (row.asset.failsafe === true) {
-                    <span class="chip fs-chip" title="Failsafe active">FS</span>
+          <!-- Two groups, structural-label headers (frontend-style §8) — mirrors `drone-picker.html`'s
+               own "Your vehicles" / "Simulated" split exactly (including duplicating this small
+               `<ul>`/`@for` wrapper once per group, the same shape that file's own `.picker-grid`
+               blocks take — see `DronePickerCard`'s own doc comment for why the *row* markup lives in
+               a dumb child component instead of an `NgTemplateOutlet`, the same choice made here with
+               `<vision-command-rail-row>`), so the same triage an operator already learned on `/fly`
+               also orders this rail. -->
+          <section class="rail-group">
+            <h3 class="rail-group-label">Your vehicles ({{ facade.railGroups().yours.length }})</h3>
+            <ul class="rail-list">
+              @for (row of facade.railGroups().yours; track row.asset.assetId) {
+                <li>
+                  <vision-command-rail-row
+                    [row]="row"
+                    [selected]="row.asset.assetId === facade.selectedAssetId()"
+                    (select)="facade.selectAsset(row.asset.assetId)"
+                  />
+                </li>
+              }
+            </ul>
+          </section>
+
+          @if (facade.railGroups().simulated.length > 0) {
+            <section class="rail-group">
+              <h3 class="rail-group-label">Simulated ({{ facade.railGroups().simulated.length }})</h3>
+              @if (!facade.hideSimulated()) {
+                <ul class="rail-list">
+                  @for (row of facade.railGroups().simulated; track row.asset.assetId) {
+                    <li>
+                      <vision-command-rail-row
+                        [row]="row"
+                        [selected]="row.asset.assetId === facade.selectedAssetId()"
+                        (select)="facade.selectAsset(row.asset.assetId)"
+                      />
+                    </li>
                   }
-                  <span class="rail-category faint truncate">{{ row.asset.categoryName }}</span>
-                  @if (row.severity !== 'ok') {
-                    <span class="chip severity-chip" [class.danger]="row.severity === 'critical'" [class.warn]="row.severity === 'warning'">
-                      {{ row.severity === 'critical' ? 'CRIT' : 'WARN' }}
-                    </span>
-                  }
-                </button>
-              </li>
-            }
-          </ul>
+                </ul>
+              }
+            </section>
+          }
         }
       </aside>
     }
@@ -203,6 +232,7 @@
             class="command-panel"
             [asset]="asset"
             [marker]="facade.selectedMarker()"
+            [reasons]="facade.selectedAttentionReasons()"
             [videoDeviceId]="facade.selectedVideoDeviceId()"
             [stream]="facade.selectedStream()"
             (watchLive)="facade.watchSelected()"

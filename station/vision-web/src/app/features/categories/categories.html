@@ -1,15 +1,10 @@
-<div class="page">
-  <!-- docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/extracts/design/14-categories.md: `page-head` is gone; the
-       subtitle carries genuine instruction so it becomes a `hint` rather than being deleted (see
-       this file's own class doc comment). -->
-  <vision-page-bar
-    title="Asset categories"
-    icon="category"
-    hint="Every category assets are grouped by, with live counts."
-  >
+<div [class.page]="!embedded()">
+  <!-- `[class.page]` not a bare class — `embedded()` mounts inside `InventoryPage`'s own `.page`
+       (WAREHOUSE-UX-PLAN.md §4 W9); a second nested `.page` would double its 24/32/64px padding. -->
+  <!-- Shared by both header shapes below — see `categories.ts`'s own `embedded` doc comment. -->
+  <ng-template #categoryFiltersTpl>
     @if (facade.hasAny()) {
       <input
-        pageBarFilters
         type="search"
         class="categories-search"
         placeholder="Search categories…"
@@ -18,12 +13,93 @@
         (ngModelChange)="facade.searchQuery.set($event)"
       />
     }
-  </vision-page-bar>
+  </ng-template>
+  <ng-template #categoryActionsTpl>
+    @if (!showCreate()) {
+      <button type="button" class="btn" (click)="openCreate()">+ Add category</button>
+    }
+  </ng-template>
 
-  <vision-notice icon="help">
-    Creating and editing categories is coming — browsing and filtering assets by category already
-    works below.
-  </vision-notice>
+  <!-- docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/extracts/design/14-categories.md: `page-head` is gone; the
+       subtitle carries genuine instruction so it becomes a `hint` rather than being deleted (see
+       this file's own class doc comment). -->
+  @if (!embedded()) {
+    <vision-page-bar
+      title="Categories"
+      icon="category"
+      hint="Every category assets are grouped by, with live counts."
+    >
+      <ng-container pageBarFilters><ng-container *ngTemplateOutlet="categoryFiltersTpl" /></ng-container>
+      <ng-container pageBarActions><ng-container *ngTemplateOutlet="categoryActionsTpl" /></ng-container>
+    </vision-page-bar>
+  } @else {
+    <div class="embedded-toolbar">
+      <ng-container *ngTemplateOutlet="categoryFiltersTpl" />
+      <ng-container *ngTemplateOutlet="categoryActionsTpl" />
+    </div>
+  }
+
+  <!-- ---- Create form (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3's write half, wave W4) — a plain
+       card, not a modal: only four fields, no reason to block the rest of the page. -->
+  @if (showCreate()) {
+    <section class="card create-form">
+      <h3 class="create-heading">New category</h3>
+      <div class="create-fields">
+        <label class="field">
+          <span class="field-label">ID (slug)</span>
+          <input
+            type="text"
+            name="createId"
+            placeholder="e.g. battery-case"
+            [ngModel]="createId()"
+            (ngModelChange)="createId.set($event)"
+          />
+          @if (createId().length > 0 && !isValidCategoryId(createId())) {
+            <span class="field-error">Lowercase letters, digits, and single hyphens only.</span>
+          }
+        </label>
+        <label class="field">
+          <span class="field-label">Name</span>
+          <input
+            type="text"
+            name="createName"
+            placeholder="e.g. Battery case"
+            [ngModel]="createName()"
+            (ngModelChange)="createName.set($event)"
+          />
+        </label>
+        <label class="field">
+          <span class="field-label">Parent (optional)</span>
+          <select name="createParent" [ngModel]="createParent()" (ngModelChange)="createParent.set($event)">
+            <option value="">None</option>
+            @for (option of facade.parentOptions(); track option.slug) {
+              <option [value]="option.slug">{{ option.name }}</option>
+            }
+          </select>
+        </label>
+        <label class="row toggle field-toggle">
+          <input
+            type="checkbox"
+            name="createConnected"
+            [ngModel]="createConnected()"
+            (ngModelChange)="createConnected.set($event)"
+          />
+          <span>Vehicles (connected device, not equipment)</span>
+        </label>
+      </div>
+      <div class="create-actions">
+        <button
+          type="button"
+          class="btn"
+          [disabled]="!canCreateCategory(createId(), createName()) || facade.submitting()"
+          (click)="submitCreate()"
+        >
+          Create
+        </button>
+        <button type="button" class="btn secondary" (click)="cancelCreate()">Cancel</button>
+      </div>
+    </section>
+  }
 
   <section class="card">
     <vision-section-header title="Categories" [subtitle]="facade.rows().length + ' shown'" />
@@ -44,6 +120,7 @@
           <thead>
             <tr>
               <th>Category</th>
+              <th>Kind</th>
               <th class="col-num">Total</th>
               <th class="col-num">Active</th>
               <th class="col-num">Deactivated</th>
@@ -53,24 +130,66 @@
           </thead>
           <tbody>
             @for (row of facade.rows(); track row.slug) {
-              <tr>
-                <td>{{ row.name }}</td>
-                <td class="col-num mono">{{ row.total }}</td>
-                <td class="col-num mono">{{ row.active }}</td>
-                <td class="col-num mono">{{ row.deactivated }}</td>
-                <td>
-                  @if (row.streaming > 0) {
-                    <span class="chip ok"><span class="dot live"></span>{{ row.streaming }}</span>
-                  } @else {
-                    <span class="muted">0</span>
-                  }
-                </td>
-                <td class="actions">
-                  <a class="btn secondary small" [routerLink]="['/assets']" [queryParams]="{ category: row.slug }">
-                    View assets
-                  </a>
-                </td>
-              </tr>
+              @if (editingSlug() === row.slug) {
+                <!-- ---- Inline edit row (Rename / Set connected) — replaces the row in place rather
+                     than a modal, mirroring the create form's own "no reason to block the page" call. -->
+                <tr class="edit-row">
+                  <td colspan="7">
+                    <div class="create-fields">
+                      <label class="field">
+                        <span class="field-label">Name</span>
+                        <input type="text" name="editName" [ngModel]="editName()" (ngModelChange)="editName.set($event)" />
+                      </label>
+                      <label class="field">
+                        <span class="field-label">Parent (optional)</span>
+                        <select name="editParent" [ngModel]="editParent()" (ngModelChange)="editParent.set($event)">
+                          <option value="">None</option>
+                          @for (option of facade.parentOptions(); track option.slug) {
+                            @if (option.slug !== row.slug) {
+                              <option [value]="option.slug">{{ option.name }}</option>
+                            }
+                          }
+                        </select>
+                      </label>
+                      <label class="row toggle field-toggle">
+                        <input type="checkbox" name="editConnected" [ngModel]="editConnected()" (ngModelChange)="editConnected.set($event)" />
+                        <span>Vehicles (connected device, not equipment)</span>
+                      </label>
+                    </div>
+                    <div class="create-actions">
+                      <button type="button" class="btn" [disabled]="!isValidCategoryName(editName()) || facade.submitting()" (click)="submitEdit()">
+                        Save
+                      </button>
+                      <button type="button" class="btn secondary" (click)="cancelEdit()">Cancel</button>
+                    </div>
+                  </td>
+                </tr>
+              } @else {
+                <tr>
+                  <td>{{ row.name }}</td>
+                  <td class="muted">{{ row.connected ? 'Vehicles' : 'Equipment' }}</td>
+                  <td class="col-num mono">{{ row.total }}</td>
+                  <td class="col-num mono">{{ row.active }}</td>
+                  <td class="col-num mono">{{ row.deactivated }}</td>
+                  <td>
+                    @if (row.streaming > 0) {
+                      <span class="chip ok"><span class="dot live"></span>{{ row.streaming }}</span>
+                    } @else {
+                      <span class="muted">0</span>
+                    }
+                  </td>
+                  <td class="actions">
+                    <button type="button" class="btn secondary small" (click)="startEdit(row)">Edit</button>
+                    <a
+                      class="btn secondary small"
+                      [routerLink]="['/assets']"
+                      [queryParams]="{ tab: row.connected ? 'vehicles' : 'equipment', category: row.slug }"
+                    >
+                      View
+                    </a>
+                  </td>
+                </tr>
+              }
             }
           </tbody>
         </table>

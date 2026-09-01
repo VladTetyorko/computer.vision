@@ -1,5 +1,6 @@
 package com.drones.vision.adapter.mavlink;
 
+import com.drones.mavlink.VehicleClass;
 import com.drones.mavlink.codec.FrameReader;
 import com.drones.mavlink.codec.MavFrame;
 import com.drones.mavlink.transport.ByteChunk;
@@ -21,7 +22,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 
 /**
  * {@link DeviceDiscoveryPort} implementation for plug-and-fly MAVLink heartbeat discovery
@@ -66,13 +66,20 @@ import java.util.Set;
  * <h2>Naming a discovered vehicle</h2>
  * {@code "<Firmware> <vehicle kind> (sysid <n>)"}, e.g. {@code "ArduPilot quadcopter (sysid 7)"} —
  * firmware from {@code HEARTBEAT.autopilot} (reusing {@link
- * MavlinkTelemetryDecoder#firmwareLabel}), vehicle kind from {@code HEARTBEAT.type} (see {@link
- * #vehicleKind}). Neither is known until a {@code HEARTBEAT} has actually been heard from that
- * vehicle — before that, a sysid is still reported (from whatever other message type first
- * revealed it), just as {@code "MAVLink vehicle (sysid n)"}, never a fabricated firmware/kind.
- * {@link DiscoveredDevice#suggestedCategory()} is {@code "drone"} only for an airborne vehicle
- * kind (quadcopter/hexacopter/octocopter/tricopter/helicopter/fixed-wing); a rover/boat/unknown
- * kind gets no suggested category, same "don't guess past what was actually observed" discipline.
+ * MavlinkTelemetryDecoder#firmwareLabel}), vehicle kind from {@code HEARTBEAT.type} via {@link
+ * com.drones.mavlink.VehicleClass#label} (see {@link #vehicleKind}). Neither is known until a
+ * {@code HEARTBEAT} has actually been heard from that vehicle — before that, a sysid is still
+ * reported (from whatever other message type first revealed it), just as {@code "MAVLink vehicle
+ * (sysid n)"}, never a fabricated firmware/kind. <b>FLEET-RADIO R1 (F1c):</b> before this wave this
+ * class held its own {@code MAV_TYPE} switch that knew no VTOL and no submarine, so both were
+ * labelled the generic {@code "vehicle"} fallback — indistinguishable from truly not having heard a
+ * heartbeat at all. It now shares {@code VehicleClass}'s one vocabulary with {@code
+ * MavlinkVehicleConfigurator}'s onboarding probe, so the same vehicle is named identically by
+ * discovery and by probing.
+ * {@link DiscoveredDevice#suggestedCategory()} is {@code "drone"} only for a {@code
+ * VehicleClass.COPTER}/{@code PLANE} vehicle (every rotorcraft and every fixed-wing/VTOL); a
+ * rover/boat/submarine/unsupported/not-a-vehicle/unknown kind gets no suggested category, same
+ * "don't guess past what was actually observed" discipline.
  *
  * <p>Blocking, self-time-boxed to ~{@code timeout} on both paths; never throws for "nothing
  * heard" — an empty list is a normal, non-error result, per {@link DeviceDiscoveryPort}'s
@@ -89,23 +96,10 @@ public final class MavlinkHeartbeatScanner implements DeviceDiscoveryPort {
     private static final String METHOD = "mavlink";
     private static final CategoryId DRONE_CATEGORY = new CategoryId("drone");
 
-    // MAV_TYPE raw values this scanner cares about for naming/categorization -- duplicated from the
-    // upstream MAVLink common.xml enum rather than reused from FlightModes (whose own MAV_TYPE_*
-    // constants are private to that class, and exist there only to pick a mode table, not to
-    // label a vehicle kind).
-    private static final int MAV_TYPE_FIXED_WING = 1;
-    private static final int MAV_TYPE_QUADROTOR = 2;
-    private static final int MAV_TYPE_COAXIAL = 3;
-    private static final int MAV_TYPE_HELICOPTER = 4;
-    private static final int MAV_TYPE_GROUND_ROVER = 10;
-    private static final int MAV_TYPE_SURFACE_BOAT = 11;
-    private static final int MAV_TYPE_HEXAROTOR = 13;
-    private static final int MAV_TYPE_OCTOROTOR = 14;
-    private static final int MAV_TYPE_TRICOPTER = 15;
-
+    // FLEET-RADIO R1 (F1c): this scanner used to hold its own MAV_TYPE switch here, duplicated from
+    // (and disagreeing with) MavlinkVehicleConfigurator's. Both now read com.drones.mavlink.VehicleClass,
+    // the one MAV_TYPE table -- see that class and this file's own vehicleKind/isAirborne below.
     private static final String KIND_VEHICLE = "vehicle";
-    private static final Set<String> AIRBORNE_KINDS =
-            Set.of("quadcopter", "hexacopter", "octocopter", "tricopter", "helicopter", "fixed-wing");
 
     private final MavlinkTelemetrySource telemetrySource;
     private final int port;
@@ -257,7 +251,7 @@ public final class MavlinkHeartbeatScanner implements DeviceDiscoveryPort {
         String kind = vehicleKind(mavType);
         String name = firmwareDisplayName(firmwareLabel) + " " + kind + " (sysid " + sysid + ")";
         URI uri = URI.create("udp://" + MavlinkTelemetrySource.DEFAULT_BIND_HOST + ":" + port);
-        CategoryId category = AIRBORNE_KINDS.contains(kind) ? DRONE_CATEGORY : null;
+        CategoryId category = isAirborne(mavType) ? DRONE_CATEGORY : null;
         StreamDescriptor stream =
                 new StreamDescriptor(METHOD, uri, Map.of(MavlinkTelemetrySource.OPTION_SYSID, String.valueOf(sysid)));
 
@@ -284,22 +278,29 @@ public final class MavlinkHeartbeatScanner implements DeviceDiscoveryPort {
         };
     }
 
-    /** @return quadcopter/hexacopter/octocopter/tricopter/helicopter/fixed-wing/rover/boat, or {@value #KIND_VEHICLE} if unknown/unmapped */
-    private static String vehicleKind(Integer mavType) {
+    /**
+     * The shared {@link VehicleClass#label} for {@code mavType}, or {@value #KIND_VEHICLE} when
+     * nothing better is known — either no {@code HEARTBEAT} has been heard yet ({@code mavType ==
+     * null}) or the number is genuinely unrecognized. A recognized-but-unsupported airframe or a
+     * non-vehicle instrument (a gimbal, a GCS) still gets its own real label here, never this
+     * fallback (FLEET-RADIO R1, F1c) — package-private so {@code VehicleTaxonomyAgreementTest} can
+     * assert it against {@code MavlinkVehicleConfigurator}'s own vehicle-kind lookup directly.
+     */
+    static String vehicleKind(Integer mavType) {
         if (mavType == null) {
             return KIND_VEHICLE;
         }
-        return switch (mavType) {
-            case MAV_TYPE_QUADROTOR -> "quadcopter";
-            case MAV_TYPE_HEXAROTOR -> "hexacopter";
-            case MAV_TYPE_OCTOROTOR -> "octocopter";
-            case MAV_TYPE_TRICOPTER -> "tricopter";
-            case MAV_TYPE_HELICOPTER, MAV_TYPE_COAXIAL -> "helicopter";
-            case MAV_TYPE_FIXED_WING -> "fixed-wing";
-            case MAV_TYPE_GROUND_ROVER -> "rover";
-            case MAV_TYPE_SURFACE_BOAT -> "boat";
-            default -> KIND_VEHICLE;
-        };
+        String label = VehicleClass.label(mavType);
+        return label != null ? label : KIND_VEHICLE;
+    }
+
+    /** {@code true} only for a real airborne family ({@link VehicleClass#COPTER}/{@link VehicleClass#PLANE}). */
+    private static boolean isAirborne(Integer mavType) {
+        if (mavType == null) {
+            return false;
+        }
+        VehicleClass vehicleClass = VehicleClass.of(mavType);
+        return vehicleClass == VehicleClass.COPTER || vehicleClass == VehicleClass.PLANE;
     }
 
     private static void sleepQuietly(long millis) {

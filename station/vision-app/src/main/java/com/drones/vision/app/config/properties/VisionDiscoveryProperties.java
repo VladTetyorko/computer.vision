@@ -28,16 +28,45 @@ import java.time.Duration;
  * beans are registered at all) deliberately stays outside this record, read directly via {@code
  * @ConditionalOnProperty} on each scanner {@code @Bean} method.
  *
+ * <p>{@link #lobby()}/{@link #inbox()} (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §11,
+ * Z2c) configure {@code com.drones.vision.app.discovery.DiscoveryInboxRunner}: {@link
+ * Inbox#enabled()} gates whether that runner bean is registered at all (read via {@code
+ * @ConditionalOnProperty} on its {@code @Bean} method, the same split {@link #mavlinkPort()}'s own
+ * javadoc describes for {@code vision.discovery.enabled}); {@link Lobby#enabled()} gates one step
+ * <em>inside</em> that runner's own sweep — whether it re-asserts the standing MAVLink lobby hold
+ * this wave's cycle — checked in-line, not via a second {@code @Bean}, since holding the lobby is
+ * not a bean of its own to conditionally register. Both default {@code true}: this feature's whole
+ * point is discovery that works with zero configuration, so shipping it off by default would defeat
+ * the plan it implements (see that document's own P2).
+ *
+ * <p>{@link #mediamtx()} (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §11 "Z3 amendment
+ * (2026-08-31) — poll, not hook") configures {@code MediamtxPathScanner}, one of the {@link
+ * #mediamtx()}-registered {@code DeviceDiscoveryPort} beans {@code wiring.DiscoveryWiring} wires.
+ * Deliberately holds only {@link Mediamtx#enabled()} and {@link Mediamtx#pathPrefix()} — the
+ * scanner's mediamtx Control API/RTSP reachability comes from {@code
+ * VisionPublishProperties.Mediamtx#apiBase()}/{@code #rtspBase()} instead (the SAME properties
+ * {@code MediamtxStreamPublisher} already uses to reach this exact mediamtx instance), not a
+ * parallel pair here that could silently drift out of sync with it.
+ *
  * @param mavlinkPort the UDP port {@code MavlinkHeartbeatScanner} listens on for MAVLink
  *                    heartbeats; must be a valid port number; default {@value #DEFAULT_MAVLINK_PORT}
  * @param mdns        {@code MdnsScanner}'s scan-timing budget; defaulted as a whole when absent
  * @param v4l2        {@code V4l2Scanner}'s filesystem bases; defaulted as a whole when absent
+ * @param lobby       whether {@code DiscoveryInboxRunner} re-asserts the standing MAVLink lobby
+ *                    hold each sweep; defaulted as a whole when absent
+ * @param inbox       {@code DiscoveryInboxRunner}'s own enable flag and sweep timing; defaulted as
+ *                    a whole when absent
+ * @param mediamtx    {@code MediamtxPathScanner}'s enable flag and ingest path-name prefix;
+ *                    defaulted as a whole when absent
  */
 @ConfigurationProperties(prefix = "vision.discovery")
 public record VisionDiscoveryProperties(
         @DefaultValue(VisionDiscoveryProperties.DEFAULT_MAVLINK_PORT) int mavlinkPort,
         Mdns mdns,
-        V4l2 v4l2) {
+        V4l2 v4l2,
+        Lobby lobby,
+        Inbox inbox,
+        Mediamtx mediamtx) {
 
     static final String DEFAULT_MAVLINK_PORT = "14550";
     private static final int MIN_PORT = 1;
@@ -57,15 +86,60 @@ public record VisionDiscoveryProperties(
         if (v4l2 == null) {
             v4l2 = new V4l2(V4l2.DEFAULT_DEV_BASE_STRING, V4l2.DEFAULT_SYS_BASE_STRING);
         }
+        if (lobby == null) {
+            lobby = new Lobby(Lobby.DEFAULT_ENABLED);
+        }
+        if (inbox == null) {
+            inbox = new Inbox(Inbox.DEFAULT_ENABLED, Inbox.DEFAULT_SWEEP_SECONDS, Inbox.DEFAULT_SCAN_TIMEOUT_SECONDS);
+        }
+        if (mediamtx == null) {
+            mediamtx = new Mediamtx(Mediamtx.DEFAULT_ENABLED, Mediamtx.DEFAULT_PATH_PREFIX);
+        }
     }
 
     /**
      * Convenience constructor covering just the original {@code vision.discovery.mavlink-port}
-     * field (predating wave F4's {@code mdns}/{@code v4l2} extension) — both nested records default
-     * exactly as they would from an absent binding.
+     * field (predating wave F4's {@code mdns}/{@code v4l2} extension, Z2c's {@code lobby}/{@code
+     * inbox} one, and Z3's {@code mediamtx} one) — every nested record defaults exactly as it would
+     * from an absent binding.
      */
     public VisionDiscoveryProperties(int mavlinkPort) {
-        this(mavlinkPort, null, null);
+        this(mavlinkPort, null, null, null, null, null);
+    }
+
+    /**
+     * @param enabled whether {@code DiscoveryInboxRunner} re-asserts the standing MAVLink lobby
+     *                hold each sweep; default {@code true}
+     */
+    public record Lobby(@DefaultValue("true") boolean enabled) {
+        static final boolean DEFAULT_ENABLED = true;
+    }
+
+    /**
+     * @param enabled            whether {@code DiscoveryInboxRunner} is registered at all; default
+     *                           {@code true}
+     * @param sweepSeconds       how often the sweep runs; must be positive; default
+     *                           {@value #DEFAULT_SWEEP_SECONDS}
+     * @param scanTimeoutSeconds how long each sweep's {@code DiscoveryService.scan} call may take;
+     *                           must be positive; default {@value #DEFAULT_SCAN_TIMEOUT_SECONDS}
+     */
+    public record Inbox(@DefaultValue("true") boolean enabled,
+                         @DefaultValue("" + Inbox.DEFAULT_SWEEP_SECONDS) int sweepSeconds,
+                         @DefaultValue("" + Inbox.DEFAULT_SCAN_TIMEOUT_SECONDS) int scanTimeoutSeconds) {
+        static final boolean DEFAULT_ENABLED = true;
+        static final int DEFAULT_SWEEP_SECONDS = 30;
+        static final int DEFAULT_SCAN_TIMEOUT_SECONDS = 5;
+
+        public Inbox {
+            if (sweepSeconds <= 0) {
+                throw new IllegalArgumentException(
+                        "vision.discovery.inbox.sweep-seconds must be positive: " + sweepSeconds);
+            }
+            if (scanTimeoutSeconds <= 0) {
+                throw new IllegalArgumentException(
+                        "vision.discovery.inbox.scan-timeout-seconds must be positive: " + scanTimeoutSeconds);
+            }
+        }
     }
 
     /**
@@ -92,5 +166,27 @@ public record VisionDiscoveryProperties(
                         @DefaultValue(V4l2.DEFAULT_SYS_BASE_STRING) String sysBase) {
         static final String DEFAULT_DEV_BASE_STRING = "/dev";
         static final String DEFAULT_SYS_BASE_STRING = "/sys";
+    }
+
+    /**
+     * @param enabled    whether {@code wiring.DiscoveryWiring} registers {@code MediamtxPathScanner}
+     *                   (ANDed with the outer {@code vision.discovery.enabled} on the {@code @Bean}
+     *                   method, the same two-flag pattern {@link Inbox#enabled()} follows against
+     *                   its own outer flag); default {@code true}
+     * @param pathPrefix mediamtx path-name prefix a device push must live under to be reported as a
+     *                   candidate — the {@code ingest/} convention documented in {@code
+     *                   mediamtx.yml}; paths outside this prefix are vision's own published streams
+     *                   (MEDIA-SOT) and are never reported. Default {@value #DEFAULT_PATH_PREFIX}
+     */
+    public record Mediamtx(@DefaultValue("true") boolean enabled,
+                            @DefaultValue(Mediamtx.DEFAULT_PATH_PREFIX) String pathPrefix) {
+        static final boolean DEFAULT_ENABLED = true;
+        static final String DEFAULT_PATH_PREFIX = "ingest/";
+
+        public Mediamtx {
+            if (pathPrefix == null || pathPrefix.isBlank()) {
+                throw new IllegalArgumentException("vision.discovery.mediamtx.path-prefix must not be blank");
+            }
+        }
     }
 }

@@ -37,8 +37,35 @@ describe('EventRow', () => {
     const el = render({ event: event({ state: 'OPEN' }), sourceLabel: 'Falcon-2', relativeTime: '12s ago' })
       .nativeElement as HTMLElement;
     expect(el.querySelector('.event-state')?.textContent).toContain('OPEN');
-    expect(el.querySelector('.event-dot')?.classList.contains('open')).toBe(true);
     expect(el.querySelector('.event-row')?.classList.contains('open')).toBe(true);
+  });
+
+  it("an OPEN row's chip replaces the severity dot rather than joining it — one status indicator, not two (docs/plans/active/OPERATOR-UX-7-PLAN.md finding W1)", () => {
+    const el = render({ event: event({ state: 'OPEN' }), sourceLabel: 'Falcon-2', relativeTime: '12s ago' })
+      .nativeElement as HTMLElement;
+    expect(el.querySelector('.event-row-top > .event-dot')).toBeNull();
+    expect(el.querySelectorAll('.event-row-top .event-state')).toHaveLength(1);
+  });
+
+  it('a CLOSED row keeps the plain severity dot and no chip (the norm)', () => {
+    const el = render({ event: event({ state: 'CLOSED' }), sourceLabel: 'Falcon-2', relativeTime: '12s ago' })
+      .nativeElement as HTMLElement;
+    expect(el.querySelector('.event-row-top > .event-dot')).not.toBeNull();
+    expect(el.querySelector('.event-row-top .event-state')).toBeNull();
+  });
+
+  it("places the OPEN chip after the time element, and gives the label flex:1/min-width:0 so it never truncates to a single letter (finding W1)", () => {
+    const el = render({ event: event({ state: 'OPEN' }), sourceLabel: 'Falcon-2', relativeTime: '12s ago' })
+      .nativeElement as HTMLElement;
+    const top = el.querySelector('.event-row-top') as HTMLElement;
+    const order = [...top.children].map((child) => child.className);
+    const timeIndex = order.findIndex((cls) => cls.includes('event-time'));
+    const chipIndex = order.findIndex((cls) => cls.includes('event-state'));
+    expect(timeIndex).toBeGreaterThanOrEqual(0);
+    expect(chipIndex).toBeGreaterThan(timeIndex);
+
+    const label = top.querySelector('.event-label') as HTMLElement;
+    expect(label.textContent?.trim()).toBe('person');
   });
 
   it('dense mode renders one row with confidence + source + time, and never an action affordance', () => {

@@ -32,11 +32,31 @@ public record MavlinkSettings(
         int maxUnclaimedVehicles,
         Duration closeJoinTimeout,
         Duration ackTimeout,
+        int commandRetries,
         Scan scan,
         Transmit transmit,
         Rc rc,
         Inventory inventory,
-        Onboarding onboarding) {
+        Onboarding onboarding,
+        LinkStatus linkStatus,
+        StreamNegotiation streamNegotiation) {
+
+    /**
+     * docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2a — {@link #ackTimeout()}'s per-<b>attempt</b> wait
+     * (re-scoped from a single whole-command wait): 3 attempts (default {@link #commandRetries()} + 1)
+     * finish in ~2.1s, inside the old single-wait 2s budget.
+     */
+    private static final long DEFAULT_ACK_TIMEOUT_MILLIS = 700L;
+
+    /**
+     * docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2a — default retry budget for <b>absolute-state</b>
+     * commands only (arm/disarm, {@code DO_SET_MODE}, {@code DO_AUX_FUNCTION}, the rover {@code Hold}
+     * e-stop — see {@code MavlinkFlightCommander#send}'s own javadoc for the eligibility rule). Gated
+     * on {@code infra/rover-sim}'s F0 idempotency case (a repeated {@code COMMAND_LONG} with a rising
+     * {@code confirmation} must be a no-op, never a double-effect) — an operator who wants today's
+     * single-shot behaviour back sets {@code vision.mavlink.command-retries: 0}.
+     */
+    private static final int DEFAULT_COMMAND_RETRIES = 2;
 
     public MavlinkSettings {
         Objects.requireNonNull(bindHost, "bindHost must not be null");
@@ -49,11 +69,16 @@ public record MavlinkSettings(
         }
         Objects.requireNonNull(closeJoinTimeout, "closeJoinTimeout must not be null");
         Objects.requireNonNull(ackTimeout, "ackTimeout must not be null");
+        if (commandRetries < 0) {
+            throw new IllegalArgumentException("commandRetries must be >= 0: " + commandRetries);
+        }
         Objects.requireNonNull(scan, "scan must not be null");
         Objects.requireNonNull(transmit, "transmit must not be null");
         Objects.requireNonNull(rc, "rc must not be null");
         Objects.requireNonNull(inventory, "inventory must not be null");
         Objects.requireNonNull(onboarding, "onboarding must not be null");
+        Objects.requireNonNull(linkStatus, "linkStatus must not be null");
+        Objects.requireNonNull(streamNegotiation, "streamNegotiation must not be null");
     }
 
     /**
@@ -61,12 +86,21 @@ public record MavlinkSettings(
      * vision-app}'s {@code TelemetryWiring#toMavlinkSettings} (out of this wave's file scope, per
      * docs/plans/active/DRONE-ONBOARDING-PLAN.md O1's brief: {@code drone-link/mavlink/**} only).
      * Defaults {@link #inventory()} to {@link Inventory#defaults()}, exactly like every other field
-     * this record has ever added.
+     * this record has ever added — including, since docs/plans/active/MAVLINK-COMMANDS-PLAN.md P1,
+     * {@link #commandRetries()} (defaulted to {@value #DEFAULT_COMMAND_RETRIES}): this is the exact
+     * overload {@code TelemetryWiring#toMavlinkSettings} still calls, so every deployment picks up the
+     * new retry default automatically the moment this module is rebuilt, with no config seam of its
+     * own yet to change it away from {@value #DEFAULT_COMMAND_RETRIES} through this particular
+     * overload (see this module's MODULE.md Gotchas). Defaults {@link #streamNegotiation()} the same
+     * way, since docs/plans/active/MAVLINK-COMMANDS-PLAN.md P2 — every deployment picks up on-claim
+     * stream negotiation the moment this module is rebuilt too (see {@link StreamNegotiation}'s own
+     * javadoc for why, unlike {@link Onboarding}'s Mechanism A, there is no flag to gate it behind).
      */
     public MavlinkSettings(String bindHost, Duration silenceWindow, int maxUnclaimedVehicles,
                             Duration closeJoinTimeout, Duration ackTimeout, Scan scan, Transmit transmit, Rc rc) {
-        this(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout, scan, transmit, rc,
-                Inventory.defaults(), Onboarding.defaults());
+        this(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout, DEFAULT_COMMAND_RETRIES,
+                scan, transmit, rc, Inventory.defaults(), Onboarding.defaults(), LinkStatus.defaults(),
+                StreamNegotiation.defaults());
     }
 
     /**
@@ -76,8 +110,9 @@ public record MavlinkSettings(
     public MavlinkSettings(String bindHost, Duration silenceWindow, int maxUnclaimedVehicles,
                             Duration closeJoinTimeout, Duration ackTimeout, Scan scan, Transmit transmit, Rc rc,
                             Inventory inventory) {
-        this(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout, scan, transmit, rc,
-                inventory, Onboarding.defaults());
+        this(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout, DEFAULT_COMMAND_RETRIES,
+                scan, transmit, rc, inventory, Onboarding.defaults(), LinkStatus.defaults(),
+                StreamNegotiation.defaults());
     }
 
     /** Reproduces every literal this module's classes hardcode today. */
@@ -87,12 +122,15 @@ public record MavlinkSettings(
                 Duration.ofSeconds(30),
                 32,
                 Duration.ofSeconds(5),
-                Duration.ofSeconds(2),
+                Duration.ofMillis(DEFAULT_ACK_TIMEOUT_MILLIS),
+                DEFAULT_COMMAND_RETRIES,
                 Scan.defaults(),
                 Transmit.defaults(),
                 Rc.defaults(),
                 Inventory.defaults(),
-                Onboarding.defaults());
+                Onboarding.defaults(),
+                LinkStatus.defaults(),
+                StreamNegotiation.defaults());
     }
 
     /**
@@ -102,7 +140,29 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withSilenceWindow(Duration newSilenceWindow) {
         return new MavlinkSettings(bindHost, newSilenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                scan, transmit, rc, inventory, onboarding);
+                commandRetries, scan, transmit, rc, inventory, onboarding, linkStatus, streamNegotiation);
+    }
+
+    /**
+     * Copy of this settings object with just {@link #ackTimeout()} replaced — same test/tuning
+     * convenience as {@link #withSilenceWindow}; also backs {@code MavlinkFlightCommander}'s own
+     * back-compat {@code (MavlinkTelemetrySource, Duration)} constructor (docs/plans/active/
+     * MAVLINK-COMMANDS-PLAN.md P1), which re-scopes its {@code Duration} argument from a single
+     * whole-command wait to the new per-attempt one.
+     */
+    public MavlinkSettings withAckTimeout(Duration newAckTimeout) {
+        return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, newAckTimeout,
+                commandRetries, scan, transmit, rc, inventory, onboarding, linkStatus, streamNegotiation);
+    }
+
+    /**
+     * Copy of this settings object with just {@link #commandRetries()} replaced — same test/tuning
+     * convenience as {@link #withSilenceWindow}; lets a test dial the retry budget down to 0 (today's
+     * byte-for-byte single-shot behaviour) or up, without needing every other field's default.
+     */
+    public MavlinkSettings withCommandRetries(int newCommandRetries) {
+        return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
+                newCommandRetries, scan, transmit, rc, inventory, onboarding, linkStatus, streamNegotiation);
     }
 
     /**
@@ -112,7 +172,7 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withInventory(Inventory newInventory) {
         return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                scan, transmit, rc, newInventory, onboarding);
+                commandRetries, scan, transmit, rc, newInventory, onboarding, linkStatus, streamNegotiation);
     }
 
     /**
@@ -121,7 +181,28 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withOnboarding(Onboarding newOnboarding) {
         return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                scan, transmit, rc, inventory, newOnboarding);
+                commandRetries, scan, transmit, rc, inventory, newOnboarding, linkStatus, streamNegotiation);
+    }
+
+    /**
+     * Copy of this settings object with just {@link #linkStatus()} replaced — same test/tuning
+     * convenience as {@link #withInventory}; lets a test shrink {@link LinkStatus#failureGrace()}
+     * far below the production default so a link-failure regression test can assert promptly instead
+     * of waiting out a multi-second bound.
+     */
+    public MavlinkSettings withLinkStatus(LinkStatus newLinkStatus) {
+        return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
+                commandRetries, scan, transmit, rc, inventory, onboarding, newLinkStatus, streamNegotiation);
+    }
+
+    /**
+     * Copy of this settings object with just {@link #streamNegotiation()} replaced — same test/tuning
+     * convenience as {@link #withInventory}; lets a test dial the on-claim stream list/rate down to
+     * something small and deterministic instead of the production default.
+     */
+    public MavlinkSettings withStreamNegotiation(StreamNegotiation newStreamNegotiation) {
+        return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
+                commandRetries, scan, transmit, rc, inventory, onboarding, linkStatus, newStreamNegotiation);
     }
 
     /** {@code MavlinkHeartbeatScanner}'s hub-poll/self-bind-timeout budgets. */
@@ -341,8 +422,9 @@ public record MavlinkSettings(
         }
 
         /**
-         * Twenty ArduPilot parameters — identity, airframe, battery, failsafe, GPS/EKF, geofence and
-         * the telemetry link itself. Timeouts follow the MAVLink parameter-protocol page's own advice
+         * Nineteen ArduPilot parameters — identity, airframe, battery, failsafe, GPS/EKF, geofence and
+         * the telemetry link itself. Overridable via {@code vision.onboarding.probe.parameters}.
+         * Timeouts follow the MAVLink parameter-protocol page's own advice
          * (~1 s, retried a few times), widened once for {@code AUTOPILOT_VERSION} because a vehicle
          * assembles that message from several subsystems.
          *
@@ -357,6 +439,21 @@ public record MavlinkSettings(
          * That is the whole reason this is configuration: parameter names are firmware-version state,
          * and no default compiled in today stays true for every airframe a fleet will fly.
          *
+         * <p><b>Renamed parameters are named here in their current spelling only</b> ({@code
+         * MAV_SYSID}, not {@code SYSID_THISMAV}). Older spellings are not listed because listing them
+         * would make every probe of every vehicle wait out the full retry budget for the one spelling
+         * that cannot exist: {@code readAll} fans out concurrently, so an entry nothing will ever
+         * answer sets the floor for the whole batch. {@code MavlinkVehicleConfigurator} instead asks
+         * the other spellings of {@link com.drones.vision.flight.domain.model.ParameterAliases} as a
+         * second pass, and only for names this pass left unanswered — so current firmware pays
+         * nothing and only an older vehicle pays the extra round. Reading neither spelling is what
+         * made the {@code fleet-identity} readiness row a permanent {@code MISSING}
+         * (docs/plans/active/FLEET-RADIO-PLAN.md F0).
+         *
+         * <p><b>{@code FENCE_ALT_MAX} is deliberately absent</b>: it does not exist on ArduRover, so
+         * on the rover this plan targets it was pure timeout — the copter-only assumption this list
+         * used to carry (F12). A fleet that wants it on copters adds it back through the property.
+         *
          * <p>{@link #requestMessagesOnConnect()} defaults {@code false} — this wave's guardrail — but
          * {@link #onConnectMessageRequests()} is still populated with a real, firmware-verified
          * default, on the same reasoning as {@link #probeParameters()}: an operator who later flips
@@ -370,7 +467,7 @@ public record MavlinkSettings(
                             "BATT_CAPACITY", "BATT_MONITOR", "BATT_LOW_VOLT", "BATT_CRT_VOLT", "BATT_ARM_VOLT",
                             "BATT_FS_LOW_ACT", "FS_GCS_ENABLE", "FS_THR_ENABLE", "FS_OPTIONS",
                             "GPS1_TYPE", "GPS_AUTO_SWITCH", "AHRS_EKF_TYPE", "EK3_ENABLE",
-                            "FENCE_ENABLE", "FENCE_ALT_MAX"),
+                            "FENCE_ENABLE"),
                     Duration.ofSeconds(3), 2,
                     Duration.ofSeconds(1), 2,
                     false, defaultOnConnectMessageRequests());
@@ -421,6 +518,117 @@ public record MavlinkSettings(
                     throw new IllegalArgumentException("interval must not be negative: " + interval);
                 }
             }
+        }
+    }
+
+    /**
+     * The platform-side stream negotiation every real GCS performs at connect
+     * (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2c) — the request list {@link
+     * MavlinkStreamNegotiator} fires once per vehicle claim (not per learned peer; see that class's
+     * own javadoc for why claim, not connect, is the right trigger). {@link #streams()} reuses {@link
+     * Onboarding.MessageRequest}'s identical (messageId, interval) shape rather than duplicating it —
+     * both are "one {@code MAV_CMD_SET_MESSAGE_INTERVAL} request," and inventing a second record for
+     * the same pair would be a distinction with no difference.
+     *
+     * <p><b>Deliberately has no enable flag</b>, unlike {@link Onboarding#requestMessagesOnConnect()}
+     * (Mechanism A, default {@code false}): O1-SYNTHESIS.md's D2c section lists {@code
+     * REQUEST_MESSAGE}/{@code SET_MESSAGE_INTERVAL} under "add a platform caller," not under
+     * "automatic behaviour that needs a guardrail" — a GCS that never negotiates streams is the gap
+     * this wave closes, not a feature an operator might reasonably want off. The two mechanisms differ
+     * in trigger, too: Mechanism A fires on any newly-learned peer (including one this gateway will
+     * never claim, e.g. a second GCS instance sharing the link); this one fires only once a vehicle is
+     * actually claimed, so it never spends a retry budget probing something that isn't this station's
+     * vehicle.
+     *
+     * @param streams the messages to request via {@code MAV_CMD_SET_MESSAGE_INTERVAL} on claim, one
+     *                 command per entry — default is the six messages {@code MavlinkTelemetryDecoder}
+     *                 actually decodes into cockpit fields (ATTITUDE, GLOBAL_POSITION_INT, VFR_HUD,
+     *                 RC_CHANNELS, GPS_RAW_INT, BATTERY_STATUS; see this module's MODULE.md field-
+     *                 mapping table), at 250&nbsp;ms/4&nbsp;Hz — proven safe up to 5&nbsp;Hz by {@code
+     *                 MavlinkSitlOnboardingIntegrationTest} against real ArduPilot Copter 4.7 firmware
+     *                 (the same evidence {@link Onboarding#defaultOnConnectMessageRequests()} cites for
+     *                 its own, slower 2&nbsp;Hz default). GPS_RAW_INT is included alongside
+     *                 GLOBAL_POSITION_INT because a GPS-less {@code GLOBAL_POSITION_INT} still arrives
+     *                 with a stale/zero lat-lon — {@code GPS_RAW_INT.fix_type} is what actually gates
+     *                 whether that position is trustworthy (see this module's OPERATOR-UX-4 N1 note).
+     */
+    public record StreamNegotiation(List<Onboarding.MessageRequest> streams) {
+
+        public StreamNegotiation {
+            Objects.requireNonNull(streams, "streams must not be null");
+            streams = List.copyOf(streams);
+        }
+
+        public static StreamNegotiation defaults() {
+            Duration interval = Duration.ofMillis(250);
+            return new StreamNegotiation(List.of(
+                    new Onboarding.MessageRequest(30, interval),  // ATTITUDE
+                    new Onboarding.MessageRequest(33, interval),  // GLOBAL_POSITION_INT
+                    new Onboarding.MessageRequest(74, interval),  // VFR_HUD
+                    new Onboarding.MessageRequest(65, interval),  // RC_CHANNELS
+                    new Onboarding.MessageRequest(24, interval),  // GPS_RAW_INT
+                    new Onboarding.MessageRequest(147, interval))); // BATTERY_STATUS
+        }
+    }
+
+    /**
+     * {@code MavlinkLinkStatusProvider}'s per-vehicle drop-rate severity thresholds, plus how
+     * promptly a genuine link failure must be surfaced (FLEET-RADIO-PLAN.md D7) — the three values
+     * that used to be either implicit (drop rate was displayed but never escalated anything) or
+     * simply absent (nothing bounded how fast a failure had to be reported) before R4.
+     *
+     * @param dropRateWarnPercent  a connected vehicle whose {@link
+     *                             com.drones.mavlink.session.LinkHealth.Health#dropRate()} (as a
+     *                             percent, {@code 0-100}) is at or above this is reported {@code
+     *                             DEGRADED} rather than {@code OK}; default {@value
+     *                             #DEFAULT_DROP_RATE_WARN_PERCENT}
+     * @param dropRateAlarmPercent at or above this, a connected vehicle is reported {@code DOWN} —
+     *                             its socket is technically still receiving, but losing this much of
+     *                             the expected stream is operationally no better than silence;
+     *                             default {@value #DEFAULT_DROP_RATE_ALARM_PERCENT}. Must be {@code
+     *                             >= dropRateWarnPercent}, or every degraded vehicle would jump
+     *                             straight past {@code DEGRADED} to {@code DOWN} the instant it
+     *                             crossed the (higher) warn line, which is not what "warn" means.
+     * @param failureGrace         the bound this wave's own regression test holds {@link
+     *                             com.drones.mavlink.session.MavlinkSession#onLinkFailure}'s
+     *                             notification to — proving a dead socket is reported within this
+     *                             window rather than only surfacing once an unpinned claim's silence
+     *                             window lapses (FLEET-RADIO-PLAN.md F7's "the silence timeout"). The
+     *                             listener is synchronous (see its own javadoc), so nothing in this adapter's
+     *                             production code branches on this value today — it exists so the
+     *                             promptness guarantee this wave ships is a configured, documented
+     *                             number rather than a magic constant buried in a test (CLAUDE.md
+     *                             rule 1), and so a future retry/backoff mechanism has an obvious
+     *                             home for its own timing budget. Default {@value
+     *                             #DEFAULT_FAILURE_GRACE}.
+     */
+    public record LinkStatus(double dropRateWarnPercent, double dropRateAlarmPercent, Duration failureGrace) {
+
+        static final double DEFAULT_DROP_RATE_WARN_PERCENT = 5.0;
+        static final double DEFAULT_DROP_RATE_ALARM_PERCENT = 20.0;
+        static final String DEFAULT_FAILURE_GRACE = "2s";
+        private static final Duration DEFAULT_FAILURE_GRACE_DURATION = Duration.ofSeconds(2);
+
+        public LinkStatus {
+            if (dropRateWarnPercent < 0 || dropRateWarnPercent > 100) {
+                throw new IllegalArgumentException("dropRateWarnPercent must be in [0,100]: " + dropRateWarnPercent);
+            }
+            if (dropRateAlarmPercent < 0 || dropRateAlarmPercent > 100) {
+                throw new IllegalArgumentException("dropRateAlarmPercent must be in [0,100]: " + dropRateAlarmPercent);
+            }
+            if (dropRateAlarmPercent < dropRateWarnPercent) {
+                throw new IllegalArgumentException("dropRateAlarmPercent must be >= dropRateWarnPercent: "
+                        + dropRateAlarmPercent + " < " + dropRateWarnPercent);
+            }
+            Objects.requireNonNull(failureGrace, "failureGrace must not be null");
+            if (failureGrace.isZero() || failureGrace.isNegative()) {
+                throw new IllegalArgumentException("failureGrace must be positive: " + failureGrace);
+            }
+        }
+
+        public static LinkStatus defaults() {
+            return new LinkStatus(DEFAULT_DROP_RATE_WARN_PERCENT, DEFAULT_DROP_RATE_ALARM_PERCENT,
+                    DEFAULT_FAILURE_GRACE_DURATION);
         }
     }
 }

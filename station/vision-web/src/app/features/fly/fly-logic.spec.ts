@@ -10,6 +10,7 @@ import {
   migratedPanelId,
   nextCollapseAction,
   pickerEmptyStateCopy,
+  positionFact,
   positionLabel,
   rememberedStreamingAssetId,
   showDetectionOffChip,
@@ -170,9 +171,14 @@ describe('lastSeenLabel', () => {
     expect(lastSeenLabel(undefined, nowMs)).toBeUndefined();
   });
 
-  it('renders elapsed time since lastUsedAt, reusing formatDuration\'s own wording', () => {
-    const fourMinutesAgo = '2026-07-24T11:55:53Z'; // 4m 07s before nowMs
-    expect(lastSeenLabel(fourMinutesAgo, nowMs)).toBe('4m 07s ago');
+  it('renders elapsed time since lastUsedAt via humanAge (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N4, this cycle\'s W5 — not formatDuration\'s zero-padded wording)', () => {
+    const fourMinutesAgo = '2026-07-24T11:55:53Z'; // 4m 7s before nowMs
+    expect(lastSeenLabel(fourMinutesAgo, nowMs)).toBe('4m 7s ago');
+  });
+
+  it('renders a multi-day age past the hour-capped register formatDuration used to force it into', () => {
+    const threeDaysAgo = '2026-07-20T18:00:00Z'; // 3d 18h before nowMs
+    expect(lastSeenLabel(threeDaysAgo, nowMs)).toBe('3d 18h ago');
   });
 
   it('never goes negative for a clock-skewed future timestamp', () => {
@@ -189,6 +195,21 @@ describe('positionLabel', () => {
   it('formats lat/lon to 4 decimal places, altitude omitted', () => {
     const position: GeoPosition = { latitude: 37.774929, longitude: -122.419416, altitudeMeters: 120 };
     expect(positionLabel(position)).toBe('37.7749, -122.4194');
+  });
+});
+
+describe('positionFact (docs/plans/active/OPERATOR-UX-4-PLAN.md finding 1, this cycle\'s W5 — reproduced live: "Your vehicles" picker cards printed POSITION 0.0000, 0.0000 for a no-fix rover)', () => {
+  it('is undefined when the asset has never reported a position at all — the card omits the fact', () => {
+    expect(positionFact(undefined)).toBeUndefined();
+  });
+
+  it('reads the faint "No GPS fix yet" register for a no-fix position (Null Island), never a fabricated coordinate', () => {
+    expect(positionFact({ latitude: 0, longitude: 0 })).toEqual({ value: 'No GPS fix yet', faint: true });
+  });
+
+  it('formats a real fix in the mono numeric register, reusing positionLabel', () => {
+    const position: GeoPosition = { latitude: 37.774929, longitude: -122.419416, altitudeMeters: 120 };
+    expect(positionFact(position)).toEqual({ value: '37.7749, -122.4194', mono: true });
   });
 });
 

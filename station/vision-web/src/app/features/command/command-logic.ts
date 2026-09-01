@@ -1,6 +1,7 @@
-import type { AssetAttention } from '../../core/api/models';
+import type { AssetAttention, AssetStatus } from '../../core/api/models';
 import type { GeofenceBreach } from '../../core/geofence/geofence-logic';
 import { REASON_RANK, attentionReasons, type AttentionReason, type AttentionSeverity } from '../../core/fleet/attention-logic';
+import { groupAndSort, offlineLabel, type PickerGroups } from '../../core/fleet/triage-logic';
 
 /**
  * Pure, Angular-free logic behind `CommandPage` (docs/plans/done/UX-REWORK-PLAN.md §U-c — the map-first
@@ -50,7 +51,13 @@ export interface EntityRow {
   readonly severity: AttentionSeverity | 'ok';
 }
 
-function rowRank(row: EntityRow): number {
+/**
+ * Higher first — the max rank of a row's own triggered reasons, or `0` for a quiet row. Exported
+ * (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N3, §2 N3) so it can double as `buildRailGroups`'
+ * own `attentionRank` callback below, in addition to `buildEntityRows`' own plain-array sort — one
+ * ranking rule, two different orderings built from it.
+ */
+export function rowRank(row: EntityRow): number {
   return row.reasons[0] ? REASON_RANK[row.reasons[0].kind] : 0;
 }
 
@@ -106,6 +113,65 @@ export function buildEntityRows(
     }
     return a.asset.displayName.localeCompare(b.asset.displayName, undefined, { sensitivity: 'base' });
   });
+}
+
+// --- Rail triage (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N3, §2 N3 — "the rail triages like
+// /fly") ------------------------------------------------------------------------------------------
+
+/**
+ * One `EntityRow` widened with the four fields `core/fleet/triage-logic.ts#TriageCandidate` needs
+ * (`AssetAttention`, this row's own `.asset`, carries `categoryId`/`streaming`/`telemetryAgeMs`, not
+ * `category`/`status`/`lastUsedAt` — see that DTO's own doc comment) plus the rail row's own honest
+ * offline-age text. Every field here is a straight rename or arithmetic derivation of a value
+ * `buildEntityRows` already fetched — never a fabricated one.
+ */
+export interface RailRow extends EntityRow {
+  /** `asset.displayName`, hoisted to the top level — `TriageCandidate` (`core/fleet/triage-logic.ts`)
+   *  reads `displayName` directly, matching `AssetSummary`'s own shape; `EntityRow.asset` nests it one
+   *  level deeper than that DTO does. */
+  readonly displayName: string;
+  readonly category: string;
+  readonly status: AssetStatus;
+  readonly lastUsedAt?: string;
+  /**
+   * The row's own right-hand text for a non-streaming asset — `Offline · 3d` (never the bare word
+   * "Offline"), or `undefined` while streaming (the row's live dot already says so). Reuses
+   * `core/fleet/triage-logic.ts#offlineLabel` against `lastUsedAt` above rather than a bespoke
+   * format string, so this rail's offline age reads identically to `/fly`'s own picker card.
+   */
+  readonly offlineAge?: string;
+}
+
+function toRailRow(row: EntityRow, nowMs: number): RailRow {
+  const asset = row.asset;
+  // `telemetryAgeMs` is a duration, not a timestamp — recovering an absolute `lastUsedAt` from it
+  // (rather than inventing a fresh sort/label input) is what lets this row satisfy `TriageCandidate`
+  // and reuse `offlineLabel` unchanged; `undefined` in, `undefined` out (no sample ever arrived).
+  const lastUsedAt = asset.telemetryAgeMs === undefined ? undefined : new Date(nowMs - asset.telemetryAgeMs).toISOString();
+  return {
+    ...row,
+    displayName: asset.displayName,
+    category: asset.categoryId,
+    status: asset.streaming ? 'STREAMING' : 'OFFLINE',
+    lastUsedAt,
+    offlineAge: asset.streaming ? undefined : offlineLabel({ lastUsedAt }, nowMs),
+  };
+}
+
+/**
+ * The Command rail's own two triage groups — same `core/fleet/triage-logic.ts#groupAndSort` `/fly`'s
+ * picker uses, extended with this wave's own `rowRank` as the `attentionRank` argument so "needs
+ * attention (severity desc)" sits between "streaming first" and "last seen desc" (that function's
+ * own doc comment has the exact tier order). `rows` is `CommandFacade#entityRows` — the identical,
+ * already-attention-ranked rows the flat rail used before this wave — so grouping/re-sorting them
+ * here is never a second attention derivation, only a different arrangement of the same one.
+ */
+export function buildRailGroups(rows: readonly EntityRow[], nowMs: number): PickerGroups<RailRow> {
+  return groupAndSort(
+    rows.map((row) => toRailRow(row, nowMs)),
+    nowMs,
+    rowRank,
+  );
 }
 
 // --- Layout grid (docs/plans/done/UX-REWORK-PLAN.md §U-c bullet 5 — geometric separation, not z-index) -----

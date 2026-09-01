@@ -1,0 +1,9 @@
+<span class="sg" role="img" [attr.aria-label]="active() ? active() + ' selected' : 'no position selected'">
+  @for (position of positions(); track position) {
+    <span class="sg-cell" [class.round]="round()" [class.lit]="position === active()">
+      @if (position === active() && holding()) {
+        <span class="sg-fill"></span>
+      }
+    </span>
+  }
+</span>

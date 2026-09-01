@@ -29,6 +29,7 @@ import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import io.grpc.ManagedChannel;
 import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -95,31 +96,52 @@ public class VisualGeoWiringConfiguration {
     }
 
     /**
-     * Real {@link GrpcPulledGeolocationPort} when enabled (sharing {@link CvWiring#cvGrpcChannel}/
-     * {@link CvWiring#cvChannelSupervisor}, D3), {@link NoopGeolocationPort} otherwise — see class
-     * javadoc.
+     * Real {@link GrpcPulledGeolocationPort} when enabled (sharing the training/control-plane channel
+     * — {@code CvWiring#controlPlaneChannel}, docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6,
+     * extending D3's "one channel to cv-service, not two" — plus {@link CvWiring#cvChannelSupervisor}),
+     * {@link NoopGeolocationPort} otherwise — see class javadoc.
+     *
+     * <p>Both parameters take two {@code @Qualifier}-annotated {@code ObjectProvider<ManagedChannel>}s
+     * rather than one unqualified one: an unqualified {@code ObjectProvider<ManagedChannel>} would
+     * throw {@code NoUniqueBeanDefinitionException} on {@code getObject()}/{@code getIfAvailable()} as
+     * soon as {@code CvWiring#cvTrainingChannel} exists alongside the {@code @Primary} {@code
+     * cvGrpcChannel} — routing to the training channel needs an explicit qualifier pair, same as
+     * {@code TrainingWiringConfiguration}'s three consumers (see that class's own javadoc).
+     *
+     * <p><b>Known limitation, not fixed here</b>: {@link CvWiring#cvChannelSupervisor} watches only
+     * the <em>inference</em> channel, never {@code cvTrainingChannel} — so under a split deployment
+     * with a genuinely separate training/geolocation host, this gate reflects the inference host's
+     * reachability, not the training host's. A geolocation session could be gated open while the
+     * training host is actually down, or gated closed by an inference outage that doesn't affect
+     * geolocation at all. Building a second supervisor for the training channel is explicitly out of
+     * scope for this wave.
      */
     @Bean
     public PulledGeolocationPort pulledGeolocationPort(VisionGeoVisualProperties properties,
-                                                         ObjectProvider<ManagedChannel> cvGrpcChannel,
-                                                         ObjectProvider<CvChannelSupervisor> cvChannelSupervisor) {
+            @Qualifier("cvTrainingChannel") ObjectProvider<ManagedChannel> cvTrainingChannel,
+            @Qualifier("cvGrpcChannel") ObjectProvider<ManagedChannel> cvGrpcChannel,
+            ObjectProvider<CvChannelSupervisor> cvChannelSupervisor) {
         if (properties.enabled()) {
+            ManagedChannel channel = CvWiring.controlPlaneChannel(cvTrainingChannel, cvGrpcChannel);
             CvChannelSupervisor supervisor = cvChannelSupervisor.getObject();
-            return new GrpcPulledGeolocationPort(cvGrpcChannel.getObject(), supervisor,
-                    properties.mountPitchDegrees());
+            return new GrpcPulledGeolocationPort(channel, supervisor, properties.mountPitchDegrees());
         }
         return new NoopGeolocationPort();
     }
 
     /**
-     * Real {@link GrpcReferenceIndexPort} when enabled (sharing the same channel, D3), {@link
-     * NoopReferenceIndexPort} otherwise — see class javadoc.
+     * Real {@link GrpcReferenceIndexPort} when enabled (sharing the same training/control-plane
+     * channel as {@link #pulledGeolocationPort}, via {@code CvWiring#controlPlaneChannel}), {@link
+     * NoopReferenceIndexPort} otherwise — see class javadoc and {@link #pulledGeolocationPort}'s own
+     * javadoc for why two qualified providers are needed here too.
      */
     @Bean
     public ReferenceIndexPort referenceIndexPort(VisionGeoVisualProperties properties,
-                                                   ObjectProvider<ManagedChannel> cvGrpcChannel) {
+            @Qualifier("cvTrainingChannel") ObjectProvider<ManagedChannel> cvTrainingChannel,
+            @Qualifier("cvGrpcChannel") ObjectProvider<ManagedChannel> cvGrpcChannel) {
         if (properties.enabled()) {
-            return new GrpcReferenceIndexPort(cvGrpcChannel.getObject(), properties.toGeoUploadSettings());
+            ManagedChannel channel = CvWiring.controlPlaneChannel(cvTrainingChannel, cvGrpcChannel);
+            return new GrpcReferenceIndexPort(channel, properties.toGeoUploadSettings());
         }
         return new NoopReferenceIndexPort();
     }

@@ -35,10 +35,17 @@
   </span>
 }
 
-<div class="page-bar-filters">
-  <ng-content select="[pageBarFilters]" />
-</div>
+<!-- `.page-bar-controls` wraps filters+actions as one unit (O1, WAREHOUSE-UX-CONTEXT.md W10) — see
+     `page-bar.css`'s own comment on this element for why: filters and actions must wrap onto a new
+     line *together*, not as two independently-wrapping siblings, or a dense filter row (Inventory's
+     five selects) claims a whole line on its own and strands actions on a third line with no
+     right-alignment at all. -->
+<div class="page-bar-controls">
+  <div class="page-bar-filters">
+    <ng-content select="[pageBarFilters]" />
+  </div>
 
-<div class="page-bar-actions">
-  <ng-content select="[pageBarActions]" />
+  <div class="page-bar-actions">
+    <ng-content select="[pageBarActions]" />
+  </div>
 </div>

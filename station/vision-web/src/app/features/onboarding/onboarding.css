@@ -154,6 +154,40 @@
     border: 0;
 }
 
+/* ---- Step 2: Connect + Step 3: Prove — one card per fit-out role (docs/plans/active/SOURCE-ONBOARDING-CONTEXT.md
+   §6, WAREHOUSE-UX-PLAN.md §3.4 wave W6). Shared between both steps since both are, structurally,
+   "one row/card per role" — Connect picks the row's method, Prove runs its checks. ------------- */
+
+.role-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel-raised);
+    padding: var(--space-16) var(--space-16);
+    margin-bottom: var(--space-16);
+}
+
+.role-card-head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-8);
+    margin-bottom: var(--space-16);
+}
+
+.role-label {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text);
+}
+
+/* The Prove step's own Test/Verify separator within one role card — same rule as `.advanced`
+   below, kept as its own class since it never carries an `h3` (that rule's own small-caps
+   override would be the wrong register for the plain "Verify" `.label` above it). */
+.prove-divider {
+    margin-top: var(--space-16);
+    padding-top: var(--space-16);
+    border-top: 1px solid var(--border);
+}
+
 /* ---- Step 2: Connect (moved verbatim from features/devices/devices.css) --------------------- */
 
 .method-grid {
@@ -521,7 +555,9 @@ td.actions {
     margin-bottom: var(--space-16);
 }
 
-/* ---- Step 5: Assign — "Who flies this?" (docs/plans/done/OPS-UX-PLAN.md §2 A3) ------------- */
+/* ---- Step 5: Hand over — "Who takes this?" (docs/plans/done/OPS-UX-PLAN.md §2 A3;
+   WAREHOUSE-UX-PLAN.md §3.4 D3) — a single-select custodian picker (radio inputs) reuses this
+   same list/row shell the pre-W6 multi-pilot checklist used. ---------------------------------- */
 
 .pilot-list {
     list-style: none;

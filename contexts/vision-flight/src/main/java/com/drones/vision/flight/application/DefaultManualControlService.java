@@ -6,8 +6,12 @@ import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.flight.domain.model.ControlProfile;
+import com.drones.vision.flight.domain.model.FeatureStatus;
+import com.drones.vision.flight.domain.model.ReadinessReport;
+import com.drones.vision.flight.domain.model.UnidentifiedReason;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.flight.domain.model.RcChannels;
+import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.flight.domain.port.ManualControlLink;
@@ -54,6 +58,16 @@ import com.drones.vision.platform.VisibilityScope;
  * here). Neither of those two guards is audited: no attempt was ever actually sent, the same
  * "guard before an attempt" rule {@code DefaultFlightCommandService} already uses.
  *
+ * <h2>An unidentified vehicle is refused, not guessed at (FLEET-RADIO R2)</h2>
+ * Unlike the two guards above, {@link ManualControlLink#vehicleKind()} can only be read <em>after</em>
+ * the port has already opened a real relay link. If it reads {@link VehicleKind#UNKNOWN}, {@link
+ * #engage} releases that link immediately (so the aircraft's failsafe still gets its release-sentinel
+ * burst), audits {@code REFUSED:unidentified-vehicle:<reason>} — this guard is security/safety
+ * relevant, unlike the two above, precisely because a real relay was opened and then deliberately
+ * torn down — and throws {@link VehicleUnidentifiedException} carrying which of the three {@link
+ * UnidentifiedReason} causes applied. See that enum's own javadoc and {@link #refusalMessage} for why
+ * the three read differently to the operator instead of collapsing into one "cannot engage" text.
+ *
  * <h2>One session per handle</h2>
  * This instance holds at most one active {@link ManualControlSession} at a time; a second {@link
  * #engage} while one is still active throws {@link IllegalStateException} without touching the
@@ -87,11 +101,27 @@ import com.drones.vision.platform.VisibilityScope;
  * vision.rc.watchdog-timeout-ms} property (default 300) when it wants that property to actually
  * take effect — the 3-/5-arg constructors always use the hard-coded default.
  *
+ * <h2>A silently misconfigured vehicle is refused too (FLEET-RADIO R6)</h2>
+ * Unlike the R2 guard above, this one needs no live link at all: {@code RC_OPTIONS} ignoring
+ * overrides and a GCS-sysid mismatch are both facts the vehicle's last-probed {@link
+ * com.drones.vision.flight.domain.model.VehicleProfile} already carries (or does not — an
+ * unprobed/incomplete vehicle is {@code UNKNOWN}, not a blocker, matching this module's "absence of
+ * evidence is not evidence of readiness" rule everywhere else). {@link #engage} re-evaluates the
+ * {@code rc-relay} {@link com.drones.vision.flight.domain.model.FeatureReadiness} row via {@link
+ * ReadinessService} right after the scope gate and before any device is resolved or any port is
+ * touched — a parameter can change between a preflight display and this engage, so the check is
+ * re-run here rather than trusted from an earlier read. A {@link FeatureStatus#MISSING} verdict
+ * throws a plain {@link IllegalStateException} carrying the row's own honest detail sentence and
+ * audits {@code REFUSED:not-ready:rc-relay}; {@code DEGRADED}/{@code READY}/{@code UNKNOWN} all let
+ * {@code engage} proceed.
+ *
  * <h2>Audit</h2>
  * Mirrors {@link DefaultFlightCommandService#audit}: one {@link AuditEntry} per {@code
- * ENGAGE}/{@code RELEASE}/{@code WATCHDOG}/{@code DENIED:out of scope} — {@link AuditAction#UPDATED}
- * (no dedicated "commanded" value exists), {@link AuditTargetType#ASSET}, attributes {@code
- * {assetId, command:"MANUAL_CONTROL", result}}.
+ * ENGAGE}/{@code RELEASE}/{@code WATCHDOG}/{@code DENIED:out of scope}/{@code
+ * REFUSED:unidentified-vehicle:<reason>}/{@code REFUSED:not-ready:<featureKey>}/{@code
+ * REFUSED:maintenance-grounded} (WAREHOUSE-UX-CONTEXT.md D6/OQ1) — {@link
+ * AuditAction#UPDATED} (no dedicated "commanded" value exists), {@link AuditTargetType#ASSET},
+ * attributes {@code {assetId, command:"MANUAL_CONTROL", result}}.
  */
 public final class DefaultManualControlService implements ManualControlService {
 
@@ -104,6 +134,10 @@ public final class DefaultManualControlService implements ManualControlService {
     private static final String RESULT_RELEASE = "RELEASE";
     private static final String RESULT_WATCHDOG = "WATCHDOG";
     private static final String RESULT_DENIED = "DENIED:out of scope";
+    private static final String RESULT_REFUSED_PREFIX = "REFUSED:unidentified-vehicle:";
+    private static final String RESULT_REFUSED_NOT_READY_PREFIX = "REFUSED:not-ready:";
+    private static final String RESULT_REFUSED_MAINTENANCE = "REFUSED:maintenance-grounded";
+    private static final String RC_RELAY_FEATURE_KEY = "rc-relay";
     private static final String ATTR_ASSET_ID = "assetId";
     private static final String ATTR_COMMAND = "command";
     private static final String ATTR_RESULT = "result";
@@ -111,6 +145,7 @@ public final class DefaultManualControlService implements ManualControlService {
     private final AssetService assetService;
     private final ManualControlPort manualControlPort;
     private final AuditTrailPort auditTrail;
+    private final ReadinessService readinessService;
     private final Clock clock;
     private final ScheduledExecutorService watchdogScheduler;
     private final long watchdogTimeoutMs;
@@ -121,26 +156,28 @@ public final class DefaultManualControlService implements ManualControlService {
 
     /** Production convenience ctor: {@link Clock#systemUTC()}, a fresh daemon watchdog scheduler, the default timeout. */
     public DefaultManualControlService(AssetService assetService, ManualControlPort manualControlPort,
-                                        AuditTrailPort auditTrail) {
-        this(assetService, manualControlPort, auditTrail, Clock.systemUTC(), defaultWatchdogScheduler());
+                                        AuditTrailPort auditTrail, ReadinessService readinessService) {
+        this(assetService, manualControlPort, auditTrail, readinessService, Clock.systemUTC(),
+                defaultWatchdogScheduler());
     }
 
     /** Test/wiring seam: explicit {@link Clock} + {@link ScheduledExecutorService}, default timeout. */
     public DefaultManualControlService(AssetService assetService, ManualControlPort manualControlPort,
-                                        AuditTrailPort auditTrail, Clock clock,
+                                        AuditTrailPort auditTrail, ReadinessService readinessService, Clock clock,
                                         ScheduledExecutorService watchdogScheduler) {
-        this(assetService, manualControlPort, auditTrail, clock, watchdogScheduler, DEFAULT_WATCHDOG_TIMEOUT_MS);
+        this(assetService, manualControlPort, auditTrail, readinessService, clock, watchdogScheduler,
+                DEFAULT_WATCHDOG_TIMEOUT_MS);
     }
 
     /**
-     * As the 5-arg ctor, with an explicit watchdog timeout (e.g. {@code vision.rc.watchdog-timeout-ms}).
-     * Resolves built-in profiles only — see the canonical 7-arg ctor.
+     * As the 6-arg ctor, with an explicit watchdog timeout (e.g. {@code vision.rc.watchdog-timeout-ms}).
+     * Resolves built-in profiles only — see the canonical 8-arg ctor.
      */
     public DefaultManualControlService(AssetService assetService, ManualControlPort manualControlPort,
-                                        AuditTrailPort auditTrail, Clock clock,
+                                        AuditTrailPort auditTrail, ReadinessService readinessService, Clock clock,
                                         ScheduledExecutorService watchdogScheduler, long watchdogTimeoutMs) {
-        this(assetService, manualControlPort, auditTrail, clock, watchdogScheduler, watchdogTimeoutMs,
-                ControlProfileSelector.builtInOnly());
+        this(assetService, manualControlPort, auditTrail, readinessService, clock, watchdogScheduler,
+                watchdogTimeoutMs, ControlProfileSelector.builtInOnly());
     }
 
     /**
@@ -149,15 +186,22 @@ public final class DefaultManualControlService implements ManualControlService {
      * constructor here defaults it to {@link ControlProfileSelector#builtInOnly()}, which is exactly
      * the behaviour this service had before operators could save profiles — a caller that does not
      * pass one gets the platform's own layout, never a null map.
+     *
+     * <p>{@code readinessService} has no such default anywhere: unlike {@code profileSelector}
+     * (whose omission falls back to identical, safe, pre-existing behaviour), skipping the {@code
+     * rc-relay} readiness gate has no safe equivalent — a no-op implementation would silently
+     * reintroduce the exact failure mode this collaborator exists to close (docs/plans/active/FLEET-RADIO-PLAN.md
+     * R6). Every constructor below therefore requires it explicitly.
      */
     public DefaultManualControlService(AssetService assetService, ManualControlPort manualControlPort,
-                                        AuditTrailPort auditTrail, Clock clock,
+                                        AuditTrailPort auditTrail, ReadinessService readinessService, Clock clock,
                                         ScheduledExecutorService watchdogScheduler, long watchdogTimeoutMs,
                                         ControlProfileSelector profileSelector) {
         this.profileSelector = Objects.requireNonNull(profileSelector, "profileSelector must not be null");
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
         this.manualControlPort = Objects.requireNonNull(manualControlPort, "manualControlPort must not be null");
         this.auditTrail = Objects.requireNonNull(auditTrail, "auditTrail must not be null");
+        this.readinessService = Objects.requireNonNull(readinessService, "readinessService must not be null");
         this.clock = Objects.requireNonNull(clock, "clock must not be null");
         this.watchdogScheduler = Objects.requireNonNull(watchdogScheduler, "watchdogScheduler must not be null");
         if (watchdogTimeoutMs <= 0) {
@@ -198,6 +242,10 @@ public final class DefaultManualControlService implements ManualControlService {
                         "Asset " + assetId.value() + " is outside your scope; you may not take manual control of it");
             }
 
+            ReadinessReport readiness = readinessService.evaluate(assetId, scope);
+            requireNotMaintenanceGrounded(readiness, assetId, actor);
+            requireRcRelayReady(readiness, assetId, actor);
+
             Device device = firstCommandableDevice(details.devices())
                     .orElseThrow(() -> new IllegalStateException(
                             "Asset " + assetId.value() + " has no active manual-control-capable device"));
@@ -209,6 +257,30 @@ public final class DefaultManualControlService implements ManualControlService {
                 // Not commandable / not currently reachable -- same "guard before an attempt, no
                 // audit" posture as the no-supports-device case just above; nothing was relayed.
                 throw new IllegalStateException(e.getMessage(), e);
+            }
+
+            if (link.vehicleKind() == VehicleKind.UNKNOWN) {
+                // Unlike the two guards above, the port link IS already open here -- it must be
+                // released before this method returns, or the aircraft's failsafe never gets the
+                // release-sentinel burst it needs (FLEET-RADIO R2 D3). This IS audited: unlike "no
+                // supported device"/"unreachable", a real vehicle was heard and a real relay was
+                // opened and then deliberately refused -- that is security/safety-relevant the same
+                // way DENIED:out of scope is.
+                UnidentifiedReason reason = link.unidentifiedReason().orElse(UnidentifiedReason.NEVER_IDENTIFIED);
+                VehicleUnidentifiedException refusal =
+                        new VehicleUnidentifiedException(reason, refusalMessage(reason, assetId));
+                try {
+                    manualControlPort.release(link);
+                } catch (RuntimeException e) {
+                    // A failed release must not become the exception the operator sees: the refusal
+                    // is why control was never granted, and the release is only the cleanup after
+                    // that decision. Swallowing it here would hide a broken port, so it rides along
+                    // as a suppressed cause -- and the audit below still runs, which it would not if
+                    // this propagated.
+                    refusal.addSuppressed(e);
+                }
+                audit(actor, assetId, RESULT_REFUSED_PREFIX + reason);
+                throw refusal;
             }
 
             DefaultManualControlSession session =
@@ -228,11 +300,93 @@ public final class DefaultManualControlService implements ManualControlService {
         }
     }
 
+    /**
+     * WAREHOUSE-UX-CONTEXT.md D6/OQ1: refuses {@link #engage} on an asset with at least one open,
+     * flight-blocking warehouse maintenance record (a manager's {@code GROUNDING}, or an open
+     * {@code INSPECTION_DUE}) — the same {@code readinessService.evaluate} call {@link
+     * #requireRcRelayReady} already needs is reused here rather than a second lookup, since {@link
+     * ReadinessReport#blockers()} already carries a {@link
+     * DefaultReadinessService#MAINTENANCE_BLOCKER_PREFIX}-prefixed entry per open blocker whenever
+     * one exists (see that class's own "Maintenance blockers" javadoc section). Runs before any
+     * device is resolved or any port is touched, exactly like {@link #requireRcRelayReady} — no live
+     * link is needed, the fact already lives in warehouse's own record.
+     *
+     * <p>This is the "may this asset fly / engage" predicate OQ1 asks for: a grounded asset refuses
+     * manual control the same way a {@code rc-relay} misconfiguration does, and a manager's {@code
+     * AssetCustodyService#release} clears it in one click. {@code DefaultFlightCommandService}'s
+     * {@code arm}/{@code disarm} (the MAVLink command path) and perception's {@code UsageTracker}
+     * (which opens the underlying {@code AssetUsage} session) are <b>not</b> gated by this check —
+     * out of this wave's scope, flagged in WAREHOUSE-UX-CONTEXT.md's W5 handoff.
+     */
+    private void requireNotMaintenanceGrounded(ReadinessReport report, AssetId assetId, UserId actor) {
+        List<String> maintenanceBlockers = report.blockers().stream()
+                .filter(blocker -> blocker.startsWith(DefaultReadinessService.MAINTENANCE_BLOCKER_PREFIX))
+                .toList();
+        if (maintenanceBlockers.isEmpty()) {
+            return;
+        }
+        audit(actor, assetId, RESULT_REFUSED_MAINTENANCE);
+        throw new IllegalStateException("Asset " + assetId.value()
+                + " is grounded for maintenance and may not take manual control: "
+                + String.join(" ", maintenanceBlockers));
+    }
+
+    /**
+     * FLEET-RADIO R6: re-checks the {@code rc-relay} feature (GCS-sysid mismatch, {@code RC_OPTIONS}
+     * ignoring overrides) from the vehicle's own last-probed profile, right before this engage —
+     * never cached from an earlier preflight read, since either fact can change in between. No live
+     * link is needed for this: both facts live in the stored {@link
+     * com.drones.vision.flight.domain.model.VehicleProfile}, so this runs before any device is
+     * resolved or any port is touched, unlike the R2 {@code vehicleKind() == UNKNOWN} guard below,
+     * which by necessity needs a link already open.
+     *
+     * <p>Only {@link FeatureStatus#MISSING} refuses — {@code UNKNOWN} (never probed, or an
+     * incomplete profile) is "no evidence either way", not a blocker, matching {@code
+     * ReadinessService}'s own "absence of evidence is not evidence of readiness" rule; a vehicle that
+     * has simply never been probed must still be able to engage manual control, exactly as it could
+     * before this wave. Takes the same {@link ReadinessReport} {@link #requireNotMaintenanceGrounded}
+     * already fetched, rather than evaluating readiness twice per {@link #engage} call.
+     */
+    private void requireRcRelayReady(ReadinessReport report, AssetId assetId, UserId actor) {
+        report.features().stream()
+                .filter(feature -> feature.featureKey().equals(RC_RELAY_FEATURE_KEY))
+                .filter(feature -> feature.status() == FeatureStatus.MISSING)
+                .findFirst()
+                .ifPresent(feature -> {
+                    audit(actor, assetId, RESULT_REFUSED_NOT_READY_PREFIX + RC_RELAY_FEATURE_KEY);
+                    throw new IllegalStateException("Asset " + assetId.value()
+                            + " is not ready for manual control: " + feature.detail());
+                });
+    }
+
     private Optional<Device> firstCommandableDevice(List<Device> devices) {
         return devices.stream()
                 .filter(Device::isActive)
                 .filter(manualControlPort::supports)
                 .findFirst();
+    }
+
+    /**
+     * The one place the three {@link UnidentifiedReason} causes actually diverge in wording
+     * (FLEET-RADIO R2's central design question). Each message names a different operator remedy:
+     * {@link UnidentifiedReason#NOT_A_VEHICLE} says there is nothing to fly here at all (check which
+     * device was selected); {@link UnidentifiedReason#UNSUPPORTED_VEHICLE} says the vehicle is known
+     * and simply unsupported (no amount of retrying helps); {@link UnidentifiedReason#NEVER_IDENTIFIED}
+     * is the one case where the operator's own eyes are more informative than this platform's table,
+     * and says so.
+     */
+    private static String refusalMessage(UnidentifiedReason reason, AssetId assetId) {
+        String asset = assetId.value().toString();
+        return switch (reason) {
+            case NOT_A_VEHICLE -> "Asset " + asset + " is not a vehicle: the device on this link is an "
+                    + "instrument (for example a gimbal or a ground station), not something to fly or "
+                    + "drive. Manual control refused.";
+            case UNSUPPORTED_VEHICLE -> "Asset " + asset + " reports a recognized airframe that this "
+                    + "platform does not support flying or driving. Manual control refused.";
+            case NEVER_IDENTIFIED -> "Asset " + asset + " could not be identified: this platform has "
+                    + "never seen the vehicle type it is reporting. If you can see the vehicle, choose "
+                    + "its kind explicitly to proceed. Manual control refused.";
+        };
     }
 
     private void audit(UserId actor, AssetId assetId, String result) {

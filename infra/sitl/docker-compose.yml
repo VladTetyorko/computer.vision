@@ -19,6 +19,9 @@ services:
     image: vision-sitl:4.7.0
     container_name: vision-sitl-1
     environment:
+      # copter (default) | rover -- one image carries both ArduPilot binaries,
+      # see Dockerfile (docs/plans/active/FLEET-RADIO-PLAN.md R7).
+      VEHICLE: "${VEHICLE:-copter}"
       SYSID_THISMAV: "${SYSID_THISMAV:-1}"
       INSTANCE: "${INSTANCE:-0}"
       # host.docker.internal: the docker host itself -- this platform LISTENS
@@ -29,6 +32,37 @@ services:
       SITL_HOME: "${SITL_HOME:--35.363261,149.165230,584,353}"
       SITL_SPEEDUP: "${SITL_SPEEDUP:-1}"
       TAKEOFF_ALT_M: "${TAKEOFF_ALT_M:-20}"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    labels:
+      - "vision.sitl.fleet=true"
+
+  # A rover on the SAME UDP port as the copter above, under a distinct sysid.
+  # Not started by default -- `docker compose --profile rover up -d` -- so the
+  # single-vehicle smoke case is byte-identical to what it was before R7.
+  #
+  # One port, two vehicles of different kinds is not incidental: it is the
+  # FLEET-RADIO exit gate itself (§6). Per-peer drop rate (R4), the rover's own
+  # mode table rather than the copter's (R1) and "an unidentified vehicle
+  # cannot be engaged" (R2) are all claims that only mean anything when a
+  # second, differently-shaped vehicle is on the wire.
+  #
+  # INSTANCE 1, not 0: SITL offsets every local port by 10*instance, so two
+  # containers at instance 0 would both bind the same simulation ports.
+  rover:
+    build: .
+    image: vision-sitl:4.7.0
+    container_name: vision-sitl-rover-1
+    profiles: ["rover"]
+    environment:
+      VEHICLE: "rover"
+      SYSID_THISMAV: "${ROVER_SYSID:-2}"
+      INSTANCE: "${ROVER_INSTANCE:-1}"
+      MAVLINK_TARGET_HOST: "${MAVLINK_TARGET_HOST:-host.docker.internal}"
+      MAVLINK_TARGET_PORT: "${MAVLINK_TARGET_PORT:-14550}"
+      SITL_HOME: "${SITL_HOME:--35.363261,149.165230,584,353}"
+      SITL_SPEEDUP: "${SITL_SPEEDUP:-1}"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

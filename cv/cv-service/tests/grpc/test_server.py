@@ -81,3 +81,96 @@ def test_serve_passes_keepalive_options_to_grpc_server(monkeypatch):
     assert captured["started"] is True
     assert captured["address"] == "[::]:0"
     assert isinstance(result, _FakeServer)
+
+
+# --- serve(): process roles (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6) -----
+
+
+class _FakeGrpcServer:
+    def add_generic_rpc_handlers(self, handlers):
+        pass
+
+    def add_insecure_port(self, address):
+        return 0
+
+    def start(self):
+        pass
+
+
+def _patch_serve_collaborators(monkeypatch, *, track_inference_only_builds=False):
+    """Fakes every collaborator `serve()` touches so a role test never loads a real model or
+    geolocation backend, and returns the ordered list of servicer names `serve()` registered on
+    the (fake) gRPC server -- the thing every role test actually asserts on.
+
+    When `track_inference_only_builds` is True, `InferenceGate`/`_build_tracker_registry` (the two
+    collaborators only an `inference`-serving role should ever construct) are faked to additionally
+    record that they were called, appended to the returned list under the same "inference"/
+    "tracker_registry" markers so a `training`-role test can assert neither ran.
+    """
+    added = []
+    monkeypatch.setattr(server_module.grpc, "server", lambda executor, options=None: _FakeGrpcServer())
+    monkeypatch.setattr(server_module, "_build_default_registry", lambda settings: None)
+    monkeypatch.setattr(server_module, "InferenceServicer", lambda **kwargs: object())
+    monkeypatch.setattr(server_module, "TrainingServicer", lambda **kwargs: object())
+    monkeypatch.setattr(server_module, "GeolocationServicer", lambda **kwargs: object())
+    monkeypatch.setattr(
+        server_module.cv_pb2_grpc, "add_InferenceServicer_to_server", lambda servicer, srv: added.append("inference")
+    )
+    monkeypatch.setattr(
+        server_module.cv_pb2_grpc, "add_TrainingServicer_to_server", lambda servicer, srv: added.append("training")
+    )
+    monkeypatch.setattr(
+        server_module.cv_pb2_grpc,
+        "add_GeolocationServicer_to_server",
+        lambda servicer, srv: added.append("geolocation"),
+    )
+    if track_inference_only_builds:
+        monkeypatch.setattr(server_module, "InferenceGate", lambda n: added.append("inference_gate") or object())
+        monkeypatch.setattr(
+            server_module, "_build_tracker_registry", lambda settings: added.append("tracker_registry")
+        )
+    return added
+
+
+def test_serve_with_default_role_registers_all_three_servicers(monkeypatch):
+    added = _patch_serve_collaborators(monkeypatch)
+
+    server_module.serve(Settings(port=0))
+
+    assert added == ["inference", "training", "geolocation"]
+
+
+def test_serve_with_role_all_explicit_registers_all_three_servicers(monkeypatch):
+    added = _patch_serve_collaborators(monkeypatch)
+
+    server_module.serve(Settings(port=0, role="all"))
+
+    assert added == ["inference", "training", "geolocation"]
+
+
+def test_serve_with_role_inference_registers_only_inference(monkeypatch):
+    added = _patch_serve_collaborators(monkeypatch, track_inference_only_builds=True)
+
+    server_module.serve(Settings(port=0, role="inference"))
+
+    # inference_gate/tracker_registry are built BEFORE add_InferenceServicer_to_server is called.
+    assert added == ["inference_gate", "tracker_registry", "inference"]
+
+
+def test_serve_with_role_training_registers_training_and_geolocation_but_not_inference(monkeypatch):
+    added = _patch_serve_collaborators(monkeypatch, track_inference_only_builds=True)
+
+    server_module.serve(Settings(port=0, role="training"))
+
+    assert added == ["training", "geolocation"]
+    assert "inference_gate" not in added
+    assert "tracker_registry" not in added
+
+
+def test_serve_logs_the_resolved_role(monkeypatch, caplog):
+    _patch_serve_collaborators(monkeypatch)
+
+    with caplog.at_level("INFO", logger="cv_service.grpc.server"):
+        server_module.serve(Settings(port=0, role="training"))
+
+    assert "role=training" in caplog.text

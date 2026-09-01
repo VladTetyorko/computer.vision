@@ -17,6 +17,8 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.function.IntConsumer;
 
 /**
  * Project policy — "which {@code Device} owns which sysid" — split out from what protocol facts
@@ -63,6 +65,7 @@ final class VehicleClaimPolicy {
     private final PeerDirectory peers;
     private final long silenceWindowMillis;
     private final int maxUnclaimedVehicles;
+    private final IntConsumer onClaimed;
 
     private final Object lock = new Object();
     private final List<VehicleRegistration> registrations = new ArrayList<>();
@@ -79,11 +82,23 @@ final class VehicleClaimPolicy {
      *                             MavlinkSettings#maxUnclaimedVehicles()}) -- {@code
      *                             PeerDirectory} itself never evicts a once-known peer, so this
      *                             bound still matters here even though it no longer matters there
+     * @param onClaimed            invoked with {@code sysid} exactly once per claim event -- both an
+     *                             initial claim and a silence-window re-election (docs/plans/active/
+     *                             MAVLINK-COMMANDS-PLAN.md P2) -- always from inside {@link #lock},
+     *                             so on the same single reader thread every other policy method
+     *                             callable from {@link #resolve} runs on; never for a lobby hold
+     *                             ({@link #recordUnclaimed} never touches {@link #registrations}/
+     *                             calls this). {@link MavlinkGateway} wires this to {@link
+     *                             MavlinkStreamNegotiator#negotiate}, which itself only queues
+     *                             non-blocking async sends -- see that class's own javadoc for why
+     *                             firing it from here, inside the lock, is safe.
      */
-    VehicleClaimPolicy(PeerDirectory peers, long silenceWindowMillis, int maxUnclaimedVehicles) {
+    VehicleClaimPolicy(PeerDirectory peers, long silenceWindowMillis, int maxUnclaimedVehicles,
+                        IntConsumer onClaimed) {
         this.peers = peers;
         this.silenceWindowMillis = silenceWindowMillis;
         this.maxUnclaimedVehicles = maxUnclaimedVehicles;
+        this.onClaimed = Objects.requireNonNull(onClaimed, "onClaimed must not be null");
     }
 
     void add(VehicleRegistration registration) {
@@ -99,6 +114,36 @@ final class VehicleClaimPolicy {
             if (registration.claimedSysid != null) {
                 claimsBySysid.remove(registration.claimedSysid, registration);
             }
+            return registrations.isEmpty();
+        }
+    }
+
+    /**
+     * Closes every registered device's publisher <b>exceptionally</b> with {@code cause}
+     * (FLEET-RADIO-PLAN.md D5) rather than leaving them to be abandoned by a later {@code
+     * unregister} — used only when the underlying socket itself has failed ({@link
+     * MavlinkGateway#handleLinkFailure}), so every device sharing this gateway sees a genuine
+     * failure on its {@code Flow.Subscriber}, not an unexplained silence or an orderly
+     * end-of-stream. Does not itself touch {@link #registrations}/{@link #claimsBySysid} — the
+     * caller closes the gateway (and, above it, {@code MavlinkTelemetrySource} evicts it from its
+     * gateway map) immediately afterward, at which point this policy's own bookkeeping is moot.
+     */
+    void closeAllPublishersExceptionally(Throwable cause) {
+        synchronized (lock) {
+            for (VehicleRegistration r : registrations) {
+                r.publisher.closeExceptionally(cause);
+            }
+        }
+    }
+
+    /**
+     * {@code true} once this policy holds no registrations at all — used by {@link
+     * MavlinkGateway#releaseLobby()} to decide whether the gateway itself should now close (a
+     * lobby-held gateway with zero devices closes exactly like an ordinary {@link #remove} that
+     * empties the registry would).
+     */
+    boolean isEmpty() {
+        synchronized (lock) {
             return registrations.isEmpty();
         }
     }
@@ -200,6 +245,7 @@ final class VehicleClaimPolicy {
         r.decoder = new MavlinkTelemetryDecoder(r.deviceId); // fresh state -- see MavlinkGateway's class javadoc
         claimsBySysid.put(sysid, r);
         unclaimed.remove(sysid);
+        onClaimed.accept(sysid); // MAVLINK-COMMANDS-PLAN P2 -- fires stream negotiation for this sysid
     }
 
     /** Must be called while holding {@link #lock}. */

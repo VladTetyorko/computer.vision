@@ -14,6 +14,8 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.List;
+
 /**
  * Wires every {@code TelemetrySourcePort}/command-TX adapter for MAVLink and the synthetic
  * simulation source — the telemetry slice of what used to be one 825-line {@code
@@ -80,19 +82,34 @@ public class TelemetryWiring {
                         transmit.defaultSysid()),
                 new MavlinkSettings.Rc(rcProperties.overrideHz(), rcProperties.minOverrideHz(),
                         rcProperties.maxOverrideHz(), rcProperties.releaseFrames()))
-                .withOnboarding(toOnboarding(onboardingProperties));
+                .withCommandRetries(properties.commandRetries())
+                .withOnboarding(toOnboarding(onboardingProperties))
+                .withLinkStatus(new MavlinkSettings.LinkStatus(properties.dropRateWarnPercent(),
+                        properties.dropRateAlarmPercent(), properties.linkFailureGrace()));
     }
 
     /**
-     * Overrides exactly two things on {@link MavlinkSettings.Onboarding#defaults()}: the on-connect
-     * flag, and the per-request timeout that {@code vision.onboarding.probe.request-timeout} exists
-     * to set. The probe parameter list stays on its defaults on purpose — every name in it was
-     * verified against live firmware, and a stale override would degrade the probe silently rather
-     * than fail (see adapter-mavlink's MODULE.md, "Parameter names are firmware-version state").
+     * Overrides the on-connect flag, the per-request timeout that
+     * {@code vision.onboarding.probe.request-timeout} exists to set, and — when the operator supplies
+     * one — the probe parameter list.
+     *
+     * <p>An empty {@code vision.onboarding.probe.parameters} keeps the firmware-verified defaults,
+     * which is what almost every deployment wants. It is a property rather than a constant because
+     * parameter names are firmware-version state and vary by vehicle type: {@code FENCE_ALT_MAX}
+     * exists on Copter and not on Rover, and the system id is spelled differently either side of
+     * ArduPilot 4.7. The javadoc on {@link MavlinkSettings.Onboarding#defaults()} claimed this was
+     * already configuration while this method hard-wired the defaults — see
+     * docs/plans/active/FLEET-RADIO-PLAN.md F12.
+     *
+     * <p>The risk the previous comment named is real and unchanged: a stale override degrades the
+     * probe silently rather than failing, because MAVLink cannot report an unknown parameter name.
+     * That argues for a good default, which this keeps, not for refusing to let a fleet correct it.
      */
     private static MavlinkSettings.Onboarding toOnboarding(VisionOnboardingProperties properties) {
         MavlinkSettings.Onboarding defaults = MavlinkSettings.Onboarding.defaults();
-        return new MavlinkSettings.Onboarding(defaults.probeParameters(),
+        List<String> configured = properties.probe().parameters();
+        List<String> probeParameters = configured.isEmpty() ? defaults.probeParameters() : configured;
+        return new MavlinkSettings.Onboarding(probeParameters,
                 properties.probe().requestTimeout(), defaults.capabilityRetries(),
                 properties.probe().requestTimeout(), defaults.parameterRetries(),
                 properties.remediate().messageInterval().enabled(),
@@ -105,11 +122,28 @@ public class TelemetryWiring {
      * socket {@link #mavlinkTelemetrySource} already has open for RX, rather than opening a second
      * one of its own. {@link #mavlinkTelemetrySource} is wired unconditionally, so this bean is too
      * — there is no {@code vision.mavlink.*}-shaped gate.
+     *
+     * <p><b>(MAVLINK-COMMANDS-PLAN P4)</b> Now built on {@link MavlinkFlightCommander}'s canonical
+     * {@code (MavlinkTelemetrySource, MavlinkSettings)} constructor, reusing {@link
+     * #toMavlinkSettings} exactly like {@link #mavlinkTelemetrySource} does, instead of the 2-arg
+     * {@code (MavlinkTelemetrySource, Duration)} back-compat overload. Closes the production gap P1
+     * documented (drone-link/mavlink's own MODULE.md Gotchas): that overload passed only {@code
+     * properties.ackTimeout()} and always defaulted {@code commandRetries} to {@code
+     * MavlinkSettings.defaults()}'s value, so a deployment got the new bounded-retry behaviour
+     * layered onto the *old* 2s per-attempt timeout (worst case ~6s for a silent vehicle) rather than
+     * the ~2.1s {@code vision.mavlink.command-retries}/{@code ack-timeout} were designed to bound
+     * together. {@code toMavlinkSettings} threads both {@link VisionMavlinkProperties#ackTimeout()}
+     * (now defaulting to 700ms) and {@link VisionMavlinkProperties#commandRetries()} (default 2)
+     * through {@code MavlinkSettings.withCommandRetries}, the same seam {@link #mavlinkTelemetrySource}
+     * relies on.
      */
     @Bean
     public MavlinkFlightCommander mavlinkFlightCommander(MavlinkTelemetrySource mavlinkTelemetrySource,
-                                                          VisionMavlinkProperties properties) {
-        return new MavlinkFlightCommander(mavlinkTelemetrySource, properties.ackTimeout());
+                                                          VisionMavlinkProperties mavlinkProperties,
+                                                          VisionRcProperties rcProperties,
+                                                          VisionOnboardingProperties onboardingProperties) {
+        return new MavlinkFlightCommander(mavlinkTelemetrySource,
+                toMavlinkSettings(mavlinkProperties, rcProperties, onboardingProperties));
     }
 
     /**

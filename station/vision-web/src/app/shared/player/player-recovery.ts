@@ -40,7 +40,13 @@ export type RecoveryEvent =
   | 'reset'
   /** Starting a fresh attach cycle: the very first attempt, or a scheduled retry firing. */
   | 'attachStarted'
-  /** The playlist isn't muxed yet (a fresh stream's normal cold-start 404) or vanished again. */
+  /**
+   * The playlist isn't muxed yet (a fresh stream's normal cold-start 404) or vanished again — also
+   * dispatched for WHEP's own pre-play equivalent (a non-2xx POST response before this attach has
+   * ever played, mediamtx's WHEP endpoint 404ing until a publisher exists for the path): see
+   * `isWhepPrePlayMiss`'s own doc comment for why that case is routed through this event rather than
+   * `'fatalError'`.
+   */
   | 'playlistNotReady'
   /** Genuine playback progress — a fragment buffered, or the native path fired `playing`. */
   | 'firstSegment'
@@ -191,6 +197,62 @@ export function reduceTransportRecovery(
     return { transport: 'hls', recovery: reduceRecovery(INITIAL_RECOVERY_STATE, 'attachStarted') };
   }
   return { transport: state.transport, recovery: reduceRecovery(state.recovery, event) };
+}
+
+// --- WHEP pre-play "path not ready" cold start (fix/stream-start-latency) -----------------------------------
+//
+// Investigated symptom: after Stop→Start, the WHEP POST 404s because mediamtx opens the publisher
+// lazily on first frame — the path genuinely isn't ready *yet*, not broken. Before this fix,
+// `player.ts` routed that 404 through `'fatalError'`, which `reduceTransportRecovery`'s rule above
+// reads as a genuine WHEP failure and permanently downgrades this attach to HLS (~5s glass-to-glass)
+// instead of retrying the still-better WebRTC transport (~0.4s) a moment later once the path opens.
+
+/**
+ * Whether a WHEP POST's non-2xx response, before this attach has ever reached `playing`
+ * (`neverPlayedYet` — the same gate `reduceTransportRecovery`'s own permanent-downgrade rule reads),
+ * should be treated as the cold-start "path not ready yet" case rather than a genuine WHEP failure.
+ * `player.ts#beginWhepAttach` dispatches `'playlistNotReady'` (not `'fatalError'`) when this is
+ * `true` — `reduceTransportRecovery`'s `isWhepFailure` set deliberately excludes `'playlistNotReady'`,
+ * so the transport stays `webrtc` and the attach retries on the same cold-start cadence
+ * (`player.ts#scheduleColdStartRetry`) HLS's own playlist-miss cold start already uses, instead of
+ * falling over to HLS the very first time mediamtx hasn't seen a publisher yet.
+ *
+ * Any non-2xx status counts, not just 404 — mediamtx can plausibly answer a not-yet-ready path with
+ * other codes (e.g. a 5xx while its own routing table catches up) that are just as much "not ready
+ * yet, not broken" as the common 404 shape. Once this attach has played at least once
+ * (`neverPlayedYet` false), a POST failure is a genuine reconnect concern instead — this always
+ * returns `false` then, leaving the caller's existing `'fatalError'` path untouched.
+ */
+export function isWhepPrePlayMiss(httpStatus: number, neverPlayedYet: boolean): boolean {
+  return neverPlayedYet && (httpStatus < 200 || httpStatus >= 300);
+}
+
+// --- Background WHEP upgrade while parked on HLS (fix/stream-start-latency) --------------------------------
+//
+// A second, independent gap the same investigation found: `reduceTransportRecovery`'s webrtc→hls
+// fallback is scoped "permanent for this attach lifetime" by design (see its own doc comment), but
+// once HLS reaches `playing` the ordinary reconnect-cycle machinery (`beginNextCycle`, the only place
+// that ever re-evaluates `shouldAttemptWhep`) is never reached again while nothing keeps failing — a
+// stream that fell back to HLS once and then played happily forever would otherwise never get a
+// second chance at the low-latency transport for the rest of the page session. `player.ts` arms one
+// quiet background WHEP probe `WHEP_RETRY_COOLDOWN_MS` after HLS reaches playing (and re-arms it on
+// a failed probe) specifically to close that gap; this predicate is the pure gate for whether that
+// probe should even start (or continue) right now.
+
+/**
+ * Whether a background WHEP upgrade probe should run: a `whepUrl` is actually configured, the
+ * live transport is `hls`, and that HLS session is calmly `playing` — deliberately narrower than
+ * merely `transport === 'hls'`. A probe must never start (or continue past a stale schedule) while
+ * HLS itself is mid-recovery (`phase !== 'playing'`): that condition already belongs to the ordinary
+ * reconnect-cycle machinery (`beginNextCycle`), and a probe racing it would only add a redundant,
+ * confusing second WHEP attempt on top of whatever that cycle is already trying.
+ */
+export function shouldAttemptWhepUpgrade(
+  transport: Transport,
+  phase: PlayerPhase,
+  hasWhepUrl: boolean,
+): boolean {
+  return hasWhepUrl && transport === 'hls' && phase === 'playing';
 }
 
 // --- Cross-cycle reconnect pacing (docs/plans/done/MVP2-PLAN.md §S, S-c) ------------------------------------

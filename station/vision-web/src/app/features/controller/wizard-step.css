@@ -1,0 +1,282 @@
+/* Two cards: instruction + live detection on the left, the choices on the right. Collapses to one
+   column below --bp-md, same breakpoint the layout/editor grid already used. */
+
+:host {
+  display: block;
+}
+
+.wizard {
+  display: grid;
+  grid-template-columns: minmax(16rem, 22rem) 1fr;
+  gap: var(--space-16);
+  align-items: start;
+  margin-bottom: var(--space-16);
+}
+
+@media (max-width: 900px) {
+  /* --bp-md */
+  .wizard {
+    grid-template-columns: 1fr;
+  }
+}
+
+.wizard-left,
+.wizard-right {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+  margin-bottom: 0;
+}
+
+.step-count {
+  margin: 0;
+}
+
+.wizard-left h2 {
+  margin: 0;
+}
+
+.instruction {
+  margin: 0;
+  color: var(--text);
+}
+
+/* ---- Manual picker (no gamepad connected) ------------------------------------------------- */
+
+.manual-pick {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--space-16);
+}
+
+.manual-pick label {
+  display: flex;
+  flex-direction: column;
+}
+
+.manual-pick label.checkbox {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+/* ---- Live detection -------------------------------------------------------------------------- */
+
+/* A tall vertical gauge for a CHANNEL step — the operator's own stick travel read top-to-bottom. */
+.gauge-vertical {
+  position: relative;
+  width: 2.5rem;
+  height: 9rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--panel-raised);
+  overflow: hidden;
+  align-self: flex-start;
+}
+
+.gauge-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--color-info);
+}
+
+.gauge-rest {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--border-strong);
+}
+
+.detected-caption {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.skip {
+  align-self: flex-start;
+}
+
+/* ---- CHANNEL: direction / rests tiles ------------------------------------------------------ */
+
+.tile-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.tile {
+  padding: var(--space-8) var(--space-16);
+  min-height: 2.25rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.tile:hover {
+  background: var(--panel-hover);
+}
+
+.tile.selected {
+  background: var(--color-info-soft);
+  border-color: var(--color-info);
+  box-shadow: inset 2px 0 0 0 var(--color-info);
+}
+
+.advanced {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-8);
+}
+
+.advanced summary {
+  cursor: pointer;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.advanced label {
+  display: flex;
+  flex-direction: column;
+  max-width: 16ch;
+  margin-top: var(--space-8);
+}
+
+/* ---- ARM / MODE / EXTRAS: per-position editor ----------------------------------------------- */
+
+.position-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.position-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-16);
+  flex-wrap: wrap;
+  padding-left: var(--space-8);
+  border-left: 2px solid var(--border);
+}
+
+.position-name {
+  min-width: 5ch;
+  padding-bottom: var(--space-8);
+  color: var(--text-muted);
+}
+
+.position-row label.grow {
+  flex: 1;
+  min-width: 12ch;
+  display: flex;
+  flex-direction: column;
+}
+
+.danger-note {
+  padding-bottom: var(--space-8);
+  color: var(--color-danger-text);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.mode-source-hint {
+  margin: 0;
+}
+
+.mode-unknown-note {
+  font-size: 0.72rem;
+}
+
+.existing-extras {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  padding-top: var(--space-8);
+  border-top: 1px solid var(--border);
+}
+
+.existing-extras ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.existing-extras li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+  font-size: 0.85rem;
+}
+
+/* ---- REVIEW ----------------------------------------------------------------------------------- */
+
+.review-checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.review-checks li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: 0.85rem;
+}
+
+.check-glyph {
+  width: 1rem;
+  text-align: center;
+  font-family: var(--mono);
+}
+
+.review-checks li.ok .check-glyph {
+  color: var(--color-success-text);
+}
+
+.review-checks li.fail .check-glyph {
+  color: var(--color-danger-text);
+}
+
+.review-checks li.na {
+  color: var(--text-faint);
+}
+
+.issue-list {
+  margin: 0;
+  padding-left: var(--space-16);
+}
+
+/* ---- Navigation --------------------------------------------------------------------------- */
+
+.wizard-nav {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-8);
+  padding-top: var(--space-8);
+  border-top: 1px solid var(--border);
+}

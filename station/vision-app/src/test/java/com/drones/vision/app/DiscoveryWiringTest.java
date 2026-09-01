@@ -18,12 +18,16 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  * vision.discovery.*} overrides): asserts {@link DiscoveryWiringConfiguration}
  * registers all three {@code adapter-discovery} scanners plus {@code
  * adapter-mavlink}'s {@code MavlinkHeartbeatScanner} (docs/plans/active/DRONE-INFRA-PLAN.md
- * I-b) per {@code vision.discovery.enabled}'s default of {@code true}.
+ * I-b) and {@code MediamtxPathScanner} (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §11
+ * Z3 amendment) per {@code vision.discovery.enabled}'s default of {@code true} (and, for the
+ * latter, {@code vision.discovery.mediamtx.enabled}'s own default of {@code true}).
  *
  * <p>{@code vision.publish.enabled=false} is set for determinism, same as
  * {@link com.drones.vision.VisionApplicationTests} and {@link
  * SimStreamSmokeTest} -- this test only cares about the discovery wiring and
- * shouldn't depend on mediamtx being reachable to stay green.
+ * shouldn't depend on mediamtx being reachable to stay green. {@code MediamtxPathScanner}'s bean
+ * construction itself never touches the network (only {@code scan()} does), so it wires cleanly
+ * here regardless.
  *
  * <p>See {@link DiscoveryDisabledWiringTest} for the {@code
  * vision.discovery.enabled=false} counterpart.
@@ -41,10 +45,10 @@ class DiscoveryWiringTest {
     private SystemNetworkController systemNetworkController;
 
     @Test
-    void allFourDiscoveryMethodsAreRegisteredByDefault() {
+    void allFiveDiscoveryMethodsAreRegisteredByDefault() {
         Set<String> methods = discoveryPorts.stream().map(DeviceDiscoveryPort::method).collect(Collectors.toSet());
 
-        assertEquals(Set.of("onvif", "mdns", "v4l2", "mavlink"), methods);
+        assertEquals(Set.of("onvif", "mdns", "v4l2", "mavlink", "mediamtx"), methods);
     }
 
     /**

@@ -1,0 +1,107 @@
+<div class="tv">
+  @if (caveat(); as text) {
+    <vision-notice variant="warn">{{ text }}</vision-notice>
+  }
+
+  @if (pads().length > 0) {
+    <div class="tv-pads">
+      @for (pad of pads(); track pad.id) {
+        <div class="tv-pad-wrap">
+          <div
+            class="tv-pad"
+            [class.single-axis]="!pad.y"
+            [class.interactive]="interactive()"
+            [attr.tabindex]="interactive() ? 0 : null"
+            [attr.role]="interactive() ? 'application' : null"
+            [attr.aria-label]="pad.label"
+            (pointerdown)="onPointerDown($event, pad)"
+            (pointermove)="onPointerMove($event, pad)"
+            (pointerup)="onPointerUp($event, pad)"
+            (pointercancel)="onPointerUp($event, pad)"
+            (keydown)="onKeyDown($event, pad)"
+          >
+            @if (restX(pad); as rest) {
+              <span class="tv-rest-v" [class.heavy]="rest.heavy" [style.left.%]="rest.percent"></span>
+            }
+            @if (restY(pad); as rest) {
+              <span class="tv-rest-h" [class.heavy]="rest.heavy" [style.top.%]="rest.percent"></span>
+            }
+            <span
+              class="tv-knob"
+              [class.interactive]="interactive()"
+              [style.left.%]="knobLeftPercent(pad.x, value(pad.x))"
+              [style.top.%]="knobTopPercent(pad.y, value(pad.y))"
+            ></span>
+          </div>
+
+          <div class="tv-readouts">
+            @if (pad.y) {
+              <span class="tv-readout">
+                <span class="tv-readout-name">{{ pad.y.label }}</span>
+                <span class="tv-readout-value mono">{{ percent(pad.y) }}</span>
+              </span>
+            }
+            @if (pad.x) {
+              <span class="tv-readout">
+                <span class="tv-readout-name">{{ pad.x.label }}</span>
+                <span class="tv-readout-value mono">{{ percent(pad.x) }}</span>
+              </span>
+            }
+          </div>
+        </div>
+      }
+    </div>
+  }
+
+  @if (rows().length > 0) {
+    <div class="tv-switches">
+      @for (row of rows(); track row.key) {
+        <div class="tv-row">
+          <span class="tv-row-id mono">{{ row.idLabel }}</span>
+          <vision-switch-gauge [positions]="row.positions" [active]="row.position" [holding]="row.holding" />
+          <span class="tv-row-actions">
+            @for (cell of row.cells; track cell.position; let last = $last) {
+              <span class="tv-cell-text" [class.lit]="cell.lit" [class.dangerous]="!cell.lit && cell.dangerous">{{
+                cell.text
+              }}</span>
+              @if (!last) {
+                <span class="tv-sep">·</span>
+              }
+            }
+          </span>
+        </div>
+      }
+    </div>
+  }
+
+  @if (keyRows().length > 0) {
+    <div class="tv-switches tv-keys">
+      @for (row of keyRows(); track row.id) {
+        <div class="tv-row">
+          <span class="tv-row-id mono">{{ row.keyLabel }}</span>
+          <vision-switch-gauge
+            [positions]="keyGaugePositions"
+            [active]="row.pressed ? 'HIGH' : undefined"
+            [holding]="row.holding"
+          />
+          <span class="tv-row-actions">
+            <span class="tv-cell-text" [class.lit]="row.pressed" [class.dangerous]="!row.pressed && row.dangerous">{{
+              row.text
+            }}</span>
+          </span>
+        </div>
+      }
+    </div>
+  }
+
+  @if (!caveat() && pads().length === 0 && rows().length === 0 && keyRows().length === 0) {
+    <p class="tv-empty faint">Nothing is bound in this layout yet.</p>
+  }
+
+  @if (unmapped().length > 0) {
+    <div class="tv-unmapped">
+      <span class="faint">{{ unmappedLabel() }} — not mapped</span>
+      <a class="muted" [routerLink]="setupLink()">Set up ›</a>
+    </div>
+  }
+</div>

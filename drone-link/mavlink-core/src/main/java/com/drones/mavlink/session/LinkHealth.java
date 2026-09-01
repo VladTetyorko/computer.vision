@@ -14,6 +14,10 @@ public interface LinkHealth {
     Health of(PeerId id);
 
     /**
+     * @param peerId    identity of the peer this snapshot describes (FLEET-RADIO-PLAN.md D4) — carried
+     *                  on the record itself so a consumer that has rolled several peers' health into
+     *                  one collection (e.g. {@code Map<DeviceId, Health>}) never has to re-derive
+     *                  "whose number is this" from context; {@code of(id)}'s own {@code id} argument
      * @param connected {@code true} if heard within the configured peer timeout of "now"
      * @param lastHeard {@code null} if this peer has never been heard from
      * @param received  frames received from this peer since it was first heard (or since it last
@@ -21,6 +25,6 @@ public interface LinkHealth {
      * @param lost      frames inferred lost from {@code seq} gaps over the same window
      * @param dropRate  {@code lost / (received + lost)}, {@code 0.0} if nothing has been received yet
      */
-    record Health(boolean connected, Instant lastHeard, long received, long lost, double dropRate) {
+    record Health(PeerId peerId, boolean connected, Instant lastHeard, long received, long lost, double dropRate) {
     }
 }

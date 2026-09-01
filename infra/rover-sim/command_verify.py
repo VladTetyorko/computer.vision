@@ -148,6 +148,52 @@ check(any("RTL" in s for s in said),
       f"the refused RTL was explained in text, not just in a result code (said {said})")
 check(all(t.severity <= M.MAV_SEVERITY_DEBUG for t in texts), "every severity is a valid MAV_SEVERITY")
 
+# -- command idempotency: the same COMMAND_LONG, a rising confirmation ------
+# D2a lets the platform retry an absolute-state command (COMPONENT_ARM_DISARM,
+# DO_SET_MODE) up to twice. The firmware must answer every attempt -- an
+# unacked retry is what makes the app give up and call the vehicle
+# unresponsive -- but the STATE it produces must be the same as sending the
+# command once: an "armed" notice for every one of three ARM attempts would
+# mean the retry budget is quietly tripling every side effect, not just
+# covering for a lost packet.
+print("\n-- command idempotency: rising confirmation --")
+idem_data = open(sys.argv[1] + "/idem_frames.bin", "rb").read()
+idem_decoder = mav.MAVLink(None)
+idem_decoder.robust_parsing = False
+idem_msgs = idem_decoder.parse_buffer(idem_data) or []
+
+
+def iof(kind):
+    return [x for x in idem_msgs if x.get_type() == kind]
+
+
+idem_acks = iof("COMMAND_ACK")
+idem_texts = iof("STATUSTEXT")
+
+arm_acks = [a for a in idem_acks if a.command == M.MAV_CMD_COMPONENT_ARM_DISARM]
+mode_acks = [a for a in idem_acks if a.command == M.MAV_CMD_DO_SET_MODE]
+
+check(len(arm_acks) == 3,
+      f"COMPONENT_ARM_DISARM re-sent 3x (confirmation 0,1,2) got 3 acks (got {len(arm_acks)})")
+check(all(a.result == M.MAV_RESULT_ACCEPTED for a in arm_acks),
+      f"...every attempt ACCEPTED, not just the first (got {[a.result for a in arm_acks]})")
+
+check(len(mode_acks) == 3,
+      f"DO_SET_MODE re-sent 3x (confirmation 0,1,2) got 3 acks (got {len(mode_acks)})")
+check(all(a.result == M.MAV_RESULT_ACCEPTED for a in mode_acks),
+      f"...every attempt ACCEPTED, not just the first (got {[a.result for a in mode_acks]})")
+
+# "armed" is exact-matched with startswith, not `in`, because "disarmed"
+# contains "armed" as a substring -- a naive `in` check would count the wrong
+# notices as evidence of idempotency.
+armed_notices = [t for t in idem_texts if t.text.startswith("armed")]
+check(len(armed_notices) == 1,
+      "a repeated ARM changes state ONCE -- exactly one 'armed' notice for "
+      f"3 attempts (got {len(armed_notices)}: {[t.text for t in armed_notices]})")
+
+print("\n-- STATUSTEXT (idempotency block) --")
+check(all(t.severity <= M.MAV_SEVERITY_DEBUG for t in idem_texts), "every severity is a valid MAV_SEVERITY")
+
 print()
 print("ALL COMMAND CHECKS PASSED" if not failures else f"{len(failures)} FAILED: {failures}")
 sys.exit(1 if failures else 0)

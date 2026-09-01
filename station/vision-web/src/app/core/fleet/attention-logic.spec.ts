@@ -115,40 +115,47 @@ describe('attentionReasons', () => {
 
   describe('gps-degraded (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d)', () => {
     it('never fires with no gpsFixType given at all', () => {
-      expect(attentionReasons(asset(), undefined)).toEqual([]);
+      expect(attentionReasons(asset({ streaming: true }), undefined)).toEqual([]);
     });
 
     it('never fires for a healthy (3D+) fix', () => {
-      expect(attentionReasons(asset(), 3)).toEqual([]);
+      expect(attentionReasons(asset({ streaming: true }), 3)).toEqual([]);
     });
 
     it('flags a 2D fix as a warning', () => {
-      const reasons = attentionReasons(asset(), 2);
+      const reasons = attentionReasons(asset({ streaming: true }), 2);
       expect(reasons).toHaveLength(1);
       expect(reasons[0].kind).toBe('gps-degraded');
       expect(reasons[0].severity).toBe('warning');
     });
 
     it('flags no-GPS/no-fix as critical', () => {
-      expect(attentionReasons(asset(), 0)[0].severity).toBe('critical');
-      expect(attentionReasons(asset(), 1)[0].severity).toBe('critical');
+      expect(attentionReasons(asset({ streaming: true }), 0)[0].severity).toBe('critical');
+      expect(attentionReasons(asset({ streaming: true }), 1)[0].severity).toBe('critical');
     });
 
     it('ranks between battery-low and open-events', () => {
-      const reasons = attentionReasons(asset({ batteryPercent: 15, openEventCount: 1 }), 2);
+      const reasons = attentionReasons(asset({ streaming: true, batteryPercent: 15, openEventCount: 1 }), 2);
       expect(reasons.map((r) => r.kind)).toEqual(['battery-low', 'gps-degraded', 'open-events']);
+    });
+
+    /** docs/plans/active/OPERATOR-UX-4-PLAN.md finding N2, §2 N2 — reproduced live: a rail row read CRIT
+     *  off a fleet marker's leftover `gpsFixType` for an asset that was not currently streaming. */
+    it('never fires for a non-streaming asset, regardless of fix quality — an offline asset is not CRIT for lacking a fix it is not trying to get', () => {
+      expect(attentionReasons(asset({ streaming: false }), 0)).toEqual([]);
+      expect(attentionReasons(asset({ streaming: false }), 1)).toEqual([]);
     });
   });
 });
 
 describe('geofence-breach (docs/plans/done/OPS-CORE-PLAN.md §G-c)', () => {
   it('never fires with no breaches given at all', () => {
-    expect(attentionReasons(asset())).toEqual([]);
-    expect(attentionReasons(asset(), undefined, [])).toEqual([]);
+    expect(attentionReasons(asset({ streaming: true }))).toEqual([]);
+    expect(attentionReasons(asset({ streaming: true }), undefined, [])).toEqual([]);
   });
 
-  it('fires with one active breach, naming the zone', () => {
-    const reasons = attentionReasons(asset(), undefined, [
+  it('fires with one active breach while streaming, naming the zone', () => {
+    const reasons = attentionReasons(asset({ streaming: true }), undefined, [
       { assetId: 'a-0', zoneId: 'z-1', zoneName: 'North perimeter', kind: 'KEEP_OUT', direction: 'enter' },
     ]);
     expect(reasons).toHaveLength(1);
@@ -157,7 +164,7 @@ describe('geofence-breach (docs/plans/done/OPS-CORE-PLAN.md §G-c)', () => {
 
   it('ranks above every other reason, including failsafe', () => {
     const reasons = attentionReasons(
-      asset({ failsafe: true, batteryPercent: 5 }),
+      asset({ streaming: true, failsafe: true, batteryPercent: 5 }),
       undefined,
       [{ assetId: 'a-0', zoneId: 'z-1', zoneName: 'North perimeter', kind: 'KEEP_OUT', direction: 'enter' }],
     );
@@ -165,12 +172,21 @@ describe('geofence-breach (docs/plans/done/OPS-CORE-PLAN.md §G-c)', () => {
   });
 
   it('joins multiple active breaches into one reason', () => {
-    const reasons = attentionReasons(asset(), undefined, [
+    const reasons = attentionReasons(asset({ streaming: true }), undefined, [
       { assetId: 'a-0', zoneId: 'z-1', zoneName: 'North perimeter', kind: 'KEEP_OUT', direction: 'enter' },
       { assetId: 'a-0', zoneId: 'z-2', zoneName: 'Charging pad', kind: 'KEEP_IN', direction: 'enter' },
     ]);
     expect(reasons).toHaveLength(1);
     expect(reasons[0].text).toBe('KEEP-OUT breach — North perimeter; KEEP-IN breach — Charging pad.');
+  });
+
+  /** docs/plans/active/OPERATOR-UX-4-PLAN.md finding N2 follow-up, §2 N2, this cycle's W5 —
+   *  reproduced live: an ESP32 rover offline 3 days still read CRIT off a `KEEP-IN` breach it
+   *  recorded from Null Island before going offline. Mirrors the identical `gps-degraded` test
+   *  above — an offline asset is not physically breaching a boundary *right now*. */
+  it('never fires for a non-streaming asset, regardless of an active breach — an offline asset is not CRIT for a boundary it crossed before going offline', () => {
+    const breaches = [{ assetId: 'a-0', zoneId: 'z-1', zoneName: 'Demo operating area', kind: 'KEEP_IN' as const, direction: 'enter' as const }];
+    expect(attentionReasons(asset({ streaming: false }), undefined, breaches)).toEqual([]);
   });
 });
 
@@ -191,7 +207,7 @@ describe('pipeline-error (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.4)', () => {
   });
 
   it('ranks below gps-degraded and above open-events', () => {
-    const reasons = attentionReasons(asset({ openEventCount: 1 }), 2, undefined, 'RTSP source unreachable');
+    const reasons = attentionReasons(asset({ streaming: true, openEventCount: 1 }), 2, undefined, 'RTSP source unreachable');
     expect(reasons.map((r) => r.kind)).toEqual(['gps-degraded', 'pipeline-error', 'open-events']);
   });
 
@@ -208,5 +224,15 @@ describe('attentionAgeLabel', () => {
 
   it('renders a formatted duration otherwise', () => {
     expect(attentionAgeLabel(asset({ telemetryAgeMs: 12_000 }))).toBe('12s ago');
+  });
+
+  /** docs/plans/active/OPERATOR-UX-4-PLAN.md finding N4, §2 N4 — one age vocabulary (`humanAge`), not
+   *  `formatDuration`'s zero-padded, day-tier-less duration format. */
+  it('drops a zero remainder rather than zero-padding it, unlike the old duration formatter', () => {
+    expect(attentionAgeLabel(asset({ telemetryAgeMs: 3_900_000 }))).toBe('1h 5m ago'); // 65 minutes
+  });
+
+  it('rolls a multi-day age into a day tier rather than an ever-growing raw hour count', () => {
+    expect(attentionAgeLabel(asset({ telemetryAgeMs: 353_099_000 }))).toBe('4d 2h ago');
   });
 });

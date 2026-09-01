@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { planEviction, tileCacheKey, type TileCacheEntryMeta } from './tile-cache-logic';
+import { planEviction, tileCacheKey, type TileCacheEntryMeta, tileHost } from './tile-cache-logic';
 
 function entry(partial: Partial<TileCacheEntryMeta>): TileCacheEntryMeta {
   return { key: 'k', size: 1_000, lastAccessedAt: 0, ...partial };
@@ -8,6 +8,9 @@ function entry(partial: Partial<TileCacheEntryMeta>): TileCacheEntryMeta {
 describe('tileCacheKey', () => {
   it('joins layer/z/x/y', () => {
     expect(tileCacheKey('night', 4, 2, 9)).toBe('night/4/2/9');
+    expect(tileCacheKey('night', 4, 2, 9, 'tile.openstreetmap.org')).toBe('night@tile.openstreetmap.org/4/2/9');
+    expect(tileHost('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png')).toBe('basemaps.cartocdn.com');
+    expect(tileHost('https://tile.openstreetmap.org/{z}/{x}/{y}.png')).toBe('tile.openstreetmap.org');
   });
 
   it('keys the same z/x/y differently per layer', () => {

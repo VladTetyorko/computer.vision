@@ -25,6 +25,20 @@
   font-size: 0.78rem;
 }
 
+/* `Include removed devices` toggle (docs/plans/active/OPERATOR-UX-7-PLAN.md finding W1) — mirrors
+   `features/command/command.css`'s own `.rail-hide-simulated` idiom (a `.row` label with a
+   naturally-sized checkbox). Deliberately not persisted — see `events-rail.ts`'s own class doc. */
+.removed-toggle {
+  gap: var(--space-8);
+  margin-bottom: var(--space-16);
+  padding: 0 var(--space-2);
+  font-size: 0.8rem;
+}
+
+.removed-toggle input {
+  width: auto;
+}
+
 .hint {
   font-size: 0.8rem;
   margin: 0;

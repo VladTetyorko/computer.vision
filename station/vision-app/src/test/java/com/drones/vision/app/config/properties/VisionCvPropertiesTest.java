@@ -1,8 +1,10 @@
 package com.drones.vision.app.config.properties;
 
+import com.drones.vision.adapter.cvgrpc.CvTarget;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -116,7 +118,77 @@ class VisionCvPropertiesTest {
                         Duration.ofSeconds(30));
         VisionCvProperties properties = new VisionCvProperties(false, "localhost:50051", 640, 0.8f, "auto", "push",
                 Duration.ofSeconds(2), Duration.ofSeconds(20), Duration.ofSeconds(5), true, Duration.ofSeconds(5),
-                true, null, null, null, false, null, reconnect);
+                true, null, null, null, false, null, reconnect, null, null, null);
         assertEquals(reconnect, properties.reconnect());
+    }
+
+    /**
+     * docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6: with no {@code vision.cv.inference.targets}
+     * configured (the default, via the 4-arg convenience constructor), {@link
+     * VisionCvProperties#inferenceTargets()} falls back to a single {@link CvTarget} built from
+     * {@link VisionCvProperties#host()}/{@link VisionCvProperties#port()} -- a one-process deployment
+     * gets exactly the endpoint it configured, not an empty list.
+     */
+    @Test
+    void inferenceTargetsFallsBackToHostAndPortWhenUnset() {
+        VisionCvProperties properties = new VisionCvProperties(true, "example.org:50051", 640, 0.8f);
+        assertEquals(List.of(new CvTarget("example.org", 50051)), properties.inferenceTargets());
+    }
+
+    /** An explicit {@code vision.cv.inference.targets} list is parsed in order via {@code CvTarget#parseAll}. */
+    @Test
+    void inferenceTargetsParsesTheConfiguredListWhenPresent() {
+        VisionCvProperties.Inference inference = new VisionCvProperties.Inference(List.of("a:1", "b:2"));
+        VisionCvProperties properties = new VisionCvProperties(false, "localhost:50051", 640, 0.8f, "auto", "push",
+                Duration.ofSeconds(2), Duration.ofSeconds(20), Duration.ofSeconds(5), true, Duration.ofSeconds(5),
+                true, null, null, null, false, null, null, inference, null, null);
+        assertEquals(List.of(new CvTarget("a", 1), new CvTarget("b", 2)), properties.inferenceTargets());
+    }
+
+    /** A malformed {@code vision.cv.inference.targets} entry fails at context startup, not at first RPC. */
+    @Test
+    void malformedInferenceTargetIsRejectedAtConstruction() {
+        VisionCvProperties.Inference inference = new VisionCvProperties.Inference(List.of("not-a-target"));
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> new VisionCvProperties(false, "localhost:50051", 640, 0.8f, "auto", "push",
+                        Duration.ofSeconds(2), Duration.ofSeconds(20), Duration.ofSeconds(5), true,
+                        Duration.ofSeconds(5), true, null, null, null, false, null, null, inference, null, null));
+        assertTrue(ex.getMessage().contains("vision.cv.inference.targets"), ex.getMessage());
+    }
+
+    /**
+     * docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6: with no {@code vision.cv.training.target}
+     * configured (the default), {@link VisionCvProperties#trainingTarget()} falls back to {@link
+     * VisionCvProperties#host()}/{@link VisionCvProperties#port()} -- the same one-process fallback
+     * {@link #inferenceTargetsFallsBackToHostAndPortWhenUnset()} exercises for the inference side --
+     * and {@link VisionCvProperties#trainingTargetConfigured()} reports {@code false}.
+     */
+    @Test
+    void trainingTargetFallsBackToHostAndPortWhenUnset() {
+        VisionCvProperties properties = new VisionCvProperties(true, "example.org:50051", 640, 0.8f);
+        assertEquals(new CvTarget("example.org", 50051), properties.trainingTarget());
+        assertFalse(properties.trainingTargetConfigured());
+    }
+
+    /** An explicit {@code vision.cv.training.target} is parsed via {@code CvTarget#parse} and reported configured. */
+    @Test
+    void trainingTargetParsesTheConfiguredValueWhenPresent() {
+        VisionCvProperties.Training training = new VisionCvProperties.Training("cv-training-host:50062");
+        VisionCvProperties properties = new VisionCvProperties(false, "localhost:50051", 640, 0.8f, "auto", "push",
+                Duration.ofSeconds(2), Duration.ofSeconds(20), Duration.ofSeconds(5), true, Duration.ofSeconds(5),
+                true, null, null, null, false, null, null, null, training, null);
+        assertEquals(new CvTarget("cv-training-host", 50062), properties.trainingTarget());
+        assertTrue(properties.trainingTargetConfigured());
+    }
+
+    /** A malformed {@code vision.cv.training.target} fails at context startup, not at first RPC. */
+    @Test
+    void malformedTrainingTargetIsRejectedAtConstruction() {
+        VisionCvProperties.Training training = new VisionCvProperties.Training("not-a-target");
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> new VisionCvProperties(false, "localhost:50051", 640, 0.8f, "auto", "push",
+                        Duration.ofSeconds(2), Duration.ofSeconds(20), Duration.ofSeconds(5), true,
+                        Duration.ofSeconds(5), true, null, null, null, false, null, null, null, training, null));
+        assertTrue(ex.getMessage().contains("vision.cv.training.target"), ex.getMessage());
     }
 }

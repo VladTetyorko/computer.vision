@@ -107,7 +107,7 @@
             </div>
             <div class="fact">
               <dt>Sample age</dt>
-              <dd class="mono">{{ m.sampleAgeSeconds !== undefined ? m.sampleAgeSeconds.toFixed(0) + 's ago' : '—' }}</dd>
+              <dd class="mono">{{ sampleAgeText(m.sampleAgeSeconds) }}</dd>
             </div>
           </dl>
         } @else {

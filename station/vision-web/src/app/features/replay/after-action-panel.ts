@@ -1,8 +1,9 @@
-import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
 import { Icon } from '../../shared/ui/icon';
 import type { IconName } from '../../shared/ui/icon-registry';
 import { Notice } from '../../shared/ui/notice';
-import { pluralize } from '../../shared/ui/page-bar/page-bar';
+import { pluralize } from '../../shared/ui/text-logic';
+import { actorLabel } from '../../core/audit/summary-logic';
 import type { AfterActionManifest, AfterActionPart } from '../../core/api/models';
 import { buildAfterActionView, type AfterActionPartRow } from '../../core/after-action/after-action-logic';
 
@@ -15,14 +16,19 @@ const PART_ICONS: Record<AfterActionPart, IconName> = {
   audit: 'shield',
 };
 
-/** The count badge's own noun, singular — `shared/ui/page-bar/page-bar.ts#pluralize` supplies the rest. */
-const PART_COUNT_NOUN: Record<AfterActionPart, string> = {
-  telemetry: 'point',
-  detections: 'detection',
-  marks: 'mark',
-  recording: 'recording',
-  passport: 'entry',
-  audit: 'entry',
+/**
+ * The count badge's own noun, singular + plural — `shared/ui/text-logic.ts#pluralize` supplies the
+ * rest. **Both forms are explicit** (docs/plans/active/OPERATOR-UX-6-PLAN.md finding E3): `passport`/`audit`
+ * previously passed only the singular `'entry'`, so `pluralize`'s regular-plural default silently
+ * produced `entrys` — the "Included · 200 entrys" bug — since `entry`'s plural is irregular.
+ */
+const PART_COUNT_NOUN: Record<AfterActionPart, readonly [singular: string, plural: string]> = {
+  telemetry: ['point', 'points'],
+  detections: ['detection', 'detections'],
+  marks: ['mark', 'marks'],
+  recording: ['recording', 'recordings'],
+  passport: ['entry', 'entries'],
+  audit: ['entry', 'entries'],
 };
 
 /**
@@ -66,17 +72,46 @@ export class AfterActionPanel {
   /** `undefined` hides the download control entirely — never a dead link (mirrors `downloadClipUrl`'s own convention in `replay-facade.ts`). */
   readonly archiveUrl = input<string | undefined>(undefined);
 
+  /**
+   * Collapsed by default (docs/plans/active/OPERATOR-UX-6-PLAN.md finding E1) — the evidence package is the
+   * last card on `ReplayPage` now, shown as just its header line + "Download package" until a viewer
+   * opens it; the manifest detail (part rows, caveats) is one click away rather than the first thing
+   * the page renders. Local, ephemeral view state — mirrors `shared/ui/preflight-checklist.ts`'s own
+   * `collapsed` idiom, except this component owns the toggle itself (no host needs to react to it),
+   * so it is a plain signal rather than an `input`/`output` pair.
+   */
+  protected readonly collapsed = signal(true);
+
   protected readonly view = computed(() => {
     const manifest = this.manifest();
     return manifest ? buildAfterActionView(manifest) : undefined;
   });
+
+  /**
+   * `Built for {{ scopedToLabel() }}` (docs/plans/active/OPERATOR-UX-6-PLAN.md finding E2) — reuses
+   * `core/audit/summary-logic.ts#actorLabel`, the same "root principal → Station, else short id"
+   * rule the audit trail already applies, rather than rendering `manifest.scopedTo`'s raw UUID.
+   * `ReplayFacade` holds no user roster (no page here needs one for anything else), so this passes
+   * an empty names map — `actorLabel` already degrades an unresolved id to its own honest 8-char
+   * short form, same posture as every other "no roster known" fallback in this app; a future page
+   * that does have a roster in hand could pass it in as an input without changing this call.
+   */
+  protected readonly scopedToLabel = computed(() => {
+    const manifest = this.manifest();
+    return manifest ? actorLabel(manifest.scopedTo, new Map()) : '';
+  });
+
+  protected toggleCollapsed(): void {
+    this.collapsed.update((c) => !c);
+  }
 
   protected iconFor(part: AfterActionPart): IconName {
     return PART_ICONS[part];
   }
 
   protected countLabel(row: AfterActionPartRow): string {
-    return pluralize(row.count, PART_COUNT_NOUN[row.part]);
+    const [singular, plural] = PART_COUNT_NOUN[row.part];
+    return pluralize(row.count, singular, plural);
   }
 
   /** The state chip's own text — `"Included · 214 detections"` when a count is worth showing, else just the plain state word. Built here (not templated inline) so the template never mixes a bare interpolation with an inline `@if`. */

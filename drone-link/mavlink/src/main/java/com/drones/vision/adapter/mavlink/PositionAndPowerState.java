@@ -24,6 +24,14 @@ import io.dronefleet.mavlink.common.GlobalPositionInt;
  * locking of its own.
  * Fields are package-private with no accessors: {@link MavlinkTelemetryDecoder} is this type's only
  * collaborator.
+ *
+ * <p><b>{@code latitude}/{@code longitude} require a GPS fix (docs/plans/active/OPERATOR-UX-4-PLAN.md
+ * N1).</b> {@link #applyPosition} records {@code GLOBAL_POSITION_INT}'s {@code lat}/{@code lon}
+ * only when the decoder's current {@code GPS_RAW_INT}-reported fix is at least 2D; otherwise both
+ * fields are set to {@code null} — a real ESP32 rover with no GPS fix sends {@code lat=lon=0}
+ * unconditionally, and Null Island is not a legal vehicle position for this product. Every other
+ * field this message carries (altitude, heading, velocity, AGL, boot millis) is unaffected — it is
+ * only the position pair that is gated.
  */
 final class PositionAndPowerState {
 
@@ -43,9 +51,27 @@ final class PositionAndPowerState {
     Double aglMeters;
     Long deviceBootMillis;
 
-    void applyPosition(GlobalPositionInt position) {
-        latitude = position.lat() / 1e7;
-        longitude = position.lon() / 1e7;
+    /**
+     * @param hasGpsFix {@link FlightStatusState#hasGpsFix()} at the moment this message arrived —
+     *                  {@code lat}/{@code lon} are recorded only when {@code true}
+     *                  (docs/plans/active/OPERATOR-UX-4-PLAN.md N1); when {@code false}, {@link
+     *                  #latitude}/{@link #longitude} are set to {@code null}, dropping any
+     *                  previously-known position rather than leaving a now-stale reading in place —
+     *                  a vehicle whose fix drops mid-session must stop reporting a position, not
+     *                  freeze on its last one. Every other field on this message ({@code alt},
+     *                  {@code hdg}, velocity, {@code relative_alt}, {@code time_boot_ms}) is a
+     *                  reading independent of the GPS fix and is always recorded.
+     */
+    void applyPosition(GlobalPositionInt position, boolean hasGpsFix) {
+        if (hasGpsFix) {
+            latitude = position.lat() / 1e7;
+            longitude = position.lon() / 1e7;
+        } else {
+            // No fix (or none seen yet) -- Null Island is not a legal vehicle position for this
+            // product; never persist a {0,0} (or any other) reading an unfixed vehicle sends.
+            latitude = null;
+            longitude = null;
+        }
         altitudeMeters = position.alt() / 1000.0;
         headingDegrees = position.hdg() == UNKNOWN_HEADING_CENTIDEGREES ? null : position.hdg() / 100.0;
         vxMps = position.vx() / 100.0;

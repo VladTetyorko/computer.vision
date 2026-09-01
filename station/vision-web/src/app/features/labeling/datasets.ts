@@ -6,6 +6,7 @@ import { IconButton } from '../../shared/ui/icon-button';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { ConfirmDialog } from '../../shared/ui/confirm-dialog';
 import { SectionHeader } from '../../shared/ui/section-header';
+import { CvSubnav } from '../../shared/ui/cv-subnav';
 import { DatasetsFacade } from './datasets-facade';
 
 /**
@@ -21,13 +22,17 @@ import { DatasetsFacade } from './datasets-facade';
  * **Disabled-state cleanup (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2, docs/extracts/design/16-training.md, wave 2).**
  * The header's own `eyebrow="Manage"` is gone — the sidebar's active group already answers "where am
  * I" (docs/extracts/design/00-shell.md), so repeating the mode name in every page's own header was pure
- * duplication. The **Models** action is hidden while `training.disabled()` — offering a door into a
- * second disabled page is not a primary action, it's dead weight above the one honest message this
- * state has to give (`vision-empty`, already used here, already produces one centered stack).
+ * duplication.
+ *
+ * **Shared CV sub-nav (docs/plans/active/CV-SETTINGS-PLAN.md §3.3/§6 row W8)** — `<vision-cv-subnav
+ * active="labeling">` replaces the old header-actions "Models" link outright; it covers that same
+ * jump plus the new Training (run history) tree, so this page never repeats it as a bespoke action —
+ * unlike that old link, the sub-nav is always visible here (not hidden behind `!disabled()`) since
+ * jumping to another CV-settings tree is meaningful regardless of whether datasets are enabled here.
  */
 @Component({
   selector: 'vision-datasets-page',
-  imports: [FormsModule, RouterLink, Icon, IconButton, EmptyState, ConfirmDialog, SectionHeader],
+  imports: [FormsModule, RouterLink, Icon, IconButton, EmptyState, ConfirmDialog, SectionHeader, CvSubnav],
   templateUrl: './datasets.html',
   styleUrl: './datasets.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

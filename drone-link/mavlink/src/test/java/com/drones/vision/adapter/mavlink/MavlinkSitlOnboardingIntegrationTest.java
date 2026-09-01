@@ -2,6 +2,7 @@ package com.drones.vision.adapter.mavlink;
 
 import com.drones.vision.flight.domain.model.MessageIntervalOutcome;
 import com.drones.vision.flight.domain.model.MessageObservation;
+import com.drones.vision.flight.domain.model.ParameterAliases;
 import com.drones.vision.flight.domain.model.ParameterReading;
 import com.drones.vision.flight.domain.model.ParameterWriteOutcome;
 import com.drones.vision.flight.domain.model.RemediationResultCode;
@@ -143,12 +144,22 @@ class MavlinkSitlOnboardingIntegrationTest {
         // Every one, not "most": each default name was read off this firmware before being written
         // down, so a miss here means either the protocol path regressed or the firmware moved --
         // both of which this wave exists to catch rather than absorb.
+        //
+        // The one licensed exception is a renamed parameter (FLEET-RADIO-PLAN F0): the probe asks
+        // under every spelling on purpose, so a 4.7 SITL leaves the pre-4.7 spelling unanswered by
+        // design. The invariant that still bites is per *parameter*, not per name -- some spelling
+        // of every probed parameter must come back.
         List<String> unanswered = PROBE_PARAMETERS.stream()
-                .filter(name -> reading(profile, name).isEmpty())
+                .filter(name -> profile.parameters().stream()
+                        .noneMatch(r -> ParameterAliases.sameParameter(r.name(), name)))
                 .toList();
         assertTrue(unanswered.isEmpty(),
                 "every one of the " + PROBE_PARAMETERS.size() + " default probe parameters exists on ArduPilot "
-                        + "Copter 4.7 and must be answered; unanswered: " + unanswered);
+                        + "Copter 4.7 under some spelling and must be answered; unanswered: " + unanswered);
+        assertEquals(1, profile.parameters().stream()
+                        .filter(r -> ParameterAliases.sameParameter(r.name(), "MAV_SYSID")).count(),
+                "4.7 answers the modern spelling, so the alias fallback pass must not have fired: "
+                        + names(profile));
         assertEquals(SYSID, (int) reading(profile, "MAV_SYSID").orElseThrow().value(),
                 "MAV_SYSID must carry the value this instance was booted with -- not a fabricated zero");
         assertTrue(profile.parameters().stream().noneMatch(p -> p.type().isBlank()),

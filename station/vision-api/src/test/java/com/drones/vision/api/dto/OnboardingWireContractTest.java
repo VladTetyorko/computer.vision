@@ -23,6 +23,9 @@ import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.UsageId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
+import com.drones.vision.warehouse.domain.model.InventoryState;
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -152,9 +155,10 @@ class OnboardingWireContractTest {
 
     @Test
     void readinessRowResponseMatchesTheFleetBoardShape() {
+        Instant now = Instant.now();
         Asset asset = new Asset(AssetId.random(), "Hexa-7", new CategoryId("multirotor"),
                 new Ownership(UserId.random(), GroupId.random()), Set.of(DeviceId.random()), Map.of(),
-                LifecycleState.ACTIVE);
+                LifecycleState.ACTIVE, Identity.NONE, Custody.NONE, InventoryState.IN_STOCK, now, now);
         Map<String, String> features = new LinkedHashMap<>();
         features.put("map-position", "READY");
         features.put("battery", "READY");

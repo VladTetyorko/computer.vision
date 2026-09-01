@@ -1,0 +1,241 @@
+<div class="wizard">
+  <section class="card wizard-left">
+    <p class="step-count label">Step {{ stepNumber() }} of {{ stepCount() }}</p>
+    <h2>{{ step().title }}</h2>
+    <p class="instruction">{{ step().instruction }}</p>
+
+    @if (step().caveat; as caveat) {
+      <vision-notice variant="warn">{{ caveat }}</vision-notice>
+    }
+
+    @if (step().kind === 'REVIEW') {
+      <vision-transmitter-view
+        [channelMap]="reviewChannelMap()"
+        [actionMap]="reviewActionMap()"
+        [vehicleKind]="draft().kind"
+        [catalog]="catalog()"
+        [axes]="axes()"
+        [buttons]="buttons()"
+      />
+    } @else {
+      @if (!connected() && !detected()) {
+        <vision-notice variant="neutral">
+          Plug your transmitter in over USB in <strong>USB Joystick</strong> mode and move the control — or pick it
+          manually below.
+        </vision-notice>
+        <div class="manual-pick">
+          <label>
+            <span class="label">Input</span>
+            <select [ngModel]="manualSource()" (ngModelChange)="manualSource.set($event)">
+              <option value="AXIS">Axis / stick</option>
+              <option value="BUTTON">Switch / button</option>
+            </select>
+          </label>
+          <label>
+            <span class="label">Number</span>
+            <select [ngModel]="manualIndex()" (ngModelChange)="manualIndex.set(+$event)">
+              @for (i of (manualSource() === 'AXIS' ? manualAxes : manualButtons); track i) {
+                <option [value]="i">{{ controlLabel(manualSource(), i) }}</option>
+              }
+            </select>
+          </label>
+          @if (detectPurpose() === 'ACTION' && manualSource() === 'AXIS') {
+            <label class="checkbox">
+              <input type="checkbox" [ngModel]="manualIsThreePos()" (ngModelChange)="manualIsThreePos.set($event)" />
+              <span>3-position switch</span>
+            </label>
+          }
+          <button type="button" class="btn secondary small" (click)="useManualPick()">Use this</button>
+        </div>
+      } @else if (detected(); as d) {
+        @if (step().kind === 'CHANNEL') {
+          <div class="gauge-vertical">
+            <span class="gauge-rest" [style.bottom.%]="restPercent()"></span>
+            <span class="gauge-fill" [style.height.%]="fillPercent(d)"></span>
+          </div>
+        } @else {
+          <vision-switch-gauge [positions]="positionsForDetected()" [active]="livePosition(d)" />
+        }
+        <p class="detected-caption mono">
+          @if (step().kind === 'CHANNEL') {
+            {{ travelCaption(d) }}
+          } @else {
+            detected: {{ controlLabel(d.source, d.sourceIndex) }}, {{ kindLabel(d.inputKind) }}
+          }
+        </p>
+        @if (editable()) {
+          <button type="button" class="btn secondary small" (click)="moveAnother()">Not this one? Move another</button>
+        }
+      } @else {
+        <p class="muted hint">Waiting for you to move it…</p>
+      }
+
+      @if (editable()) {
+        <button type="button" class="btn secondary small skip" (click)="onSkip()">Skip this step</button>
+      }
+    }
+  </section>
+
+  <section class="card wizard-right">
+    @if (!editable()) {
+      <vision-notice variant="neutral">
+        Built-in layouts can't be edited — they're the fallback every vehicle keeps.
+        <button type="button" class="btn secondary small" (click)="copyRequested.emit()">Make a copy to edit</button>
+      </vision-notice>
+    } @else if (step().kind === 'CHANNEL') {
+      @if (questions(); as q) {
+        <div class="tile-group">
+          <span class="label">This control moves</span>
+          <div class="tiles">
+            @for (tile of q.direction; track tile.label) {
+              <button type="button" class="tile" [class.selected]="isDirectionChosen(tile)" (click)="chooseDirection(tile)">
+                {{ tile.label }}
+              </button>
+            }
+          </div>
+        </div>
+        @if (q.rests.length > 0) {
+          <div class="tile-group">
+            <span class="label">Where it rests</span>
+            <div class="tiles">
+              @for (tile of q.rests; track tile.label) {
+                <button type="button" class="tile" [class.selected]="isRestChosen(tile)" (click)="chooseRest(tile)">
+                  {{ tile.label }}
+                </button>
+              }
+            </div>
+          </div>
+        }
+      }
+      <details class="advanced">
+        <summary>Advanced</summary>
+        <label>
+          <span class="label">Channel</span>
+          <select [ngModel]="effectiveAnswers().rcChannel" (ngModelChange)="chooseChannel($event)">
+            @for (ch of rcChannels; track ch) {
+              <option [value]="ch">CH{{ ch }}</option>
+            }
+          </select>
+        </label>
+        <p class="muted hint mono">
+          {{ derivedMicros().min }}–{{ derivedMicros().max }} µs, rest {{ derivedMicros().center }} µs
+        </p>
+      </details>
+    } @else if (step().kind === 'ARM' || step().kind === 'MODE' || step().kind === 'EXTRAS') {
+      @if (detected(); as d) {
+        <ul class="position-list">
+          @for (row of positionRows(); track row.position) {
+            <li class="position-row">
+              <span class="position-name">{{ row.position }}</span>
+              <label class="grow">
+                <span class="label">fires</span>
+                <select [ngModel]="row.action ?? ''" (ngModelChange)="onPositionAction(row.position, $event)">
+                  <option value="">— nothing —</option>
+                  @for (action of stepActions(); track action.name) {
+                    <option [value]="action.name">{{ action.label }}</option>
+                  }
+                </select>
+              </label>
+              @if (row.action; as act) {
+                @if (parameterKind(act) === 'MODE_NAME') {
+                  <label class="grow">
+                    <span class="label">mode</span>
+                    <input
+                      type="text"
+                      list="wizard-mode-names"
+                      placeholder="e.g. HOLD"
+                      [ngModel]="row.parameter ?? ''"
+                      (ngModelChange)="onPositionParameter(row.position, $event)"
+                    />
+                    @if (isUnknownModeName(row)) {
+                      <span class="muted mode-unknown-note">Not a mode this vehicle reported</span>
+                    }
+                  </label>
+                } @else if (parameterKind(act) === 'AUX_FUNCTION') {
+                  <label class="grow">
+                    <span class="label">function</span>
+                    <select [ngModel]="row.parameter ?? ''" (ngModelChange)="onPositionParameter(row.position, $event)">
+                      <option value="">— pick one —</option>
+                      @for (fn of auxOptions(row.parameter); track fn.number) {
+                        <option [value]="fn.number">{{ fn.number }} · {{ fn.label }}</option>
+                      }
+                    </select>
+                  </label>
+                }
+                @if (dangerousActions().has(act)) {
+                  <span class="danger-note">dangerous</span>
+                }
+              }
+            </li>
+          }
+        </ul>
+        <datalist id="wizard-mode-names">
+          @for (m of modeNameSuggestions(); track m) {
+            <option [value]="m"></option>
+          }
+        </datalist>
+        @if (hasModeNameField()) {
+          <p class="muted hint mode-source-hint">{{ modeSourceHintText() }}</p>
+        }
+
+        @if (step().kind === 'EXTRAS') {
+          <button type="button" class="btn secondary small" (click)="onAddAnother()">Add another</button>
+        }
+      } @else {
+        <p class="muted hint">Detect a control on the left to configure it here.</p>
+      }
+
+      @if (step().kind === 'EXTRAS' && existingExtras().length > 0) {
+        <div class="existing-extras">
+          <span class="label">Already set</span>
+          <ul>
+            @for (control of existingExtras(); track draftKey(control)) {
+              <li>
+                <span>{{ controlLabel(control.source, control.sourceIndex) }} — {{ extraSummary(control) }}</span>
+                <button type="button" class="btn secondary small" (click)="removeExisting(draftKey(control))">
+                  Remove
+                </button>
+              </li>
+            }
+          </ul>
+        </div>
+      }
+    } @else {
+      <ul class="review-checks">
+        @for (check of checks(); track check.label) {
+          <li [class.ok]="check.ok === true" [class.fail]="check.ok === false" [class.na]="check.ok === undefined">
+            <span class="check-glyph">{{ check.ok === true ? '✓' : check.ok === false ? '✕' : '—' }}</span>
+            <span>{{ check.label }}</span>
+          </li>
+        }
+      </ul>
+      @if (issues().length > 0) {
+        <vision-notice variant="warn">
+          <ul class="issue-list">
+            @for (issue of issues(); track issue) {
+              <li>{{ issue }}</li>
+            }
+          </ul>
+        </vision-notice>
+      }
+    }
+
+    <div class="wizard-nav">
+      @if (stepNumber() > 1) {
+        <button type="button" class="btn secondary" (click)="back.emit()">Back</button>
+      }
+      @if (step().kind === 'REVIEW') {
+        @if (editable()) {
+          <button type="button" class="btn secondary" [disabled]="!canSave() || saving()" (click)="save.emit()">
+            {{ saving() ? 'Saving…' : 'Save' }}
+          </button>
+          <button type="button" class="btn" [disabled]="!canSave() || saving()" (click)="saveAndActivate.emit()">
+            Save and activate
+          </button>
+        }
+      } @else {
+        <button type="button" class="btn" (click)="onNext()">Next →</button>
+      }
+    </div>
+  </section>
+</div>

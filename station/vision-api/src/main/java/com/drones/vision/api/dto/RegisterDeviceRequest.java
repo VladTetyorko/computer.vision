@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import com.drones.vision.api.controller.CategoryController;
 import com.drones.vision.api.support.CapabilityParsing;
+import com.drones.vision.api.support.DeviceOriginParsing;
 
 /**
  * Request body for {@code POST /api/devices}.
@@ -33,16 +34,20 @@ import com.drones.vision.api.support.CapabilityParsing;
  * @param capabilities capability names (see {@link Capability}); may be {@code null}/empty
  *                     (then defaulted from {@code protocol}: {@code mavlink} → {@code
  *                     [TELEMETRY]}, otherwise {@code [VIDEO]})
+ * @param origin       {@code LIVE} or {@code SIMULATED}, matched case-insensitively; {@code null}
+ *                     defaults to {@code LIVE} (registering a real device is the common case)
  */
 public record RegisterDeviceRequest(String name, String protocol, String uri, Map<String, String> options,
-                                     List<String> capabilities) {
+                                     List<String> capabilities, String origin) {
 
     /**
      * Validates and converts this request into a {@link DeviceRegistration}.
      *
      * @return the input for {@code DeviceService#register}
      * @throws IllegalArgumentException if any required field is missing/blank, {@code uri} is not a
-     *                                   valid URI, or {@code capabilities} contains an unknown name
+     *                                   valid URI, {@code capabilities} contains an unknown name, or
+     *                                   {@code origin} names no known {@link
+     *                                   com.drones.vision.kernel.DeviceOrigin}
      */
     public DeviceRegistration toRegistration() {
         if (name == null || name.isBlank()) {
@@ -64,6 +69,7 @@ public record RegisterDeviceRequest(String name, String protocol, String uri, Ma
 
         StreamDescriptor descriptor =
                 new StreamDescriptor(protocol, parsedUri, options == null ? Map.of() : options);
-        return new DeviceRegistration(name, CapabilityParsing.parse(capabilities, protocol), descriptor);
+        return new DeviceRegistration(name, CapabilityParsing.parse(capabilities, protocol), descriptor,
+                DeviceOriginParsing.parse(origin));
     }
 }

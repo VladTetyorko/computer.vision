@@ -136,6 +136,50 @@ int main(int argc, char** argv) {
   printf("\nTX_DATAGRAMS count=%zu bytes=%zu params=%u\n",
          g_lastSocket->sent.size(), total, parameters.count());
 
+  // --- command idempotency: the same COMMAND_LONG re-sent with a rising ----
+  // confirmation. D2a lets the platform retry an absolute-state command up to
+  // twice, so the firmware has to see COMPONENT_ARM_DISARM/DO_SET_MODE up to
+  // three times for one operator intent and still: (a) ack every attempt, and
+  // (b) change state once, not once per attempt. A fresh link/store, so this
+  // does not depend on -- or disturb -- phase A/B's mode and parameter state.
+  printf("\n-- command idempotency: rising confirmation, one state change --\n");
+  {
+    ParameterStore idemParameters;
+    MavlinkUdpLink  idemLink(idemParameters, network, logger);
+    g_hostMillis += 1000;
+    if (!idemLink.begin()) { fprintf(stderr, "idem begin() failed\n"); return 1; }
+    WiFiUDP* const idemSocket = g_lastSocket;
+
+    // One frame per feed/poll cycle, deliberately: the point is what the
+    // link does with EACH attempt, not what it does with a burst of six
+    // decoded in a single poll().
+    auto sendOne = [&](const char* name) {
+      idemSocket->feed(readFile(dir + "/" + name));
+      pump(idemLink, 6);
+    };
+
+    sendOne("cmd_idem_arm0.bin");
+    sendOne("cmd_idem_arm1.bin");
+    sendOne("cmd_idem_arm2.bin");
+    check(idemLink.customMode() == mavlink::rover_mode::MANUAL,
+          "before DO_SET_MODE, the mode is still whatever it booted with (MANUAL)");
+
+    sendOne("cmd_idem_mode0.bin");
+    sendOne("cmd_idem_mode1.bin");
+    sendOne("cmd_idem_mode2.bin");
+    check(idemLink.customMode() == mavlink::rover_mode::HOLD,
+          "three repeats of DO_SET_MODE(HOLD) all land on the same final mode");
+
+    std::ofstream idemOut(dir + "/idem_frames.bin", std::ios::binary);
+    size_t idemTotal = 0;
+    for (const std::vector<uint8_t>& datagram : idemSocket->sent) {
+      idemOut.write(reinterpret_cast<const char*>(datagram.data()), datagram.size());
+      idemTotal += datagram.size();
+    }
+    idemOut.close();
+    printf("IDEM_DATAGRAMS count=%zu bytes=%zu\n", idemSocket->sent.size(), idemTotal);
+  }
+
   if (failures) printf("\ncommand_test: %d FAILED\n", failures);
   return failures ? 1 : 0;
 }

@@ -5,9 +5,10 @@ import { COMMAND_ROUTES } from './features/command/command.routes';
 import { WALL_ROUTES } from './features/wall/wall.routes';
 import { MAP_ROUTES } from './features/map/map.routes';
 import { DEVICES_ROUTES } from './features/devices/devices.routes';
-import { ASSETS_ROUTES } from './features/assets/assets.routes';
+import { INVENTORY_ROUTES } from './features/inventory/inventory.routes';
 import { WAREHOUSE_ROUTES } from './features/warehouse/warehouse.routes';
 import { ONBOARDING_ROUTES } from './features/onboarding/onboarding.routes';
+import { PROVISIONING_ROUTES } from './features/provisioning/provisioning.routes';
 import { ASSET_DETAIL_ROUTES } from './features/asset-detail/asset-detail.routes';
 import { REPLAY_ROUTES } from './features/replay/replay.routes';
 import { LIVE_ROUTES } from './features/live/live.routes';
@@ -29,6 +30,7 @@ import { MODELS_ROUTES } from './features/models/models.routes';
 import { TRAINING_JOB_ROUTES } from './features/training-jobs/training-jobs.routes';
 import { GEO_ROUTES } from './features/geo/geo.routes';
 import { CONTROLLER_ROUTES } from './features/controller/controller.routes';
+import { VISION_PROFILES_ROUTES } from './features/vision-profiles/vision-profiles.routes';
 import { authGuard } from './core/auth/auth-guard';
 import { landingGuard } from './core/shell/landing-guard';
 
@@ -76,6 +78,7 @@ export const routes: Routes = [
       ...REPORTS_ROUTES,
       ...GEO_ROUTES,
       ...CONTROLLER_ROUTES,
+      ...VISION_PROFILES_ROUTES,
       ...SYSTEM_STATUS_ROUTES,
       // MODELS_ROUTES' static 'manage/training/models' must precede LABELING_ROUTES' param route
       // 'manage/training/:datasetId' — see MODELS_ROUTES' own doc comment. TRAINING_JOB_ROUTES has
@@ -89,9 +92,10 @@ export const routes: Routes = [
       ...WALL_ROUTES,
       ...MAP_ROUTES,
       ...DEVICES_ROUTES,
-      ...ASSETS_ROUTES,
+      ...INVENTORY_ROUTES,
       ...WAREHOUSE_ROUTES,
       ...ONBOARDING_ROUTES,
+      ...PROVISIONING_ROUTES,
       ...ASSET_DETAIL_ROUTES,
       ...READINESS_ROUTES,
       ...REPLAY_ROUTES,

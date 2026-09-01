@@ -36,6 +36,7 @@ import {
   findPredecessorResult,
   formatDetectionLabel,
   formatTierLabel,
+  isBoxesMode,
   isDetectionStale,
   modelHue,
   overlaySyncLatencySeconds,
@@ -190,6 +191,22 @@ describe('declutterLevelLabel', () => {
 describe('DEFAULT_DECLUTTER_LEVEL', () => {
   it('is priority, not the undifferentiated "all" level', () => {
     expect(DEFAULT_DECLUTTER_LEVEL).toBe('priority');
+  });
+});
+
+describe('isBoxesMode', () => {
+  it('accepts every current declutter level', () => {
+    expect(isBoxesMode('all')).toBe(true);
+    expect(isBoxesMode('priority')).toBe(true);
+    expect(isBoxesMode('locked')).toBe(true);
+    expect(isBoxesMode('off')).toBe(true);
+  });
+
+  it('rejects a stale/pre-wave value rather than adopting it', () => {
+    expect(isBoxesMode('overlay')).toBe(false);
+    expect(isBoxesMode('burned')).toBe(false);
+    expect(isBoxesMode(undefined)).toBe(false);
+    expect(isBoxesMode(42)).toBe(false);
   });
 });
 

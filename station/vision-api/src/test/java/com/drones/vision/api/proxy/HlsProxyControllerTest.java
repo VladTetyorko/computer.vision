@@ -1,7 +1,25 @@
 package com.drones.vision.api.proxy;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.api.security.CurrentUser;
+import com.drones.vision.api.security.PrincipalResolver;
+import com.drones.vision.api.security.StreamAccess;
 import com.drones.vision.api.support.VisionApiProperties;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.kernel.StreamId;
+import com.drones.vision.kernel.UserId;
+import com.drones.vision.map.application.MapAccessPolicy;
+import com.drones.vision.perception.application.stream.ActiveStream;
+import com.drones.vision.perception.application.stream.StreamService;
+import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.warehouse.domain.model.Asset;
+import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Identity;
+import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -11,12 +29,19 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -29,6 +54,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * rather than mocking {@code java.net.http.HttpClient}, since the behavior
  * under test (redirect-following, cookie relay, raw path pass-through) is
  * exactly the wire-level behavior a mock would have to reimplement anyway.
+ *
+ * <p>Every wire-mechanics test below builds its controller with {@link #openStreamAccess()} — a real
+ * {@link StreamAccess} backed by a {@link StreamService} stub reporting no running streams at all, so
+ * {@link StreamAccess#requireVisible(StreamId)} is a no-op for whatever placeholder {@code streamId}
+ * path segment each test uses ("stream-1" etc. — never a real {@link StreamId}), exactly mirroring
+ * production's own "not currently running" no-op (see {@link HlsProxyController}'s class javadoc).
+ * The scope gate itself is exercised separately, below, against a stream {@link StreamService}
+ * actually reports as running.
  */
 class HlsProxyControllerTest {
 
@@ -39,6 +72,19 @@ class HlsProxyControllerTest {
         if (upstream != null) {
             upstream.stop(0);
         }
+    }
+
+    /**
+     * A real {@link StreamAccess} ({@code final}, so not mocked) whose {@link StreamService} stub
+     * reports no running streams — {@link StreamAccess#requireVisible(StreamId)} is then a
+     * documented no-op for any {@code streamId}, matching every wire-mechanics test's placeholder
+     * path segments.
+     */
+    private static StreamAccess openStreamAccess() {
+        StreamService streamService = mock(StreamService.class);
+        when(streamService.streams()).thenReturn(List.of());
+        CurrentUser currentUser = new CurrentUser(new Ownership(UserId.random(), GroupId.random()));
+        return new StreamAccess(streamService, mock(AssetRepositoryPort.class), currentUser);
     }
 
     @Test
@@ -334,7 +380,7 @@ class HlsProxyControllerTest {
                 VisionApiProperties.HlsProxy.defaults().connectTimeout(),
                 VisionApiProperties.HlsProxy.defaults().requestTimeout(),
                 VisionApiProperties.HlsProxy.defaults().errorBodyPreviewMaxChars(), 1);
-        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new HlsProxyController(base, oneHop))
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new HlsProxyController(base, oneHop, openStreamAccess()))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
 
@@ -348,7 +394,7 @@ class HlsProxyControllerTest {
         // Port 1 refuses connections immediately on Linux without a privileged process
         // listening there, so this fails fast without relying on a connect-timeout.
         MockMvc mockMvc = MockMvcBuilders
-                .standaloneSetup(new HlsProxyController(URI.create("http://127.0.0.1:1")))
+                .standaloneSetup(new HlsProxyController(URI.create("http://127.0.0.1:1"), openStreamAccess()))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
 
@@ -361,7 +407,7 @@ class HlsProxyControllerTest {
     @Test
     void unmappedPathUnderHlsWithoutStreamIdReturns404() throws Exception {
         MockMvc mockMvc = MockMvcBuilders
-                .standaloneSetup(new HlsProxyController(URI.create("http://127.0.0.1:1")))
+                .standaloneSetup(new HlsProxyController(URI.create("http://127.0.0.1:1"), openStreamAccess()))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
 
@@ -369,9 +415,116 @@ class HlsProxyControllerTest {
         mockMvc.perform(get("/hls/")).andExpect(status().isNotFound());
     }
 
+    /**
+     * The wave's own acceptance case (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R7, finding
+     * A2): a stream {@link StreamService} reports as genuinely running, on a device belonging to an
+     * asset the caller's {@link VisibilityScope} does not reach, must 404 <em>before</em> the upstream
+     * is ever contacted — not proxy the video through. No {@link #upstream} server is even started
+     * here, so a passing test proves the upstream was never touched, not merely that its response was
+     * discarded.
+     */
+    @Test
+    void proxyReturns404ForARunningStreamOnADeviceOutsideTheCallersScopeWithoutTouchingUpstream() throws Exception {
+        DeviceId deviceId = DeviceId.random();
+        StreamId streamId = StreamId.random();
+        AssetId visibleAssetId = AssetId.random();
+        Asset foreignAsset = Asset.register(AssetId.random(), "someone else's drone", new CategoryId("drone"),
+                new Ownership(UserId.random(), GroupId.random()), Set.of(deviceId), Map.of(), Identity.NONE,
+                Custody.NONE);
+
+        StreamService streamService = mock(StreamService.class);
+        when(streamService.streams())
+                .thenReturn(List.of(new ActiveStream(streamId, deviceId, Instant.now())));
+        AssetRepositoryPort assetRepositoryPort = mock(AssetRepositoryPort.class);
+        when(assetRepositoryPort.findByDeviceId(deviceId)).thenReturn(Optional.of(foreignAsset));
+
+        CurrentUser pilotScopedElsewhere = currentUserWithAssignedAssets(Set.of(visibleAssetId));
+        StreamAccess streamAccess = new StreamAccess(streamService, assetRepositoryPort, pilotScopedElsewhere);
+        MockMvc mockMvc = MockMvcBuilders
+                .standaloneSetup(new HlsProxyController(URI.create("http://127.0.0.1:1"), streamAccess))
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
+
+        mockMvc.perform(get("/hls/{streamId}/index.m3u8", streamId.value()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("NOT_FOUND"));
+    }
+
+    /** The visible-counterpart of the test above: the caller's own assigned asset still streams through. */
+    @Test
+    void proxyStillServesARunningStreamOnTheCallersOwnAssignedAsset() throws Exception {
+        byte[] body = "#EXTM3U\n".getBytes(StandardCharsets.UTF_8);
+        DeviceId deviceId = DeviceId.random();
+        StreamId streamId = StreamId.random();
+        AssetId ownedAssetId = AssetId.random();
+        Asset ownedAsset = Asset.register(ownedAssetId, "my drone", new CategoryId("drone"),
+                new Ownership(UserId.random(), GroupId.random()), Set.of(deviceId), Map.of(), Identity.NONE,
+                Custody.NONE);
+
+        upstream = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        upstream.createContext("/", exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "application/vnd.apple.mpegurl");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        upstream.start();
+
+        StreamService streamService = mock(StreamService.class);
+        when(streamService.streams())
+                .thenReturn(List.of(new ActiveStream(streamId, deviceId, Instant.now())));
+        AssetRepositoryPort assetRepositoryPort = mock(AssetRepositoryPort.class);
+        when(assetRepositoryPort.findByDeviceId(deviceId)).thenReturn(Optional.of(ownedAsset));
+
+        CurrentUser pilotScopedToOwnAsset = currentUserWithAssignedAssets(Set.of(ownedAssetId));
+        StreamAccess streamAccess = new StreamAccess(streamService, assetRepositoryPort, pilotScopedToOwnAsset);
+        URI base = URI.create("http://localhost:" + upstream.getAddress().getPort());
+        MockMvc mockMvc = MockMvcBuilders
+                .standaloneSetup(new HlsProxyController(base, streamAccess))
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
+
+        mockMvc.perform(get("/hls/{streamId}/index.m3u8", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(content().bytes(body));
+    }
+
+    /**
+     * A {@link CurrentUser} with a PILOT-shaped {@link VisibilityScope#assignedAssets(Set)} scope —
+     * {@link CurrentUser#CurrentUser(Ownership)}'s convenience constructor always answers {@link
+     * VisibilityScope#unbounded()}, which cannot exercise a real 404, so this builds a
+     * {@link PrincipalResolver} by hand instead (the same idiom {@code StreamControllerTest} uses).
+     * {@link PrincipalResolver#viewer()} is never called by {@link HlsProxyController}/{@link
+     * StreamAccess}, so it throws rather than fake a map viewer no test here needs.
+     */
+    private static CurrentUser currentUserWithAssignedAssets(Set<AssetId> assignedAssets) {
+        Ownership ownership = new Ownership(UserId.random(), GroupId.random());
+        return new CurrentUser(new PrincipalResolver() {
+            @Override
+            public UserId userId() {
+                return ownership.ownerId();
+            }
+
+            @Override
+            public Ownership ownership() {
+                return ownership;
+            }
+
+            @Override
+            public VisibilityScope scope() {
+                return VisibilityScope.assignedAssets(assignedAssets);
+            }
+
+            @Override
+            public MapAccessPolicy.Viewer viewer() {
+                throw new UnsupportedOperationException("HlsProxyController never calls viewer()");
+            }
+        });
+    }
+
     private static MockMvc mockMvcFor(HttpServer server) {
         URI base = URI.create("http://localhost:" + server.getAddress().getPort());
-        return MockMvcBuilders.standaloneSetup(new HlsProxyController(base))
+        return MockMvcBuilders.standaloneSetup(new HlsProxyController(base, openStreamAccess()))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }

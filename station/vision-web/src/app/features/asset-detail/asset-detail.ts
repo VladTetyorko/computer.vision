@@ -21,19 +21,32 @@ import { KebabMenu } from '../../shared/ui/kebab-menu';
 import { ConfirmDialog } from '../../shared/ui/confirm-dialog';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { Stat } from '../../shared/ui/stat';
-import { PageBar, type PageBarCrumb, pluralize } from '../../shared/ui/page-bar/page-bar';
+import { PageBar, type PageBarCrumb } from '../../shared/ui/page-bar/page-bar';
+import { pluralize } from '../../shared/ui/text-logic';
 import { PilotsCard } from './pilots-card';
 import { CameraPosePanel } from '../camera-geo/camera-pose-panel';
 import { AssetDetailFacade } from './asset-detail-facade';
-import { attributeRowsToRecord, attributesToRows, telemetryFactRows, type AttributeRow, type TelemetryFactRow } from './asset-detail-logic';
+import {
+  attributeRowsToRecord,
+  attributesToRows,
+  sampleAgeLabel,
+  telemetryFactRows,
+  type AttributeRow,
+  type TelemetryFactRow,
+} from './asset-detail-logic';
 import type { AssetUsage, Device, DetectionEvent } from '../../core/api/models';
 
 /** The page's four independent editor overlays — docs/plans/done/UI-ARCHITECTURE-PLAN.md's own migration
  *  target for this page — consolidated into ONE mutually-exclusive `UiStore` group, mirroring
  *  `features/fly/flight-command-panel.ts`'s `dialog` group: opening any one implicitly closes
  *  whichever other was open, so this page can never show two editors at once. Transient (no
- *  `storageKey`) — an editor must never survive a reload. */
-type AssetEditor = 'asset' | 'registration' | 'attributes' | 'assign';
+ *  `storageKey`) — an editor must never survive a reload. `'registration'` renamed to `'identity'`
+ *  this wave (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4) — the single-field editor became a
+ *  four-field `AssetIdentity` group. */
+type AssetEditor = 'asset' | 'identity' | 'attributes' | 'assign';
+
+/** The Identity editor's own draft shape — one combined form for all four `AssetIdentity` fields, replacing the old single `registrationNumberDraft` string. */
+type IdentityDraft = { serialNumber: string; make: string; model: string; registration: string };
 
 /**
  * The asset **manager** page (`/assets/:id`, docs/main/CYCLES-PLAN.md §11, CD-b item 2 — reworked from a
@@ -53,7 +66,7 @@ type AssetEditor = 'asset' | 'registration' | 'attributes' | 'assign';
  *     `dialogs` (the Archive-asset confirm, added by docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2 wave 2 — see
  *     this class's own `requestArchiveAsset` doc comment), `subView` (the two wide-table sub-views);
  *   - truly-ephemeral local view state no other component/route transition needs to stay consistent
- *     with: form drafts (`nameDraft`/`categoryDraft`/`registrationNumberDraft`/`renameDraft`/
+ *     with: form drafts (`nameDraft`/`categoryDraft`/`identityDraft`/`renameDraft`/
  *     `assignDraft`/`attributeRows`) and the "which inline row is open" pointer (`rowAction`);
  *   - a handful of pure, stateless template helpers (label/format mappers, `@for`-bound per-row
  *     readers of a facade signal — the same "plain method reading a signal, called from `@for`"
@@ -186,6 +199,17 @@ export class AssetDetailPage {
     return isStale(this.deviceSampleAgeSeconds(deviceId));
   }
 
+  /** `<humanAge> ago` for the freshest-sample summary card's own "Sample" fact — docs/plans/active/
+   *  OPERATOR-UX-4-PLAN.md finding N4, one age vocabulary. */
+  protected freshestAgeLabel(): string {
+    return sampleAgeLabel(this.facade.freshestAgeSeconds());
+  }
+
+  /** Same as {@link freshestAgeLabel}, per device, for the "Full telemetry" drawer's own rows. */
+  protected deviceAgeLabel(deviceId: string): string {
+    return sampleAgeLabel(this.deviceSampleAgeSeconds(deviceId));
+  }
+
   protected usageDuration(usage: AssetUsage): string {
     return formatDuration(usageDurationSeconds(usage, this.facade.now()));
   }
@@ -255,23 +279,39 @@ export class AssetDetailPage {
     void this.facade.restoreAssetNow();
   }
 
-  // --- Registration/tail number editor --------------------------------------------------------
+  // --- Identity editor (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4, wave W4) — Serial/Make/Model/
+  //     Registration, one combined form, PATCH'd via `identity` (replaces the old single-field
+  //     Registration-only editor). ------------------------------------------------------------
 
-  protected readonly registrationNumberDraft = signal('');
+  protected readonly identityDraft = signal<IdentityDraft>({ serialNumber: '', make: '', model: '', registration: '' });
 
-  protected openEditRegistrationNumber(): void {
-    this.registrationNumberDraft.set(this.facade.registrationNumber() ?? '');
-    this.editors.open('registration');
+  protected openEditIdentity(): void {
+    const identity = this.facade.identity();
+    this.identityDraft.set({
+      serialNumber: identity?.serialNumber ?? '',
+      make: identity?.make ?? '',
+      model: identity?.model ?? '',
+      // Seeds from the effective (fallback-aware) value — editing and saving migrates a
+      // legacy-attribute-only asset onto `identity.registration` for free, the first write after
+      // this wave ships fixes the gap for that asset going forward.
+      registration: identity?.registration ?? this.facade.effectiveRegistration() ?? '',
+    });
+    this.editors.open('identity');
   }
 
-  protected cancelEditRegistrationNumber(): void {
-    this.editors.close('registration');
+  protected setIdentityDraftField(field: keyof IdentityDraft, value: string): void {
+    this.identityDraft.update((draft) => ({ ...draft, [field]: value }));
   }
 
-  protected async confirmEditRegistrationNumber(): Promise<void> {
-    const ok = await this.facade.saveRegistrationNumber(this.registrationNumberDraft());
+  protected cancelEditIdentity(): void {
+    this.editors.close('identity');
+  }
+
+  protected async confirmEditIdentity(): Promise<void> {
+    const draft = this.identityDraft();
+    const ok = await this.facade.saveIdentity(draft.serialNumber, draft.make, draft.model, draft.registration);
     if (ok) {
-      this.editors.close('registration');
+      this.editors.close('identity');
     }
   }
 

@@ -11,8 +11,11 @@ import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 
 import jakarta.persistence.EntityManagerFactory;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * {@link AssetUsageRepositoryPort} backed by Postgres via plain JPA (see {@link JpaOperations}).
@@ -42,6 +45,14 @@ import java.util.Optional;
  * being true. {@code setMaxResults(1)} plus a {@code started_at desc} order makes the result
  * deterministic rather than relying on the "one usage per stream id" invariant holding for rows
  * written by some future caller that reuses an id.
+ *
+ * <p>{@link #totalFlightSecondsByAsset()} (docs/plans/active/WAREHOUSE-UX-PLAN.md &sect;3.3, D5) is
+ * this module's first native {@code SELECT} query with row projection (every other native query in
+ * this package is a batch {@code DELETE}, see {@code JpaTelemetryRepository}) — a plain JPQL
+ * aggregate cannot express {@code coalesce(ended_at, now())} without a dialect-specific function
+ * call, so this drops to native SQL rather than fetching every row and summing in Java (the
+ * tradeoff {@code DefaultAssetStatsService} accepts for a single asset does not scale to "every
+ * asset, every render").
  */
 public final class JpaAssetUsageRepository implements AssetUsageRepositoryPort {
 
@@ -108,5 +119,22 @@ public final class JpaAssetUsageRepository implements AssetUsageRepositoryPort {
                 .setMaxResults(1)
                 .getResultList());
         return open.stream().findFirst().map(AssetUsageMapper::toDomain);
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public Map<AssetId, Long> totalFlightSecondsByAsset() {
+        List<Object[]> rows = jpa.read(em -> em.createNativeQuery("""
+                select asset_id, coalesce(sum(extract(epoch from (coalesce(ended_at, now()) - started_at))), 0)
+                from asset_usages
+                group by asset_id
+                """).getResultList());
+        Map<AssetId, Long> totals = new LinkedHashMap<>();
+        for (Object[] row : rows) {
+            UUID assetId = (UUID) row[0];
+            long seconds = ((Number) row[1]).longValue();
+            totals.put(new AssetId(assetId), Math.max(0, seconds));
+        }
+        return totals;
     }
 }

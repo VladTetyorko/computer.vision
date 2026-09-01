@@ -5,11 +5,13 @@ import com.drones.vision.api.dto.ManualControlEngageRequest;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.flight.application.ManualControlService;
 import com.drones.vision.flight.application.ManualControlSession;
+import com.drones.vision.flight.application.VehicleUnidentifiedException;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.flight.application.WatchdogListener;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.flight.domain.model.ControlProfile;
 import com.drones.vision.flight.domain.model.ControlProfileId;
+import com.drones.vision.flight.domain.model.UnidentifiedReason;
 import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.kernel.UserId;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,6 +39,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -165,6 +168,62 @@ class ManualControlWebSocketHandlerTest {
         JsonNode denied = lastFrame();
         assertEquals("denied", denied.get("type").asString());
         assertEquals("UNSUPPORTED", denied.get("code").asString());
+    }
+
+    /**
+     * FLEET-RADIO R2: {@link VehicleUnidentifiedException} is caught before the plain {@link
+     * IllegalStateException} case above, so it must map to its own dedicated {@code
+     * VEHICLE_UNIDENTIFIED} code -- never message-sniffed into {@code NOT_COMMANDABLE}/{@code
+     * UNSUPPORTED} the way the other three causes are.
+     */
+    @Test
+    void engageDeniedVehicleUnidentifiedGetsItsOwnCodeNotMessageSniffedIntoOneOfTheOtherThree() throws Exception {
+        service.nextEngageFailure = new VehicleUnidentifiedException(UnidentifiedReason.NEVER_IDENTIFIED,
+                "Asset xyz could not be identified: this platform has never seen the vehicle type it is "
+                        + "reporting. If you can see the vehicle, choose its kind explicitly to proceed. "
+                        + "Manual control refused.");
+        handler.afterConnectionEstablished(session);
+
+        handler.handleMessage(session, engageFrame(AssetId.random()));
+
+        JsonNode denied = lastFrame();
+        assertEquals("denied", denied.get("type").asString());
+        assertEquals("VEHICLE_UNIDENTIFIED", denied.get("code").asString());
+        assertTrue(denied.get("reason").asString().contains("could not be identified"),
+                "expected the server-supplied reason rendered verbatim, got: " + denied.get("reason").asString());
+    }
+
+    /**
+     * Expected result: the operator sees a refusal, not a connection error that looks identical
+     * whatever the true cause -- and the three causes must not collapse into one wire message.
+     */
+    @Test
+    void engageDeniedVehicleUnidentifiedCarriesADistinctReasonPerCause() throws Exception {
+        handler.afterConnectionEstablished(session);
+
+        service.nextEngageFailure =
+                new VehicleUnidentifiedException(UnidentifiedReason.NOT_A_VEHICLE, "is not a vehicle at all");
+        handler.handleMessage(session, engageFrame(AssetId.random()));
+        String notAVehicleReason = lastFrame().get("reason").asString();
+        assertEquals("VEHICLE_UNIDENTIFIED", lastFrame().get("code").asString());
+
+        session.sentPayloads.clear();
+        service.nextEngageFailure = new VehicleUnidentifiedException(UnidentifiedReason.UNSUPPORTED_VEHICLE,
+                "reports a recognized airframe that this platform does not support");
+        handler.handleMessage(session, engageFrame(AssetId.random()));
+        String unsupportedReason = lastFrame().get("reason").asString();
+        assertEquals("VEHICLE_UNIDENTIFIED", lastFrame().get("code").asString());
+
+        session.sentPayloads.clear();
+        service.nextEngageFailure =
+                new VehicleUnidentifiedException(UnidentifiedReason.NEVER_IDENTIFIED, "could not be identified");
+        handler.handleMessage(session, engageFrame(AssetId.random()));
+        String neverIdentifiedReason = lastFrame().get("reason").asString();
+
+        assertNotEquals(notAVehicleReason, unsupportedReason,
+                "a gimbal on the link and an unsupported airframe must not read as the same refusal");
+        assertNotEquals(notAVehicleReason, neverIdentifiedReason);
+        assertNotEquals(unsupportedReason, neverIdentifiedReason);
     }
 
     @Test
