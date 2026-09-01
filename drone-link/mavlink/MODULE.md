@@ -158,9 +158,10 @@ there is nothing to structurally prevent here the way Mechanism A's opt-in remed
   before/after and why "never heard" deliberately stays `true`. **`emergencyStop` is
   vehicle-kind-gated (FLEET-RADIO R4b)** — see its own Gotchas section below; it is no longer a
   single, uniform command for every device. Constructors: `(MavlinkTelemetrySource)` and
-  `(MavlinkTelemetrySource, Duration ackTimeout)` are back-compat overloads (the latter is
-  `vision-app`'s `TelemetryWiring` call site, out of this module's reach — see Gotchas for the
-  production gap this leaves); `(MavlinkTelemetrySource, MavlinkSettings)` is canonical.
+  `(MavlinkTelemetrySource, Duration ackTimeout)` are back-compat overloads;
+  `(MavlinkTelemetrySource, MavlinkSettings)` is canonical — and since MAVLINK-COMMANDS-PLAN P4,
+  `vision-app`'s `TelemetryWiring#mavlinkFlightCommander` calls the canonical one (700ms×3 in
+  production; the P1-era "production gap" Gotcha below is CLOSED).
 - `public final class MavlinkManualControlSender implements ManualControlPort` — `RC_CHANNELS_OVERRIDE`
   (#70) relay. `engage(Device): ManualControlLink` / `send(link, RcChannels)` / `release(link)`;
   its `AdapterLink` carries `vehicleKind()` (resolved from the heartbeat heard at `engage` time,
@@ -301,9 +302,9 @@ there is nothing to structurally prevent here the way Mechanism A's opt-in remed
   CLAUDE.md rule 10 / java-clean-code §3: a new collaborator updates call sites and back-compat
   delegation targets, never a new overload). **`vision-app`'s `TelemetryWiring#toMavlinkSettings`
   calls the 8-arg overload**, so every deployment picks up `commandRetries = 2` **and**
-  `StreamNegotiation.defaults()` automatically the moment this module is rebuilt — see the
-  MAVLINK-COMMANDS-PLAN P1 Gotchas below for the one place this back-compat design does *not* close
-  the loop (the `ackTimeout` actually wired into `MavlinkFlightCommander` in production). Nested:
+  `StreamNegotiation.defaults()` automatically the moment this module is rebuilt — the
+  one loop this back-compat design left open (production `ackTimeout`) was closed by P4 —
+  see the P1 Gotchas below. Nested:
   - `record LinkStatus(double dropRateWarnPercent, double dropRateAlarmPercent, Duration
     failureGrace)` (**FLEET-RADIO R4/D7**, new) — `MavlinkLinkStatusProvider`'s per-vehicle drop-rate
     severity thresholds (`dropRateAlarmPercent >= dropRateWarnPercent` enforced in the compact
@@ -776,21 +777,14 @@ one `FlightState`-contributing row above has fired at least once.
   `application.yaml`), not a design change — the retry machinery itself doesn't care what the budget
   is, `armReturnsNoAckAfterExhaustingEveryConfiguredAttempt` reads the live default rather than
   hardcoding "3" for exactly this reason.
-- **Known production gap: `vision-app`'s `TelemetryWiring`/`VisionMavlinkProperties` were out of this
-  wave's file scope, so the *deployed* `ackTimeout` does not actually become 700ms.**
-  `TelemetryWiring#mavlinkFlightCommander` still calls `MavlinkFlightCommander`'s 2-arg
-  `(MavlinkTelemetrySource, Duration)` back-compat constructor with `properties.ackTimeout()`
-  (`VisionMavlinkProperties`'s `@DefaultValue("2s")`, unchanged) — so production gets the *new*
-  `commandRetries = 2` (via `MavlinkSettings`'s 8-arg back-compat constructor default, which
-  `toMavlinkSettings` does call) layered onto the *old* 2s per-attempt timeout, not the intended
-  700ms. Worst case for a fully-silent vehicle is therefore **~6s (3 × 2s), not the ~2.1s this wave's
-  own D2a decision claims** — a real, currently-unaddressed latency regression risk, not merely an
-  aesthetic gap. Closing it needs a future wave to add a `commandRetries` field to
-  `VisionMavlinkProperties`, thread it through `TelemetryWiring`, and switch that wiring onto
-  `MavlinkFlightCommander`'s canonical `(MavlinkTelemetrySource, MavlinkSettings)` constructor instead
-  of the 2-arg one — none of which this wave's brief (`drone-link/mavlink/**` plus the
-  `application.yaml` `mavlink:` block only) permits touching. The `application.yaml` block documents
-  this gap inline next to `ack-timeout`/`command-retries`.
+- **P1-era "known production gap" — CLOSED by MAVLINK-COMMANDS-PLAN P4 (`169f8665`), kept for
+  history.** P1 could not touch `vision-app`, so the deployed `ackTimeout` briefly stayed 2s (worst
+  case ~6s, not the intended ~2.1s). P4 then added `commandRetries` to `VisionMavlinkProperties`
+  (11th component), flipped `ack-timeout`'s `@DefaultValue` to 700ms, and switched
+  `TelemetryWiring#mavlinkFlightCommander` onto the canonical
+  `(MavlinkTelemetrySource, MavlinkSettings)` constructor — production is 700ms × 3 attempts
+  (verified against `TelemetryWiring.java` 2026-09-01; `TelemetryWiringCommandRetryWiringTest`
+  pins it). Do not re-report this from stale reads of this section.
 - **`MavlinkFlightCommanderTest`'s retry tests read `MavlinkSettings.defaults()` for the expected
   attempt count rather than hardcoding it**, so they stay correct if a future wave (e.g. the
   F0-triggered flip above) changes `DEFAULT_COMMAND_RETRIES`; the ack-on-retry test additionally
