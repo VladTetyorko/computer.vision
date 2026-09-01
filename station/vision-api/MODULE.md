@@ -179,7 +179,7 @@ the full mechanism.
 | GeofenceController | PUT | `/api/geofences/{id}` | Replace a zone wholesale | administer |
 | GeofenceController | DELETE | `/api/geofences/{id}` | Delete a zone | administer |
 | DiscoveryController | POST | `/api/discovery/scan` | ONVIF/mDNS/V4L2 device scan | **unscoped** (ledger) |
-| DiscoveryInboxController | GET | `/api/discovery/inbox` | List every reported discovery candidate, newest-reported first | manageOrg |
+| DiscoveryInboxController | GET | `/api/discovery/inbox` | `{candidates, sources}` envelope — every reported discovery candidate (newest-reported first) plus one health row per discovery mechanism (BK6/A3) | manageOrg |
 | DiscoveryInboxController | POST | `/api/discovery/inbox/{id}/register` | Register a candidate as a new asset | manageOrg (checked inside `DiscoveryInboxService#register`, ownership from `CurrentUser`, never the body — see Conventions) |
 | DiscoveryInboxController | POST | `/api/discovery/inbox/{id}/dismiss` | Dismiss a candidate (idempotent-in-effect: dismissing an already-dismissed candidate just re-stamps status) | manageOrg |
 | SimulationController | POST | `/api/simulations` | Start a synthetic (or video-fed) simulated asset | manageOrg |
@@ -338,6 +338,23 @@ returns that, not the mutated `DiscoveryCandidate`), and building the full detai
 extra collaborators (`AssetRowFacts`, image lookup) this endpoint has no call to pull in; a caller
 wanting the full asset shape follows up with `GET /api/assets/{id}`, same posture as `AssetInventoryController`'s
 own after-mutation responses.
+
+**ASSET-FLOWS wave BK6 (A3) — `GET /api/discovery/inbox` wire-contract change (docs/plans/active/ASSET-FLOWS-PLAN.md
+§2, frozen).** This endpoint used to answer a bare `DiscoveryCandidateResponse[]`; it now answers
+`DiscoveryInboxResponse(candidates, sources)` — an envelope, `candidates` carrying exactly that same
+array under its own key. `sources` is `List<DiscoverySourceResponse>`, `DiscoverySourceResponse(id,
+status)` (`status` the raw enum name, `"OK"`/`"UNREACHABLE"`, static `from(SourceHealth)`) — one row
+per registered `vision-warehouse` `DeviceDiscoveryPort`, from that context's new
+`DiscoveryService#health()`. This is the fix for the mediamtx push-registry scanner reporting
+"unreachable" identically to "reachable but empty" (both were `List.of()` from `scan()`, WARN-log
+only); a caller can now tell them apart without reading logs. **Breaking change, intentional per
+plan**: `register`/`dismiss` are unchanged (still bare `DiscoveryCandidateResponse`/
+`RegisterDiscoveryCandidateResponse`) — only `list` moved to the envelope. `vision-web`'s frontend
+still expects the old bare-array shape as of this wave; fixing that is wave WB2's job, out of this
+module's scope. `DiscoveryInboxController`'s constructor gained a third parameter,
+`DiscoveryService` (alongside the existing `DiscoveryInboxService`/`CurrentUser`) — no `vision-app`
+wiring change needed, since this controller has no explicit `@Bean` method (pure component-scan
+auto-wiring by type).
 
 ## Conventions
 
@@ -569,3 +586,21 @@ install -Dmaven.test.skip=true` on the upstream context modules, then a separate
 `station/vision-api` **941** (+9 over 932: `DiscoveryInboxControllerTest`'s 9 cases), `storage/persistence`
 **267** (+7, see that module's own MODULE.md entry), `station/vision-app` **293** (+15, see that
 module's own MODULE.md entry) — all green, Docker ran for real, default-config bar held throughout.
+
+**ASSET-FLOWS wave BK6 (A3) done.** `DiscoveryInboxController#list` now returns the
+`DiscoveryInboxResponse` envelope (`candidates` + `sources`) instead of a bare
+`DiscoveryCandidateResponse[]` — see the Conventions note above for the full wire-contract
+writeup and the reason it is an intentional breaking change. Two new `dto/` records
+(`DiscoveryInboxResponse`, `DiscoverySourceResponse`); the controller's constructor gained a third
+param, `DiscoveryService` (`vision-warehouse`'s `application.discovery` package). 1 new test,
+`DiscoveryInboxControllerTest#listCarriesSourceHealthAlongsideTheCandidateList`; every pre-existing
+`list` test's JSON-path assertions moved from `$[...]` to `$.candidates[...]`.
+`./mvnw -B -pl contexts/vision-warehouse -am install -DskipTests` then `./mvnw -B -pl
+station/vision-api -o test` (offline, no `-am` — a concurrent agent's in-progress, uncommitted
+`contexts/vision-flight` edit was mid-break on this shared branch at the time; resolving `vision-flight`
+from its last-known-good installed jar instead of rebuilding its currently-broken source avoided
+blocking on unrelated work, per CLAUDE.md's "never run reactor-wide builds while another agent's
+task holds modules red") — `station/vision-api` **944** tests, 0 failures (the exact delta from 941
+is not attributable to this wave alone: `git status` shows a sibling agent's concurrent, unrelated
+`OpsThresholdsController`/`BatteryThresholdsResponse` additions already present in this shared
+working tree).

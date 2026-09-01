@@ -1,6 +1,7 @@
 package com.drones.vision.adapter.discovery.mediamtx;
 
 import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
+import com.drones.vision.warehouse.domain.model.SourceStatus;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -109,8 +110,31 @@ class MediamtxPathScannerTest {
         assertTrue(scanner().scan(Duration.ofSeconds(5)).isEmpty());
     }
 
+    /**
+     * The A3 defect this wave fixes (docs/plans/active/ASSET-FLOWS-PLAN.md &sect;2): mediamtx
+     * reachable and answering 200, but with no {@code ingest/} candidates right now, must report
+     * {@link SourceStatus#OK} -- distinct from the API being unreachable below, even though
+     * {@code scan()} alone answers an empty list either way.
+     */
+    @Test
+    void mediamtxUpButEmptyReportsOkStatusWithEmptyCandidates() throws IOException {
+        server.createContext("/v3/paths/list", exchange -> respond(exchange, 200, "{\"items\":[]}"));
+        server.start();
+        MediamtxPathScanner scanner = scanner();
+
+        List<DiscoveredDevice> found = scanner.scan(Duration.ofSeconds(5));
+
+        assertTrue(found.isEmpty());
+        assertEquals(SourceStatus.OK, scanner.lastStatus());
+    }
+
     // -- failure handling: same "empty list, never throw" contract as every other scan ----------
 
+    /**
+     * The A3 defect this wave fixes: mediamtx unreachable must report {@link
+     * SourceStatus#UNREACHABLE}, not the same {@link SourceStatus#OK} an empty-but-reachable
+     * response reports -- see {@link #mediamtxUpButEmptyReportsOkStatusWithEmptyCandidates}.
+     */
     @Test
     void apiUnreachableReturnsEmptyListRatherThanThrowing() throws IOException {
         int unusedPort;
@@ -123,22 +147,57 @@ class MediamtxPathScannerTest {
         List<DiscoveredDevice> found = scanner.scan(Duration.ofSeconds(2));
 
         assertTrue(found.isEmpty());
+        assertEquals(SourceStatus.UNREACHABLE, scanner.lastStatus());
     }
 
     @Test
     void nonTwoHundredResponseReturnsEmptyListRatherThanThrowing() throws IOException {
         server.createContext("/v3/paths/list", exchange -> respond(exchange, 500, "{\"error\":\"boom\"}"));
         server.start();
+        MediamtxPathScanner scanner = scanner();
 
-        assertTrue(scanner().scan(Duration.ofSeconds(5)).isEmpty());
+        assertTrue(scanner.scan(Duration.ofSeconds(5)).isEmpty());
+        assertEquals(SourceStatus.UNREACHABLE, scanner.lastStatus());
     }
 
+    /**
+     * {@code MediamtxPathListParser} is deliberately tolerant (its own javadoc: "empty ... if ...
+     * has no items array at all"), so a 200 response with garbage-but-no-{@code items}-key text
+     * never actually throws from {@code parseItems} -- it falls through the same "no items array"
+     * path a genuinely empty {@code {"items":[]}} response would, and {@link
+     * MediamtxPathScanner#scan}'s own {@code catch (RuntimeException)} around the parse call is
+     * therefore a defensive net for a parser bug, not something this input exercises. mediamtx
+     * itself answered 200, so {@link SourceStatus#OK} (not {@link SourceStatus#UNREACHABLE}) is the
+     * honest report here -- see {@link #mediamtxUpButEmptyReportsOkStatusWithEmptyCandidates} for
+     * the same reasoning applied to a well-formed empty response.
+     */
     @Test
     void malformedJsonReturnsEmptyListRatherThanThrowing() throws IOException {
         server.createContext("/v3/paths/list", exchange -> respond(exchange, 200, "not json at all, just noise"));
         server.start();
+        MediamtxPathScanner scanner = scanner();
 
-        assertTrue(scanner().scan(Duration.ofSeconds(5)).isEmpty());
+        assertTrue(scanner.scan(Duration.ofSeconds(5)).isEmpty());
+        assertEquals(SourceStatus.OK, scanner.lastStatus());
+    }
+
+    @Test
+    void lastStatusDefaultsToOkBeforeAnyScanHasRun() {
+        assertEquals(SourceStatus.OK, scanner().lastStatus());
+    }
+
+    @Test
+    void zeroOrNegativeTimeoutGuardLeavesThePreviouslyObservedStatusUnchanged() throws IOException {
+        server.createContext("/v3/paths/list", exchange -> respond(exchange, 500, "{\"error\":\"boom\"}"));
+        server.start();
+        MediamtxPathScanner scanner = scanner();
+        scanner.scan(Duration.ofSeconds(5));
+        assertEquals(SourceStatus.UNREACHABLE, scanner.lastStatus(), "precondition: a real failed scan ran first");
+
+        assertTrue(scanner.scan(Duration.ZERO).isEmpty());
+
+        assertEquals(SourceStatus.UNREACHABLE, scanner.lastStatus(),
+                "a guard call that never attempted a request must not overwrite the last real observation");
     }
 
     /**

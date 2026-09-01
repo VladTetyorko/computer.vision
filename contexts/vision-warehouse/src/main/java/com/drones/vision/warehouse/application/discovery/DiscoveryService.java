@@ -1,5 +1,7 @@
 package com.drones.vision.warehouse.application.discovery;
 
+import java.util.List;
+
 /**
  * Finds candidate devices on the network or host.
  *
@@ -19,4 +21,14 @@ public interface DiscoveryService {
      * @throws IllegalArgumentException if the request names an unknown method
      */
     DiscoveryScanResult scan(DiscoveryScanSpec request);
+
+    /**
+     * Reachability of every registered discovery mechanism (docs/plans/active/ASSET-FLOWS-PLAN.md
+     * &sect;2, A3), one entry per mechanism — read independently of {@link
+     * #scan(DiscoveryScanSpec)}, since a caller (the found-devices inbox) needs this even between
+     * scans.
+     *
+     * @return one {@link SourceHealth} per registered mechanism; order not guaranteed
+     */
+    List<SourceHealth> health();
 }

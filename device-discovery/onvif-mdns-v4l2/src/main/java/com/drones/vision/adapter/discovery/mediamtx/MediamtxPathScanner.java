@@ -2,6 +2,7 @@ package com.drones.vision.adapter.discovery.mediamtx;
 
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
+import com.drones.vision.warehouse.domain.model.SourceStatus;
 import com.drones.vision.warehouse.domain.port.DeviceDiscoveryPort;
 
 import java.io.IOException;
@@ -59,6 +60,17 @@ import java.util.Objects;
  * the ordinary, expected case, not a fault this scanner should escalate into {@code
  * DiscoveryService}'s {@code failedMethods}.
  *
+ * <h2>{@link #lastStatus()} distinguishes "down" from "empty" (ASSET-FLOWS-PLAN.md &sect;2, A3)</h2>
+ * The empty-list-on-failure contract above is deliberately quiet about the one honesty gap it
+ * creates: a caller reading only {@link #scan(Duration)}'s return value cannot tell "mediamtx has
+ * no ingest paths right now" (the common steady state) apart from "mediamtx's Control API could not
+ * be reached at all". {@link #lastStatus()} answers that separately -- {@link SourceStatus#OK} for
+ * a scan that got a 200 response it could parse (regardless of how many candidates it yielded, if
+ * any), {@link SourceStatus#UNREACHABLE} for the connection failure / non-2xx / unparsable-body
+ * cases above. A zero/negative-timeout guard call (no request attempted) leaves the previously
+ * observed status untouched, since it reports nothing new about mediamtx itself; an interrupted
+ * call does the same, since interruption is a fact about this JVM/thread, not about mediamtx.
+ *
  * <p>Plain class, no framework dependency -- instantiated directly by {@code vision-app}'s wiring
  * configuration, mirroring every other scanner in this module.
  */
@@ -70,6 +82,7 @@ public final class MediamtxPathScanner implements DeviceDiscoveryPort {
     private final MediamtxScannerSettings settings;
     private final HttpClient httpClient;
     private final URI pathsListUri;
+    private volatile SourceStatus lastStatus = SourceStatus.OK;
 
     public MediamtxPathScanner(MediamtxScannerSettings settings) {
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
@@ -94,6 +107,7 @@ public final class MediamtxPathScanner implements DeviceDiscoveryPort {
             HttpRequest request = HttpRequest.newBuilder(pathsListUri).timeout(timeout).GET().build();
             response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
         } catch (IOException e) {
+            lastStatus = SourceStatus.UNREACHABLE;
             LOG.log(System.Logger.Level.WARNING,
                     () -> "mediamtx Control API unreachable at " + pathsListUri + ": " + e.getMessage());
             return List.of();
@@ -103,6 +117,7 @@ public final class MediamtxPathScanner implements DeviceDiscoveryPort {
         }
 
         if (response.statusCode() != 200) {
+            lastStatus = SourceStatus.UNREACHABLE;
             LOG.log(System.Logger.Level.WARNING, () -> "mediamtx Control API " + pathsListUri
                     + " returned unexpected HTTP " + response.statusCode());
             return List.of();
@@ -112,12 +127,14 @@ public final class MediamtxPathScanner implements DeviceDiscoveryPort {
         try {
             items = MediamtxPathListParser.parseItems(response.body());
         } catch (RuntimeException e) {
+            lastStatus = SourceStatus.UNREACHABLE;
             LOG.log(System.Logger.Level.WARNING,
                     () -> "mediamtx Control API " + pathsListUri + " returned an unparsable response: "
                             + e.getMessage());
             return List.of();
         }
 
+        lastStatus = SourceStatus.OK;
         List<DiscoveredDevice> discovered = new ArrayList<>();
         for (MediamtxPathListParser.PathItem item : items) {
             if (isReportableIngestPath(item)) {
@@ -125,6 +142,11 @@ public final class MediamtxPathScanner implements DeviceDiscoveryPort {
             }
         }
         return List.copyOf(discovered);
+    }
+
+    @Override
+    public SourceStatus lastStatus() {
+        return lastStatus;
     }
 
     private boolean isReportableIngestPath(MediamtxPathListParser.PathItem item) {

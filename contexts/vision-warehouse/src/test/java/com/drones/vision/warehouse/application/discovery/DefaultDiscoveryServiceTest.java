@@ -3,6 +3,7 @@ package com.drones.vision.warehouse.application.discovery;
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
 import com.drones.vision.kernel.StreamDescriptor;
+import com.drones.vision.warehouse.domain.model.SourceStatus;
 import com.drones.vision.warehouse.domain.port.DeviceDiscoveryPort;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -232,6 +233,38 @@ class DefaultDiscoveryServiceTest {
         assertEquals("mdns+onvif", r2.devices().get(0).method());
     }
 
+    // -- A3: source health (docs/plans/active/ASSET-FLOWS-PLAN.md &sect;2) --------------------
+
+    @Test
+    void healthReportsOneEntryPerRegisteredPort() {
+        FakePort onvif = FakePort.returning("onvif", List.of());
+        FakePort mdns = FakePort.returning("mdns", List.of());
+        mdns.status(SourceStatus.UNREACHABLE);
+        DiscoveryService service = new DefaultDiscoveryService(List.of(onvif, mdns));
+
+        // order is not guaranteed (backed by Map.copyOf) -- compare as a set
+        assertEquals(Set.of(new SourceHealth("onvif", SourceStatus.OK),
+                new SourceHealth("mdns", SourceStatus.UNREACHABLE)), Set.copyOf(service.health()));
+    }
+
+    @Test
+    void healthDefaultsToOkForAPortThatNeverOverridesLastStatus() {
+        FakePort mdns = FakePort.returning("mdns", List.of());
+        DiscoveryService service = new DefaultDiscoveryService(List.of(mdns));
+
+        assertEquals(List.of(new SourceHealth("mdns", SourceStatus.OK)), service.health());
+    }
+
+    @Test
+    void healthIsReadableWithoutRunningAScan() {
+        FakePort mdns = FakePort.returning("mdns", List.of());
+        DiscoveryService service = new DefaultDiscoveryService(List.of(mdns));
+
+        service.health();
+
+        assertEquals(0, mdns.invocationCount(), "health() must not itself trigger a scan");
+    }
+
     /**
      * Configurable {@link DeviceDiscoveryPort} test double: records
      * invocation counts and runs a scripted behavior instead of doing real
@@ -242,10 +275,16 @@ class DefaultDiscoveryServiceTest {
         private final String method;
         private final Function<Duration, List<DiscoveredDevice>> behavior;
         private final AtomicInteger invocations = new AtomicInteger();
+        private volatile SourceStatus status = SourceStatus.OK;
 
         private FakePort(String method, Function<Duration, List<DiscoveredDevice>> behavior) {
             this.method = method;
             this.behavior = behavior;
+        }
+
+        /** Test seam: scripts what {@link #lastStatus()} reports, independent of scan behavior. */
+        void status(SourceStatus status) {
+            this.status = status;
         }
 
         static FakePort returning(String method, List<DiscoveredDevice> results) {
@@ -297,6 +336,11 @@ class DefaultDiscoveryServiceTest {
         public List<DiscoveredDevice> scan(Duration timeout) {
             invocations.incrementAndGet();
             return behavior.apply(timeout);
+        }
+
+        @Override
+        public SourceStatus lastStatus() {
+            return status;
         }
 
         int invocationCount() {

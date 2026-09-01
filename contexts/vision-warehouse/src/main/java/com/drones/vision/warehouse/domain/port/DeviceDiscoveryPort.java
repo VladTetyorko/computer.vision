@@ -1,6 +1,7 @@
 package com.drones.vision.warehouse.domain.port;
 
 import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
+import com.drones.vision.warehouse.domain.model.SourceStatus;
 
 import java.time.Duration;
 import java.util.List;
@@ -51,4 +52,26 @@ public interface DeviceDiscoveryPort {
      * @return discovered candidates, possibly empty; never {@code null}
      */
     List<DiscoveredDevice> scan(Duration timeout);
+
+    /**
+     * Reachability of this mechanism's remote/external dependency, as observed by the most recent
+     * {@link #scan(Duration)} call (docs/plans/active/ASSET-FLOWS-PLAN.md &sect;2, A3) — lets a
+     * caller distinguish "this source could not be reached" from "reached fine, nothing found",
+     * both of which {@link #scan(Duration)} alone answers identically with an empty list.
+     *
+     * <p>Defaults to always {@link SourceStatus#OK}: a mechanism with no such dependency to poll
+     * (mDNS/ONVIF/V4L2 — a genuine setup failure there is thrown per this interface's own contract,
+     * never swallowed into an empty list) has nothing ambiguous to report. Only a mechanism that
+     * itself collapses a real failure into an empty {@link #scan(Duration)} result (e.g. the
+     * mediamtx push-registry scanner polling a Control API that may be down) needs to override this.
+     *
+     * <p>Not required to be thread-safe against a concurrent {@link #scan(Duration)} beyond
+     * eventual visibility of the last completed attempt — the same "correctness over throughput for
+     * an infrequent call pattern" tradeoff this port's implementations already accept elsewhere.
+     *
+     * @return the last scan's reachability; {@link SourceStatus#OK} before any scan has run
+     */
+    default SourceStatus lastStatus() {
+        return SourceStatus.OK;
+    }
 }

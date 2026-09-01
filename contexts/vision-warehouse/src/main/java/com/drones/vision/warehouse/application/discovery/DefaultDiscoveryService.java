@@ -142,6 +142,16 @@ public final class DefaultDiscoveryService implements DiscoveryService {
         return new DiscoveryScanResult(mergeCrossMethodDuplicates(rawDevices), failedMethods);
     }
 
+    /** {@inheritDoc} Iteration order is {@link #portsByMethod}'s ({@link Map#copyOf}'s), not guaranteed. */
+    @Override
+    public List<SourceHealth> health() {
+        List<SourceHealth> health = new ArrayList<>(portsByMethod.size());
+        for (DeviceDiscoveryPort port : portsByMethod.values()) {
+            health.add(new SourceHealth(port.method(), port.lastStatus()));
+        }
+        return List.copyOf(health);
+    }
+
     /**
      * Groups exact-deduplicated candidates by network identity and merges
      * every group spanning two or more distinct methods into one {@link

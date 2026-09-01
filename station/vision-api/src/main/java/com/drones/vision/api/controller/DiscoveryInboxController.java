@@ -1,12 +1,15 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.dto.DiscoveryCandidateResponse;
+import com.drones.vision.api.dto.DiscoveryInboxResponse;
+import com.drones.vision.api.dto.DiscoverySourceResponse;
 import com.drones.vision.api.dto.RegisterDiscoveryCandidateRequest;
 import com.drones.vision.api.dto.RegisterDiscoveryCandidateResponse;
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.warehouse.application.discovery.DiscoveryInboxService;
+import com.drones.vision.warehouse.application.discovery.DiscoveryService;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.DiscoveryCandidateId;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,7 +18,6 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.List;
 import java.util.Objects;
 
 /**
@@ -24,8 +26,10 @@ import java.util.Objects;
  * {@code DiscoveryInboxRunner} sweep ({@code vision-app}'s own wiring) and/or a manual {@link
  * DiscoveryController#scan} feed, and an operator clicks through.
  *
- * <p>Constructor-injected with {@link DiscoveryInboxService} and {@link CurrentUser} only —
- * mirrors {@link DiscoveryController}'s own minimal shape.
+ * <p>Constructor-injected with {@link DiscoveryInboxService}, {@link DiscoveryService} (read-only —
+ * {@link #list} reads its {@link DiscoveryService#health()} only, never calls {@link
+ * DiscoveryService#scan}, which stays {@link DiscoveryController}'s own verb) and {@link
+ * CurrentUser}.
  *
  * <h2>Authorization</h2>
  * {@link #list} is gated on {@link com.drones.vision.platform.VisibilityScope#canManageOrg()
@@ -53,26 +57,35 @@ import java.util.Objects;
 public class DiscoveryInboxController {
 
     private final DiscoveryInboxService discoveryInboxService;
+    private final DiscoveryService discoveryService;
     private final CurrentUser currentUser;
 
-    public DiscoveryInboxController(DiscoveryInboxService discoveryInboxService, CurrentUser currentUser) {
+    public DiscoveryInboxController(DiscoveryInboxService discoveryInboxService, DiscoveryService discoveryService,
+                                     CurrentUser currentUser) {
         this.discoveryInboxService =
                 Objects.requireNonNull(discoveryInboxService, "discoveryInboxService must not be null");
+        this.discoveryService = Objects.requireNonNull(discoveryService, "discoveryService must not be null");
         this.currentUser = Objects.requireNonNull(currentUser, "currentUser must not be null");
     }
 
     /**
-     * Lists every candidate in the inbox.
+     * Lists every candidate in the inbox, alongside every discovery mechanism's own reachability
+     * (docs/plans/active/ASSET-FLOWS-PLAN.md &sect;2, A3) — {@code sources}, so a client can tell
+     * "this source is unreachable" apart from "reachable, nothing found" instead of both collapsing
+     * into an empty candidate list.
      *
-     * @return every candidate, mapped to its wire representation
+     * @return the candidates, mapped to their wire representation, plus one {@link
+     *         DiscoverySourceResponse} per registered discovery mechanism
      * @throws AccessDeniedException if the caller's scope may not manage the organization (403)
      */
     @GetMapping("/api/discovery/inbox")
-    public List<DiscoveryCandidateResponse> list() {
+    public DiscoveryInboxResponse list() {
         if (!currentUser.scope().canManageOrg()) {
             throw new AccessDeniedException("Not permitted to view the discovery inbox");
         }
-        return discoveryInboxService.candidates().stream().map(DiscoveryCandidateResponse::from).toList();
+        var candidates = discoveryInboxService.candidates().stream().map(DiscoveryCandidateResponse::from).toList();
+        var sources = discoveryService.health().stream().map(DiscoverySourceResponse::from).toList();
+        return new DiscoveryInboxResponse(candidates, sources);
     }
 
     /**

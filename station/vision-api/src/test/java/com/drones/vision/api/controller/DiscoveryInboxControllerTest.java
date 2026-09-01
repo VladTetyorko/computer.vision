@@ -14,13 +14,16 @@ import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.application.discovery.DiscoveryInboxService;
+import com.drones.vision.warehouse.application.discovery.DiscoveryService;
 import com.drones.vision.warehouse.application.discovery.RegisterFromCandidateCommand;
+import com.drones.vision.warehouse.application.discovery.SourceHealth;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.Custody;
 import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
 import com.drones.vision.warehouse.domain.model.DiscoveryCandidate;
 import com.drones.vision.warehouse.domain.model.DiscoveryCandidateId;
 import com.drones.vision.warehouse.domain.model.Identity;
+import com.drones.vision.warehouse.domain.model.SourceStatus;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
@@ -53,6 +56,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class DiscoveryInboxControllerTest {
 
     private final DiscoveryInboxService discoveryInboxService = mock(DiscoveryInboxService.class);
+    private final DiscoveryService discoveryService = mock(DiscoveryService.class);
 
     private static CurrentUser currentUserWithScope(VisibilityScope scope) {
         Ownership ownership = new Ownership(UserId.random(), GroupId.random());
@@ -79,8 +83,10 @@ class DiscoveryInboxControllerTest {
         });
     }
 
-    private static MockMvc mockMvcFor(CurrentUser currentUser, DiscoveryInboxService discoveryInboxService) {
-        return MockMvcBuilders.standaloneSetup(new DiscoveryInboxController(discoveryInboxService, currentUser))
+    private static MockMvc mockMvcFor(CurrentUser currentUser, DiscoveryInboxService discoveryInboxService,
+                                       DiscoveryService discoveryService) {
+        return MockMvcBuilders
+                .standaloneSetup(new DiscoveryInboxController(discoveryInboxService, discoveryService, currentUser))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -101,20 +107,43 @@ class DiscoveryInboxControllerTest {
     @Test
     void listSucceedsForAnAdminUnboundedScopeAndCarriesTheFullSuggestedStream() throws Exception {
         when(discoveryInboxService.candidates()).thenReturn(List.of(candidate()));
-        MockMvc mockMvc = mockMvcFor(currentUserWithScope(VisibilityScope.unbounded()), discoveryInboxService);
+        MockMvc mockMvc = mockMvcFor(currentUserWithScope(VisibilityScope.unbounded()), discoveryInboxService, discoveryService);
 
         mockMvc.perform(get("/api/discovery/inbox"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].method").value("mavlink"))
-                .andExpect(jsonPath("$[0].suggestedStreamProtocol").value("mavlink"))
-                .andExpect(jsonPath("$[0].suggestedStreamOptions.sysid").value("7"))
-                .andExpect(jsonPath("$[0].status").value("NEW"));
+                .andExpect(jsonPath("$.candidates[0].method").value("mavlink"))
+                .andExpect(jsonPath("$.candidates[0].suggestedStreamProtocol").value("mavlink"))
+                .andExpect(jsonPath("$.candidates[0].suggestedStreamOptions.sysid").value("7"))
+                .andExpect(jsonPath("$.candidates[0].status").value("NEW"));
+    }
+
+    /**
+     * The A3 defect this wave fixes (docs/plans/active/ASSET-FLOWS-PLAN.md &sect;2): {@code
+     * sources} reports each discovery mechanism's own reachability alongside the (possibly empty)
+     * candidate list, so a client can tell "mediamtx unreachable" apart from "reachable, nothing
+     * found" instead of both collapsing into the same empty array.
+     */
+    @Test
+    void listCarriesSourceHealthAlongsideTheCandidateList() throws Exception {
+        when(discoveryInboxService.candidates()).thenReturn(List.of());
+        when(discoveryService.health()).thenReturn(List.of(
+                new SourceHealth("mediamtx", SourceStatus.UNREACHABLE),
+                new SourceHealth("mdns", SourceStatus.OK)));
+        MockMvc mockMvc = mockMvcFor(currentUserWithScope(VisibilityScope.unbounded()), discoveryInboxService, discoveryService);
+
+        mockMvc.perform(get("/api/discovery/inbox"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.candidates").isEmpty())
+                .andExpect(jsonPath("$.sources[0].id").value("mediamtx"))
+                .andExpect(jsonPath("$.sources[0].status").value("UNREACHABLE"))
+                .andExpect(jsonPath("$.sources[1].id").value("mdns"))
+                .andExpect(jsonPath("$.sources[1].status").value("OK"));
     }
 
     @Test
     void listReturns403ForAPilotAssignedAssetsScope() throws Exception {
         MockMvc mockMvc = mockMvcFor(
-                currentUserWithScope(VisibilityScope.assignedAssets(Set.of(AssetId.random()))), discoveryInboxService);
+                currentUserWithScope(VisibilityScope.assignedAssets(Set.of(AssetId.random()))), discoveryInboxService, discoveryService);
 
         mockMvc.perform(get("/api/discovery/inbox"))
                 .andExpect(status().isForbidden())
@@ -130,7 +159,7 @@ class DiscoveryInboxControllerTest {
         DiscoveryCandidate dismissed = candidate().dismiss();
         when(discoveryInboxService.dismiss(any(), any())).thenReturn(dismissed);
         MockMvc mockMvc = mockMvcFor(
-                currentUserWithScope(VisibilityScope.groups(Set.of(GroupId.random()))), discoveryInboxService);
+                currentUserWithScope(VisibilityScope.groups(Set.of(GroupId.random()))), discoveryInboxService, discoveryService);
 
         mockMvc.perform(post("/api/discovery/inbox/" + dismissed.id().value() + "/dismiss"))
                 .andExpect(status().isOk())
@@ -140,7 +169,7 @@ class DiscoveryInboxControllerTest {
     @Test
     void dismissReturns403ForAnUnaffiliatedEmptyScope() throws Exception {
         MockMvc mockMvc = mockMvcFor(
-                currentUserWithScope(VisibilityScope.assignedAssets(Set.of())), discoveryInboxService);
+                currentUserWithScope(VisibilityScope.assignedAssets(Set.of())), discoveryInboxService, discoveryService);
 
         mockMvc.perform(post("/api/discovery/inbox/" + DiscoveryCandidateId.random().value() + "/dismiss"))
                 .andExpect(status().isForbidden())
@@ -153,7 +182,7 @@ class DiscoveryInboxControllerTest {
     void dismissReturns404WhenTheServiceReportsAnUnknownCandidate() throws Exception {
         when(discoveryInboxService.dismiss(any(), any()))
                 .thenThrow(new NoSuchElementException("Unknown discovery candidate"));
-        MockMvc mockMvc = mockMvcFor(currentUserWithScope(VisibilityScope.unbounded()), discoveryInboxService);
+        MockMvc mockMvc = mockMvcFor(currentUserWithScope(VisibilityScope.unbounded()), discoveryInboxService, discoveryService);
 
         mockMvc.perform(post("/api/discovery/inbox/" + DiscoveryCandidateId.random().value() + "/dismiss"))
                 .andExpect(status().isNotFound());
@@ -167,7 +196,7 @@ class DiscoveryInboxControllerTest {
         Asset created = Asset.register(AssetId.random(), "new quad", new CategoryId("quadcopter"), ownership,
                 Set.of(), Map.of(), Identity.NONE, Custody.NONE);
         when(discoveryInboxService.register(any(), any(), any(), any())).thenReturn(created);
-        MockMvc mockMvc = mockMvcFor(currentUserWithScope(VisibilityScope.unbounded()), discoveryInboxService);
+        MockMvc mockMvc = mockMvcFor(currentUserWithScope(VisibilityScope.unbounded()), discoveryInboxService, discoveryService);
 
         String body = "{\"displayName\":\"new quad\",\"category\":\"quadcopter\"}";
         mockMvc.perform(post("/api/discovery/inbox/" + DiscoveryCandidateId.random().value() + "/register")
@@ -182,7 +211,7 @@ class DiscoveryInboxControllerTest {
     void registerPropagatesAccessDeniedFromTheServiceAs403() throws Exception {
         when(discoveryInboxService.register(any(), any(), any(), any()))
                 .thenThrow(new AccessDeniedException("not permitted"));
-        MockMvc mockMvc = mockMvcFor(currentUserWithScope(VisibilityScope.unbounded()), discoveryInboxService);
+        MockMvc mockMvc = mockMvcFor(currentUserWithScope(VisibilityScope.unbounded()), discoveryInboxService, discoveryService);
 
         String body = "{\"displayName\":\"new quad\",\"category\":\"quadcopter\"}";
         mockMvc.perform(post("/api/discovery/inbox/" + DiscoveryCandidateId.random().value() + "/register")
@@ -194,7 +223,7 @@ class DiscoveryInboxControllerTest {
     void registerPropagatesNoSuchElementFromTheServiceAs404() throws Exception {
         when(discoveryInboxService.register(any(), any(), any(), any()))
                 .thenThrow(new NoSuchElementException("Unknown discovery candidate"));
-        MockMvc mockMvc = mockMvcFor(currentUserWithScope(VisibilityScope.unbounded()), discoveryInboxService);
+        MockMvc mockMvc = mockMvcFor(currentUserWithScope(VisibilityScope.unbounded()), discoveryInboxService, discoveryService);
 
         String body = "{\"displayName\":\"new quad\",\"category\":\"quadcopter\"}";
         mockMvc.perform(post("/api/discovery/inbox/" + DiscoveryCandidateId.random().value() + "/register")
@@ -209,7 +238,7 @@ class DiscoveryInboxControllerTest {
                 currentUser.ownership(), Set.of(), Map.of(), Identity.NONE, Custody.NONE);
         ArgumentCaptor<RegisterFromCandidateCommand> captor = ArgumentCaptor.forClass(RegisterFromCandidateCommand.class);
         when(discoveryInboxService.register(any(), captor.capture(), any(), any())).thenReturn(created);
-        MockMvc mockMvc = mockMvcFor(currentUser, discoveryInboxService);
+        MockMvc mockMvc = mockMvcFor(currentUser, discoveryInboxService, discoveryService);
 
         String body = "{\"displayName\":\"new quad\",\"category\":\"quadcopter\"}";
         mockMvc.perform(post("/api/discovery/inbox/" + DiscoveryCandidateId.random().value() + "/register")
