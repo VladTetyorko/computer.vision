@@ -426,3 +426,57 @@ and `VisionDiscoveryPropertiesTest`'s pre-existing 5-arg canonical-constructor c
 trailing `null` for the new 6th `Mediamtx` component. `ArchitectureTest`/`ContextArchitectureTest`
 unaffected — `MediamtxPathScanner` imports nothing from another adapter (only `vision-warehouse`'s
 `DeviceDiscoveryPort`/`DiscoveredDevice`, matching every other scanner in the module).
+
+**MAVLINK-COMMANDS wave P3 done — verified already wired, no wiring change.** The 2026-08-26
+architecture audit flagged that R3's codebase inventory could not confirm every production
+`MavlinkSession` actually registers a `mavlink-core` `onLinkFailure` listener (vs. the hook merely
+existing). Traced to ground: every production `MavlinkSession` is built in exactly one place —
+`MavlinkGateway`'s package-private `(MavlinkLink, MavlinkSettings)` constructor
+(`drone-link/mavlink`'s `MavlinkGateway.java:168-176`), which the production `(String, int,
+MavlinkSettings)` constructor unconditionally delegates to (`MavlinkGateway.java:156-158`) — `grep
+-rn "new MavlinkSession("` across the repo shows no other production call site, only mavlink-core's
+own unit tests. That constructor registers `session.onLinkFailure((linkId, cause) ->
+handleLinkFailure(cause))` at line 176, before any device registration/claim policy/subscription
+exists. `MavlinkGateway` itself has exactly two production callers — `MavlinkTelemetrySource.java:322`
+(the RX hub every device shares) and `MavlinkVehicleConfigurator.java:494` (the onboarding probe's
+self-bound gateway) — both go through that one constructor. `handleLinkFailure`
+(`MavlinkGateway.java:347-351`) logs a `WARNING` naming the failed link and closes every registered
+device's `SubmissionPublisher` exceptionally, which is exactly the `onError` `UsageTracker`
+(vision-perception) `SupervisedPublisher`-wraps into the cockpit's existing stale-not-live telemetry
+rendering (OPERATOR-UX-3) — no parallel status concept needed. `MavlinkHeartbeatScanner`'s self-bind
+discovery path never builds a `MavlinkSession` at all (a bounded scan over a bare
+`UdpListenLink`+`FrameReader`, its own synchronous bind-failure handling), so it was never a
+candidate for this failure class. vision-app itself has no seam to add a listener to —
+`MavlinkGateway`/`MavlinkSession` construction is fully encapsulated inside adapter-mavlink's
+package-private `MavlinkGateway`; vision-app only ever sees the public `MavlinkTelemetrySource`
+facade. **No wiring change made** — the "already wired, write the missing test, stop" branch.
+
+New `config/wiring/MavlinkLinkStatusWiringTest` (1 test, no Spring context, no Docker) pins the piece
+that genuinely is this module's own responsibility: that `SystemStatusWiring#mavlinkLinkStatus`
+reads its health off the *same* `MavlinkTelemetrySource` instance the rest of the app's MAVLink
+wiring shares, not a stale/disconnected copy. Builds the real production object graph
+(`TelemetryWiring#toMavlinkSettings` → a real socket-bound `MavlinkTelemetrySource` →
+`SystemStatusWiring#mavlinkLinkStatus`), sends one real MAVLink heartbeat over real loopback UDP via
+the existing `MavlinkFeedTransmitter` test double, and proves the status port's answer is live:
+`Health.UNKNOWN` before anything is heard, non-`UNKNOWN` once a real vehicle is claimed, with
+`source.claimedVehicleHealth()` (the exact `Supplier` `mavlinkLinkStatus` is built from) showing the
+same device. A genuine-`IOException` reproduction of `onLinkFailure` itself was deliberately not
+attempted from this module: the only injectable-failing-link seam (`MavlinkGateway(MavlinkLink,
+MavlinkSettings)`) is package-private inside adapter-mavlink and already exercised end-to-end there
+(`MavlinkGatewayLinkFailureTest`) and at the `mavlink-core` layer
+(`MavlinkSessionLinkFailureTest`) — reproducing it from vision-app would need either reflection into
+private socket internals (a pattern FLEET-RADIO R4 explicitly rejected as fragile/invasive when
+building this exact seam) or duplicate coverage of a mechanism already proven at the layer that owns
+it.
+
+`./mvnw -B -pl station/vision-app -am test -DskipWeb` — **299** (+1 over the pre-P3 298), all green;
+`ArchitectureTest`/`ContextArchitectureTest`/`EndpointAuthorizationTest` unaffected (no new bean, no
+new ArchUnit surface). Two collisions hit during this wave's gate runs, both from other agents'
+concurrent in-progress work on this shared branch, both cleared on retry: `FlightModesTest` failed
+once against a mid-edit `drone-link/mavlink/FlightModes.java` (P1's file scope), and `npm run
+test:ci` failed once against mid-edit `station/vision-web/src/app/core/rc/*` files (W1's file scope,
+`-DskipWeb` used for every run after that to isolate this module's own verification from the
+concurrent frontend wave). A `MediamtxDockerIntegrationTest` (`adapter-rtsp`, untouched by this or
+any MAVLINK-COMMANDS wave) failure also cleared on retry — a timing flake under concurrent
+sandbox load, not a regression. Docker ran for real throughout (Postgres Testcontainer migrated
+through `V31`).
