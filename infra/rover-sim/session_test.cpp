@@ -34,16 +34,32 @@ public:
 };
 class FakeNetwork : public INetworkLink {
 public:
+  // Defaults true so every existing call site is unaffected; only the F3
+  // network-down case below ever flips it. This is the IP-layer carrier
+  // itself going away (WiFi association lost), not merely a stalled RC
+  // stream -- MavlinkUdpLink::poll() reads this before anything else.
+  bool up = true;
   void begin() override {} void poll(uint32_t) override {}
-  bool connected() const override { return true; }
-  int8_t rssiDbm() const override { return -60; }
+  bool connected() const override { return up; }
+  int8_t rssiDbm() const override { return up ? -60 : -100; }
 };
 
 class FakeMotors : public IMotorDriver {
 public:
+  // A timestamped demand, opt-in: only the F3 case below sets `recording`,
+  // so every other section pays nothing and behaves exactly as before.
+  struct Sample { uint32_t ms; float throttle; float steering; };
+  std::vector<Sample>* recording = nullptr;
+
   void begin() override {}
-  void apply(float t, float s, uint32_t) override { throttle_ = t; steering_ = s; }
-  void stop() override { throttle_ = 0; steering_ = 0; }
+  void apply(float t, float s, uint32_t) override {
+    throttle_ = t; steering_ = s;
+    if (recording) recording->push_back({g_hostMillis, t, s});
+  }
+  void stop() override {
+    throttle_ = 0; steering_ = 0;
+    if (recording) recording->push_back({g_hostMillis, 0.0f, 0.0f});
+  }
   // Counted, not performed: this suite is about WHEN the controller wakes or
   // sleeps the bridge (the STBY edge), not about what enable()/disable()
   // write to the pin -- motor_test owns that. The two questions fail
@@ -198,6 +214,108 @@ int main(int argc, char** argv) {
   feed2(g_ch5hi); tick2(20); tick2(20);
   check("re-arm without fresh sticks does not resurrect demand",
         vehicle2.armed() && motors.appliedThrottle() == 0.0f);
+
+  // ================= F3: network-down failsafe is a pinned invariant =================
+  // R4 finding 5: two independently-maintained failsafe clocks currently happen to
+  // agree only because they read the exact same cfg.timing.commandTimeoutMs field.
+  // MavlinkUdpLink::poll() (MavlinkUdpLink.cpp:202-209) returns BEFORE reaching its
+  // own "stream stalled -> centre demand" block whenever network_.connected() is
+  // false -- so during a full network outage that clock never runs at all, and
+  // pending_/hasPending_/streamLost_ are never refreshed. VehicleController::
+  // evaluateFailsafe() (VehicleController.cpp:26-57) is the one that actually
+  // protects the rover here: it reads link_.sinceLastCommandMs(), a plain getter
+  // over lastCommandMs_ that needs no poll() to have run, and trips on its own.
+  //
+  // Every other section above starves the STREAM (silence while the link stays
+  // healthy). This one kills the NETWORK itself, so the link's own stall clock
+  // is provably absent from the picture and the bound below is proven to rest on
+  // the controller alone.
+  printf("\n-- network-down failsafe: the controller's own clock, not the link's, must trip --\n");
+  {
+    FakeNetwork network3;
+    FakeMotors  motors3;
+    std::vector<FakeMotors::Sample> history;
+    motors3.recording = &history;
+    MavlinkUdpLink    link3(parameters, network3, logger);
+    VehicleController vehicle3(link3, motors3, imu, cfg.timing, logger);
+    vehicle3.begin();
+
+    g_hostMillis = 100000;
+    link3.begin();
+    WiFiUDP* sock3 = g_lastSocket;
+    auto at    = [&](uint32_t absMs) { g_hostMillis = absMs; link3.poll(g_hostMillis); vehicle3.loop(g_hostMillis); };
+    auto tick3 = [&](uint32_t ms)    { at(g_hostMillis + ms); };
+    auto feed3 = [&](const std::vector<uint8_t>& f) { sock3->feed(f); };
+
+    // -- drive: nonzero throttle AND steering, actually applied and verified ----
+    feed3(g_arm); tick3(10);
+    for (int i = 0; i < 60; ++i) { feed3(g_rc); tick3(20); }
+    check("network-down setup: armed and out of failsafe", vehicle3.armed() && !vehicle3.failsafeActive());
+    check("network-down setup: nonzero throttle and steering are applied",
+          motors3.appliedThrottle() > 0.0f && motors3.appliedSteering() > 0.0f);
+
+    // -- go silent: kill the network, not just the stream. From here MavlinkUdpLink::
+    //    poll() early-returns every call: its own stall detection cannot run, and
+    //    controlStreamLost() must stay false throughout, since nothing ever sets
+    //    streamLost_ while the network is down.
+    network3.up = false;
+    const uint32_t bound       = cfg.timing.commandTimeoutMs;  // the ONE value both clocks read
+    const uint32_t period      = cfg.timing.controlPeriodMs;
+    const uint32_t lastFrameMs = g_hostMillis;
+
+    at(lastFrameMs + bound);   // since == bound, NOT > bound: must not have tripped yet
+    check("failsafe has NOT latched at exactly commandTimeoutMs of silence (the bound is exclusive)",
+          !vehicle3.failsafeActive());
+    check("demand has not been prematurely zeroed by exactly commandTimeoutMs (still driving)",
+          motors3.appliedThrottle() != 0.0f);
+    check("MavlinkUdpLink's own stall clock never ran during the outage (poll() returns early on network-down)",
+          !link3.controlStreamLost());
+
+    at(lastFrameMs + bound + 1);   // since == bound + 1, now > bound
+    check("failsafe latches the instant silence exceeds commandTimeoutMs "
+          "-- the controller's own clock, unaided by the link",
+          vehicle3.failsafeActive());
+    check("the arm holds through the trip (a dead network is not an operator disarm)",
+          vehicle3.armed());
+
+    // -- the flag can latch mid control-period; the actuator only obeys on the next
+    //    period boundary (VehicleController.cpp:111), so the real end-to-end bound on
+    //    PHYSICAL demand is commandTimeoutMs + one controlPeriodMs, not commandTimeoutMs
+    //    alone. Pin that too, or a widened control period could quietly widen this.
+    tick3(period);
+    check("demand at the motor driver returns to zero within one control period of the trip "
+          "(commandTimeoutMs + controlPeriodMs end to end)",
+          motors3.appliedThrottle() == 0.0f && motors3.appliedSteering() == 0.0f);
+
+    // -- coast, never an instant reversal: reuse the bench driver's own recording
+    //    (the sample history FakeMotors kept above) and check the transition from
+    //    the last positive demand to zero never crossed sign. The firmware always
+    //    reaches failsafe through stop(), never through apply() with a flipped
+    //    command -- a demand that jumped straight from + to - without landing on
+    //    zero first would be exactly the "instant reversal" defect this pins against.
+    bool sawInstantReversal = false;
+    bool sawExactZero       = false;
+    for (size_t i = 1; i < history.size(); ++i) {
+      const FakeMotors::Sample& prev = history[i - 1];
+      const FakeMotors::Sample& cur  = history[i];
+      const bool throttleFlipped = (prev.throttle > 0.0f && cur.throttle < 0.0f)
+                                 || (prev.throttle < 0.0f && cur.throttle > 0.0f);
+      const bool steeringFlipped = (prev.steering > 0.0f && cur.steering < 0.0f)
+                                 || (prev.steering < 0.0f && cur.steering > 0.0f);
+      if (throttleFlipped || steeringFlipped) sawInstantReversal = true;
+      if (cur.throttle == 0.0f && cur.steering == 0.0f) sawExactZero = true;
+    }
+    check("the recorded demand reached exact zero (a coast), not merely a small value", sawExactZero);
+    check("no recorded step ever flipped sign directly -- a coast to zero, never a reversal",
+          !sawInstantReversal);
+
+    // -- resumption: the network returns, a fresh stream is accepted at once --------
+    network3.up = true;
+    for (int i = 0; i < 30; ++i) { feed3(g_rc); tick3(period); }
+    check("a resumed stream clears the failsafe", !vehicle3.failsafeActive());
+    check("fresh demand is accepted again once the stream resumes",
+          motors3.appliedThrottle() > 0.0f && motors3.appliedSteering() > 0.0f);
+  }
 
   printf("\n%s\n", g_failures ? "SESSION CHECKS FAILED" : "ALL SESSION CHECKS PASSED");
   return g_failures ? 1 : 0;
