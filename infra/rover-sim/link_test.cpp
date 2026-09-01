@@ -94,6 +94,19 @@ uint32_t lanAddress(uint8_t host) {
          (static_cast<uint32_t>(host) << 24);
 }
 
+/// True when `datagram` is a STATUSTEXT frame; writes its severity if given.
+/// Message id lives at byte 7 of a v2 frame (one byte suffices -- every id
+/// this firmware sends fits below 255, see MavlinkV2Codec.cpp's OFF_*
+/// offsets); the payload, and so the severity, starts right after the
+/// 10-byte header (mavlink::HEADER_LEN_V2).
+bool isStatusText(const std::vector<uint8_t>& datagram, uint8_t* severityOut = nullptr) {
+  if (datagram.size() < 11 || datagram[7] != static_cast<uint8_t>(mavlink::msg::STATUSTEXT)) {
+    return false;
+  }
+  if (severityOut != nullptr) *severityOut = datagram[10];
+  return true;
+}
+
 /// Every distinct "ip:port" this socket has transmitted to.
 std::string targets(const WiFiUDP& socket) {
   std::string out;
@@ -169,6 +182,80 @@ int main(int argc, char** argv) {
               targets(*socket) + ")");
   }
 
+  printf("\n-- a second transmitter cannot steal command authority --\n");
+  {
+    // R4-firmware-audit finding 4's cheap half: once a GCS peer is learned,
+    // a COMMAND frame from a DIFFERENT source is refused, closing "any
+    // second device on the LAN claiming sysid 255 can drive the rover"
+    // without touching the protocol. Reply/telemetry re-learning (above)
+    // is deliberately untouched -- that half of the vulnerability is out of
+    // scope for this wave (D4 row 5).
+    ParameterStore  parameters;
+    QuietLogger     logger;
+    CountingNetwork network;
+    MavlinkUdpLink  link(parameters, network, logger);
+    WiFiUDP* const  socket = g_lastSocket;
+
+    const std::vector<uint8_t> arm  = readFile(dir + "/cmd_idem_arm0.bin");   // COMPONENT_ARM_DISARM
+    const std::vector<uint8_t> hold = readFile(dir + "/cmd_idem_mode0.bin");  // DO_SET_MODE -> HOLD (disarms)
+    if (arm.empty() || hold.empty()) {
+      fprintf(stderr, "cmd_idem_arm0.bin/cmd_idem_mode0.bin missing -- run command_fixture.py\n");
+      return 2;
+    }
+
+    g_hostMillis = 100000;
+    link.begin();
+
+    // Source A (.10) is the first ever command sender: nothing to compare
+    // it against yet, so it is accepted outright and becomes the command
+    // source of record.
+    socket->feedFrom(arm, lanAddress(10), 14550);
+    pump(link, 1);
+    ControlCommand cmd;
+    check(link.takeCommand(cmd) && cmd.armed,
+          "the first command source is accepted and arms the rover");
+
+    // Source B (.20), a different address, tries to switch to HOLD --
+    // moments later, well inside the re-learn window. It must be silently
+    // ignored: no state change, no ACK, just a throttled log line.
+    socket->sentTo.clear();
+    socket->feedFrom(hold, lanAddress(20), 14550);
+    pump(link, 1);
+    check(!link.takeCommand(cmd),
+          "a second transmitter's command is ignored while the first is still live");
+    check(link.customMode() == mavlink::rover_mode::MANUAL,
+          "...and never reaches the mode table");
+
+    // The reply/telemetry address still follows whoever spoke last, exactly
+    // as before this wave -- learnPeer() is unconditional and unchanged.
+    // Nothing was due to transmit on the single tick above (every telemetry
+    // stream is rate-limited well past 20ms), so pump a few more ticks --
+    // still well inside the re-learn window -- until ATTITUDE (the fastest
+    // stream, 100ms) has something to send, then look at where it went.
+    pump(link, 5);
+    check(targets(*socket) == "192.168.0.20:14550",
+          "telemetry keeps following the last sender even though its command "
+          "was refused (got " + targets(*socket) + ")");
+
+    // Now let source A go silent for the same window the stall failsafe
+    // already uses (timing_.commandTimeoutMs, 500ms by default) -- long
+    // enough that a real DHCP move would have reassociated by now too.
+    // (20ms already elapsed before the rejected attempt above, plus the 100ms
+    // just spent settling telemetry, so 20 more ticks clears the 500ms mark.)
+    pump(link, 20);
+
+    // Source B tries again: the incumbent has been quiet long enough, so
+    // this time the takeover is allowed.
+    socket->sentTo.clear();
+    socket->feedFrom(hold, lanAddress(20), 14550);
+    pump(link, 1);
+    check(link.takeCommand(cmd) && !cmd.armed,
+          "once the incumbent has been silent past the re-learn window, a "
+          "new source is accepted");
+    check(link.customMode() == mavlink::rover_mode::HOLD,
+          "...and its command actually lands");
+  }
+
   printf("\n-- a transmit path that stops working is recovered, not narrated --\n");
   {
     ParameterStore  parameters;
@@ -202,6 +289,24 @@ int main(int argc, char** argv) {
     check(network.reconnects == reconnectsBefore,
           "once transmits succeed again the escalation stops");
     check(!socket->sent.empty(), "and traffic resumes");
+
+    // R4-firmware-audit §5's observability gap: both escalations above used
+    // to be Serial-only, which tells an untethered operator nothing. Both
+    // are now queued as STATUSTEXT too (drained here, now that transmits
+    // succeed again) so the ground station sees "the link looks fine but
+    // nothing is getting through" without a USB cable attached.
+    bool sawRebindWarning = false;
+    bool sawReconnectError = false;
+    for (const std::vector<uint8_t>& datagram : socket->sent) {
+      uint8_t severity = 0;
+      if (!isStatusText(datagram, &severity)) continue;
+      if (severity == mavlink::severity::WARNING) sawRebindWarning = true;
+      if (severity == mavlink::severity::ERROR)   sawReconnectError = true;
+    }
+    check(sawRebindWarning,
+          "the socket-rebind escalation reached the operator as a STATUSTEXT, not just Serial");
+    check(sawReconnectError,
+          "the re-associate escalation reached the operator as a STATUSTEXT, not just Serial");
   }
 
   printf("\n%s\n", failures == 0 ? "ALL LINK CHECKS PASSED"
