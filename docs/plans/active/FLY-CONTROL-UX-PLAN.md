@@ -91,7 +91,7 @@ with moved responsibilities, `npm run test:ci`, MODULE.md updated.
 |---|---|---|---|
 | BK1 | spring-integrator | `vision.ops.rc.*` in `station/vision-app` (properties, wiring, yaml doc-comment) + thresholds DTO field in `station/vision-api` | scoped `-pl … -am test` |
 | WEB1 | controller-ux | ALL of §2's web side + §3 in `station/vision-web` (one wave — serialized by design; last cycle's parallel-web-wave races) | `npm run test:ci` + `tsc --noEmit` |
-| H1 | scoped by R3 | handshake fix (station-side tolerance and/or precise firmware requirement) | per scope |
+| H1 | spring-integrator, **after BK1** (shares vision-api) | per R3: engage denial is a station-local 4s timeout, no vehicle ack exists. (a) catch-all exception → honest `denied` frame in `ManualControlWebSocketHandler.handleEngage` (today only 3 exceptions caught — anything else is silence); (b) verify/bound any engage-path block >4s (live vehicle-kind resolution from heartbeat) so a real `denied` always beats the client's abandon; (c) WARN log with engage duration+outcome; (d) read-only: does rover firmware's F4 first-peer authority gate also drop `RC_CHANNELS_OVERRIDE` from a second source? (would explain "granted but doesn't move" — report, firmware is out-of-repo) | scoped `-pl` tests |
 | V | orchestrator | combined verify + docs + MODULE.md audit + merge | full scoped set |
 
 BK1 ∥ WEB1 (disjoint modules; WEB1 builds against the frozen JSON contract with local fallback).
