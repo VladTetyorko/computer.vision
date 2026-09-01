@@ -64,7 +64,12 @@ class MavlinkFlightCommanderTest {
     }
 
     @Test
-    void supportsDelegatesToTheTelemetrySourcesOwnSupportsCheckSoTheTwoCanNeverDisagree() {
+    void supportsMatchesTheTelemetrySourcesOwnProtocolCheckForADeviceNeverYetHeardFrom() {
+        // ASSET-FLOWS-PLAN C5: for a device this class has never claimed (firmware unknown), the two
+        // agree -- protocol-only, exactly the pre-C5 behavior. See the two supports*Firmware* tests
+        // below for the case they now deliberately disagree on (a claimed, known-non-commandable
+        // firmware): this method's own class javadoc explains why "never heard" stays true rather
+        // than flipping to a vaguer "unknown" false.
         MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
         MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
         Device supported = device(14550, DeviceId.random(), Map.of());
@@ -74,6 +79,55 @@ class MavlinkFlightCommanderTest {
         assertEquals(telemetrySource.supports(supported), commander.supports(supported));
         assertTrue(commander.supports(supported));
         assertFalse(commander.supports(wrongProtocol));
+    }
+
+    // ---- ASSET-FLOWS-PLAN C5 / ARCHITECTURE-AUDIT-2026-08-26 D3: supports() is firmware-honest ----
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void supportsReturnsFalseForAClaimedBetaflightVehicleEvenThoughTheProtocolMatches() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 141, MavAutopilot.MAV_AUTOPILOT_GENERIC, MavType.MAV_TYPE_QUADROTOR)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "generic", Duration.ofSeconds(10));
+
+            // The protocol check alone still says yes -- this is the exact false positive C5 fixes:
+            // this class's own supports() must not repeat it.
+            assertTrue(telemetrySource.supports(device), "sanity: the device is still a MAVLink device on the wire");
+            assertFalse(commander.supports(device),
+                    "a claimed Betaflight vehicle must not claim command support: its RC link processes "
+                            + "neither MAV_CMD_DO_SET_MODE nor MAV_CMD_COMPONENT_ARM_DISARM");
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void supportsReturnsTrueForAClaimedArdupilotVehicle() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 142, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_QUADROTOR)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "ardupilot", Duration.ofSeconds(10));
+
+            assertTrue(commander.supports(device), "a claimed ArduPilot vehicle must still claim command support");
+        } finally {
+            telemetrySource.close(deviceId);
+        }
     }
 
     @Test

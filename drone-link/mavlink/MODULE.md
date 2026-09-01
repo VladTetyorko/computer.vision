@@ -150,7 +150,12 @@ there is nothing to structurally prevent here the way Mechanism A's opt-in remed
   See the MAVLINK-COMMANDS-PLAN P1 Gotchas below for the force-magic split and the retry eligibility
   rule in full. `static final int TARGET_COMPONENT_AUTOPILOT = 1`. Only ArduPilot/INAV (`autopilot`
   ARDUPILOTMEGA) is commandable; Betaflight (`autopilot` GENERIC) is rejected before `FlightModes` is
-  even consulted, even though its own table has an RTL-named mode. **`emergencyStop` is
+  even consulted, even though its own table has an RTL-named mode. **(ASSET-FLOWS-PLAN C5, new)**
+  `supports(Device)` is now firmware-honest, not just protocol-honest: `false` for a device whose
+  most-recently-heard firmware is a *known* non-commandable one (Betaflight/any non-ArduPilot label
+  today), `true` for protocol-match-plus-never-heard exactly as before — see the C5 Gotchas below and
+  this class's own "supports(Device) is honest about firmware" javadoc section for the full
+  before/after and why "never heard" deliberately stays `true`. **`emergencyStop` is
   vehicle-kind-gated (FLEET-RADIO R4b)** — see its own Gotchas section below; it is no longer a
   single, uniform command for every device. Constructors: `(MavlinkTelemetrySource)` and
   `(MavlinkTelemetrySource, Duration ackTimeout)` are back-compat overloads (the latter is
@@ -167,6 +172,10 @@ there is nothing to structurally prevent here the way Mechanism A's opt-in remed
   `DefaultTxScheduler` (two daemon threads total). v1 scope: channels 1–8 only. Constructors
   `(MavlinkTelemetrySource, MavlinkSettings.Rc)`; package-private
   `(MavlinkTelemetrySource, long tickPeriodMillis, int releaseFrameCount)` test seam.
+  **(ASSET-FLOWS-PLAN C5)** `supports(Device)` is deliberately left protocol-only (unlike
+  `MavlinkFlightCommander`'s new firmware-aware version) — see the C5 Gotchas below for why
+  `RC_CHANNELS_OVERRIDE` is not a Betaflight false positive the way `MAV_CMD_DO_SET_MODE`/
+  `MAV_CMD_COMPONENT_ARM_DISARM` are.
 - `public final class MavlinkHeartbeatScanner implements DeviceDiscoveryPort` — `method()` =
   `"mavlink"`, `scan(Duration): List<DiscoveredDevice>`. Two paths: **hub-borrow** (a gateway is
   already open — polls its claimed/unclaimed registries, never binds) or **self-bind** (nothing has
@@ -209,7 +218,9 @@ there is nothing to structurally prevent here the way Mechanism A's opt-in remed
   **(MAVLINK-COMMANDS-PLAN P2, new)** `probe`'s capability request and `requestMessageInterval` both
   now go through a private `awaitWithContentionRetry` rather than the plain `await` every other call
   here still uses — see the P2 Gotchas below for why (they share a correlator key with
-  `MavlinkStreamNegotiator`, which now fires on every claim).
+  `MavlinkStreamNegotiator`, which now fires on every claim). **(ASSET-FLOWS-PLAN C5)**
+  `supports(Device)` also stays protocol-only, deliberately — see the C5 Gotchas below for why
+  onboarding probing has no firmware-specific verb to be dishonest about the way flight commands do.
 - `public final class MavlinkLinkStatusProvider implements SubsystemStatusPort` — `mavlink-link`'s
   health self-report for `GET /api/system/status`. **(FLEET-RADIO R4/D4, rewritten)** Constructor is
   `(Supplier<Map<DeviceId, LinkHealth.Health>> claimedVehicleHealth, MavlinkSettings.LinkStatus
@@ -855,6 +866,73 @@ one `FlightState`-contributing row above has fired at least once.
   through before this is live in production; the only future work is making the six ids/rate
   *configurable* (a `VisionMavlinkProperties` field), not making negotiation *happen*.
 
+### ASSET-FLOWS-PLAN C5 Gotchas
+
+- **The false positive named by ARCHITECTURE-AUDIT-2026-08-26 D3 was real, but narrower than "every
+  `supports()` is dishonest".** Before this wave, `MavlinkFlightCommander.supports(Device)` delegated
+  straight to `MavlinkTelemetrySource.supports(Device)` — "is this a MAVLink device at all" — so a
+  claimed Betaflight aircraft answered `true` even though every command method already rejects it via
+  `requireCommandableFirmware`. The consequences were real but already partly mitigated: `capabilities(
+  Device)` (what the web command panel actually reads, `GET /api/assets/{id}/flight-capabilities`) was
+  already firmware-honest before this wave — MAVLINK-COMMANDS-PLAN's own `requireCommandableFirmware`
+  and this method's own `!FIRMWARE_ARDUPILOT.equals(target.firmware())` guard already made it report
+  `notCommandable()` for Betaflight. The two live gaps `supports()` itself left open: (1) a caller that
+  trusts `supports()` alone instead of the finer-grained `capabilities()` — the port's own javadoc
+  explicitly *allows* this ("does not by itself guarantee any command will succeed"), which is exactly
+  what made the false positive legal-by-contract; (2) `contexts/vision-flight`'s
+  `DefaultFlightCommandService.firstCommandableDevice` filters an asset's devices on this exact method
+  and "silently takes the first" match (its own class javadoc) — a decoy Betaflight device sharing an
+  asset with a real ArduPilot one could shadow the commandable device entirely, turning both
+  `resolveForCommand` and `capabilities()` dishonest for that asset even though a genuinely commandable
+  device exists on it. Neither gap needed a `contexts/vision-flight` file touched to fix — both close
+  once `MavlinkFlightCommander.supports(Device)` itself stops claiming what `requireCommandableFirmware`
+  already knows it will refuse.
+- **"Never heard from" deliberately stays `supports() == true` — this is not the "unknown-safe" default
+  by inertia, it is the more-honest of the two choices, not the less.** The tempting "fully honest"
+  design would be `supports()` mirroring `capabilities()`'s own guard exactly (`target == null` also
+  ⇒ `false`). Rejected: `resolveReachableTarget`'s own reachability check already throws a specific,
+  named message ("no MAVLink vehicle has ever been heard for device … you cannot command what you
+  cannot hear") for that exact case, and `capabilities()` already answers `notCommandable()` for it too
+  — both through their own, more specific mechanism. Flipping `supports()`'s never-heard case to `false`
+  would not make either of those more honest; it would only make `DefaultFlightCommandService.
+  firstCommandableDevice` silently skip a device instead of surfacing that specific, useful message,
+  trading a precise diagnostic for a vaguer one with no honesty gained. "Honest-unknown" only wins over
+  "keep current behavior" when the current behavior is actually claiming something false — here it
+  isn't, because nothing downstream trusts `supports()` as the final word.
+- **The internal reachability guard (`resolveReachableTarget`) must check `telemetrySource.supports(
+  device)` directly, never this class's own (now firmware-aware) `supports(Device)`.** Every command
+  method calls `resolveReachableTarget` *before* `requireCommandableFirmware` (directly, or via
+  `resolveCustomMode`). Had `resolveReachableTarget` kept calling `this.supports(device)`, a claimed
+  Betaflight device would now fail *that* guard first, throwing the generic "`MavlinkFlightCommander`
+  does not support device: …" message — silently replacing `requireCommandableFirmware`'s specific,
+  already-tested messages (naming Betaflight; "not commandable in DRONE-INFRA I-e (ArduPilot/INAV
+  only)") with a strictly worse one. Caught by hand before it ever reached a red test: this is exactly
+  the kind of two-call-sites-of-the-same-method landmine a firmware-aware `supports()` creates, and the
+  reason this class's own class javadoc now calls the split out explicitly rather than leaving it to be
+  rediscovered.
+- **`MavlinkManualControlSender`/`MavlinkVehicleConfigurator` were deliberately left protocol-only —
+  not an oversight, a researched decision.** `docs/plans/active/OPERATOR-CONTROL-CONTEXT.md` §2.1 (the
+  same investigation ARCHITECTURE-AUDIT D3 cites) corrected an earlier premise: Betaflight has accepted
+  `RC_CHANNELS_OVERRIDE` (#70) via its own `rx/mavlink.c` since ~2025.12.0-beta — the *same* wire
+  message `MavlinkManualControlSender` sends, unlike `MAV_CMD_DO_SET_MODE`/`MAV_CMD_COMPONENT_ARM_DISARM`,
+  which Betaflight's RC link genuinely never processes at any firmware version. There is therefore no
+  firmware-family fact this module can check (only `HEARTBEAT.autopilot`'s coarse ardupilot/generic/px4
+  label is decoded — no firmware *version*) that would make gating `ManualControlPort.supports()` on
+  "generic" honest; doing so would trade today's real false positive (Betaflight claims a verb it can
+  never do) for a new false negative (a modern Betaflight build genuinely honoring RC override reported
+  as unsupported). `MavlinkVehicleConfigurator.probe`/`readParams`/`writeParam` have no equivalent
+  firmware-verb question at all — probing is protocol-level by design (best-effort, never throws for an
+  incomplete answer; `VehicleProfile.complete()`/`incompleteReason()` already carry the honesty this
+  port needs), so there is nothing for its `supports(Device)` to be dishonest about.
+- **Tests**: `supportsReturnsFalseForAClaimedBetaflightVehicleEvenThoughTheProtocolMatches` and
+  `supportsReturnsTrueForAClaimedArdupilotVehicle` (`MavlinkFlightCommanderTest`, real UDP loopback via
+  the existing `FakeVehicle` double) — the former also asserts `telemetrySource.supports(device)` stays
+  `true` for the same device, proving this is a genuine `supports()`-vs-`supports()` disagreement, not a
+  change in protocol detection. The pre-existing "can never disagree" test was renamed
+  (`supportsMatchesTheTelemetrySourcesOwnProtocolCheckForADeviceNeverYetHeardFrom`) to scope its own
+  claim to the case it actually covers (a device never yet claimed) rather than the general case, which
+  is no longer true.
+
 ## Status
 
 Real and load-bearing: RX ingest + fleet-gateway claim/re-election, guarded command TX (mode/arm/
@@ -999,3 +1077,26 @@ to a test asserting on its own, unrelated command.
 (2026-09-01); `MavlinkSitlOnConnectIntegrationTest` re-run individually against real SITL
 (docker+image present) also green, confirming the Mechanism A step-aside end-to-end against real
 ArduPilot 4.7.0, not just fake-vehicle unit tests.
+
+**`docs/plans/active/ASSET-FLOWS-PLAN.md` C5 done** (ARCHITECTURE-AUDIT-2026-08-26 D3 — the Betaflight
+`supports()` false positive). `MavlinkFlightCommander.supports(Device)` is now firmware-honest: `false`
+for a device whose most-recently-heard firmware is a *known* non-commandable one (today: any firmware
+label other than `"ardupilot"`, once heard — matching `requireCommandableFirmware`'s own definition
+exactly), `true` for protocol-match-plus-never-heard, unchanged. The internal reachability guard
+(`resolveReachableTarget`) now deliberately checks `telemetrySource.supports(device)` directly rather
+than this class's own `supports(Device)`, so every command's specific firmware-rejection message
+(naming Betaflight, or ArduPilot/INAV-only) still surfaces exactly as before — only the public
+`supports()` answer changed. `MavlinkManualControlSender`/`MavlinkVehicleConfigurator`'s own
+`supports(Device)` were deliberately left protocol-only, a researched decision (not an oversight) —
+see the C5 Gotchas above for why Betaflight is not a false positive for `RC_CHANNELS_OVERRIDE` the way
+it is for `MAV_CMD_DO_SET_MODE`/`MAV_CMD_COMPONENT_ARM_DISARM`, and why onboarding probing has no
+firmware-verb question to be dishonest about at all. No port interface changed; no call site outside
+this module needed a change — `contexts/vision-flight`'s `DefaultFlightCommandService` and
+`FlightCommandController` already read `capabilities()`, which was already firmware-honest before this
+wave, so this closes a latent dishonesty in `supports()` itself and the `firstCommandableDevice`
+device-selection edge case, not a currently-user-visible cockpit bug. New tests:
+`supportsReturnsFalseForAClaimedBetaflightVehicleEvenThoughTheProtocolMatches`,
+`supportsReturnsTrueForAClaimedArdupilotVehicle`; the pre-existing "can never disagree" test was
+renamed to scope its claim correctly (see the C5 Gotchas above).
+`./mvnw -B -pl drone-link/mavlink -am test` — **265 tests**, all green, foreground/blocking run
+(2026-09-01).

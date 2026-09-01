@@ -35,10 +35,38 @@ import java.util.concurrent.ExecutionException;
  * A device names a {@link MavlinkTelemetrySource} bind address ({@code udp://host:port}, plus an
  * optional pinned {@code sysid} option) — the exact same address its telemetry ingest uses. This
  * class shares {@code telemetrySource}'s own {@link MavlinkGateway} registry rather than tracking
- * anything of its own: {@link #supports(Device)} delegates straight to {@link
- * MavlinkTelemetrySource#supports(Device)} so the two can never disagree, and every command
- * resolves the device's <b>current claim</b> — sysid, firmware/mavType, and last-seen UDP source
- * address — via {@link MavlinkTelemetrySource#commandTarget}.
+ * anything of its own: every command resolves the device's <b>current claim</b> — sysid,
+ * firmware/mavType, and last-seen UDP source address — via {@link
+ * MavlinkTelemetrySource#commandTarget}.
+ *
+ * <h2>{@link #supports(Device)} is honest about firmware, not just protocol
+ * (docs/plans/active/ASSET-FLOWS-PLAN.md C5 / docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D3)</h2>
+ * {@link #supports(Device)} used to delegate straight to {@link MavlinkTelemetrySource#supports(Device)}
+ * — "is this a MAVLink device at all" — so a Betaflight aircraft streaming MAVLink telemetry answered
+ * {@code true} even though every command method below rejects it via {@link
+ * #requireCommandableFirmware}. That was a real false positive: a driving adapter that trusted {@code
+ * supports()} alone (rather than the finer-grained {@link #capabilities(Device)}) could offer a
+ * control that can never work, and {@code vision-flight}'s own {@code firstCommandableDevice} device
+ * -selection filters on this method, so a decoy Betaflight device on the same asset as a real ArduPilot
+ * one could shadow it. {@link #supports(Device)} now also asks: once this platform has actually heard a
+ * {@code HEARTBEAT}, is the reported firmware one this class knows how to command at all? A vehicle
+ * whose firmware is a <b>known</b> non-ArduPilot family (Betaflight/{@code "generic"} today; any other
+ * firmware label this decoder ever learns) reports {@code false}. A vehicle never yet heard from keeps
+ * reporting {@code true} — <b>not</b> flipped to "honest-unknown" {@code false}, because that would
+ * trade the specific, already-honest "no vehicle has ever been heard" ({@link #resolveReachableTarget})
+ * and {@link FlightCapability#notCommandable()} ({@link #capabilities(Device)}) diagnostics this class
+ * already gives for a vaguer "not supported" one, with no honesty gained — both paths already report the
+ * same true fact ("cannot command it yet") through their own, more specific mechanism. See this module's
+ * MODULE.md Gotchas for the equivalent decision recorded for {@link MavlinkManualControlSender} and
+ * {@link MavlinkVehicleConfigurator} (deliberately left protocol-only).
+ *
+ * <p>The internal reachability guard ({@link #resolveReachableTarget}) deliberately checks {@link
+ * MavlinkTelemetrySource#supports(Device)} directly rather than this class's own (now firmware-aware)
+ * {@link #supports(Device)} — otherwise every command's specific firmware-rejection message (naming
+ * Betaflight, or "not commandable in DRONE-INFRA I-e (ArduPilot/INAV only)") would be masked behind
+ * the generic "does not support device" message this guard raises for a wrong-protocol device.
+ * {@link #requireCommandableFirmware}, called immediately after by every command method, is still the
+ * one place that rejection is actually decided and worded.
  *
  * <h2>Stage-1 reachability rule (still applies to every command)</h2>
  * A command can only be sent to an address this platform has actually received a datagram from —
@@ -185,9 +213,22 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
         this.commandRetries = settings.commandRetries();
     }
 
+    /**
+     * {@code true} for a device on this adapter's own protocol whose most-recently-heard firmware
+     * either (a) has never been heard yet (firmware unknown) or (b) is ArduPilot/INAV — {@code false}
+     * for a device whose firmware this platform has already learned is not commandable (Betaflight
+     * today). See this class's own "supports(Device) is honest about firmware" javadoc section above
+     * for the full rationale, including why "never heard" deliberately stays {@code true} rather than
+     * flipping to a vaguer "unknown" {@code false}.
+     */
     @Override
     public boolean supports(Device device) {
-        return telemetrySource.supports(device);
+        if (!telemetrySource.supports(device)) {
+            return false;
+        }
+        String bindKey = telemetrySource.bindKeyFor(device);
+        MavlinkGateway.CommandTarget target = telemetrySource.commandTarget(bindKey, device.id());
+        return target == null || target.firmware() == null || FIRMWARE_ARDUPILOT.equals(target.firmware());
     }
 
     @Override
@@ -339,7 +380,12 @@ public final class MavlinkFlightCommander implements FlightCommandPort {
     /** @throws IllegalArgumentException if unsupported, or the vehicle has never been heard (no source address) */
     private ResolvedTarget resolveReachableTarget(Device device) {
         Objects.requireNonNull(device, "device must not be null");
-        if (!supports(device)) {
+        // Deliberately telemetrySource.supports(device) (protocol only), not this class's own
+        // (now firmware-aware) supports(device) -- see the "supports(Device) is honest about
+        // firmware" class javadoc section for why: a known-non-commandable firmware must still
+        // reach requireCommandableFirmware below for its specific, named rejection message
+        // rather than being masked behind this guard's generic one.
+        if (!telemetrySource.supports(device)) {
             throw new IllegalArgumentException("MavlinkFlightCommander does not support device: " + device);
         }
         String bindKey = telemetrySource.bindKeyFor(device);
