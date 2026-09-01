@@ -358,6 +358,69 @@ class HlsProxyControllerTest {
     }
 
     /**
+     * docs/plans/active/ASSET-FLOWS-PLAN.md &sect;2 "S6 auth model": once mediamtx gates {@code
+     * read} on every path behind a viewer account, this controller must authenticate its own
+     * upstream fetch or every proxied request would 401. Asserts the actual wire-level header, not
+     * just that the controller was constructed with credentials — the same "prove the mechanism, not
+     * just the config plumbing" standard {@link #configuredMaxRedirectHopsBoundsTheHandFollowedRedirectLoop}
+     * already applies to {@code maxRedirectHops}.
+     */
+    @Test
+    void configuredMediamtxCredentialsAreSentAsAnUpstreamAuthorizationHeader() throws Exception {
+        AtomicReference<String> receivedAuthorization = new AtomicReference<>();
+        upstream = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        upstream.createContext("/", exchange -> {
+            receivedAuthorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            byte[] body = "#EXTM3U".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/vnd.apple.mpegurl");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body);
+            exchange.close();
+        });
+        upstream.start();
+        URI base = URI.create("http://localhost:" + upstream.getAddress().getPort());
+        VisionApiProperties.HlsProxy authenticated = new VisionApiProperties.HlsProxy(
+                VisionApiProperties.HlsProxy.defaults().connectTimeout(),
+                VisionApiProperties.HlsProxy.defaults().requestTimeout(),
+                VisionApiProperties.HlsProxy.defaults().errorBodyPreviewMaxChars(),
+                VisionApiProperties.HlsProxy.defaults().maxRedirectHops(), "vision-viewer", "change-me");
+        MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new HlsProxyController(base, authenticated, openStreamAccess()))
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
+
+        mockMvc.perform(get("/hls/{streamId}/index.m3u8", "stream-1")).andExpect(status().isOk());
+
+        assertEquals("Basic dmlzaW9uLXZpZXdlcjpjaGFuZ2UtbWU=", receivedAuthorization.get(),
+                "expected Basic base64(vision-viewer:change-me), got: " + receivedAuthorization.get());
+    }
+
+    /**
+     * Same request as {@link #playlistFetchPassesThroughBodyAndContentTypeAndForwardsRawPath}, but
+     * against {@link #mockMvcFor} — the default no-credentials controller every other wire-mechanics
+     * test in this class already uses — proving the new header is opt-in, not sent unconditionally.
+     */
+    @Test
+    void noAuthorizationHeaderIsSentWhenNoMediamtxCredentialIsConfigured() throws Exception {
+        AtomicReference<String> receivedAuthorization = new AtomicReference<>();
+        AtomicReference<Boolean> headerPresent = new AtomicReference<>();
+        upstream = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        upstream.createContext("/", exchange -> {
+            headerPresent.set(exchange.getRequestHeaders().containsKey("Authorization"));
+            receivedAuthorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+            exchange.getResponseHeaders().add("Content-Type", "application/vnd.apple.mpegurl");
+            exchange.sendResponseHeaders(200, 0);
+            exchange.close();
+        });
+        upstream.start();
+        MockMvc mockMvc = mockMvcFor(upstream);
+
+        mockMvc.perform(get("/hls/{streamId}/index.m3u8", "stream-1")).andExpect(status().isOk());
+
+        assertFalse(Boolean.TRUE.equals(headerPresent.get()),
+                "expected no Authorization header, got: " + receivedAuthorization.get());
+    }
+
+    /**
      * docs/plans/done/SCALE-100-PLAN.md §5 S7: {@code maxRedirectHops} is no longer the private
      * {@code static final} constant it used to be — it comes from the {@link
      * VisionApiProperties.HlsProxy} passed to the {@code @Autowired} constructor. This proves that
@@ -379,7 +442,7 @@ class HlsProxyControllerTest {
         VisionApiProperties.HlsProxy oneHop = new VisionApiProperties.HlsProxy(
                 VisionApiProperties.HlsProxy.defaults().connectTimeout(),
                 VisionApiProperties.HlsProxy.defaults().requestTimeout(),
-                VisionApiProperties.HlsProxy.defaults().errorBodyPreviewMaxChars(), 1);
+                VisionApiProperties.HlsProxy.defaults().errorBodyPreviewMaxChars(), 1, null, null);
         MockMvc mockMvc = MockMvcBuilders.standaloneSetup(new HlsProxyController(base, oneHop, openStreamAccess()))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();

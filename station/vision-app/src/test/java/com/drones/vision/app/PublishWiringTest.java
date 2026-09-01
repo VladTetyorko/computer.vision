@@ -142,6 +142,13 @@ class PublishWiringTest {
      * address, not app-relative (see {@code VisionPublishProperties}'s "WHEP has no third base"
      * javadoc section) — the default is the host-mode {@code whep-base} in {@code
      * application.yaml} (port 18889, matching {@code docker-compose.yml}'s host mapping).
+     *
+     * <p>docs/plans/active/ASSET-FLOWS-PLAN.md &sect;2 S6: read is now gated on every mediamtx path, so
+     * the WHEP URL handed to a browser verbatim must carry the viewer credential as {@code
+     * ?user=&pass=} query parameters (mediamtx's documented mechanism for HTTP-based protocols) —
+     * {@code VisionMediaProperties}'s non-blank {@code vision-viewer}/{@code change-me} defaults
+     * apply here exactly like everywhere else, since this test overrides no {@code vision.media.*}
+     * property.
      */
     @Test
     void whepUrlIsMediamtxsOwnAddressPerHostModeDefault() {
@@ -150,9 +157,11 @@ class PublishWiringTest {
         Optional<URI> whepUrl = streamPublisherPort.whepUrl(streamId);
 
         assertTrue(whepUrl.isPresent());
-        assertEquals("http://localhost:18889/" + streamId.value() + "/whep", whepUrl.get().toString(),
+        assertEquals("http://localhost:18889/" + streamId.value() + "/whep?user=vision-viewer&pass=change-me",
+                whepUrl.get().toString(),
                 "whepUrl must be VisionPublishProperties.Mediamtx#whepBase's default, handed to the "
-                        + "viewer verbatim -- WHEP has no app-relative proxy the way HLS does");
+                        + "viewer verbatim with the default viewer credential appended -- WHEP has no "
+                        + "app-relative proxy the way HLS does");
     }
 
     /**

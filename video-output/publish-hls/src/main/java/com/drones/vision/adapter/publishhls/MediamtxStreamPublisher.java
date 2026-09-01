@@ -248,7 +248,7 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
         if (id == null) {
             return Optional.empty();
         }
-        return Optional.of(URI.create(MediamtxUrls.whepUrl(whepViewBase, id)));
+        return Optional.of(URI.create(MediamtxUrls.whepUrl(whepViewBase, id, settings.auth())));
     }
 
     /**
@@ -280,7 +280,7 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
         Objects.requireNonNull(duration, "duration must not be null");
         long durationSeconds = Math.round(duration.toMillis() / 1000.0);
         return Optional.of(URI.create(
-                MediamtxPlaybackUrls.getUrl(playbackViewBase, id.value().toString(), start, durationSeconds)));
+                MediamtxPlaybackUrls.getUrl(playbackViewBase, id.value().toString(), start, durationSeconds, settings.auth())));
     }
 
     /**
@@ -370,11 +370,22 @@ public final class MediamtxStreamPublisher implements StreamPublisherPort {
     }
 
     private FFmpegFrameRecorder startRecorder(StreamId id, int width, int height, double frameRateFps) throws Exception {
-        return H264RecorderFactory.create(pushUrl(id), width, height, frameRateFps, settings.encoder());
+        return H264RecorderFactory.create(authenticatedPushUrl(id), width, height, frameRateFps, settings.encoder());
     }
 
+    /** Credential-free — for logging/display only. See {@link #authenticatedPushUrl} for what actually gets pushed to. */
     private String pushUrl(StreamId id) {
         return MediamtxUrls.pushUrl(rtspPushBase, id);
+    }
+
+    /**
+     * The publisher-credentialed push target (docs/plans/active/ASSET-FLOWS-PLAN.md &sect;2 S6) — used
+     * only to start the {@link FFmpegFrameRecorder}, never logged (see {@link MediamtxUrls}'s class
+     * javadoc for why): every log line in this class uses the credential-free {@link #pushUrl}
+     * instead.
+     */
+    private String authenticatedPushUrl(StreamId id) {
+        return MediamtxUrls.pushUrl(rtspPushBase, id, settings.auth());
     }
 
     private void onPublishSucceeded(StreamId id, StreamState state) {

@@ -83,7 +83,7 @@ class MediamtxProxyPublisherTest {
                 respond(exchange, 200, "{\"ready\":false}");
             }
         });
-        MediamtxProxySettings settings = new MediamtxProxySettings("automatic", Duration.ofMillis(300), false, null, null);
+        MediamtxProxySettings settings = new MediamtxProxySettings("automatic", Duration.ofMillis(300), false, null, null, MediaCredentials.none());
         MediamtxProxyPublisher publisher = proxyPublisher(baseUri(server), settings);
 
         MediamtxControlApiException exception = assertThrows(MediamtxControlApiException.class,
@@ -110,7 +110,7 @@ class MediamtxProxyPublisherTest {
                 respond(exchange, 200, "{\"ready\":false}");
             }
         });
-        MediamtxProxySettings settings = new MediamtxProxySettings("automatic", Duration.ofSeconds(10), true, null, null);
+        MediamtxProxySettings settings = new MediamtxProxySettings("automatic", Duration.ofSeconds(10), true, null, null, MediaCredentials.none());
         MediamtxProxyPublisher publisher = proxyPublisher(baseUri(server), settings);
 
         assertDoesNotThrow(() -> publisher.streamStarted(StreamId.random(), rtspDevice()));

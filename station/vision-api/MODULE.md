@@ -72,7 +72,7 @@ the full mechanism.
 | InventoryExportController | GET | `/api/inventory/export?format=csv` | Hand-rolled CSV, one row per visible asset (id/name/category/serial/make/model/registration/inventoryState/custodian/location/lifecycle/createdAt/lastFlownAt) | scope |
 | AssetStreamController | POST | `/api/assets/{id}/stream` | Start the asset's video stream | scope |
 | AssetStreamController | DELETE | `/api/assets/{id}/stream` | Stop it (idempotent) | scope |
-| AssetSessionController | POST | `/api/assets/{id}/session` | Operator "engage" — opens/promotes a usage, no video, no device traffic | scope |
+| AssetSessionController | POST | `/api/assets/{id}/session` | Operator "engage" — opens/promotes a usage, no video, no device traffic; the response's `pilotId` is now `CurrentUser#userId()` (ASSET-FLOWS-PLAN §2 D1p, wave BK4 — passed straight through to `UsageTracker#engage`, the caller's own identity, never a request body field) | scope |
 | AssetSessionController | DELETE | `/api/assets/{id}/session` | Operator "disengage" (idempotent; demotes rather than closes if a stream is still running) | scope |
 | AssetStatsController | GET | `/api/assets/{id}/stats` | KPI tile row (flight time/count, last battery, …) | scope |
 | AssetImageController | PUT | `/api/assets/{id}/image` | Upload cover image (≤2 MB, `AssetImageRepositoryPort` called directly) | scope |
@@ -288,7 +288,12 @@ meaningful (`AfterActionManifestResponse`'s `endedAt:null` distinguishes "still 
 records themselves (`toSpec()`, `toRegistration()`, …) — no mapper library. `AssetUsageResponse`
 carries `origin` (`STREAM` or `OPERATOR` — the only two `UsageOrigin` values today; a `TELEMETRY`
 value was considered and deliberately left out since nothing produces it, see
-`com.drones.vision.kernel.UsageOrigin`'s own javadoc). `ErrorResponse(error, message)` is the
+`com.drones.vision.kernel.UsageOrigin`'s own javadoc) and (ASSET-FLOWS-PLAN §2 D1p, wave BK4)
+`pilotId` — the raw `UUID` string of `AssetUsage#pilotId()`, `null`/omitted when genuinely unknown,
+**no display-name resolution** at this layer (mirrors `MaintenanceRecordResponse#openedBy`'s own
+precedent: id only, a caller resolves a name if it needs one). `UsageSummaryResponse` (the
+`GET /api/usages`/`GET /api/usages/by-stream/{id}` row shape) carries the same `pilotId` field, same
+nullability rule. `ErrorResponse(error, message)` is the
 uniform error body every `ApiExceptionHandler` mapping returns.
 
 **WAREHOUSE-UX W3 additions** — `IdentityResponse(serialNumber, make, model, registration)` /
@@ -479,6 +484,18 @@ auto-wiring by type).
   per-viewer pinning cookies over a redirect; a shared cookie jar would leak viewer A's cookie to
   viewer B. Redirects are followed by hand (`Redirect.NEVER` + a bounded manual loop) specifically to
   keep each hop's `Set-Cookie` scoped to that one servlet request.
+- **`HlsProxyController` sends a mediamtx read credential as an outbound `Authorization: Basic`
+  header** (docs/plans/active/ASSET-FLOWS-PLAN.md &sect;2 S6): `VisionApiProperties.HlsProxy` grew two
+  components, `authUsername`/`authPassword` — `null`/blank `authUsername` (the `defaults()` factory's
+  value, matching every test that doesn't opt in) sends no header at all, which is the correct
+  behaviour for a `vision.publish.enabled=false`/no-mediamtx-auth setup. `vision-app`'s `PublishWiring`
+  is the only real caller that supplies a non-null value, sourced from the new `vision.media.auth.*`
+  `VisionMediaProperties` (defaults `vision-viewer`/`change-me` — see that module's own MODULE.md).
+  The header is built once in the constructor (`Base64` of `username:password`, empty string for a
+  `null` password) and resent on **every** hand-followed redirect hop, alongside the existing
+  Cookie/Range forwarding — mediamtx's own read-auth check runs on the redirect target, not the first
+  hop, so a header that only rode the initial request would silently 401 after the very first request
+  established the pinning cookie.
 
 ## Status
 
@@ -605,6 +622,16 @@ task holds modules red") — `station/vision-api` **944** tests, 0 failures (the
 is not attributable to this wave alone: `git status` shows a sibling agent's concurrent, unrelated
 `OpsThresholdsController`/`BatteryThresholdsResponse` additions already present in this shared
 working tree).
+
+**ASSET-FLOWS wave BK4 (D1p) done.** `AssetSessionController#engage` now passes `CurrentUser#userId()`
+through to `UsageTracker#engage(AssetId, UserId)` (widened, CLAUDE.md rule 10 — every call site
+updated, no new overload); `AssetUsageResponse`/`UsageSummaryResponse` each gained a `pilotId` field
+(raw UUID string, `null`/omitted when unknown — see DTO conventions above and the endpoint table row
+above). No new Flyway migration (`storage/persistence`'s `V28` already carried the column
+schema-only). `./mvnw -B -pl station/vision-api -am test -DskipWeb` — **949** tests, 0 failures (+5
+over BK3's 944: `AssetSessionControllerTest#engagePassesTheCurrentUsersIdThroughToUsageTrackerEngage`
+plus new/strengthened pilot assertions in `AssetUsageResponseTest`/`UsageTimelineControllerTest`).
+Docker not needed for this module.
 
 **ASSET-FLOWS wave BK3 (D6/S3 backend) done.** New `OpsThresholdsController` (1 handler, `GET
 /api/ops/thresholds`, `@OpenByDesign` — display config, not fleet or per-user data, so any signed-in

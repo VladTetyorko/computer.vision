@@ -71,6 +71,7 @@ public final class MediamtxReplayFrameExtractor implements ReplayFrameExtraction
     private final URI playbackBase;
     private final long windowDurationSeconds;
     private final String readTimeoutMicros;
+    private final MediaCredentials credentials;
 
     /**
      * @param playbackBase base URL of mediamtx's playback HTTP server, e.g. {@code
@@ -80,7 +81,7 @@ public final class MediamtxReplayFrameExtractor implements ReplayFrameExtraction
      *                      MediamtxStreamPublisher#playbackUrl}'s own unconfigured-base posture.
      */
     public MediamtxReplayFrameExtractor(URI playbackBase) {
-        this(playbackBase, Duration.ofSeconds(WINDOW_DURATION_SECONDS), Duration.ofMillis(15_000L));
+        this(playbackBase, Duration.ofSeconds(WINDOW_DURATION_SECONDS), Duration.ofMillis(15_000L), MediaCredentials.none());
     }
 
     /**
@@ -89,8 +90,11 @@ public final class MediamtxReplayFrameExtractor implements ReplayFrameExtraction
      *                    wave F3), replacing this class's own {@link #WINDOW_DURATION_SECONDS} constant
      * @param readTimeout bounds the grabber's connect+read I/O — {@code vision.publish.replay.read-timeout},
      *                    replacing this class's own {@link #READ_TIMEOUT_MICROS} constant
+     * @param credentials {@code vision.media.auth.*} (docs/plans/active/ASSET-FLOWS-PLAN.md &sect;2 S6) —
+     *                    the viewer credential appended to every mediamtx playback fetch this class
+     *                    performs; {@link MediaCredentials#none()} sends no credentials
      */
-    public MediamtxReplayFrameExtractor(URI playbackBase, Duration window, Duration readTimeout) {
+    public MediamtxReplayFrameExtractor(URI playbackBase, Duration window, Duration readTimeout, MediaCredentials credentials) {
         // Idempotent, shared with MediamtxStreamPublisher (same package): both classes create
         // FFmpeg objects, so both route through the one native-log-quieting entry point instead
         // of each carrying their own copy — see MediamtxStreamPublisher's own javadoc for why the
@@ -101,6 +105,7 @@ public final class MediamtxReplayFrameExtractor implements ReplayFrameExtraction
         this.windowDurationSeconds = Objects.requireNonNull(window, "window must not be null").toSeconds();
         this.readTimeoutMicros =
                 Long.toString(Objects.requireNonNull(readTimeout, "readTimeout must not be null").toNanos() / 1000L);
+        this.credentials = credentials == null ? MediaCredentials.none() : credentials;
     }
 
     @Override
@@ -111,7 +116,11 @@ public final class MediamtxReplayFrameExtractor implements ReplayFrameExtraction
             return Optional.empty();
         }
 
-        String url = MediamtxPlaybackUrls.getUrl(playbackBase, streamId.value().toString(), at, windowDurationSeconds);
+        // displayUrl is credential-free and only ever logged; url (below) carries the viewer
+        // credential and is only ever handed to the grabber -- see MediamtxUrls's class javadoc
+        // for why the two must never be conflated.
+        String displayUrl = MediamtxPlaybackUrls.getUrl(playbackBase, streamId.value().toString(), at, windowDurationSeconds);
+        String url = MediamtxPlaybackUrls.getUrl(playbackBase, streamId.value().toString(), at, windowDurationSeconds, credentials);
         FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(url);
         try {
             grabber.setFormat("mp4");
@@ -125,7 +134,7 @@ public final class MediamtxReplayFrameExtractor implements ReplayFrameExtraction
             Frame frame = grabber.grabImage();
             if (frame == null || frame.image == null || frame.image.length == 0) {
                 LOG.log(System.Logger.Level.WARNING,
-                        "No decodable video frame at " + url + " (nothing recorded at that instant, "
+                        "No decodable video frame at " + displayUrl + " (nothing recorded at that instant, "
                                 + "or the clip carries no video)");
                 return Optional.empty();
             }
@@ -136,7 +145,7 @@ public final class MediamtxReplayFrameExtractor implements ReplayFrameExtraction
         } catch (Exception e) {
             LOG.log(System.Logger.Level.WARNING,
                     "Failed to extract a replay frame for stream " + streamId.value() + " at " + at
-                            + " from " + url, e);
+                            + " from " + displayUrl, e);
             return Optional.empty();
         } finally {
             releaseQuietly(grabber);

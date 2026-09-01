@@ -114,6 +114,222 @@ class MediamtxDockerIntegrationTest {
     }
 
     /**
+     * docs/plans/active/ASSET-FLOWS-PLAN.md &sect;2 "S6 auth model" end-to-end check: a real
+     * mediamtx started with the exact {@code authInternalUsers} shape {@code ./mediamtx.yml} ships
+     * (mounted as a config file — env vars cannot set this field, see that file's own header
+     * comment) proves the auth model actually behaves as designed, not just that this module's Java
+     * string-building does — the {@code path:} tilde-regex requirement (a bare pattern with no
+     * leading {@code ~} is a literal string match, not a regex — this test caught exactly that
+     * defect once, see {@code ./mediamtx.yml}'s own header comment), the three-account split, and
+     * the "read is always gated, publish is gated except under {@code ingest/}" behaviour are all
+     * mediamtx's own behaviour, unverifiable from this module's unit tests alone.
+     *
+     * <p>Exercises, against one container: (1) an unauthenticated push to a protected path is
+     * rejected (its HLS playlist never becomes fetchable); (2) the identical push, credentialed with
+     * the publisher account, succeeds; (3) an unauthenticated push to an {@code ingest/}-prefixed
+     * path succeeds (the deliberate open-publish exception); (4) an unauthenticated HLS read of the
+     * now-published protected path is rejected with {@code 401}; (5) the same read, credentialed
+     * with the viewer account (a Basic {@code Authorization} header — the mechanism {@code
+     * HlsProxyController}, vision-api, actually uses), succeeds with {@code 200}.
+     */
+    @Test
+    @Timeout(value = 150, unit = TimeUnit.SECONDS)
+    void authenticatedMediamtxGatesPublishAndReadWhileLeavingIngestPublishOpen() throws Exception {
+        String containerName = "vision-publish-hls-it-auth-" + java.util.UUID.randomUUID();
+        String viewerUser = "vision-viewer";
+        String viewerPass = "viewer-secret";
+        String publisherUser = "vision-publisher";
+        String publisherPass = "publisher-secret";
+        java.nio.file.Path configFile = java.nio.file.Files.createTempFile("mediamtx-auth-it-", ".yml");
+        try {
+            java.nio.file.Files.writeString(configFile, """
+                    api: yes
+                    apiAddress: :9997
+                    authInternalUsers:
+                      - user: any
+                        pass:
+                        ips: []
+                        permissions:
+                          - action: publish
+                            path: ~^ingest/.*
+                          - action: api
+                          - action: metrics
+                          - action: pprof
+                      - user: %s
+                        pass: %s
+                        ips: []
+                        permissions:
+                          - action: read
+                          - action: playback
+                      - user: %s
+                        pass: %s
+                        ips: []
+                        permissions:
+                          - action: publish
+                    paths:
+                      all_others:
+                    """.formatted(viewerUser, viewerPass, publisherUser, publisherPass));
+
+            startContainerWithAuth(containerName, configFile);
+            int rtspPort = resolveHostPort(containerName, "8554/tcp");
+            int hlsPort = resolveHostPort(containerName, "8888/tcp");
+            awaitTcpPortOpen(rtspPort, Duration.ofSeconds(10));
+
+            URI rtspBase = URI.create("rtsp://localhost:" + rtspPort);
+            URI hlsBase = URI.create("http://localhost:" + hlsPort);
+            MediaCredentials noCredentials = MediaCredentials.none();
+            MediaCredentials fullCredentials = new MediaCredentials(viewerUser, viewerPass, publisherUser, publisherPass);
+            // Read is gated on every path (including ingest/ — only publish is exempted there), so
+            // once this container's auth model is live, pollUntilFetchable must authenticate as the
+            // viewer to observe "the playlist is now servable" at all; an unauthenticated poll would
+            // spuriously time out even after a fully successful, correctly-authenticated publish.
+            String viewerAuthorizationHeader = "Basic " + java.util.Base64.getEncoder()
+                    .encodeToString((viewerUser + ":" + viewerPass).getBytes(StandardCharsets.UTF_8));
+
+            // (1) Unauthenticated push to a protected (non-ingest) path is rejected.
+            StreamId protectedStream = StreamId.random();
+            StreamPublisherPort unauthenticatedPublisher = new MediamtxStreamPublisher(rtspBase, hlsBase,
+                    URI.create("http://localhost:8889"), null,
+                    new PublishSettings(null, null, null, noCredentials));
+            URI protectedPlaylist = unauthenticatedPublisher.viewUrl(protectedStream)
+                    .orElseThrow(() -> new AssertionError("expected a view URL"));
+            Device device = new Device(DeviceId.random(), "auth-it-camera",
+                    Set.of(Capability.VIDEO), new StreamDescriptor("sim", URI.create("sim://auth-it"), Map.of()));
+            unauthenticatedPublisher.streamStarted(protectedStream, device);
+            AtomicBoolean keepPumping = new AtomicBoolean(true);
+            Thread pump = startFramePump(unauthenticatedPublisher, protectedStream, keepPumping);
+            try {
+                long elapsedMs = pollUntilFetchable(protectedPlaylist, Duration.ofSeconds(8));
+                assertEquals(-1L, elapsedMs, "an unauthenticated push to a protected path must be rejected by "
+                        + "mediamtx (publish auth), so its playlist must never become fetchable");
+            } finally {
+                keepPumping.set(false);
+                pump.join(Duration.ofSeconds(5).toMillis());
+            }
+            unauthenticatedPublisher.streamEnded(protectedStream);
+
+            // (2) The identical push, credentialed with the publisher account, succeeds.
+            StreamPublisherPort authenticatedPublisher = new MediamtxStreamPublisher(rtspBase, hlsBase,
+                    URI.create("http://localhost:8889"), null,
+                    new PublishSettings(null, null, null, fullCredentials));
+            authenticatedPublisher.streamStarted(protectedStream, device);
+            keepPumping.set(true);
+            pump = startFramePump(authenticatedPublisher, protectedStream, keepPumping);
+            try {
+                // Read is gated on this path too (S6: read auth on ALL paths), so the fetchability
+                // poll itself must authenticate as the viewer — an unauthenticated poll would time
+                // out regardless of whether the publisher-credentialed push above succeeded.
+                long elapsedMs = pollUntilFetchable(protectedPlaylist, PLAYLIST_TIMEOUT, viewerAuthorizationHeader);
+                assertTrue(elapsedMs >= 0, "expected " + protectedPlaylist + " to become fetchable once "
+                        + "credentialed with the publisher account within " + PLAYLIST_TIMEOUT);
+
+                // (4) Unauthenticated HLS read of this now-published protected path is rejected.
+                assertEquals(401, rawGet(protectedPlaylist, null).statusCode(),
+                        "expected an unauthenticated HLS read of a protected path to be rejected (read auth)");
+
+                // (5) The same read, credentialed with the viewer account via a Basic Authorization
+                // header (HlsProxyController's own mechanism), succeeds.
+                assertEquals(200, rawGet(protectedPlaylist, viewerAuthorizationHeader).statusCode(),
+                        "expected an HLS read credentialed with the viewer account to succeed");
+            } finally {
+                keepPumping.set(false);
+                pump.join(Duration.ofSeconds(5).toMillis());
+            }
+            authenticatedPublisher.streamEnded(protectedStream);
+
+            // (3) Unauthenticated push to an ingest/-prefixed path succeeds (deliberate open exception).
+            StreamId ingestStream = StreamId.random();
+            // MediamtxStreamPublisher's own path name is always streamId.value() -- to exercise the
+            // ingest/ convention (a path-name prefix, not a StreamId concept, see mediamtx.yml's own
+            // comments) this pushes directly to the ingest/ path with a raw JavaCV recorder instead
+            // of going through the publisher port, exactly like a zero-config device would.
+            String ingestPath = "ingest/" + ingestStream.value();
+            URI ingestPushUrl = URI.create(MediamtxUrls.pushUrl(rtspBase, ingestStream).replace(
+                    "/" + ingestStream.value(), "/" + ingestPath));
+            URI ingestPlaylist = URI.create(MediamtxUrls.viewUrl(hlsBase, ingestStream).replace(
+                    "/" + ingestStream.value() + "/", "/" + ingestPath + "/"));
+            org.bytedeco.javacv.FFmpegFrameRecorder ingestRecorder = H264RecorderFactory.create(
+                    ingestPushUrl.toString(), 320, 240, 15.0, PublishSettings.Encoder.defaults());
+            AtomicBoolean keepPumpingIngest = new AtomicBoolean(true);
+            Thread ingestPump = new Thread(() -> {
+                long periodMs = 1000L / 15;
+                long sequence = 0;
+                while (keepPumpingIngest.get()) {
+                    try {
+                        org.bytedeco.javacv.Frame frame = FrameConverter.toFrame(new VideoFrame(ingestStream, sequence,
+                                Instant.now(), 320, 240, PixelFormat.BGR24, ByteBuffer.wrap(new byte[320 * 240 * 3])));
+                        ingestRecorder.setTimestamp(sequence * (1_000_000L / 15));
+                        ingestRecorder.record(frame);
+                        sequence++;
+                        Thread.sleep(periodMs);
+                    } catch (Exception e) {
+                        return;
+                    }
+                }
+            }, "ingest-it-frame-pump");
+            ingestPump.setDaemon(true);
+            ingestPump.start();
+            try {
+                // The ingest/ exception is publish-only — reading this path's HLS output is still
+                // gated behind the viewer account, so this poll must authenticate too.
+                long elapsedMs = pollUntilFetchable(ingestPlaylist, PLAYLIST_TIMEOUT, viewerAuthorizationHeader);
+                assertTrue(elapsedMs >= 0, "expected an unauthenticated push to " + ingestPath
+                        + " to succeed (the ingest/ zero-config exception) and " + ingestPlaylist
+                        + " to become fetchable within " + PLAYLIST_TIMEOUT);
+            } finally {
+                keepPumpingIngest.set(false);
+                ingestPump.join(Duration.ofSeconds(5).toMillis());
+                releaseQuietlyStatic(ingestRecorder);
+            }
+        } finally {
+            removeContainerQuietly(containerName);
+            java.nio.file.Files.deleteIfExists(configFile);
+        }
+    }
+
+    private static void releaseQuietlyStatic(org.bytedeco.javacv.FFmpegFrameRecorder recorder) {
+        try {
+            recorder.release();
+        } catch (Exception ignored) {
+            // best-effort cleanup only
+        }
+    }
+
+    /** A single raw HTTP GET, optionally with an {@code Authorization} header, returning the response with no body buffering beyond a string. */
+    /**
+     * A single HTTP GET, optionally with an {@code Authorization} header, that follows mediamtx's
+     * own session-pinning {@code 302} redirect (see {@link #pollUntilFetchable(URI, Duration,
+     * String)}'s javadoc) rather than reporting that first hop's status code — the redirect happens
+     * before mediamtx's read-auth check runs, so a caller that doesn't follow it would observe the
+     * {@code 302} itself instead of the {@code 401}/{@code 200} the redirect target actually
+     * returns. Java's {@code HttpClient} forwards the {@code Authorization} header across this
+     * redirect because it stays same-origin (mediamtx only appends a session-pinning path segment).
+     */
+    private static HttpResponse<String> rawGet(URI uri, String authorizationHeaderValue) throws IOException, InterruptedException {
+        HttpClient client = HttpClient.newBuilder()
+                .followRedirects(HttpClient.Redirect.NORMAL)
+                .cookieHandler(new CookieManager())
+                .connectTimeout(Duration.ofSeconds(3))
+                .build();
+        HttpRequest.Builder builder = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(5)).GET();
+        if (authorizationHeaderValue != null) {
+            builder.header("Authorization", authorizationHeaderValue);
+        }
+        return client.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    private static void startContainerWithAuth(String name, java.nio.file.Path configFile)
+            throws IOException, InterruptedException {
+        ProcessResult result = run(Duration.ofSeconds(90),
+                "docker", "run", "-d", "--rm", "--name", name, "-p", "0:8554", "-p", "0:8888", "-p", "0:9997",
+                "-v", configFile.toAbsolutePath() + ":/mediamtx.yml:ro",
+                RECORDING_IMAGE);
+        if (result.exitCode() != 0) {
+            fail("failed to start mediamtx container (auth): " + result.output());
+        }
+    }
+
+    /**
      * Regression test for a real bug: {@link org.bytedeco.javacv.FFmpegFrameRecorder#setTimestamp(long)}
      * quantizes whatever microsecond value it's handed down to a whole video
      * frame number at the recorder's configured frame rate (see {@code
@@ -585,6 +801,16 @@ class MediamtxDockerIntegrationTest {
 
     /** @return elapsed milliseconds once the playlist is fetchable, or -1 if {@code timeout} elapses first */
     private static long pollUntilFetchable(URI playlistUrl, Duration timeout) {
+        return pollUntilFetchable(playlistUrl, timeout, null);
+    }
+
+    /**
+     * Same as {@link #pollUntilFetchable(URI, Duration)}, optionally sending a Basic {@code
+     * Authorization} header on every poll — required once read auth is live (docs/plans/active/
+     * ASSET-FLOWS-PLAN.md &sect;2 S6): an unauthenticated poll against a read-gated path always
+     * returns 401/404 and never observes a successful, correctly-authenticated publish.
+     */
+    private static long pollUntilFetchable(URI playlistUrl, Duration timeout, String authorizationHeaderValue) {
         long startNanos = System.nanoTime();
         // mediamtx redirects the first request per session with a cookie-pinning 302; a
         // plain stateless client would loop on 404s forever, so redirects + cookies are required.
@@ -596,8 +822,11 @@ class MediamtxDockerIntegrationTest {
         long deadline = System.currentTimeMillis() + timeout.toMillis();
         while (System.currentTimeMillis() < deadline) {
             try {
-                HttpRequest request = HttpRequest.newBuilder(playlistUrl).timeout(Duration.ofSeconds(3)).GET().build();
-                HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+                HttpRequest.Builder requestBuilder = HttpRequest.newBuilder(playlistUrl).timeout(Duration.ofSeconds(3)).GET();
+                if (authorizationHeaderValue != null) {
+                    requestBuilder.header("Authorization", authorizationHeaderValue);
+                }
+                HttpResponse<String> response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofString());
                 if (response.statusCode() == 200 && !response.body().isBlank()) {
                     return Duration.ofNanos(System.nanoTime() - startNanos).toMillis();
                 }

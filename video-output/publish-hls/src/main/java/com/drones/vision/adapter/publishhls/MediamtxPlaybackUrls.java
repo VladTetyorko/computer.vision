@@ -45,6 +45,19 @@ final class MediamtxPlaybackUrls {
                 + "?path=" + pathName + "&start=" + start + "&duration=" + durationSeconds;
     }
 
+    /**
+     * Same as {@link #getUrl(URI, String, Instant, long)}, with {@code &user=&pass=} appended when
+     * {@code credentials} carries a viewer credential (docs/plans/active/ASSET-FLOWS-PLAN.md &sect;2
+     * S6 — mediamtx's "playback" action is gated behind the same viewer account as "read"). Every
+     * caller that also logs this URL must build the credential-free form via the other overload for
+     * that log line — see {@link MediamtxUrls}'s class javadoc for the same rule applied there.
+     */
+    static String getUrl(URI playbackBase, String pathName, Instant start, long durationSeconds,
+                          MediaCredentials credentials) {
+        return MediamtxUrls.appendCredentialQuery(getUrl(playbackBase, pathName, start, durationSeconds),
+                credentials.hasViewerCredentials() ? credentials.viewerUsername() : null, credentials.viewerPassword());
+    }
+
     private static String withoutTrailingSlash(String value) {
         return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
     }

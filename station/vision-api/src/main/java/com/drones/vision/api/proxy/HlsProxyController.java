@@ -27,6 +27,7 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -129,6 +130,21 @@ import java.util.Set;
  * own {@code no-cache} on live LL-HLS playlists reaches the browser instead
  * of silently vanishing.
  *
+ * <h2>Upstream mediamtx credentials (docs/plans/active/ASSET-FLOWS-PLAN.md &sect;2 "S6 auth model")</h2>
+ * mediamtx now gates its {@code read} action on every path behind one viewer account — this
+ * controller is the one place that sends it. {@link VisionApiProperties.HlsProxy#authUsername()}/
+ * {@code authPassword}, when configured, are pre-encoded once (constructor time) into a Basic {@code
+ * Authorization} header value and sent on every hop of every {@link #fetch} call, exactly like the
+ * {@code Cookie}/{@code Range} headers already forwarded there — mediamtx accepts Basic-auth
+ * credentials for its HTTP-based protocols (HLS included) the same way it accepts {@code
+ * ?user=&pass=} query parameters (the mechanism {@code MediamtxUrls}, adapter-publish-hls, uses for
+ * WHEP/playback URLs handed to the browser verbatim instead — this controller can use a header
+ * because, unlike a WHEP session, it is this app's own JVM driving the fetch, not the browser).
+ * {@code null}/blank {@code authUsername} (the default — matches mediamtx auth being off/
+ * unconfigured, and every existing test that constructs this controller via {@link
+ * VisionApiProperties.HlsProxy#defaults()}) sends no {@code Authorization} header at all, unchanged
+ * from this controller's pre-S6 behaviour.
+ *
  * <h2>Authorization (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R7, finding A2)</h2>
  * This endpoint proxies an asset's live video bytes, so it is gated exactly like {@code
  * StreamController}'s other stream reads: {@link #proxy} calls {@link
@@ -155,6 +171,15 @@ public class HlsProxyController {
     private final Duration requestTimeout;
     private final int errorBodyPreviewMaxChars;
     private final int maxRedirectHops;
+
+    /**
+     * Pre-encoded {@code Authorization: Basic ...} header value for the mediamtx viewer credential
+     * (see class javadoc, "Upstream mediamtx credentials"); {@code null} when {@link
+     * VisionApiProperties.HlsProxy#authUsername()} is unset — sends no header, this controller's
+     * pre-S6 behaviour. Computed once at construction time, not per-request: base64-encoding an
+     * unchanging credential pair has nothing to gain from repeating on every proxied fetch.
+     */
+    private final String authorizationHeaderValue;
 
     /**
      * Stamped on every proxied fetch so the idle policy counts an HLS viewer as demand
@@ -230,11 +255,25 @@ public class HlsProxyController {
         this.requestTimeout = hlsProxy.requestTimeout();
         this.errorBodyPreviewMaxChars = hlsProxy.errorBodyPreviewMaxChars();
         this.maxRedirectHops = hlsProxy.maxRedirectHops();
+        this.authorizationHeaderValue = buildAuthorizationHeaderValue(hlsProxy.authUsername(), hlsProxy.authPassword());
         this.httpClient = HttpClient.newBuilder()
                 // No cookieHandler: see class javadoc "One shared client, no shared cookie jar".
                 .followRedirects(HttpClient.Redirect.NEVER)
                 .connectTimeout(hlsProxy.connectTimeout())
                 .build();
+    }
+
+    /**
+     * @return {@code "Basic " + base64(username:password)}, or {@code null} when {@code username}
+     *         is unset — the latter is the common case (mediamtx auth off/unconfigured, or every
+     *         test built via {@link VisionApiProperties.HlsProxy#defaults()}), not an error.
+     */
+    private static String buildAuthorizationHeaderValue(String username, String password) {
+        if (username == null || username.isBlank()) {
+            return null;
+        }
+        String credentials = username + ":" + (password == null ? "" : password);
+        return "Basic " + Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8));
     }
 
     /** Releases the shared client's selector thread and pooled connections when this bean is destroyed, since (unlike the old per-request client) this one is held open for the whole app lifetime. */
@@ -374,6 +413,9 @@ public class HlsProxyController {
             }
             if (rangeHeader != null && !rangeHeader.isBlank()) {
                 requestBuilder.header(HttpHeaders.RANGE, rangeHeader);
+            }
+            if (authorizationHeaderValue != null) {
+                requestBuilder.header(HttpHeaders.AUTHORIZATION, authorizationHeaderValue);
             }
             HttpResponse<InputStream> response = httpClient.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofInputStream());
             List<String> hopSetCookies = response.headers().allValues("set-cookie");

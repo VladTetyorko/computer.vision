@@ -35,9 +35,15 @@ import java.util.Objects;
  *                       vision.publish.mediamtx.api-password}; required (non-blank) whenever {@code
  *                       apiUser} is set, so a half-configured credential pair fails fast at wiring
  *                       time rather than 401ing at the first stream start
+ * @param media          {@code vision.media.auth.*} (docs/plans/active/ASSET-FLOWS-PLAN.md &sect;2 S6) —
+ *                       the viewer credential {@link MediamtxProxyPublisher} embeds in the WHEP/playback
+ *                       URLs it hands to browsers; this class never pushes ({@link
+ *                       MediamtxProxyPublisher#publish} is a no-op, D3), so only {@link
+ *                       MediaCredentials#viewerUsername()}/{@code viewerPassword} are ever read here —
+ *                       {@link MediaCredentials#none()} (no credentials sent) when absent
  */
 public record MediamtxProxySettings(String rtspTransport, Duration readyTimeout, boolean sourceOnDemand,
-                                     String apiUser, String apiPassword) {
+                                     String apiUser, String apiPassword, MediaCredentials media) {
 
     private static final String DEFAULT_RTSP_TRANSPORT = "automatic";
     private static final Duration DEFAULT_READY_TIMEOUT = Duration.ofSeconds(10);
@@ -55,11 +61,14 @@ public record MediamtxProxySettings(String rtspTransport, Duration readyTimeout,
         if (apiUser != null && !apiUser.isBlank() && (apiPassword == null || apiPassword.isBlank())) {
             throw new IllegalArgumentException("apiPassword must be set when apiUser is set");
         }
+        if (media == null) {
+            media = MediaCredentials.none();
+        }
     }
 
-    /** {@code ("automatic", 10s, false, null, null)} — D1: reproduces today's (proxy-disabled) behaviour exactly. */
+    /** {@code ("automatic", 10s, false, null, null, MediaCredentials.none())} — D1: reproduces today's (proxy-disabled) behaviour exactly. */
     public static MediamtxProxySettings defaults() {
         return new MediamtxProxySettings(
-                DEFAULT_RTSP_TRANSPORT, DEFAULT_READY_TIMEOUT, DEFAULT_SOURCE_ON_DEMAND, null, null);
+                DEFAULT_RTSP_TRANSPORT, DEFAULT_READY_TIMEOUT, DEFAULT_SOURCE_ON_DEMAND, null, null, MediaCredentials.none());
     }
 }

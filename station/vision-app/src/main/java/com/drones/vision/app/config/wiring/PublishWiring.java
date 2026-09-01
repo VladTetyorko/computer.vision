@@ -1,5 +1,6 @@
 package com.drones.vision.app.config.wiring;
 
+import com.drones.vision.adapter.publishhls.MediaCredentials;
 import com.drones.vision.adapter.publishhls.MediamtxLiveFrameGrabber;
 import com.drones.vision.adapter.publishhls.MediamtxProxyPublisher;
 import com.drones.vision.adapter.publishhls.MediamtxProxySettings;
@@ -12,6 +13,7 @@ import com.drones.vision.api.proxy.HlsProxyController;
 import com.drones.vision.api.support.SnapshotJpegEncoder;
 import com.drones.vision.app.config.properties.VisionApiProperties;
 import com.drones.vision.app.config.properties.VisionCvProperties;
+import com.drones.vision.app.config.properties.VisionMediaProperties;
 import com.drones.vision.app.config.properties.VisionPublishProperties;
 import com.drones.vision.app.devsupport.NoopReplayFrameExtractor;
 import com.drones.vision.app.devsupport.NoopStreamPublisher;
@@ -51,7 +53,7 @@ import java.net.URI;
  */
 @Configuration
 @EnableConfigurationProperties({VisionPublishProperties.class,
-        VisionApiProperties.class, VisionCvProperties.class})
+        VisionApiProperties.class, VisionCvProperties.class, VisionMediaProperties.class})
 public class PublishWiring {
 
     /**
@@ -65,10 +67,11 @@ public class PublishWiring {
      */
     @Bean
     @ConditionalOnProperty(prefix = "vision.publish", name = "enabled", havingValue = "true", matchIfMissing = true)
-    public MediamtxStreamPublisher mediamtxStreamPublisher(VisionPublishProperties properties) {
+    public MediamtxStreamPublisher mediamtxStreamPublisher(VisionPublishProperties properties,
+                                                             VisionMediaProperties mediaProperties) {
         VisionPublishProperties.Mediamtx mediamtx = properties.mediamtx();
         return new MediamtxStreamPublisher(mediamtx.rtspBase(), properties.viewBase(), mediamtx.whepBase(),
-                mediamtx.playbackBase(), toPublishSettings(properties));
+                mediamtx.playbackBase(), toPublishSettings(properties, mediaProperties));
     }
 
     /**
@@ -92,6 +95,7 @@ public class PublishWiring {
     @Bean
     public StreamPublisherPort streamPublisherPort(VisionPublishProperties properties,
                                                     VisionCvProperties cvProperties,
+                                                    VisionMediaProperties mediaProperties,
                                                     ObjectProvider<MediamtxStreamPublisher> mediamtxStreamPublisher) {
         rejectProxyWithPushTransport(properties, cvProperties);
         if (!properties.enabled()) {
@@ -100,7 +104,7 @@ public class PublishWiring {
         VisionPublishProperties.Mediamtx mediamtx = properties.mediamtx();
         StreamPublisherPort directPublisher = mediamtxStreamPublisher.getObject();
         StreamPublisherPort proxyPublisher = new MediamtxProxyPublisher(mediamtx.apiBase(), properties.viewBase(),
-                mediamtx.whepBase(), mediamtx.playbackBase(), toProxySettings(properties));
+                mediamtx.whepBase(), mediamtx.playbackBase(), toProxySettings(properties, mediaProperties));
         return new PublisherRouter(directPublisher, proxyPublisher, properties.sourceProxy().enabled());
     }
 
@@ -128,7 +132,8 @@ public class PublishWiring {
         }
     }
 
-    private static PublishSettings toPublishSettings(VisionPublishProperties properties) {
+    private static PublishSettings toPublishSettings(VisionPublishProperties properties,
+                                                       VisionMediaProperties mediaProperties) {
         VisionPublishProperties.Encoder encoder = properties.encoder();
         VisionPublishProperties.Resilience resilience = properties.resilience();
         VisionPublishProperties.Cadence cadence = properties.cadence();
@@ -138,7 +143,8 @@ public class PublishWiring {
                 new PublishSettings.Resilience(resilience.initialBackoff(), resilience.maxBackoff()),
                 new PublishSettings.Cadence(cadence.measurementFrames(), cadence.minMeasuredFps(),
                         cadence.maxMeasuredFps(), cadence.driftRatioHigh(), cadence.driftEwmaAlpha(),
-                        cadence.sustainedDriftWindow(), cadence.defaultFrameRateFps()));
+                        cadence.sustainedDriftWindow(), cadence.defaultFrameRateFps()),
+                toMediaCredentials(mediaProperties));
     }
 
     /**
@@ -146,11 +152,26 @@ public class PublishWiring {
      * VisionPublishProperties.Mediamtx} onto {@link MediamtxProxySettings} — the same "this record
      * maps onto that adapter settings object" shape {@link #toPublishSettings} already has.
      */
-    private static MediamtxProxySettings toProxySettings(VisionPublishProperties properties) {
+    private static MediamtxProxySettings toProxySettings(VisionPublishProperties properties,
+                                                           VisionMediaProperties mediaProperties) {
         VisionPublishProperties.SourceProxy sourceProxy = properties.sourceProxy();
         VisionPublishProperties.Mediamtx mediamtx = properties.mediamtx();
         return new MediamtxProxySettings(sourceProxy.rtspTransport(), sourceProxy.readyTimeout(),
-                sourceProxy.onDemand(), mediamtx.apiUser(), mediamtx.apiPassword());
+                sourceProxy.onDemand(), mediamtx.apiUser(), mediamtx.apiPassword(), toMediaCredentials(mediaProperties));
+    }
+
+    /**
+     * Maps {@link VisionMediaProperties.Auth} onto {@link MediaCredentials} — {@code
+     * vision.media.auth.*} (docs/plans/active/ASSET-FLOWS-PLAN.md &sect;2 S6), unconditionally: unlike
+     * {@link VisionPublishProperties.Mediamtx#apiUser()} (which stays {@code null} by default, no
+     * credential sent), {@link VisionMediaProperties.Auth}'s four fields are never blank — see that
+     * class's javadoc for why sending a real default credential is safe even against a mediamtx with
+     * no auth configured at all.
+     */
+    private static MediaCredentials toMediaCredentials(VisionMediaProperties mediaProperties) {
+        VisionMediaProperties.Auth auth = mediaProperties.auth();
+        return new MediaCredentials(auth.viewerUsername(), auth.viewerPassword(),
+                auth.publisherUsername(), auth.publisherPassword());
     }
 
     /**
@@ -167,8 +188,9 @@ public class PublishWiring {
      * VisionPublishProperties#enabled()} the way an actual publisher/extractor implementation must.
      */
     @Bean
-    public MediamtxLiveFrameGrabber mediamtxLiveFrameGrabber(VisionPublishProperties properties) {
-        return new MediamtxLiveFrameGrabber(properties.mediamtx().rtspBase());
+    public MediamtxLiveFrameGrabber mediamtxLiveFrameGrabber(VisionPublishProperties properties,
+                                                               VisionMediaProperties mediaProperties) {
+        return new MediamtxLiveFrameGrabber(properties.mediamtx().rtspBase(), toMediaCredentials(mediaProperties));
     }
 
     /**
@@ -178,11 +200,12 @@ public class PublishWiring {
      * wave F3) replace {@code MediamtxReplayFrameExtractor}'s own hardcoded 1s/15s constants.
      */
     @Bean
-    public ReplayFrameExtractionPort replayFrameExtractionPort(VisionPublishProperties properties) {
+    public ReplayFrameExtractionPort replayFrameExtractionPort(VisionPublishProperties properties,
+                                                                 VisionMediaProperties mediaProperties) {
         if (properties.enabled()) {
             VisionPublishProperties.Replay replay = properties.replay();
             return new MediamtxReplayFrameExtractor(properties.mediamtx().playbackBase(), replay.window(),
-                    replay.readTimeout());
+                    replay.readTimeout(), toMediaCredentials(mediaProperties));
         }
         return new NoopReplayFrameExtractor();
     }
@@ -206,8 +229,8 @@ public class PublishWiring {
      * VisionApiProperties.defaults()} stopgap construction.
      */
     @Bean
-    public SnapshotJpegEncoder snapshotJpegEncoder(VisionApiProperties properties) {
-        return new SnapshotJpegEncoder(toApiSupportProperties(properties));
+    public SnapshotJpegEncoder snapshotJpegEncoder(VisionApiProperties properties, VisionMediaProperties mediaProperties) {
+        return new SnapshotJpegEncoder(toApiSupportProperties(properties, mediaProperties));
     }
 
     /**
@@ -218,8 +241,9 @@ public class PublishWiring {
      * all the controller's own {@code @Autowired} constructor declares.
      */
     @Bean
-    public com.drones.vision.api.support.VisionApiProperties.HlsProxy hlsProxySettings(VisionApiProperties properties) {
-        return toApiSupportProperties(properties).hlsProxy();
+    public com.drones.vision.api.support.VisionApiProperties.HlsProxy hlsProxySettings(VisionApiProperties properties,
+                                                                                         VisionMediaProperties mediaProperties) {
+        return toApiSupportProperties(properties, mediaProperties).hlsProxy();
     }
 
     /**
@@ -228,21 +252,32 @@ public class PublishWiring {
      * VisionApiProperties#live()}, same shape as {@link #hlsProxySettings}.
      */
     @Bean
-    public com.drones.vision.api.support.VisionApiProperties.Live liveSettings(VisionApiProperties properties) {
-        return toApiSupportProperties(properties).live();
+    public com.drones.vision.api.support.VisionApiProperties.Live liveSettings(VisionApiProperties properties,
+                                                                                 VisionMediaProperties mediaProperties) {
+        return toApiSupportProperties(properties, mediaProperties).live();
     }
 
+    /**
+     * @param mediaProperties {@code vision.media.auth.*} (docs/plans/active/ASSET-FLOWS-PLAN.md &sect;2
+     *                        S6) — the viewer credential threaded into {@link
+     *                        com.drones.vision.api.support.VisionApiProperties.HlsProxy#authUsername()}/{@code
+     *                        authPassword}, which {@link HlsProxyController} sends as an outbound
+     *                        {@code Authorization: Basic} header on every upstream mediamtx HLS fetch
+     *                        (mediamtx now gates {@code read} on every path behind this same account)
+     */
     private static com.drones.vision.api.support.VisionApiProperties toApiSupportProperties(
-            VisionApiProperties properties) {
+            VisionApiProperties properties, VisionMediaProperties mediaProperties) {
         VisionApiProperties.Snapshot snapshot = properties.snapshot();
         VisionApiProperties.HlsProxy hlsProxy = properties.hlsProxy();
         VisionApiProperties.Live live = properties.live();
         VisionApiProperties.Paging paging = properties.paging();
         VisionApiProperties.Upload upload = properties.upload();
+        VisionMediaProperties.Auth auth = mediaProperties.auth();
         return new com.drones.vision.api.support.VisionApiProperties(
                 new com.drones.vision.api.support.VisionApiProperties.Snapshot(snapshot.maxWidth(), snapshot.jpegQuality()),
                 new com.drones.vision.api.support.VisionApiProperties.HlsProxy(hlsProxy.connectTimeout(),
-                        hlsProxy.requestTimeout(), hlsProxy.errorBodyPreviewMaxChars(), hlsProxy.maxRedirectHops()),
+                        hlsProxy.requestTimeout(), hlsProxy.errorBodyPreviewMaxChars(), hlsProxy.maxRedirectHops(),
+                        auth.viewerUsername(), auth.viewerPassword()),
                 new com.drones.vision.api.support.VisionApiProperties.Live(live.coalesce(), live.heartbeat(),
                         live.telemetryBuffer(), live.eventBuffer(), live.detectionBuffer(), live.mapBuffer(),
                         live.sendTimeout(), live.bufferEviction()),

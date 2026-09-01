@@ -37,9 +37,67 @@
 # mistake is kept documented here, not silently rewritten, so nobody re-derives the same wrong
 # assumption from a stale copy of this file or an old comment.
 #
-# publish/read/playback are restated alongside api/metrics/pprof so this file doesn't accidentally
-# NARROW anything mediamtx already grants unauthenticated by default -- widening api access is the only
-# actual behaviour change from mediamtx's own baked-in config.
+# docs/plans/active/ASSET-FLOWS-PLAN.md §2 "S6 auth model" -- read+publish are now gated. Before this
+# change, `any` (below) had blanket publish/read/playback with no restriction: anyone on the network
+# who could reach mediamtx's RTSP/HLS/WHEP ports could inject video into any path or pull any stream
+# (a real defect, not a hypothetical one -- this stack is a field-deployed drone command point per
+# CLAUDE.md's deployment section, so "anyone on the network" is not a trusted set). Three accounts now
+# replace the single wide-open `any` entry:
+#   - `any` (unauthenticated): publish narrowed to the `ingest/` prefix ONLY (anchored regex --
+#     see the note on `path:` below), plus api/metrics/pprof unchanged (see that section's own
+#     comment for why those stay open). No read/playback permission at all: an unauthenticated
+#     client can no longer watch any stream.
+#   - `vision-viewer`: read + playback on every path, no path restriction. This is the ONE account
+#     used by HLS/WHEP playback and by external players -- vision-api's HlsProxyController injects
+#     it as an outbound Basic-auth header for proxied HLS, and MediamtxStreamPublisher/
+#     MediamtxProxyPublisher embed it as `?user=&pass=` query parameters in the WHEP/playback URLs
+#     handed to a browser verbatim (mediamtx's own documented mechanism for HTTP-based protocols a
+#     browser client drives directly -- see video-output/publish-hls's MediamtxUrls class javadoc).
+#   - `vision-publisher`: publish on every path (no `path:` restriction, so it also covers `ingest/`,
+#     harmlessly -- nothing needs it there since `any` already covers that prefix unauthenticated).
+#     Used by MediamtxStreamPublisher's RTSP push (embedded in the RTSP URL's userinfo, e.g.
+#     `rtsp://vision-publisher:***@mediamtx:8554/...`) and by MediamtxProxyPublisher's mediamtx-dials-
+#     the-camera paths (D3) -- the latter never sends credentials of its own since mediamtx is the
+#     one publishing there, not this JVM.
+#
+# `ingest/` staying open-publish is DELIBERATE, not an oversight: it is the zero-config device-push
+# funnel (see the `paths:` section below) -- a camera/companion with no vision-side account can push
+# straight into an `ingest/*` path, and MediamtxPathScanner (device-discovery, off-limits to this
+# correction) quarantines it as a "found device" candidate until an operator explicitly accepts it.
+# Requiring a credential here would break zero-config onboarding for every device that can't be
+# taught one; the quarantine step is the actual safeguard, not a closed publish port. A malicious
+# publisher can still spam `ingest/*` paths with junk video -- accepted risk, unchanged by this
+# correction, bounded by the operator-accept gate downstream.
+#
+# `path:` on a permission entry is a PLAIN LITERAL STRING unless prefixed with a leading tilde
+# (`~`), which switches it to a Go regexp checked with an unanchored `regexp.MatchString` --
+# straight from mediamtx's own baked-in default config comment ("Regular expressions can be used
+# by using a tilde as prefix"), confirmed empirically: a bare `^ingest/.*` (no tilde) matched
+# NOTHING -- every push to an actual `ingest/<id>` path was rejected, because mediamtx was
+# comparing the path name against the nine literal characters `^ingest/.*`, not running it as a
+# pattern -- caught by video-output/publish-hls's MediamtxDockerIntegrationTest, which pushes to a
+# real `ingest/`-prefixed path against a real mediamtx container. An earlier revision of this
+# comment claimed the opposite (unanchored substring matching with no tilde needed) -- that was
+# WRONG; the value below carries BOTH the tilde (regex mode) AND the leading `^` (anchor to the
+# start of the path name, so e.g. `evilingest/foo`/`not-ingest/x` -- the substring "ingest/"
+# appearing mid-string -- correctly do NOT match).
+#
+# CRITICAL -- mediamtx's env-var loader (`MTX_*`) has NO override mechanism for list-of-struct
+# fields like `authInternalUsers` (see the api/apiAddress note above, which hit this same limit
+# first) -- there is no `MTX_AUTHINTERNALUSERS` that can change `vision-viewer`/`vision-publisher`'s
+# passwords at deploy time. The plaintext `pass:` values below and docker-compose.yml's
+# `VISION_MEDIA_AUTH_VIEWER_PASSWORD`/`VISION_MEDIA_AUTH_PUBLISHER_PASSWORD` env vars (consumed by
+# vision-app as `vision.media.auth.*`, which is what the Java side actually sends) are therefore TWO
+# INDEPENDENT sources of truth for the same secret, kept in sync ONLY by whoever edits both files by
+# hand. Changing one without the other breaks auth (mediamtx rejects credentials the Java side is no
+# longer sending, or vice versa) -- there is no way around this short of templating this file at
+# deploy time, which is out of this correction's scope. Operators MUST override the `change-me`
+# defaults below AND the matching docker-compose.yml env vars together, in the same change.
+#
+# publish/read/playback are restated alongside api/metrics/pprof (on the accounts that keep them) so
+# this file doesn't accidentally NARROW anything mediamtx already grants beyond what this correction
+# intends to change -- widening api access (pre-existing, see below) and gating read/publish
+# (this correction) are the only actual behaviour changes from mediamtx's own baked-in config.
 api: yes
 apiAddress: :9997
 authInternalUsers:
@@ -48,11 +106,21 @@ authInternalUsers:
     ips: []
     permissions:
       - action: publish
-      - action: read
-      - action: playback
+        path: ~^ingest/.*
       - action: api
       - action: metrics
       - action: pprof
+  - user: vision-viewer
+    pass: change-me
+    ips: []
+    permissions:
+      - action: read
+      - action: playback
+  - user: vision-publisher
+    pass: change-me
+    ips: []
+    permissions:
+      - action: publish
 
 # Preserves mediamtx's own default per-path behaviour: any path name (a per-start random StreamId,
 # docs/plans/done/MEDIA-SOT-PLAN.md D2) is accepted with no explicit per-path configuration block --

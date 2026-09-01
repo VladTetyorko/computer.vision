@@ -94,9 +94,18 @@ public record VisionApiProperties(Snapshot snapshot, HlsProxy hlsProxy, Live liv
      * @param maxRedirectHops          bound on the hand-followed redirect chain (mediamtx's own
      *                                 node-pinning flow is exactly one hop); higher only so a
      *                                 misbehaving or looping upstream fails fast instead of hanging
+     * @param authUsername             mediamtx {@code read} account username (docs/plans/active/
+     *                                 ASSET-FLOWS-PLAN.md &sect;2 S6) sent as an outbound {@code
+     *                                 Authorization: Basic} header on every upstream fetch, now that
+     *                                 mediamtx gates {@code read} on every path; {@code null}/blank
+     *                                 sends no {@code Authorization} header (mediamtx auth off/
+     *                                 unconfigured — the correct behaviour for most tests, which
+     *                                 build this record via {@link #defaults()})
+     * @param authPassword             password paired with {@code authUsername}; ignored when {@code
+     *                                 authUsername} is {@code null}/blank
      */
     public record HlsProxy(Duration connectTimeout, Duration requestTimeout, int errorBodyPreviewMaxChars,
-                            int maxRedirectHops) {
+                            int maxRedirectHops, String authUsername, String authPassword) {
 
         public HlsProxy {
             requirePositive(connectTimeout, "connectTimeout");
@@ -105,8 +114,9 @@ public record VisionApiProperties(Snapshot snapshot, HlsProxy hlsProxy, Live liv
             requirePositive(maxRedirectHops, "maxRedirectHops");
         }
 
+        /** No mediamtx read credential — matches {@code vision.publish.enabled=false}/no-auth setups. */
         public static HlsProxy defaults() {
-            return new HlsProxy(Duration.ofSeconds(5), Duration.ofSeconds(15), 200, 5);
+            return new HlsProxy(Duration.ofSeconds(5), Duration.ofSeconds(15), 200, 5, null, null);
         }
     }
 

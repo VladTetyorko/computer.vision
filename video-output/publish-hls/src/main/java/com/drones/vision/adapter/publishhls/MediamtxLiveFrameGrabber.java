@@ -71,6 +71,7 @@ public final class MediamtxLiveFrameGrabber {
     private final URI rtspBase;
     private final String connectTimeoutMicros;
     private final String readTimeoutMicros;
+    private final MediaCredentials credentials;
 
     /**
      * @param rtspBase mediamtx's RTSP base, e.g. {@code rtsp://localhost:8554} — the same value
@@ -78,20 +79,34 @@ public final class MediamtxLiveFrameGrabber {
      *                 a path is readable at the same address it is publishable to.
      */
     public MediamtxLiveFrameGrabber(URI rtspBase) {
-        this(rtspBase, DEFAULT_CONNECT_TIMEOUT, DEFAULT_READ_TIMEOUT);
+        this(rtspBase, DEFAULT_CONNECT_TIMEOUT, DEFAULT_READ_TIMEOUT, MediaCredentials.none());
+    }
+
+    /**
+     * @param credentials {@code vision.media.auth.*} (docs/plans/active/ASSET-FLOWS-PLAN.md &sect;2 S6) —
+     *                     the viewer credential this grabber authenticates its live RTSP read with;
+     *                     {@link MediaCredentials#none()} sends no credentials. Uses this class's own
+     *                     default connect/read timeouts — the production wiring call site ({@code
+     *                     vision-app}'s {@code PublishWiring}) has no other tunable to pass here.
+     */
+    public MediamtxLiveFrameGrabber(URI rtspBase, MediaCredentials credentials) {
+        this(rtspBase, DEFAULT_CONNECT_TIMEOUT, DEFAULT_READ_TIMEOUT, credentials);
     }
 
     /**
      * @param connectTimeout bounds the grabber's connect step
      * @param readTimeout    bounds the grabber's read step once connected
+     * @param credentials    {@code vision.media.auth.*} viewer credential; {@link
+     *                       MediaCredentials#none()} sends no credentials
      */
-    public MediamtxLiveFrameGrabber(URI rtspBase, Duration connectTimeout, Duration readTimeout) {
+    public MediamtxLiveFrameGrabber(URI rtspBase, Duration connectTimeout, Duration readTimeout, MediaCredentials credentials) {
         MediamtxStreamPublisher.ensureQuietLogging();
         this.rtspBase = Objects.requireNonNull(rtspBase, "rtspBase must not be null");
         this.connectTimeoutMicros = Long.toString(
                 Objects.requireNonNull(connectTimeout, "connectTimeout must not be null").toNanos() / 1000L);
         this.readTimeoutMicros = Long.toString(
                 Objects.requireNonNull(readTimeout, "readTimeout must not be null").toNanos() / 1000L);
+        this.credentials = credentials == null ? MediaCredentials.none() : credentials;
     }
 
     /**
@@ -106,7 +121,11 @@ public final class MediamtxLiveFrameGrabber {
      */
     public Optional<VideoFrame> grab(StreamId streamId) {
         Objects.requireNonNull(streamId, "streamId must not be null");
-        String url = MediamtxUrls.pushUrl(rtspBase, streamId);
+        // displayUrl is credential-free and only ever logged; url (below) carries the viewer
+        // credential and is only ever handed to the grabber -- see MediamtxUrls's class javadoc
+        // for why the two must never be conflated.
+        String displayUrl = MediamtxUrls.pushUrl(rtspBase, streamId);
+        String url = MediamtxUrls.readUrl(rtspBase, streamId, credentials);
         FFmpegFrameGrabber grabber = new FFmpegFrameGrabber(url);
         try {
             grabber.setOption("rtsp_transport", RTSP_TRANSPORT);
@@ -120,7 +139,7 @@ public final class MediamtxLiveFrameGrabber {
             // their own grab loops/calls.
             Frame frame = grabber.grabImage();
             if (frame == null || frame.image == null || frame.image.length == 0) {
-                LOG.log(System.Logger.Level.WARNING, "No decodable video frame available live at " + url);
+                LOG.log(System.Logger.Level.WARNING, "No decodable video frame available live at " + displayUrl);
                 return Optional.empty();
             }
 
@@ -129,7 +148,7 @@ public final class MediamtxLiveFrameGrabber {
                     PixelFormat.BGR24, copy));
         } catch (Exception e) {
             LOG.log(System.Logger.Level.WARNING,
-                    "Failed to grab a live frame for stream " + streamId.value() + " from " + url, e);
+                    "Failed to grab a live frame for stream " + streamId.value() + " from " + displayUrl, e);
             return Optional.empty();
         } finally {
             releaseQuietly(grabber);

@@ -24,8 +24,12 @@ import java.util.Objects;
  * @param resilience {@link PublishBackoff}'s reconnect-throttling bounds; defaulted as a whole when absent
  * @param cadence    {@link CadenceEstimator}'s measurement/drift-detection tunables; defaulted as a
  *                   whole when absent
+ * @param auth       {@code vision.media.auth.*} (docs/plans/active/ASSET-FLOWS-PLAN.md &sect;2 S6) — the
+ *                   publisher credential {@link MediamtxStreamPublisher} authenticates its RTSP push
+ *                   with, and the viewer credential it embeds in the WHEP/playback URLs it hands to
+ *                   browsers; {@link MediaCredentials#none()} (no credentials sent) when absent
  */
-public record PublishSettings(Encoder encoder, Resilience resilience, Cadence cadence) {
+public record PublishSettings(Encoder encoder, Resilience resilience, Cadence cadence, MediaCredentials auth) {
 
     public PublishSettings {
         if (encoder == null) {
@@ -37,11 +41,14 @@ public record PublishSettings(Encoder encoder, Resilience resilience, Cadence ca
         if (cadence == null) {
             cadence = Cadence.defaults();
         }
+        if (auth == null) {
+            auth = MediaCredentials.none();
+        }
     }
 
     /** Every field equals the literal each collaborator used to hardcode as a {@code static final} constant. */
     public static PublishSettings defaults() {
-        return new PublishSettings(Encoder.defaults(), Resilience.defaults(), Cadence.defaults());
+        return new PublishSettings(Encoder.defaults(), Resilience.defaults(), Cadence.defaults(), MediaCredentials.none());
     }
 
     /**

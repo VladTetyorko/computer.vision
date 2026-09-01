@@ -152,7 +152,7 @@ public final class MediamtxProxyPublisher implements StreamPublisherPort {
         if (id == null) {
             return Optional.empty();
         }
-        return Optional.of(URI.create(MediamtxUrls.whepUrl(whepViewBase, id)));
+        return Optional.of(URI.create(MediamtxUrls.whepUrl(whepViewBase, id, settings.media())));
     }
 
     @Override
@@ -164,7 +164,7 @@ public final class MediamtxProxyPublisher implements StreamPublisherPort {
         Objects.requireNonNull(duration, "duration must not be null");
         long durationSeconds = Math.round(duration.toMillis() / 1000.0);
         return Optional.of(URI.create(
-                MediamtxPlaybackUrls.getUrl(playbackViewBase, id.value().toString(), start, durationSeconds)));
+                MediamtxPlaybackUrls.getUrl(playbackViewBase, id.value().toString(), start, durationSeconds, settings.media())));
     }
 
     /**

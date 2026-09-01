@@ -282,6 +282,33 @@ vision:
     #   window: 1s
     #   read-timeout: 15s
 
+  # --- mediamtx read/publish credentials (docs/plans/active/ASSET-FLOWS-PLAN.md §2 "S6 auth model") ---
+  # ./mediamtx.yml now gates read+playback on every path behind a viewer account, and publish on
+  # every path except the ingest/ zero-config funnel (kept open by design -- see that file's own
+  # comments) behind a publisher account. Every collaborator below sends one or both of these:
+  # MediamtxStreamPublisher (RTSP push = publisher creds; WHEP/playback URLs = viewer creds),
+  # MediamtxProxyPublisher (viewer creds only -- it never pushes), MediamtxLiveFrameGrabber/
+  # MediamtxReplayFrameExtractor (viewer creds, server-side reads), and HlsProxyController
+  # (vision-api, viewer creds as an outbound Authorization: Basic header).
+  #
+  # These four values are commented here because they equal VisionMediaProperties' own compiled
+  # @DefaultValue defaults exactly (this block documents, it does not override, matching this
+  # file's convention) -- NOT because they are safe to leave unset. CLAUDE.md rule 1 forbids an
+  # empty-string credential default, so these are real, working accounts out of the box; they are
+  # also, deliberately, obvious placeholders. Anyone deploying beyond local dev/demo MUST override
+  # both viewer-password and publisher-password (via VISION_MEDIA_AUTH_VIEWER_PASSWORD/
+  # VISION_MEDIA_AUTH_PUBLISHER_PASSWORD, see docker-compose.yml/.env.example) AND the matching
+  # `pass:` lines in ./mediamtx.yml's authInternalUsers block, together, in the same change --
+  # mediamtx's own env-var loader cannot override that list-of-struct config field, so the two are
+  # independent copies of the same secret that only stay in sync by hand. See mediamtx.yml's header
+  # comment for the full explanation.
+  # media:
+  #   auth:
+  #     viewer-username: vision-viewer
+  #     viewer-password: change-me
+  #     publisher-username: vision-publisher
+  #     publisher-password: change-me
+
   # --- adapter-cv-grpc: CV inference (see docs/plans/done/MVP1-PLAN.md §C7) ---
   cv:
     # Whether WiringConfiguration wires DetectionPort to GrpcDetectionPort

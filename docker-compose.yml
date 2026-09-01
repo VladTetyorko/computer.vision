@@ -150,14 +150,17 @@ services:
       # "must be reachable by the *viewer's* browser, not just this app's own JVM" shape as WHEP's
       # 18889 above, not the Control API's "only vision-app itself ever calls this" shape. Binding
       # this to loopback would silently break clip export/replay for every viewer not on the Docker
-      # host itself. It is unauthenticated by mediamtx's own stock default (the "playback" action
-      # already grants ips: [] in mediamtx's baked-in authInternalUsers, grouped with publish/read --
-      # ./mediamtx.yml restates it, it doesn't widen it, see that file's header), so this was already
-      # today's posture before wave M7 touched anything. Anyone who can reach the host can still
-      # list/download recorded clips with no credentials -- a real confidentiality question for a
-      # field-deployed command point, but a pre-existing one shared with every other unauthenticated
-      # mediamtx default (HLS/WHEP viewing has the same shape), not something this correction
-      # introduced or is scoped to fix.
+      # host itself.
+      #
+      # UPDATE (docs/plans/active/ASSET-FLOWS-PLAN.md §2 S6): this port is NO LONGER unauthenticated.
+      # ./mediamtx.yml now gates the "playback" action behind the `vision-viewer` account (same
+      # account HLS/WHEP read auth uses) -- the paragraph this replaces was accurate when written but
+      # is now stale; see that file's authInternalUsers block for the current model. Anyone who can
+      # reach this host still needs vision-viewer's credentials to list/download recorded clips.
+      # UsageTimelineController#recording (vision-api) appends them as `?user=&pass=` query
+      # parameters to the URL it hands the browser verbatim, mirroring MediamtxStreamPublisher/
+      # MediamtxProxyPublisher's own playbackUrl -- see VISION_MEDIA_AUTH_* below for where those
+      # credentials come from.
       - "19996:9996" # Playback API (recording clip export)
       # Control API (docs/plans/done/MEDIA-SOT-PLAN.md §5.3): container default is 9997 (mediamtx's
       # own apiAddress default, ":9997"), set explicitly below via MTX_API/MTX_APIADDRESS for the
@@ -462,6 +465,31 @@ services:
       # than left to the default) so this reasoning is visible at the compose
       # level, not just in source.
       VISION_PUBLISH_MEDIAMTX_WHEP_BASE: http://localhost:18889
+      # docs/plans/active/ASSET-FLOWS-PLAN.md §2 "S6 auth model": the viewer/publisher credential pair
+      # every mediamtx collaborator in this app sends -- MediamtxStreamPublisher's RTSP push
+      # (publisher creds, embedded in the push URL's userinfo), MediamtxStreamPublisher/
+      # MediamtxProxyPublisher's WHEP/playback URLs (viewer creds, appended as `?user=&pass=` for the
+      # browser), HlsProxyController's outbound HLS fetch (viewer creds, as an Authorization: Basic
+      # header), and MediamtxLiveFrameGrabber/MediamtxReplayFrameExtractor's server-side reads (viewer
+      # creds). Spring's relaxed binding maps these four env vars onto
+      # vision.media.auth.viewer-username/-password/publisher-username/-password (VisionMediaProperties,
+      # station/vision-app) -- see application.yaml's `vision.media` block for the same defaults
+      # spelled out in property form (`vision-viewer`/`change-me`, `vision-publisher`/`change-me`).
+      #
+      # MUST be kept in sync BY HAND with ./mediamtx.yml's authInternalUsers `pass:` fields for the
+      # `vision-viewer`/`vision-publisher` accounts -- mediamtx's env-var loader has no override for
+      # that list-of-struct config field (see mediamtx.yml's own header comment for the full
+      # explanation), so this env block and that YAML file are two independent copies of the same
+      # secret. Changing the password here without changing it there (or vice versa) breaks auth:
+      # mediamtx rejects credentials this app is no longer sending, or accepts a stale password this
+      # app no longer knows. Anyone deploying beyond local dev/demo MUST override BOTH the `change-me`
+      # defaults below AND the matching `pass:` lines in mediamtx.yml, together, in the same change --
+      # same "DEV-ONLY, must be changed before exposing this" posture as VISION_PERSISTENCE_SEED_DEV_USERS
+      # below.
+      VISION_MEDIA_AUTH_VIEWER_USERNAME: ${VISION_MEDIA_AUTH_VIEWER_USERNAME:-vision-viewer}
+      VISION_MEDIA_AUTH_VIEWER_PASSWORD: ${VISION_MEDIA_AUTH_VIEWER_PASSWORD:-change-me}
+      VISION_MEDIA_AUTH_PUBLISHER_USERNAME: ${VISION_MEDIA_AUTH_PUBLISHER_USERNAME:-vision-publisher}
+      VISION_MEDIA_AUTH_PUBLISHER_PASSWORD: ${VISION_MEDIA_AUTH_PUBLISHER_PASSWORD:-change-me}
       # docs/plans/done/MVP2-PLAN.md P-a: wire fleet persistence (categories/devices/
       # assets) against the postgres service above -- compose-internal
       # hostname/port, not the host-mapped ${POSTGRES_PORT} below (same

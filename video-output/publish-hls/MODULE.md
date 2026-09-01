@@ -21,15 +21,23 @@ self-skip via `@EnabledIf(dockerAvailable)` when docker is unreachable.
     — delegates to the 5-arg ctor with `PublishSettings.defaults()`. First three non-null;
     `playbackViewBase` nullable (`null` ⇒ `playbackUrl` always `Optional.empty()`).
   - `MediamtxStreamPublisher(URI, URI, URI, URI, PublishSettings settings)` — canonical constructor;
-    `settings` threads encoder/resilience/cadence tunables into every `StreamState` this instance creates.
+    `settings` threads encoder/resilience/cadence tunables **and, since ASSET-FLOWS-PLAN §2 S6, mediamtx
+    read/publish credentials (`settings.auth()`)** into every `StreamState` this instance creates.
   - `streamStarted(StreamId, Device)`, `publish(StreamId, VideoFrame)`, `streamEnded(StreamId)`.
-  - `viewUrl(StreamId): Optional<URI>` → `{hlsViewBase}/{id}/index.m3u8`; `whepUrl(StreamId): Optional<URI>`
-    → `{whepViewBase}/{id}/whep` (mediamtx serves WHEP for every published path at zero extra setup —
-    pure string formatting, not a second live session). Both delegate to `MediamtxUrls`.
+  - `viewUrl(StreamId): Optional<URI>` → `{hlsViewBase}/{id}/index.m3u8` (credential-free — the app-relative
+    HLS proxy path `vision-api`'s `HlsProxyController` serves; that controller, not this URL, carries the
+    read credential, see its own module's Gotchas); `whepUrl(StreamId): Optional<URI>` → `{whepViewBase}/{id}/whep`
+    handed to the browser verbatim, so it embeds the viewer credential as `?user=&pass=` when configured
+    (mediamtx serves WHEP for every published path at zero extra setup — pure string formatting, not a
+    second live session). Both delegate to `MediamtxUrls`.
   - `playbackUrl(StreamId, Instant start, Duration duration): Optional<URI>` → `{playbackViewBase}/get?
-    path={id}&start={start}&duration={roundedSeconds}` (delegates to `MediamtxPlaybackUrls`); `start`
-    uses `Instant#toString()` verbatim (RFC3339); `duration` rounded to the nearest whole second.
-  - Recorder creation is delegated to `H264RecorderFactory`; frame/pixel conversion to `FrameConverter`;
+    path={id}&start={start}&duration={roundedSeconds}[&user=&pass=]` (delegates to `MediamtxPlaybackUrls`,
+    5-arg overload since S6, credential appended the same way as `whepUrl`); `start` uses
+    `Instant#toString()` verbatim (RFC3339); `duration` rounded to the nearest whole second.
+  - Recorder creation is delegated to `H264RecorderFactory`, pushing to `authenticatedPushUrl(StreamId)`
+    (private — embeds the **publisher** credential via `MediamtxUrls.pushUrl(URI, StreamId,
+    MediaCredentials)`); every log line instead uses the credential-free `pushUrl(StreamId)` — see
+    Gotchas' "credentials never reach a log line" entry. Frame/pixel conversion to `FrameConverter`;
     backoff to `PublishBackoff`; cadence measurement/PTS/drift to `CadenceEstimator`; lag tracking to
     `PublishDiagnostics`/`LagTracker` — see their own entries below.
   - `public record PublishSnapshot(int total, List<StreamId> inOutage)` / `public PublishSnapshot streamsInOutage()`
@@ -39,7 +47,22 @@ self-skip via `@EnabledIf(dockerAvailable)` when docker is unreachable.
     (port contract serializes calls per `streamId`): `volatile FFmpegFrameRecorder recorder` plus
     `final PublishBackoff backoff`, `final CadenceEstimator cadence`, `final PublishDiagnostics diagnostics`.
 - `final class MediamtxUrls` (package-private, stateless) — `static String pushUrl/viewUrl/whepUrl(URI, StreamId)`
-  string formatting; trailing slash on the base tolerated.
+  string formatting; trailing slash on the base tolerated. **ASSET-FLOWS-PLAN §2 S6** added credential-aware
+  overloads: `pushUrl(URI, StreamId, MediaCredentials)` and `readUrl(URI, StreamId, MediaCredentials)` embed
+  `user:pass@` in the RTSP URL's authority (the mechanism both FFmpeg's rtsp muxer/demuxer and mediamtx
+  itself support natively for ANNOUNCE/DESCRIBE auth); `whepUrl(URI, StreamId, MediaCredentials)` instead
+  appends `?user=&pass=` (package-visible `appendCredentialQuery`, reused by `MediamtxPlaybackUrls`) —
+  mediamtx's own documented mechanism for HTTP-based protocols a browser drives directly via `fetch()`,
+  which this app never intercepts the way it can add a header to its own outbound HTTP calls. The
+  credential-free overloads remain the log-safe ones — see the class's own javadoc and the "credentials
+  never reach a log line" Gotcha.
+- `record MediaCredentials(String viewerUsername, String viewerPassword, String publisherUsername, String publisherPassword)`
+  (package-private) — `static none()` (all-`null` singleton, the "mediamtx auth is off/unconfigured"
+  case every 3/4-arg constructor across this module still defaults to); package-private
+  `hasViewerCredentials()`/`hasPublisherCredentials()` blank-checks used by `MediamtxUrls` to decide
+  whether to embed a credential at all. `PublishSettings#auth`/`MediamtxProxySettings#media` carry one
+  instance each; `vision-app`'s `PublishWiring` is the only real production constructor call, built from
+  the new `VisionMediaProperties` (see that module's own MODULE.md).
 - `final class H264RecorderFactory` (package-private, stateless) — `static FFmpegFrameRecorder create(String pushUrl, int width, int height, double frameRateFps[, PublishSettings.Encoder])`
   (new + configure + `start()`, releasing on a failed start); `static void configureRecorder(FFmpegFrameRecorder, double frameRateFps[, PublishSettings.Encoder])`.
   Fixed (not settings-driven): format `"rtsp"`, `rtsp_transport=tcp`, connect timeout 5s, codec
@@ -72,11 +95,16 @@ self-skip via `@EnabledIf(dockerAvailable)` when docker is unreachable.
   own method (adapters must not depend on each other).
 - `final class MediamtxPlaybackUrls` (package-private, stateless) — `static String getUrl(URI playbackBase, String pathName, Instant start, long durationSeconds)`
   → `{playbackBase}/get?path={pathName}&start={start}&duration={durationSeconds}`. Shared by
-  `MediamtxStreamPublisher#playbackUrl` and `MediamtxReplayFrameExtractor#frameAt`.
+  `MediamtxStreamPublisher#playbackUrl` and `MediamtxReplayFrameExtractor#frameAt`. **S6** added a 5-arg
+  overload taking a trailing `MediaCredentials`, delegating to the 4-arg form plus
+  `MediamtxUrls.appendCredentialQuery` (the viewer credential, query-param style, same idiom as `whepUrl`).
 - `final class MediamtxReplayFrameExtractor implements ReplayFrameExtractionPort` (public) — pulls one
   decoded BGR24 frame out of a stream's mediamtx recording, for CV-training frame capture from a
   recorded replay. `MediamtxReplayFrameExtractor(URI playbackBase)` / `(URI playbackBase, Duration window, Duration readTimeout)`
-  (`playbackBase` nullable — unconfigured ⇒ every call returns empty). `frameAt(StreamId, Instant): Optional<VideoFrame>`
+  (`playbackBase` nullable — unconfigured ⇒ every call returns empty) / **S6** `(URI, Duration, Duration, MediaCredentials)`
+  canonical 4-arg ctor, the first three delegating with `MediaCredentials.none()`. `frameAt` builds a
+  credential-free `displayUrl` (both `WARNING` logs) and a separately-credentialed `url` (the actual
+  `FFmpegFrameGrabber` target) via the two `MediamtxPlaybackUrls.getUrl` overloads. `frameAt(StreamId, Instant): Optional<VideoFrame>`
   requests a one-second window starting at `at` from mediamtx's playback server (seek delegated to
   mediamtx, never an ffmpeg-side seek across the whole recording), decodes via `FFmpegFrameGrabber`
   (`setFormat("mp4")`, `grabImage()` not `grab()`, 15s `rw_timeout`), returns
@@ -99,9 +127,12 @@ self-skip via `@EnabledIf(dockerAvailable)` when docker is unreachable.
   allowed to escape `streamStarted` (unlike this module's usual "nothing escapes" posture) — a proxied
   start that cannot reach a ready path must fail loud, not hand back a URL that plays nothing;
   `streamEnded` still catches it and logs at `WARNING`.
-- `public record MediamtxProxySettings(String rtspTransport, Duration readyTimeout, boolean sourceOnDemand, String apiUser, String apiPassword)`
-  — `MediamtxProxyPublisher`'s tunables. `static defaults()` = `("automatic", 10s, false, null, null)`.
-  Compact ctor requires `apiPassword` whenever `apiUser` is set.
+- `public record MediamtxProxySettings(String rtspTransport, Duration readyTimeout, boolean sourceOnDemand, String apiUser, String apiPassword, MediaCredentials media)`
+  — `MediamtxProxyPublisher`'s tunables. `static defaults()` = `("automatic", 10s, false, null, null, MediaCredentials.none())`.
+  Compact ctor requires `apiPassword` whenever `apiUser` is set; `media` nulls default to `MediaCredentials.none()`.
+  **S6**: `apiUser`/`apiPassword` (this record's pre-existing fields) are the mediamtx **Control API**
+  credential (`POST/PATCH/DELETE /v3/config/paths/**`), unrelated to `media`'s RTSP/HLS/WHEP read+publish
+  credential — two different mediamtx auth surfaces, kept as two separate fields deliberately.
 - `final class MediamtxProxyPublisher implements StreamPublisherPort` (public) — mediamtx dials the
   camera itself; the JVM never decodes the source. `MediamtxProxyPublisher(URI apiBase, URI hlsViewBase, URI whepViewBase, URI playbackViewBase, MediamtxProxySettings settings)`.
   `streamStarted(StreamId, Device)` creates/idempotently re-points a mediamtx path at `device.stream().uri()`,
@@ -109,7 +140,8 @@ self-skip via `@EnabledIf(dockerAvailable)` when docker is unreachable.
   times out by throwing `MediamtxControlApiException`. `publish` is an intentional no-op. `streamEnded`
   deletes the path, swallowing `MediamtxControlApiException` (logs `WARNING`). `viewUrl`/`whepUrl`/`playbackUrl`
   delegate to the same `MediamtxUrls`/`MediamtxPlaybackUrls` helpers `MediamtxStreamPublisher` uses (same
-  path name, `streamId.value()`, regardless of which publisher created it). `proxiesSource(Device)` always `true`.
+  path name, `streamId.value()`, regardless of which publisher created it), passing `settings.media()`
+  since S6. `proxiesSource(Device)` always `true`.
 - `final class PublisherRouter implements StreamPublisherPort` (public) — the one `StreamPublisherPort`
   `vision-app` wires. `PublisherRouter(StreamPublisherPort directPublisher, StreamPublisherPort proxyPublisher, boolean sourceProxyEnabled)`.
   Routes to `proxyPublisher` iff `sourceProxyEnabled && device.stream().protocol().equals("rtsp")`, else
@@ -125,11 +157,15 @@ self-skip via `@EnabledIf(dockerAvailable)` when docker is unreachable.
   never `Health.DOWN`** (losing publish for one stream is degraded availability for that stream, not a
   platform-wide outage) — `detail` names the actual `StreamId`s in outage.
 - `final class MediamtxLiveFrameGrabber` (public) — `MediamtxLiveFrameGrabber(URI rtspBase)` /
-  `(URI rtspBase, Duration connectTimeout, Duration readTimeout)`. `grab(StreamId): Optional<VideoFrame>`
-  opens `{rtspBase}/{streamId}` as an RTSP **read** client (the same address a push publishes to, or a
-  proxied path is reachable at) and decodes exactly one frame (`grabImage()`, `rtsp_transport=tcp` fixed,
-  BGR24, `FrameConverter.copyBgr24`). Never throws — an unreachable base or no decodable video returns
-  `Optional.empty()`, logged once at `WARNING`. `capturedAt` is stamped at grab time (`Instant.now()`),
+  `(URI rtspBase, Duration connectTimeout, Duration readTimeout)` / **S6** `(URI rtspBase, MediaCredentials credentials)`
+  and the canonical `(URI, Duration, Duration, MediaCredentials)`; the first two delegate with
+  `MediaCredentials.none()`. `grab(StreamId): Optional<VideoFrame>` builds a credential-free `displayUrl`
+  (both `WARNING` logs) via `MediamtxUrls.pushUrl` and a separately-credentialed `url` (the actual grabber
+  target, viewer credential) via `MediamtxUrls.readUrl`, opening `{rtspBase}/{streamId}` as an RTSP **read**
+  client (the same address a push publishes to, or a proxied path is reachable at) and decoding exactly
+  one frame (`grabImage()`, `rtsp_transport=tcp` fixed, BGR24, `FrameConverter.copyBgr24`). Never throws —
+  an unreachable base, a rejected read credential, or no decodable video all return `Optional.empty()`,
+  logged once at `WARNING`. `capturedAt` is stamped at grab time (`Instant.now()`),
   not derived from the RTSP PTS. Fills the gap proxy mode opens (nothing in the JVM decodes a proxied
   stream, so `StreamPipeline`'s cached frames would sit empty) — **not yet wired into `StreamService`**,
   this class only supplies the capability.
@@ -139,9 +175,10 @@ self-skip via `@EnabledIf(dockerAvailable)` when docker is unreachable.
   invisible to every in-JVM demand signal an idle-stream policy might otherwise use; wanted in every
   mode (push-mode streams have WHEP viewers too), so it is its own class rather than a method on
   `MediamtxProxyPublisher`, which is only wired in proxy mode.
-- `public record PublishSettings(Encoder encoder, Resilience resilience, Cadence cadence)` — the single
-  source for every `vision.publish.encoder.*`/`.resilience.*`/`.cadence.*` tunable; a `null` component
-  normalizes to that nested record's own `defaults()` in the compact ctor. `static defaults()`.
+- `public record PublishSettings(Encoder encoder, Resilience resilience, Cadence cadence, MediaCredentials auth)`
+  — the single source for every `vision.publish.encoder.*`/`.resilience.*`/`.cadence.*` tunable plus (S6)
+  the mediamtx read/publish credential; a `null` component normalizes to that nested record's own
+  `defaults()` (or `MediaCredentials.none()` for `auth`) in the compact ctor. `static defaults()`.
   - `record Encoder(int crf, long maxrateBitsPerSecond, long bufsizeBits, String preset, int gopSeconds, int scenecutThreshold)`
     — `defaults()` = `(21, 6_000_000, 12_000_000, "veryfast", 1, 0)`.
   - `record Resilience(Duration initialBackoff, Duration maxBackoff)` — `defaults()` = `(500ms, 10s)`.
@@ -234,10 +271,44 @@ self-skip via `@EnabledIf(dockerAvailable)` when docker is unreachable.
   transport, browser buffering) is invisible to this number by construction. A player's own "behind live"
   estimate is the number to compare against for the full picture; if this module's own p50/p95 sits in
   the tens of milliseconds while the player reports seconds behind, the bottleneck is downstream, not here.
+- **Credentials never reach a log line, by construction (ASSET-FLOWS-PLAN §2 S6).** Every class that
+  formats a credentialed mediamtx URL also builds a separate, credential-free "display" URL for logging
+  (`MediamtxStreamPublisher`'s `pushUrl(StreamId)` vs. private `authenticatedPushUrl(StreamId)`;
+  `MediamtxLiveFrameGrabber.grab`'s local `displayUrl` vs. `url`; `MediamtxReplayFrameExtractor.frameAt`'s
+  same pair) — see `MediamtxUrls`'s own class javadoc for the rule. Any new mediamtx URL consumer must
+  follow the same split; a single shared "url" variable used for both logging and the actual FFmpeg/HTTP
+  call is a credential-leak-in-logs regression waiting to happen.
+- **mediamtx's `authInternalUsers[].permissions[].path` is a LITERAL STRING unless prefixed with a
+  leading tilde (`~`), which switches it to an unanchored Go `regexp.MatchString`** — straight from
+  mediamtx's own baked-in default config comment ("Regular expressions can be used by using a tilde as
+  prefix"). A bare `^ingest/.*` (no tilde) matches **nothing**: mediamtx compares every real path name
+  against the nine literal characters `^ingest/.*`, not against a pattern — this was a real defect in
+  this correction's first draft (`./mediamtx.yml`'s `any` user's publish restriction), caught by
+  `MediamtxDockerIntegrationTest`'s `authenticatedMediamtxGatesPublishAndReadWhileLeavingIngestPublishOpen`,
+  which pushes to a real `ingest/<id>` path against a real mediamtx container — a plain unit test asserting
+  this module's own URL-building code cannot catch a mediamtx-side config-syntax mistake like this one.
+  The corrected value is `~^ingest/.*` (tilde for regex mode, `^` to anchor to the path's start so e.g.
+  `evilingest/foo`/`not-ingest/x` correctly do **not** match).
+- **mediamtx's HLS session-pinning `302` redirect happens *before* its read-auth check, not after** — the
+  very first request to `{hlsBase}/{path}/index.m3u8` always redirects (routing to a specific internal
+  HLS muxer worker) regardless of credentials; the 401 (unauthenticated) or 200 (authenticated) only
+  appears on the **redirect target**. A raw HTTP client that doesn't follow redirects (or doesn't forward
+  its `Authorization` header across one) will observe the `302` itself and wrongly conclude the request
+  "worked" or "failed" without ever reaching the actual auth decision. `HlsProxyController` (vision-api)
+  already followed redirects by hand for exactly this reason, pre-dating S6; this module's own docker ITs
+  (`pollUntilFetchable`/`rawGet`) needed the same `HttpClient.Redirect.NORMAL` + `CookieManager` treatment
+  added for S6's own test, having previously only needed to poll for `200` on an unauthenticated,
+  redirect-tolerant `HttpClient`.
 
 ## Status
 Fully implemented and green: direct JVM-side push publishing, mediamtx-side pull-proxy publishing
 (`PublisherRouter`, off by default via `vision.publish.source-proxy.enabled`), recording + playback URL
 formatting, replay frame extraction for CV training, a live un-annotated frame grab for proxied streams
 (capability only — not yet wired into `StreamService`), reader-presence probing for the idle-stream
-policy, and a mediamtx health self-report for `GET /api/system/status`.
+policy, and a mediamtx health self-report for `GET /api/system/status`. **ASSET-FLOWS-PLAN §2 S6**
+(mediamtx read+publish auth, `ingest/` staying open-publish) is fully implemented and green, including a
+real-mediamtx docker IT (`MediamtxDockerIntegrationTest#authenticatedMediamtxGatesPublishAndReadWhileLeavingIngestPublishOpen`)
+that exercises all five S6 behaviours (unauthenticated publish rejected, authenticated publish succeeds,
+`ingest/` publish stays open unauthenticated, unauthenticated read rejected, authenticated read succeeds)
+against one real container started from the exact `authInternalUsers` shape `./mediamtx.yml` ships. 114
+tests, 0 failures (`./mvnw -B -pl video-output/publish-hls test`).
