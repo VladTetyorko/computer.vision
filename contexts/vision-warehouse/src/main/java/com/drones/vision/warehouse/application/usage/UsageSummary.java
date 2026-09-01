@@ -2,6 +2,7 @@ package com.drones.vision.warehouse.application.usage;
 
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.kernel.UserId;
 
 import java.time.Instant;
 
@@ -21,9 +22,12 @@ import java.time.Instant;
  *                         null} while the usage is still open
  * @param sampleCount      number of telemetry samples received during this usage; must not be
  *                         negative
+ * @param pilotId          the operator this usage is attributed to, or {@code null} when genuinely
+ *                         unknown (docs/plans/active/ASSET-FLOWS-PLAN.md §2, D1p — see {@code
+ *                         AssetUsage#pilotId()})
  */
 public record UsageSummary(UsageId usageId, AssetId assetId, String assetName, Instant startedAt, Instant endedAt,
-                            Long durationSeconds, long sampleCount) {
+                            Long durationSeconds, long sampleCount, UserId pilotId) {
 
     public UsageSummary {
         if (usageId == null) {

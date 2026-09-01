@@ -3,6 +3,7 @@ package com.drones.vision.api.dto;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.UsageId;
 import com.drones.vision.kernel.UsageOrigin;
+import com.drones.vision.kernel.UserId;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.warehouse.domain.model.UsagePhase;
 import org.junit.jupiter.api.Test;
@@ -10,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 /**
  * Pins the one thing that made {@code phase}/{@code origin} worth adding to this DTO: each is
@@ -46,8 +48,22 @@ class AssetUsageResponseTest {
                 "this fixture's origin is explicitly STREAM");
     }
 
+    @Test
+    void theKnownPilotSurvivesTheTripToTheWireAsARawUuidString() {
+        UserId pilotId = UserId.random();
+        AssetUsage attributed = usage().withPilot(pilotId);
+
+        assertEquals(pilotId.value().toString(), AssetUsageResponse.from(attributed).pilotId());
+    }
+
+    @Test
+    void aUsageWithNoKnownPilotReportsPilotIdAsNullRatherThanFabricated() {
+        assertNull(AssetUsageResponse.from(usage()).pilotId(),
+                "this fixture's pilotId is genuinely unknown — must not be fabricated");
+    }
+
     private static AssetUsage usage() {
         return new AssetUsage(UsageId.random(), AssetId.random(), Instant.parse("2026-08-18T12:00:00Z"),
-                null, null, null, 0L, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+                null, null, null, 0L, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM, null);
     }
 }

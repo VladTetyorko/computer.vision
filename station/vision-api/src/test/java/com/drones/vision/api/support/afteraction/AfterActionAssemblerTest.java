@@ -157,7 +157,7 @@ class AfterActionAssemblerTest {
     @Test
     void assembleReportsAStillOpenUsageWithoutThrowing() {
         AssetUsage openUsage = new AssetUsage(usageId, assetId, STARTED_AT, null, null, null, 0, streamId,
-                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM, null);
         replayService.timeline = new UsageTimeline(openUsage, STARTED_AT, Instant.now(), List.of(), List.of());
 
         AfterActionPackage pkg = assembler.assemble(assetId, usageId, VisibilityScope.unbounded(), viewer(Role.ADMIN),
@@ -202,7 +202,7 @@ class AfterActionAssemblerTest {
     void assembleThrowsNoSuchElementWhenUsageDoesNotBelongToAsset() {
         AssetId otherAssetId = AssetId.random();
         AssetUsage foreignUsage = new AssetUsage(usageId, otherAssetId, STARTED_AT, ENDED_AT, null, null, 0, null,
-                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM, null);
         replayService.timeline = new UsageTimeline(foreignUsage, STARTED_AT, ENDED_AT, List.of(), List.of());
 
         assertThrows(NoSuchElementException.class, () -> assembler.assemble(assetId, usageId,
@@ -416,7 +416,7 @@ class AfterActionAssemblerTest {
 
     private UsageTimeline timelineWith(List<Telemetry> telemetry, List<DetectionResult> detections) {
         AssetUsage usage = new AssetUsage(usageId, assetId, STARTED_AT, ENDED_AT, null, null, telemetry.size(),
-                streamId, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+                streamId, UsagePhase.PREFLIGHT, UsageOrigin.STREAM, null);
         return new UsageTimeline(usage, STARTED_AT, ENDED_AT, telemetry, detections);
     }
 

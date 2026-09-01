@@ -8,6 +8,7 @@ import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UsageId;
 import com.drones.vision.kernel.UsageOrigin;
+import com.drones.vision.kernel.UserId;
 
 /**
  * {@link AssetUsage} &harr; {@link AssetUsageEntity} mapping, extracted from {@code
@@ -21,11 +22,9 @@ import com.drones.vision.kernel.UsageOrigin;
  * ({@code .claude/skills/java-clean-code/SKILL.md} §3) — see {@code AssetUsageEntity}'s own javadoc
  * for why this is the correct "unknown, not fabricated" fallback rather than a bug.
  *
- * <p>{@code origin} (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md D2, wave R2) always
- * round-trips in both directions, unlike {@code phase}: {@link AssetUsage#origin()} is non-null by
- * the domain record's own compact constructor on the way in, and the entity column is {@code NOT
- * NULL} with a database default on the way back (see {@code AssetUsageEntity}'s own javadoc), so
- * there is no legacy-row case to fall back on here.
+ * <p>{@code pilotId} (docs/plans/active/ASSET-FLOWS-PLAN.md §2, D1p) round-trips as a plain nullable
+ * UUID, same shape as {@code streamId} — {@link AssetUsage#pilotId()} is honestly {@code null}
+ * whenever the acting user was never known, and this mapper does not fabricate one on either side.
  */
 public final class AssetUsageMapper {
 
@@ -36,12 +35,14 @@ public final class AssetUsageMapper {
         GeoPosition start = usage.startPosition();
         GeoPosition last = usage.lastPosition();
         StreamId streamId = usage.streamId();
+        UserId pilotId = usage.pilotId();
         return new AssetUsageEntity(usage.id().value(), usage.assetId().value(), usage.startedAt(), usage.endedAt(),
                 start == null ? null : start.latitude(), start == null ? null : start.longitude(),
                 start == null ? null : start.altitudeMeters(),
                 last == null ? null : last.latitude(), last == null ? null : last.longitude(),
                 last == null ? null : last.altitudeMeters(),
-                usage.sampleCount(), streamId == null ? null : streamId.value(), usage.phase(), usage.origin());
+                usage.sampleCount(), streamId == null ? null : streamId.value(), usage.phase(), usage.origin(),
+                pilotId == null ? null : pilotId.value());
     }
 
     public static AssetUsage toDomain(AssetUsageEntity entity) {
@@ -54,7 +55,8 @@ public final class AssetUsageMapper {
         AssetId assetId = new AssetId(entity.assetId());
         UsagePhase phase = entity.phase() == null ? UsagePhase.PREFLIGHT : entity.phase();
         UsageOrigin origin = entity.origin() == null ? UsageOrigin.STREAM : entity.origin();
+        UserId pilotId = entity.pilotId() == null ? null : new UserId(entity.pilotId());
         return new AssetUsage(id, assetId, entity.startedAt(), entity.endedAt(), start, last, entity.sampleCount(),
-                streamId, phase, origin);
+                streamId, phase, origin, pilotId);
     }
 }

@@ -15,6 +15,7 @@ import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.kernel.UsageId;
 import com.drones.vision.kernel.UsageOrigin;
+import com.drones.vision.kernel.UserId;
 import com.drones.vision.warehouse.application.directory.AssetDirectoryService;
 import com.drones.vision.warehouse.application.maintenance.MaintenanceQuery;
 import com.drones.vision.warehouse.application.usage.UsageSessionService;
@@ -283,9 +284,20 @@ public final class UsageTracker {
      *
      * <p>Idempotent: engaging an asset that is already {@link UsageOrigin#OPERATOR}-engaged returns
      * the existing usage unchanged; its telemetry subscriptions (already open) are left exactly as
-     * they were.
+     * they were. {@code pilotIdOrNull} is not consulted on this idempotent path either — {@link
+     * AssetUsage#pilotId()} never changes once set, so a second {@code engage} call, by the same
+     * pilot or a different one, cannot alter who the session is attributed to.
      *
-     * @param assetId the asset to engage
+     * <p>{@code pilotIdOrNull} (docs/plans/active/ASSET-FLOWS-PLAN.md §2, D1p) attributes the usage
+     * to the calling operator wherever the caller actually has one — {@code AssetSessionController}
+     * always does, since it runs behind authentication. Applied via {@link AssetUsage#withPilot} on
+     * open, and (per {@link AssetUsage#pilotId()}'s "first attribution wins" rule) only when the
+     * usage being promoted or already-open does not already carry one; a usage a stream opened and
+     * an operator later engages is backfilled this way, honestly, without disturbing a pilot an
+     * earlier engage already recorded.
+     *
+     * @param assetId       the asset to engage
+     * @param pilotIdOrNull the operator engaging it, or {@code null} when genuinely unknown
      * @return the open usage, now attributed to {@link UsageOrigin#OPERATOR} (newly opened,
      *         promoted, or already engaged)
      * @throws NullPointerException     if {@code assetId} is {@code null}
@@ -293,7 +305,7 @@ public final class UsageTracker {
      * @throws IllegalStateException    if the asset is not in service, or is grounded for
      *                                  maintenance (docs/plans/active/ASSET-FLOWS-PLAN.md S1)
      */
-    public AssetUsage engage(AssetId assetId) {
+    public AssetUsage engage(AssetId assetId, UserId pilotIdOrNull) {
         Objects.requireNonNull(assetId, "assetId must not be null");
         Asset asset = requireActiveAsset(assetId); // devices() needed below to open telemetry -- see class javadoc
         requireNotMaintenanceGrounded(assetId);
@@ -306,13 +318,16 @@ public final class UsageTracker {
         synchronized (tracking) {
             if (tracking.usage == null) {
                 tracking.usage = usageSessionService.open(assetId, null, UsageOrigin.OPERATOR,
-                        phaseSettings.clock().get());
+                        phaseSettings.clock().get(), pilotIdOrNull);
                 openedUsageId = tracking.usage.id();
                 openedPhase = tracking.usage.phase();
                 openedNow = true;
                 result = tracking.usage;
             } else if (tracking.usage.origin() != UsageOrigin.OPERATOR) {
                 tracking.usage = tracking.usage.withOrigin(UsageOrigin.OPERATOR);
+                if (tracking.usage.pilotId() == null && pilotIdOrNull != null) {
+                    tracking.usage = tracking.usage.withPilot(pilotIdOrNull);
+                }
                 toPersist = tracking.usage;
                 result = tracking.usage;
             } else {
@@ -442,11 +457,12 @@ public final class UsageTracker {
      * depends on warehouse (the pure leaf every context may read) and {@code MaintenanceQuery} is
      * filed in warehouse's {@code application} package precisely so a cross-context caller like this
      * one need not import {@code domain.port}. Unlike {@code DefaultFlightCommandService#arm} and
-     * {@code DefaultManualControlService#engage}, this refusal is <em>not</em> audited: {@code
-     * engage(AssetId)} carries no acting-user context to attribute an audit entry to, and {@link
-     * #requireActiveAsset}'s sibling "not in service" refusal on the very same call path has never
-     * been audited either — this stays consistent with that existing precedent rather than growing a
-     * new constructor parameter purely to attribute one more refusal.
+     * {@code DefaultManualControlService#engage}, this refusal is <em>not</em> audited: {@link
+     * #engage}'s {@code pilotIdOrNull} (docs/plans/active/ASSET-FLOWS-PLAN.md §2, D1p) attributes the
+     * usage it opens, but there is no audit-trail entry for this method to attribute in the first
+     * place — {@link #requireActiveAsset}'s sibling "not in service" refusal on the very same call
+     * path has never been audited either — this stays consistent with that existing precedent rather
+     * than building a new audit path purely to cover one more refusal.
      */
     private void requireNotMaintenanceGrounded(AssetId assetId) {
         boolean grounded = maintenanceQuery.openBlockers(assetId).stream()
@@ -588,8 +604,10 @@ public final class UsageTracker {
             // so each gets its own boolean rather than reusing "first active device" for both.
             usageOpenedNow = tracking.usage == null;
             if (usageOpenedNow) {
-                tracking.usage =
-                        usageSessionService.open(asset.id(), streamId, UsageOrigin.STREAM, phaseSettings.clock().get());
+                // pilotId null: a device pushing a stream carries no acting-user context (see
+                // AssetUsage#pilotId() javadoc) -- an operator later engaging backfills it, see #engage.
+                tracking.usage = usageSessionService.open(asset.id(), streamId, UsageOrigin.STREAM,
+                        phaseSettings.clock().get(), null);
                 openedUsageId = tracking.usage.id();
                 openedPhase = tracking.usage.phase();
             }

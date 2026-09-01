@@ -5,6 +5,7 @@ import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UsageId;
 import com.drones.vision.kernel.UsageOrigin;
+import com.drones.vision.kernel.UserId;
 import java.time.Instant;
 
 /**
@@ -45,10 +46,18 @@ import java.time.Instant;
  * @param phase         this usage's aircraft-state phase (docs/plans/active/DRONE-ONBOARDING-PLAN.md §2.3,
  *                      Wave O7); driven by {@code UsageTracker} in vision-perception, see {@link UsagePhase}
  * @param origin        which verb opened this session — see {@link UsageOrigin}
+ * @param pilotId       the operator this session is attributed to, or {@code null} when genuinely
+ *                      unknown (docs/plans/active/ASSET-FLOWS-PLAN.md §2, D1p) — stamped, when the
+ *                      acting user is actually known at the moment attribution first becomes
+ *                      possible, by {@code UsageTracker#engage} (the operator explicitly asserting
+ *                      "I am flying this"); a usage a stream opened with no operator ever engaging
+ *                      it stays {@code null} honestly, the same "unknown, not fabricated" posture
+ *                      {@link #streamId()} already documents. Never overwritten once set — first
+ *                      attribution wins, mirroring {@code streamId}'s own "recorded once" rule.
  */
 public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant endedAt, GeoPosition startPosition,
                           GeoPosition lastPosition, long sampleCount, StreamId streamId, UsagePhase phase,
-                          UsageOrigin origin) {
+                          UsageOrigin origin, UserId pilotId) {
 
     public AssetUsage {
         if (id == null) {
@@ -83,7 +92,7 @@ public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant
      */
     public AssetUsage closed(Instant endedAt) {
         return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId,
-                phase, origin);
+                phase, origin, pilotId);
     }
 
     /**
@@ -95,7 +104,7 @@ public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant
      */
     public AssetUsage withPositions(GeoPosition startPosition, GeoPosition lastPosition) {
         return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId,
-                phase, origin);
+                phase, origin, pilotId);
     }
 
     /**
@@ -106,7 +115,7 @@ public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant
      */
     public AssetUsage withSampleCount(long sampleCount) {
         return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId,
-                phase, origin);
+                phase, origin, pilotId);
     }
 
     /**
@@ -117,7 +126,7 @@ public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant
      */
     public AssetUsage withPhase(UsagePhase phase) {
         return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId,
-                phase, origin);
+                phase, origin, pilotId);
     }
 
     /**
@@ -131,6 +140,19 @@ public record AssetUsage(UsageId id, AssetId assetId, Instant startedAt, Instant
      */
     public AssetUsage withOrigin(UsageOrigin origin) {
         return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId,
-                phase, origin);
+                phase, origin, pilotId);
+    }
+
+    /**
+     * Returns a copy of this usage with a different {@code pilotId} — used to attribute a usage the
+     * moment the acting user first becomes known (docs/plans/active/ASSET-FLOWS-PLAN.md §2, D1p;
+     * see this record's own {@code pilotId} javadoc for when that is).
+     *
+     * @param pilotId the replacement pilot, or {@code null}
+     * @return a new {@code AssetUsage} with {@code pilotId} replaced
+     */
+    public AssetUsage withPilot(UserId pilotId) {
+        return new AssetUsage(id, assetId, startedAt, endedAt, startPosition, lastPosition, sampleCount, streamId,
+                phase, origin, pilotId);
     }
 }

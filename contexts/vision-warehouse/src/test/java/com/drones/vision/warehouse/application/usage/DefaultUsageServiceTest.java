@@ -56,13 +56,13 @@ class DefaultUsageServiceTest {
 
     private static AssetUsage usage(UsageId id, AssetId assetId, Instant startedAt, Instant endedAt) {
         return new AssetUsage(id, assetId, startedAt, endedAt, null, null, 7, null, UsagePhase.PREFLIGHT,
-                UsageOrigin.STREAM);
+                UsageOrigin.STREAM, null);
     }
 
     private static AssetUsage usageOfStream(AssetId assetId, StreamId streamId) {
         Instant start = Instant.parse("2026-08-04T10:00:00Z");
         return new AssetUsage(UsageId.random(), assetId, start, start.plusSeconds(90), null, null, 7, streamId,
-                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM, null);
     }
 
     @Test
@@ -91,6 +91,34 @@ class DefaultUsageServiceTest {
         assertEquals(end, row.endedAt());
         assertEquals(2610L, row.durationSeconds());
         assertEquals(7, row.sampleCount());
+    }
+
+    @Test
+    void pilotIdFlowsThroughToTheSummaryRowWhenKnown() {
+        AssetId assetId = AssetId.random();
+        Instant start = Instant.parse("2026-08-04T10:36:29.895Z");
+        UserId pilotId = UserId.random();
+        AssetUsage usage = new AssetUsage(UsageId.random(), assetId, start, null, null, null, 0, null,
+                UsagePhase.PREFLIGHT, UsageOrigin.OPERATOR, pilotId);
+        when(usageRepository.findRecent(50)).thenReturn(List.of(usage));
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(assetIn(assetId, GroupId.random(), "Falcon-2")));
+
+        UsageSummary row = service.recent(VisibilityScope.unbounded(), null, 50).get(0);
+
+        assertEquals(pilotId, row.pilotId());
+    }
+
+    @Test
+    void pilotIdIsNullOnTheSummaryRowWhenGenuinelyUnknown() {
+        AssetId assetId = AssetId.random();
+        Instant start = Instant.parse("2026-08-04T10:36:29.895Z");
+        AssetUsage usage = usage(UsageId.random(), assetId, start, null);
+        when(usageRepository.findRecent(50)).thenReturn(List.of(usage));
+        when(assetRepository.findById(assetId)).thenReturn(Optional.of(assetIn(assetId, GroupId.random(), "Falcon-2")));
+
+        UsageSummary row = service.recent(VisibilityScope.unbounded(), null, 50).get(0);
+
+        assertNull(row.pilotId());
     }
 
     @Test

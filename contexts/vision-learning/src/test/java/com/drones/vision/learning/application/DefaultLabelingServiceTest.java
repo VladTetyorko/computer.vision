@@ -269,7 +269,7 @@ class DefaultLabelingServiceTest {
 
     private AssetUsage openUsage(AssetId assetId, StreamId onStream) {
         AssetUsage usage = new AssetUsage(UsageId.random(), assetId, USAGE_STARTED_AT, USAGE_ENDED_AT, null, null, 0,
-                onStream, UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+                onStream, UsagePhase.PREFLIGHT, UsageOrigin.STREAM, null);
         return usageRepository.save(usage);
     }
 
@@ -346,7 +346,7 @@ class DefaultLabelingServiceTest {
         Dataset dataset = dataset(ownership, List.of("building"));
         Asset owningAsset = asset(AssetId.random(), group);
         AssetUsage usage = new AssetUsage(UsageId.random(), owningAsset.id(), USAGE_STARTED_AT, USAGE_ENDED_AT,
-                null, null, 0, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM); // streamId null
+                null, null, 0, null, UsagePhase.PREFLIGHT, UsageOrigin.STREAM, null); // streamId null
         usageRepository.save(usage);
 
         assertThrows(NoSuchElementException.class, () -> service.captureFromReplay(

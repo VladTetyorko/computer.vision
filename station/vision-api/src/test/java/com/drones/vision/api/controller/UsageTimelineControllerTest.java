@@ -75,7 +75,7 @@ class UsageTimelineControllerTest {
 
     private AssetUsage usage(Instant startedAt, Instant endedAt) {
         return new AssetUsage(usageId, assetId, startedAt, endedAt, null, null, 2, null, UsagePhase.PREFLIGHT,
-                UsageOrigin.STREAM);
+                UsageOrigin.STREAM, null);
     }
 
     // ---- recent (docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 4, F8 -- the replay library list) ----
@@ -84,7 +84,8 @@ class UsageTimelineControllerTest {
     void recentReturns200WithMappedRowsOnHappyPath() throws Exception {
         Instant start = Instant.parse("2026-08-04T10:36:29.895Z");
         Instant end = Instant.parse("2026-08-04T11:20:00.000Z");
-        UsageSummary summary = new UsageSummary(usageId, assetId, "Falcon-2", start, end, 2610L, 1234);
+        UserId pilotId = UserId.random();
+        UsageSummary summary = new UsageSummary(usageId, assetId, "Falcon-2", start, end, 2610L, 1234, pilotId);
         when(usageService.recent(eq(VisibilityScope.unbounded()), isNull(), eq(50))).thenReturn(List.of(summary));
 
         mockMvc.perform(get("/api/usages"))
@@ -96,19 +97,21 @@ class UsageTimelineControllerTest {
                 .andExpect(jsonPath("$[0].startedAt").value("2026-08-04T10:36:29.895Z"))
                 .andExpect(jsonPath("$[0].endedAt").value("2026-08-04T11:20:00Z"))
                 .andExpect(jsonPath("$[0].durationSeconds").value(2610))
-                .andExpect(jsonPath("$[0].sampleCount").value(1234));
+                .andExpect(jsonPath("$[0].sampleCount").value(1234))
+                .andExpect(jsonPath("$[0].pilotId").value(pilotId.value().toString()));
     }
 
     @Test
     void recentOmitsEndedAtAndDurationSecondsForAStillOpenUsage() throws Exception {
         Instant start = Instant.parse("2026-08-04T10:36:29.895Z");
-        UsageSummary summary = new UsageSummary(usageId, assetId, "Falcon-2", start, null, null, 12);
+        UsageSummary summary = new UsageSummary(usageId, assetId, "Falcon-2", start, null, null, 12, null);
         when(usageService.recent(eq(VisibilityScope.unbounded()), isNull(), eq(50))).thenReturn(List.of(summary));
 
         mockMvc.perform(get("/api/usages"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].endedAt").doesNotExist())
-                .andExpect(jsonPath("$[0].durationSeconds").doesNotExist());
+                .andExpect(jsonPath("$[0].durationSeconds").doesNotExist())
+                .andExpect(jsonPath("$[0].pilotId").doesNotExist());
     }
 
     @Test
@@ -358,7 +361,8 @@ class UsageTimelineControllerTest {
         StreamId streamId = StreamId.random();
         Instant start = Instant.parse("2026-08-04T10:36:29.895Z");
         Instant end = Instant.parse("2026-08-04T11:20:00.000Z");
-        UsageSummary summary = new UsageSummary(usageId, assetId, "Falcon-2", start, end, 2610L, 1234);
+        UserId pilotId = UserId.random();
+        UsageSummary summary = new UsageSummary(usageId, assetId, "Falcon-2", start, end, 2610L, 1234, pilotId);
         when(usageService.byStream(VisibilityScope.unbounded(), streamId)).thenReturn(Optional.of(summary));
 
         mockMvc.perform(get("/api/usages/by-stream/{streamId}", streamId.value()))
@@ -367,7 +371,8 @@ class UsageTimelineControllerTest {
                 .andExpect(jsonPath("$.assetId").value(assetId.value().toString()))
                 .andExpect(jsonPath("$.assetName").value("Falcon-2"))
                 .andExpect(jsonPath("$.endedAt").value("2026-08-04T11:20:00Z"))
-                .andExpect(jsonPath("$.durationSeconds").value(2610));
+                .andExpect(jsonPath("$.durationSeconds").value(2610))
+                .andExpect(jsonPath("$.pilotId").value(pilotId.value().toString()));
     }
 
     @Test

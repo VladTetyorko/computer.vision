@@ -51,6 +51,13 @@ import java.util.UUID;
  * {@link com.drones.vision.adapter.persistence.mapper.AssetUsageMapper} to handle here the way it
  * does for {@code phase}.
  *
+ * <p>{@code pilotId} (docs/plans/active/ASSET-FLOWS-PLAN.md §2, D1p) maps {@code pilot_id}, a
+ * nullable UUID column added schema-only, ahead of any domain field, by {@code
+ * V28__asset_inventory.sql} (the same "column exists ahead of the domain" precedent {@code
+ * first_armed_at}/{@code last_disarmed_at} set in V19 — see above) — this wave is what finally maps
+ * it, onto {@link com.drones.vision.warehouse.domain.model.AssetUsage#pilotId()}. No new migration
+ * was needed.
+ *
  * <p>{@link com.drones.vision.adapter.persistence.mapper.AssetUsageMapper} owns the mapping in
  * both directions. No FK to {@code assets} — same no-cross-entity-FK convention as the P-a schema
  * (see {@code CategoryEntity}/{@code AssetEntity}'s javadoc); {@code asset_id} is indexed instead
@@ -105,6 +112,9 @@ public class AssetUsageEntity {
     @Column(name = "origin", nullable = false)
     private UsageOrigin origin;
 
+    @Column(name = "pilot_id")
+    private UUID pilotId;
+
     /** JPA only. */
     protected AssetUsageEntity() {
     }
@@ -112,7 +122,7 @@ public class AssetUsageEntity {
     public AssetUsageEntity(UUID id, UUID assetId, Instant startedAt, Instant endedAt, Double startLatitude,
                              Double startLongitude, Double startAltitudeMeters, Double lastLatitude,
                              Double lastLongitude, Double lastAltitudeMeters, long sampleCount, UUID streamId,
-                             UsagePhase phase, UsageOrigin origin) {
+                             UsagePhase phase, UsageOrigin origin, UUID pilotId) {
         this.id = id;
         this.assetId = assetId;
         this.startedAt = startedAt;
@@ -127,6 +137,7 @@ public class AssetUsageEntity {
         this.streamId = streamId;
         this.phase = phase;
         this.origin = origin;
+        this.pilotId = pilotId;
     }
 
     public UUID id() {
@@ -183,5 +194,9 @@ public class AssetUsageEntity {
 
     public UsageOrigin origin() {
         return origin;
+    }
+
+    public UUID pilotId() {
+        return pilotId;
     }
 }

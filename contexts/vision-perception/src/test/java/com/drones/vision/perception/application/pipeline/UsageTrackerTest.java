@@ -263,6 +263,9 @@ class UsageTrackerTest {
         assertNull(opened.endedAt());
         assertEquals(camStreamId, opened.streamId(),
                 "the usage must be stamped with the FIRST device's streamId, not any later one");
+        assertNull(opened.pilotId(),
+                "a device-pushed stream carries no acting-user context (docs/plans/active/"
+                        + "ASSET-FLOWS-PLAN.md §2, D1p) -- an operator later engaging backfills it");
 
         // First stop: the asset still has one active device, usage must stay open.
         tracker.onStreamStopped(cam.id());
@@ -885,7 +888,7 @@ class UsageTrackerTest {
         ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
         UsageTracker tracker = tracker(List.of(source));
 
-        AssetUsage opened = tracker.engage(asset.id());
+        AssetUsage opened = tracker.engage(asset.id(), null);
 
         assertEquals(asset.id(), opened.assetId());
         assertNull(opened.streamId(), "an operator-engaged usage has no video stream to stamp");
@@ -903,12 +906,87 @@ class UsageTrackerTest {
         when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
         UsageTracker tracker = tracker(List.of());
 
-        AssetUsage first = tracker.engage(asset.id());
-        AssetUsage second = tracker.engage(asset.id());
+        AssetUsage first = tracker.engage(asset.id(), null);
+        AssetUsage second = tracker.engage(asset.id(), null);
 
         assertEquals(first.id(), second.id());
         assertEquals(UsageOrigin.OPERATOR, second.origin());
         verify(usageRepository, times(1)).save(any()); // the second call is a pure no-op, no re-save
+    }
+
+    // -- pilot attribution (docs/plans/active/ASSET-FLOWS-PLAN.md §2, D1p) ----------------------
+
+    @Test
+    void engageWithAKnownPilotStampsTheOpenedUsage() {
+        Asset asset = asset(Set.of(telemetryDevice("tel-1").id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        UsageTracker tracker = tracker(List.of());
+        UserId pilotId = UserId.random();
+
+        AssetUsage opened = tracker.engage(asset.id(), pilotId);
+
+        assertEquals(pilotId, opened.pilotId());
+    }
+
+    @Test
+    void engageWithNoKnownPilotLeavesPilotIdHonestlyNull() {
+        Asset asset = asset(Set.of(telemetryDevice("tel-1").id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        UsageTracker tracker = tracker(List.of());
+
+        AssetUsage opened = tracker.engage(asset.id(), null);
+
+        assertNull(opened.pilotId());
+    }
+
+    @Test
+    void engagingAnAlreadyOperatorEngagedUsageNeverOverwritesTheRecordedPilot() {
+        // "First attribution wins" (AssetUsage#pilotId() javadoc): idempotent re-engage, even by a
+        // different pilot, must not disturb who was recorded first.
+        Asset asset = asset(Set.of(telemetryDevice("tel-1").id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        UsageTracker tracker = tracker(List.of());
+        UserId firstPilot = UserId.random();
+        UserId secondPilot = UserId.random();
+
+        AssetUsage first = tracker.engage(asset.id(), firstPilot);
+        AssetUsage second = tracker.engage(asset.id(), secondPilot);
+
+        assertEquals(firstPilot, first.pilotId());
+        assertEquals(firstPilot, second.pilotId(), "re-engaging must never overwrite the first-recorded pilot");
+    }
+
+    @Test
+    void promotingAStreamOpenedUsageBackfillsTheEngagingPilot() {
+        // A device-pushed stream carries no acting-user context (see #deviceStreamStarted), so the
+        // usage it opens has pilotId == null until an operator explicitly engages it.
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        UsageTracker tracker = tracker(List.of(new ScriptedTelemetrySource(d -> true)));
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+        UserId pilotId = UserId.random();
+
+        AssetUsage promoted = tracker.engage(asset.id(), pilotId);
+
+        assertEquals(pilotId, promoted.pilotId(), "promoting a stream-opened usage must backfill the engaging pilot");
+    }
+
+    @Test
+    void promotingAStreamOpenedUsageWithNoPilotKnownLeavesPilotIdNull() {
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        UsageTracker tracker = tracker(List.of(new ScriptedTelemetrySource(d -> true)));
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+
+        AssetUsage promoted = tracker.engage(asset.id(), null);
+
+        assertNull(promoted.pilotId());
     }
 
     @Test
@@ -918,7 +996,7 @@ class UsageTrackerTest {
         UsageTracker tracker = tracker(List.of());
 
         org.junit.jupiter.api.Assertions.assertThrows(java.util.NoSuchElementException.class,
-                () -> tracker.engage(unknown));
+                () -> tracker.engage(unknown, null));
         verify(usageRepository, never()).save(any());
     }
 
@@ -931,7 +1009,7 @@ class UsageTrackerTest {
         when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
         UsageTracker tracker = tracker(List.of());
 
-        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () -> tracker.engage(asset.id()));
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class, () -> tracker.engage(asset.id(), null));
         verify(usageRepository, never()).save(any());
     }
 
@@ -946,7 +1024,7 @@ class UsageTrackerTest {
         UsageTracker tracker = tracker(List.of());
 
         IllegalStateException ex = org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
-                () -> tracker.engage(asset.id()));
+                () -> tracker.engage(asset.id(), null));
 
         assertTrue(ex.getMessage().contains(asset.id().value().toString()), "got: " + ex.getMessage());
         verify(usageRepository, never()).save(any());
@@ -962,7 +1040,7 @@ class UsageTrackerTest {
                 MaintenanceKind.REPAIR, Instant.EPOCH, null, UserId.random(), "Swapping a prop", null));
         UsageTracker tracker = tracker(List.of());
 
-        AssetUsage opened = tracker.engage(asset.id());
+        AssetUsage opened = tracker.engage(asset.id(), null);
 
         assertEquals(UsageOrigin.OPERATOR, opened.origin());
     }
@@ -995,7 +1073,7 @@ class UsageTrackerTest {
         Asset asset = asset(Set.of(telemetryDevice("tel-1").id()));
         when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
         UsageTracker tracker = tracker(List.of());
-        AssetUsage opened = tracker.engage(asset.id());
+        AssetUsage opened = tracker.engage(asset.id(), null);
 
         Optional<AssetUsage> result = tracker.disengage(asset.id());
 
@@ -1057,7 +1135,7 @@ class UsageTrackerTest {
         ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
         UsageTracker tracker = tracker(List.of(source));
 
-        AssetUsage engaged = tracker.engage(asset.id()); // opens the OPERATOR-origin usage first
+        AssetUsage engaged = tracker.engage(asset.id(), null); // opens the OPERATOR-origin usage first
         tracker.onStreamStarted(telemetryDevice.id(), StreamId.random()); // a stream starts on top of it
         verify(usageRepository, times(1)).save(any()); // starting the stream must NOT open a second usage
 
@@ -1083,7 +1161,7 @@ class UsageTrackerTest {
         StreamId streamId = StreamId.random();
         tracker.onStreamStarted(telemetryDevice.id(), streamId); // opens a STREAM-origin usage first
 
-        AssetUsage promoted = tracker.engage(asset.id());
+        AssetUsage promoted = tracker.engage(asset.id(), null);
 
         verify(usageRepository, times(2)).save(any()); // 1 open (stream) + 1 promote (engage) -- never a 2nd open
         assertEquals(UsageOrigin.OPERATOR, promoted.origin());
@@ -1102,7 +1180,7 @@ class UsageTrackerTest {
         when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
         when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
         UsageTracker tracker = tracker(List.of(new ScriptedTelemetrySource(d -> true)));
-        AssetUsage engaged = tracker.engage(asset.id());
+        AssetUsage engaged = tracker.engage(asset.id(), null);
         tracker.onStreamStarted(telemetryDevice.id(), StreamId.random()); // device is still active
 
         Optional<AssetUsage> result = tracker.disengage(asset.id());
@@ -1134,7 +1212,7 @@ class UsageTrackerTest {
         ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
         UsageTracker tracker = tracker(List.of(source));
 
-        tracker.engage(asset.id());
+        tracker.engage(asset.id(), null);
         assertEquals(List.of(telemetryDevice.id()), source.openedDevices,
                 "engage on a telemetry-only asset must open telemetry for its device");
 
@@ -1157,7 +1235,7 @@ class UsageTrackerTest {
         tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
         assertEquals(1, source.openedDevices.size(), "the stream start must open telemetry for the device");
 
-        AssetUsage promoted = tracker.engage(asset.id());
+        AssetUsage promoted = tracker.engage(asset.id(), null);
 
         assertEquals(UsageOrigin.OPERATOR, promoted.origin());
         assertEquals(1, source.openedDevices.size(),
@@ -1173,7 +1251,7 @@ class UsageTrackerTest {
         when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
         ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
         UsageTracker tracker = tracker(List.of(source));
-        tracker.engage(asset.id());
+        tracker.engage(asset.id(), null);
         tracker.onStreamStarted(telemetryDevice.id(), StreamId.random()); // device still active afterward
 
         Optional<AssetUsage> result = tracker.disengage(asset.id());
@@ -1193,7 +1271,7 @@ class UsageTrackerTest {
         when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
         ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
         UsageTracker tracker = tracker(List.of(source));
-        tracker.engage(asset.id());
+        tracker.engage(asset.id(), null);
         assertEquals(1, source.openedDevices.size());
 
         Optional<AssetUsage> result = tracker.disengage(asset.id());
@@ -1218,7 +1296,7 @@ class UsageTrackerTest {
         when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
         ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
         UsageTracker tracker = tracker(List.of(source));
-        AssetUsage engaged = tracker.engage(asset.id());
+        AssetUsage engaged = tracker.engage(asset.id(), null);
         tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
 
         tracker.onStreamStopped(telemetryDevice.id());
@@ -1248,7 +1326,7 @@ class UsageTrackerTest {
         when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
         ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
         UsageTracker tracker = tracker(List.of(source));
-        tracker.engage(asset.id());
+        tracker.engage(asset.id(), null);
 
         Telemetry sample = telemetry(telemetryDevice.id(), 50.0, 30.0, 95.0);
         source.emit(telemetryDevice.id(), sample);

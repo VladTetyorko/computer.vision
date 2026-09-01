@@ -36,9 +36,15 @@ import com.drones.vision.api.security.CurrentUser;
  * the verb by name.
  *
  * <h2>Who the change is attributed to</h2>
- * There is no attribution field on {@link AssetUsage} yet — {@link UsageTracker} does not take one
- * — so unlike {@link AssetController}'s mutations, neither handler here passes a user id through.
- * {@link CurrentUser} is still consulted, for scope alone (see below).
+ * {@link #engage} (docs/plans/active/ASSET-FLOWS-PLAN.md §2, D1p) passes {@link
+ * CurrentUser#userId()} through to {@link UsageTracker#engage}, which stamps it onto {@link
+ * AssetUsage#pilotId()} — this endpoint always runs behind authentication, so a pilot is always
+ * known here. {@link AssetStreamController#startStream}, by contrast, consults {@link CurrentUser}
+ * for scope alone and never threads it into the usage a stream start opens (see that controller's
+ * own "Who the change is attributed to" section); a stream-opened usage's {@code pilotId} stays
+ * {@code null} until an operator later calls {@link #engage} here, which backfills it via
+ * promotion. {@link #disengage} has nothing to attribute — it never creates or first-attributes a
+ * usage, only closes or demotes one.
  *
  * <h2>Visibility scoping, not management authority</h2>
  * Both handlers re-read the asset through {@link CurrentUser#scope()} before mutating — the same
@@ -88,7 +94,7 @@ public class AssetSessionController {
     public AssetUsageResponse engage(@PathVariable String id) {
         AssetId assetId = AssetId.of(id);
         requireInScope(assetId);
-        return AssetUsageResponse.from(usageTracker.engage(assetId));
+        return AssetUsageResponse.from(usageTracker.engage(assetId, currentUser.userId()));
     }
 
     /**

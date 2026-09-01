@@ -91,7 +91,7 @@ class GeoCorrectionControllerTest {
 
     private static AssetUsage usage(UsageId usageId, AssetId assetId) {
         return new AssetUsage(usageId, assetId, Instant.parse("2026-08-19T09:00:00Z"), null, null, null, 0L, null,
-                UsagePhase.IN_FLIGHT, UsageOrigin.STREAM);
+                UsagePhase.IN_FLIGHT, UsageOrigin.STREAM, null);
     }
 
     private static TrackCorrection noFix(AssetId assetId, UsageId usageId, Instant frameAt) {

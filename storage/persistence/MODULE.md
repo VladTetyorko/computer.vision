@@ -16,8 +16,9 @@ All version pins come from `spring-boot-dependencies` (this module's grandparent
 
 **Used by:** vision-app (`PersistenceWiringConfiguration`, unconditional).
 
-**Build/test:** `./mvnw -B -pl storage/persistence test` — 267 tests (last measured, ZERO-CONFIG-ONBOARDING
-Z2c; up from 260 before that wave — count from Maven's own summary line, see Gotchas), one shared `postgres:16`
+**Build/test:** `./mvnw -B -pl storage/persistence test` — 269 tests (last measured, ASSET-FLOWS
+BK4; up from 267 after ZERO-CONFIG-ONBOARDING Z2c, 260 before that — count from Maven's own summary
+line, see Gotchas), one shared `postgres:16`
 Testcontainers container per test class. Requires a running Docker daemon — there is no non-Docker
 path; tests skip cleanly (not fail) when Docker is unavailable. Use a **two-step** build when a
 sibling context module is mid-flight elsewhere in the reactor: `./mvnw -B -pl
@@ -48,7 +49,7 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 | `JpaCategoryRepository` | `CategoryRepositoryPort` | merge upsert, hard delete |
 | `JpaDeviceRepository` | `DeviceRepositoryPort` | merge upsert, hard delete |
 | `JpaAssetRepository` | `AssetRepositoryPort` | merge upsert, hard delete, `findByDeviceId`; `AssetMapper` flattens `Identity`/`Custody` onto the asset row directly (see WAREHOUSE-UX-PLAN.md D7, `V28`) |
-| `JpaAssetUsageRepository` | `AssetUsageRepositoryPort` | merge upsert; `findByStream` is a deliberately unindexed scan (one-row-per-flight table, read once per stream lookup); `findRecent(int)` is the fleet-wide sibling of `findRecentByAsset`; `totalFlightSecondsByAsset()` (WAREHOUSE-UX W8) is this module's **first native SELECT-with-row-projection query** (every earlier native query was a batch `DELETE`/`executeUpdate`) — `em.createNativeQuery(...)` returning `List<Object[]>`, needed because plain JPQL cannot express `coalesce(ended_at, now())` |
+| `JpaAssetUsageRepository` | `AssetUsageRepositoryPort` | merge upsert; `findByStream` is a deliberately unindexed scan (one-row-per-flight table, read once per stream lookup); `findRecent(int)` is the fleet-wide sibling of `findRecentByAsset`; `totalFlightSecondsByAsset()` (WAREHOUSE-UX W8) is this module's **first native SELECT-with-row-projection query** (every earlier native query was a batch `DELETE`/`executeUpdate`) — `em.createNativeQuery(...)` returning `List<Object[]>`, needed because plain JPQL cannot express `coalesce(ended_at, now())`; `AssetUsageEntity#pilotId`/`AssetUsageMapper` (ASSET-FLOWS-PLAN §2 D1p, wave BK4) finally map the `pilot_id` column `V28` added schema-only — no new migration, see the `V28` row below |
 | `JpaTelemetryRepository` | `TelemetryRepositoryPort` | always `persist` (append-only); prune-on-write retention (100k rows/usage default); optional batched-write mode via `TelemetryBatchSettings` (see Batching) — production wiring still uses the immediate-mode constructor; `findByUsage`'s `limit` returns the **earliest** samples, not the newest (see Gotchas) |
 | `JpaDetectionRepository` | `DetectionRepositoryPort` | always `persist`; prune-on-write (100k rows/stream); `DetectionQuery#to` treated as inclusive despite the port's javadoc calling it exclusive (see Gotchas) |
 | `JpaAssetImageRepository` | `AssetImageRepositoryPort` | keyed by `assetId` itself (no synthetic id — at most one image per asset); `data` plain `byte[]`/`bytea` |
@@ -115,6 +116,9 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 - **`AssetUsageEntity#phase`** (nullable, `V19`) falls back to `UsagePhase.PREFLIGHT` on `toDomain`
   only for a genuinely `null` column (a pre-`V19` row); **`AssetUsageEntity#origin`** (`V26`) is
   `NOT NULL` with a database default, so `AssetUsageMapper` has no legacy-null case for it at all.
+  **`AssetUsageEntity#pilotId`** (nullable, `V28`, mapped `AssetUsageMapper` wave BK4) is plain
+  `UUID`↔`UserId` — no legacy-null special case either, since "unknown pilot" and "column never
+  populated" are the same honest `null` at every row's actual, unbackfilled history.
 - **`AssetEntity` flattens `Identity`/`Custody` onto its own columns** (`V28`) rather than nesting a
   jsonb blob — `serialNumber`/`make`/`model`/`registration`/`custodianId`/`location`/`custodySince`
   are plain nullable columns, `inventoryState` is `@Enumerated(EnumType.STRING)`, and
@@ -193,7 +197,7 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 | `V25__device_origin.sql` | `devices.origin` (`LIVE`/`SIMULATED`, `NOT NULL DEFAULT 'LIVE'`), backfilling `SIMULATED` for devices already on a `simulated`-category asset |
 | `V26__asset_usage_origin.sql` | `asset_usages.origin` (`STREAM`/`TELEMETRY`/`OPERATOR`, `NOT NULL DEFAULT 'STREAM'`) — single statement, no follow-up `UPDATE` needed since every pre-existing row's correct value is the same one |
 | `V27__rc_relay_readiness.sql` | `feature_requirements.required_parameter_value`/`forbidden_parameter_bits` (nullable); retires the single always-trivially-satisfied `id='ardupilot:rc-relay'` placeholder row V18 seeded and replaces it with two independent, value-aware rows under the same `rc-relay` feature key — a GCS-sysid value check (`SYSID_MYGCS` must equal `255`) and an `RC_OPTIONS` forbidden-bits check (bit 1 must be clear) — net row count for `firmware='ardupilot'` goes from 11 to 12 (FLEET-RADIO-PLAN.md R6) |
-| `V28__asset_inventory.sql` | `assets` += `serial_number`/`make`/`model`/`registration` (from `Identity`), `custodian_id`/`location`/`custody_since` (from `Custody`), `inventory_state` (stored values only — `IN_STOCK`/`MAINTENANCE`/`RETIRED`, default `IN_STOCK`), `created_at`/`updated_at`; backfills `registration` from the pre-existing `attributes->>'registration'` key then removes that key (WAREHOUSE-UX-PLAN.md D8); `categories` += `connected BOOLEAN NOT NULL DEFAULT TRUE`, seeding three passive categories (`battery`/`spare`/`radio`) with `connected=false`; new `maintenance_records` (audited) and `asset_notes` (audited) tables; `asset_usages.pilot_id` (nullable UUID, schema-only — no domain field maps it yet, same status as `first_armed_at`/`last_disarmed_at`) |
+| `V28__asset_inventory.sql` | `assets` += `serial_number`/`make`/`model`/`registration` (from `Identity`), `custodian_id`/`location`/`custody_since` (from `Custody`), `inventory_state` (stored values only — `IN_STOCK`/`MAINTENANCE`/`RETIRED`, default `IN_STOCK`), `created_at`/`updated_at`; backfills `registration` from the pre-existing `attributes->>'registration'` key then removes that key (WAREHOUSE-UX-PLAN.md D8); `categories` += `connected BOOLEAN NOT NULL DEFAULT TRUE`, seeding three passive categories (`battery`/`spare`/`radio`) with `connected=false`; new `maintenance_records` (audited) and `asset_notes` (audited) tables; `asset_usages.pilot_id` (nullable UUID — schema-only when this migration landed; mapped by `AssetUsageEntity#pilotId`/`AssetUsageMapper` in ASSET-FLOWS wave BK4, no new migration needed) |
 | `V29__cv_profiles.sql` | `cv_profiles` (audited) + `cv_profile_bindings` (audited, composite PK `(scope_kind, scope_id)`); seeds the four built-in profiles (`people-vehicles`/`wide-search`/`military-vehicles`/`video-only`, fixed ids) with `built_in=true`/`group_id=NULL` and `tracking`/`event_rule` byte-identical to `TrackingConfig.defaults()`/`EventRuleConfig.defaults()`; **zero bindings seeded** (CV-SETTINGS-PLAN.md §3.1 rule 3 — no feature flag, every existing stream keeps resolving to `PipelineConfig.defaults()`); two deviations from §5.3's literal column list, both flagged in the migration's own header: `model_id`/`model_version` split (not one `model` column) and an added `event_rule` column (missing from §5.3 entirely) |
 | `V30__cv_model_registry.sql` | `cv_models` (audited, composite PK `(model_id, version)`, every provenance column + `metrics` nullable) + `cv_training_runs` (audited, `idx_cv_training_runs_started_at` for `findAll(limit)`'s newest-first order); no seed rows — the config-seeded model roster merges with the worker's live `ListModels` response at the application layer, not baked into this schema (fixes H4/H7) |
 | `V31__discovery_inbox.sql` | `discovery_candidates` (audited): domain-owned `id` PK, `identity_key` (the mDNS/ONVIF/MAVLink-derived stable key `DiscoveryCandidate` upserts on), `method`/`name`/`address`, flattened `suggested_category`/`suggested_stream_protocol`/`suggested_stream_uri`/`suggested_stream_options` (nullable as a group — a candidate with no offered stream), `details` jsonb `NOT NULL DEFAULT '{}'`, `first_seen`/`last_seen` `TIMESTAMPTZ`, `status`, nullable `registered_asset_id` (no FK — the same "no cross-aggregate FK" posture every other table in this schema takes, see Conventions); unique index on `identity_key` (the upsert target) + index on `last_seen` (the inbox list's sort column) |
@@ -432,6 +436,17 @@ a re-report, `DISMISSED`/`REGISTERED` status round-tripping, and newest-first or
 tests (Maven's own summary line); `BUILD SUCCESS`, Docker ran (not skipped — Testcontainers started a
 real `postgres:16`, Flyway migrated through `V31`, every nested class in the table above executed).
 
+**ASSET-FLOWS wave BK4 (D1p) done.** `AssetUsageEntity#pilotId`/`AssetUsageMapper` now map the
+`pilot_id` column `V28__asset_inventory.sql` added schema-only, closing `PLATFORM-AUDIT-2026-08-21.md`
+R1 gap #4/T4 ("every flight record is anonymous") on the persistence side. **No new migration** —
+confirmed against the ground-truth Flyway slot ledger mid-wave (master's next free slot is `V33`,
+not `V31`/`V32` as this wave's original brief assumed); moot for this wave regardless, since `V28`
+already carries the column and nothing here needed a schema change. `PostgresDockerIntegrationTest`
+gained two new `AssetUsageRepositoryTests` cases (`savedUsageWithAKnownPilotRoundTripsExactly`,
+`savedUsageWithNoPilotRoundTripsAsNull`). 267 → 269 tests (Maven's own summary line); `BUILD SUCCESS`,
+Docker ran (not skipped — Testcontainers started a real `postgres:16`).
+
 See `docs/plans/README.md` for the plan-status authority behind the phase references throughout this
 file (MVP2, POSTGRES-ONLY-CONTEXT, SCALE-100, FIXED-CAMERA-GEO, VISUAL-GEO-V2, DRONE-ONBOARDING,
-CONTROLLER-SETUP-CONTEXT, ARCHITECTURE-AUDIT-2026-08-26, CV-SETTINGS, ZERO-CONFIG-ONBOARDING-CONTEXT).
+CONTROLLER-SETUP-CONTEXT, ARCHITECTURE-AUDIT-2026-08-26, CV-SETTINGS, ZERO-CONFIG-ONBOARDING-CONTEXT,
+ASSET-FLOWS).

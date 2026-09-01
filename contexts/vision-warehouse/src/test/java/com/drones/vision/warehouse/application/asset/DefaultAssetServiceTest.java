@@ -413,7 +413,7 @@ class DefaultAssetServiceTest {
         GeoPosition last = new GeoPosition(50.01, 30.01, null);
         Instant startedAt = Instant.now().minusSeconds(60);
         AssetUsage usage = new AssetUsage(UsageId.random(), asset.id(), startedAt, null, start, last, 5, null,
-                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM, null);
         when(assetRepository.findAll()).thenReturn(List.of(asset));
         when(usageRepository.findRecentByAsset(eq(asset.id()), eq(1))).thenReturn(List.of(usage));
 
@@ -429,7 +429,7 @@ class DefaultAssetServiceTest {
         Asset asset = asset(Set.of(cam.id()));
         GeoPosition start = new GeoPosition(50.0, 30.0, null);
         AssetUsage usage = new AssetUsage(UsageId.random(), asset.id(), Instant.now(), null, start, null, 0, null,
-                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM, null);
         when(assetRepository.findAll()).thenReturn(List.of(asset));
         when(usageRepository.findRecentByAsset(eq(asset.id()), eq(1))).thenReturn(List.of(usage));
 
@@ -454,7 +454,7 @@ class DefaultAssetServiceTest {
         Device cam = device("cam-1");
         Asset asset = asset(Set.of(cam.id()));
         AssetUsage usage = new AssetUsage(UsageId.random(), asset.id(), Instant.now(), null, null, null, 3, null,
-                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM, null);
         when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
         when(deviceService.find(cam.id())).thenReturn(Optional.of(cam));
         when(usageRepository.findRecentByAsset(eq(asset.id()), anyInt())).thenReturn(List.of(usage));
@@ -864,7 +864,7 @@ class DefaultAssetServiceTest {
 
     private static AssetUsage usage(AssetId assetId) {
         return new AssetUsage(UsageId.random(), assetId, Instant.now(), null, null, null, 0, null,
-                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM, null);
     }
 
     private static DeviceRegistration registration(String name) {

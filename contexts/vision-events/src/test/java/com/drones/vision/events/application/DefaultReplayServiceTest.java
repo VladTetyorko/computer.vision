@@ -72,22 +72,22 @@ class DefaultReplayServiceTest {
 
     private AssetUsage closedUsage(Instant startedAt, Instant endedAt) {
         return new AssetUsage(usageId, assetId, startedAt, endedAt, null, null, 0, null, UsagePhase.PREFLIGHT,
-                UsageOrigin.STREAM);
+                UsageOrigin.STREAM, null);
     }
 
     private AssetUsage openUsage(Instant startedAt) {
         return new AssetUsage(usageId, assetId, startedAt, null, null, null, 0, null, UsagePhase.PREFLIGHT,
-                UsageOrigin.STREAM);
+                UsageOrigin.STREAM, null);
     }
 
     private AssetUsage closedUsageWithStream(Instant startedAt, Instant endedAt) {
         return new AssetUsage(usageId, assetId, startedAt, endedAt, null, null, 0, STREAM_ID, UsagePhase.PREFLIGHT,
-                UsageOrigin.STREAM);
+                UsageOrigin.STREAM, null);
     }
 
     private AssetUsage openUsageWithStream(Instant startedAt) {
         return new AssetUsage(usageId, assetId, startedAt, null, null, null, 0, STREAM_ID, UsagePhase.PREFLIGHT,
-                UsageOrigin.STREAM);
+                UsageOrigin.STREAM, null);
     }
 
     @Test

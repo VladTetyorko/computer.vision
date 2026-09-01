@@ -107,6 +107,6 @@ public final class DefaultUsageService implements UsageService {
                 ? null
                 : Duration.between(usage.startedAt(), usage.endedAt()).getSeconds();
         return new UsageSummary(usage.id(), usage.assetId(), assetName, usage.startedAt(), usage.endedAt(),
-                durationSeconds, usage.sampleCount());
+                durationSeconds, usage.sampleCount(), usage.pilotId());
     }
 }

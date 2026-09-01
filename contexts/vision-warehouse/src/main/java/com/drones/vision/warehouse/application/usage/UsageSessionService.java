@@ -6,6 +6,7 @@ import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UsageId;
 import com.drones.vision.kernel.UsageOrigin;
+import com.drones.vision.kernel.UserId;
 import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 
@@ -59,9 +60,13 @@ public interface UsageSessionService {
      * @param origin    which verb opened this session (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md
      *                  D2, wave R2 — see {@link UsageOrigin})
      * @param startedAt when the usage was opened
+     * @param pilotIdOrNull the acting user this session is attributed to, or {@code null} when
+     *                  genuinely unknown at open time (docs/plans/active/ASSET-FLOWS-PLAN.md §2,
+     *                  D1p — see {@link AssetUsage#pilotId()})
      * @return the persisted, newly opened usage
      */
-    AssetUsage open(AssetId assetId, StreamId streamIdOrNull, UsageOrigin origin, Instant startedAt);
+    AssetUsage open(AssetId assetId, StreamId streamIdOrNull, UsageOrigin origin, Instant startedAt,
+                     UserId pilotIdOrNull);
 
     /**
      * Folds one telemetry sample's position and the caller-computed phase into {@code usage},

@@ -55,12 +55,12 @@ class DefaultUsageIdleCloseServiceTest {
 
     private static AssetUsage openUsage(AssetId assetId, Instant startedAt, UsagePhase phase) {
         return new AssetUsage(UsageId.random(), assetId, startedAt, null, null, null, 3, null, phase,
-                UsageOrigin.STREAM);
+                UsageOrigin.STREAM, null);
     }
 
     private static AssetUsage closedUsage(AssetId assetId, Instant startedAt, Instant endedAt) {
         return new AssetUsage(UsageId.random(), assetId, startedAt, endedAt, null, null, 3, null,
-                UsagePhase.CLOSED, UsageOrigin.STREAM);
+                UsagePhase.CLOSED, UsageOrigin.STREAM, null);
     }
 
     private static Telemetry sampleAt(Instant at) {

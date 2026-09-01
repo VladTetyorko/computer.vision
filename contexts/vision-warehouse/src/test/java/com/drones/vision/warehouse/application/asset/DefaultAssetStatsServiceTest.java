@@ -50,12 +50,12 @@ class DefaultAssetStatsServiceTest {
 
     private static AssetUsage closedUsage(AssetId assetId, Instant startedAt, Instant endedAt) {
         return new AssetUsage(UsageId.random(), assetId, startedAt, endedAt, null, null, 0, null,
-                UsagePhase.PREFLIGHT, UsageOrigin.STREAM);
+                UsagePhase.PREFLIGHT, UsageOrigin.STREAM, null);
     }
 
     private static AssetUsage openUsage(AssetId assetId, Instant startedAt) {
         return new AssetUsage(UsageId.random(), assetId, startedAt, null, null, null, 0, null, UsagePhase.PREFLIGHT,
-                UsageOrigin.STREAM);
+                UsageOrigin.STREAM, null);
     }
 
     @Test

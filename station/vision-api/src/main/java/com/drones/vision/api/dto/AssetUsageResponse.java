@@ -30,11 +30,16 @@ import java.time.Instant;
  *                      wave R2). Exposed for the same reason {@code phase} is: a future UI wave
  *                      needs to tell an operator-engaged session apart from a stream-opened one to
  *                      render {@code AssetSessionController#disengage} only where it applies
+ * @param pilotId       the operator this usage is attributed to, as a canonical UUID string, or
+ *                      absent if genuinely unknown (docs/plans/active/ASSET-FLOWS-PLAN.md §2,
+ *                      D1p — see {@code AssetUsage#pilotId()}); id only, no display-name
+ *                      resolution, matching {@code MaintenanceRecordResponse#openedBy}'s own
+ *                      precedent
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record AssetUsageResponse(String usageId, Instant startedAt, Instant endedAt,
                                   GeoPositionResponse startPosition, GeoPositionResponse lastPosition,
-                                  long sampleCount, String phase, String origin) {
+                                  long sampleCount, String phase, String origin, String pilotId) {
 
     /**
      * Maps a domain {@link AssetUsage} to its wire representation.
@@ -51,6 +56,7 @@ public record AssetUsageResponse(String usageId, Instant startedAt, Instant ende
                 GeoPositionResponse.from(usage.lastPosition()),
                 usage.sampleCount(),
                 usage.phase() == null ? null : usage.phase().name(),
-                usage.origin() == null ? null : usage.origin().name());
+                usage.origin() == null ? null : usage.origin().name(),
+                usage.pilotId() == null ? null : usage.pilotId().value().toString());
     }
 }

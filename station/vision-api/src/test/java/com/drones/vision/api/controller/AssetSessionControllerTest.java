@@ -100,7 +100,7 @@ class AssetSessionControllerTest {
 
     private static AssetUsage usage(AssetId assetId, UsageOrigin origin) {
         return new AssetUsage(UsageId.random(), assetId, Instant.parse("2026-08-26T09:00:00Z"), null, null, null, 0L,
-                null, UsagePhase.PREFLIGHT, origin);
+                null, UsagePhase.PREFLIGHT, origin, null);
     }
 
     // ---- POST /api/assets/{id}/session ----
@@ -108,15 +108,33 @@ class AssetSessionControllerTest {
     @Test
     void engageReturns200WithTheOpenedUsage() throws Exception {
         AssetId assetId = AssetId.random();
-        AssetUsage opened = usage(assetId, UsageOrigin.OPERATOR);
-        when(usageTracker.engage(assetId)).thenReturn(opened);
+        AssetUsage opened = usage(assetId, UsageOrigin.OPERATOR).withPilot(ownerId);
+        when(usageTracker.engage(assetId, ownerId)).thenReturn(opened);
 
         mockMvc.perform(post("/api/assets/{id}/session", assetId.value()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.usageId").value(opened.id().value().toString()))
-                .andExpect(jsonPath("$.origin").value("OPERATOR"));
+                .andExpect(jsonPath("$.origin").value("OPERATOR"))
+                .andExpect(jsonPath("$.pilotId").value(ownerId.value().toString()));
 
-        verify(usageTracker).engage(assetId);
+        verify(usageTracker).engage(assetId, ownerId);
+    }
+
+    /**
+     * docs/plans/active/ASSET-FLOWS-PLAN.md §2, D1p: {@link AssetSessionController#engage} must
+     * pass {@link CurrentUser#userId()} through to {@link UsageTracker#engage}, not some other
+     * value — this pins the exact argument, distinct from {@link #engageReturns200WithTheOpenedUsage}
+     * only asserting a response shape.
+     */
+    @Test
+    void engagePassesTheCurrentUsersIdThroughToUsageTrackerEngage() throws Exception {
+        AssetId assetId = AssetId.random();
+        when(usageTracker.engage(eq(assetId), eq(ownerId))).thenReturn(usage(assetId, UsageOrigin.OPERATOR));
+
+        mockMvc.perform(post("/api/assets/{id}/session", assetId.value()))
+                .andExpect(status().isOk());
+
+        verify(usageTracker).engage(assetId, ownerId);
     }
 
     @Test
@@ -129,13 +147,14 @@ class AssetSessionControllerTest {
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.error").value("NOT_FOUND"));
 
-        verify(usageTracker, never()).engage(any());
+        verify(usageTracker, never()).engage(any(), any());
     }
 
     @Test
     void engageReturns409ForADeactivatedAsset() throws Exception {
         AssetId assetId = AssetId.random();
-        when(usageTracker.engage(assetId)).thenThrow(new IllegalStateException("Asset is not in service: my drone"));
+        when(usageTracker.engage(assetId, ownerId))
+                .thenThrow(new IllegalStateException("Asset is not in service: my drone"));
 
         mockMvc.perform(post("/api/assets/{id}/session", assetId.value()))
                 .andExpect(status().isConflict())
@@ -162,19 +181,19 @@ class AssetSessionControllerTest {
         pilotMvc.perform(post("/api/assets/{id}/session", assetId.value()))
                 .andExpect(status().isNotFound());
 
-        verify(usageTracker, never()).engage(any());
+        verify(usageTracker, never()).engage(any(), any());
     }
 
     @Test
     void engageReturns200ForAPilotScopedToTheAsset() throws Exception {
         AssetId assetId = AssetId.random();
-        when(usageTracker.engage(assetId)).thenReturn(usage(assetId, UsageOrigin.OPERATOR));
+        when(usageTracker.engage(assetId, ownerId)).thenReturn(usage(assetId, UsageOrigin.OPERATOR));
         MockMvc pilotMvc = mockMvcFor(currentUserWithScope(VisibilityScope.assignedAssets(Set.of(assetId))));
 
         pilotMvc.perform(post("/api/assets/{id}/session", assetId.value()))
                 .andExpect(status().isOk());
 
-        verify(usageTracker).engage(assetId);
+        verify(usageTracker).engage(assetId, ownerId);
     }
 
     // ---- DELETE /api/assets/{id}/session ----

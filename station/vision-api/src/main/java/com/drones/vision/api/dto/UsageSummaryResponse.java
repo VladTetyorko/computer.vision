@@ -22,10 +22,13 @@ import java.time.Instant;
  * @param durationSeconds  whole seconds between {@code startedAt} and {@code endedAt}, or absent
  *                         while still open
  * @param sampleCount      number of telemetry samples received during this usage
+ * @param pilotId          the operator this usage is attributed to, as a canonical UUID string, or
+ *                         absent if genuinely unknown (docs/plans/active/ASSET-FLOWS-PLAN.md §2,
+ *                         D1p — see {@link UsageSummary#pilotId()})
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record UsageSummaryResponse(String usageId, String assetId, String assetName, Instant startedAt,
-                                    Instant endedAt, Long durationSeconds, long sampleCount) {
+                                    Instant endedAt, Long durationSeconds, long sampleCount, String pilotId) {
 
     /**
      * Maps an application-layer {@link UsageSummary} to its wire representation.
@@ -41,6 +44,7 @@ public record UsageSummaryResponse(String usageId, String assetId, String assetN
                 summary.startedAt(),
                 summary.endedAt(),
                 summary.durationSeconds(),
-                summary.sampleCount());
+                summary.sampleCount(),
+                summary.pilotId() == null ? null : summary.pilotId().value().toString());
     }
 }
