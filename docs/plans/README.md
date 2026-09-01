@@ -66,6 +66,7 @@ Retired 2026-08-22 (merged session scratchpads, zero code citations): `AFTER-ACT
 
 | Plan | Merged | Still open | CODE |
 |---|---|---|---:|
+| MAVLINK-COMMANDS-PLAN | **built on `feat/mavlink-command-control`, unmerged** (2026-09-01, 12 commits): R1–R4+O1 research corpus · F0–F4 firmware hardening (harness repaired incl. dark `make motors`/`make session`, esp_task_wdt, dtMs clamp, network-down failsafe pinned, learned-peer command gate + TX STATUSTEXT) · P1–P4 command surface (force-arm magic 2989 defect fix, 700ms×3 bounded retries wired to production, stream negotiation on claim, onLinkFailure pinned) · W1–W2 keyboard ops (Space e-stop, Shift+Enter hold-arm, mode digits, transmitter-view key map) | merge to master · **F1 WDT bench reset test — operator, powered hardware** · live rover drive — operator-gated · `capabilities()` ← CapabilityReport wiring · stream ids/rates not yet in VisionMavlinkProperties · MAVLink signing (own effort) | — |
 | DRONE-ONBOARDING-PLAN | O1–O8, O11–O14 (`aa426859`), all behind `vision.onboarding.*.enabled=false` | **O9/O10** — operator-gated, need an explicit go | 107 |
 | DOMAIN-SEPARATION-W1 / -PLAN | **W1** (`00879827`) — 8 contexts are Maven modules | **W2** broker + live plane · **W3** worker role + leases · **W4** learning extraction · **W5** sim node | 51 / 2 |
 | MAVLINK-CORE-PLAN | W0–W4 (`7e80746d`) — `drone-link/mavlink-core`, adapter rewired, SITL green | **W5** message-rate + link health (the first user-visible payoff) · **W6** Parameter/Mission | 22 |
