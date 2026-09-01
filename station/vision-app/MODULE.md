@@ -47,7 +47,7 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 | Class | `@EnableConfigurationProperties` | Beans |
 |---|---|---|
 | `VideoSourceWiring` | Simulation, Rtsp, Mjpeg, V4l2 | `simulatedVideoSource`/`ffmpegVideoSource`/`mjpegVideoSource`/`v4l2VideoSource` (all unconditional `VideoSourcePort`), `videoSourceRegistry`. Exposes static `toFfmpegSettings`/`toMjpegSettings` mappers reused by `FeedTransmitterWiring` |
-| `TelemetryWiring` | Simulation, Mavlink, Rc, Onboarding | `simulatedTelemetrySource`, `mavlinkTelemetrySource`, `mavlinkFlightCommander`, `mavlinkManualControlSender` — all unconditional. Static `toMavlinkSettings(...)` reused by `FeedTransmitterWiring`/`DiscoveryWiringConfiguration`/`OnboardingWiringConfiguration` |
+| `TelemetryWiring` | Simulation, Mavlink, Rc, Onboarding | `simulatedTelemetrySource`, `mavlinkTelemetrySource`, `mavlinkFlightCommander`, `mavlinkManualControlSender` — all unconditional. Static `toMavlinkSettings(...)` reused by `FeedTransmitterWiring`/`DiscoveryWiringConfiguration`/`OnboardingWiringConfiguration`. **MAVLINK-COMMANDS-PLAN P4** rewired `mavlinkFlightCommander` off the 2-arg `(MavlinkTelemetrySource, Duration)` back-compat constructor onto `MavlinkFlightCommander`'s canonical `(MavlinkTelemetrySource, MavlinkSettings)` one, reusing `toMavlinkSettings(...)` a fourth time (now takes `VisionRcProperties`/`VisionOnboardingProperties` too, matching `mavlinkTelemetrySource`'s own parameter list) |
 | `PublishWiring` | Publish, Api, Cv | `mediamtxStreamPublisher` (COP `vision.publish.enabled`, default true — own bean so `SystemStatusWiring` observes the *same* instance `streamPublisherPort` routes through), `streamPublisherPort` (unconditional `StreamPublisherPort`; `NoopStreamPublisher` if disabled, else a `PublisherRouter` wrapping the direct publisher + a `MediamtxProxyPublisher`, routed by `vision.publish.source-proxy.enabled`; **fails fast** if source-proxy is on while `vision.cv.frame-transport` is still `push` — see Gotchas), `mediamtxLiveFrameGrabber` (unconditional, cheap/lazy), `replayFrameExtractionPort` (unconditional; `NoopReplayFrameExtractor` if publish disabled), `hlsProxyUpstreamBase: URI`, `snapshotJpegEncoder`, `hlsProxySettings`, `liveSettings` (last 3 bridge Spring-bound `VisionApiProperties` → vision-api's plain mirror of the same simple name — see Gotchas) |
 | `CvWiring` | Cv | `cvGrpcChannel: ManagedChannel` `@Primary` (COE: `cv.enabled` OR `training.enabled` OR `frame-transport=pull` OR `geo.visual.enabled`; built via `CvChannels.forTargets`), `cvTrainingChannel` (COP `vision.cv.training.target` present — independent shutdown), `cvChannelSupervisor` (COE = cvGrpcChannel's expression AND `cv.reconnect.enabled` default true; `@Qualifier("cvGrpcChannel")`), `detectionPort` (unconditional bean, internal branch on `enabled`: `GrpcDetectionPort` w/ `@Qualifier("cvGrpcChannel")` else `NoopDetectionPort`; `destroyMethod=""`), `pulledDetectionPort` (COE `frame-transport=pull`; `@Qualifier("cvGrpcChannel")`), `cvModelRoster` (static constant), `detectionDemandPort` (COE default true, returns concrete `LiveAndPollDetectionDemand`), `streamDefaultConfig`, `streamDetectionSupport`. Static `toGrpcCvSettings(...)` and package-private `controlPlaneChannel(cvTrainingChannel, cvGrpcChannel)` (= training channel if present else falls back to inference channel) shared by `TrainingWiringConfiguration`/`VisualGeoWiringConfiguration` |
 | `TrainingWiringConfiguration` | Training, Cv | `datasetUploadPort`, `trainingStores`, `replaySources`, `datasetService`, `labelingService` (takes `AssetDirectoryService`, not `AssetService`), `trainingPort`, `trainingJobService` all `@ConditionalOnProperty(vision.training.enabled=true)`, no fallback. `modelRegistryPort`/`modelRegistryService` are a **separate** switch since CV-SETTINGS-PLAN §5 (CV-SETTINGS-CONTEXT.md's W4-app → W5 handoff decoupled the registry from training): `@ConditionalOnProperty(vision.cv.registry.enabled=true)`, whose own `application.yaml` default follows `vision.cv.enabled` via the `${vision.cv.enabled:false}` placeholder — a CV-only deployment gets the registry for free unless it explicitly opts out (`vision.cv.registry.enabled=false`); a training-only deployment does **not** get it for free any more. Channel-consuming beans route through `CvWiring.controlPlaneChannel(...)` |
@@ -101,7 +101,7 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 | `VisionRtspProperties` | `vision.rtsp` | `adapter-rtsp`'s `FfmpegSettings` |
 | `VisionMjpegProperties` | `vision.mjpeg` | `adapter-mjpeg`'s `MjpegSettings` |
 | `VisionV4l2Properties` | `vision.v4l2` | `V4l2VideoSource` directly (no adapter settings record) |
-| `VisionMavlinkProperties` | `vision.mavlink` | `adapter-mavlink`'s `MavlinkSettings` (minus `Rc`); **FLEET-RADIO R4/D7** adds `dropRateWarnPercent`/`dropRateAlarmPercent`/`linkFailureGrace` (defaults 5.0/20.0/2s, compact-constructor validated: both percents 0..100, alarm>=warn, grace positive) — consumed by `TelemetryWiring#toMavlinkSettings` (into `MavlinkSettings.LinkStatus`) and directly by `SystemStatusWiring#mavlinkLinkStatus` |
+| `VisionMavlinkProperties` | `vision.mavlink` | `adapter-mavlink`'s `MavlinkSettings` (minus `Rc`); **FLEET-RADIO R4/D7** adds `dropRateWarnPercent`/`dropRateAlarmPercent`/`linkFailureGrace` (defaults 5.0/20.0/2s, compact-constructor validated: both percents 0..100, alarm>=warn, grace positive) — consumed by `TelemetryWiring#toMavlinkSettings` (into `MavlinkSettings.LinkStatus`) and directly by `SystemStatusWiring#mavlinkLinkStatus`. **MAVLINK-COMMANDS-PLAN P4** re-scoped `ackTimeout`'s `@DefaultValue` from `2s` to `700ms` (now byte-identical to `MavlinkSettings.DEFAULT_ACK_TIMEOUT_MILLIS`, the per-*attempt* wait) and added `commandRetries` (11th canonical-constructor component, right after `ackTimeout`; `@DefaultValue` `2`, compact-constructor validated `>= 0`, byte-identical to `MavlinkSettings.DEFAULT_COMMAND_RETRIES`) — both threaded through `TelemetryWiring#toMavlinkSettings` via `MavlinkSettings.withCommandRetries(...)`, closing the P1-documented production gap (see Gotchas) |
 | `VisionApiProperties` | `vision.api` | bridges to vision-api's plain mirror (same simple name, see Gotchas); snapshot/hlsProxy/live/paging/upload/rateLimit |
 | `VisionOnboardingProperties` | `vision.onboarding` | probe/remediate/passport flags → `OnboardingWiringConfiguration` + `TelemetryWiring#toMavlinkSettings`. `probe.parameters` (list, default empty) **replaces** the adapter's firmware-verified probe list rather than adding to it; empty keeps it |
 | `VisionControlProperties` | `vision.control` | `ControlProfileWiring`'s aux-function catalog |
@@ -480,3 +480,74 @@ concurrent frontend wave). A `MediamtxDockerIntegrationTest` (`adapter-rtsp`, un
 any MAVLINK-COMMANDS wave) failure also cleared on retry — a timing flake under concurrent
 sandbox load, not a regression. Docker ran for real throughout (Postgres Testcontainer migrated
 through `V31`).
+
+**MAVLINK-COMMANDS-PLAN.md wave P4 done** — closes the production gap P1 flagged in
+`drone-link/mavlink/MODULE.md`'s Gotchas: `TelemetryWiring#mavlinkFlightCommander` still called
+`MavlinkFlightCommander`'s 2-arg `(MavlinkTelemetrySource, Duration)` back-compat constructor with
+`properties.ackTimeout()`, and `VisionMavlinkProperties.ackTimeout()` still defaulted to the old
+single-whole-command 2s literal with no `commandRetries` field at all — so production got the new
+bounded-retry behaviour (3 attempts) layered onto the *old*, larger per-attempt timeout: worst case
+~6s (3 × 2s) for a fully-silent vehicle instead of the ~2.1s D2a intended (3 × 700ms).
+
+Two changes, both in `config/properties/VisionMavlinkProperties.java`:
+1. `ackTimeout`'s `@DefaultValue` changed from `"2s"` to `"700ms"` — now byte-identical to
+   `MavlinkSettings.DEFAULT_ACK_TIMEOUT_MILLIS`.
+2. New `commandRetries` component (11th on the canonical constructor, inserted right after
+   `ackTimeout` — matching `MavlinkSettings`'s own field order), `@DefaultValue` `"2"`
+   (`DEFAULT_COMMAND_RETRIES`, byte-identical to `MavlinkSettings.DEFAULT_COMMAND_RETRIES`),
+   compact-constructor validated `>= 0` (mirrors `MavlinkSettings`'s own check, same message shape).
+   Every existing positional `new VisionMavlinkProperties(...)` call site (3, all in this module's own
+   tests — `VisionMavlinkPropertiesTest`, `TelemetryWiringOnboardingTest`,
+   `MavlinkLinkStatusWiringTest`) needed the new arg inserted; none live outside `station/vision-app`.
+
+One change in `config/wiring/TelemetryWiring.java`: `toMavlinkSettings(...)` now chains
+`.withCommandRetries(properties.commandRetries())` onto the `MavlinkSettings` it builds (right after
+the constructor call, before `.withOnboarding(...)`/`.withLinkStatus(...)`) — the 8-arg back-compat
+`MavlinkSettings` constructor it still calls only *defaults* `commandRetries` to `MavlinkSettings`'s
+own constant; without this `.withCommandRetries(...)` call, `vision.mavlink.command-retries` would
+still be a documentation-only key for every consumer of `toMavlinkSettings`, not just the commander.
+This one-line addition means all four `toMavlinkSettings` consumers (`mavlinkTelemetrySource`,
+`FeedTransmitterWiring#mavlinkFeedTransmitter`, `OnboardingWiringConfiguration`, and now
+`mavlinkFlightCommander`) honor an operator-configured retry budget, not just the commander this wave
+targeted. `mavlinkFlightCommander` itself was rewired from `new MavlinkFlightCommander(mavlinkTelemetrySource,
+properties.ackTimeout())` onto `new MavlinkFlightCommander(mavlinkTelemetrySource,
+toMavlinkSettings(mavlinkProperties, rcProperties, onboardingProperties))` — the canonical
+`(MavlinkTelemetrySource, MavlinkSettings)` constructor, gaining `VisionRcProperties`/
+`VisionOnboardingProperties` as two new bean-method parameters (Spring resolves both from beans
+`TelemetryWiring`/`OnboardingWiringConfiguration` already register; no new `@EnableConfigurationProperties`
+needed since `TelemetryWiring` already declares all three). Per CLAUDE.md rule 10/java-clean-code §3,
+this is "update the call site," not a new overload — `MavlinkFlightCommander`'s own constructors were
+untouched (out of scope: `drone-link/mavlink` is a different wave's file scope on this branch).
+
+No `application.yaml` change — P1's `mavlink:` block is already fully commented out (module key
+included, per this module's own "block whose keys are all commented has its module key commented too"
+convention) and documents `ack-timeout: 700ms`/`command-retries: 2` as the intended values already;
+its "KNOWN GAP" comment (that `command-retries` was documentation-only and `ack-timeout` still ran at
+2s in production) is now stale but was left untouched — out of this wave's brief, which permitted
+touching that file only for a key-*name* change, and none was needed (`command-retries`/`ack-timeout`
+already relaxed-bind onto `commandRetries`/`ackTimeout` the same way `drop-rate-warn-percent` already
+binds onto `dropRateWarnPercent`). Flagged here for whichever wave next touches that comment block.
+
+New `config/wiring/TelemetryWiringCommandRetryWiringTest` (3 tests) pins the fix at the one seam this
+module owns, since `MavlinkFlightCommander` exposes no accessor for its private `ackTimeout`/
+`commandRetries` fields (and `drone-link/mavlink` was another agent's concurrent file scope, so no
+reflection/getter could be added there this wave): `defaultPropertiesYieldTheD2aBudget` binds
+`VisionMavlinkProperties`/`VisionRcProperties`/`VisionOnboardingProperties` from an **empty** source
+(the `Binder`/`MapConfigurationPropertySource` idiom `PersistenceWiringConfigurationTest` established)
+and asserts `toMavlinkSettings(...)`'s result carries `ackTimeout() == 700ms`/`commandRetries() == 2`;
+`mavlinkFlightCommanderBeanBuildsOnTheSameSettingsAsMavlinkTelemetrySource` calls the actual
+`TelemetryWiring#mavlinkFlightCommander` bean method (against a bare `new MavlinkTelemetrySource()` —
+safe, opens no socket) and asserts it builds without throwing; `anOperatorSuppliedCommandRetriesReachesTheSettingsObject`
+proves `vision.mavlink.command-retries: 0` (today's byte-for-byte single-shot behaviour) reaches the
+built `MavlinkSettings`, not just the properties record. `VisionMavlinkPropertiesTest` gained 3 tests:
+`negativeCommandRetriesIsRejected`/`zeroCommandRetriesIsAccepted` (compact-constructor validation) and
+`ackTimeoutAndCommandRetriesDefaultsMatchMavlinkSettings` (same empty-`Binder` idiom, pinning the
+`@DefaultValue` annotations themselves rather than a hand-written `new` call's positional args).
+
+`./mvnw -B -pl station/vision-app -am test -DskipWeb` — **305** (+6 over the pre-P4 299: 3 in
+`VisionMavlinkPropertiesTest`, 3 in the new `TelemetryWiringCommandRetryWiringTest`), all green on the
+first run, no collisions this time (`drone-link/mavlink` — `adapter-mavlink` in the reactor summary —
+built clean at 02:07 min, unaffected by any concurrent edit at gate time). `ArchitectureTest`/
+`ContextArchitectureTest`/`EndpointAuthorizationTest` unaffected (no new bean, no new ArchUnit
+surface — `mavlinkFlightCommander` gained two constructor parameters, not a new bean or a new
+`@Configuration` class). Docker ran for real (Postgres Testcontainer migrated through `V31`).

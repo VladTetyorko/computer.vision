@@ -93,7 +93,7 @@ class MavlinkLinkStatusWiringTest {
     @Timeout(value = 30, unit = TimeUnit.SECONDS)
     void mavlinkLinkStatusObservesTheSameTelemetrySourceRealTrafficClaims() throws Exception {
         VisionMavlinkProperties mavlinkProperties = new VisionMavlinkProperties("127.0.0.1", Duration.ofSeconds(30),
-                32, Duration.ofSeconds(5), Duration.ofSeconds(2), 5.0, 20.0, Duration.ofSeconds(2), null, null);
+                32, Duration.ofSeconds(5), Duration.ofMillis(700), 2, 5.0, 20.0, Duration.ofSeconds(2), null, null);
         VisionRcProperties rcProperties = new VisionRcProperties(300L, 33, 10, 50, 3);
         VisionOnboardingProperties onboardingProperties = new VisionOnboardingProperties(
                 new VisionOnboardingProperties.Probe(false, Duration.ofSeconds(10), Duration.ofSeconds(7), java.util.List.of()),

@@ -82,6 +82,7 @@ public class TelemetryWiring {
                         transmit.defaultSysid()),
                 new MavlinkSettings.Rc(rcProperties.overrideHz(), rcProperties.minOverrideHz(),
                         rcProperties.maxOverrideHz(), rcProperties.releaseFrames()))
+                .withCommandRetries(properties.commandRetries())
                 .withOnboarding(toOnboarding(onboardingProperties))
                 .withLinkStatus(new MavlinkSettings.LinkStatus(properties.dropRateWarnPercent(),
                         properties.dropRateAlarmPercent(), properties.linkFailureGrace()));
@@ -121,11 +122,28 @@ public class TelemetryWiring {
      * socket {@link #mavlinkTelemetrySource} already has open for RX, rather than opening a second
      * one of its own. {@link #mavlinkTelemetrySource} is wired unconditionally, so this bean is too
      * — there is no {@code vision.mavlink.*}-shaped gate.
+     *
+     * <p><b>(MAVLINK-COMMANDS-PLAN P4)</b> Now built on {@link MavlinkFlightCommander}'s canonical
+     * {@code (MavlinkTelemetrySource, MavlinkSettings)} constructor, reusing {@link
+     * #toMavlinkSettings} exactly like {@link #mavlinkTelemetrySource} does, instead of the 2-arg
+     * {@code (MavlinkTelemetrySource, Duration)} back-compat overload. Closes the production gap P1
+     * documented (drone-link/mavlink's own MODULE.md Gotchas): that overload passed only {@code
+     * properties.ackTimeout()} and always defaulted {@code commandRetries} to {@code
+     * MavlinkSettings.defaults()}'s value, so a deployment got the new bounded-retry behaviour
+     * layered onto the *old* 2s per-attempt timeout (worst case ~6s for a silent vehicle) rather than
+     * the ~2.1s {@code vision.mavlink.command-retries}/{@code ack-timeout} were designed to bound
+     * together. {@code toMavlinkSettings} threads both {@link VisionMavlinkProperties#ackTimeout()}
+     * (now defaulting to 700ms) and {@link VisionMavlinkProperties#commandRetries()} (default 2)
+     * through {@code MavlinkSettings.withCommandRetries}, the same seam {@link #mavlinkTelemetrySource}
+     * relies on.
      */
     @Bean
     public MavlinkFlightCommander mavlinkFlightCommander(MavlinkTelemetrySource mavlinkTelemetrySource,
-                                                          VisionMavlinkProperties properties) {
-        return new MavlinkFlightCommander(mavlinkTelemetrySource, properties.ackTimeout());
+                                                          VisionMavlinkProperties mavlinkProperties,
+                                                          VisionRcProperties rcProperties,
+                                                          VisionOnboardingProperties onboardingProperties) {
+        return new MavlinkFlightCommander(mavlinkTelemetrySource,
+                toMavlinkSettings(mavlinkProperties, rcProperties, onboardingProperties));
     }
 
     /**

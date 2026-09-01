@@ -100,7 +100,7 @@ class TelemetryWiringOnboardingTest {
     private static MavlinkSettings toSettings(boolean requestMessagesOnConnect, List<String> probeParameters) {
         return TelemetryWiring.toMavlinkSettings(
                 new VisionMavlinkProperties("0.0.0.0", Duration.ofSeconds(30), 32, Duration.ofSeconds(5),
-                        Duration.ofSeconds(2), 5.0, 20.0, Duration.ofSeconds(2), null, null),
+                        Duration.ofMillis(700), 2, 5.0, 20.0, Duration.ofSeconds(2), null, null),
                 new VisionRcProperties(300L, 33, 5, 50, 3),
                 new VisionOnboardingProperties(
                         new VisionOnboardingProperties.Probe(false, Duration.ofSeconds(10), REQUEST_TIMEOUT,
