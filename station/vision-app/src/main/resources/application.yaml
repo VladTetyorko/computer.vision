@@ -1083,3 +1083,36 @@ vision:
     #     default-position-rate-hz: 5.0
     #     default-failsafe-battery-percent: 15.0
     #     default-sysid: 1
+    #   MAVLINK-COMMANDS-PLAN.md P2: MavlinkStreamNegotiator's on-claim stream negotiation, driven by
+    #   MavlinkSettings.StreamNegotiation. On every claim (initial or silence-window re-election) the
+    #   gateway sends one MAV_CMD_REQUEST_MESSAGE(512) for AUTOPILOT_VERSION, then one
+    #   MAV_CMD_SET_MESSAGE_INTERVAL(511) per message below (param2 = the rate, in microseconds). This
+    #   has NO enable flag of its own by design (a real GCS always does this at connect) -- there is
+    #   nothing to uncomment to turn it off. UNSUPPORTED/DENIED/NO_ACK on any one message is logged and
+    #   otherwise ignored; it never fails the claim.
+    #   KNOWN GAP (see drone-link/mavlink/MODULE.md): unlike ack-timeout/command-retries above, there is
+    #   no VisionMavlinkProperties field for this at all, so the six ids/rate below cannot be overridden
+    #   from configuration yet -- but unlike command-retries' gap, this one is NOT dormant: TelemetryWiring
+    #   builds MavlinkSettings via the 8-arg constructor, which now always appends
+    #   StreamNegotiation.defaults() (mirroring MavlinkSettings.defaults()'s own literal), so production
+    #   gets exactly the defaults below the moment this module is rebuilt, with no wiring change required.
+    #   Interaction with the on-connect-message-request flag above (Onboarding#requestMessagesOnConnect,
+    #   Mechanism A): MAV_CMD_SET_MESSAGE_INTERVAL's COMMAND_ACK correlates only on (sysid, command id),
+    #   never on message id, so this negotiator's own interval chain and Mechanism A's on-connect chain
+    #   cannot both hold a live wait for the same peer at once. When that flag is on, this negotiator
+    #   skips its own interval chain entirely (Mechanism A already owns that job for that peer); its
+    #   AUTOPILOT_VERSION probe still runs regardless, since it uses a different correlator key.
+    #   stream-negotiation:
+    #     streams:
+    #       - message-id: 30    # ATTITUDE
+    #         interval: 250ms
+    #       - message-id: 33    # GLOBAL_POSITION_INT
+    #         interval: 250ms
+    #       - message-id: 74    # VFR_HUD
+    #         interval: 250ms
+    #       - message-id: 65    # RC_CHANNELS
+    #         interval: 250ms
+    #       - message-id: 24    # GPS_RAW_INT
+    #         interval: 250ms
+    #       - message-id: 147   # BATTERY_STATUS
+    #         interval: 250ms

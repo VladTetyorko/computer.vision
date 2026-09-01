@@ -109,7 +109,7 @@ class MavlinkSettingsTest {
                 "0.0.0.0", Duration.ofSeconds(30), 32, Duration.ofSeconds(5), Duration.ofMillis(700), -1,
                 MavlinkSettings.Scan.defaults(), MavlinkSettings.Transmit.defaults(), MavlinkSettings.Rc.defaults(),
                 MavlinkSettings.Inventory.defaults(), MavlinkSettings.Onboarding.defaults(),
-                MavlinkSettings.LinkStatus.defaults()));
+                MavlinkSettings.LinkStatus.defaults(), MavlinkSettings.StreamNegotiation.defaults()));
         assertTrue(ex.getMessage().contains("commandRetries"), ex.getMessage());
     }
 
@@ -140,5 +140,47 @@ class MavlinkSettingsTest {
         MavlinkSettings noRetries = settings.withCommandRetries(0);
         assertEquals(0, noRetries.commandRetries());
         assertEquals(settings.ackTimeout(), noRetries.ackTimeout());
+    }
+
+    // ---- MAVLINK-COMMANDS-PLAN P2: unconditional on-claim stream negotiation ----
+
+    @Test
+    void streamNegotiationDefaultsCoverTheSixCockpitMessagesAtAPositiveRate() {
+        MavlinkSettings.StreamNegotiation negotiation = MavlinkSettings.StreamNegotiation.defaults();
+
+        assertEquals(6, negotiation.streams().size());
+        List<Integer> messageIds = negotiation.streams().stream()
+                .map(MavlinkSettings.Onboarding.MessageRequest::messageId).toList();
+        assertTrue(messageIds.containsAll(List.of(30, 33, 74, 65, 24, 147)),
+                "ATTITUDE/GLOBAL_POSITION_INT/VFR_HUD/RC_CHANNELS/GPS_RAW_INT/BATTERY_STATUS");
+        assertTrue(negotiation.streams().stream().allMatch(request -> !request.interval().isZero()),
+                "every default stream request must ask for a real, non-zero rate");
+    }
+
+    @Test
+    void defaultsCarryAStreamNegotiationUnconditionally() {
+        // Unlike Onboarding.requestMessagesOnConnect(), there is no flag: MavlinkSettings.defaults()
+        // (and therefore both back-compat constructors, since they delegate here) always carries a
+        // real, non-empty StreamNegotiation.
+        MavlinkSettings settings = MavlinkSettings.defaults();
+        assertFalse(settings.streamNegotiation().streams().isEmpty());
+    }
+
+    @Test
+    void aNullStreamNegotiationStreamListIsRejected() {
+        assertThrows(NullPointerException.class, () -> new MavlinkSettings.StreamNegotiation(null));
+    }
+
+    @Test
+    void withStreamNegotiationReplacesOnlyThatOneField() {
+        MavlinkSettings settings = MavlinkSettings.defaults();
+        MavlinkSettings.StreamNegotiation custom = new MavlinkSettings.StreamNegotiation(
+                List.of(new MavlinkSettings.Onboarding.MessageRequest(30, Duration.ofMillis(100))));
+
+        MavlinkSettings updated = settings.withStreamNegotiation(custom);
+
+        assertEquals(custom, updated.streamNegotiation());
+        assertEquals(settings.bindHost(), updated.bindHost());
+        assertEquals(settings.commandRetries(), updated.commandRetries());
     }
 }

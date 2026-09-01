@@ -38,7 +38,8 @@ public record MavlinkSettings(
         Rc rc,
         Inventory inventory,
         Onboarding onboarding,
-        LinkStatus linkStatus) {
+        LinkStatus linkStatus,
+        StreamNegotiation streamNegotiation) {
 
     /**
      * docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2a — {@link #ackTimeout()}'s per-<b>attempt</b> wait
@@ -77,6 +78,7 @@ public record MavlinkSettings(
         Objects.requireNonNull(inventory, "inventory must not be null");
         Objects.requireNonNull(onboarding, "onboarding must not be null");
         Objects.requireNonNull(linkStatus, "linkStatus must not be null");
+        Objects.requireNonNull(streamNegotiation, "streamNegotiation must not be null");
     }
 
     /**
@@ -89,12 +91,16 @@ public record MavlinkSettings(
      * overload {@code TelemetryWiring#toMavlinkSettings} still calls, so every deployment picks up the
      * new retry default automatically the moment this module is rebuilt, with no config seam of its
      * own yet to change it away from {@value #DEFAULT_COMMAND_RETRIES} through this particular
-     * overload (see this module's MODULE.md Gotchas).
+     * overload (see this module's MODULE.md Gotchas). Defaults {@link #streamNegotiation()} the same
+     * way, since docs/plans/active/MAVLINK-COMMANDS-PLAN.md P2 — every deployment picks up on-claim
+     * stream negotiation the moment this module is rebuilt too (see {@link StreamNegotiation}'s own
+     * javadoc for why, unlike {@link Onboarding}'s Mechanism A, there is no flag to gate it behind).
      */
     public MavlinkSettings(String bindHost, Duration silenceWindow, int maxUnclaimedVehicles,
                             Duration closeJoinTimeout, Duration ackTimeout, Scan scan, Transmit transmit, Rc rc) {
         this(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout, DEFAULT_COMMAND_RETRIES,
-                scan, transmit, rc, Inventory.defaults(), Onboarding.defaults(), LinkStatus.defaults());
+                scan, transmit, rc, Inventory.defaults(), Onboarding.defaults(), LinkStatus.defaults(),
+                StreamNegotiation.defaults());
     }
 
     /**
@@ -105,7 +111,8 @@ public record MavlinkSettings(
                             Duration closeJoinTimeout, Duration ackTimeout, Scan scan, Transmit transmit, Rc rc,
                             Inventory inventory) {
         this(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout, DEFAULT_COMMAND_RETRIES,
-                scan, transmit, rc, inventory, Onboarding.defaults(), LinkStatus.defaults());
+                scan, transmit, rc, inventory, Onboarding.defaults(), LinkStatus.defaults(),
+                StreamNegotiation.defaults());
     }
 
     /** Reproduces every literal this module's classes hardcode today. */
@@ -122,7 +129,8 @@ public record MavlinkSettings(
                 Rc.defaults(),
                 Inventory.defaults(),
                 Onboarding.defaults(),
-                LinkStatus.defaults());
+                LinkStatus.defaults(),
+                StreamNegotiation.defaults());
     }
 
     /**
@@ -132,7 +140,7 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withSilenceWindow(Duration newSilenceWindow) {
         return new MavlinkSettings(bindHost, newSilenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                commandRetries, scan, transmit, rc, inventory, onboarding, linkStatus);
+                commandRetries, scan, transmit, rc, inventory, onboarding, linkStatus, streamNegotiation);
     }
 
     /**
@@ -144,7 +152,7 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withAckTimeout(Duration newAckTimeout) {
         return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, newAckTimeout,
-                commandRetries, scan, transmit, rc, inventory, onboarding, linkStatus);
+                commandRetries, scan, transmit, rc, inventory, onboarding, linkStatus, streamNegotiation);
     }
 
     /**
@@ -154,7 +162,7 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withCommandRetries(int newCommandRetries) {
         return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                newCommandRetries, scan, transmit, rc, inventory, onboarding, linkStatus);
+                newCommandRetries, scan, transmit, rc, inventory, onboarding, linkStatus, streamNegotiation);
     }
 
     /**
@@ -164,7 +172,7 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withInventory(Inventory newInventory) {
         return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                commandRetries, scan, transmit, rc, newInventory, onboarding, linkStatus);
+                commandRetries, scan, transmit, rc, newInventory, onboarding, linkStatus, streamNegotiation);
     }
 
     /**
@@ -173,7 +181,7 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withOnboarding(Onboarding newOnboarding) {
         return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                commandRetries, scan, transmit, rc, inventory, newOnboarding, linkStatus);
+                commandRetries, scan, transmit, rc, inventory, newOnboarding, linkStatus, streamNegotiation);
     }
 
     /**
@@ -184,7 +192,17 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withLinkStatus(LinkStatus newLinkStatus) {
         return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                commandRetries, scan, transmit, rc, inventory, onboarding, newLinkStatus);
+                commandRetries, scan, transmit, rc, inventory, onboarding, newLinkStatus, streamNegotiation);
+    }
+
+    /**
+     * Copy of this settings object with just {@link #streamNegotiation()} replaced — same test/tuning
+     * convenience as {@link #withInventory}; lets a test dial the on-claim stream list/rate down to
+     * something small and deterministic instead of the production default.
+     */
+    public MavlinkSettings withStreamNegotiation(StreamNegotiation newStreamNegotiation) {
+        return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
+                commandRetries, scan, transmit, rc, inventory, onboarding, linkStatus, newStreamNegotiation);
     }
 
     /** {@code MavlinkHeartbeatScanner}'s hub-poll/self-bind-timeout budgets. */
@@ -500,6 +518,56 @@ public record MavlinkSettings(
                     throw new IllegalArgumentException("interval must not be negative: " + interval);
                 }
             }
+        }
+    }
+
+    /**
+     * The platform-side stream negotiation every real GCS performs at connect
+     * (docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2c) — the request list {@link
+     * MavlinkStreamNegotiator} fires once per vehicle claim (not per learned peer; see that class's
+     * own javadoc for why claim, not connect, is the right trigger). {@link #streams()} reuses {@link
+     * Onboarding.MessageRequest}'s identical (messageId, interval) shape rather than duplicating it —
+     * both are "one {@code MAV_CMD_SET_MESSAGE_INTERVAL} request," and inventing a second record for
+     * the same pair would be a distinction with no difference.
+     *
+     * <p><b>Deliberately has no enable flag</b>, unlike {@link Onboarding#requestMessagesOnConnect()}
+     * (Mechanism A, default {@code false}): O1-SYNTHESIS.md's D2c section lists {@code
+     * REQUEST_MESSAGE}/{@code SET_MESSAGE_INTERVAL} under "add a platform caller," not under
+     * "automatic behaviour that needs a guardrail" — a GCS that never negotiates streams is the gap
+     * this wave closes, not a feature an operator might reasonably want off. The two mechanisms differ
+     * in trigger, too: Mechanism A fires on any newly-learned peer (including one this gateway will
+     * never claim, e.g. a second GCS instance sharing the link); this one fires only once a vehicle is
+     * actually claimed, so it never spends a retry budget probing something that isn't this station's
+     * vehicle.
+     *
+     * @param streams the messages to request via {@code MAV_CMD_SET_MESSAGE_INTERVAL} on claim, one
+     *                 command per entry — default is the six messages {@code MavlinkTelemetryDecoder}
+     *                 actually decodes into cockpit fields (ATTITUDE, GLOBAL_POSITION_INT, VFR_HUD,
+     *                 RC_CHANNELS, GPS_RAW_INT, BATTERY_STATUS; see this module's MODULE.md field-
+     *                 mapping table), at 250&nbsp;ms/4&nbsp;Hz — proven safe up to 5&nbsp;Hz by {@code
+     *                 MavlinkSitlOnboardingIntegrationTest} against real ArduPilot Copter 4.7 firmware
+     *                 (the same evidence {@link Onboarding#defaultOnConnectMessageRequests()} cites for
+     *                 its own, slower 2&nbsp;Hz default). GPS_RAW_INT is included alongside
+     *                 GLOBAL_POSITION_INT because a GPS-less {@code GLOBAL_POSITION_INT} still arrives
+     *                 with a stale/zero lat-lon — {@code GPS_RAW_INT.fix_type} is what actually gates
+     *                 whether that position is trustworthy (see this module's OPERATOR-UX-4 N1 note).
+     */
+    public record StreamNegotiation(List<Onboarding.MessageRequest> streams) {
+
+        public StreamNegotiation {
+            Objects.requireNonNull(streams, "streams must not be null");
+            streams = List.copyOf(streams);
+        }
+
+        public static StreamNegotiation defaults() {
+            Duration interval = Duration.ofMillis(250);
+            return new StreamNegotiation(List.of(
+                    new Onboarding.MessageRequest(30, interval),  // ATTITUDE
+                    new Onboarding.MessageRequest(33, interval),  // GLOBAL_POSITION_INT
+                    new Onboarding.MessageRequest(74, interval),  // VFR_HUD
+                    new Onboarding.MessageRequest(65, interval),  // RC_CHANNELS
+                    new Onboarding.MessageRequest(24, interval),  // GPS_RAW_INT
+                    new Onboarding.MessageRequest(147, interval))); // BATTERY_STATUS
         }
     }
 

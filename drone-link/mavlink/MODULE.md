@@ -30,11 +30,16 @@ module's own MODULE.md for their surface. No class here constructs an
 
 `MavlinkFlightCommander`/`MavlinkManualControlSender` send whenever their port method is called —
 this adapter enforces reachability only ("you cannot command what you cannot hear"), not
-authorization; who is allowed to call them is enforced above this module. The one send path that
-fires with no explicit per-call request is `MavlinkConnectRemediator`'s on-connect Mechanism A, and
-it is **default-off**: `MavlinkSettings.Onboarding.requestMessagesOnConnect()` defaults `false`, and
+authorization; who is allowed to call them is enforced above this module. Two send paths fire with
+no explicit per-call request. `MavlinkConnectRemediator`'s on-connect Mechanism A is
+**default-off**: `MavlinkSettings.Onboarding.requestMessagesOnConnect()` defaults `false`, and
 `MavlinkGateway` constructs no remediator at all when it's false — structurally "cannot send", not
-merely "chose not to".
+merely "chose not to". **(MAVLINK-COMMANDS-PLAN P2)** `MavlinkStreamNegotiator`, by contrast, is
+**always constructed and always fires**, on every claim — one `MAV_CMD_REQUEST_MESSAGE` probe plus
+(unless Mechanism A already owns the peer's interval channel) a `MAV_CMD_SET_MESSAGE_INTERVAL` chain
+for six cockpit messages. This has no flag of its own, deliberately (see the P2 Gotchas below and
+`MavlinkStreamNegotiator`'s own class javadoc for why) — every real GCS does this at connect, so
+there is nothing to structurally prevent here the way Mechanism A's opt-in remediation is prevented.
 
 ## API surface
 
@@ -60,7 +65,9 @@ merely "chose not to".
   `MavlinkLink` (production: a `UdpListenLink`, binds in its own constructor, throws `IOException`
   on conflict), a `MavlinkSession` built with `MavlinkNode.groundStation()` (sysid 255/compid 190), a
   `VehicleClaimPolicy`, a `MavlinkMessageInventory`, and optionally a `MavlinkConnectRemediator`
-  (only when `settings.onboarding().requestMessagesOnConnect()` is `true`). Demultiplexes every
+  (only when `settings.onboarding().requestMessagesOnConnect()` is `true`) and, **(MAVLINK-COMMANDS-PLAN
+  P2, always)**, a `MavlinkStreamNegotiator`, built before `VehicleClaimPolicy` so its `negotiate(int)`
+  method reference can be handed in as the claim policy's `onClaimed` hook. Demultiplexes every
   dispatched frame by sysid only (never source address — a companion computer relaying several
   vehicles is one physical source for all of them). `register(DeviceId, Integer pinnedSysid,
   SubmissionPublisher<Telemetry>): VehicleRegistration`, `unregister(...): boolean` (true once it has
@@ -90,7 +97,11 @@ merely "chose not to".
   String firmware, Integer mavType, Instant lastHeard)`, `CommandTarget(int sysid, String firmware,
   Integer mavType, InetSocketAddress sourceAddress)`.
 - `final class VehicleClaimPolicy` (package-private) — project policy: which `Device` owns which
-  sysid (pinned/unpinned claim + re-election — see Gotchas). `add`/`remove(VehicleRegistration):
+  sysid (pinned/unpinned claim + re-election — see Gotchas). Constructor takes an
+  `IntConsumer onClaimed` (**MAVLINK-COMMANDS-PLAN P2**, one call site: `MavlinkGateway` passes
+  `streamNegotiator::negotiate`) — `assignClaim` invokes it with the claimed sysid exactly once per
+  claim event (initial claim and silence-window re-election alike), never for an unclaimed sysid
+  merely landing in the unclaimed registry, and never twice for one claim. `add`/`remove(VehicleRegistration):
   boolean`, `unclaimedVehicles()`, `claimedVehicles()`, `commandTarget(DeviceId)`,
   `resolve(int sysid): VehicleRegistration` (called once per dispatched frame),
   `closeAllPublishersExceptionally(Throwable)` (**FLEET-RADIO R4/D5**, package-private — called only
@@ -114,6 +125,19 @@ merely "chose not to".
   `MAV_CMD_SET_MESSAGE_INTERVAL` for every configured message the instant a system id is newly
   learned. `(Dispatcher, FrameSink, Correlator, MavlinkSettings)`, `close()`. No port, no dependency
   on `vision-flight`'s requirement table — the message set is pure configuration.
+- `final class MavlinkStreamNegotiator` (package-private) — **(MAVLINK-COMMANDS-PLAN P2, new)** the
+  stream negotiation every real GCS does at connect, on every claim (not gated by
+  `Onboarding.requestMessagesOnConnect()` — see its own class javadoc and the P2 Gotchas below).
+  `(FrameSink sink, Correlator correlator, MavlinkSettings settings)`, `void negotiate(int sysid)` —
+  the one method, handed to `VehicleClaimPolicy` as its `onClaimed` hook. Sends one
+  `MAV_CMD_REQUEST_MESSAGE`(512) for `AUTOPILOT_VERSION` (via a fresh `CapabilityService`), then,
+  unless `settings.onboarding().requestMessagesOnConnect()` is `true`, one
+  `MAV_CMD_SET_MESSAGE_INTERVAL`(511) per `settings.streamNegotiation().streams()` entry, strictly
+  sequential via `CompletableFuture.thenCompose` (never blocks the calling — session reader — thread).
+  Every outcome is logged and none of them fail the claim: `UNSUPPORTED`/`DENIED`/`NO_ACK` → INFO;
+  a send-level fault (e.g. no link registered) → WARNING. Deliberately does **not** wire its probe's
+  `CapabilityReport` into `MavlinkFlightCommander.capabilities(Device)` this wave — a known, documented
+  scope boundary, not an oversight.
 - `public final class MavlinkFlightCommander implements FlightCommandPort` — `setMode`/
   `returnToHome`/`arm`/`disarm`/`emergencyStop`/`auxFunction`/`capabilities`. Every command is one
   `COMMAND_LONG` from a fresh, per-call `CommandService` built on the resolved device's gateway.
@@ -182,6 +206,10 @@ merely "chose not to".
   — `"surface boat"`, `"coaxial helicopter"` — are the ones the shared table kept). `null` only for a
   genuinely unrecognized `MAV_TYPE`, never for a recognized-but-unsupported or not-a-vehicle one (both
   get a real label). Constructors `(MavlinkTelemetrySource)`, `(MavlinkTelemetrySource, MavlinkSettings)`.
+  **(MAVLINK-COMMANDS-PLAN P2, new)** `probe`'s capability request and `requestMessageInterval` both
+  now go through a private `awaitWithContentionRetry` rather than the plain `await` every other call
+  here still uses — see the P2 Gotchas below for why (they share a correlator key with
+  `MavlinkStreamNegotiator`, which now fires on every claim).
 - `public final class MavlinkLinkStatusProvider implements SubsystemStatusPort` — `mavlink-link`'s
   health self-report for `GET /api/system/status`. **(FLEET-RADIO R4/D4, rewritten)** Constructor is
   `(Supplier<Map<DeviceId, LinkHealth.Health>> claimedVehicleHealth, MavlinkSettings.LinkStatus
@@ -246,22 +274,25 @@ merely "chose not to".
   `Position positionAt(double metersAlongRoute)`.
 - `public record MavlinkSettings(String bindHost, Duration silenceWindow, int maxUnclaimedVehicles,
   Duration closeJoinTimeout, Duration ackTimeout, int commandRetries, Scan scan, Transmit transmit,
-  Rc rc, Inventory inventory, Onboarding onboarding, LinkStatus linkStatus)` — this module's
-  tunables, `vision-app` maps `vision.mavlink.*`/`vision.rc.*` onto one. **(MAVLINK-COMMANDS-PLAN P1)**
+  Rc rc, Inventory inventory, Onboarding onboarding, LinkStatus linkStatus, StreamNegotiation
+  streamNegotiation)` — this module's tunables, `vision-app` maps `vision.mavlink.*`/`vision.rc.*`
+  onto one. **(MAVLINK-COMMANDS-PLAN P1)**
   `ackTimeout` is now documented as the **per-attempt** wait (re-scoped from a single whole-command
   wait — its type and default-field position are unchanged, only its meaning); `commandRetries` is
   new, inserted right after it, `>= 0` enforced in the compact constructor. `static defaults()` →
   `ackTimeout = 700ms`, `commandRetries = 2` (`DEFAULT_ACK_TIMEOUT_MILLIS`/`DEFAULT_COMMAND_RETRIES`,
   D2a — worst case 3 attempts × 700ms ≈ 2.1s, inside the old single-wait 2s budget).
   `withSilenceWindow`/`withAckTimeout`/`withCommandRetries`/`withInventory`/`withOnboarding`/
-  `withLinkStatus`. Back-compat 8-arg and 9-arg constructors default every field added after them,
-  **including `commandRetries`** now (to `DEFAULT_COMMAND_RETRIES`) and `linkStatus` (`LinkStatus.
-  defaults()` — FLEET-RADIO R4 kept both overloads' arity unchanged per CLAUDE.md rule 10 /
-  java-clean-code §3: a new collaborator updates call sites and back-compat delegation targets, never
-  a new overload). **`vision-app`'s `TelemetryWiring#toMavlinkSettings` calls the 8-arg overload**, so
-  every deployment picks up `commandRetries = 2` automatically the moment this module is rebuilt —
-  see the MAVLINK-COMMANDS-PLAN P1 Gotchas below for the one place this back-compat design does *not*
-  close the loop (the `ackTimeout` actually wired into `MavlinkFlightCommander` in production). Nested:
+  `withLinkStatus`/`withStreamNegotiation` (**MAVLINK-COMMANDS-PLAN P2, new**). Back-compat 8-arg and
+  9-arg constructors default every field added after them, **including `commandRetries`** now (to
+  `DEFAULT_COMMAND_RETRIES`), `linkStatus` (`LinkStatus.defaults()` — FLEET-RADIO R4), and
+  `streamNegotiation` (`StreamNegotiation.defaults()` — P2) kept both overloads' arity unchanged per
+  CLAUDE.md rule 10 / java-clean-code §3: a new collaborator updates call sites and back-compat
+  delegation targets, never a new overload). **`vision-app`'s `TelemetryWiring#toMavlinkSettings`
+  calls the 8-arg overload**, so every deployment picks up `commandRetries = 2` **and**
+  `StreamNegotiation.defaults()` automatically the moment this module is rebuilt — see the
+  MAVLINK-COMMANDS-PLAN P1 Gotchas below for the one place this back-compat design does *not* close
+  the loop (the `ackTimeout` actually wired into `MavlinkFlightCommander` in production). Nested:
   - `record LinkStatus(double dropRateWarnPercent, double dropRateAlarmPercent, Duration
     failureGrace)` (**FLEET-RADIO R4/D7**, new) — `MavlinkLinkStatusProvider`'s per-vehicle drop-rate
     severity thresholds (`dropRateAlarmPercent >= dropRateWarnPercent` enforced in the compact
@@ -291,6 +322,15 @@ merely "chose not to".
     9 on-connect message requests are firmware-verified against ArduPilot Copter 4.7 — see Gotchas.
     `probeParameters` is overridable through `vision.onboarding.probe.parameters`; empty (the
     default) keeps `defaults()`'s list rather than probing nothing.
+  - `record StreamNegotiation(List<Onboarding.MessageRequest> streams)` — **(MAVLINK-COMMANDS-PLAN
+    P2, new)** `MavlinkStreamNegotiator`'s own interval-chain configuration, reusing
+    `Onboarding.MessageRequest`'s `(int messageId, Duration interval)` shape rather than duplicating
+    it. Deliberately no enable flag (contrast `Onboarding.requestMessagesOnConnect()`) — see the P2
+    Gotchas below. `static defaults()` → six cockpit messages at 250ms/4Hz each: `ATTITUDE`(30),
+    `GLOBAL_POSITION_INT`(33), `VFR_HUD`(74), `RC_CHANNELS`(65), `GPS_RAW_INT`(24, gates
+    `GLOBAL_POSITION_INT`'s lat/lon trustworthiness per the OPERATOR-UX-4 N1 Gotcha above),
+    `BATTERY_STATUS`(147). No `VisionMavlinkProperties` field exists for this yet — see the P2 Gotchas
+    below for the "documentation only, but not dormant" distinction from `command-retries`' gap.
 - `final class SimulatedVehicleMessages` (package-private) — the MAVLink message builders
   `MavlinkFeedTransmitter` calls (`heartbeat`, `sysStatus`, `gpsRawInt`, `globalPositionInt`).
 
@@ -456,7 +496,12 @@ one `FlightState`-contributing row above has fired at least once.
   fire-all-at-once loop would register a second live `Correlator.await` for a key the first request
   already occupies, and `DefaultCorrelator` throws `IllegalStateException` rather than silently
   orphan the first waiter. Chaining serialises the sends without ever blocking the dispatcher's
-  calling thread.
+  calling thread. **(MAVLINK-COMMANDS-PLAN P2)** This is not just an intra-class concern any more —
+  `MavlinkStreamNegotiator`'s own interval chain, `MavlinkConnectRemediator`'s on-connect chain, and
+  `MavlinkVehicleConfigurator`'s manual `requestMessageInterval`/`probe` calls all now share this same
+  keying scheme for the same peer, so any two of them running close together for one vehicle can
+  collide on it. See the P2 Gotchas below for the two fixes this wave added (`MavlinkStreamNegotiator`
+  stepping aside for Mechanism A; `MavlinkVehicleConfigurator.awaitWithContentionRetry`).
 - **What "reconnected" means for `MavlinkConnectRemediator`'s idempotency is a judgement call, not
   a protocol fact.** MAVLink has no boot counter and no session identifier, so there is no wire-level
   way to distinguish "same aircraft, radio blipped" from "fresh boot, back to starved defaults". A
@@ -740,6 +785,76 @@ one `FlightState`-contributing row above has fired at least once.
   F0-triggered flip above) changes `DEFAULT_COMMAND_RETRIES`; the ack-on-retry test additionally
   `assumeTrue`s `commandRetries() >= 1` so it skips cleanly (not red) if that default ever drops to 0.
 
+### MAVLINK-COMMANDS-PLAN P2 Gotchas
+
+- **Negotiation is best-effort, by design — nothing it sends can fail a claim.**
+  `MavlinkStreamNegotiator.negotiate` is fired from inside `VehicleClaimPolicy.assignClaim`'s own
+  monitor, but every send it makes is async (`CompletableFuture`, never blocking); `UNSUPPORTED`/
+  `DENIED`/`NO_ACK` on any one message is logged (INFO for the honest-refusal codes, WARNING for a
+  send-level fault or an unexpected result) and the chain simply continues to the next message. A
+  vehicle that ignores every request still claims normally and streams whatever it already streams —
+  P2 can only make a link richer, never worse.
+- **Unconditional by default (no flag of its own) — except the interval chain steps aside for
+  Mechanism A, and that exception is a real wire-level constraint, not a policy choice.**
+  `MAV_CMD_SET_MESSAGE_INTERVAL`'s `COMMAND_ACK` correlates on `(origin sysid, command id)` only,
+  never on which message id was asked for (see the general Gotcha above, written for
+  `MavlinkConnectRemediator` but equally true here) — so this negotiator's own interval chain and
+  `MavlinkConnectRemediator`'s on-connect chain cannot both hold a live `Correlator.await` for the
+  same peer's `(sysid, 511)` key at once; the second registration throws `IllegalStateException`,
+  logged as a WARNING "could not be sent" by whichever side loses the race. Discovered this wave via
+  `MavlinkConnectRemediationIntegrationTest` going red the moment P2 shipped unconditionally. Fixed
+  by having `MavlinkStreamNegotiator`'s constructor read
+  `settings.onboarding().requestMessagesOnConnect()` once, into `intervalChainOwnedByMechanismA`, and
+  skip its own `negotiateStreams` call entirely when it is `true` — Mechanism A already owns that
+  exact job for that peer when an operator has explicitly turned it on. The `AUTOPILOT_VERSION` probe
+  is unaffected (a different correlator key, `(sysid, 512)`) and always runs regardless of the flag.
+- **The same collision reaches `MavlinkVehicleConfigurator`'s manual, operator-invoked endpoints too
+  — a second, broader manifestation the flag-based fix above does not cover, since these calls are
+  not gated by any flag.** `probe`'s `AUTOPILOT_VERSION` request and `requestMessageInterval` share
+  their correlator keys with `MavlinkStreamNegotiator`'s probe/interval chain respectively, and an
+  operator can call either at any time — including moments after a claim, while this negotiator's own
+  chain is still in flight. Before this wave's fix, that race produced an instant, spurious
+  `IllegalStateException` → `NO_ACK`/no-report the moment two local collaborators wanted the same key,
+  which is dishonest: it reads exactly like the aircraft never answered, when in fact the request was
+  never sent at all. Caught by `MavlinkVehicleConfiguratorTest.requestsThatAreSentToAReachableAircraftAndGoUnansweredTimeOutIntoNoAck`'s
+  own elapsed-time assertion ("must actually have been sent and waited on, not short-circuited"; it
+  failed at ~5ms instead of waiting out `ackTimeout`). Fixed with a new private
+  `MavlinkVehicleConfigurator.awaitWithContentionRetry` (plus `CORRELATOR_CONTENTION_BACKOFF = 100ms`):
+  on an `IllegalStateException`-caused `ExecutionException`, it retries a **fresh** exchange (a new
+  send, a new registration — replaying the same failed future would just fail again) after the
+  backoff, bounded by the same overall budget the call already computes; any other outcome (a real
+  reply, a real timeout, an unrelated fault) is returned exactly as the plain `await` helper already
+  would. Only `requestCapabilities`/`requestMessageInterval` use it — `readParams`/`writeParam`
+  correlate on `PARAM_VALUE`, a key `MavlinkStreamNegotiator` never touches, so they keep the plain
+  `await`.
+- **`MavlinkSitlOnConnectIntegrationTest`'s "starved baseline" premise no longer holds, and its proof
+  message had to change.** `StreamNegotiation.defaults()` requests `VFR_HUD` (74) unconditionally —
+  the same message id the test used to prove Mechanism A's flag caused something. A connection with
+  the flag off is no longer starved of `VFR_HUD`; it is starved of nothing P2 already asks for. The
+  test now uses `SERVO_OUTPUT_RAW` (36) as its proof message instead — one of Mechanism A's four
+  P2-exclusive on-connect ids (`SYS_STATUS`=1, `SERVO_OUTPUT_RAW`=36, `SCALED_IMU2`=116,
+  `SYSTEM_TIME`=2), never requested by P2's own default set, so seeing it arrive is still unambiguous
+  proof the flag — not P2 — caused it. Re-run against real SITL after the rewrite (docker+image
+  present): the flag-off connection's `MavlinkStreamNegotiator` chain got all six messages
+  `ACCEPTED` by ArduPilot 4.7.0, and the flag-on connection's own `MavlinkConnectRemediator` chain ran
+  cleanly afterward with zero collisions, confirming the `intervalChainOwnedByMechanismA` fix
+  end-to-end against real firmware, not just the fake-vehicle unit tests.
+- **`MavlinkFlightCommander.capabilities(Device)` is not wired to this probe's `CapabilityReport` this
+  wave — a known, deliberate scope boundary, not an oversight.** The on-claim `AUTOPILOT_VERSION`
+  probe's result is only logged, never cached or exposed through the existing `capabilities()` port
+  method; a future wave that wants a claim-time capability cache to back that method can build one,
+  but P2's own brief was the negotiation itself.
+- **Production automatically inherits `StreamNegotiation.defaults()` the moment this module is
+  rebuilt — no `vision-app` change required, unlike `commandRetries`' still-open gap above.**
+  `TelemetryWiring#toMavlinkSettings` builds `MavlinkSettings` via the 8-arg back-compat constructor,
+  which this wave updated (like every other back-compat constructor and `withXxx` method on this
+  record) to append `StreamNegotiation.defaults()` automatically. Unlike `MavlinkFlightCommander`'s
+  `ackTimeout` gap (P1 Gotchas above, still open), there is no separate, stale constructor overload in
+  the way here — `MavlinkGateway` always builds its `MavlinkStreamNegotiator` off whatever
+  `MavlinkSettings` it is constructed with, so there is nothing left for a future wave to thread
+  through before this is live in production; the only future work is making the six ids/rate
+  *configurable* (a `VisionMavlinkProperties` field), not making negotiation *happen*.
+
 ## Status
 
 Real and load-bearing: RX ingest + fleet-gateway claim/re-election, guarded command TX (mode/arm/
@@ -851,3 +966,36 @@ back-compat constructor, so production's actual per-attempt wait stays 2s, not 7
 wave threads a `commandRetries` field through `VisionMavlinkProperties`/`TelemetryWiring` — see the P1
 Gotchas above for the worst-case latency this leaves (~6s, not the ~2.1s D2a intends).
 `./mvnw -B -pl drone-link/mavlink -am test` — **256 tests**, all green (2026-09-01).
+
+**`docs/plans/active/MAVLINK-COMMANDS-PLAN.md` P2 done.** New `MavlinkStreamNegotiator`
+(package-private): on every claim, one `MAV_CMD_REQUEST_MESSAGE`(512) `AUTOPILOT_VERSION` probe, then
+(unless `Onboarding.requestMessagesOnConnect()`/Mechanism A already owns the peer's interval channel)
+one `MAV_CMD_SET_MESSAGE_INTERVAL`(511) per new `MavlinkSettings.StreamNegotiation.defaults()` entry —
+`ATTITUDE`/`GLOBAL_POSITION_INT`/`VFR_HUD`/`RC_CHANNELS`/`GPS_RAW_INT`/`BATTERY_STATUS` at 250ms each.
+No enable flag of its own, by design; every outcome is logged and none of them fail the claim. Hook is
+`VehicleClaimPolicy`'s new `IntConsumer onClaimed` constructor param, wired in `MavlinkGateway`'s
+constructor as `streamNegotiator::negotiate`, invoked from `assignClaim` exactly once per claim event.
+`MavlinkSettings` grew a 13th field/`StreamNegotiation` nested record and a `withStreamNegotiation`
+wither; every back-compat constructor and existing wither defaults it, so `vision-app`'s
+`TelemetryWiring` (an 8-arg-constructor call site, out of this wave's file scope, unmodified) picks up
+`StreamNegotiation.defaults()` automatically the moment this module rebuilds — unlike P1's still-open
+`commandRetries`/`ackTimeout` gap, this one is not dormant. Two real, previously-latent production bugs
+surfaced and were fixed this wave, both stemming from `MAV_CMD_SET_MESSAGE_INTERVAL`'s `COMMAND_ACK`
+correlating on `(sysid, command id)` only, never on message id: (1) `MavlinkStreamNegotiator`'s own
+interval chain colliding with `MavlinkConnectRemediator`'s, fixed by having the former step aside
+entirely when Mechanism A is active; (2) the same collision reaching `MavlinkVehicleConfigurator`'s
+manual `probe`/`requestMessageInterval` endpoints (no flag gates those), fixed by a new
+`awaitWithContentionRetry` helper that retries a fresh exchange after a short backoff instead of
+surfacing an instant, dishonest "no reply". See the P2 Gotchas above for both in full, including the
+real-SITL re-verification of fix (1) and the message-id rewrite fix (1) forced on
+`MavlinkSitlOnConnectIntegrationTest` (its "starved baseline" proof message, `VFR_HUD`, is now one of
+P2's own six defaults, so it switched to `SERVO_OUTPUT_RAW` — a message id exclusive to Mechanism A's
+own on-connect set). New tests: `MavlinkStreamNegotiatorTest` (3, real UDP loopback against a local
+`FakeVehicle`); 4 new `MavlinkSettingsTest` cases for `StreamNegotiation`; `MavlinkFlightCommanderTest`
+and `MavlinkConnectRemediationIntegrationTest`'s shared `FakeVehicle` test doubles gained an auto-drain
+mechanism so P2's now-unconditional negotiation traffic never surfaces as an unexpected `COMMAND_LONG`
+to a test asserting on its own, unrelated command.
+`./mvnw -B -pl drone-link/mavlink -am test` — **263 tests**, all green, foreground/blocking run
+(2026-09-01); `MavlinkSitlOnConnectIntegrationTest` re-run individually against real SITL
+(docker+image present) also green, confirming the Mechanism A step-aside end-to-end against real
+ArduPilot 4.7.0, not just fake-vehicle unit tests.

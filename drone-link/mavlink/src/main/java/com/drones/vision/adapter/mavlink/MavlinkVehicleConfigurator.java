@@ -37,6 +37,7 @@ import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 
 /**
  * The MAVLink half of vehicle onboarding (docs/plans/active/DRONE-ONBOARDING-PLAN.md wave O4):
@@ -101,6 +102,18 @@ public final class MavlinkVehicleConfigurator implements VehicleConfigPort {
     /** @see #budget(Duration, int) */
     private static final Duration EXCHANGE_SLACK = Duration.ofSeconds(2);
 
+    /**
+     * How long to wait before retrying an exchange whose first send failed synchronously because
+     * {@code mavlink-core}'s {@code Correlator} rejected registration -- another exchange for the
+     * very same {@code (sysid, command)} key is already live. This is the {@code MAV_CMD_REQUEST_MESSAGE}
+     * / {@code MAV_CMD_SET_MESSAGE_INTERVAL} keys this class shares with {@link MavlinkStreamNegotiator},
+     * which fires on every claim and can genuinely still be mid-exchange with the same aircraft when
+     * an operator calls {@link #probe} or {@link #requestMessageInterval} (MAVLINK-COMMANDS-PLAN P2).
+     * Short and unconfigured on purpose: this is contention between two in-process collaborators
+     * sharing one correlator slot, not a network condition, so there is nothing to tune per deployment.
+     */
+    private static final Duration CORRELATOR_CONTENTION_BACKOFF = Duration.ofMillis(100);
+
     private final MavlinkTelemetrySource telemetrySource;
     private final MavlinkSettings settings;
 
@@ -155,8 +168,8 @@ public final class MavlinkVehicleConfigurator implements VehicleConfigPort {
             MessageIntervalService service = new MessageIntervalService(
                     new CommandService(lease.gateway().sink(), lease.gateway().correlator(),
                             settings.ackTimeout(), retries));
-            CommandService.CommandOutcome outcome = await(
-                    service.setMessageInterval(target.peerId(), messageId, interval),
+            CommandService.CommandOutcome outcome = awaitWithContentionRetry(
+                    () -> service.setMessageInterval(target.peerId(), messageId, interval),
                     budget(settings.ackTimeout(), retries));
             if (outcome == null) {
                 return new MessageIntervalOutcome(messageId, interval, RemediationResultCode.NO_ACK,
@@ -310,8 +323,8 @@ public final class MavlinkVehicleConfigurator implements VehicleConfigPort {
     private CapabilityReport requestCapabilities(MavlinkGateway gateway, LinkTarget target) {
         CapabilityService service = new CapabilityService(gateway.sink(), gateway.correlator(),
                 settings.onboarding().capabilityTimeout(), settings.onboarding().capabilityRetries());
-        CapabilityReport report = await(service.requestAutopilotVersion(target.peerId()),
-                budget(settings.onboarding().capabilityTimeout(), settings.onboarding().capabilityRetries()));
+        Duration budget = budget(settings.onboarding().capabilityTimeout(), settings.onboarding().capabilityRetries());
+        CapabilityReport report = awaitWithContentionRetry(() -> service.requestAutopilotVersion(target.peerId()), budget);
         return report == null ? noCapabilityReport() : report;
     }
 
@@ -639,6 +652,63 @@ public final class MavlinkVehicleConfigurator implements VehicleConfigPort {
         } catch (ExecutionException e) {
             LOG.log(System.Logger.Level.DEBUG, () -> "MAVLink onboarding exchange failed: " + e.getCause());
             return null;
+        }
+    }
+
+    /**
+     * Like {@link #await(java.util.concurrent.CompletableFuture, Duration)}, but for an exchange
+     * that shares its correlator key with {@link MavlinkStreamNegotiator} ({@code
+     * requestCapabilities}/{@code requestMessageInterval} — see {@link #CORRELATOR_CONTENTION_BACKOFF}).
+     * {@code exchange} is a supplier, not a future, because a retry must open a <b>fresh</b> exchange
+     * (a new send, a new registration) — replaying an already-failed future would just fail again.
+     *
+     * <p>Only the specific, honest, in-process contention case is retried: a first send that fails
+     * because the correlator's slot is momentarily held by another exchange from elsewhere in this
+     * module. A real reply, a real timeout against the aircraft, or any other fault is returned (or
+     * reported as {@code null}) exactly as the plain {@code await} already would — this exists so a
+     * caller gets a genuine wait against the aircraft, not an instant, misleading "no reply" the
+     * moment two local collaborators happen to want the same key at the same instant.
+     */
+    private static <T> T awaitWithContentionRetry(Supplier<java.util.concurrent.CompletableFuture<T>> exchange,
+                                                    Duration budget) {
+        Instant deadline = Instant.now().plus(budget);
+        while (true) {
+            Duration remaining = Duration.between(Instant.now(), deadline);
+            if (remaining.isNegative() || remaining.isZero()) {
+                return null;
+            }
+            java.util.concurrent.CompletableFuture<T> future = exchange.get();
+            try {
+                return future.get(remaining.toMillis(), TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                future.cancel(true);
+                return null;
+            } catch (TimeoutException e) {
+                future.cancel(true);
+                return null;
+            } catch (ExecutionException e) {
+                if (!(e.getCause() instanceof IllegalStateException)) {
+                    LOG.log(System.Logger.Level.DEBUG, () -> "MAVLink onboarding exchange failed: " + e.getCause());
+                    return null;
+                }
+                LOG.log(System.Logger.Level.DEBUG,
+                        "correlator slot busy (MavlinkStreamNegotiator likely mid-exchange with the same "
+                                + "aircraft) -- retrying after " + CORRELATOR_CONTENTION_BACKOFF);
+                sleepQuietly(minDuration(CORRELATOR_CONTENTION_BACKOFF, remaining));
+            }
+        }
+    }
+
+    private static Duration minDuration(Duration a, Duration b) {
+        return a.compareTo(b) <= 0 ? a : b;
+    }
+
+    private static void sleepQuietly(Duration duration) {
+        try {
+            Thread.sleep(duration.toMillis());
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 

@@ -4,6 +4,7 @@ import com.drones.mavlink.CompId;
 import com.drones.mavlink.SysId;
 import com.drones.mavlink.codec.FrameReader;
 import com.drones.mavlink.codec.FrameWriter;
+import com.drones.mavlink.session.CorrelationKeys;
 import com.drones.mavlink.transport.ByteChunk;
 import com.drones.mavlink.transport.UdpTargetLink;
 
@@ -14,6 +15,7 @@ import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.flight.domain.model.FlightCapability;
 import com.drones.vision.kernel.StreamDescriptor;
 
+import io.dronefleet.mavlink.common.AutopilotVersion;
 import io.dronefleet.mavlink.common.CommandAck;
 import io.dronefleet.mavlink.common.CommandLong;
 import io.dronefleet.mavlink.common.MavCmd;
@@ -23,6 +25,7 @@ import io.dronefleet.mavlink.minimal.MavAutopilot;
 import io.dronefleet.mavlink.minimal.MavModeFlag;
 import io.dronefleet.mavlink.minimal.MavState;
 import io.dronefleet.mavlink.minimal.MavType;
+import io.dronefleet.mavlink.util.EnumValue;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -36,6 +39,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -1059,6 +1063,17 @@ class MavlinkFlightCommanderTest {
     private static final class FakeVehicle implements AutoCloseable {
         private static final long HEARTBEAT_PERIOD_MILLIS = 200L;
 
+        /**
+         * MAVLINK-COMMANDS-PLAN.md P2's {@link MavlinkStreamNegotiator} now fires unconditionally the
+         * instant a vehicle is claimed -- i.e. on this fake's very first heartbeat, racing every test
+         * method's own deliberate command. {@link #awaitCommandLong} auto-answers and swallows this
+         * traffic transparently (see that method's own note) so every existing test here keeps seeing
+         * exactly the one command it deliberately sent, unaffected by a mechanism none of them are
+         * about.
+         */
+        private static final Set<Integer> NEGOTIATED_MESSAGE_IDS = MavlinkSettings.StreamNegotiation.defaults()
+                .streams().stream().map(MavlinkSettings.Onboarding.MessageRequest::messageId).collect(Collectors.toSet());
+
         private final UdpTargetLink link;
         private final FrameWriter writer;
         private final FrameReader reader;
@@ -1110,7 +1125,13 @@ class MavlinkFlightCommanderTest {
             writer.broadcast(heartbeat, link.id());
         }
 
-        /** Blocks (bounded by {@code timeout}) until a {@code COMMAND_LONG} arrives, skipping anything else. */
+        /**
+         * Blocks (bounded by {@code timeout}) until a {@code COMMAND_LONG} arrives, skipping anything
+         * else -- <b>and</b> transparently auto-answering (never returning) {@link
+         * MavlinkStreamNegotiator}'s own on-claim traffic (see {@link #NEGOTIATED_MESSAGE_IDS}'s own
+         * note), so every caller here still only ever sees the one command its own test scenario
+         * deliberately sent.
+         */
         CommandLong awaitCommandLong(Duration timeout) throws IOException {
             long deadlineNanos = System.nanoTime() + timeout.toNanos();
             AtomicReference<CommandLong> found = new AtomicReference<>();
@@ -1125,7 +1146,12 @@ class MavlinkFlightCommanderTest {
                 }
                 reader.offer(chunk, frame -> {
                     if (frame.is(CommandLong.class)) {
-                        found.compareAndSet(null, frame.as(CommandLong.class));
+                        CommandLong candidate = frame.as(CommandLong.class);
+                        if (isStreamNegotiationTraffic(candidate)) {
+                            autoAnswerStreamNegotiation(candidate);
+                        } else {
+                            found.compareAndSet(null, candidate);
+                        }
                     }
                 });
             }
@@ -1133,6 +1159,34 @@ class MavlinkFlightCommanderTest {
                 throw new AssertionError("expected a COMMAND_LONG within " + timeout);
             }
             return found.get();
+        }
+
+        private static boolean isStreamNegotiationTraffic(CommandLong candidate) {
+            MavCmd command = candidate.command().entry();
+            if (command == MavCmd.MAV_CMD_REQUEST_MESSAGE) {
+                return (int) candidate.param1() == CorrelationKeys.AUTOPILOT_VERSION_MESSAGE_ID;
+            }
+            return command == MavCmd.MAV_CMD_SET_MESSAGE_INTERVAL
+                    && NEGOTIATED_MESSAGE_IDS.contains((int) candidate.param1());
+        }
+
+        private void autoAnswerStreamNegotiation(CommandLong candidate) {
+            if (candidate.command().entry() == MavCmd.MAV_CMD_REQUEST_MESSAGE) {
+                replyAutopilotVersion();
+            } else {
+                replyAck(MavCmd.MAV_CMD_SET_MESSAGE_INTERVAL, MavResult.MAV_RESULT_ACCEPTED);
+            }
+        }
+
+        private void replyAutopilotVersion() {
+            AutopilotVersion version = AutopilotVersion.builder()
+                    .capabilities(EnumValue.create(0))
+                    .flightSwVersion(0)
+                    .boardVersion(0)
+                    .vendorId(0)
+                    .productId(0)
+                    .build();
+            writer.broadcast(version, link.id());
         }
 
         void replyAck(MavResult result) {

@@ -63,6 +63,12 @@ import java.util.concurrent.atomic.AtomicReference;
  *       O8) — a third, independent dispatcher subscription, constructed only when {@link
  *       MavlinkSettings.Onboarding#requestMessagesOnConnect()} is {@code true}, that fires
  *       Mechanism A ({@code MAV_CMD_SET_MESSAGE_INTERVAL}) the instant a peer is learned.</li>
+ *   <li>a {@link MavlinkStreamNegotiator} (docs/plans/active/MAVLINK-COMMANDS-PLAN.md P2) —
+ *       unconditional, unlike {@link MavlinkConnectRemediator} — wired into {@link
+ *       VehicleClaimPolicy}'s {@code onClaimed} hook so a claim (not merely a learned peer) fires
+ *       {@code MAV_CMD_REQUEST_MESSAGE(AUTOPILOT_VERSION)} and the configured {@code
+ *       MAV_CMD_SET_MESSAGE_INTERVAL} set; see that class's own javadoc for how it differs from
+ *       Mechanism A above.</li>
  * </ul>
  * It subscribes to {@code session.dispatcher()} once, for every frame; each dispatched frame is
  * handed to {@link VehicleClaimPolicy#resolve} to find the owning registration (by sysid alone --
@@ -174,8 +180,12 @@ final class MavlinkGateway {
         // silent reader-thread exit. Wired before any registration exists, so a failure occurring
         // the instant after bind still reaches every registration this gateway ever accumulates.
         session.onLinkFailure((linkId, cause) -> handleLinkFailure(cause));
+        // MAVLINK-COMMANDS-PLAN.md P2: built before claimPolicy so its onClaimed hook can be wired
+        // in below. Unconditional (no settings.onboarding()-style flag) -- see its own javadoc.
+        MavlinkStreamNegotiator streamNegotiator = new MavlinkStreamNegotiator(session.sink(), session.correlator(), settings);
         this.claimPolicy = new VehicleClaimPolicy(
-                session.peers(), settings.silenceWindow().toMillis(), settings.maxUnclaimedVehicles());
+                session.peers(), settings.silenceWindow().toMillis(), settings.maxUnclaimedVehicles(),
+                streamNegotiator::negotiate);
         this.subscription = session.dispatcher().subscribe(MessageFilter.any(), this::onFrame);
         // A second, independent subscription (docs/plans/active/DRONE-ONBOARDING-PLAN.md O1,
         // §3.2's "passive inventory") -- deliberately not folded into onFrame's routing/decode
