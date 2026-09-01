@@ -138,7 +138,7 @@ public class ControlProfileController {
     @PutMapping("/api/control-profiles/{id}")
     public ControlProfileResponse update(@PathVariable String id, @RequestBody UpdateControlProfileRequest request) {
         return ControlProfileResponse.saved(controlProfileService.update(owner(), ControlProfileId.of(id),
-                request.name(), request.toChannelMap(), request.toActionMap()));
+                request.name(), request.toChannelMap(), request.toActionMap(), request.toView()));
     }
 
     /**

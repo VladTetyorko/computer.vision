@@ -39,9 +39,38 @@
               <button type="button" class="btn small" [class.active]="learning()" (click)="toggleLearn()">
                 {{ learning() ? 'Move a control…' : 'Detect' }}
               </button>
+              <!-- Sweeps (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md wave C15) — Detect above names
+                   one control and stops; these keep going until the operator stops them, and are
+                   mutually exclusive with Detect and each other. -->
+              <button type="button" class="btn small" [class.active]="detecting()" (click)="toggleAutodetect()">
+                {{ detecting() ? 'Stop (' + detectedCount() + ' added)' : 'Autodetect' }}
+              </button>
+              <button type="button" class="btn small" [class.active]="guiding()" (click)="toggleGuided()">
+                {{ guiding() ? 'Stop guide' : 'Guide me' }}
+              </button>
             }
           }
         </div>
+
+        @if (guiding()) {
+          <p class="muted hint guide-line">
+            @if (guidedDone()) {
+              Guide me is done — {{ guidedBound() }} bound. <button type="button" class="btn small" (click)="toggleGuided()">Close</button>
+            } @else if (guidedStep(); as step) {
+              Move the control you use for <strong>{{ step.label }}</strong> ({{ guidedProgress().at }} of
+              {{ guidedProgress().of }}).
+              <button type="button" class="btn small" (click)="skipGuidedStep()">Skip</button>
+            }
+          </p>
+        }
+        @if (detecting()) {
+          <p class="muted hint guide-line">
+            Flick every control on your transmitter in turn — {{ detectedCount() }} added so far.
+            @if (lastDetected(); as key) {
+              Last: {{ key }}.
+            }
+          </p>
+        }
 
         @if (!rc.connected()) {
           <p class="muted hint">

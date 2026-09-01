@@ -165,8 +165,14 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
   `status` is `@Enumerated(EnumType.STRING)` reusing `CandidateStatus` directly. `identity_key` is a
   plain unique-indexed `String` column, not a synthesized id — the port's `findByIdentityKey` is the
   sweep's upsert-target lookup, called once per discovered device every cycle.
+- **`ControlProfileEntity` gained `stickMode`/`forwardIsUp`** (`V32`, CONTROLLER-SETUP-CONTEXT.md wave
+  C15 — the owner's `TransmitterView`) as two plain scalar columns rather than folding them into the
+  existing `channelMap`/`actionMap` jsonb, since they are two fixed, range-checked fields (`stickMode`
+  1-4) rather than an open document; `NOT NULL` with defaults matching `TransmitterView.DEFAULT`
+  (mode 2, forward-up), the same "every existing row already has an arrangement" reasoning
+  `AssetUsageEntity#origin` (`V26`) uses.
 
-## Schema (`src/main/resources/db/migration`) — migration ledger, V1 through V31
+## Schema (`src/main/resources/db/migration`) — migration ledger, V1 through V32
 
 | Migration | What it does |
 |---|---|
@@ -201,6 +207,7 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 | `V29__cv_profiles.sql` | `cv_profiles` (audited) + `cv_profile_bindings` (audited, composite PK `(scope_kind, scope_id)`); seeds the four built-in profiles (`people-vehicles`/`wide-search`/`military-vehicles`/`video-only`, fixed ids) with `built_in=true`/`group_id=NULL` and `tracking`/`event_rule` byte-identical to `TrackingConfig.defaults()`/`EventRuleConfig.defaults()`; **zero bindings seeded** (CV-SETTINGS-PLAN.md §3.1 rule 3 — no feature flag, every existing stream keeps resolving to `PipelineConfig.defaults()`); two deviations from §5.3's literal column list, both flagged in the migration's own header: `model_id`/`model_version` split (not one `model` column) and an added `event_rule` column (missing from §5.3 entirely) |
 | `V30__cv_model_registry.sql` | `cv_models` (audited, composite PK `(model_id, version)`, every provenance column + `metrics` nullable) + `cv_training_runs` (audited, `idx_cv_training_runs_started_at` for `findAll(limit)`'s newest-first order); no seed rows — the config-seeded model roster merges with the worker's live `ListModels` response at the application layer, not baked into this schema (fixes H4/H7) |
 | `V31__discovery_inbox.sql` | `discovery_candidates` (audited): domain-owned `id` PK, `identity_key` (the mDNS/ONVIF/MAVLink-derived stable key `DiscoveryCandidate` upserts on), `method`/`name`/`address`, flattened `suggested_category`/`suggested_stream_protocol`/`suggested_stream_uri`/`suggested_stream_options` (nullable as a group — a candidate with no offered stream), `details` jsonb `NOT NULL DEFAULT '{}'`, `first_seen`/`last_seen` `TIMESTAMPTZ`, `status`, nullable `registered_asset_id` (no FK — the same "no cross-aggregate FK" posture every other table in this schema takes, see Conventions); unique index on `identity_key` (the upsert target) + index on `last_seen` (the inbox list's sort column) |
+| `V32__control_profile_transmitter_view.sql` | `control_profiles` += `stick_mode SMALLINT NOT NULL DEFAULT 2`, `forward_is_up BOOLEAN NOT NULL DEFAULT TRUE`, `ck_control_profiles_stick_mode CHECK (stick_mode BETWEEN 1 AND 4)` — how the owner's transmitter is arranged (CONTROLLER-SETUP-CONTEXT.md wave C15); defaults rather than nullable since every existing row already has an arrangement (the platform's); **renumbered from the branch's own `V25` during the `feat/controller-setup-c15` merge** — see the Gotchas entry below for the collision this replaced |
 
 A second, conditional Flyway location, `src/main/resources/db/seed/dev`, holds
 `V90001__dev_accounts.sql` (the `admin`/`manager`/`pilot` DEV-ONLY accounts) — it only joins Flyway's
@@ -353,13 +360,14 @@ buffered samples per open usage; `DEFAULT_BATCH_WINDOW_MILLIS` is non-zero on pu
   `docs/plans/README.md` instead.
 - **Stale compiled Flyway resources on `target/classes` produce phantom/duplicate migrations that
   don't exist in the working tree.** This has bitten twice: an abandoned `V13.1__dev_accounts.sql`
-  once caused an out-of-order failure until a `mvn clean`; and **currently**, the unmerged branch
-  `feat/controller-setup-c15` also claims version 25 (`V25__control_profile_transmitter_view.sql`,
-  vs. this branch's `V25__device_origin.sql`) — if that branch was ever built in the same checkout, a
-  stale copy left in `target/classes` makes this module fail with `FlywayException: Found more than
-  one migration with version 25` against a working tree that contains no such file. `mvn clean` is
-  the fix. Whichever of the two branches merges second must renumber its `V25`; `refactor/audit-remediation`
-  merges first, so `V25__device_origin.sql`/`V26__asset_usage_origin.sql` stand as-is.
+  once caused an out-of-order failure until a `mvn clean`; and, as anticipated here ahead of time, the
+  branch `feat/controller-setup-c15` also claimed version 25 (`V25__control_profile_transmitter_view.sql`,
+  vs. this tree's own `V25__device_origin.sql`) — resolved at merge time by renumbering the branch's
+  file to `V32__control_profile_transmitter_view.sql`, the next free slot once `V31__discovery_inbox.sql`
+  is accounted for (see the ledger above). A stale copy of the old `V25` name left in `target/classes`
+  from a pre-merge build of that branch will still make this module fail with `FlywayException: Found
+  more than one migration with version 25` against a working tree that no longer contains such a file
+  — `mvn clean` is the fix.
 - **`JpaTelemetryRepository#findByUsage`'s `limit` returns the earliest samples, not the most
   recent** — a caller expecting "newest N" gets the flight's first N seconds instead.
 - **`DetectionQuery#to` is treated as inclusive** by both the query and `JpaDetectionRepository`,
@@ -389,8 +397,10 @@ buffered samples per open usage; `DEFAULT_BATCH_WINDOW_MILLIS` is non-zero on pu
 ## Status
 
 Fully implements every repository port the platform currently defines (32 `Jpa*Repository`/`Jpa*Store`
-classes; see API surface) against a schema migrated through `V31`. Wired into vision-app
-unconditionally via `PersistenceWiringConfiguration` — Postgres is the only store.
+classes; see API surface) against a schema migrated through `V32` (`feat/controller-setup-c15`'s
+`stickMode`/`forwardIsUp` columns, reconciled here as `V32__control_profile_transmitter_view.sql` —
+see the ledger and Gotchas above for the renumbering). Wired into vision-app unconditionally via
+`PersistenceWiringConfiguration` — Postgres is the only store.
 
 Open items, all deliberate rather than oversights:
 - Connection pooling and telemetry write batching both exist but are constructor-argument opt-ins

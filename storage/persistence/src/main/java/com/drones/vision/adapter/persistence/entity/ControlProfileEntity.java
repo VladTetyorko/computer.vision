@@ -65,13 +65,20 @@ public class ControlProfileEntity {
     @Column(name = "action_map", columnDefinition = "jsonb", nullable = false)
     private List<ActionBinding> actionMap = new ArrayList<>();
 
+    /** How the owner's transmitter is arranged; affects only how the layout is drawn (V32). */
+    @Column(name = "stick_mode", nullable = false)
+    private short stickMode;
+
+    @Column(name = "forward_is_up", nullable = false)
+    private boolean forwardIsUp;
+
     /** JPA only. */
     protected ControlProfileEntity() {
     }
 
     public ControlProfileEntity(UUID id, UUID ownerUserId, String vehicleKind, String code, String displayName,
                                  boolean active, Instant updatedAt, List<ControlBinding> channelMap,
-                                 List<ActionBinding> actionMap) {
+                                 List<ActionBinding> actionMap, short stickMode, boolean forwardIsUp) {
         this.id = id;
         this.ownerUserId = ownerUserId;
         this.vehicleKind = vehicleKind;
@@ -81,6 +88,8 @@ public class ControlProfileEntity {
         this.updatedAt = updatedAt;
         this.channelMap = new ArrayList<>(channelMap);
         this.actionMap = new ArrayList<>(actionMap);
+        this.stickMode = stickMode;
+        this.forwardIsUp = forwardIsUp;
     }
 
     public UUID id() {
@@ -105,6 +114,14 @@ public class ControlProfileEntity {
 
     public boolean active() {
         return active;
+    }
+
+    public short stickMode() {
+        return stickMode;
+    }
+
+    public boolean forwardIsUp() {
+        return forwardIsUp;
     }
 
     public Instant updatedAt() {

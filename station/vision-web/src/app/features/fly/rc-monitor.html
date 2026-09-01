@@ -61,8 +61,20 @@
     @if (dispatcher.lastFired(); as fired) {
       <p class="muted hint">{{ fired }}</p>
     }
-    @if (actionBindings().length > 0 && !canCommand()) {
-      <p class="muted hint">These do nothing until this drone accepts commands.</p>
+    <!-- Setup signpost (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C11) — the empty branch is
+         deliberate: an operator whose transmitter fires nothing has no other way to discover the
+         setup page exists from inside the cockpit. Once something is bound, offer the same link as
+         a quiet edit affordance instead. -->
+    @if (actionBindings().length === 0) {
+      <p class="muted hint">
+        Nothing on your transmitter is bound to a command yet.
+        <a routerLink="/manage/controller">Set up your controller</a> to choose what each switch does.
+      </p>
+    } @else {
+      @if (!canCommand()) {
+        <p class="muted hint">These do nothing until this drone accepts commands.</p>
+      }
+      <a class="muted hint" routerLink="/manage/controller">Change what these do</a>
     }
 
     <!-- Session link (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P4) — a calm,

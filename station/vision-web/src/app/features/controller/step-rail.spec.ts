@@ -12,6 +12,8 @@ const ROVER_BUILTIN: ControlProfile = {
   code: 'S-T-',
   name: 'Ground vehicle',
   active: true,
+  stickMode: 2,
+  forwardIsUp: true,
   channelMap: [
     {
       source: 'AXIS',
@@ -55,7 +57,7 @@ const COPTER_BUILTIN: ControlProfile = {
 };
 
 function draft(controls: readonly ControlDraft[], kind: ProfileDraft['kind'] = 'ROVER'): ProfileDraft {
-  return { id: 'p1', kind, name: 'Bench layout', controls };
+  return { id: 'p1', kind, name: 'Bench layout', controls, stickMode: 2, forwardIsUp: true };
 }
 
 function render(props: { steps: ReturnType<typeof wizardSteps>; draft: ProfileDraft; currentIndex: number }) {

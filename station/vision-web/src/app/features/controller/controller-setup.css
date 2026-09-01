@@ -70,3 +70,100 @@
     display: none;
   }
 }
+
+/* ---- How the picture is drawn + what leaves the station (wave C15) -------------------------- */
+/* Two more stacked cards, same "each block supplies its own margin-bottom" rule as the rest of
+   this file — see this file's own header comment. Both sit above the wizard/all-controls views
+   below, since they are properties of the draft as a whole rather than of any one step or row. */
+
+.transmitter-drawing {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.diagram-controls {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.inline-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.outputs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.outputs-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}
+
+.output-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.output-row {
+  display: grid;
+  grid-template-columns: 4rem minmax(8rem, 1fr) minmax(6rem, 2fr) 4rem;
+  align-items: center;
+  gap: var(--space-8);
+  padding: var(--space-4) var(--space-8);
+}
+
+.output-row.idle .out-fn,
+.output-row.idle .out-micros {
+  color: var(--text-muted);
+}
+
+.out-fn {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.out-micros {
+  text-align: right;
+}
+
+/* The pulse-width envelope, 1000 to 2000 µs, with a tick where this channel rests. */
+.out-track {
+  position: relative;
+  height: var(--space-8);
+  border-radius: var(--radius-sm);
+  background: var(--panel-hover);
+}
+
+.out-rest,
+.out-marker {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  transform: translateX(-50%);
+}
+
+.out-rest {
+  width: 1px;
+  background: var(--border-strong);
+}
+
+.out-marker {
+  width: var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--color-info);
+}

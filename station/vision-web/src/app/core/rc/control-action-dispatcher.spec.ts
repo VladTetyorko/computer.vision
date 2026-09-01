@@ -115,6 +115,8 @@ function profileWith(actionMap: readonly ActionBinding[]): ControlProfile {
     name: 'Bench rover',
     active: true,
     updatedAt: undefined,
+  stickMode: 2,
+  forwardIsUp: true,
     channelMap: [],
     actionMap: [...actionMap],
   };

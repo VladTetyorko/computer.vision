@@ -11,6 +11,7 @@ import com.drones.vision.flight.domain.model.ControlAction;
 import com.drones.vision.flight.domain.model.ControlProfile;
 import com.drones.vision.flight.domain.model.ControlProfileId;
 import com.drones.vision.flight.domain.model.OwnedControlProfile;
+import com.drones.vision.flight.domain.model.TransmitterView;
 import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
@@ -195,7 +196,7 @@ class ControlProfileControllerTest {
     @Test
     void updateSendsBothMapsThroughToTheService() throws Exception {
         OwnedControlProfile existing = savedRover("Bench rover", true);
-        when(controlProfileService.update(eq(ownerId), eq(existing.id()), eq("Field rover"), any(), any()))
+        when(controlProfileService.update(eq(ownerId), eq(existing.id()), eq("Field rover"), any(), any(), any()))
                 .thenReturn(existing);
 
         mockMvc.perform(put("/api/control-profiles/{id}", existing.id().value())
@@ -215,11 +216,47 @@ class ControlProfileControllerTest {
         ArgumentCaptor<ChannelMap> channels = ArgumentCaptor.forClass(ChannelMap.class);
         ArgumentCaptor<ActionMap> actions = ArgumentCaptor.forClass(ActionMap.class);
         verify(controlProfileService).update(eq(ownerId), eq(existing.id()), eq("Field rover"),
-                channels.capture(), actions.capture());
+                channels.capture(), actions.capture(), any());
         assertEquals(1, channels.getValue().bindings().size());
         assertEquals(6, channels.getValue().bindings().get(0).rcChannel());
         assertEquals(2, actions.getValue().bindings().get(0).positions().size());
         assertEquals(46, actions.getValue().bindings().get(0).positions().get(1).auxFunctionNumber());
+    }
+
+    @Test
+    void updateCarriesHowTheOperatorsTransmitterIsArranged() throws Exception {
+        OwnedControlProfile existing = savedRover("Bench rover", true);
+        when(controlProfileService.update(eq(ownerId), eq(existing.id()), any(), any(), any(), any()))
+                .thenReturn(existing);
+
+        mockMvc.perform(put("/api/control-profiles/{id}", existing.id().value())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Bench rover","channelMap":[],"actionMap":[],
+                                 "stickMode":1,"forwardIsUp":false}"""))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<TransmitterView> view = ArgumentCaptor.forClass(TransmitterView.class);
+        verify(controlProfileService).update(eq(ownerId), eq(existing.id()), any(), any(), any(), view.capture());
+        assertEquals(new TransmitterView(1, false), view.getValue());
+    }
+
+    /** An older client that has never drawn the picture sends no opinion, and must not be refused. */
+    @Test
+    void updateWithoutATransmitterViewKeepsThePlatformDefault() throws Exception {
+        OwnedControlProfile existing = savedRover("Bench rover", true);
+        when(controlProfileService.update(eq(ownerId), eq(existing.id()), any(), any(), any(), any()))
+                .thenReturn(existing);
+
+        mockMvc.perform(put("/api/control-profiles/{id}", existing.id().value())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Bench rover","channelMap":[],"actionMap":[]}"""))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<TransmitterView> view = ArgumentCaptor.forClass(TransmitterView.class);
+        verify(controlProfileService).update(eq(ownerId), eq(existing.id()), any(), any(), any(), view.capture());
+        assertEquals(TransmitterView.DEFAULT, view.getValue());
     }
 
     /**
@@ -242,7 +279,7 @@ class ControlProfileControllerTest {
     @Test
     void updateReturns404ForAProfileNobodySaved() throws Exception {
         ControlProfileId id = ControlProfileId.random();
-        when(controlProfileService.update(eq(ownerId), eq(id), any(), any(), any()))
+        when(controlProfileService.update(eq(ownerId), eq(id), any(), any(), any(), any()))
                 .thenThrow(new NoSuchElementException("No control profile " + id.value()));
 
         mockMvc.perform(put("/api/control-profiles/{id}", id.value())
@@ -255,7 +292,7 @@ class ControlProfileControllerTest {
     @Test
     void updateReturns403ForAnotherOperatorsProfile() throws Exception {
         ControlProfileId id = ControlProfileId.random();
-        when(controlProfileService.update(eq(ownerId), eq(id), any(), any(), any()))
+        when(controlProfileService.update(eq(ownerId), eq(id), any(), any(), any(), any()))
                 .thenThrow(new AccessDeniedException("belongs to another operator"));
 
         mockMvc.perform(put("/api/control-profiles/{id}", id.value())

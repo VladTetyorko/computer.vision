@@ -53,6 +53,7 @@ const CATALOG: ControlCatalog = {
     { name: 'AUX_FUNCTION', label: 'Aux function', parameter: 'AUX_FUNCTION', dangerous: false },
   ],
   auxFunctions: [{ number: 19, label: 'Gripper' }],
+  maxRcChannel: 8,
 };
 
 const ROVER_BUILTIN: ControlProfile = {
@@ -62,6 +63,8 @@ const ROVER_BUILTIN: ControlProfile = {
   code: 'S-T-',
   name: 'Ground vehicle',
   active: true,
+  stickMode: 2,
+  forwardIsUp: true,
   channelMap: [
     {
       source: 'AXIS',
@@ -98,6 +101,8 @@ const COPTER_BUILTIN: ControlProfile = {
   code: 'AETR',
   name: 'Multirotor',
   active: true,
+  stickMode: 2,
+  forwardIsUp: true,
   channelMap: [
     {
       source: 'AXIS',
@@ -163,7 +168,7 @@ const UNKNOWN_BUILTIN: ControlProfile = {
 };
 
 function draft(controls: readonly ControlDraft[], kind: ProfileDraft['kind'] = 'ROVER'): ProfileDraft {
-  return { id: 'p1', kind, name: 'Bench layout', controls };
+  return { id: 'p1', kind, name: 'Bench layout', controls, stickMode: 2, forwardIsUp: true };
 }
 
 describe('wizardSteps', () => {

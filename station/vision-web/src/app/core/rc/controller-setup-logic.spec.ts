@@ -1,17 +1,22 @@
 import { describe, expect, it } from 'vitest';
 import {
   actionAt,
+  asStickMode,
+  bindingSummary,
   blankControlDraft,
+  channelOptions,
   draftFrom,
   draftIssues,
   draftKey,
   draftLabel,
+  groupByKind,
   kindsFor,
   microsFor,
   movedControl,
   nextFreeChannel,
   parameterKindOf,
   positionsOf,
+  relayedChannels,
   toUpdateRequest,
   withKind,
   withPositionAction,
@@ -43,6 +48,7 @@ const CATALOG = {
     { name: 'AUX_FUNCTION', label: 'Aux function', parameter: 'AUX_FUNCTION', dangerous: false },
   ],
   auxFunctions: [{ number: 19, label: 'Gripper' }],
+  maxRcChannel: 8,
 } as ControlCatalog;
 
 const ROVER: ControlProfile = {
@@ -52,6 +58,8 @@ const ROVER: ControlProfile = {
   code: 'CUSTOM',
   name: 'Bench rover',
   active: false,
+  stickMode: 2,
+  forwardIsUp: true,
   channelMap: [
     {
       source: 'AXIS',
@@ -89,7 +97,7 @@ const ROVER: ControlProfile = {
 };
 
 function draft(controls: readonly ControlDraft[], name = 'Bench rover'): ProfileDraft {
-  return { id: 'p1', kind: 'ROVER', name, controls };
+  return { id: 'p1', kind: 'ROVER', name, controls, stickMode: 2, forwardIsUp: true };
 }
 
 describe('draftFrom', () => {
@@ -123,6 +131,11 @@ describe('draftFrom', () => {
   });
 });
 
+/** Axis 5 redeclared as a 2-position switch that fires commands rather than driving a channel. */
+function commandSwitch(): ControlDraft {
+  return { ...withKind(blankControlDraft('AXIS', 4, draft([])), 'SWITCH_2', CATALOG), role: 'ACTIONS' };
+}
+
 describe('blankControlDraft', () => {
   it('starts a new control doing nothing at all, not driving a channel', () => {
     const control = blankControlDraft('BUTTON', 4, draft([]));
@@ -136,6 +149,13 @@ describe('blankControlDraft', () => {
     const existing = draftFrom(ROVER);
 
     expect(blankControlDraft('AXIS', 5, existing).rcChannel).toBe(2);
+  });
+
+  it('starts an axis on a channel, because a continuous axis has no positions to fire from', () => {
+    const control = blankControlDraft('AXIS', 5, draft([]));
+
+    expect(control.role).toBe('CHANNEL');
+    expect(control.kind).toBe('AXIS');
   });
 });
 
@@ -278,7 +298,7 @@ describe('draftIssues', () => {
 
   it('catches an action whose parameter was never chosen', () => {
     const control = withPositionAction(
-      withKind(blankControlDraft('AXIS', 4, draft([])), 'SWITCH_2', CATALOG),
+      commandSwitch(),
       'HIGH',
       'SET_MODE',
       null,
@@ -290,6 +310,69 @@ describe('draftIssues', () => {
 
   it('refuses a nameless layout', () => {
     expect(draftIssues(draft([], '   '), CATALOG)).toContain('Give this layout a name.');
+  });
+
+  it('warns about a channel this link never puts on the wire', () => {
+    const control: ControlDraft = { ...blankControlDraft('AXIS', 0, draft([])), role: 'CHANNEL', rcChannel: 12 };
+
+    expect(draftIssues(draft([control]), CATALOG)).toEqual([
+      'Axis 1 drives CH12, which this link never sends \u2014 it carries CH1\u2013CH8.',
+    ]);
+  });
+
+  it('says nothing about a channel inside what the link carries', () => {
+    const control: ControlDraft = { ...blankControlDraft('AXIS', 0, draft([])), role: 'CHANNEL', rcChannel: 8 };
+
+    expect(draftIssues(draft([control]), CATALOG)).toEqual([]);
+  });
+});
+
+describe('bindingSummary', () => {
+  it('says the channel and what it drives, in the catalogue\u2019s words', () => {
+    const control: ControlDraft = {
+      ...blankControlDraft('AXIS', 0, draft([])),
+      role: 'CHANNEL',
+      function: 'THROTTLE',
+      rcChannel: 3,
+    };
+
+    expect(bindingSummary(control, CATALOG)).toBe('CH3 \u00b7 Throttle');
+  });
+
+  it('lists every command a switch fires', () => {
+    const control = withPositionAction(
+      withPositionAction(
+        commandSwitch(),
+        'LOW',
+        'ARM',
+        null,
+        ['LOW', 'HIGH'],
+      ),
+      'HIGH',
+      'SET_MODE',
+      'HOLD',
+      ['LOW', 'HIGH'],
+    );
+
+    expect(bindingSummary(control, CATALOG)).toBe('Arm \u00b7 Mode HOLD');
+  });
+
+  it('calls a command control with no command on it what it is', () => {
+    const control = withKind(blankControlDraft('AXIS', 4, draft([])), 'SWITCH_2', CATALOG);
+
+    expect(bindingSummary({ ...control, role: 'ACTIONS' }, CATALOG)).toBe('nothing yet');
+  });
+});
+
+describe('channel offering', () => {
+  it('offers exactly what the server says the link carries', () => {
+    expect(relayedChannels(CATALOG)).toBe(8);
+    expect(channelOptions(CATALOG)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  });
+
+  it('falls back to the wire maximum before the catalogue has loaded', () => {
+    expect(channelOptions(undefined).length).toBe(relayedChannels(undefined));
+    expect(channelOptions(undefined)[0]).toBe(1);
   });
 });
 
@@ -325,5 +408,57 @@ describe('movedControl', () => {
 
   it('reads a control the baseline never saw as resting at zero', () => {
     expect(movedControl([0, 0, 0, 0, 1], [], { axes: [], buttons: [] })).toEqual({ source: 'AXIS', sourceIndex: 4 });
+  });
+});
+
+describe('groupByKind', () => {
+  const saved = { ...ROVER, id: 'p1', name: 'Bench rover', active: false } as ControlProfile;
+  const rover = { ...ROVER, id: 'b-rover', source: 'BUILT_IN', name: 'Ground vehicle', active: true } as ControlProfile;
+  const copter = { ...ROVER, id: 'b-copter', source: 'BUILT_IN', kind: 'COPTER', name: 'Multirotor', active: true } as ControlProfile;
+
+  it('puts every layout for one vehicle under that vehicle', () => {
+    const groups = groupByKind([saved, rover, copter], CATALOG);
+
+    expect(groups.map((g) => g.kind)).toEqual(['ROVER', 'COPTER']);
+    expect(groups[0].profiles.map((p) => p.id)).toEqual(['p1', 'b-rover']);
+  });
+
+  it('names the group in the catalogue\u2019s words', () => {
+    expect(groupByKind([rover], CATALOG)[0].label).toBe('Rover');
+  });
+
+  it('falls back to the kind itself when the catalogue does not name it', () => {
+    expect(groupByKind([copter], CATALOG)[0].label).toBe('COPTER');
+  });
+
+  it('names the one layout a session would engage for the kind', () => {
+    expect(groupByKind([saved, rover], CATALOG)[0].active?.id).toBe('b-rover');
+  });
+
+  it('lists the built-in last, because it is the fallback the others override', () => {
+    const groups = groupByKind([rover, saved], CATALOG);
+
+    expect(groups[0].profiles.map((p) => p.source)).toEqual(['SAVED', 'BUILT_IN']);
+  });
+});
+
+describe('the transmitter view on a draft', () => {
+  it('opens a layout with how its owner said their radio is arranged', () => {
+    const draft = draftFrom({ ...ROVER, stickMode: 3, forwardIsUp: false } as ControlProfile);
+
+    expect(draft.stickMode).toBe(3);
+    expect(draft.forwardIsUp).toBe(false);
+  });
+
+  it('falls back to the common arrangement when the stored mode is not one', () => {
+    expect(draftFrom({ ...ROVER, stickMode: 9 } as ControlProfile).stickMode).toBe(2);
+    expect(asStickMode(undefined)).toBe(2);
+  });
+
+  it('saves it with the layout, because it describes the radio and not the browser', () => {
+    const request = toUpdateRequest(draftFrom({ ...ROVER, stickMode: 1, forwardIsUp: false } as ControlProfile));
+
+    expect(request.stickMode).toBe(1);
+    expect(request.forwardIsUp).toBe(false);
   });
 });

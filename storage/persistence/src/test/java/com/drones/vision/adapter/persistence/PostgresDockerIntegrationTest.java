@@ -11,6 +11,7 @@ import com.drones.vision.flight.domain.model.ControlInputKind;
 import com.drones.vision.flight.domain.model.ControlProfile;
 import com.drones.vision.flight.domain.model.ControlProfileId;
 import com.drones.vision.flight.domain.model.OwnedControlProfile;
+import com.drones.vision.flight.domain.model.TransmitterView;
 import com.drones.vision.flight.domain.model.PositionAction;
 import com.drones.vision.flight.domain.model.SwitchPosition;
 import com.drones.vision.flight.domain.model.VehicleKind;
@@ -2964,6 +2965,29 @@ class PostgresDockerIntegrationTest {
             OwnedControlProfile found = repository.findById(layout.id()).orElseThrow();
             assertEquals(layout, found.profile());
             assertEquals(owner, found.owner());
+        }
+
+        @Test
+        void howTheOperatorsTransmitterIsArrangedSurvivesTheRoundTrip() {
+            UserId owner = UserId.random();
+            OwnedControlProfile saved = new OwnedControlProfile(owner,
+                    ControlProfile.forKind(VehicleKind.ROVER).copyAs(ControlProfileId.random(), "Bench rover"),
+                    false, NOW, new TransmitterView(3, false));
+
+            repository.save(saved);
+
+            assertEquals(new TransmitterView(3, false), repository.findById(saved.id()).orElseThrow().view());
+        }
+
+        /** V25 backfilled the two columns rather than adding them nullable, so a pre-C15 row still draws. */
+        @Test
+        void aProfileSavedWithNoOpinionReadsBackAsThePlatformDefault() {
+            UserId owner = UserId.random();
+            OwnedControlProfile saved = profileFor(owner, VehicleKind.COPTER, "Bench copter", false);
+
+            repository.save(saved);
+
+            assertEquals(TransmitterView.DEFAULT, repository.findById(saved.id()).orElseThrow().view());
         }
 
         @Test

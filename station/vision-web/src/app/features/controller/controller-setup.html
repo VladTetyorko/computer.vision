@@ -77,6 +77,77 @@
     </section>
 
     @if (facade.selected()) {
+      @if (facade.draft(); as draft) {
+        <!-- How the picture is drawn (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md wave C15) — a
+             property of the saved layout, not this browser: it describes the operator's own radio,
+             which follows them between machines. Neither field changes a microsecond on the wire —
+             axis → function → channel decides that alone. -->
+        <section class="card transmitter-drawing">
+          <div class="diagram-controls">
+            <label class="inline-field">
+              <span class="label">Stick mode</span>
+              <select
+                [disabled]="!facade.editable()"
+                aria-label="Transmitter stick mode"
+                [ngModel]="stickMode()"
+                (ngModelChange)="setStickMode($event)"
+              >
+                @for (option of stickModes; track option.mode) {
+                  <option [value]="option.mode">{{ option.label }}</option>
+                }
+              </select>
+            </label>
+            <label class="inline-field">
+              <span class="label">Stick direction</span>
+              <select
+                [disabled]="!facade.editable()"
+                aria-label="Which way a stick reads on this picture"
+                [ngModel]="positiveIsUp() ? 'up' : 'down'"
+                (ngModelChange)="setPositiveIsUp($event === 'up')"
+              >
+                <option value="up">Pushing forward draws the dot up</option>
+                <option value="down">Pushing forward draws the dot down</option>
+              </select>
+            </label>
+          </div>
+          <p class="muted hint">
+            Both only change the transmitter picture above and in the cockpit — what the vehicle does is
+            decided by the channel each control drives. Change the direction if a stick reads upside down.
+          </p>
+        </section>
+
+        <!-- What leaves the station (wave C15) — the only place travel and reverse are checkable on the
+             bench rather than on the first flight. Live regardless of which view below is open. -->
+        <section class="card outputs">
+          <div class="outputs-head">
+            <span class="label">What the vehicle receives</span>
+            <span class="muted hint">
+              Live, with travel and reverse applied. A channel nothing drives is left as it was.
+            </span>
+          </div>
+          <ul class="output-list">
+            @for (out of outputs(); track out.rcChannel) {
+              <li class="output-row" [class.idle]="out.micros === undefined">
+                <span class="out-ch mono">CH{{ out.rcChannel }}</span>
+                <span class="out-fn">
+                  {{ out.functionLabel ?? 'not sent' }}
+                  @if (out.reversed) {
+                    <span class="chip">reversed</span>
+                  }
+                </span>
+                <span class="out-track" aria-hidden="true">
+                  <span class="out-rest" [style.left.%]="out.restPercent"></span>
+                  @if (out.micros !== undefined) {
+                    <span class="out-marker" [style.left.%]="out.offsetPercent"></span>
+                  }
+                </span>
+                <span class="out-micros mono">{{ out.micros === undefined ? '—' : out.micros }}</span>
+              </li>
+            }
+          </ul>
+        </section>
+      }
+
       @if (isPanelOpen('all-controls')) {
         <vision-all-controls (copyRequested)="copySelected()" />
       }

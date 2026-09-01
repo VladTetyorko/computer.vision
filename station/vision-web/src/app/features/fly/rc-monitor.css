@@ -119,3 +119,17 @@
   align-self: flex-start;
   font-size: 0.72rem;
 }
+
+/* The way into `/manage/controller` from the cockpit (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md
+   C11 — the drawer links to the setup page, the cockpit never becomes an editor). Quiet by default:
+   an operator mid-flight is not looking for it, and one who has bound nothing yet is told plainly in
+   the empty branch above instead. */
+.rc-setup-link {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+
+.rc-setup-link:hover,
+.rc-setup-link:focus-visible {
+  color: var(--color-info);
+}

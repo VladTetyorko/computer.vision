@@ -24,7 +24,7 @@ const ARM_STEP: WizardStepModel = {
 };
 
 function draft(): ProfileDraft {
-  return { id: 'p1', kind: 'ROVER', name: 'Bench layout', controls: [] };
+  return { id: 'p1', kind: 'ROVER', name: 'Bench layout', controls: [], stickMode: 2, forwardIsUp: true };
 }
 
 function render() {
@@ -173,6 +173,7 @@ describe('WizardStep — Mode step known names (CONTROLLER-UX-PLAN.md §5 wave M
     functions: [],
     actions: [{ name: 'SET_MODE', label: 'Set mode', parameter: 'MODE_NAME', dangerous: false }],
     auxFunctions: [],
+    maxRcChannel: 8,
   };
 
   function renderModeStep() {

@@ -12,6 +12,12 @@ Angular 21 SPA (driving adapter): the whole product UI — operator cockpit, man
 - `models.ts` (~3000 lines) — every DTO, mirroring Java 1:1. Change a Java DTO → fix here first, then `grep -rn` the field.
 - `VisionApi` (~123 methods) — thin `firstValueFrom` wrappers over `HttpClient`; no component calls `fetch`/`HttpClient` directly.
 - `api-error.ts#describeHttpError(err)` — the one place an HTTP failure becomes user text.
+- **`ControlProfile` gained required `stickMode`/`forwardIsUp`; `UpdateControlProfileRequest` gained
+  the same pair as optional** (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md wave C15, reconciled here
+  as part of merging `feat/controller-setup-c15`) — the owner's transmitter arrangement (mode 1-4,
+  which way a vertical axis reads), stored per layout rather than per browser. An older/omitting
+  caller of `UpdateControlProfileRequest` gets the platform default read back on the next fetch. See
+  `TransmitterView`/`WizardStep` below for where the setup UI reads/writes this.
 
 ### `core/**` — stores (all `providedIn: 'root'` unless noted)
 | Area | Types |
@@ -390,3 +396,46 @@ Everything listed under API surface is implemented and covered by the suite (160
   - **Degrades honestly**: a digit past the vehicle's own `selectableModes` renders no row at all (never a fabricated mode name); `capabilities()` still loading or a failed read reads as `[]`, so only Space/`Shift`+`Enter` show until a real capability arrives — never a guessed mode list; `armed() === undefined` reads through `toggleArmVerb` as `'Arm'`, the safer assumption, exactly like W1's own dispatcher-side resolution.
   - **Verify chain, all green**: `npm run test:ci` — **166/166 files, 3273/3273 tests** (+17 over W1's own 3256 baseline — 8 new `rc-monitor-logic.spec.ts#actionKeyRows` cases, 5 new `transmitter-view.spec.ts` `keyRows` cases, 4 new `rc-monitor.spec.ts` TestBed cases covering the keyboard-source gate, live mode names + armed-state verb, the past-the-list omission, and a real `keydown`/`keyup` dispatch lighting the row). `npx tsc --noEmit -p tsconfig.app.json`/`-p tsconfig.spec.json` — 0 errors both. `ng build --configuration production` — green, same two pre-existing budget warnings only. **Bundle delta**, measured against a disposable `git worktree add <tmp> HEAD` baseline (symlinked `node_modules`, isolated from this shared tree's own pre-existing unrelated uncommitted changes in `infra/rover-sim/**`/`drone-link/**`/`station/vision-app/**`): initial bundle **421.25 kB → 421.25 kB raw (unchanged), 118.47 kB → 118.47 kB transfer (unchanged)** — every touched file is only reachable through the already-lazy cockpit route. Lazy **`cockpit` chunk 157.20 kB → 157.83 kB raw (+0.63 kB), 34.26 kB → 34.46 kB transfer (+0.20 kB)**.
   - **Commit**: `station/vision-web/src/app/features/fly/{rc-monitor.ts,rc-monitor.html,rc-monitor-logic.ts,rc-monitor-logic.spec.ts,rc-monitor.spec.ts}`, `station/vision-web/src/app/shared/ui/transmitter-view/{transmitter-view.ts,transmitter-view.html,transmitter-view.css,transmitter-view.spec.ts}` + this `MODULE.md`, message `feat(web): keyboard key map surfaced in the transmitter view`; no file under `core/rc/` was touched (frozen per this wave's instruction); the tree's pre-existing unrelated uncommitted/untracked changes outside this list (`infra/rover-sim/**`, `station/vision-app/**`, `drone-link/**`) were left untouched — explicit file paths staged, never `git add -A`.
+
+## Status — CONTROLLER-SETUP wave C15: the setup page redesign + Guide me + live channel strip (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md) — 2026-08-24, reconciled here as part of merging `feat/controller-setup-c15`
+
+Builds on the C7/C10/C11 setup page (`ControllerSetupPage`/`ControllerSetupFacade`, `src/app/core/rc/**`) already
+documented above. Four pieces:
+
+- **`channel-output-logic.ts`** (pure, spec'd) — `channelOutputs(draft, axes, buttons, catalog)` computes what
+  each of CH1–CH8 would carry **right now**, in microseconds, mirroring `ControlBinding#toMicros` step for step
+  (clamp → reverse → deadband → piecewise map → clamp; switches snap to detents). A channel nothing drives reads
+  `undefined`, not a number. Feeds a live **"What the vehicle receives"** CH1–CH8 strip between the diagram and
+  the mapped-controls list — duplicating the backend's mapping in TypeScript is deliberate: the operator is
+  checking their *layout*, and a strip fed by the server would only prove the server agrees with itself.
+- **`guided-setup.ts`** (pure, spec'd) — **Guide me**, the inverse of Autodetect: function-first. `guidedSteps`
+  builds one question per channel function the vehicle kind's built-in declares ("Move the control you use for
+  Steering"), `beginGuided`/`advanceGuided`/`skipGuided`/`currentStep`/`isGuidedDone` drive it through three
+  phases (`off`/`watch`/`settle`); `SETTLE_TICKS = 9` (~0.15 s at 60 Hz) keeps a self-centring stick's spring-back
+  from being read as the next answer, its quiet threshold (0.08) deliberately below `movedControl`'s trigger
+  (0.5). Answering a step **takes over** any row already holding that function or channel — mutually exclusive
+  with Autodetect by construction, since both claim the same flick.
+- **The two-column work-area redesign** — diagram → the live CH1-CH8 strip → one line per mapped control, with a
+  **sticky editor beside them** rendering only the selected control's fields, collapsing under the diagram at
+  `--bp-lg`. Replaces the earlier column of full-height cards, which took roughly two screens of scrolling to
+  reach a picked control.
+- **Stick mode (1–4) and stick direction moved onto the saved profile** (`stickMode`/`forwardIsUp`) — they used
+  to be browser preferences in `core/panel-state.ts`. That was wrong: the picture is of **the operator's own
+  radio**, which follows them between browsers and machines while `localStorage` does not. They still change
+  nothing about what the vehicle does — axis → function → channel decides that — and the page says so under the
+  pickers.
+
+### Tests
+
+C15 adds 16 `channel-output-logic.spec.ts` + 17 `guided-setup.spec.ts` cases, plus cases for
+`groupByKind`/`asStickMode`/`assignFunction`. `npm run test:ci` — **143 files, 2625 tests green** at the time of
+this wave.
+
+### Left undone, named honestly
+
+- **The C15 backend half was not live on the running station at build time.** `stickMode`/`forwardIsUp` were
+  compiled and tested against the migration then numbered `V25`, but the dev station ran an old build; a `PUT`
+  carrying them answered `200` while ignoring them, falling back to mode 2 / forward-up until restarted. Both
+  fields are optional in both directions precisely so that degrades quietly. (The migration is `V32` on the
+  merged tree — see `storage/persistence/MODULE.md`'s schema ledger and Gotchas for the renumbering.)
+- **Light theme only** — never verified against dark theme at the time of this wave.

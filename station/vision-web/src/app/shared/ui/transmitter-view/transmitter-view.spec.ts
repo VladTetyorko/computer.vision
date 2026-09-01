@@ -38,6 +38,7 @@ const CATALOG: ControlCatalog = {
     { name: 'DISARM', label: 'Disarm', parameter: 'NONE', dangerous: true },
   ],
   auxFunctions: [],
+  maxRcChannel: 8,
 };
 
 const axisBinding = (

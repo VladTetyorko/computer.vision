@@ -2,6 +2,7 @@ package com.drones.vision.api.dto;
 
 import com.drones.vision.flight.domain.model.ActionMap;
 import com.drones.vision.flight.domain.model.ChannelMap;
+import com.drones.vision.flight.domain.model.TransmitterView;
 
 import java.util.List;
 
@@ -18,9 +19,12 @@ import java.util.List;
  * @param name       the layout's name; must not be blank
  * @param channelMap the controls that stream into RC channels; {@code null} is read as empty
  * @param actionMap  the controls whose positions fire commands; {@code null} is read as empty
+ * @param stickMode  the owner's transmitter mode, 1-4; {@code null} keeps the platform default
+ * @param forwardIsUp whether pushing a stick forward reads positive; {@code null} keeps the default
  */
 public record UpdateControlProfileRequest(String name, List<ControlBindingPayload> channelMap,
-                                           List<ActionBindingPayload> actionMap) {
+                                           List<ActionBindingPayload> actionMap, Integer stickMode,
+                                           Boolean forwardIsUp) {
 
     /**
      * @return the channel bindings as a domain map
@@ -29,6 +33,24 @@ public record UpdateControlProfileRequest(String name, List<ControlBindingPayloa
     public ChannelMap toChannelMap() {
         return new ChannelMap(channelMap == null ? List.of()
                 : channelMap.stream().map(ControlBindingPayload::toBinding).toList());
+    }
+
+    /**
+     * How the caller's transmitter is arranged, or the platform default when they said nothing.
+     *
+     * <p>Absent rather than invalid is the normal case here: an older client, or one that has never
+     * shown the operator the picture, has no opinion to send, and the default is what it was already
+     * drawing with.
+     *
+     * @return the view to store
+     * @throws IllegalArgumentException if {@code stickMode} is outside 1-4
+     */
+    public TransmitterView toView() {
+        if (stickMode == null && forwardIsUp == null) {
+            return TransmitterView.DEFAULT;
+        }
+        return new TransmitterView(stickMode == null ? TransmitterView.DEFAULT.stickMode() : stickMode,
+                forwardIsUp == null ? TransmitterView.DEFAULT.forwardIsUp() : forwardIsUp);
     }
 
     /**

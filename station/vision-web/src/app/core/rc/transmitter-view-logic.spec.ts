@@ -41,6 +41,7 @@ const CATALOG: ControlCatalog = {
     { name: 'SET_MODE', label: 'Set mode', parameter: 'MODE_NAME', dangerous: false },
   ],
   auxFunctions: [],
+  maxRcChannel: 8,
 };
 
 const axisBinding = (

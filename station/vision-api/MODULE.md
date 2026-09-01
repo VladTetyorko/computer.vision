@@ -119,10 +119,10 @@ the full mechanism.
 | FlightCommandController | POST | `/api/assets/{id}/emergency-stop` | Forced disarm, kept separate from `disarm{force}` for audit-trail clarity | scope |
 | FlightCommandController | POST | `/api/assets/{id}/aux-function` | `MAV_CMD_DO_AUX_FUNCTION` | scope |
 | FlightCommandController | GET | `/api/assets/{id}/flight-capabilities` | What this asset supports commanding | scope |
-| ControlProfileController | GET | `/api/control-profiles` | Caller's saved layouts + built-ins | own profile |
+| ControlProfileController | GET | `/api/control-profiles` | Caller's saved layouts + built-ins; every row now also carries `stickMode`/`forwardIsUp` (C15), a built-in reporting `TransmitterView.DEFAULT` | own profile |
 | ControlProfileController | GET | `/api/control-profiles/catalog` | Every enumerable setup choice (vehicle kinds, input kinds, functions, …) | own profile |
 | ControlProfileController | POST | `/api/control-profiles` | Create (copy of the built-in for that vehicle kind) | own profile |
-| ControlProfileController | PUT | `/api/control-profiles/{id}` | Replace the whole layout | own profile |
+| ControlProfileController | PUT | `/api/control-profiles/{id}` | Replace the whole layout; body may also carry `stickMode?`/`forwardIsUp?` (C15's `TransmitterView`, both optional in both directions — an older client sends neither and gets the platform default; a `stickMode` outside 1-4 is a 400) | own profile |
 | ControlProfileController | POST | `/api/control-profiles/{id}/activate` | Activate (≤1 active per owner+vehicle-kind) | own profile |
 | ControlProfileController | DELETE | `/api/control-profiles/{id}` | Delete (not a built-in) | own profile |
 | DatasetController | POST | `/api/datasets` | Create dataset | scope (`DatasetService`, gated `vision.training.enabled`) |
@@ -496,8 +496,44 @@ auto-wiring by type).
   Cookie/Range forwarding — mediamtx's own read-auth check runs on the redirect target, not the first
   hop, so a header that only rode the initial request would silently 401 after the very first request
   established the pinning cookie.
+- **`ControlProfileController`'s catalogue is served, not hardcoded in the SPA** (decision C8, and
+  CLAUDE.md rule 1). `ControlCatalogResponse.of(...)` is derived from the domain enums themselves —
+  `ControlInputKind#allows` decides which sources each kind lists, `SwitchPosition#auxFunctionLevel()`
+  supplies each position's level, `ControlAction#dangerous()` supplies the danger flag. A client that
+  invented its own copy of any of these would eventually offer a binding the server refuses, or —
+  worse, for `dangerous` — skip a confirmation.
+- **`AuxFunctionCatalog` is a labelled seed list, not the firmware's own table.** Thirteen common
+  `RCx_OPTION` numbers (RTL 4, camera trigger 9, gripper 19, parachute 22, motor e-stop 31, …) exist
+  to save an operator a trip to the docs. **Any number in `[0,400]` is accepted** whether it is listed
+  or not; the list is a convenience, and this module deliberately keeps no claim to be complete — a
+  stale copy of the firmware's list is worse than none. It is a `@ConfigurationProperties`-shaped
+  record so a deployment can extend it (`vision.control.aux-functions[*]`, `station/vision-app`).
+- **No `VisibilityScope` anywhere in `ControlProfileController`.** Every other controller here threads
+  `currentUser.scope()`; this one threads only `currentUser.userId()`, because a controller layout is
+  personal equipment configuration and the authority question is ownership. `ControlProfileService`
+  throws `AccessDeniedException` for another operator's profile, which the existing handler maps to
+  403 — no new exception type and no `ApiExceptionHandler` change.
+- **Control-layout validation is the domain's, not the DTO's.** `UpdateControlProfileRequest` parses
+  strings to enums (`ControlEnumParsing`, the same case-insensitive-with-listed-alternatives idiom as
+  `CapabilityParsing`) and then builds real `ChannelMap`/`ActionMap` records — so "the same stick both
+  drives CH3 and arms the vehicle" is rejected by `ControlProfile`'s own compact constructor and
+  surfaces as a 400 with the domain's own message. Nothing re-validates it here.
+- **`ControlCatalogResponse` carries a trailing `maxRcChannel`**, populated from
+  `RcChannels.RELAYED_CHANNELS` (8) — decision C8's rule ("the client invents nothing the server can
+  state") applied to the one number the setup page was still inventing: it used to offer CH1–18 while
+  the link relays only CH1–8, so ten of those choices were stored, displayed, and never sent.
 
 ## Status
+
+**docs/plans/active/CONTROLLER-SETUP-CONTEXT.md Wave C15 done** (the operator's transmitter, not
+just their bindings — reconciled here as part of merging `feat/controller-setup-c15` onto master).
+`GET`/`PUT /api/control-profiles[/{id}]` now carry `stickMode`/`forwardIsUp` on every row
+(`ControlProfileResponse`), and `PUT` accepts them as optional fields on `UpdateControlProfileRequest`
+— absent means the platform default (`TransmitterView.DEFAULT`, mode 2/forward-up), a `stickMode`
+outside 1-4 is a 400. See "API surface" above for the full endpoint contract and the Gotchas block
+above for the `ControlProfileController`-specific gotchas C1-C8 already established (catalogue served
+not hardcoded, `AuxFunctionCatalog` seed list, ownership not `VisibilityScope`, domain-owned
+validation, `maxRcChannel`) — none of which this wave changed.
 
 Feature flags gating whole controllers/packages off by default: `vision.training.enabled` (false —
 `DatasetController`/`LabelingController`/`TrainingJobController` all 404

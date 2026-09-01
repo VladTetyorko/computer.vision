@@ -6,6 +6,7 @@ import com.drones.vision.flight.domain.model.ChannelMap;
 import com.drones.vision.flight.domain.model.ControlProfile;
 import com.drones.vision.flight.domain.model.ControlProfileId;
 import com.drones.vision.flight.domain.model.OwnedControlProfile;
+import com.drones.vision.flight.domain.model.TransmitterView;
 import com.drones.vision.flight.domain.model.VehicleKind;
 import com.drones.vision.kernel.UserId;
 
@@ -32,7 +33,8 @@ public final class ControlProfileMapper {
         ControlProfile layout = profile.profile();
         return new ControlProfileEntity(layout.id().value(), profile.owner().value(), layout.kind().name(),
                 layout.code(), layout.displayName(), profile.active(), profile.updatedAt(),
-                layout.channelMap().bindings(), layout.actionMap().bindings());
+                layout.channelMap().bindings(), layout.actionMap().bindings(),
+                (short) profile.view().stickMode(), profile.view().forwardIsUp());
     }
 
     /**
@@ -46,6 +48,6 @@ public final class ControlProfileMapper {
                 VehicleKind.valueOf(entity.vehicleKind()), entity.code(), entity.displayName(),
                 new ChannelMap(entity.channelMap()), new ActionMap(entity.actionMap()));
         return new OwnedControlProfile(new UserId(entity.ownerUserId()), layout, entity.active(),
-                entity.updatedAt());
+                entity.updatedAt(), new TransmitterView(entity.stickMode(), entity.forwardIsUp()));
     }
 }

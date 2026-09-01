@@ -44,6 +44,11 @@
   gap: var(--space-8);
 }
 
+/* Autodetect / Guide me status line (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md wave C15). */
+.guide-line {
+  margin: 0 0 var(--space-4);
+}
+
 /* One physical control, offered as something to map. A bound one stays visible but inert — it is
    still part of the transmitter, it just already has a row below. */
 .input-chip {

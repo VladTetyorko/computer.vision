@@ -8,6 +8,9 @@ import { ConfirmDialog } from '../../shared/ui/confirm-dialog';
 import { UiStore } from '../../core/ui/ui-store';
 import { RcInputService } from '../../core/rc/rc-input.service';
 import { wizardSteps, type WizardStep as WizardStepModel } from '../../core/rc/controller-wizard-logic';
+import { channelOutputs, type ChannelOutput } from '../../core/rc/channel-output-logic';
+import { asStickMode, channelOptions } from '../../core/rc/controller-setup-logic';
+import { DEFAULT_STICK_MODE, STICK_MODES, type StickMode } from '../../core/rc/controller-diagram-logic';
 import { ControllerSetupFacade } from './controller-setup-facade';
 import { StepRail } from './step-rail';
 import { WizardStep as WizardStepComponent } from './wizard-step';
@@ -45,6 +48,45 @@ import type { ControlProfile, VehicleKind } from '../../core/api/models';
 export class ControllerSetupPage implements OnInit {
   protected readonly facade = inject(ControllerSetupFacade);
   protected readonly rc = inject(RcInputService);
+
+  /** The channels worth offering — served, not assumed; see `controller-setup-logic.ts#relayedChannels`. */
+  protected readonly channels = computed(() => channelOptions(this.facade.catalog()));
+
+  /**
+   * What the station would put on the wire right now, per channel (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md
+   * wave C15) — the only place on this page that shows the *output*, which is what makes `reversed` and
+   * `travel` checkable on the bench rather than on the first flight. Live regardless of which view
+   * (wizard or "All controls") is open, since both write the same draft.
+   */
+  protected readonly outputs = computed<readonly ChannelOutput[]>(() =>
+    channelOutputs(this.facade.draft(), this.rc.axes(), this.rc.buttons(), this.facade.catalog()),
+  );
+
+  // --- How the transmitter is drawn --------------------------------------------------------------
+
+  protected readonly stickModes = STICK_MODES;
+
+  /**
+   * Which stick holds which function, and which end of a vertical axis is up (wave C15).
+   *
+   * Neither changes a microsecond on the wire — what the vehicle does is decided entirely by axis →
+   * function → channel. Both are nonetheless **saved with the layout**, not kept in this browser:
+   * they describe the radio in the operator's hands, and a browser-local answer meant setting a
+   * layout up on a laptop and flying it from the ground-station box asked the same question twice.
+   *
+   * A built-in reports the platform default and cannot be edited; the way to change its drawing is
+   * the same as the way to change anything else about it — make a copy.
+   */
+  protected readonly stickMode = computed<StickMode>(() => this.facade.draft()?.stickMode ?? DEFAULT_STICK_MODE);
+  protected readonly positiveIsUp = computed(() => this.facade.draft()?.forwardIsUp ?? true);
+
+  protected setStickMode(mode: string): void {
+    this.facade.setStickMode(asStickMode(Number(mode)));
+  }
+
+  protected setPositiveIsUp(up: boolean): void {
+    this.facade.setForwardIsUp(up);
+  }
 
   /** The delete confirm — one overlay group, per this app's own `UiStore` rule. */
   private readonly dialog = new UiStore();
