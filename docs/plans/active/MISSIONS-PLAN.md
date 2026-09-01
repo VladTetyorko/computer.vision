@@ -1,6 +1,8 @@
 # MISSIONS-PLAN — from the tactical map to the aircraft, honestly
 
 **Status:** plan (2026-08-16, branch `feat/missions`). Architecture only — no code in this task.
+**DECIDED 2026-09-01 (ASSET-FLOWS D1): tasking-only.** Full waypoint execution (M1–M8) is retired; this doc remains reference for the tasking subset (`goto`, small verb set, `.plan` import/export). See `docs/plans/active/asset-flows/P-PROPOSAL.md` §Decided.
+
 **Context:** [MISSIONS-CONTEXT.md](MISSIONS-CONTEXT.md) — what exists, the gap, constraints C1–C9. Not re-derived here.
 **Answers:** [MAVLINK-CORE-PLAN.md](MAVLINK-CORE-PLAN.md) §9 open question 2 (*"Mission upload priority — W6 or sooner?"*) — sooner, as this plan's M1/M3.
 **Reads with:** `drone-link/mavlink-core/MODULE.md` (the built L1–L4½ surface), `contexts/vision-flight/MODULE.md` (the command-gate idiom every wave here copies), `contexts/vision-map/MODULE.md` (§3's integration surface), `docs/conclusions/MAP-UX-RESEARCH.md` (the UI method §1 applies, and the Fly-rail constraint §1.4 obeys).

@@ -60,3 +60,19 @@ missions full-XL (pending D1).
 
 **ASSET-FLOWS cycle 1 = Tier 1 + Tier 2** (~9 items, mostly XS/S, disjoint scopes, one branch
 `feat/asset-flows-1` with sub-waves). Tier 3 becomes cycle 2 after the D-decisions land.
+
+## Decided (owner, 2026-09-01): tier 1+2 build now, recommendations adopted
+
+- **D1 missions → tasking-only.** Full M1–M8 execution retired; MISSIONS-PLAN stays as
+  reference for the tasking subset (`goto` + small verb set + `.plan` import/export), unscheduled.
+- **D2 → CREW-CONTROL ships as its own next plan** (CC-1..CC-6); advisory banner rides inside it.
+- **D3 → probe.enabled flips on behind a verification wave** (later cycle; O9/O10 + RC Phase 2
+  stay operator-gated).
+- **D4 → pilots may onboard into their own scope** (later cycle, with the authority-table edit).
+- **D5 → geofence altitude per vehicle kind** (AGL rovers/copters, AMSL selectable fixed-wing).
+- **D6 → thresholds in configuration file**: `vision.ops.battery.warning-percent=25`,
+  `critical-percent=10` — the one severity source for cockpit + fleet (built this cycle, S3).
+- **D7 → retention starting point accepted** (30d telemetry / 90d detections / 1y audit);
+  scheduling stays with PLATFORM-AUDIT row 5.
+
+Execution plan: [../ASSET-FLOWS-PLAN.md](../ASSET-FLOWS-PLAN.md), branch `feat/asset-flows-1`.
