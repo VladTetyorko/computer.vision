@@ -1,5 +1,6 @@
 package com.drones.vision.perception.application.pipeline;
 
+import com.drones.vision.flight.application.alerting.LinkLossNotifier;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
@@ -152,11 +153,14 @@ import com.drones.vision.perception.application.stream.StreamService;
  * race for the same asset; it claims each device id under {@code tracking}'s monitor before opening
  * anything, so whichever caller runs first wins the open and the other is a safe no-op — see that
  * method's own javadoc. Unlike the video path, this does <b>not</b> publish a {@code PIPELINE_ERROR}
- * event on an outage — this class has no {@link com.drones.vision.platform.EventPublisherPort}
- * (and no {@code StreamId} to publish one against; telemetry is tracked per-asset/device, not
- * per-stream), and {@link TelemetrySubscriber#onError} was already, deliberately, a completely
- * silent no-op before this task (see the Gotchas below) — reconnection is new, the pre-existing
- * silence is not. {@link #unsubscribeTelemetry} calls {@link SupervisedPublisher#stop()}
+ * event on an outage — this class has no {@link com.drones.vision.platform.EventPublisherPort} (and
+ * no {@code StreamId} to publish one against; telemetry is tracked per-asset/device, not
+ * per-stream). It does, since docs/plans/active/ASSET-FLOWS-PLAN.md S4/BK2b, raise exactly one
+ * {@code EventType#LINK_LOST} per outage through {@link LinkLossNotifier} — an asset-scoped
+ * notification, not a stream-scoped one, so it needed no {@code EventPublisherPort} field of this
+ * class's own; {@link TelemetrySubscriber#onError} itself remains a silent no-op (see the Gotchas
+ * below) — only the {@link SupervisedPublisher} outage callback above it changed.
+ * {@link #unsubscribeTelemetry} calls {@link SupervisedPublisher#stop()}
  * synchronously (cheap, in-memory) so an explicit stream stop cancels any pending reopen
  * immediately, then releases the subscription/source off a background thread — see that method's
  * own javadoc.
@@ -186,6 +190,7 @@ public final class UsageTracker {
     private final UsagePhaseSettings phaseSettings;
     private final UsagePhaseObserver usagePhaseObserver;
     private final MaintenanceQuery maintenanceQuery;
+    private final LinkLossNotifier linkLossNotifier;
 
     /** One dedicated daemon thread scheduling every telemetry subscription's reopen retries; see {@code DefaultStreamService}'s own field of the same shape for why this is shared rather than per-subscription. */
     private final ScheduledExecutorService retryScheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
@@ -200,7 +205,7 @@ public final class UsageTracker {
      * The single canonical constructor (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md Finding
      * R1) — every collaborator beyond the mandatory services and telemetry sources is bundled into
      * {@code settings}; see {@link UsageTrackerSettings} for what each field controls and {@link
-     * UsageTrackerSettings#defaults(MaintenanceQuery)} for the behavior every pre-R1 shortest
+     * UsageTrackerSettings#defaults(MaintenanceQuery, LinkLossNotifier)} for the behavior every pre-R1 shortest
      * constructor used to default to. {@code assetDirectory}/{@code usageSessionService} (warehouse) and {@code
      * telemetryService} (flight) replace the four repository ports this class used to hold directly
      * (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md Finding R3/R5, wave R3) — see this class's
@@ -223,6 +228,7 @@ public final class UsageTracker {
         this.phaseSettings = settings.phaseSettings();
         this.usagePhaseObserver = settings.usagePhaseObserver();
         this.maintenanceQuery = settings.maintenanceQuery();
+        this.linkLossNotifier = settings.linkLossNotifier();
     }
 
     /**
@@ -726,9 +732,14 @@ public final class UsageTracker {
                 if (source.supports(device)) {
                     TelemetrySubscriber subscriber = new TelemetrySubscriber(asset.id());
                     // docs/plans/done/MVP2-PLAN.md §S, S-a: supervised exactly like the video source (see this
-                    // class's own javadoc for why no PIPELINE_ERROR is published here).
+                    // class's own javadoc for why no PIPELINE_ERROR is published here). ASSET-FLOWS S4/BK2b:
+                    // onOutageBegan fires exactly once per outage (SupervisedPublisher's own latch, not a
+                    // retry counter -- see its javadoc), so this is already the edge signal LinkLossNotifier
+                    // needs, with no extra debouncing on this side of the call.
                     SupervisedPublisher<Telemetry> supervised = new SupervisedPublisher<>(() -> source.open(device),
-                            cause -> { }, retryScheduler, sourceInitialBackoffNanos, sourceMaxBackoffNanos);
+                            cause -> linkLossNotifier.reportLinkLost(asset.id(),
+                                    "MAVLink link to " + asset.displayName() + " lost"),
+                            retryScheduler, sourceInitialBackoffNanos, sourceMaxBackoffNanos);
                     supervised.subscribe(subscriber);
                     synchronized (tracking) {
                         tracking.telemetrySubscriptions.add(

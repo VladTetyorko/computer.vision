@@ -37,8 +37,12 @@ import com.drones.vision.warehouse.application.directory.DefaultAssetDirectorySe
 import com.drones.vision.warehouse.application.maintenance.MaintenanceQuery;
 import com.drones.vision.warehouse.application.usage.UsageSessionService;
 import com.drones.vision.warehouse.application.usage.DefaultUsageSessionService;
+import com.drones.vision.flight.application.alerting.LinkLossNotifier;
 import com.drones.vision.flight.application.telemetry.TelemetryService;
 import com.drones.vision.flight.application.telemetry.DefaultTelemetryService;
+import com.drones.vision.platform.Event;
+import com.drones.vision.platform.EventPublisherPort;
+import com.drones.vision.platform.EventType;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -93,6 +97,11 @@ class UsageTrackerTest {
     private UsageSessionService usageSessionService;
     private TelemetryService telemetryService;
     private FakeMaintenanceQuery maintenanceQuery;
+    /** docs/plans/active/ASSET-FLOWS-PLAN.md S4/BK2b: real {@link LinkLossNotifier} over a mocked
+     *  {@link EventPublisherPort}, so tests can assert on the actual {@code Event} it publishes
+     *  rather than on a mocked notifier's method call. */
+    private EventPublisherPort linkLossEventPublisher;
+    private LinkLossNotifier linkLossNotifier;
 
     @BeforeEach
     void setUp() {
@@ -108,20 +117,22 @@ class UsageTrackerTest {
         usageSessionService = new DefaultUsageSessionService(usageRepository);
         telemetryService = new DefaultTelemetryService(telemetryRepository);
         maintenanceQuery = new FakeMaintenanceQuery();
+        linkLossEventPublisher = mock(EventPublisherPort.class);
+        linkLossNotifier = new LinkLossNotifier(linkLossEventPublisher, null);
     }
 
     private UsageTracker tracker(List<TelemetrySourcePort> sources) {
         return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
-                UsageTrackerSettings.defaults(maintenanceQuery));
+                UsageTrackerSettings.defaults(maintenanceQuery, linkLossNotifier));
     }
 
     private UsageTracker tracker(List<TelemetrySourcePort> sources, TelemetryLiveUpdatePort liveUpdatePublisherPort) {
-        UsageTrackerSettings defaults = UsageTrackerSettings.defaults(maintenanceQuery);
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults(maintenanceQuery, linkLossNotifier);
         return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
                 new UsageTrackerSettings(Optional.of(liveUpdatePublisherPort), defaults.telemetryObserver(),
                         defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(),
                         defaults.summaryBatchSettings(), defaults.phaseSettings(), defaults.usagePhaseObserver(),
-                        defaults.maintenanceQuery()));
+                        defaults.maintenanceQuery(), defaults.linkLossNotifier()));
     }
 
     /**
@@ -131,12 +142,12 @@ class UsageTrackerTest {
      * tracker no longer names that type (docs/plans/active/DOMAIN-SEPARATION-W1.md §5, C2).
      */
     private UsageTracker tracker(List<TelemetrySourcePort> sources, GeofenceMonitor geofenceMonitor) {
-        UsageTrackerSettings defaults = UsageTrackerSettings.defaults(maintenanceQuery);
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults(maintenanceQuery, linkLossNotifier);
         return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
                 new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), Optional.of(geofenceMonitor::evaluate),
                         defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(),
                         defaults.summaryBatchSettings(), defaults.phaseSettings(), defaults.usagePhaseObserver(),
-                        defaults.maintenanceQuery()));
+                        defaults.maintenanceQuery(), defaults.linkLossNotifier()));
     }
 
     /**
@@ -145,12 +156,12 @@ class UsageTrackerTest {
      * deterministically.
      */
     private UsageTracker trackerWithFastRetry(List<TelemetrySourcePort> sources) {
-        UsageTrackerSettings defaults = UsageTrackerSettings.defaults(maintenanceQuery);
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults(maintenanceQuery, linkLossNotifier);
         return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
                 new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), defaults.telemetryObserver(),
                         TimeUnit.MILLISECONDS.toNanos(20), TimeUnit.MILLISECONDS.toNanos(20),
                         defaults.summaryBatchSettings(), defaults.phaseSettings(), defaults.usagePhaseObserver(),
-                        defaults.maintenanceQuery()));
+                        defaults.maintenanceQuery(), defaults.linkLossNotifier()));
     }
 
     /**
@@ -160,11 +171,12 @@ class UsageTrackerTest {
      */
     private UsageTracker trackerWithSummaryBatching(List<TelemetrySourcePort> sources,
                                                      UsageSummaryBatchSettings summaryBatchSettings) {
-        UsageTrackerSettings defaults = UsageTrackerSettings.defaults(maintenanceQuery);
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults(maintenanceQuery, linkLossNotifier);
         return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
                 new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), defaults.telemetryObserver(),
                         defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(), summaryBatchSettings,
-                        defaults.phaseSettings(), defaults.usagePhaseObserver(), defaults.maintenanceQuery()));
+                        defaults.phaseSettings(), defaults.usagePhaseObserver(), defaults.maintenanceQuery(),
+                        defaults.linkLossNotifier()));
     }
 
     /**
@@ -174,12 +186,12 @@ class UsageTrackerTest {
      */
     private UsageTracker trackerWithPhaseSettings(List<TelemetrySourcePort> sources,
                                                    UsagePhaseSettings phaseSettings) {
-        UsageTrackerSettings defaults = UsageTrackerSettings.defaults(maintenanceQuery);
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults(maintenanceQuery, linkLossNotifier);
         return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
                 new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), defaults.telemetryObserver(),
                         defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(),
                         UsageSummaryBatchSettings.immediate(), phaseSettings, defaults.usagePhaseObserver(),
-                        defaults.maintenanceQuery()));
+                        defaults.maintenanceQuery(), defaults.linkLossNotifier()));
     }
 
     /**
@@ -195,12 +207,12 @@ class UsageTrackerTest {
      */
     private UsageTracker trackerWithPhaseObserver(List<TelemetrySourcePort> sources, UsagePhaseSettings phaseSettings,
                                                    UsagePhaseObserver usagePhaseObserver) {
-        UsageTrackerSettings defaults = UsageTrackerSettings.defaults(maintenanceQuery);
+        UsageTrackerSettings defaults = UsageTrackerSettings.defaults(maintenanceQuery, linkLossNotifier);
         return new UsageTracker(assetDirectoryService, usageSessionService, telemetryService, sources,
                 new UsageTrackerSettings(defaults.liveUpdatePublisherPort(), defaults.telemetryObserver(),
                         defaults.sourceInitialBackoffNanos(), defaults.sourceMaxBackoffNanos(),
                         UsageSummaryBatchSettings.immediate(), phaseSettings, usagePhaseObserver,
-                        defaults.maintenanceQuery()));
+                        defaults.maintenanceQuery(), defaults.linkLossNotifier()));
     }
 
     /**
@@ -495,6 +507,52 @@ class UsageTrackerTest {
         assertNull(latest.endedAt(), "the usage must still be open -- a source reconnect must never close/reopen it");
         assertEquals(1, latest.sampleCount(), "the sample folded through the reconnected publisher into the SAME usage");
         assertEquals(new GeoPosition(12.0, 34.0, null), latest.lastPosition());
+    }
+
+    @Test
+    void telemetrySourceFailureRaisesExactlyOneLinkLostEventNotOnePerRetry() throws InterruptedException {
+        // docs/plans/active/ASSET-FLOWS-PLAN.md S4/BK2b: LinkLossNotifier.reportLinkLost must fire on
+        // the *outage* edge, never once per retry attempt -- proven here by making the very first
+        // retry ALSO fail (still no LINK_LOST for that second failure) before a later retry finally
+        // succeeds. This is entirely SupervisedPublisher's own "outageAnnounced" latch (see its
+        // javadoc): the onOutageBegan callback this test wires straight to reportLinkLost is already
+        // the edge signal, so LinkLossNotifier itself stays deliberately stateless -- no separate
+        // hysteresis logic like BatteryMonitor's, because unlike a raw telemetry sample, this
+        // callback's own cadence is already edge-only by construction.
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        AtomicInteger openCount = new AtomicInteger();
+        CountDownLatch thirdOpen = new CountDownLatch(1);
+        source.onOpen = () -> {
+            int n = openCount.incrementAndGet();
+            if (n == 2) {
+                // The first retry itself fails immediately -- the outage is still ongoing, so this
+                // must NOT raise a second LINK_LOST event.
+                source.currentPublisher(telemetryDevice.id()).error(new RuntimeException("still down"));
+            } else if (n == 3) {
+                thirdOpen.countDown();
+            }
+        };
+        UsageTracker tracker = trackerWithFastRetry(List.of(source));
+
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+        assertEquals(1, openCount.get());
+
+        source.currentPublisher(telemetryDevice.id()).error(new RuntimeException("radio dropout"));
+
+        assertTrue(thirdOpen.await(2, TimeUnit.SECONDS),
+                "the source must be reopened twice -- one retry that also failed, then one that succeeded");
+        assertEquals(3, openCount.get());
+
+        ArgumentCaptor<Event> captor = ArgumentCaptor.forClass(Event.class);
+        verify(linkLossEventPublisher, times(1)).publish(captor.capture());
+        Event event = captor.getValue();
+        assertEquals(EventType.LINK_LOST, event.type());
+        assertEquals(asset.id().value().toString(), event.attributes().get("assetId"));
     }
 
     @Test

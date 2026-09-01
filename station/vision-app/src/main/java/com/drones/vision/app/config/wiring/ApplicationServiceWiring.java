@@ -365,9 +365,12 @@ public class ApplicationServiceWiring {
     /**
      * Raises one {@code LINK_LOST} event per link-failure edge (docs/plans/active/ASSET-FLOWS-PLAN.md §2,
      * wave S4) — see {@link LinkLossNotifier}'s own javadoc for the FLEET-RADIO R4 signal this
-     * notifies for and the one remaining call-site wiring step (perception's {@code
-     * UsageTracker#subscribeTelemetry}, out of this wave's file scope) that makes this bean's output
-     * reach the bell.
+     * notifies for. Threaded into {@link #usageTracker} below (wave S4/BK2b) exactly like {@link
+     * #batteryMonitor}, reaching perception's {@code UsageTracker#subscribeTelemetry} through {@link
+     * UsageTrackerSettings#linkLossNotifier()} rather than a functional seam — unlike {@code
+     * geofenceMonitor}/{@code batteryMonitor}, which evaluate every telemetry sample, this is a
+     * single method reference reacting to one outage callback, so passing the collaborator itself
+     * costs {@code UsageTracker} nothing extra and needs no {@code BiConsumer} composition.
      */
     @Bean
     public LinkLossNotifier linkLossNotifier(EventPublisherPort eventPublisherPort,
@@ -443,6 +446,11 @@ public class ApplicationServiceWiring {
      * queried directly by {@code UsageTracker#engage} rather than routed through flight's {@code
      * ReadinessService}, since {@code UsageTracker} already depends on warehouse (the pure leaf) and
      * {@code MaintenanceQuery} is filed in warehouse's {@code application} package for exactly this.
+     *
+     * <p>{@code linkLossNotifier} (docs/plans/active/ASSET-FLOWS-PLAN.md S4/BK2b) is passed straight
+     * through to {@code UsageTracker}'s constructor via {@link UsageTrackerSettings} — see {@link
+     * #linkLossNotifier} above for why this one is a plain collaborator rather than composed into
+     * the {@code telemetryObserver} lambda the way {@code batteryMonitor} is.
      */
     @Bean
     public UsageTracker usageTracker(AssetDirectoryService assetDirectoryService,
@@ -452,13 +460,14 @@ public class ApplicationServiceWiring {
                                       TelemetryLiveUpdatePort telemetryLiveUpdatePort,
                                       GeofenceMonitor geofenceMonitor,
                                       BatteryMonitor batteryMonitor,
+                                      LinkLossNotifier linkLossNotifier,
                                       MaintenanceQuery maintenanceQuery,
                                       VisionPersistenceProperties persistenceProperties,
                                       ObjectProvider<UsagePhaseObserver> usagePhaseObserver) {
         // geofenceMonitor::evaluate/batteryMonitor::evaluate, not the monitors themselves: UsageTracker
         // (perception) takes a BiConsumer seam so it never depends on the flight context —
         // docs/plans/active/DOMAIN-SEPARATION-W1.md §5 C2
-        UsageTrackerSettings defaultSettings = UsageTrackerSettings.defaults(maintenanceQuery);
+        UsageTrackerSettings defaultSettings = UsageTrackerSettings.defaults(maintenanceQuery, linkLossNotifier);
         BiConsumer<AssetId, Telemetry> telemetryObserver = (assetId, sample) -> {
             geofenceMonitor.evaluate(assetId, sample);
             batteryMonitor.evaluate(assetId, sample);
@@ -467,7 +476,8 @@ public class ApplicationServiceWiring {
                 new UsageTrackerSettings(Optional.of(telemetryLiveUpdatePort), Optional.of(telemetryObserver),
                         defaultSettings.sourceInitialBackoffNanos(), defaultSettings.sourceMaxBackoffNanos(),
                         persistenceProperties.telemetry().toSummarySettings(), UsagePhaseSettings.defaults(),
-                        usagePhaseObserver.getIfAvailable(() -> UsagePhaseObserver.NOOP), maintenanceQuery));
+                        usagePhaseObserver.getIfAvailable(() -> UsagePhaseObserver.NOOP), maintenanceQuery,
+                        linkLossNotifier));
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.drones.vision.perception.application.pipeline;
 
+import com.drones.vision.flight.application.alerting.LinkLossNotifier;
 import com.drones.vision.flight.domain.port.TelemetryLiveUpdatePort;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.Telemetry;
@@ -41,12 +42,25 @@ import java.util.function.BiConsumer;
  *                                  on a maintenance-grounded asset; required (no safe no-op default
  *                                  for a safety gate, mirroring {@code ReadinessService} in {@code
  *                                  DefaultManualControlService})
+ * @param linkLossNotifier          docs/plans/active/ASSET-FLOWS-PLAN.md S4/BK2b — raises {@code
+ *                                  EventType#LINK_LOST} when a device's supervised {@code
+ *                                  TelemetrySourcePort} outage begins ({@link SupervisedPublisher}'s
+ *                                  own "exactly once per outage, not once per failed retry" latch is
+ *                                  the entire edge guarantee here — {@code UsageTracker} adds none of
+ *                                  its own); required like {@code maintenanceQuery} rather than
+ *                                  {@link Optional} — a link-loss notification is a safety-adjacent
+ *                                  signal, not an optional feature, so every caller must supply one
+ *                                  explicitly. {@code LinkLossNotifier} itself already tolerates a
+ *                                  fully-disabled deployment (both its own publisher ports are
+ *                                  nullable), so requiring the collaborator here costs nothing when
+ *                                  live/event publishing is off
  */
 public record UsageTrackerSettings(Optional<TelemetryLiveUpdatePort> liveUpdatePublisherPort,
                                     Optional<BiConsumer<AssetId, Telemetry>> telemetryObserver,
                                     long sourceInitialBackoffNanos, long sourceMaxBackoffNanos,
                                     UsageSummaryBatchSettings summaryBatchSettings, UsagePhaseSettings phaseSettings,
-                                    UsagePhaseObserver usagePhaseObserver, MaintenanceQuery maintenanceQuery) {
+                                    UsagePhaseObserver usagePhaseObserver, MaintenanceQuery maintenanceQuery,
+                                    LinkLossNotifier linkLossNotifier) {
 
     public UsageTrackerSettings {
         Objects.requireNonNull(liveUpdatePublisherPort, "liveUpdatePublisherPort must not be null");
@@ -55,17 +69,19 @@ public record UsageTrackerSettings(Optional<TelemetryLiveUpdatePort> liveUpdateP
         Objects.requireNonNull(phaseSettings, "phaseSettings must not be null");
         Objects.requireNonNull(usagePhaseObserver, "usagePhaseObserver must not be null");
         Objects.requireNonNull(maintenanceQuery, "maintenanceQuery must not be null");
+        Objects.requireNonNull(linkLossNotifier, "linkLossNotifier must not be null");
     }
 
     /**
      * Reproduces the pre-R1 shortest constructor's behavior exactly: no live-update announcements,
      * no telemetry observer, production backoff bounds, immediate summary writes, default phase
-     * settings, no phase observer. {@code maintenanceQuery} has no such "pre-R1" default — it is a
-     * new required collaborator (ASSET-FLOWS-PLAN S1), so every caller must supply one explicitly.
+     * settings, no phase observer. {@code maintenanceQuery}/{@code linkLossNotifier} have no such
+     * "pre-R1" default — both are required collaborators added after R1 (ASSET-FLOWS-PLAN S1/S4), so
+     * every caller must supply them explicitly.
      */
-    public static UsageTrackerSettings defaults(MaintenanceQuery maintenanceQuery) {
+    public static UsageTrackerSettings defaults(MaintenanceQuery maintenanceQuery, LinkLossNotifier linkLossNotifier) {
         return new UsageTrackerSettings(Optional.empty(), Optional.empty(), SupervisedPublisher.INITIAL_BACKOFF_NANOS,
                 SupervisedPublisher.MAX_BACKOFF_NANOS, UsageSummaryBatchSettings.immediate(),
-                UsagePhaseSettings.defaults(), UsagePhaseObserver.NOOP, maintenanceQuery);
+                UsagePhaseSettings.defaults(), UsagePhaseObserver.NOOP, maintenanceQuery, linkLossNotifier);
     }
 }
