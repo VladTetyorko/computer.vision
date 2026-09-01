@@ -1,6 +1,7 @@
 import { HttpErrorResponse } from '@angular/common/http';
 import { FEATURE_KEYS } from '../api/models';
-import type { ApiErrorBody, FeatureStatus, ReadinessReport, ReadinessRow, ReadinessVerdict, RemedyKind } from '../api/models';
+import type { ApiErrorBody, FeatureStatus, MaintenanceKind, ReadinessReport, ReadinessRow, ReadinessVerdict, RemedyKind } from '../api/models';
+import { MAINTENANCE_KIND_LABELS } from '../maintenance/maintenance-logic';
 import { humanAge } from '../telemetry/telemetry-logic';
 
 /**
@@ -248,6 +249,84 @@ export function readinessCounts(rows: readonly ReadinessRow[]): ReadinessCounts 
     else unknown++;
   }
   return { go, noGo, unknown };
+}
+
+// --- Maintenance grounding (docs/plans/active/ASSET-FLOWS-PLAN.md §2 "S1 gate semantics") -------
+
+/**
+ * The exact prefix `DefaultReadinessService#maintenanceBlockers` (contexts/vision-flight, verified
+ * against source: `MAINTENANCE_BLOCKER_PREFIX`) puts on every `ReadinessReport.blockers` entry that
+ * came from an open flight-blocking `MaintenanceRecord` — `"MAINTENANCE_GROUNDED:" + kind.name() +
+ * ":" + summary`. Every other entry in that array is a bare feature key (S1 pass-through) rendered
+ * by {@link featureLabel} instead; this prefix is what tells the two apart.
+ */
+const MAINTENANCE_BLOCKER_PREFIX = 'MAINTENANCE_GROUNDED:';
+
+/** One parsed `MAINTENANCE_GROUNDED:` blocker — the kind and free-text summary a manager entered when opening the `MaintenanceRecord` that's refusing arm/engage. */
+export interface GroundingBlocker {
+  readonly kind: MaintenanceKind;
+  readonly summary: string;
+}
+
+/**
+ * Parses one raw `report.blockers` entry into a {@link GroundingBlocker}, or `null` when it isn't a
+ * `MAINTENANCE_GROUNDED:` entry at all, or when its `kind` segment isn't a `MaintenanceKind` this
+ * build recognises (a future kind the backend adds before this file does) — degrades honestly by
+ * treating the whole entry as unparseable rather than guessing, mirroring this module's own "render
+ * it, don't invent its meaning" rule ({@link featureLabel}). The summary itself may contain further
+ * `:` characters (free text a manager typed) — only the first colon after the prefix splits kind
+ * from summary; everything after is summary verbatim.
+ */
+export function parseGroundingBlocker(raw: string): GroundingBlocker | null {
+  if (!raw.startsWith(MAINTENANCE_BLOCKER_PREFIX)) {
+    return null;
+  }
+  const rest = raw.slice(MAINTENANCE_BLOCKER_PREFIX.length);
+  const separatorIndex = rest.indexOf(':');
+  if (separatorIndex === -1) {
+    return null;
+  }
+  const kind = rest.slice(0, separatorIndex);
+  const summary = rest.slice(separatorIndex + 1);
+  if (!(kind in MAINTENANCE_KIND_LABELS)) {
+    return null;
+  }
+  return { kind: kind as MaintenanceKind, summary };
+}
+
+/**
+ * `report.blockers` filtered down to plain feature-key entries — excludes any `MAINTENANCE_GROUNDED:`
+ * entry, which {@link groundingBlocker} renders separately and distinctly rather than as an opaque
+ * feature-key row (`readiness.html`'s pre-WB1 bug: it fed every blocker, grounding included, straight
+ * through {@link featureLabel}, which doesn't recognise the prefix and rendered the whole raw string).
+ */
+export function featureBlockers(blockers: readonly string[]): readonly string[] {
+  return blockers.filter((raw) => parseGroundingBlocker(raw) === null);
+}
+
+/**
+ * The first grounding blocker in a `ReadinessReport.blockers` array, or `undefined` when this asset
+ * carries none. `DefaultReadinessService` opens at most one blocking `MaintenanceRecord`'s refusal
+ * onto the wire in the common case, but nothing in the contract guarantees exactly one — this picks
+ * the first and ignores the rest rather than fabricating a combined summary from several.
+ */
+export function groundingBlocker(blockers: readonly string[]): GroundingBlocker | undefined {
+  for (const raw of blockers) {
+    const parsed = parseGroundingBlocker(raw);
+    if (parsed) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * One-line text for a {@link GroundingBlocker} — shared verbatim by the cockpit's grounded banner,
+ * the Arm button's `.disabled-reason`, and the per-asset readiness page, so the three surfaces never
+ * drift on wording (ASSET-FLOWS-PLAN.md §2: "Web surfaces grounding from data it already receives").
+ */
+export function groundedBannerText(blocker: GroundingBlocker): string {
+  return `${MAINTENANCE_KIND_LABELS[blocker.kind]} — ${blocker.summary}`;
 }
 
 // --- Per-asset probe state (docs/plans/active/OPERATOR-UX-6-PLAN.md finding R1) ----------------

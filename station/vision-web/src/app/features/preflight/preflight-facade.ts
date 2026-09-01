@@ -10,6 +10,7 @@ import {
   buildBoardGroups,
   buildFleetVehicleRows,
   emptyFilterTitle,
+  isInMaintenance,
   vehicleStatusOverride,
   type BlockerSummary,
   type BoardCounts,
@@ -129,6 +130,8 @@ export class PreflightFacade {
   readonly verdictTone = verdictTone;
   readonly blocker = (row: ReadinessRow): BlockerSummary => blockerSummary(row.features);
   readonly statusOverride = (row: FleetVehicleRow): string | undefined => vehicleStatusOverride(row);
+  /** `preflight-logic.ts#isInMaintenance` — see that function's own doc comment for what it is (and isn't) an honest proxy for (ASSET-FLOWS-PLAN.md §2, wave WB1). */
+  readonly isInMaintenance = (row: FleetVehicleRow): boolean => isInMaintenance(row);
 
   constructor() {
     void this.refresh();

@@ -32,8 +32,8 @@
             type="button"
             class="btn danger arm-btn"
             (click)="requestArm()"
-            [disabled]="anyBusy()"
-            title="Arm — the propellers will spin"
+            [disabled]="anyBusy() || armDisabled()"
+            [title]="groundedReason() ?? 'Arm — the propellers will spin'"
           >
             Arm
           </button>
@@ -50,6 +50,9 @@
             <span class="also-on muted">also on {{ hint }}</span>
           }
         </div>
+        @if (groundedReason(); as reason) {
+          <p class="disabled-reason">{{ reason }}</p>
+        }
       }
     </div>
   }

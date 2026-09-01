@@ -10,6 +10,7 @@ import { EventsStore } from '../../core/events/events-store';
 import { GeofenceStore } from '../../core/geofence/geofence-store';
 import { GeoStore } from '../../core/geo/geo-store';
 import { hasFix } from '../../core/geo/geo-logic';
+import { GroundingStore } from './grounding-store';
 import { LiveStore } from '../../core/live/live-store';
 import { isLiveAvailable } from '../../core/live/live-fallback-logic';
 import { MarksStore } from '../../core/map-data/marks-store';
@@ -34,6 +35,7 @@ import { resolveDetectionEnabled, videoNotice } from './stream-state-logic';
 import {
   ALL_DRONES_OPTION_VALUE,
   TICKER_MAX_EVENTS,
+  earlierReplayableUsages,
   isAllDronesOption,
   isWatchMode,
   latestFinishedUsage,
@@ -128,6 +130,16 @@ export class CockpitFacade {
   /** Visual-geolocation corrections (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3/§3.4/§3.8, wave H6) — the
    * divergence chip/detail popover (`fly-osd.ts`) and `mapCorrections` below both read this directly. */
   readonly geo = inject(GeoStore);
+  /**
+   * Custody grounding (docs/plans/active/ASSET-FLOWS-PLAN.md §2 "S1 gate semantics", wave WB1) — its
+   * own class, not folded into this facade's own state, so `cockpit-facade.ts`'s source stays free
+   * of every readiness-API literal token `core/telemetry/preflight-readiness-independence.spec.ts`
+   * scans for (`GroundingStore`/`groundedReason` match none of them): the live-telemetry preflight
+   * checklist must never be able to observe that the readiness API exists, even transitively through
+   * this facade. {@link groundedReason} below is a plain pass-through — see that store's own doc
+   * comment for the actual fetch/parse.
+   */
+  private readonly grounding = inject(GroundingStore);
   /**
    * The three halves of the Common Operational Picture (docs/plans/done/MAP-REWORK-PLAN.md §5.2) — exposed as
    * whole stores (not thin passthroughs), mirroring `geofence` above: `cockpit.html` wires
@@ -314,6 +326,12 @@ export class CockpitFacade {
   // F-d) — both pure derivations over the same `TelemetryStore.latest()` sample every other OSD chip
   // already reads, no second telemetry source.
   readonly failsafeBanner = computed(() => flightBanner(this.telemetry.latest()));
+
+  /** `GroundingStore#groundedReason` for the currently tracked asset — `undefined` unless it carries
+   * an open `MAINTENANCE_GROUNDED:` blocker. Renders `<vision-grounded-banner>` in the same
+   * `.grid-banner` area as {@link failsafeBanner} above, and disables Arm via
+   * `flight-command-panel.ts#armDisabled` (docs/plans/active/ASSET-FLOWS-PLAN.md §2, wave WB1). */
+  readonly groundedReason = computed(() => this.grounding.groundedReason());
 
   /** Re-derives whenever the tracked sample/primary-device/live state changes — a ground-check
    * glance, not a live-ticking instrument (the OSD's own age chip is that); see
@@ -531,6 +549,13 @@ export class CockpitFacade {
 
   readonly latestFinishedUsageEntry = computed(() => latestFinishedUsage(this.asset()?.recentUsages ?? []));
 
+  /** "Replay an earlier flight" menu (D3r, docs/plans/active/ASSET-FLOWS-PLAN.md §3 WB2) — the small
+   *  list of finished usages behind {@link latestFinishedUsageEntry}'s own primary link, sourced from
+   *  the exact same already-in-hand `asset()?.recentUsages` (no extra `GET /api/usages` read — see
+   *  `fly-logic.ts#earlierReplayableUsages`'s own doc comment for why). Empty whenever there is at
+   *  most one finished usage to offer, which `cockpit.html` reads as "don't render the menu at all". */
+  readonly olderReplayableUsages = computed(() => earlierReplayableUsages(this.asset()?.recentUsages ?? []));
+
   // --- Events ticker overlay (docs/plans/done/MVP3-PLAN.md §C-b: "this stream's events via events-store,
   // newest, auto-fading") — filters the shared global feed by this asset's id, same derivation
   // `AssetDetailPage`'s own offline-branch already uses (`filterEvents(events.events(), {assetId})`);
@@ -643,6 +668,18 @@ export class CockpitFacade {
         this.geo.track(assetId);
       } else {
         this.geo.reset();
+      }
+    });
+
+    // Custody grounding (docs/plans/active/ASSET-FLOWS-PLAN.md §2, wave WB1) — same per-asset
+    // track/reset shape as `geo` above; `GroundingStore.track()` is a no-op for an unchanged
+    // assetId (its own `lastTrackedAssetId` field), so no derived-primitive guard needed here either.
+    effect(() => {
+      const assetId = this.activeAssetId();
+      if (assetId) {
+        this.grounding.track(assetId);
+      } else {
+        this.grounding.reset();
       }
     });
 

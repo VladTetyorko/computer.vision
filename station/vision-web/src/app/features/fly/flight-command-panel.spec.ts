@@ -65,3 +65,37 @@ describe('FlightCommandPanel — "also on" switch hints (docs/plans/active/CONTR
     expect(fixture.nativeElement.querySelector('.command-row-danger')?.textContent).toContain('also on Sw 2 ↑');
   });
 });
+
+describe('FlightCommandPanel — grounded (docs/plans/active/ASSET-FLOWS-PLAN.md §2 "S1 gate semantics", wave WB1)', () => {
+  it('leaves Arm enabled and shows no reason when not grounded', () => {
+    const fixture = render();
+
+    const armBtn: HTMLButtonElement = fixture.nativeElement.querySelector('.arm-btn');
+    expect(armBtn.disabled).toBe(false);
+    expect(fixture.nativeElement.querySelector('.disabled-reason')).toBeNull();
+  });
+
+  it('disables only Arm — Disarm stays clickable — and renders the reason inline, verbatim', () => {
+    const fixture = render();
+    fixture.componentRef.setInput('groundedReason', 'Grounded — Prop strike on landing');
+    fixture.detectChanges();
+
+    const armBtn: HTMLButtonElement = fixture.nativeElement.querySelector('.arm-btn');
+    const buttons: NodeListOf<HTMLButtonElement> = fixture.nativeElement.querySelectorAll('.command-row-danger button');
+    const disarmBtn = buttons[1];
+    expect(armBtn.disabled).toBe(true);
+    expect(disarmBtn.disabled).toBe(false);
+    expect(fixture.nativeElement.querySelector('.disabled-reason')?.textContent).toBe('Grounded — Prop strike on landing');
+  });
+
+  it('requestArm() is a no-op while grounded, even if the disabled button is somehow reached', () => {
+    const fixture = render();
+    fixture.componentRef.setInput('groundedReason', 'Grounded — Prop strike on landing');
+    fixture.detectChanges();
+
+    (fixture.componentInstance as unknown as { requestArm(): void }).requestArm();
+    fixture.detectChanges();
+
+    expect(fixture.nativeElement.querySelector('vision-arm-confirm-dialog')).toBeNull();
+  });
+});

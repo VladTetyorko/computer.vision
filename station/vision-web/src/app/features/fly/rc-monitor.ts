@@ -142,6 +142,13 @@ export class RcMonitor implements OnInit {
   /** `CockpitFacade.sessionBusy` — disables the button for the life of the in-flight request, the
    * same "no double-submit" posture `flight-command-panel.ts` already applies to its own commands. */
   readonly sessionBusy = input<boolean>(false);
+  /** `CockpitPage`'s own `GroundingStore.groundedReason` — plain pass-through to
+   * `<vision-flight-command-panel>`'s own input; this component owns no grounding logic of its own
+   * (docs/plans/active/ASSET-FLOWS-PLAN.md §2, wave WB1). Deliberately not derived from this
+   * component's own private readiness fetch below (`_readiness`, scoped to the `rc-relay` feature
+   * row only) — `GroundingStore` is the one place grounding is read from, everywhere in the cockpit
+   * (see that class's own doc comment for why it's a dedicated store, not `CockpitFacade`). */
+  readonly groundedReason = input<string | undefined>(undefined);
   readonly engageAssetLink = output<void>();
   readonly endAssetSession = output<void>();
 

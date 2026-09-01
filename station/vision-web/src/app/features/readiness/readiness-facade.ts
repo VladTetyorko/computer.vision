@@ -2,9 +2,12 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
 import {
+  featureBlockers,
   featureLabel,
   featureStatusLabel,
   featureStatusTone,
+  groundedBannerText,
+  groundingBlocker,
   hasBeenProbed,
   isProbeDisabledError,
   isRemediable,
@@ -78,8 +81,27 @@ export class ReadinessFacade {
   readonly remediateError = signal<string | null>(null);
   readonly lastRemediation = signal<RemediationResult | null>(null);
 
-  /** Feature keys named in {@link ReadinessReport.blockers} (raw keys, no label on the wire — verified against `DefaultReadinessService#evaluate`), mapped to their seeded label for display. */
-  readonly blockerLabels = computed(() => (this.report()?.blockers ?? []).map((key) => featureLabel(key)));
+  /**
+   * Feature keys named in {@link ReadinessReport.blockers} (raw keys, no label on the wire — verified
+   * against `DefaultReadinessService#evaluate`), mapped to their seeded label for display. Excludes
+   * any `MAINTENANCE_GROUNDED:` entry — {@link groundedText} renders that one distinctly (WB1 fix:
+   * this used to feed every blocker, grounding included, straight through {@link featureLabel},
+   * which doesn't recognise the prefix and rendered the raw `"MAINTENANCE_GROUNDED:GROUNDING:..."`
+   * string verbatim as an opaque row).
+   */
+  readonly blockerLabels = computed(() => featureBlockers(this.report()?.blockers ?? []).map((key) => featureLabel(key)));
+
+  /**
+   * This asset's parsed grounding blocker (docs/plans/active/ASSET-FLOWS-PLAN.md §2 "S1 gate
+   * semantics", wave WB1) — `undefined` when it carries none.
+   */
+  readonly groundedBlocker = computed(() => groundingBlocker(this.report()?.blockers ?? []));
+
+  /** One-line grounded text — the same wording `flight-command-panel.ts`/`grounded-banner.ts` render, so this page never drifts from the cockpit. */
+  readonly groundedText = computed(() => {
+    const blocker = this.groundedBlocker();
+    return blocker ? groundedBannerText(blocker) : null;
+  });
 
   readonly verdictLabel = verdictLabel;
   readonly verdictTone = verdictTone;

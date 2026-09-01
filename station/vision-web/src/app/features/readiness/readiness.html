@@ -4,7 +4,12 @@
     icon="shield"
     [crumb]="assetCrumb()"
     hint="Whether this drone's last-observed link satisfies what this platform's own features need — video feed and the live cockpit checklist stay on Fly. Advisory only: a No-go never blocks flight, it just lists what's missing."
-  />
+  >
+    <!-- B2 (docs/plans/active/ASSET-FLOWS-PLAN.md) — the return trip from the cockpit's own
+         shield-icon link in its header; the "Asset" crumb above already covers the other direction
+         (back to the asset detail page). -->
+    <a pageBarActions class="btn secondary" [routerLink]="['/fly', assetId()]">Open in Fly ›</a>
+  </vision-page-bar>
 
   @if (facade.loading()) {
     <p class="muted">Loading readiness report…</p>
@@ -46,6 +51,14 @@
         <vision-notice variant="warn">{{ error }}</vision-notice>
       }
 
+      @if (facade.groundedText(); as grounded) {
+        <!-- Distinct from the feature-blockers notice below (docs/plans/active/ASSET-FLOWS-PLAN.md
+             §2, wave WB1 fix) — a custody/maintenance fact, not a feature the platform can't reach;
+             shield-iconed to match the cockpit's own grounded banner. -->
+        <vision-notice variant="danger" icon="shield">
+          {{ grounded }}
+        </vision-notice>
+      }
       @if (facade.blockerLabels().length > 0) {
         <vision-notice variant="danger" icon="alert">
           Blocking: {{ facade.blockerLabels().join(', ') }}

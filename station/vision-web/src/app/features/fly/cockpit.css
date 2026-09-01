@@ -98,6 +98,12 @@
 .grid-banner {
   grid-area: banner;
   z-index: 10;
+  /* Stacks the grounded banner above the failsafe banner when both apply at once (grounded-banner.ts's
+     own doc comment) — flex-column rather than two grid-area siblings, which would overlap instead of
+     stack. Empty (both children render nothing) collapses to zero height, same as the old
+     single-banner `@if`. */
+  display: flex;
+  flex-direction: column;
 }
 
 /* The bottom OSD strip (`<vision-fly-osd>`) — a real row below the video now, not an overlaid
@@ -135,6 +141,15 @@
   justify-content: center;
   gap: var(--space-16);
   padding: var(--space-16);
+}
+
+/* D3r (docs/plans/active/ASSET-FLOWS-PLAN.md §3 WB2) — "Replay last flight" plus its own small
+   "earlier flights" kebab trigger, kept snug together as one control rather than two independently
+   spaced `.grid-controls` children. */
+.replay-control {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
 }
 
 /* The tool-rail column (docs/plans/done/UI-REDESIGN-PLAN.md D-D) — frozen ids: flight · rc · cv · detections ·

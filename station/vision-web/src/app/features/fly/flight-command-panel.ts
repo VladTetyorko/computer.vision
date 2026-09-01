@@ -86,6 +86,16 @@ export class FlightCommandPanel {
   readonly modeAlsoOn = input<string | undefined>(undefined);
   /** Same idea for the Arm/Disarm row — the switch whose action map fires `ARM`/`TOGGLE_ARM`. */
   readonly armAlsoOn = input<string | undefined>(undefined);
+  /**
+   * `CockpitPage`'s own `GroundingStore.groundedReason`, forwarded through `<vision-rc-monitor>`
+   * (docs/plans/active/ASSET-FLOWS-PLAN.md §2 "S1 gate semantics",
+   * wave WB1) — `undefined` unless this asset carries an open `MAINTENANCE_GROUNDED:` blocker.
+   * Blocks Arm only, following this codebase's own "disabled-with-reason inline" idiom
+   * (`.disabled-reason`, first established by `rc-monitor-logic.ts#engageBlock`) rather than letting
+   * the click reach the server and eat a 409. **Disarm/mode stay untouched** — S1's own frozen rule:
+   * energy-reducing/recovery verbs must always work on a vehicle that is somehow already moving.
+   */
+  readonly groundedReason = input<string | undefined>(undefined);
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
 
@@ -157,7 +167,15 @@ export class FlightCommandPanel {
    */
   protected readonly armBusy = signal(false);
 
+  /** `groundedReason() !== undefined` — poka-yoke: the trigger button is disabled from this exact
+   * condition (never enabled-then-error), and {@link requestArm} re-checks it too, since a disabled
+   * DOM button is still reachable by a stray keyboard Enter on some browsers. */
+  protected readonly armDisabled = computed(() => this.groundedReason() !== undefined);
+
   protected requestArm(): void {
+    if (this.armDisabled()) {
+      return;
+    }
     this.dialog.open('arm');
   }
 

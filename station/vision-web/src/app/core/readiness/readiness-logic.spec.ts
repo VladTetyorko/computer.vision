@@ -2,15 +2,19 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { describe, expect, it } from 'vitest';
 import type { ReadinessRow } from '../api/models';
 import {
+  featureBlockers,
   featureLabel,
   featureStatusLabel,
   featureStatusTone,
   fleetRowAttention,
+  groundedBannerText,
+  groundingBlocker,
   hasBeenProbed,
   isProbeDisabledError,
   isRemediable,
   outcomeLabel,
   outcomeTone,
+  parseGroundingBlocker,
   probeBlockedReason,
   readinessCounts,
   remedyLabel,
@@ -198,6 +202,83 @@ describe('readinessCounts', () => {
   it('tallies a mixed fleet', () => {
     const rows = [row({ verdict: 'GO' }), row({ verdict: 'GO' }), row({ verdict: 'NO_GO' }), row({ verdict: 'UNKNOWN' })];
     expect(readinessCounts(rows)).toEqual({ go: 2, noGo: 1, unknown: 1 });
+  });
+});
+
+describe('parseGroundingBlocker', () => {
+  it('parses a well-formed MAINTENANCE_GROUNDED blocker', () => {
+    expect(parseGroundingBlocker('MAINTENANCE_GROUNDED:GROUNDING:Prop strike on landing')).toEqual({
+      kind: 'GROUNDING',
+      summary: 'Prop strike on landing',
+    });
+  });
+
+  it('keeps every colon in the summary after the first — free text a manager typed', () => {
+    expect(parseGroundingBlocker('MAINTENANCE_GROUNDED:INSPECTION_DUE:Annual due: overdue since 08:00')).toEqual({
+      kind: 'INSPECTION_DUE',
+      summary: 'Annual due: overdue since 08:00',
+    });
+  });
+
+  it('is null for a plain feature-key blocker (no prefix)', () => {
+    expect(parseGroundingBlocker('battery')).toBeNull();
+  });
+
+  it('is null for a prefixed entry with no summary separator', () => {
+    expect(parseGroundingBlocker('MAINTENANCE_GROUNDED:GROUNDING')).toBeNull();
+  });
+
+  it('is null for an unrecognised MaintenanceKind — degrades honestly instead of guessing', () => {
+    expect(parseGroundingBlocker('MAINTENANCE_GROUNDED:FUTURE_KIND:something new')).toBeNull();
+  });
+});
+
+describe('featureBlockers', () => {
+  it('drops MAINTENANCE_GROUNDED entries, keeping plain feature keys', () => {
+    expect(featureBlockers(['battery', 'MAINTENANCE_GROUNDED:GROUNDING:Prop strike', 'link-quality'])).toEqual([
+      'battery',
+      'link-quality',
+    ]);
+  });
+
+  it('is the identity on a list with no grounding blocker', () => {
+    expect(featureBlockers(['battery', 'link-quality'])).toEqual(['battery', 'link-quality']);
+  });
+});
+
+describe('groundingBlocker', () => {
+  it('is undefined when the list carries no grounding entry', () => {
+    expect(groundingBlocker(['battery', 'link-quality'])).toBeUndefined();
+  });
+
+  it('finds the grounding entry among plain feature-key blockers', () => {
+    expect(groundingBlocker(['battery', 'MAINTENANCE_GROUNDED:GROUNDING:Prop strike'])).toEqual({
+      kind: 'GROUNDING',
+      summary: 'Prop strike',
+    });
+  });
+
+  it('picks the first grounding entry when more than one is present', () => {
+    expect(
+      groundingBlocker([
+        'MAINTENANCE_GROUNDED:GROUNDING:First',
+        'MAINTENANCE_GROUNDED:INSPECTION_DUE:Second',
+      ]),
+    ).toEqual({ kind: 'GROUNDING', summary: 'First' });
+  });
+});
+
+describe('groundedBannerText', () => {
+  it('renders the kind label and summary, em-dash separated', () => {
+    expect(groundedBannerText({ kind: 'GROUNDING', summary: 'Prop strike on landing' })).toBe(
+      'Grounded — Prop strike on landing',
+    );
+  });
+
+  it('labels every blocking MaintenanceKind', () => {
+    expect(groundedBannerText({ kind: 'INSPECTION_DUE', summary: 'Annual overdue' })).toBe(
+      'Inspection due — Annual overdue',
+    );
   });
 });
 

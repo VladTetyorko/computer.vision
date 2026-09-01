@@ -1,4 +1,5 @@
 import { ChangeDetectionStrategy, Component, effect, inject, input } from '@angular/core';
+import { RouterLink } from '@angular/router';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { Notice } from '../../shared/ui/notice';
 import { PageBar, type PageBarCrumb } from '../../shared/ui/page-bar/page-bar';
@@ -28,7 +29,7 @@ import type { FeatureKey, RemediationResult } from '../../core/api/models';
  */
 @Component({
   selector: 'vision-readiness',
-  imports: [EmptyState, Notice, PageBar],
+  imports: [EmptyState, Notice, PageBar, RouterLink],
   templateUrl: './readiness.html',
   styleUrl: './readiness.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

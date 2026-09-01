@@ -8,6 +8,7 @@ import {
   buildFleetVehicleRows,
   emptyFilterTitle,
   hasTelemetryCapableDevice,
+  isInMaintenance,
   isNeverProbedRow,
   sortWorstFirst,
   vehicleStatusOverride,
@@ -197,6 +198,28 @@ describe('buildFleetVehicleRows (OPERATOR-UX-7 P1)', () => {
     expect(built.status).toBe('OFFLINE');
     expect(built.lastUsedAt).toBeUndefined();
     expect(built.hasTelemetryDevice).toBeUndefined();
+    expect(built.inventoryState).toBeUndefined();
+  });
+
+  it('carries inventoryState through from AssetDetails (ASSET-FLOWS-PLAN.md §2, wave WB1)', () => {
+    const details = new Map<
+      string,
+      Pick<AssetDetails, 'category' | 'status' | 'lastUsedAt' | 'inventoryState'> & { devices: readonly Pick<Device, 'capabilities'>[] }
+    >([['a-1', { category: 'drones', status: 'OFFLINE', lastUsedAt: undefined, inventoryState: 'MAINTENANCE', devices: [] }]]);
+    const [built] = buildFleetVehicleRows([row({ assetId: 'a-1' })], details);
+    expect(built.inventoryState).toBe('MAINTENANCE');
+  });
+});
+
+describe('isInMaintenance (ASSET-FLOWS-PLAN.md §2 "S1 gate semantics", wave WB1)', () => {
+  it('is true only for MAINTENANCE inventoryState', () => {
+    expect(isInMaintenance(vehicleRow({ inventoryState: 'MAINTENANCE' }))).toBe(true);
+  });
+
+  it('is false for every other inventoryState, including undefined (unresolved AssetDetails)', () => {
+    expect(isInMaintenance(vehicleRow({ inventoryState: 'IN_FIELD' }))).toBe(false);
+    expect(isInMaintenance(vehicleRow({ inventoryState: 'RETIRED' }))).toBe(false);
+    expect(isInMaintenance(vehicleRow({ inventoryState: undefined }))).toBe(false);
   });
 });
 

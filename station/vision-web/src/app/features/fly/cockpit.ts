@@ -12,8 +12,11 @@ import { Icon } from '../../shared/ui/icon';
 import { IconButton } from '../../shared/ui/icon-button';
 import { SidePanel } from '../../shared/ui/side-panel';
 import { EmptyState } from '../../shared/ui/empty-state';
+import { KebabMenu } from '../../shared/ui/kebab-menu';
 import { FlyOsd } from './fly-osd';
 import { FailsafeBanner } from './failsafe-banner';
+import { GroundedBanner } from './grounded-banner';
+import { GroundingStore } from './grounding-store';
 import { PreflightChecklist } from '../../shared/ui/preflight-checklist';
 import { DiagnosticsCard } from './diagnostics-card';
 import { ReturnHomeButton } from '../../shared/ui/return-home-button';
@@ -90,8 +93,10 @@ type CockpitDialog = 'stop' | 'cv-setup';
     IconButton,
     SidePanel,
     EmptyState,
+    KebabMenu,
     FlyOsd,
     FailsafeBanner,
+    GroundedBanner,
     PreflightChecklist,
     DiagnosticsCard,
     ReturnHomeButton,
@@ -110,7 +115,7 @@ type CockpitDialog = 'stop' | 'cv-setup';
   // comment for why it can't be a shared root singleton. `CockpitFacade` shares this same injector
   // so its own `inject(TelemetryStore)`/`inject(DetectionsStore)`/`inject(WeatherStore)` resolve to
   // these exact instances (see `CockpitFacade`'s own doc comment).
-  providers: [TelemetryStore, DetectionsStore, WeatherStore, GeoStore, CockpitFacade],
+  providers: [TelemetryStore, DetectionsStore, WeatherStore, GeoStore, CockpitFacade, GroundingStore],
 })
 export class CockpitPage {
   /** Bound from the route by `withComponentInputBinding()` (`cockpit.routes.ts` names the segment

@@ -181,6 +181,9 @@
                                 }
                               </span>
                             </td>
+                          } @else if (facade.isInMaintenance(row)) {
+                            <!-- See the "Your vehicles" table's own identical branch above for why. -->
+                            <td class="attention-cell"><span class="muted">In maintenance</span></td>
                           } @else {
                             <td class="faint">—</td>
                           }

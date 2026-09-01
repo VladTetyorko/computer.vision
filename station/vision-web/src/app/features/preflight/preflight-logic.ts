@@ -1,5 +1,5 @@
 import { FEATURE_KEYS } from '../../core/api/models';
-import type { AssetDetails, AssetStatus, Device, FeatureStatus, ReadinessRow, ReadinessVerdict } from '../../core/api/models';
+import type { AssetDetails, AssetStatus, Device, FeatureStatus, InventoryState, ReadinessRow, ReadinessVerdict } from '../../core/api/models';
 import { featureLabel } from '../../core/readiness/readiness-logic';
 import { isSimulated, type PickerGroups } from '../../core/fleet/triage-logic';
 
@@ -198,6 +198,10 @@ export interface FleetVehicleRow extends ReadinessRow {
   readonly status: AssetStatus;
   readonly lastUsedAt?: string;
   readonly hasTelemetryDevice?: boolean;
+  /** `AssetDetails.inventoryState` — `undefined` on the same missing/failed-detail path every other
+   *  enrichment field degrades on above. See {@link isInMaintenance}'s own doc comment for what this
+   *  is (and isn't) an honest proxy for. */
+  readonly inventoryState?: InventoryState;
 }
 
 /**
@@ -211,7 +215,10 @@ export interface FleetVehicleRow extends ReadinessRow {
  */
 export function buildFleetVehicleRows(
   rows: readonly ReadinessRow[],
-  detailsById: ReadonlyMap<string, Pick<AssetDetails, 'category' | 'status' | 'lastUsedAt'> & { devices: readonly Pick<Device, 'capabilities'>[] }>,
+  detailsById: ReadonlyMap<
+    string,
+    Pick<AssetDetails, 'category' | 'status' | 'lastUsedAt' | 'inventoryState'> & { devices: readonly Pick<Device, 'capabilities'>[] }
+  >,
 ): readonly FleetVehicleRow[] {
   return rows.map((row) => {
     const details = detailsById.get(row.assetId);
@@ -221,8 +228,26 @@ export function buildFleetVehicleRows(
       status: details?.status ?? 'OFFLINE',
       lastUsedAt: details?.lastUsedAt,
       hasTelemetryDevice: details ? hasTelemetryCapableDevice(details.devices) : undefined,
+      inventoryState: details?.inventoryState,
     };
   });
+}
+
+/**
+ * Whether a fleet-board row's asset is currently in `MAINTENANCE` — the honest, best-available
+ * proxy this page has for "grounded" (docs/plans/active/ASSET-FLOWS-PLAN.md §2, wave WB1). The fleet
+ * board's own `ReadinessRow` carries no `blockers` (unlike the per-asset `ReadinessReport` —
+ * `ReadinessRowResponse` is verified to have no such field), so the precise `MAINTENANCE_GROUNDED:`
+ * kind/summary {@link isRemediable}'s sibling surfaces read isn't reachable here without a per-row
+ * fetch this page's own doc comment already rules out for `profileObservedAt`. `inventoryState ===
+ * 'MAINTENANCE'` is set by `DefaultAssetCustodyService#ground` for *every* `MaintenanceKind`
+ * (verified against source: not just the two that block flight, `GROUNDING`/`INSPECTION_DUE`) — so
+ * this is a broader "something is flagged on this asset" fact, not a precise re-derivation of why a
+ * NO_GO row is NO_GO. Rendered as a plain "In maintenance" label (`preflight.html`), never a
+ * fabricated kind/summary this function cannot actually confirm.
+ */
+export function isInMaintenance(row: Pick<FleetVehicleRow, 'inventoryState'>): boolean {
+  return row.inventoryState === 'MAINTENANCE';
 }
 
 /**

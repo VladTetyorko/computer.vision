@@ -15,11 +15,16 @@
        it that already assumed an always-dark ambient (`--hud-*`/`--scrim*`, `--text`/`--panel`
        etc. throughout `cockpit.css` and the tool-rail drawer components). -->
   <div class="cockpit surface-dark" #stage>
-    @if (facade.failsafeBanner(); as banner) {
-      <div class="grid-banner">
+    <!-- Grounded (custody/maintenance) stacks above failsafe (live flight-state) when both apply at
+         once — a grounded vehicle can still be mid-flight and trip its own failsafe. One wrapper so
+         the two share the `banner` grid area without overlapping (cockpit.css's own `.grid-banner`
+         comment); collapses to zero height when neither applies. -->
+    <div class="grid-banner">
+      <vision-grounded-banner [reason]="facade.groundedReason()" />
+      @if (facade.failsafeBanner(); as banner) {
         <vision-failsafe-banner [banner]="banner" />
-      </div>
-    }
+      }
+    </div>
 
     <div class="grid-main">
       <div class="stage-video">
@@ -134,6 +139,11 @@
         <div class="header-left">
           <a class="icon-btn" routerLink="/wall" title="Exit to the Wall">
             <vision-icon name="chevron-left" />
+          </a>
+          <!-- B2 (docs/plans/active/ASSET-FLOWS-PLAN.md) — outbound half of the cockpit⇄readiness nav;
+               `/assets/:assetId/readiness` gains the return trip via its own `Open in Fly ›` action. -->
+          <a class="icon-btn" [routerLink]="['/assets', a.assetId, 'readiness']" title="This drone's readiness report">
+            <vision-icon name="shield" />
           </a>
           @if (facade.hasTelemetryDevice()) {
             <vision-icon-button
@@ -318,6 +328,7 @@
           [live]="facade.live()"
           [operatorEngaged]="facade.operatorEngaged()"
           [sessionBusy]="facade.sessionBusy()"
+          [groundedReason]="facade.groundedReason()"
           (close)="panels.close()"
           (engageAssetLink)="facade.engageSession()"
           (endAssetSession)="facade.endSession()"
@@ -489,9 +500,24 @@
     @if (!facade.watchMode()) {
       <div class="grid-controls">
         @if (facade.latestFinishedUsageEntry(); as finished) {
-          <a class="btn secondary" [routerLink]="['/assets', a.assetId, 'replay', finished.usageId]">
-            Replay last flight
-          </a>
+          <div class="replay-control">
+            <a class="btn secondary" [routerLink]="['/assets', a.assetId, 'replay', finished.usageId]">
+              Replay last flight
+            </a>
+            <!-- D3r (docs/plans/active/ASSET-FLOWS-PLAN.md §3 WB2) — a small menu of earlier finished
+                 flights, absent entirely when there is at most one to offer. -->
+            @if (facade.olderReplayableUsages().length > 0) {
+              <vision-kebab-menu [label]="'Replay an earlier flight for ' + a.displayName">
+                @for (usage of facade.olderReplayableUsages(); track usage.usageId) {
+                  <div class="kebab-item">
+                    <button type="button" [routerLink]="['/assets', a.assetId, 'replay', usage.usageId]">
+                      <span class="mono">{{ usage.startedAt }}</span>
+                    </button>
+                  </div>
+                }
+              </vision-kebab-menu>
+            }
+          </div>
         }
         @if (facade.live()) {
           <button type="button" class="btn danger big danger-action" (click)="requestStop()" [disabled]="facade.busy()">
