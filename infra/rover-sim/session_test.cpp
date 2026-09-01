@@ -17,6 +17,7 @@
 #include "IMotorDriver.h"
 #include "INetworkLink.h"
 #include "MavlinkUdpLink.h"
+#include "ParameterStore.h"
 #include "VehicleController.h"
 
 uint32_t g_hostMillis = 0;
@@ -43,11 +44,21 @@ public:
   void begin() override {}
   void apply(float t, float s, uint32_t) override { throttle_ = t; steering_ = s; }
   void stop() override { throttle_ = 0; steering_ = 0; }
+  // Counted, not performed: this suite is about WHEN the controller wakes or
+  // sleeps the bridge (the STBY edge), not about what enable()/disable()
+  // write to the pin -- motor_test owns that. The two questions fail
+  // independently, so they are asked separately.
+  void enable() override { enabled_ = true; ++enableCalls; }
+  void disable() override { enabled_ = false; ++disableCalls; }
+  bool enabled() const override { return enabled_; }
+  int enableCalls = 0;
+  int disableCalls = 0;
   float appliedThrottle() const override { return throttle_; }
   float appliedSteering() const override { return steering_; }
   float estimatedSpeedMps() const override { return 0; }
 private:
   float throttle_ = 0, steering_ = 0;
+  bool  enabled_ = false;
 };
 class FakeImu : public IImu {
 public:
@@ -58,7 +69,7 @@ public:
   void calibrate() override {}
 };
 
-std::vector<uint8_t> g_rc, g_arm;
+std::vector<uint8_t> g_rc, g_arm, g_rel;
 int  g_failures = 0;
 
 void check(const char* what, bool ok) {
@@ -80,12 +91,14 @@ int main(int argc, char** argv) {
     while ((c = fgetc(f)) != EOF) v.push_back(static_cast<uint8_t>(c));
     fclose(f); return v;
   };
-  g_rc = load("rc"); g_arm = load("arm");
+  g_rc = load("rc"); g_arm = load("arm"); g_rel = load("rel");
   g_ch5hi = load("ch5hi"); g_ch5lo = load("ch5lo"); g_ch5mid = load("ch5mid");
 
-  const AppConfig& cfg = appConfig();
+  // The store owns the live config; the link binds to it, not to appConfig().
+  ParameterStore   parameters;
+  const AppConfig& cfg = parameters.config();
   QuietLogger logger; FakeNetwork network; FakeMotors motors; FakeImu imu;
-  MavlinkUdpLink link(cfg.link, cfg.rc, cfg.telemetry, cfg.timing, network, logger);
+  MavlinkUdpLink link(parameters, network, logger);
   VehicleController vehicle(link, motors, imu, cfg.timing, logger);
   vehicle.begin();
 
@@ -100,14 +113,22 @@ int main(int argc, char** argv) {
   feed(g_arm); tick(10);
   for (int i = 0; i < 300; ++i) tick(20);          // 6 s of silence
   check("cold ARM survives 6s with no RC stream", vehicle.armed());
+  // Waking the bridge belongs to the arm EDGE, not to every tick a command
+  // happens to arrive while already armed.
+  check("the arm edge enables the bridge exactly once", motors.enableCalls == 1);
 
   // --- 2. a real drive session: 3 s of RC frames at 50 Hz
   for (int i = 0; i < 150; ++i) { feed(g_rc); tick(20); }
   check("driving: armed and out of failsafe", vehicle.armed());
 
-  // --- 3. the stream stops dead (no RELEASE burst) -- the watchdog must cut it
+  // --- 3. the stream stops dead (no RELEASE burst). The watchdog must stop the
+  //        vehicle -- but a lost stream is not an operator disarm, so the arm
+  //        holds and the next frame to arrive drives immediately.
   for (int i = 0; i < 50; ++i) tick(20);           // 1 s past the 500 ms timeout
-  check("stalled stream cuts the arm", !vehicle.armed());
+  check("stalled stream raises failsafe", vehicle.failsafeActive());
+  check("stalled stream centres the outputs",
+        motors.appliedThrottle() == 0.0f && motors.appliedSteering() == 0.0f);
+  check("stalled stream HOLDS the arm (no surprise disarm)", vehicle.armed());
 
   // --- 4. the regression: ARM again, long after that session ended
   feed(g_arm); tick(10);
@@ -115,14 +136,34 @@ int main(int argc, char** argv) {
   for (int i = 0; i < 300; ++i) { tick(20); if (!vehicle.armed()) held = false; }
   check("re-ARM after a finished session holds for 6s", held);
 
-  // --- 5. and the stream still re-arms the watchdog when it comes back
+  // --- 5. and the stream still re-arms the watchdog when it comes back: a
+  //        second stall must latch failsafe again rather than be swallowed by
+  //        the first, while still leaving the arm alone.
   for (int i = 0; i < 50; ++i) { feed(g_rc); tick(20); }
+  check("a resumed stream clears failsafe", !vehicle.failsafeActive());
   for (int i = 0; i < 50; ++i) tick(20);
-  check("a resumed stream re-arms the watchdog", !vehicle.armed());
+  check("a resumed stream re-arms the watchdog", vehicle.failsafeActive());
+  check("the second stall also holds the arm", vehicle.armed());
+
+  // --- 6. the operator lets go: the app's 3x RELEASE burst. Same rule as a
+  //        stall -- centre, hold the arm. The app sends this burst when its own
+  //        input watchdog trips too, so treating it as a disarm would have made
+  //        the arm-holding above unreachable through the app.
+  for (int i = 0; i < 60; ++i) { feed(g_rc); tick(20); }
+  check("driving again before the release", vehicle.armed());
+  for (int i = 0; i < 3; ++i) { feed(g_rel); tick(20); }
+  tick(20);
+  check("3x RELEASE centres the outputs",
+        motors.appliedThrottle() == 0.0f && motors.appliedSteering() == 0.0f);
+  check("3x RELEASE HOLDS the arm (no surprise disarm)", vehicle.armed());
+  for (int i = 0; i < 150; ++i) tick(20);          // 3 s of the silence that follows
+  check("the silence after a release does not disarm either", vehicle.armed());
+  for (int i = 0; i < 30; ++i) { feed(g_rc); tick(20); }
+  check("the next stream drives without a fresh arm", vehicle.armed());
 
   // ================= ch5 arm switch =================
   printf("\n-- ch5 arm switch --\n");
-  MavlinkUdpLink link2(cfg.link, cfg.rc, cfg.telemetry, cfg.timing, network, logger);
+  MavlinkUdpLink link2(parameters, network, logger);
   VehicleController vehicle2(link2, motors, imu, cfg.timing, logger);
   g_hostMillis = 100000;
   link2.begin();
@@ -149,6 +190,7 @@ int main(int argc, char** argv) {
   feed2(g_ch5lo); tick2(20);
   check("driving before the disarm", drove);
   check("ch5 low disarms", !vehicle2.armed());
+  check("the disarm edge disables the bridge", motors.disableCalls > 0);
   check("disarm cuts the outputs", motors.appliedThrottle() == 0.0f);
 
   // The safety property: re-arming with NO fresh stick data must not resurrect

@@ -11,6 +11,8 @@
 
 #include <vector>
 
+#include "IPAddress.h"
+
 class WiFiUDP {
 public:
   uint8_t begin(uint16_t port) {
@@ -27,15 +29,25 @@ public:
     return 1;
   }
 
+  void stop() { if (fd_ >= 0) { close(fd_); fd_ = -1; } }
+
   int parsePacket() {
     if (pos_ < rx_.size()) return static_cast<int>(rx_.size() - pos_);
     uint8_t buffer[2048];
-    const ssize_t n = recv(fd_, buffer, sizeof(buffer), 0);
+    sockaddr_in from{};
+    socklen_t fromLen = sizeof(from);
+    const ssize_t n = recvfrom(fd_, buffer, sizeof(buffer), 0,
+                               reinterpret_cast<sockaddr*>(&from), &fromLen);
     if (n <= 0) return 0;
+    remote_ = IPAddress(from.sin_addr.s_addr);
+    remotePort_ = ntohs(from.sin_port);
     rx_.assign(buffer, buffer + n);
     pos_ = 0;
     return static_cast<int>(n);
   }
+
+  IPAddress remoteIP() const { return remote_; }
+  uint16_t  remotePort() const { return remotePort_; }
   int available() { return static_cast<int>(rx_.size() - pos_); }
   int read() { return pos_ < rx_.size() ? rx_[pos_++] : -1; }
 
@@ -44,6 +56,15 @@ public:
     peer_.sin_family = AF_INET;
     peer_.sin_port = htons(port);
     if (inet_pton(AF_INET, host, &peer_.sin_addr) != 1) return 0;
+    tx_.clear();
+    return 1;
+  }
+
+  int beginPacket(IPAddress ip, uint16_t port) {
+    memset(&peer_, 0, sizeof(peer_));
+    peer_.sin_family = AF_INET;
+    peer_.sin_port = htons(port);
+    peer_.sin_addr.s_addr = ip.networkOrder();
     tx_.clear();
     return 1;
   }
@@ -59,5 +80,7 @@ private:
   int fd_ = -1;
   std::vector<uint8_t> rx_, tx_;
   size_t pos_ = 0;
+  IPAddress remote_;
+  uint16_t  remotePort_ = 0;
   sockaddr_in peer_{};
 };

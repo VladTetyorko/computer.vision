@@ -13,6 +13,7 @@
 #include "IMotorDriver.h"
 #include "INetworkLink.h"
 #include "MavlinkUdpLink.h"
+#include "ParameterStore.h"
 #include "NullImu.h"
 #include "VehicleController.h"
 
@@ -77,16 +78,19 @@ int main(int argc, char** argv) {
   signal(SIGINT, onSignal);
   signal(SIGTERM, onSignal);
 
-  const AppConfig& cfg = appConfig();
-  LinkConfig link = cfg.link;      // must outlive the adapter; held by reference
-  link.peerHost  = host;
-  link.localPort = localPort;
+  // The store owns the live config, so the endpoint override lands in the same
+  // copy the link and the motor driver read -- there is no second LinkConfig to
+  // keep alive alongside it any more.
+  ParameterStore   parameters;
+  const AppConfig& cfg = parameters.config();
+  parameters.linkEndpoint().peerHost  = host;
+  parameters.linkEndpoint().localPort = localPort;
 
   StderrLogger      logger;
   WiredNetwork      network;
   BenchMotorDriver  motors(cfg.drive);
   NullImu           imu;
-  MavlinkUdpLink    commandLink(link, cfg.rc, cfg.telemetry, cfg.timing, network, logger);
+  MavlinkUdpLink    commandLink(parameters, network, logger);
   VehicleController controller(commandLink, motors, imu, cfg.timing, logger);
 
   g_hostMillis = nowMillis();
