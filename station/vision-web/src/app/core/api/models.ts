@@ -1003,6 +1003,29 @@ export interface RegisterDiscoveryCandidateResponse {
   readonly category: string;
 }
 
+/**
+ * Mirrors `dto.DiscoverySourceResponse` — one discovery mechanism's own reachability (A3,
+ * docs/plans/active/ASSET-FLOWS-PLAN.md §2), reported alongside the candidate list so a client can
+ * tell "this source is unreachable" apart from "reachable, nothing found" instead of both collapsing
+ * into an identical empty list (`core/discovery/discovery-inbox-logic.ts#sourceUnreachableWarnings`).
+ * `id` is the same mechanism key `DiscoveryCandidate#method` carries (`mavlink`/`onvif`/`mdns`/
+ * `v4l2`/`mediamtx`) — `discoveryMethodLabel` gives both the same human name.
+ */
+export interface DiscoverySource {
+  readonly id: string;
+  readonly status: 'OK' | 'UNREACHABLE';
+}
+
+/**
+ * Mirrors `dto.DiscoveryInboxResponse`, the body of `GET /api/discovery/inbox` since A3 — replaces
+ * the bare `DiscoveryCandidate[]` this endpoint used to answer; `candidates` carries exactly that
+ * same array under its own key now (docs/plans/active/ASSET-FLOWS-PLAN.md §2's frozen contract).
+ */
+export interface DiscoveryInboxResponse {
+  readonly candidates: readonly DiscoveryCandidate[];
+  readonly sources: readonly DiscoverySource[];
+}
+
 // --- Device probe (docs/plans/done/UX-REWORK-PLAN.md §U-d — the onboarding wizard's Test step) -----------
 // `POST /api/devices/probe`: the pinned "test-before-save" contract (UX-DESIGN §5.1) — connects to
 // a candidate device/URI without registering anything, decodes exactly one frame, and reports back
@@ -1194,7 +1217,10 @@ export type UsageOrigin = 'STREAM' | 'OPERATOR';
  * means the usage is still open — this is how the telemetry store finds the usage to poll.
  * `phase`/`origin` are absent for a usage the domain never stamped one on (the DTO's own
  * `@JsonInclude(NON_NULL)`), not a fabricated default — treat a missing `origin` as "unknown", never
- * as `STREAM`.
+ * as `STREAM`. `pilotId` (docs/plans/active/ASSET-FLOWS-PLAN.md §2 D1p, BK4) is the operator this
+ * usage is attributed to, a canonical UUID string, absent if genuinely unknown — id only, no
+ * display-name resolution (matches `MaintenanceRecord#openedBy`'s own precedent); no reader in this
+ * cycle resolves it to a name yet.
  */
 export interface AssetUsage {
   readonly usageId: string;
@@ -1205,6 +1231,7 @@ export interface AssetUsage {
   readonly sampleCount: number;
   readonly phase?: UsagePhase;
   readonly origin?: UsageOrigin;
+  readonly pilotId?: string;
 }
 
 /**
@@ -1651,7 +1678,8 @@ export interface UsageTimeline {
  * `null`) while the flight is still open — the same `@JsonInclude(NON_NULL)` convention as
  * `AssetUsage.endedAt` above; `features/replay/replay-library-logic.ts#formatUsageDuration` is
  * the one place that turns an open flight into an honest "Flying now" rather than a negative or
- * blank duration.
+ * blank duration. `pilotId` mirrors `AssetUsage.pilotId`'s own doc comment (D1p, BK4) — same
+ * absent-if-unknown, id-only contract.
  */
 export interface UsageSummary {
   readonly usageId: string;
@@ -1661,6 +1689,7 @@ export interface UsageSummary {
   readonly endedAt?: string;
   readonly durationSeconds?: number;
   readonly sampleCount: number;
+  readonly pilotId?: string;
 }
 
 /**
@@ -2901,6 +2930,35 @@ export interface SystemStatus {
   readonly overall: OverallHealth;
   readonly checkedAt: string;
   readonly subsystems: readonly SubsystemStatus[];
+}
+
+// --- Ops thresholds (docs/plans/active/ASSET-FLOWS-PLAN.md §2 "Battery thresholds" D6, wave S3) ------------
+// `GET /api/ops/thresholds` — the ONE severity source the Fly cockpit's OSD and fleet attention-logic
+// both read (`core/ops/thresholds-store.ts`), replacing their old separately-hardcoded, disagreeing
+// thresholds (OSD's own 20/45, fleet's own 20/10). `@OpenByDesign` server-side — display config, not
+// fleet or per-user data, so any signed-in caller may read it.
+
+/**
+ * Mirrors `dto.BatteryThresholdsResponse` — one severity-threshold group inside {@link
+ * OpsThresholdsResponse}. Both boundaries are **inclusive** ("at/below" — the backend's own DTO
+ * javadoc, echoed by `platform.EventType#BATTERY_LOW`'s "at or below"/"at or above" hysteresis
+ * wording): a reading exactly at `criticalPercent` is already critical, exactly at `warningPercent`
+ * is already warning, matching `core/fleet/attention-logic.ts#batteryAttentionSeverity` and
+ * `core/telemetry/telemetry-logic.ts#batterySeverity`, both rewired this wave to the same `<=`
+ * comparison so the two surfaces can never disagree at the boundary value itself again.
+ */
+export interface BatteryThresholds {
+  readonly warningPercent: number;
+  readonly criticalPercent: number;
+}
+
+/**
+ * Mirrors `dto.OpsThresholdsResponse`, the body of `GET /api/ops/thresholds` — deploy-time config
+ * (`vision.ops.battery.*`), not a per-request computation, read once per SPA session
+ * (`core/ops/thresholds-store.ts`).
+ */
+export interface OpsThresholdsResponse {
+  readonly battery: BatteryThresholds;
 }
 
 // --- Auth (docs/plans/done/U-AUTH-PLAN.md wave 3's frozen contract; wave 4 is this app's own UI) -----------

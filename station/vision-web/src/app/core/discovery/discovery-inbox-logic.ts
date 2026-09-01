@@ -1,5 +1,11 @@
 import { humanAge } from '../telemetry/telemetry-logic';
-import type { DiscoveryCandidate, DiscoveryCandidateStatus, RegisterDeviceRequest, RegisterDiscoveryCandidateRequest } from '../api/models';
+import type {
+  DiscoveryCandidate,
+  DiscoveryCandidateStatus,
+  DiscoverySource,
+  RegisterDeviceRequest,
+  RegisterDiscoveryCandidateRequest,
+} from '../api/models';
 
 /**
  * Pure derivations for the discovery inbox's "Found devices" cards
@@ -26,6 +32,20 @@ export function discoveryMethodLabel(method: string): string {
     return known;
   }
   return method.length === 0 ? method : method[0].toUpperCase() + method.slice(1);
+}
+
+/**
+ * "Mediamtx push unreachable — found devices may be incomplete." per source reporting
+ * `UNREACHABLE` (A3, docs/plans/active/ASSET-FLOWS-PLAN.md §2) — an operator staring at an empty or
+ * partial inbox has no way to tell "nothing found yet" from "this scanner can't even run right now"
+ * without this. Reuses {@link discoveryMethodLabel} so a source's name reads identically here and on
+ * its own candidates' cards. `OK` sources produce no message at all — the plan's own "empty+all-OK
+ * keeps the current empty state" rule; `FoundDevices` renders nothing when this returns `[]`.
+ */
+export function sourceUnreachableWarnings(sources: readonly DiscoverySource[]): readonly string[] {
+  return sources
+    .filter((source) => source.status === 'UNREACHABLE')
+    .map((source) => `${discoveryMethodLabel(source.id)} unreachable — found devices may be incomplete.`);
 }
 
 /**

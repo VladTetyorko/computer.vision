@@ -54,6 +54,21 @@
       }
     </div>
   } @else {
+    <!-- B4 (docs/plans/active/ASSET-FLOWS-PLAN.md §3 WB2) — a shortcut section above "Your vehicles",
+         never a replacement for it: the assigned cards still also appear in "Your vehicles" below,
+         unchanged. Absent entirely when there are no assignments (or the read failed) — the exact
+         same picker an operator saw before this wave. -->
+    @if (facade.myAssigned().length > 0) {
+      <section class="picker-group">
+        <h2 class="picker-group-label">My assigned ({{ facade.myAssigned().length }})</h2>
+        <div class="picker-grid">
+          @for (a of facade.myAssigned(); track a.assetId) {
+            <vision-drone-picker-card [asset]="a" />
+          }
+        </div>
+      </section>
+    }
+
     <!-- T1 (docs/plans/active/OPERATOR-UX-3-PLAN.md §2 T1) — two groups with quiet structural-label
          headers instead of one flat, unordered grid mixing real and simulated vehicles. -->
     <section class="picker-group">

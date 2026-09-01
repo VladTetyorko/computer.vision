@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { batterySeverity, humanAge, telemetryAgeSeverity } from '../../core/telemetry/telemetry-logic';
+import { ThresholdsStore } from '../../core/ops/thresholds-store';
 import { gpsFixLabel, gpsSeverity } from '../../core/telemetry/flight-state-logic';
 import { formatLatency, transportLabel } from '../../core/stream-info-logic';
 import { DEFAULT_WIND_LIMIT_MPS } from '../../core/weather/weather-logic';
@@ -106,6 +107,10 @@ import type { Transport } from '../../shared/player/player';
 })
 export class FlyOsd {
   protected readonly store = inject(TelemetryStore);
+  /** The one served severity source (S3, docs/plans/active/ASSET-FLOWS-PLAN.md §2 D6) —
+   *  {@link batterySeverityTier} below now reads this instead of `batterySeverity`'s own old fixed
+   *  45/20 pair, so the OSD's battery color and the fleet attention list's can never disagree again. */
+  private readonly thresholds = inject(ThresholdsStore);
 
   /** `shared/player/player.ts`'s own measured seconds-behind-live, piped up via its `latencyChanged` output. */
   readonly latencySeconds = input<number | null>(null);
@@ -123,7 +128,9 @@ export class FlyOsd {
     const percent = this.batteryPercent();
     return percent === undefined ? '—' : `${percent.toFixed(0)}%`;
   });
-  protected readonly batterySeverityTier = computed(() => batterySeverity(this.batteryPercent()));
+  protected readonly batterySeverityTier = computed(() =>
+    batterySeverity(this.batteryPercent(), this.thresholds.battery()),
+  );
 
   /** `humanAge`-formatted (`12s`/`3m 10s`/`4h 2m`/`4d 2h`), not a raw second count — H1's own
    * finding: `353099s` on this chip is a number nobody parses. */

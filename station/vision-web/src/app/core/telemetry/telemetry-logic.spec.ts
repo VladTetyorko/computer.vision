@@ -188,18 +188,25 @@ describe('batterySeverity', () => {
     expect(batterySeverity(undefined)).toBe('unknown');
   });
 
-  it('is ok above the low threshold', () => {
-    expect(batterySeverity(46)).toBe('ok');
+  it('is ok above the default warning threshold (25%)', () => {
+    expect(batterySeverity(26)).toBe('ok');
   });
 
-  it('is low at and below the low threshold, above critical', () => {
-    expect(batterySeverity(45)).toBe('low');
-    expect(batterySeverity(21)).toBe('low');
+  it('is low at and below the default warning threshold, above critical', () => {
+    expect(batterySeverity(25)).toBe('low');
+    expect(batterySeverity(11)).toBe('low');
   });
 
-  it('is critical at and below the critical threshold', () => {
-    expect(batterySeverity(20)).toBe('critical');
+  it('is critical at and below the default critical threshold (10%)', () => {
+    expect(batterySeverity(10)).toBe('critical');
     expect(batterySeverity(0)).toBe('critical');
+  });
+
+  it('respects an explicit served-thresholds override (S3, ASSET-FLOWS-PLAN.md §2 D6) instead of the default', () => {
+    const thresholds = { warningPercent: 45, criticalPercent: 20 };
+    expect(batterySeverity(46, thresholds)).toBe('ok');
+    expect(batterySeverity(45, thresholds)).toBe('low');
+    expect(batterySeverity(20, thresholds)).toBe('critical');
   });
 });
 

@@ -45,6 +45,7 @@ import type {
   Device,
   DeviceEdit,
   DiscoveryCandidate,
+  DiscoveryInboxResponse,
   EffectiveCvProfile,
   FleetMaintenanceRecord,
   FleetReadiness,
@@ -91,6 +92,7 @@ import type {
   RegisterDiscoveryCandidateResponse,
   RemediationRequest,
   RemediationResult,
+  OpsThresholdsResponse,
   RenameLayerRequest,
   ReturnHomeResponse,
   SampleStatus,
@@ -288,8 +290,10 @@ export class VisionApi {
   // manageOrg-gated server-side (`DiscoveryInboxController`); poll-only, no SSE topic yet — see
   // `DiscoveryCandidate`'s own doc comment in `models.ts`.
 
-  listDiscoveryInboxCandidates(): Promise<DiscoveryCandidate[]> {
-    return firstValueFrom(this.http.get<DiscoveryCandidate[]>('/api/discovery/inbox'));
+  /** Since A3 (docs/plans/active/ASSET-FLOWS-PLAN.md §2) this answers the `{candidates, sources}`
+   *  envelope, not a bare array — see `DiscoveryInboxResponse`'s own doc comment in `models.ts`. */
+  listDiscoveryInboxCandidates(): Promise<DiscoveryInboxResponse> {
+    return firstValueFrom(this.http.get<DiscoveryInboxResponse>('/api/discovery/inbox'));
   }
 
   registerDiscoveryCandidate(
@@ -1220,6 +1224,14 @@ export class VisionApi {
    */
   systemStatus(): Promise<SystemStatus> {
     return firstValueFrom(this.http.get<SystemStatus>('/api/system/status'));
+  }
+
+  // --- Ops thresholds (docs/plans/active/ASSET-FLOWS-PLAN.md §2 D6, wave S3) -------------------------------
+
+  /** The one served severity source (`core/ops/thresholds-store.ts`) — `@OpenByDesign`, readable by
+   *  any signed-in caller, never 403s. */
+  opsThresholds(): Promise<OpsThresholdsResponse> {
+    return firstValueFrom(this.http.get<OpsThresholdsResponse>('/api/ops/thresholds'));
   }
 
   // --- Auth (docs/plans/done/U-AUTH-PLAN.md wave 3's frozen contract) --------------------------------------

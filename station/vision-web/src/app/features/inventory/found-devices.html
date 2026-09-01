@@ -1,44 +1,57 @@
-@if (store.candidates().length > 0) {
+@if (store.candidates().length > 0 || unreachableWarnings().length > 0) {
   <section class="found-devices">
-    <div class="row spread found-devices-head">
-      <h2 class="found-devices-title">
-        Found devices
-        @if (newCount() > 0) {
-          <span class="chip accent">{{ newCount() }} new</span>
-        }
-      </h2>
-
-      <div class="row found-devices-toggles">
-        @if (registeredCount() > 0) {
-          <label class="row toggle">
-            <input type="checkbox" name="showResolved" [checked]="showRegistered()" (change)="toggleShowRegistered()" />
-            <span>Show resolved ({{ registeredCount() }})</span>
-          </label>
-        }
-        @if (dismissedCount() > 0) {
-          <label class="row toggle">
-            <input type="checkbox" name="showDismissed" [checked]="showDismissed()" (change)="toggleShowDismissed()" />
-            <span>Show dismissed ({{ dismissedCount() }})</span>
-          </label>
+    <!-- A3 (docs/plans/active/ASSET-FLOWS-PLAN.md §2) — honest scanner health, shown even with zero
+         candidates (that's exactly when it matters most: an empty inbox reads very differently once
+         an operator knows a scanner can't even run right now). -->
+    @if (unreachableWarnings().length > 0) {
+      <div class="found-devices-warnings">
+        @for (message of unreachableWarnings(); track message) {
+          <vision-notice variant="warn" icon="alert">{{ message }}</vision-notice>
         }
       </div>
-    </div>
+    }
 
-    @if (visible().length > 0) {
-      <div class="found-devices-grid">
-        @for (candidate of visible(); track candidate.id) {
-          <vision-found-device-card
-            [candidate]="candidate"
-            [now]="now()"
-            [busy]="store.busyId() === candidate.id"
-            (add)="openAdd(candidate)"
-            (attachTo)="openAttach(candidate)"
-            (dismiss)="onDismiss(candidate)"
-          />
-        }
+    @if (store.candidates().length > 0) {
+      <div class="row spread found-devices-head">
+        <h2 class="found-devices-title">
+          Found devices
+          @if (newCount() > 0) {
+            <span class="chip accent">{{ newCount() }} new</span>
+          }
+        </h2>
+
+        <div class="row found-devices-toggles">
+          @if (registeredCount() > 0) {
+            <label class="row toggle">
+              <input type="checkbox" name="showResolved" [checked]="showRegistered()" (change)="toggleShowRegistered()" />
+              <span>Show resolved ({{ registeredCount() }})</span>
+            </label>
+          }
+          @if (dismissedCount() > 0) {
+            <label class="row toggle">
+              <input type="checkbox" name="showDismissed" [checked]="showDismissed()" (change)="toggleShowDismissed()" />
+              <span>Show dismissed ({{ dismissedCount() }})</span>
+            </label>
+          }
+        </div>
       </div>
-    } @else {
-      <p class="muted">Nothing new — every found device is resolved or dismissed.</p>
+
+      @if (visible().length > 0) {
+        <div class="found-devices-grid">
+          @for (candidate of visible(); track candidate.id) {
+            <vision-found-device-card
+              [candidate]="candidate"
+              [now]="now()"
+              [busy]="store.busyId() === candidate.id"
+              (add)="openAdd(candidate)"
+              (attachTo)="openAttach(candidate)"
+              (dismiss)="onDismiss(candidate)"
+            />
+          }
+        </div>
+      } @else {
+        <p class="muted">Nothing new — every found device is resolved or dismissed.</p>
+      }
     }
   </section>
 }

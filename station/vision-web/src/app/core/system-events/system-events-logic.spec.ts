@@ -37,6 +37,16 @@ describe('toSystemEventRow', () => {
     expect(toSystemEventRow(liveEvent({ type: 'DEVICE_OFFLINE', message: 'Device offline' }))?.severity).toBe('warn');
   });
 
+  it('maps LINK_LOST/BATTERY_LOW to danger with their own titles (S4, ASSET-FLOWS-PLAN.md §2)', () => {
+    const linkLost = toSystemEventRow(liveEvent({ type: 'LINK_LOST', message: 'Telemetry link lost' }));
+    expect(linkLost?.severity).toBe('danger');
+    expect(linkLost?.title).toBe('Link lost');
+
+    const batteryLow = toSystemEventRow(liveEvent({ type: 'BATTERY_LOW', message: 'Battery at 9%' }));
+    expect(batteryLow?.severity).toBe('danger');
+    expect(batteryLow?.title).toBe('Battery low');
+  });
+
   it('maps DEVICE_ONLINE/STREAM_STARTED/STREAM_STOPPED/TRAINING to neutral', () => {
     for (const type of ['DEVICE_ONLINE', 'STREAM_STARTED', 'STREAM_STOPPED', 'TRAINING']) {
       expect(toSystemEventRow(liveEvent({ type }))?.severity).toBe('neutral');

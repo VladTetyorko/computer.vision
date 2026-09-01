@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest';
 import type { AssetAttention } from '../api/models';
 import { attentionAgeLabel, attentionReasons, batteryAttentionSeverity } from './attention-logic';
 
+/** S3's served-thresholds override (docs/plans/active/ASSET-FLOWS-PLAN.md §2 D6) — a value deliberately
+ *  different from `DEFAULT_BATTERY_THRESHOLDS` (25/10) so a test using it can tell "the default was
+ *  applied" apart from "the override was actually threaded through". */
+const CUSTOM_THRESHOLDS = { warningPercent: 40, criticalPercent: 15 };
+
 /**
  * Moved from `features/command/command-logic.spec.ts` (docs/plans/done/UI-REDESIGN-PLAN.md Wave 4) alongside
  * the rules themselves — see `attention-logic.ts`'s own doc comment. `features/command/command-logic.spec.ts`
@@ -26,19 +31,25 @@ describe('batteryAttentionSeverity', () => {
     expect(batteryAttentionSeverity(undefined)).toBe('unknown');
   });
 
-  it('is ok at and above 20%', () => {
-    expect(batteryAttentionSeverity(20)).toBe('ok');
+  it('is ok strictly above the default warning threshold (25%)', () => {
+    expect(batteryAttentionSeverity(25.1)).toBe('ok');
     expect(batteryAttentionSeverity(45)).toBe('ok');
   });
 
-  it('is warning just under 20%, down to and including 10%', () => {
-    expect(batteryAttentionSeverity(19.9)).toBe('warning');
-    expect(batteryAttentionSeverity(10)).toBe('warning');
+  it('is warning at and below 25%, down to (but excluding) the critical threshold at 10%', () => {
+    expect(batteryAttentionSeverity(25)).toBe('warning');
+    expect(batteryAttentionSeverity(10.1)).toBe('warning');
   });
 
-  it('is critical strictly under 10%', () => {
+  it('is critical at and below the default critical threshold (10%)', () => {
     expect(batteryAttentionSeverity(9.9)).toBe('critical');
     expect(batteryAttentionSeverity(0)).toBe('critical');
+  });
+
+  it('respects an explicit served-thresholds override instead of the default', () => {
+    expect(batteryAttentionSeverity(45, CUSTOM_THRESHOLDS)).toBe('ok');
+    expect(batteryAttentionSeverity(20, CUSTOM_THRESHOLDS)).toBe('warning');
+    expect(batteryAttentionSeverity(15, CUSTOM_THRESHOLDS)).toBe('critical');
   });
 });
 
@@ -47,20 +58,27 @@ describe('attentionReasons', () => {
     expect(attentionReasons(asset({ batteryPercent: 80 }))).toEqual([]);
   });
 
-  it('flags battery-low just under 20%, not at exactly 20%', () => {
-    expect(attentionReasons(asset({ batteryPercent: 20 }))).toEqual([]);
-    const reasons = attentionReasons(asset({ batteryPercent: 19.9 }));
+  it('flags battery-low at and below 25%, not strictly above it', () => {
+    expect(attentionReasons(asset({ batteryPercent: 25.1 }))).toEqual([]);
+    const reasons = attentionReasons(asset({ batteryPercent: 25 }));
     expect(reasons).toHaveLength(1);
     expect(reasons[0].kind).toBe('battery-low');
     expect(reasons[0].severity).toBe('warning');
   });
 
-  it('flags battery-critical strictly under 10%, not at exactly 10%', () => {
+  it('flags battery-critical at and below 10%, battery-low just above it', () => {
     const atTen = attentionReasons(asset({ batteryPercent: 10 }));
-    expect(atTen[0].kind).toBe('battery-low');
-    const underTen = attentionReasons(asset({ batteryPercent: 9.9 }));
-    expect(underTen[0].kind).toBe('battery-critical');
-    expect(underTen[0].severity).toBe('critical');
+    expect(atTen[0].kind).toBe('battery-critical');
+    const justAbove = attentionReasons(asset({ batteryPercent: 10.1 }));
+    expect(justAbove[0].kind).toBe('battery-low');
+  });
+
+  it('threads an explicit thresholds override through to the battery-critical/battery-low split', () => {
+    const thresholds = { warningPercent: 40, criticalPercent: 15 };
+    const reasons = attentionReasons(asset({ batteryPercent: 20 }), undefined, undefined, undefined, thresholds);
+    expect(reasons[0].kind).toBe('battery-low');
+    const critical = attentionReasons(asset({ batteryPercent: 15 }), undefined, undefined, undefined, thresholds);
+    expect(critical[0].kind).toBe('battery-critical');
   });
 
   it('rounds the battery percent in the reason text', () => {

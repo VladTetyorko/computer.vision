@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import type { AssetSummary, AssetUsage, GeoPosition, Membership, Role } from '../../core/api/models';
 import {
   ALL_DRONES_OPTION_VALUE,
+  REPLAY_PICKER_MAX_USAGES,
+  earlierReplayableUsages,
   isAllDronesOption,
   isSwitcherOptionSelected,
   isWatchMode,
@@ -95,6 +97,45 @@ describe('latestFinishedUsage', () => {
 
   it('returns undefined for no usage history at all', () => {
     expect(latestFinishedUsage([])).toBeUndefined();
+  });
+});
+
+describe('earlierReplayableUsages', () => {
+  it('drops the newest finished usage, keeping the rest in order', () => {
+    const usages = [
+      usage({ usageId: 'newest', endedAt: '2026-07-22T03:00:00Z' }),
+      usage({ usageId: 'middle', endedAt: '2026-07-22T02:00:00Z' }),
+      usage({ usageId: 'oldest', endedAt: '2026-07-22T01:00:00Z' }),
+    ];
+    expect(earlierReplayableUsages(usages).map((u) => u.usageId)).toEqual(['middle', 'oldest']);
+  });
+
+  it('filters out still-open usages entirely, even ahead of the newest finished one', () => {
+    const usages = [
+      usage({ usageId: 'open' }),
+      usage({ usageId: 'newest', endedAt: '2026-07-22T03:00:00Z' }),
+      usage({ usageId: 'older', endedAt: '2026-07-22T01:00:00Z' }),
+    ];
+    expect(earlierReplayableUsages(usages).map((u) => u.usageId)).toEqual(['older']);
+  });
+
+  it('caps at the given max', () => {
+    const usages = Array.from({ length: 10 }, (_, i) =>
+      usage({ usageId: `u-${i}`, endedAt: `2026-07-22T0${i}:00:00Z` }),
+    );
+    expect(earlierReplayableUsages(usages, 2)).toHaveLength(2);
+  });
+
+  it('defaults to REPLAY_PICKER_MAX_USAGES', () => {
+    const usages = Array.from({ length: REPLAY_PICKER_MAX_USAGES + 5 }, (_, i) =>
+      usage({ usageId: `u-${i}`, endedAt: `2026-07-22T0${i % 10}:00:00Z` }),
+    );
+    expect(earlierReplayableUsages(usages)).toHaveLength(REPLAY_PICKER_MAX_USAGES);
+  });
+
+  it('returns an empty list with zero or one finished usage', () => {
+    expect(earlierReplayableUsages([])).toEqual([]);
+    expect(earlierReplayableUsages([usage({ usageId: 'only', endedAt: '2026-07-22T01:00:00Z' })])).toEqual([]);
   });
 });
 

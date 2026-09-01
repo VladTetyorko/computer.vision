@@ -6,8 +6,10 @@ import { LiveStore } from '../../core/live/live-store';
 import { isLiveAvailable } from '../../core/live/live-fallback-logic';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { pickerEmptyStateCopy } from './fly-logic';
-import { groupAndSort, type PickerGroups } from './drone-picker-logic';
+import { groupAndSort, myAssignedAssets, type PickerGroups } from './drone-picker-logic';
 import type { AssetSummary } from '../../core/api/models';
+
+const LOG_PREFIX = '[drone-picker]';
 
 /** Asset list re-read at this cadence — keeps a still-open picker's cards fresh (a card flipping
  * Offline→Streaming while the operator is looking at it). Unchanged from the pre-split page's own
@@ -56,6 +58,14 @@ const HIDE_SIMULATED_KEY = 'vision.fly.hideSimulated';
  * **T1 (docs/plans/active/OPERATOR-UX-3-PLAN.md finding T1, §2 T1)** added {@link groups} (replacing
  * the old flat `orderedPickerAssets`) and the persisted {@link hideSimulated} toggle — see each
  * field's own doc comment.
+ *
+ * **B4 (docs/plans/active/ASSET-FLOWS-PLAN.md §3 WB2)** added {@link myAssigned} — `GET
+ * /api/me/assignments` read once from the constructor (an assignment changes rarely enough, an
+ * admin action rather than flight telemetry, that a session-lifetime-stale read is harmless, the
+ * same "fetch once" posture `core/ops/thresholds-store.ts` uses for equally rarely-changing config).
+ * A failed read is logged and otherwise ignored — {@link myAssignedAssets} already degrades an empty
+ * assignment set to "don't show the section", so this facade needs no separate error signal of its
+ * own; the picker looks exactly as it did before B4.
  */
 @Injectable()
 export class DronePickerFacade {
@@ -100,11 +110,21 @@ export class DronePickerFacade {
     pickerEmptyStateCopy(this.auth.user()?.topRole, this.auth.user()?.memberships ?? []),
   );
 
+  /** `GET /api/me/assignments`'s own row set, as ids — see class doc's B4 note. Empty until the
+   *  fetch resolves, and stays empty forever on a failed fetch — {@link myAssigned} then degrades to
+   *  `[]`, the flat pre-B4 picker. */
+  private readonly assignedAssetIdsSignal = signal<ReadonlySet<string>>(new Set());
+
+  /** "My assigned" section (B4) — real assets from {@link groups}'s own `yours` list that the
+   *  session's own `GET /api/me/assignments` names, in that list's existing freshness order. */
+  readonly myAssigned = computed(() => myAssignedAssets(this.groups().yours, this.assignedAssetIdsSignal()));
+
   /** `null` until the poll is actually paused/resumed for the first time — see `applyTransport`. */
   private stopPollFn: (() => void) | null = null;
 
   constructor() {
     void this.refresh();
+    void this.refreshAssignments();
     this.stopPollFn = this.schedulePoll();
 
     effect(() => {
@@ -171,6 +191,19 @@ export class DronePickerFacade {
       if (this.pickerAssets() === undefined) {
         this.pickerError.set(true);
       }
+    }
+  }
+
+  /** B4 (docs/plans/active/ASSET-FLOWS-PLAN.md §3 WB2) — fetched once, not polled; see class doc's
+   *  own "fetch once" note. A failed read is logged and left at the empty default — never surfaced
+   *  as a picker-blocking error, since {@link myAssigned} already degrades gracefully to "no
+   *  section" (the exact same picker an operator saw before this wave). */
+  private async refreshAssignments(): Promise<void> {
+    try {
+      const assignments = await this.api.myAssignments();
+      this.assignedAssetIdsSignal.set(new Set(assignments.map((assignment) => assignment.assetId)));
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} could not read /api/me/assignments — showing the flat list`, { error });
     }
   }
 }

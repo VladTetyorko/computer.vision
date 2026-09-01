@@ -1,5 +1,6 @@
-import type { AssetDetails, AssetUsage, Device, GeoPosition, TelemetrySample } from '../api/models';
+import type { AssetDetails, AssetUsage, BatteryThresholds, Device, GeoPosition, TelemetrySample } from '../api/models';
 import { hasFix } from '../geo/geo-logic';
+import { DEFAULT_BATTERY_THRESHOLDS } from '../ops/thresholds-logic';
 
 /**
  * Pure derivations behind `TelemetryStore` (docs/main/CYCLES-PLAN.md §2), split out so the
@@ -116,21 +117,42 @@ export function telemetryDevices(devices: readonly Device[]): readonly Device[] 
 // the same "second consumer needs it, move it to core/" precedent as `findVideoDevice`/
 // `groupTelemetryByDevice` above. `telemetry-osd.ts` now imports it instead of computing its own.
 
-/** Battery-bar color thresholds, roughly matching common flight-controller OSDs. */
+/**
+ * Battery-bar color thresholds for the preflight low-battery bar
+ * (`flight-state-logic.ts#batteryLowPercentFor`) — **not** `batterySeverity`'s own thresholds below
+ * since S3 (docs/plans/active/ASSET-FLOWS-PLAN.md §2 D6): those two features used to share this one
+ * constant pair, but `batterySeverity` now reads the served `GET /api/ops/thresholds` value instead,
+ * so this pair is kept, unrenamed and unchanged in value, purely for `flight-state-logic.ts`'s own
+ * runtime import — see that module's own doc comment above `BATTERY_LOW_PERCENT_BY_KIND`.
+ */
 export const BATTERY_LOW_PERCENT = 45;
 export const BATTERY_CRITICAL_PERCENT = 20;
 
 export type BatterySeverity = 'ok' | 'low' | 'critical' | 'unknown';
 
-/** `'unknown'` for a device that hasn't reported a battery reading yet — never a fabricated tier. */
-export function batterySeverity(percent: number | undefined): BatterySeverity {
+/**
+ * `'unknown'` for a device that hasn't reported a battery reading yet — never a fabricated tier.
+ *
+ * `thresholds` (S3, docs/plans/active/ASSET-FLOWS-PLAN.md §2 D6) defaults to
+ * `core/ops/thresholds-logic.ts#DEFAULT_BATTERY_THRESHOLDS` (25/10) — the served value the Fly
+ * cockpit OSD now threads through (`features/fly/fly-osd.ts` via `core/ops/thresholds-store.ts`),
+ * replacing this function's own old fixed 45/20 pair (still exported above as `BATTERY_LOW_PERCENT`/
+ * `BATTERY_CRITICAL_PERCENT`, but no longer read by this function — see that pair's own doc comment).
+ * Both boundaries stay inclusive (`<=`), unchanged from this function's pre-S3 behavior and matching
+ * `core/fleet/attention-logic.ts#batteryAttentionSeverity`'s own identical comparison — the "one
+ * severity source, both surfaces agree" rule this wave establishes.
+ */
+export function batterySeverity(
+  percent: number | undefined,
+  thresholds: BatteryThresholds = DEFAULT_BATTERY_THRESHOLDS,
+): BatterySeverity {
   if (percent === undefined) {
     return 'unknown';
   }
-  if (percent <= BATTERY_CRITICAL_PERCENT) {
+  if (percent <= thresholds.criticalPercent) {
     return 'critical';
   }
-  return percent <= BATTERY_LOW_PERCENT ? 'low' : 'ok';
+  return percent <= thresholds.warningPercent ? 'low' : 'ok';
 }
 
 /**

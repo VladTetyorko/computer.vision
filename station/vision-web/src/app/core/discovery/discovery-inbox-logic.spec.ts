@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { DiscoveryCandidate, DiscoveryCandidateStatus } from '../api/models';
+import type { DiscoveryCandidate, DiscoveryCandidateStatus, DiscoverySource } from '../api/models';
 import {
   buildDeviceSpecFromCandidate,
   buildRegisterCommand,
@@ -11,6 +11,7 @@ import {
   dismissedCandidateCount,
   newCandidateCount,
   registeredCandidateCount,
+  sourceUnreachableWarnings,
   visibleCandidates,
   type DiscoveryInboxVisibility,
 } from './discovery-inbox-logic';
@@ -48,6 +49,37 @@ describe('discoveryMethodLabel', () => {
   it('falls back to a capitalized raw string for an unknown method rather than throwing', () => {
     expect(discoveryMethodLabel('future-method')).toBe('Future-method');
     expect(discoveryMethodLabel('')).toBe('');
+  });
+});
+
+describe('sourceUnreachableWarnings', () => {
+  function source(partial: Partial<DiscoverySource> = {}): DiscoverySource {
+    return { id: 'mediamtx', status: 'OK', ...partial };
+  }
+
+  it('is empty when every source is OK — the plan\'s own "keep the current empty state" rule', () => {
+    expect(sourceUnreachableWarnings([source({ id: 'mediamtx' }), source({ id: 'mdns' })])).toEqual([]);
+  });
+
+  it('is empty for no sources at all', () => {
+    expect(sourceUnreachableWarnings([])).toEqual([]);
+  });
+
+  it('names an unreachable source using its own discoveryMethodLabel', () => {
+    const warnings = sourceUnreachableWarnings([source({ id: 'mediamtx', status: 'UNREACHABLE' })]);
+    expect(warnings).toEqual(['Mediamtx push unreachable — found devices may be incomplete.']);
+  });
+
+  it('produces one message per unreachable source, ignoring OK ones', () => {
+    const warnings = sourceUnreachableWarnings([
+      source({ id: 'mediamtx', status: 'UNREACHABLE' }),
+      source({ id: 'mdns', status: 'OK' }),
+      source({ id: 'onvif', status: 'UNREACHABLE' }),
+    ]);
+    expect(warnings).toEqual([
+      'Mediamtx push unreachable — found devices may be incomplete.',
+      'ONVIF unreachable — found devices may be incomplete.',
+    ]);
   });
 });
 

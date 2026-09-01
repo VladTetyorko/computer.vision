@@ -15,8 +15,9 @@ import type { ActiveStream, Device, LiveEvent } from '../api/models';
  * own doc comment in `core/api/models.ts`), arriving on a different SSE topic with no relation to
  * `DetectionEvent`'s `OPEN`/`CLOSED`/`peakConfidence` shape. Mixing the two into one module would
  * blur exactly the distinction `SYSTEM-STATUS-PLAN.md §1.1` is about: detections already have a
- * surface (`EventsStore` → bell/rail/alerts); this module is for the seven other event kinds, minus
- * `DETECTION` itself, which is deliberately excluded here too (see {@link toSystemEventRow}).
+ * surface (`EventsStore` → bell/rail/alerts); this module is for the other event kinds (nine as of
+ * S4's `LINK_LOST`/`BATTERY_LOW`, docs/plans/active/ASSET-FLOWS-PLAN.md §2), minus `DETECTION`
+ * itself, which is deliberately excluded here too (see {@link toSystemEventRow}).
  */
 
 /** The three severities a system event row can carry — same three-tier vocabulary as `<vision-notice>`. */
@@ -29,10 +30,19 @@ export type SystemEventSeverity = 'danger' | 'warn' | 'neutral';
  * knowing, not yet a crisis); `DEVICE_ONLINE`/`STREAM_STARTED`/`STREAM_STOPPED`/`TRAINING` are
  * `neutral` (routine lifecycle noise, still worth a durable record, never colored as a problem).
  * `DETECTION` is intentionally absent — see {@link toSystemEventRow}.
+ *
+ * **`LINK_LOST`/`BATTERY_LOW` (S4, docs/plans/active/ASSET-FLOWS-PLAN.md §2)** are both `danger` —
+ * `LINK_LOST` is a genuinely failed telemetry source (`LinkLossNotifier`, never an ordinary heartbeat
+ * miss or an intentional stream stop — see `platform.EventType#LINK_LOST`'s own javadoc), and
+ * `BATTERY_LOW` is the rising edge of a battery crossing the served critical threshold
+ * (`BatteryMonitor`) — both are "this asset needs a person right now" facts, the same tier as
+ * `GEOFENCE_BREACH`.
  */
 const SEVERITY_BY_TYPE: Readonly<Record<string, SystemEventSeverity>> = {
   PIPELINE_ERROR: 'danger',
   GEOFENCE_BREACH: 'danger',
+  LINK_LOST: 'danger',
+  BATTERY_LOW: 'danger',
   DEVICE_OFFLINE: 'warn',
   DEVICE_ONLINE: 'neutral',
   STREAM_STARTED: 'neutral',
@@ -40,12 +50,14 @@ const SEVERITY_BY_TYPE: Readonly<Record<string, SystemEventSeverity>> = {
   TRAINING: 'neutral',
 };
 
-/** Sentence-case display titles for the same seven types — `event.message` (the backend's own
+/** Sentence-case display titles for the same nine types — `event.message` (the backend's own
  *  human sentence, e.g. `"RTSP source unreachable"`) is the row's `detail`, this is only the row's
  *  short, scannable heading. */
 const TITLE_BY_TYPE: Readonly<Record<string, string>> = {
   PIPELINE_ERROR: 'Pipeline error',
   GEOFENCE_BREACH: 'Geofence breach',
+  LINK_LOST: 'Link lost',
+  BATTERY_LOW: 'Battery low',
   DEVICE_OFFLINE: 'Device offline',
   DEVICE_ONLINE: 'Device online',
   STREAM_STARTED: 'Stream started',

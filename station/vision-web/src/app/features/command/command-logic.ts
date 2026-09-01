@@ -27,13 +27,18 @@ import { groupAndSort, offlineLabel, type PickerGroups } from '../../core/fleet/
  * `core/fleet/device-logic.ts`'s doc comment). Every name below is re-exported so this file's own
  * pre-existing import sites (`asset-panel.ts`, `command-facade.ts`, `command-logic.spec.ts`) keep
  * working verbatim — see that module's own doc comment for the full rule set.
+ *
+ * **`BATTERY_ATTENTION_PERCENT`/`BATTERY_CRITICAL_PERCENT` are gone (S3, docs/plans/active/
+ * ASSET-FLOWS-PLAN.md §2 D6)** — the hardcoded 20/10 pair they held is replaced by the served `GET
+ * /api/ops/thresholds` value (`core/ops/thresholds-store.ts`), threaded as `batteryAttentionSeverity`/
+ * `attentionReasons`'s own new optional `thresholds` parameter (defaulting to
+ * `core/ops/thresholds-logic.ts#DEFAULT_BATTERY_THRESHOLDS`, 25/10) instead of two fixed constants.
+ * Grep-verified zero importers of either name outside this re-export before deleting.
  */
 export {
   attentionReasons,
   attentionAgeLabel,
   batteryAttentionSeverity,
-  BATTERY_ATTENTION_PERCENT,
-  BATTERY_CRITICAL_PERCENT,
   TELEMETRY_STALE_MS,
   type AttentionReason,
   type AttentionReasonKind,

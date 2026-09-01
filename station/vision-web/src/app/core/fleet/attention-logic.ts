@@ -1,7 +1,8 @@
-import type { AssetAttention } from '../api/models';
+import type { AssetAttention, BatteryThresholds } from '../api/models';
 import { TELEMETRY_AGE_RED_SECONDS, humanAge } from '../telemetry/telemetry-logic';
 import { gpsSeverity } from '../telemetry/flight-state-logic';
 import { geofenceBreachReasonText, type GeofenceBreach } from '../geofence/geofence-logic';
+import { DEFAULT_BATTERY_THRESHOLDS } from '../ops/thresholds-logic';
 
 /**
  * Pure, Angular-free "does this asset need attention right now" rules — originally
@@ -19,12 +20,6 @@ import { geofenceBreachReasonText, type GeofenceBreach } from '../geofence/geofe
  */
 
 // --- Attention rules --------------------------------------------------------------------------
-
-/** Battery below this percent is worth flagging at all. */
-export const BATTERY_ATTENTION_PERCENT = 20;
-
-/** Battery below this percent escalates the same reason to the most severe tier. */
-export const BATTERY_CRITICAL_PERCENT = 10;
 
 /**
  * Telemetry older than this, on a *currently streaming* asset, is itself an attention reason.
@@ -96,19 +91,30 @@ export type BatteryAttentionSeverity = 'critical' | 'warning' | 'ok' | 'unknown'
  * The single battery-severity rule every consumer uses — a Command rail row's chip color, its
  * detail panel's own battery fact, and the Reports attention table all derive from this one
  * function, so "when is a battery reading worth calling out" is answered in exactly one place.
+ *
+ * `thresholds` defaults to {@link DEFAULT_BATTERY_THRESHOLDS} — every existing call site (and every
+ * pre-S3 test) that doesn't thread the served `GET /api/ops/thresholds` value still gets a real,
+ * usable classification. Boundaries are inclusive (`<=`), matching the served contract's own "at/
+ * below" wording (S3, docs/plans/active/ASSET-FLOWS-PLAN.md §2 D6) — the same comparison
+ * `core/telemetry/telemetry-logic.ts#batterySeverity` now uses, so the cockpit OSD and this fleet
+ * rule can no longer disagree at the boundary value itself, which they did before this wave (the OSD
+ * used `<=` against its own 20/45, this file used strict `<` against its own 20/10).
  */
-export function batteryAttentionSeverity(percent: number | undefined): BatteryAttentionSeverity {
+export function batteryAttentionSeverity(
+  percent: number | undefined,
+  thresholds: BatteryThresholds = DEFAULT_BATTERY_THRESHOLDS,
+): BatteryAttentionSeverity {
   if (percent === undefined) {
     return 'unknown';
   }
-  if (percent < BATTERY_CRITICAL_PERCENT) {
+  if (percent <= thresholds.criticalPercent) {
     return 'critical';
   }
-  return percent < BATTERY_ATTENTION_PERCENT ? 'warning' : 'ok';
+  return percent <= thresholds.warningPercent ? 'warning' : 'ok';
 }
 
-function batteryReason(percent: number | undefined): AttentionReason | undefined {
-  const severity = batteryAttentionSeverity(percent);
+function batteryReason(percent: number | undefined, thresholds?: BatteryThresholds): AttentionReason | undefined {
+  const severity = batteryAttentionSeverity(percent, thresholds);
   if (severity === 'critical') {
     return { kind: 'battery-critical', severity: 'critical', text: `Battery critical at ${Math.round(percent!)}%.` };
   }
@@ -247,17 +253,23 @@ function pipelineErrorReason(detail: string | undefined): AttentionReason | unde
  * `features/reports/reports-logic.ts`'s read-only dashboard, which has no live map marker or
  * geofence/pipeline feed to draw from) simply omits all three — those reason kinds never fire for
  * it, honestly "not evaluated" rather than "not present".
+ *
+ * `thresholds` (S3, docs/plans/active/ASSET-FLOWS-PLAN.md §2 D6) is the served `GET
+ * /api/ops/thresholds` value, threaded straight through to `batteryReason` — omitted, every caller
+ * still gets {@link DEFAULT_BATTERY_THRESHOLDS}'s own honest fallback (see `batteryAttentionSeverity`'s
+ * own doc comment).
  */
 export function attentionReasons(
   asset: AssetAttention,
   gpsFixType?: number,
   geofenceBreaches?: readonly GeofenceBreach[],
   pipelineErrorDetail?: string,
+  thresholds?: BatteryThresholds,
 ): readonly AttentionReason[] {
   const reasons = [
     geofenceBreachReason(asset, geofenceBreaches),
     failsafeReason(asset),
-    batteryReason(asset.batteryPercent),
+    batteryReason(asset.batteryPercent, thresholds),
     telemetryReason(asset),
     gpsDegradedReason(asset, gpsFixType),
     pipelineErrorReason(pipelineErrorDetail),

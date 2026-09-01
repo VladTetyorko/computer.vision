@@ -69,6 +69,28 @@ export function latestFinishedUsage(usages: readonly AssetUsage[]): AssetUsage |
   return usages.find((usage) => usage.endedAt !== undefined);
 }
 
+/** How many older finished usages the cockpit's "Replay an earlier flight" menu shows at once (D3r,
+ *  docs/plans/active/ASSET-FLOWS-PLAN.md §3 WB2) — small and glanceable, like `TICKER_MAX_EVENTS`
+ *  above; anything further back belongs in the full replay library (`features/replay/**`), not this
+ *  cockpit shortcut. */
+export const REPLAY_PICKER_MAX_USAGES = 5;
+
+/**
+ * Finished usages available to replay from the cockpit, **older** than the newest one (D3r) —
+ * {@link latestFinishedUsage} above already backs the primary "Replay last flight" link; this is the
+ * short menu behind it, for an operator who wants to reach further back than the newest flight.
+ * `recentUsages` is already newest-first and pre-capped to the 20 most recent server-side
+ * (`AssetDetails#recentUsages`'s own javadoc) — no extra `GET /api/usages` read needed, this is the
+ * exact same data `CockpitFacade#latestFinishedUsageEntry` already has in hand, just further down
+ * the list and capped smaller.
+ */
+export function earlierReplayableUsages(
+  usages: readonly AssetUsage[],
+  max: number = REPLAY_PICKER_MAX_USAGES,
+): readonly AssetUsage[] {
+  return usages.filter((usage) => usage.endedAt !== undefined).slice(1, max + 1);
+}
+
 /**
  * `?watch=1` exactly (docs/plans/done/MVP3-PLAN.md §C-b — "Watch mode `?watch=1`: hides Start/Stop"). Only
  * this literal value counts, not any other truthy-looking string — a deliberate, narrow contract

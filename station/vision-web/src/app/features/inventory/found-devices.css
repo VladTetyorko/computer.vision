@@ -39,3 +39,11 @@
   grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
   gap: var(--space-16);
 }
+
+/* A3 — one banner per unreachable source; stacks above the head/grid when both are present. */
+.found-devices-warnings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin-bottom: var(--space-16);
+}

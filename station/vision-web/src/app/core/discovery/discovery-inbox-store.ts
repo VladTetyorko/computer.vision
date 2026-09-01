@@ -5,6 +5,7 @@ import { PollScheduler } from '../poll-scheduler';
 import { ToastService } from '../toast.service';
 import type {
   DiscoveryCandidate,
+  DiscoverySource,
   RegisterDeviceRequest,
   RegisterDiscoveryCandidateRequest,
   RegisterDiscoveryCandidateResponse,
@@ -41,6 +42,13 @@ const POLL_INTERVAL_MS = 30_000;
  * **Errors are exactly one toast, via the same `run()` idiom `FleetStore` uses** — a background
  * poll failure is the one deliberate exception (silently kept-stale, like every other poller in
  * this app degrading to "last known good" rather than toast-spamming every 30s).
+ *
+ * **`sources` (A3, docs/plans/active/ASSET-FLOWS-PLAN.md §2)** — since this wave, `GET
+ * /api/discovery/inbox` answers `{candidates, sources}` rather than a bare array; `sources` is each
+ * discovery mechanism's own reachability, feeding `core/discovery/discovery-inbox-logic.ts#sourceUnreachableWarnings`
+ * so `FoundDevices` can say "mediamtx unreachable" instead of leaving an operator staring at an
+ * ambiguous empty list. Degrades the same way `candidates` does — a failed poll leaves both
+ * signals exactly as they were.
  */
 @Injectable({ providedIn: 'root' })
 export class DiscoveryInboxStore {
@@ -50,6 +58,9 @@ export class DiscoveryInboxStore {
 
   private readonly candidatesSignal = signal<readonly DiscoveryCandidate[]>([]);
   readonly candidates = this.candidatesSignal.asReadonly();
+
+  private readonly sourcesSignal = signal<readonly DiscoverySource[]>([]);
+  readonly sources = this.sourcesSignal.asReadonly();
 
   readonly loading = signal(false);
   /** The one candidate id currently mid-mutation (register/dismiss/attach) — disables that card's
@@ -87,7 +98,9 @@ export class DiscoveryInboxStore {
   async refresh(): Promise<void> {
     this.loading.set(true);
     try {
-      this.candidatesSignal.set(await this.api.listDiscoveryInboxCandidates());
+      const response = await this.api.listDiscoveryInboxCandidates();
+      this.candidatesSignal.set(response.candidates);
+      this.sourcesSignal.set(response.sources);
     } catch (error) {
       console.warn('[discovery-inbox] refresh failed', { error });
     } finally {

@@ -1,0 +1,12 @@
+import { describe, expect, it } from 'vitest';
+import { DEFAULT_BATTERY_THRESHOLDS } from './thresholds-logic';
+
+describe('DEFAULT_BATTERY_THRESHOLDS', () => {
+  it('matches the frozen backend default (ASSET-FLOWS-PLAN.md §2 D6: warning 25, critical 10)', () => {
+    expect(DEFAULT_BATTERY_THRESHOLDS).toEqual({ warningPercent: 25, criticalPercent: 10 });
+  });
+
+  it('critical is strictly below warning', () => {
+    expect(DEFAULT_BATTERY_THRESHOLDS.criticalPercent).toBeLessThan(DEFAULT_BATTERY_THRESHOLDS.warningPercent);
+  });
+});

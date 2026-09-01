@@ -25,6 +25,10 @@ import { DronePickerCard } from './drone-picker-card';
  * vehicles" / "Simulated" (`facade.groups()`, a persisted `hideSimulated` toggle collapsing the
  * second) and moved every per-card derivation onto `DronePickerCard` — this page no longer computes
  * per-card facts itself, only which cards go in which group.
+ *
+ * **B4 (docs/plans/active/ASSET-FLOWS-PLAN.md §3 WB2)** added an optional "My assigned" section
+ * above "Your vehicles" (`facade.myAssigned()`) — a shortcut, not a third exclusive group: assigned
+ * assets still also appear in "Your vehicles" below, unchanged.
  */
 @Component({
   selector: 'vision-drone-picker',

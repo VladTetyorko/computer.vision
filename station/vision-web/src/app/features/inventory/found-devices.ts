@@ -10,6 +10,7 @@ import {
   dismissedCandidateCount,
   newCandidateCount,
   registeredCandidateCount,
+  sourceUnreachableWarnings,
   visibleCandidates,
   type DiscoveryInboxVisibility,
   type RegisterDraft,
@@ -17,6 +18,7 @@ import {
 import { FoundDeviceCard } from './found-device-card';
 import { AddCandidateDialog } from './add-candidate-dialog';
 import { AttachCandidateDialog } from './attach-candidate-dialog';
+import { Notice } from '../../shared/ui/notice';
 import type { AssetSummary, Category, DiscoveryCandidate } from '../../core/api/models';
 
 /** The clock tick behind every card's "last heard <age> ago" — 1s is plenty for an age label whose
@@ -42,10 +44,16 @@ const CLOCK_TICK_MS = 1_000;
  *
  * **Categories/assets are fetched lazily**, once, the first time either dialog is opened — not
  * eagerly alongside the candidates poll, since most page visits open neither dialog at all.
+ *
+ * **A3 (docs/plans/active/ASSET-FLOWS-PLAN.md §2)** — {@link unreachableWarnings} renders "mediamtx
+ * unreachable — found devices may be incomplete" (and per-source equivalents) whenever the inbox
+ * envelope's own `sources` reports one down, even with zero candidates, so an operator can tell "the
+ * scanner is broken" apart from "genuinely found nothing" — see `found-devices.html`'s own outer
+ * `@if` for exactly how that changes the section's visibility.
  */
 @Component({
   selector: 'vision-found-devices',
-  imports: [FoundDeviceCard, AddCandidateDialog, AttachCandidateDialog],
+  imports: [FoundDeviceCard, AddCandidateDialog, AttachCandidateDialog, Notice],
   templateUrl: './found-devices.html',
   styleUrl: './found-devices.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -66,6 +74,9 @@ export class FoundDevices {
   protected readonly newCount = computed(() => newCandidateCount(this.store.candidates()));
   protected readonly registeredCount = computed(() => registeredCandidateCount(this.store.candidates()));
   protected readonly dismissedCount = computed(() => dismissedCandidateCount(this.store.candidates()));
+
+  /** A3 — see class doc's own note. */
+  protected readonly unreachableWarnings = computed(() => sourceUnreachableWarnings(this.store.sources()));
 
   // --- Dialogs — at most one open at a time, each a plain nullable target signal (mirrors
   // `UiStore`'s "mutually exclusive overlay" shape in spirit; this component isn't a routed page
