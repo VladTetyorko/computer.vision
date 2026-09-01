@@ -148,6 +148,57 @@ int main() {
   }
   motors.stop();
 
+  // F2: VehicleController::loop() clamps dtMs to 2 * controlPeriodMs before
+  // ever calling apply() -- a stall (the ~13s boot delay before the first
+  // tick, a WiFi hiccup, a long log flush) must not hand ramp() a dtMs big
+  // enough to step straight to full demand. This suite has no VehicleController
+  // to drive (motor_test links only Tb6612MotorDriver + Config), so it proves
+  // the bound the clamp relies on directly against the driver: the biggest
+  // dtMs the clamp can ever pass through, however long the real gap was,
+  // steps the ramp no further than two ordinary control ticks would.
+  printf("\n-- F2: a stalled tick's clamped dtMs ramps no further than two ordinary ticks --\n");
+  {
+    // Drain to a clean Idle before each baseline: holding zero demand can
+    // only ever settle IN Idle, never leave it, so this absorbs whatever
+    // coast/dead-time wind-down a prior section left running, however long
+    // it still had to go (worst case: a full-speed reversal's
+    // reversalCoastMs + reversalCoastPerUnitMs + reversalDeadTimeMs, well
+    // under half of this window).
+    auto drainToIdle = [&] {
+      for (int i = 0; i < 40; i++) { g_hostMillis += kTickMs; motors.apply(0.0f, 0.0f, kTickMs); }
+    };
+
+    drainToIdle();
+    settle(1.0f, 0.0f, 5);
+    const float baseline = motors.appliedThrottle();
+    check(baseline > 0.0f && baseline < cfg.drive.maxThrottle - 1e-4f,
+          "setup: throttle is still mid-ramp, neither at rest nor already at the ceiling");
+
+    // Reference: two ordinary control ticks from the baseline.
+    g_hostMillis += kTickMs; motors.apply(1.0f, 0.0f, kTickMs);
+    g_hostMillis += kTickMs; motors.apply(1.0f, 0.0f, kTickMs);
+    const float twoTicksDuty = motors.appliedThrottle();
+
+    // Replay to the identical baseline, then apply once with the largest
+    // dtMs the F2 clamp can ever produce -- 2 * controlPeriodMs -- no matter
+    // how long the real stall behind it actually was.
+    motors.stop();
+    drainToIdle();
+    settle(1.0f, 0.0f, 5);
+    check(motors.appliedThrottle() == baseline, "replay reaches the identical baseline duty");
+    const uint32_t clampedDtMs = 2 * cfg.timing.controlPeriodMs;
+    g_hostMillis += 9000;  // stand-in for an arbitrarily long real stall
+    motors.apply(1.0f, 0.0f, clampedDtMs);
+    const float postGapDuty = motors.appliedThrottle();
+
+    check(postGapDuty <= twoTicksDuty + 1e-4f,
+          "a stalled tick's clamped dtMs steps the ramp no further than two "
+          "ordinary control ticks would have");
+    printf("      (post-gap duty %.4f vs two-tick reference %.4f, clamped dtMs=%ums)\n",
+           postGapDuty, twoTicksDuty, clampedDtMs);
+  }
+  motors.stop();
+
   printf("\n-- disable(): stops first, then sleeps the bridge --\n");
   settle(1.0f, 1.0f, 60);
   check(g_ledcDuty[throttle.pwm] > 0 && g_ledcDuty[steering.pwm] > 0, "driving before disable()");
