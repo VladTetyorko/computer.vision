@@ -1,6 +1,6 @@
 # ASSET-FLOWS — task context
 
-**Started:** 2026-09-01 · **Status:** proposal delivered — awaiting user picks · **Branch:** none yet (research only)
+**Started:** 2026-09-01 · **Status:** cycle 1 DONE — merged to master · **Branch:** `feat/asset-flows-1` (merged)
 
 ## The ask (user, verbatim intent)
 
@@ -72,3 +72,10 @@ Stale-record corrections from O1 §4 applied same day: `vision-flight/MODULE.md`
 gotchas marked RESOLVED; memory `platform-audit` (live-ops now scoped) and `source-onboarding`
 (`onTelemetryDeviceDiscovered` deleted; `DeviceOrigin` shipped-but-unconsumed) corrected.
 Unverified leftover: the ops-ux Wave E dev-group conflict (O1 §4 last row) — check before citing.
+
+## Cycle 1 close-out (2026-09-01)
+
+Owner picked tier 1+2 with all recommendations (P-PROPOSAL §Decided). Built and merged same day —
+wave table and commits in [ASSET-FLOWS-PLAN.md](ASSET-FLOWS-PLAN.md) §Close-out. Cycle 2 candidates:
+CREW-CONTROL (decision D2 says it is the next plan), then tier 3 (S5→B3 readiness, C1 command
+monitor, E2→E1→E4 maintenance chain, A2 simulate unification, post-flight summary).

@@ -1,6 +1,6 @@
 # ASSET-FLOWS-PLAN — cycle 1 (tier 1 safety + tier 2 quick wins)
 
-**Status:** FROZEN 2026-09-01 · **Branch:** `feat/asset-flows-1` · **Owner picked:** tier 1+2,
+**Status:** BUILT + MERGED to master 2026-09-01 · **Branch:** `feat/asset-flows-1` · **Owner picked:** tier 1+2,
 decisions per Fable recommendation (see P-PROPOSAL §Decided).
 **Reads with:** [asset-flows/P-PROPOSAL.md](asset-flows/P-PROPOSAL.md) (ranking + decisions),
 [asset-flows/O1-SYNTHESIS.md](asset-flows/O1-SYNTHESIS.md) (evidence + dependency constraints).
@@ -77,3 +77,26 @@ message when your gate is green.
 Gating disarm/e-stop/RTH/mode (see §2) · CREW-CONTROL claim arbitration (next plan) ·
 S5 live-telemetry readiness / B3 checklist · missions tasking (decision recorded, unscheduled) ·
 probe.enabled flip (needs its own verification wave) · pilot self-onboard route change.
+
+## Close-out (2026-09-01)
+
+All waves green and merged; final web gate on the combined tree 174 files / 3411 tests.
+
+| Wave | Commit | Result |
+|---|---|---|
+| BK1 | `cb565688` | arm + engage refuse on grounding (recovery verbs proven ungated); perception gates engage only (pipeline-leak rationale in MODULE.md) |
+| BK2+BK2b | `1e41432b`+`18911098` | LINK_LOST/BATTERY_LOW kinds + producers; link-loss wired to SupervisedPublisher outage edge (exactly one event per outage, tested) |
+| BK3 | `36ecbbd0` | `vision.ops.battery.*` (25/10) + `GET /api/ops/thresholds` |
+| BK4 | `c6f29b7b` | `AssetUsage.pilotId` (V28 column already existed — no new migration); engage populates, promote backfills, device-push stays null |
+| BK5 | `c9f954f4` | firmware-honest `supports()`; Betaflight decoy can no longer shadow ArduPilot; +`5d52f80c` doc fix (P1-era gotcha closed by P4) |
+| BK6 | `a79bc222` | inbox response `{candidates, sources[]}` — UNREACHABLE vs empty |
+| BK7 | `ddfd572d` | mediamtx viewer/publisher accounts, `ingest/` tilde-regex exception, creds through push/WHEP/HLS-proxy, real-container IT |
+| C4/C4b | `34e298d0` on master | c15 reconciled (21 conflicts, V25→V32) + merged; unblocks FLEET-RADIO R2/R3 web halves |
+| WB1 | `3176d67a` | grounded banner + arm reason + readiness nav both ways + preflight maintenance cell |
+| WB2 | `2afedf2b` | one severity source consumed by OSD+attention, bell kinds, assignment picker, replay list, inbox warnings |
+
+Residuals, deliberate: Command/Inventory attention consumers use the same default thresholds but aren't
+wired to the live store yet (named in vision-web MODULE.md) · mediamtx yaml/env creds are two sources
+of truth the operator must change together (`.env.example` documents it) · evidence-package DTO not
+widened with pilotId. Shared-tree lesson recorded: three concurrent-staging races this cycle — next
+cycle, waves sharing a folder get worktree isolation or strict serialization.
