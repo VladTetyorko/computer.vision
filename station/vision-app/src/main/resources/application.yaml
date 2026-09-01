@@ -1115,3 +1115,19 @@ vision:
     #         interval: 250ms
     #       - message-id: 147   # BATTERY_STATUS
     #         interval: 250ms
+
+    # --- vision.ops: battery urgency thresholds (docs/plans/active/ASSET-FLOWS-PLAN.md §2 "Battery
+    # thresholds") ---
+    # Every key below is commented out: each documents VisionOpsProperties.Battery's own default
+    # rather than overriding it -- a freshly-built app behaves exactly as documented here with no
+    # change. This is the ONE severity source for battery urgency: the Fly cockpit's OSD and the fleet
+    # attention-logic both read GET /api/ops/thresholds (OpsThresholdsController), which mirrors these
+    # two values back verbatim -- replacing OSD's own previously hardcoded 20/45 and fleet's own
+    # previously hardcoded 20/10. warning-percent is the "battery low" edge; critical-percent is the
+    # "battery critical" edge and must stay strictly below warning-percent. BATTERY_LOW (docs/plans/
+    # active/ASSET-FLOWS-PLAN.md §2 "New system-event kinds") fires as a rising edge on crossing
+    # critical-percent, re-arming only once telemetry is back above warning-percent.
+    # ops:
+    #   battery:
+    #     warning-percent: 25
+    #     critical-percent: 10

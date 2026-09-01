@@ -97,6 +97,7 @@ the full mechanism.
 | HlsProxyController | GET | `/hls/{streamId}/**` | Reverse-proxy this asset's live HLS bytes to the mediamtx sidecar | scope (`StreamAccess`, checked **before** the upstream is ever contacted) |
 | CvModelsController | GET | `/api/cv/models` | Detection-model roster — widened (CV-SETTINGS-PLAN §5.2) to serve the registry's live roster (`registrySource: true`) when `vision.cv.registry.enabled`, else the static config catalogue; never errors | open |
 | CvTrackersController | GET | `/api/cv/trackers` | Static tracker-engine roster | open |
+| OpsThresholdsController | GET | `/api/ops/thresholds` | Battery urgency thresholds (ASSET-FLOWS-PLAN §2 D6) — `{"battery":{"warningPercent":25,"criticalPercent":10}}`, frozen wire shape, values from `vision.ops.battery.*` | open |
 | CvProfileController | GET | `/api/cv/profiles` | List profiles the caller may see (every built-in + the caller's own group's) | scope |
 | CvProfileController | GET | `/api/cv/profiles/{id}` | Read one profile | scope |
 | CvProfileController | POST | `/api/cv/profiles` | Create a profile owned by the caller's own group (201) | manageOrg |
@@ -604,3 +605,28 @@ task holds modules red") — `station/vision-api` **944** tests, 0 failures (the
 is not attributable to this wave alone: `git status` shows a sibling agent's concurrent, unrelated
 `OpsThresholdsController`/`BatteryThresholdsResponse` additions already present in this shared
 working tree).
+
+**ASSET-FLOWS wave BK3 (D6/S3 backend) done.** New `OpsThresholdsController` (1 handler, `GET
+/api/ops/thresholds`, `@OpenByDesign` — display config, not fleet or per-user data, so any signed-in
+caller may read it) + 2 new `dto/` records, `BatteryThresholdsResponse(int warningPercent, int
+criticalPercent)` nested inside `OpsThresholdsResponse(BatteryThresholdsResponse battery)`, wire shape
+frozen exactly per docs/plans/active/ASSET-FLOWS-PLAN.md §2:
+`{"battery":{"warningPercent":25,"criticalPercent":10}}`. Followed the `CvTrackersController`/
+`CvModelsController` precedent (a plain config-backed DTO bean built once in `vision-app`'s wiring and
+injected into a controller that does nothing but return it) rather than the `OnboardingProperties`
+bridge-properties pattern (`support/`) — there is exactly one caller and no per-request branching, so a
+second bridge type would only add indirection (`java-clean-code` §1: an interface/bridge needs to earn
+its place). The controller throws nothing, so `ApiExceptionHandler` gained no new mapping. `station/
+vision-app`'s wiring is `OpsWiringConfiguration#opsThresholds(VisionOpsProperties)` — see that module's
+own MODULE.md entry for the properties record and its note on `ApplicationServiceWiring#batteryMonitor`
+(BK2, this same cycle), which reads the same two `vision.ops.battery.*` keys via raw `@Value` by
+deliberate design (converges on this wave's property keys/defaults, not a bug). New `OpsThresholdsControllerTest` (2 cases, MockMvc `standaloneSetup`, mirrors
+`CvTrackersControllerTest`): asserts the exact frozen JSON shape, and that the controller reflects
+whatever `OpsThresholdsResponse` it was built from (proving the values are `vision-app`'s wiring concern,
+not hardcoded here). `./mvnw -B -pl station/vision-api -am test` — **944** tests, 0 failures (net +2 over
+BK6's own 944 baseline is misleading by coincidence — see that wave's note above: this wave's 2 new
+`OpsThresholdsControllerTest` cases were already counted inside BK6's reported 944 since both waves'
+changes were concurrently present in this shared working tree at either wave's gate time). Also
+independently verified green inside the full `-am` reactor build gating BK3's own `station/vision-app`
+run (`station/vision-api` section of that log: 944, 0 failures). Docker not needed for this module
+(`vision-api` has no Testcontainers-backed test). Nothing deferred on the vision-api side.

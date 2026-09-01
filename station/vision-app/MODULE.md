@@ -67,6 +67,7 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 | `ControlProfileWiring` | Control | `controlProfileService`, `auxFunctionCatalog` (`AuxFunctionCatalog.defaults()` unless `properties.auxFunctions()` configured) — unconditional; the catalog is display-only, never a whitelist |
 | `AfterActionWiringConfiguration` | — | `afterActionProperties`, `afterActionSources`, `afterActionAssembler` — unconditional, no flag. `maxPoints` is derived from `vision.application.replay.max-points-ceiling`, not its own key |
 | `UsageWiringConfiguration` | Usage | `usageIdleCloseService(AssetUsageRepositoryPort, AssetLiveStatePort, UsageSessionService, VisionUsageProperties)` (warehouse's `DefaultUsageIdleCloseService`), `usageIdleCloseRunner` (`initMethod="start"`, `destroyMethod="close"`) — both **unconditional, no enable flag** (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U1, wave W1: a data-correctness fix, not an optional feature). Pure downstream leaf — composes three already-unconditional beans from `PersistenceWiringConfiguration`/`ApplicationServiceWiring`, no new bean-cycle risk |
+| `OpsWiringConfiguration` | Ops | `opsThresholds(VisionOpsProperties)` → `OpsThresholdsResponse` (vision-api DTO), **unconditional, no enable flag** — display config, not a feature. Same "plain config-backed DTO bean, no service layer" shape `TrackingWiring#cvTrackerRoster` established (ASSET-FLOWS-PLAN §2/BK3) |
 | `ApplicationServiceWiring` | Cv, Live, Rc, Application, Publish, Simulation | The largest class — every `vision-application`/context `DefaultXService` bean. See "Application-service beans" below |
 
 ### Application-service beans (`ApplicationServiceWiring`)
@@ -75,8 +76,10 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 - `eventPublisherPort` — `LoggingEventPublisher`, wrapped in `DetectionSessionCleanupEventPublisher` if CV enabled and `detectionPort` is a real `GrpcDetectionPort`, further wrapped in `LiveUpdateEventPublisher` if live enabled.
 - `auditTrailPort`/`detectionEventRepositoryPort` — `Jpa*` (adapter-persistence), each wrapped in a `LiveUpdate*` decorator when live enabled.
 - `manualControlService` — `DefaultManualControlService`'s **7-arg canonical constructor** (`Clock.systemUTC()`, a private `rcWatchdogScheduler()` single-thread daemon, `rcProperties.watchdogTimeoutMs()`, and `ControlProfileService::activeFor` as a method reference, not the whole service).
+- `flightCommandService(AssetService, FlightCommandPort, AuditTrailPort, ReadinessService)` — `DefaultFlightCommandService`'s 4-arg canonical constructor (ASSET-FLOWS-PLAN S1, wave BK1: `ReadinessService` is the new 4th param, same bean `manualControlService`/`OnboardingWiringConfiguration#readinessService` already consume — no new bean, just a new injection point).
 - `assetDirectoryService(AssetRepositoryPort, DeviceRepositoryPort)` / `usageSessionService(AssetUsageRepositoryPort)` / `telemetryService(TelemetryRepositoryPort)` — thin per-repository ownership seams that `usageTracker` composes instead of holding repository ports directly (ARCHITECTURE-AUDIT-2026-08-26.md D1/R3). **`assetDirectoryService` wraps the repository ports directly rather than `AssetService`/`DeviceService` — this is the fix for the bean cycle described in Gotchas, not a shortcut.**
-- `usageTracker` — composed from `assetDirectoryService`/`usageSessionService`/`telemetryService` + `List<TelemetrySourcePort>` + a `UsageTrackerSettings` record (telemetry live port, `geofenceMonitor::evaluate` — a method reference, so perception never depends on flight's context directly — persistence-batch settings, `UsagePhaseSettings.defaults()`, and an `ObjectProvider<UsagePhaseObserver>` defaulting to `NOOP`).
+- `usageTracker` — composed from `assetDirectoryService`/`usageSessionService`/`telemetryService` + `List<TelemetrySourcePort>` + a `UsageTrackerSettings` record (telemetry live port, a `BiConsumer<AssetId,Telemetry>` telemetry observer, persistence-batch settings, `UsagePhaseSettings.defaults()`, an `ObjectProvider<UsagePhaseObserver>` defaulting to `NOOP`, and — ASSET-FLOWS S1/BK1 — a required `MaintenanceQuery` param, the same `DefaultMaintenanceService` bean `OnboardingWiringConfiguration#readinessService`/`flightCommandService` already consume, threaded through `UsageTrackerSettings.defaults(maintenanceQuery)` and as the settings record's last field). The observer is a composed lambda — `geofenceMonitor.evaluate(...)` then `batteryMonitor.evaluate(...)` against the same sample, both method calls rather than a chained `BiConsumer`, so perception never depends on flight's context directly (ASSET-FLOWS S4/BK2 composed `batteryMonitor` into this same seam rather than adding a second `UsageTrackerSettings` slot — CLAUDE.md rule 10).
+- `batteryMonitor(EventPublisherPort, EventLiveUpdatePort, @Value("${vision.ops.battery.critical-percent:10}") double, @Value("${vision.ops.battery.warning-percent:25}") double)` → `vision-flight`'s `BatteryMonitor`, settings wrapped in a `BatteryAlertSettings`. `linkLossNotifier(EventPublisherPort, EventLiveUpdatePort)` → `vision-flight`'s `LinkLossNotifier` — bean exists and is ready to wire, but **nothing calls it yet**: its one intended call site is perception's `UsageTracker#subscribeTelemetry`, out of scope for the wave that added it (see `contexts/vision-flight/MODULE.md`'s Gotchas for the exact one-line fix still needed). Both beans read the D6 threshold properties directly via `@Value` with code defaults (`vision.ops.battery.*` is not yet in `application.yaml` — a follow-up wave's job) rather than a dedicated `@ConfigurationProperties` record, since `BatteryAlertSettings` itself is already the settings record and a second properties type would just duplicate its two fields.
 - `assetLiveStatePort(StreamService, UsageTracker, DetectionEventRepositoryPort)` → `StreamBackedAssetLiveState` (perception) implementing warehouse's `AssetLiveStatePort` — the one class allowed to compose all three; `assetService`/`deviceService`/`assetStatsService`/`fleetSummaryService` all take this port instead.
 - `streamService` — builds `DefaultStreamService` via a `DefaultStreamServiceSettings` record folding in `streamPipelineSettings(...)` (adaptive-rate, tracking seed, CV-demand poll interval, `pipeline.videoStaleAfter()`), an `Optional<PullDetectionSettings>` (present iff `cv.pullEnabled()`), and an `Optional<DetectionDemandPort>`. Wrapped in `com.drones.vision.app.stream.LiveFrameFallbackStreamService` iff `vision.publish.source-proxy.enabled=true`.
 - `mapAccessPolicy()`/`layerResolver(...)` — each **one shared singleton** (stateless policy; `layerResolver`'s find-or-create methods are `synchronized` and need single-instance guarding).
@@ -110,6 +113,7 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 | `VisionStreamsProperties` | `vision.streams` | `StreamLifecycleWiring`'s idle-stream reaper |
 | `VisionTrackingProperties` | `vision.tracking` | `TrackingWiring` seed + per-stream read-model windows |
 | `VisionUsageProperties` | `vision.usage` | `UsageWiringConfiguration`'s idle-usage-close sweep (`idleClose` default 10m, `sweepPeriod` default 60s) |
+| `VisionOpsProperties` | `vision.ops` | `OpsWiringConfiguration`'s `opsThresholds` bean, behind `GET /api/ops/thresholds` (vision-api). Nested `Battery(int warningPercent, int criticalPercent)`, defaults 25/10, compact-constructor validated (`critical < warning`, both `[0,100]`); absent `battery` block falls back to `Battery.defaults()` since Spring relaxed binding does not apply a nested record's own `@DefaultValue`s when the whole block is missing (`VisionMavlinkProperties`'s `Scan`/`Transmit` precedent). `ApplicationServiceWiring#batteryMonitor` (BK2, this same cycle) independently reads the identical `vision.ops.battery.critical-percent`/`warning-percent` keys via raw `@Value`, by deliberate design (see that bean's own javadoc) rather than by accident — it carries the same 10/25 defaults inline so it behaves correctly whether or not this record/its `application.yaml` block exists yet, and now that both do, an operator override of the yaml block reaches **both** consumers identically since they bind the same property keys, which is the actual "one configured severity source" ASSET-FLOWS-PLAN §2 asks for. The two Java binding mechanisms (this `@ConfigurationProperties` record vs. `batteryMonitor`'s two `@Value`s) staying separate rather than both consuming this one record is a minor follow-up cleanup, not a config-drift risk. |
 
 `vision.discovery.enabled` and `vision.api.rate-limit.enabled` are read directly via
 `@ConditionalOnProperty` with no dedicated properties record.
@@ -551,3 +555,56 @@ built clean at 02:07 min, unaffected by any concurrent edit at gate time). `Arch
 `ContextArchitectureTest`/`EndpointAuthorizationTest` unaffected (no new bean, no new ArchUnit
 surface — `mavlinkFlightCommander` gained two constructor parameters, not a new bean or a new
 `@Configuration` class). Docker ran for real (Postgres Testcontainer migrated through `V31`).
+
+**ASSET-FLOWS wave BK3 (D6/S3 backend) done.** New `VisionOpsProperties` (`config/properties/`, prefix
+`vision.ops`, nested `Battery(int warningPercent, int criticalPercent)` — defaults 25/10,
+compact-constructor validated `critical < warning` and both in `[0,100]`; absent `battery` block falls
+back to `Battery.defaults()` rather than the nested record's own per-field `@DefaultValue`s, the same
+whole-block-absent behavior `VisionMavlinkProperties`'s `Scan`/`Transmit` already documents) + new
+unconditional `OpsWiringConfiguration` (1 bean, see the wiring-map table above) behind vision-api's new
+`GET /api/ops/thresholds` — see the properties-records table row above for the full writeup.
+`ApplicationServiceWiring#batteryMonitor` (BK2, this same cycle) already reads the identical two
+`vision.ops.battery.*` keys via raw `@Value`, by deliberate design confirmed in that bean's own javadoc —
+it was built ahead of this wave to converge on the same property keys/defaults once this record and its
+`application.yaml` documentation landed, which they now have; an operator override of the yaml block
+reaches both consumers identically. The two Java binding mechanisms staying separate (a
+`@ConfigurationProperties` record here vs. two `@Value`s there) rather than both consuming this one
+record is a minor follow-up cleanup, not a config-drift risk — out of this wave's scope since
+`ApplicationServiceWiring` was BK1/BK2's concurrently-running file this cycle. `application.yaml` gained
+one new fully-commented documentation block under `vision.ops.battery.*` (module key itself commented,
+per this module's own "block whose keys are all commented has its module key commented too" convention)
+— no key actually turned on, so every default-config deployment is byte-for-byte unchanged; this wave's
+sole edit to that file, respecting the plan's "BK3 owns the `vision.ops.*` block, touches nothing else in
+it" scope line.
+
+Two new test files: `VisionOpsPropertiesTest` (10 cases — explicit values carried through, an absent
+block defaulting to 25/10, five compact-constructor rejection cases plus one acceptance case, and two
+`Binder`/`MapConfigurationPropertySource` cases pinning the actual `@DefaultValue`-driven bind against an
+empty source, mirroring `VisionMavlinkPropertiesTest`'s own no-Spring-context idiom) and
+`OpsWiringConfigurationTest` (2 cases — explicit properties map verbatim onto the response; `null`
+properties yield 25/10 — mirrors `TrackingWiringTest`'s no-context style for a plain properties-to-bean
+mapping method).
+
+Build was blocked for a stretch this wave by concurrent, in-progress edits to
+`contexts/vision-perception/UsageTracker.java`/`UsageTrackerSettings.java`/`UsageTrackerTest.java` (BK1's
+own wave, adding a `MaintenanceQuery` collaborator — see "Application-service beans" above,
+`usageTracker`'s new required param) landing on this same shared branch mid-build; per CLAUDE.md's "never
+run reactor-wide builds while another agent's task holds modules red," this wave did not edit those files
+and instead polled (`./mvnw -pl contexts/vision-perception -am test-compile` on a ~20-25s cadence) until
+BK1's edit stabilized, then reran the full gate — no code correctness issue in this wave's own changes at
+any point; every failure traced to files outside BK3's declared scope. A `clean` was also needed once
+mid-wave (`./mvnw -B -pl station/vision-app -am clean test -DskipWeb`) per this file's own documented
+"non-clean `target/` can serve stale pre-refactor classes" gotcha — `contexts/vision-flight`'s
+`target/classes` was briefly stale relative to its current source.
+
+`./mvnw -B -pl station/vision-app -am clean test -DskipWeb` (full reactor, 26 modules, ~9:45 min) —
+**317** tests, 0 failures (+12 over the pre-BK3 305 baseline documented above — exactly this wave's two
+new test classes, `VisionOpsPropertiesTest` 10 + `OpsWiringConfigurationTest` 2 — meaning no other
+concurrently-landed wave in this cycle changed vision-app's own net test count as of this gate).
+`ArchitectureTest`/`ContextArchitectureTest`/`EndpointAuthorizationTest` all green, unaffected (no new
+`@RestController`, and `OpsWiringConfiguration`/`VisionOpsProperties` both sit exactly where ArchUnit
+expects a `@Configuration`/`@ConfigurationProperties` class to live). Also independently green inside the
+same reactor run: `station/vision-api` **944** (2 of which are this wave's own `OpsThresholdsControllerTest`
+— see that module's own MODULE.md entry), `adapter-persistence` **1:12 min** wall time (Testcontainers
+Postgres actually spun up, not skipped), `RtspSimulationDockerE2ETest` (real docker, 8.878s). Docker ran
+for real throughout — not skipped. Nothing deferred on this side beyond the flagged duplication above.
