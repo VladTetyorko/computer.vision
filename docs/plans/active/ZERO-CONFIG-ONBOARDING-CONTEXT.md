@@ -347,9 +347,32 @@ lives in `~/Arduino/ardupoilot-start`, its bench harness `infra/rover-sim/link_t
 exists uncommitted); Z4's wire-DTO half (`DiscoveredDeviceResponse` options-drop) and the
 interface-ranking bug — small, unscheduled; SSE topic + mediamtx `runOnAvailable` hook (graduate
 together); per-path publish tokens before any shared deployment (§6); live smoke of the whole loop
-(rover/SITL heartbeat → card → click → engage → arm) — **not yet run**, needs real hardware/SITL.
+(rover/SITL heartbeat → card → click → engage → arm) — **run and green 2026-09-01**, see the
+smoke record below.
 
 **Behavior change to know before merging:** `vision.discovery.lobby.enabled` and
 `vision.discovery.inbox.enabled` default **true** — vision now binds `:14550` at boot, answers
 with GCS heartbeats, and sweeps discovery every 30s. Set either to `false` to restore the old
 passive behavior.
+
+## 13. Live smoke record (2026-09-01, pre-merge; merged as `7356275a`)
+
+Run against the branch jar (fresh boot, Flyway `V31 - discovery inbox` applied cleanly on the dev
+DB), a pymavlink fake vehicle standing in for SITL (1 Hz HEARTBEAT, sysid 7, `MAV_TYPE_GROUND_ROVER`
++ `MAV_AUTOPILOT_ARDUPILOTMEGA`, ACKs `COMMAND_LONG`), and ffmpeg pushing to mediamtx.
+
+| Leg | Result |
+|---|---|
+| Lobby at boot | `MAVLink lobby hold acquired on LinkId[value=udp-listen:0.0.0.0:14550]; GCS heartbeat TX started` |
+| Lock-on | vehicle saw the sys=255/comp=190 GCS heartbeat **< 1s** after its first broadcast |
+| Inbox card | next 30s sweep surfaced `ArduPilot rover (sysid 7)`, `details: {firmware: ardupilot, sysid: 7, mavType: rover}`, status NEW |
+| Register | `POST /api/discovery/inbox/{id}/register` `{displayName, category: robot}` → asset created |
+| Engage | `POST /api/assets/{id}/session` → usage `origin=OPERATOR, phase=PREFLIGHT` — **no video stream involved** (B4 closed for real) |
+| Capabilities | `commandable: true, armSupported: true, vehicleKind: ROVER`, full ArduPilot rover mode list |
+| Arm | `POST /api/assets/{id}/arm` → `ACCEPTED` (202); log `Sending arm to MAVLink sysid 7 at /127.0.0.1:<port>`; vehicle received `cmd=400 p1=1.0` and ACKed |
+| mediamtx push (Z3) | ffmpeg → `rtsp://localhost:8554/ingest/smoke-cam` → sweep surfaced a `mediamtx` candidate with a playable RTSP URI. Caveat: publish over UDP RTP into the docker container times out (`session timed out` after 10s) — `-rtsp_transport tcp` works; device firmware should push TCP |
+| v4l2 duplicate-match | pre-existing registered webcam auto-flipped its candidate to REGISTERED with the matching assetId |
+| Disengage | `DELETE /api/assets/{id}/session` → 204 |
+
+Leftover smoke artifacts in the dev DB: asset "Smoke Rover" (category robot) + its REGISTERED
+candidate, and the NEW `smoke-cam` mediamtx candidate — harmless; dismiss/delete from Inventory.
