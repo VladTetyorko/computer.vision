@@ -507,8 +507,9 @@
   left: var(--overlay-pad);
   /* Cleared above `vision-player`'s own bottom-left latency badge (`player.css` `.badge`,
      bottom: --space-8, ~1.5rem tall) — the one stage overlay this column cannot own as a flex
-     child; without the extra offset the preflight chip paints straight over it (live check
-     2026-09-02). */
+     child; without the extra offset this column's own bottom member (the secondary tiles, or the
+     map inset/placeholder once the preflight chip that used to sit lowest here was deleted by
+     FLY-FLOW-PLAN.md §4 W4) paints straight over it (live check 2026-09-02). */
   bottom: calc(var(--overlay-pad) + var(--space-24));
   z-index: 3;
   display: flex;
@@ -532,12 +533,13 @@
   z-index: 3;
 }
 
-/* `.main-preflight`/`.main-diagnostics` are now bare structural wrappers (cockpit.html) — everything
-   they used to own themselves (position, offset, z-index) moved to their parent column above, so
-   they no longer need a box of their own; `display: contents` promotes each one's single child
-   (the checklist / diagnostics card) to be the actual flex item its parent lays out, with no visual
-   change and no HTML restructuring needed. */
-.main-preflight,
+/* `.main-diagnostics` is now a bare structural wrapper (cockpit.html) — everything it used to own
+   itself (position, offset, z-index) moved to its parent column above, so it no longer needs a box
+   of its own; `display: contents` promotes its single child (the diagnostics card) to be the actual
+   flex item its parent lays out, with no visual change and no HTML restructuring needed.
+   `.main-preflight` (the identical twin for the pre-flight checklist) was deleted along with it —
+   docs/plans/active/FLY-FLOW-PLAN.md §4 W4 moved that checklist into the connect-ritual modal instead
+   of leaving an unused floating chip on the video stage. */
 .main-diagnostics {
   display: contents;
 }
@@ -551,6 +553,29 @@
   /* Same Leaflet z-index containment as command.css's .command-map: keep pane z-indexes
      (400+) from escaping to the root and painting over this page's own header overlay above. */
   isolation: isolate;
+}
+
+/* The honest map-slot placeholder (docs/plans/active/FLY-FLOW-PLAN.md §4 W4 item 1) — stands in for
+   `<vision-tactical-map>` for exactly as long as this drone has never reported a fix, so the header's
+   map toggle always visibly connects to *something* rather than the inset silently vanishing. Sized
+   to the same footprint the map itself settles into in its own follow-mode (`tactical-map.css`'s
+   `:host(.follow-mode) .map-shell`, 220px) so turning the toggle on never visibly jumps once a fix
+   does arrive. `--hud-*` frosted chrome, not a themed `--panel`/`--panel-raised` card: this sits
+   directly on the live video the same way the map it stands in for would (frontend-style §2). */
+.main-map-placeholder {
+  width: 100%;
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-16);
+  text-align: center;
+  border-radius: var(--radius-sm);
+  background: var(--hud-bg);
+  border: var(--hud-border);
+  backdrop-filter: blur(var(--hud-blur));
+  color: var(--text);
+  font-size: 0.78rem;
 }
 
 @media (max-width: 900px) {

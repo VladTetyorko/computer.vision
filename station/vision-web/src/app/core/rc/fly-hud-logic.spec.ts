@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ManualControlChannelBinding } from '../api/models';
-import { axisKeyGlyphs, hudBadgeFor, hudElementsFrom, hudTransitionToast, sourceLocked } from './fly-hud-logic';
+import { axisKeyGlyphs, hudBadgeFor, hudElementsFrom, hudTransitionToast, openTakeControlDisabledReason, sourceLocked } from './fly-hud-logic';
 
 const axis = (
   fn: ManualControlChannelBinding['function'],
@@ -128,6 +128,28 @@ describe('sourceLocked', () => {
     expect(sourceLocked('idle')).toBe(false);
     expect(sourceLocked('denied')).toBe(false);
     expect(sourceLocked('released')).toBe(false);
+  });
+});
+
+describe('openTakeControlDisabledReason (docs/plans/active/FLY-FLOW-PLAN.md §4 W4 — the connect ritual\'s own "open" gate)', () => {
+  it('is enabled once the vehicle is commandable and nothing is already in flight', () => {
+    expect(openTakeControlDisabledReason({ canCommand: true, engageState: 'idle' })).toBeUndefined();
+  });
+
+  it('blocks opening while a handshake is already engaging', () => {
+    expect(openTakeControlDisabledReason({ canCommand: true, engageState: 'engaging' })).toBe('Engaging…');
+  });
+
+  it('blocks opening when the vehicle is not commandable', () => {
+    expect(openTakeControlDisabledReason({ canCommand: false, engageState: 'idle' })).toBe("This drone isn't commandable right now.");
+  });
+
+  it('never blocks on the selected source — that is exactly what the modal itself lets the operator fix', () => {
+    // Unlike `engageDisabledReason`, there is no `sourceKind`/`gamepadConnected` in this gate's input
+    // at all — a disconnected gamepad must never strand the operator outside the one door that lets
+    // them switch away from it.
+    expect(openTakeControlDisabledReason({ canCommand: true, engageState: 'denied' })).toBeUndefined();
+    expect(openTakeControlDisabledReason({ canCommand: true, engageState: 'released' })).toBeUndefined();
   });
 });
 

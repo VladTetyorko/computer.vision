@@ -29,9 +29,10 @@
   max-width: calc(100% - 2 * var(--overlay-pad));
 }
 
-/* One row at rest (FLY-FLOW-PLAN.md §3 S3) — a watching pilot sees `[badge] [Take control]
-   [source ▾]` as a single low-profile line, not a 3-high center stack; the engaged widget keeps
-   the column default above. */
+/* One row at rest (FLY-FLOW-PLAN.md §3 S3, at-rest content reduced by §4 W4) — a watching pilot sees
+   `[badge] [Take control]` as a single low-profile line, not a 3-high center stack; the engaged
+   widget keeps the column default above (and re-gains the source pill as a third element there —
+   `fly-hud.html`'s own top comment explains why that one survives engaged-only). */
 .hud-bottom-center.at-rest {
   flex-direction: row;
 }
@@ -89,13 +90,13 @@
   font-weight: 600;
 }
 
-/* The collapsed source control (docs/plans/active/FLY-FLOW-PLAN.md §4 W1) — one HUD pill wrapping a
-   native `<select>`, replacing the three independent `.source-pill` buttons this used to be (still
-   using `.hud-pill`'s own chrome, via the template's class list, just compact-sized like the old
-   pills were). Mirrors `cockpit.css`'s `.switcher-control`/`.switcher` pair — the same "native select
-   styled as a frosted HUD pill" recipe, a second call site since Angular's emulated encapsulation
-   can't share the class across component stylesheets (this file's own doc comment above, "Shared
-   frosted-pill chrome"). */
+/* The source control (docs/plans/active/FLY-FLOW-PLAN.md §4 W1; at-rest twin deleted by §4 W4 — this
+   pill now renders engaged-only, `fly-hud.html`'s own top comment) — one HUD pill wrapping a native
+   `<select>` (still using `.hud-pill`'s own chrome, via the template's class list, just compact-sized
+   like the old per-source pills were). Mirrors `cockpit.css`'s `.switcher-control`/`.switcher` pair —
+   the same "native select styled as a frosted HUD pill" recipe, a second call site since Angular's
+   emulated encapsulation can't share the class across component stylesheets (this file's own doc
+   comment above, "Shared frosted-pill chrome"). */
 .hud-pill.source-select {
   padding: var(--space-4) var(--space-8);
   font-size: 0.7rem;

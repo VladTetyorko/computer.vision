@@ -115,6 +115,37 @@ export function sourceLocked(engageState: ManualControlEngageState): boolean {
   return engageState === 'engaging' || engageState === 'engaged';
 }
 
+// --- The connect ritual's own "open" gate (docs/plans/active/FLY-FLOW-PLAN.md §4 W4 item 2) --------
+
+export interface OpenTakeControlGateInput {
+  readonly canCommand: boolean;
+  readonly engageState: ManualControlEngageState;
+}
+
+/**
+ * The at-rest Take-control pill's own poka-yoke reason for *opening the connect-ritual modal* —
+ * deliberately a narrower gate than `rc-monitor-logic.ts#engageDisabledReason` (the modal's own
+ * "Start control" button reuses that full gate once a tile is picked, see `take-control-modal.ts`'s
+ * own doc comment). This one omits `sourceKind`/`gamepadConnected` on purpose: before W4, an operator
+ * whose selected source happened to be a disconnected gamepad could still reach the always-visible
+ * at-rest source-select pill and switch away from it, *without* Take-control ever needing to be
+ * enabled first. W4 deletes that pill — the picker now lives inside the modal itself — so gating the
+ * modal's own front door on the very source problem the modal exists to let the operator fix would
+ * strand them: disabled, with no path left to reach the control that would un-disable it. Only the
+ * two gates that no tile choice could ever resolve — `canCommand` and an already in-flight handshake
+ * — block opening the ritual at all; mirrors `fly-hud-logic.ts#hudBadgeFor`'s own "hasAsset never
+ * applies here" precedent (this component only ever mounts once an asset is selected).
+ */
+export function openTakeControlDisabledReason(input: OpenTakeControlGateInput): string | undefined {
+  if (input.engageState === 'engaging') {
+    return 'Engaging…';
+  }
+  if (!input.canCommand) {
+    return "This drone isn't commandable right now.";
+  }
+  return undefined;
+}
+
 // --- Transient toasts (§3 — "become toasts ... never persistent video text") -----------------------
 
 export interface HudToast {

@@ -1,6 +1,7 @@
 import type { AssetStatus, AssetSummary, AssetUsage, GeoPosition, Membership, Role, StreamState } from '../../core/api/models';
 import { hasFix } from '../../core/geo/geo-logic';
 import { humanAge } from '../../core/telemetry/telemetry-logic';
+import type { PreflightSummary } from '../../core/telemetry/flight-state-logic';
 
 /**
  * Re-exported from `core/telemetry/telemetry-logic.ts`, which is now its canonical home
@@ -28,8 +29,7 @@ export { trackingIdChanged } from '../../core/telemetry/telemetry-logic';
  * `CockpitFacade#busy`), `live` (a stream exists — `CockpitFacade#live`), `engaged` (commandable
  * without ever having gone live — see this type's own note on the two "engaged"s below).
  * `cockpit.html` uses it to choose between the idle/starting dock card and nothing (the S3/S4
- * on-video row is `fly-hud.html`'s own zone, gated on this same value being `'live'`/`'engaged'`);
- * `CockpitFacade#preflightCollapsed` uses it to decide when ground-check time is over.
+ * on-video row is `fly-hud.html`'s own zone, gated on this same value being `'live'`/`'engaged'`).
  */
 export type FlyStage = 'idle' | 'starting' | 'live' | 'engaged';
 
@@ -364,6 +364,25 @@ export function positionLabel(position: GeoPosition | undefined): string | undef
     return undefined;
   }
   return `${position.latitude.toFixed(4)}, ${position.longitude.toFixed(4)}`;
+}
+
+/**
+ * The idle/starting dock card's own one-line pre-flight summary (docs/plans/active/FLY-FLOW-PLAN.md
+ * §4 W4 item 3b — the floating `.main-preflight` chip left the video stage entirely this wave; this
+ * quiet line is what stays behind on the card so pre-flight is still visible before the operator ever
+ * opens the connect-ritual modal, per the owner's own words: *"pre-flight should be visible
+ * pre-flight ... but not as a separate [module]"*). A thin wrapper over
+ * `flight-state-logic.ts#preflightSummary`'s own worst-state-wins rollup — read exactly the way the
+ * (still-alive, still-reused-in-the-modal) `<vision-preflight-checklist>` head already reads it.
+ *
+ * The owner's own two example strings were `'Pre-flight: N unchecked'`/`'Pre-flight complete'`, but a
+ * `'fail'` summary (a real blocker, e.g. a low battery or no GPS fix) is never folded into the softer
+ * "unchecked" word — CLAUDE.md rule 9's "never fabricate/soften an honest reading" applies here just
+ * as much as to any other chip in this app: a `'fail'` summary keeps `preflightSummary`'s own
+ * `label` ("2 blockers"), just prefixed the same way `'unknown'` is.
+ */
+export function dockPreflightSummaryLabel(summary: PreflightSummary): string {
+  return summary.state === 'ok' ? 'Pre-flight complete' : `Pre-flight: ${summary.label}`;
 }
 
 /** One rendered fact — `dt`/`dd` register a `<dl class="picker-card-facts">` row needs: `mono` for

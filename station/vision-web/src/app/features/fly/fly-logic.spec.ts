@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { AssetSummary, AssetUsage, GeoPosition, Membership, Role } from '../../core/api/models';
+import type { PreflightSummary } from '../../core/telemetry/flight-state-logic';
 import {
   ALL_DRONES_OPTION_VALUE,
   REPLAY_PICKER_MAX_USAGES,
+  dockPreflightSummaryLabel,
   earlierReplayableUsages,
   flyStage,
   isAllDronesOption,
@@ -296,6 +298,24 @@ describe('positionFact (docs/plans/active/OPERATOR-UX-4-PLAN.md finding 1, this 
   it('formats a real fix in the mono numeric register, reusing positionLabel', () => {
     const position: GeoPosition = { latitude: 37.774929, longitude: -122.419416, altitudeMeters: 120 };
     expect(positionFact(position)).toEqual({ value: '37.7749, -122.4194', mono: true });
+  });
+});
+
+function summary(partial: Partial<PreflightSummary>): PreflightSummary {
+  return { ok: 5, fail: 0, unknown: 0, state: 'ok', label: 'All clear', ...partial };
+}
+
+describe('dockPreflightSummaryLabel (docs/plans/active/FLY-FLOW-PLAN.md §4 W4 item 3b — the idle dock card\'s own quiet pre-flight line)', () => {
+  it('reads "Pre-flight complete" once every row clears', () => {
+    expect(dockPreflightSummaryLabel(summary({ state: 'ok', label: 'All clear' }))).toBe('Pre-flight complete');
+  });
+
+  it('reads "Pre-flight: N unchecked" while rows are still resolving, the owner\'s own example wording', () => {
+    expect(dockPreflightSummaryLabel(summary({ state: 'unknown', unknown: 2, label: '2 unchecked' }))).toBe('Pre-flight: 2 unchecked');
+  });
+
+  it('never softens a real blocker into "unchecked" — a fail summary keeps its own blocker count', () => {
+    expect(dockPreflightSummaryLabel(summary({ state: 'fail', fail: 1, label: '1 blocker' }))).toBe('Pre-flight: 1 blocker');
   });
 });
 

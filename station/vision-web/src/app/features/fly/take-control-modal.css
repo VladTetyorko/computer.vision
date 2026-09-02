@@ -1,0 +1,147 @@
+/* The connect ritual (docs/plans/active/FLY-FLOW-PLAN.md §4 W4 item 2) — the identical backdrop/
+   dialog mechanics as `cv-setup-modal.css` (z-index: 150, `--scrim-strong` over the still-visible
+   video, a `--panel` card), per the plan's own "same family as the CV setup modal" instruction; see
+   that file's own doc comment for why this family, not `shared/ui/confirm-dialog.css`'s narrower
+   no-dismiss shape, is the right one here (backdrop-click/`Esc` losing nothing is the right default
+   for a dialog that holds no destructive/one-shot action of its own — declining to take control has
+   no consequence). `:host { display: contents }` keeps this component out of `fly-hud.html`'s own
+   layout, same convention every dialog component in this app already follows. */
+
+:host {
+  display: contents;
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 150;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-16);
+  background: var(--scrim-strong);
+}
+
+.dialog {
+  width: min(28rem, 100%);
+  max-height: calc(100vh - 2rem);
+  overflow-y: auto;
+  background: var(--panel);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: var(--space-16) var(--space-24);
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.dialog-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-16);
+}
+
+.dialog-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.tcm-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.tcm-section .label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: color-mix(in srgb, var(--text) 65%, transparent);
+}
+
+/* The checklist card reused verbatim inside this dialog — it self-applies `.surface-dark` (its own
+   doc comment), so it stays legible unchanged regardless of this dialog's own `--panel` (themed)
+   surface. `::ng-deep` reaches past its own view-encapsulation boundary to override its inner
+   `.checklist`'s hardcoded `width: 15rem` (the width that card owns when it floats free over the
+   video) — the same "reach into another component's own DOM" technique `cockpit.css`'s own
+   `.stage-video vision-player .frame` rule already documents, needed here because a plain, unscoped
+   selector from this component's own stylesheet can never match an element inside a *different*
+   component's template. `100%` here fills this dialog's own column instead of floating narrower than
+   its sibling section, with dead space beside it. */
+.tcm-section vision-preflight-checklist {
+  display: block;
+  width: 100%;
+}
+
+.tcm-section ::ng-deep .checklist {
+  width: 100%;
+}
+
+/* ---- "Control with" tiles — frontend-style §4's one selection language (2px left inset bar +
+   `--color-info-soft` tint), the identical recipe `features/controller/wizard-step.css`'s own
+   direction/rests tiles already use for the same "pick exactly one" shape. ---------------------- */
+
+.tiles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+}
+
+.tile {
+  flex: 1 1 8rem;
+  padding: var(--space-8) var(--space-16);
+  min-height: 2.5rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.85rem;
+  text-align: center;
+}
+
+.tile:hover:not(:disabled) {
+  background: var(--panel-hover);
+}
+
+.tile:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.tile.selected {
+  background: var(--color-info-soft);
+  border-color: var(--color-info);
+  box-shadow: inset 2px 0 0 0 var(--color-info);
+  font-weight: 600;
+}
+
+.tcm-denied {
+  margin: 0;
+}
+
+.tcm-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+@media (max-width: 640px) {
+  /* --bp-sm — large touch targets, full-width stacked actions rather than a cramped row. */
+  .backdrop {
+    padding: var(--space-8);
+  }
+
+  .dialog {
+    width: 100%;
+    padding: var(--space-16);
+  }
+
+  .tcm-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

@@ -17,7 +17,6 @@ import { FlyOsd } from './fly-osd';
 import { FailsafeBanner } from './failsafe-banner';
 import { GroundedBanner } from './grounded-banner';
 import { GroundingStore } from './grounding-store';
-import { PreflightChecklist } from '../../shared/ui/preflight-checklist';
 import { DiagnosticsCard } from './diagnostics-card';
 import { ReturnHomeButton } from '../../shared/ui/return-home-button';
 import { CvControlPanel } from './cv-control-panel';
@@ -97,7 +96,6 @@ type CockpitDialog = 'stop' | 'cv-setup';
     FlyOsd,
     FailsafeBanner,
     GroundedBanner,
-    PreflightChecklist,
     DiagnosticsCard,
     ReturnHomeButton,
     CvControlPanel,

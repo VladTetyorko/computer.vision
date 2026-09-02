@@ -122,6 +122,14 @@
                 <p class="mono">{{ position }}</p>
                 <a class="muted hint" routerLink="/command">Open on map ›</a>
               }
+              <!-- The idle/starting dock card's own quiet pre-flight line (docs/plans/active/
+                   FLY-FLOW-PLAN.md §4 W4 item 3b) — the only place pre-flight shows before the
+                   connect-ritual modal is ever opened, now that `.main-preflight`'s floating chip is
+                   gone. Hidden in watch mode, same gate `showPreflightChecklist` used to apply, since a
+                   watcher has no ritual to open and nothing to act on here. -->
+              @if (!facade.watchMode()) {
+                <p class="muted hint">{{ facade.preflightDockSummary() }}</p>
+              }
               @if (!facade.watchMode()) {
                 <button
                   type="button"
@@ -226,15 +234,17 @@
         </div>
       </div>
 
-      <!-- ---- Left column (docs/plans/active/FLY-FLOW-PLAN.md §4 W2, D4) — ONE flex column, bottom-left
-           of `.grid-main`, `flex-direction: column-reverse` so DOM order reads bottom-up exactly like
-           the stack visually does: secondary tiles (bottom) → map inset → pre-flight checklist → the
-           events ticker overlay (top). A real `gap` between whichever of these actually render — no
-           more three independent absolutes each carrying its own approximate `calc(... + --space-64)`
-           offset guessing at its neighbor's height. `column-reverse` also means the ticker (the one
-           transient, size-changing member) only ever grows/shrinks the stack's *top* edge — the three
-           persistent items below it stay anchored to this column's own fixed `bottom`, never jump
-           position as events come and go. -->
+      <!-- ---- Left column (docs/plans/active/FLY-FLOW-PLAN.md §4 W2, D4; member list revised by §4 W4 —
+           the pre-flight checklist that used to sit here moved into the connect-ritual modal, see
+           `fly-hud.ts`'s own doc comment) — ONE flex column, bottom-left of `.grid-main`,
+           `flex-direction: column-reverse` so DOM order reads bottom-up exactly like the stack visually
+           does: secondary tiles (bottom) → map inset (honest slot: Leaflet once a fix exists, else a
+           placeholder — §4 W4 item 1) → the events ticker overlay (top). A real `gap` between whichever
+           of these actually render — no more independent absolutes each carrying its own approximate
+           `calc(... + --space-64)` offset guessing at its neighbor's height. `column-reverse` also means
+           the ticker (the one transient, size-changing member) only ever grows/shrinks the stack's *top*
+           edge — the persistent items below it stay anchored to this column's own fixed `bottom`, never
+           jump position as events come and go. -->
       <div class="main-left">
         <!-- ---- Secondary video-device tiles ------------------------------------------------------ -->
         @if (facade.secondaryDevices().length > 0) {
@@ -260,43 +270,34 @@
         <!-- ---- Map inset (M, or the header's own map-toggle button, docs/conclusions/MAP-UX-RESEARCH.md M5) —
              a separate persisted toggle, not a drawer (docs/plans/done/UI-REDESIGN-PLAN.md D-D:
              "glanceable, not a modal drawer"); hidden entirely below `--bp-md` (900px, cockpit.css)
-             regardless of this toggle's own state. Additionally gated on `facade.hasKnownPosition()`
-             (docs/plans/active/FLY-FLOW-PLAN.md §4 W2, D5) — without a real fix the map would only ever
-             render world-zoomed on Null Island, "pure noise, answers nothing". -->
-        @if (facade.mapVisible() && facade.hasTelemetryDevice() && facade.hasKnownPosition()) {
+             regardless of this toggle's own state. The world-zoomed-empty-Leaflet ban stays in force
+             (docs/plans/active/FLY-FLOW-PLAN.md §4 W2, D5 — without a real fix the map would only ever
+             render world-zoomed on Null Island, "pure noise, answers nothing") but the *slot* itself no
+             longer disappears without one: FLY-FLOW-PLAN.md §4 W4 item 1 ("the header map-toggle must
+             never look dead") splits `facade.hasKnownPosition()` off the outer `@if` and into an inner
+             `@if`/`@else` — the toggle stays visibly connected to *something* the instant it's on,
+             a themed placeholder card standing in for Leaflet until this drone actually reports a fix. -->
+        @if (facade.mapVisible() && facade.hasTelemetryDevice()) {
           <div class="main-map">
-            <vision-tactical-map
-              [assets]="facade.mapAssets()"
-              [followAssetId]="facade.mapFollowAssetId()"
-              [zones]="facade.geofence.zones()"
-              [marks]="facade.marks.displayMarks()"
-              [drawings]="facade.drawings.displayDrawings()"
-              [layers]="facade.layers.layers()"
-              [corrections]="facade.mapCorrections()"
-              [interactionMode]="facade.interactionMode()"
-              [selectedMarkId]="facade.marks.selectedMarkId()"
-              (markSelected)="facade.marks.select($event)"
-              (mapClicked)="facade.marks.handleMapClick($event)"
-              (drawingCompleted)="facade.completeDrawing($event)"
-              (drawingSelected)="facade.selectDrawing($event)"
-            />
-          </div>
-        }
-
-        <!-- ---- Pre-flight checklist (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — ground-check only: hidden
-             in watch mode, and once the FC itself confirms armed. Collapsible per direct user request:
-             open before the stream starts, collapsed to its summary head once the dock reaches
-             `live`/`engaged` (the video stage, or a telemetry-only commandable session, owns that
-             space then), re-openable by clicking the head — the state itself is
-             `CockpitFacade#preflightCollapsed`'s job, see that signal's own doc comment. -->
-        @if (facade.showPreflightChecklist()) {
-          <div class="main-preflight">
-            <vision-preflight-checklist
-              [items]="facade.preflightItems()"
-              [collapsible]="true"
-              [collapsed]="facade.preflightCollapsed()"
-              (collapsedChange)="facade.preflightCollapsed.set($event)"
-            />
+            @if (facade.hasKnownPosition()) {
+              <vision-tactical-map
+                [assets]="facade.mapAssets()"
+                [followAssetId]="facade.mapFollowAssetId()"
+                [zones]="facade.geofence.zones()"
+                [marks]="facade.marks.displayMarks()"
+                [drawings]="facade.drawings.displayDrawings()"
+                [layers]="facade.layers.layers()"
+                [corrections]="facade.mapCorrections()"
+                [interactionMode]="facade.interactionMode()"
+                [selectedMarkId]="facade.marks.selectedMarkId()"
+                (markSelected)="facade.marks.select($event)"
+                (mapClicked)="facade.marks.handleMapClick($event)"
+                (drawingCompleted)="facade.completeDrawing($event)"
+                (drawingSelected)="facade.selectDrawing($event)"
+              />
+            } @else {
+              <div class="main-map-placeholder">No position yet — the map follows this drone once it reports a fix.</div>
+            }
           </div>
         }
 
@@ -405,6 +406,7 @@
         [operatorEngaged]="facade.operatorEngaged()"
         [sessionBusy]="facade.sessionBusy()"
         [groundedReason]="facade.groundedReason()"
+        [preflightItems]="facade.preflightItems()"
         [rcPanelOpen]="isPanelOpen('rc')"
         [stage]="facade.stage()"
         (closeRcPanel)="panels.close()"

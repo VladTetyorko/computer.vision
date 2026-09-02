@@ -1,19 +1,19 @@
 <!-- Bottom-center zone (docs/plans/active/FLY-FLOW-PLAN.md §3/§4 W1, superseding FLY-CONTROL-UX-PLAN.md
-     §3's own "pills always visible" call by direct owner request) — gated on `stage()` (`fly-logic.ts`)
-     rather than mounting unconditionally: at `idle`/`starting` this whole zone is silent, ceding the
-     one bottom-center anchor to `cockpit.html`'s own `.dock` (its "why `stage()` can't fully unify the
-     two" note explains why this is a second `@if` against the identical value rather than one shared
-     template). At `live`, one row: the at-rest badge, Take-control, and the collapsed source control —
-     three separate pills folded into a single HUD-styled `<select>` (D-scan finding: three always-on
-     buttons for a choice made once per session and then frozen was worse than a compact picker). At
-     `engaged`, the live input widget + Release pill — "unchanged" per §4 S4 — plus the identical
-     source control, now disabled: `sourceChoiceLocked()` is exactly as true here as mid-handshake, and
-     showing what is actually driving the vehicle right up until Release is worth the one extra glyph,
-     not a reason to hide the control the "same lock rule" sentence above is describing. -->
+     §3's own "pills always visible" call by direct owner request; at-rest content revised again by
+     FLY-FLOW-PLAN.md §4 W4) — gated on `stage()` (`fly-logic.ts`) rather than mounting unconditionally:
+     at `idle`/`starting` this whole zone is silent, ceding the one bottom-center anchor to
+     `cockpit.html`'s own `.dock` (its "why `stage()` can't fully unify the two" note explains why this
+     is a second `@if` against the identical value rather than one shared template). At `live`, one row:
+     the at-rest badge and Take-control — "nothing else" (W4 owner review; the source picker that used
+     to sit here at rest now lives inside `<vision-take-control-modal>`, see `fly-hud.ts`'s own doc
+     comment's "connect ritual" section). At `engaged`, the live input widget + Release pill —
+     "unchanged" per §4 S4 — plus the source control, now disabled: `sourceChoiceLocked()` is exactly as
+     true here as mid-handshake, and showing what is actually driving the vehicle right up until Release
+     is worth the one extra glyph. -->
 @if (stage() === 'live' || stage() === 'engaged') {
-  <!-- `.at-rest` (FLY-FLOW-PLAN.md §3 S3 "dock collapses to one row"): badge · Take control ·
-       source read as one horizontal row while nothing is engaged; the engaged widget keeps the
-       column stack (widget row above, Release + source below). -->
+  <!-- `.at-rest` (FLY-FLOW-PLAN.md §3 S3 "dock collapses to one row"): badge · Take control read as
+       one horizontal row while nothing is engaged; the engaged widget keeps the column stack (widget
+       row above, Release + source below). -->
   <div class="hud-bottom-center" [class.at-rest]="client.state() !== 'engaged'">
     @if (client.state() === 'engaged') {
       <div class="hud-widget">
@@ -54,6 +54,21 @@
         }
       </div>
       <button type="button" class="hud-pill release" (click)="release()">Release</button>
+
+      <!-- Engaged-only source readout — see this file's own top comment for why this pill survives
+           here while its at-rest twin was deleted for W4. -->
+      <label class="hud-pill source-select" title="Input source — frozen for the life of a session">
+        <select
+          aria-label="Input source"
+          [disabled]="sourceChoiceLocked()"
+          [value]="source.kind()"
+          (change)="selectSource($any($event.target).value)"
+        >
+          <option value="virtual">On-screen</option>
+          <option value="gamepad">Transmitter</option>
+          <option value="keyboard">Keys</option>
+        </select>
+      </label>
     } @else {
       <span
         class="hud-badge"
@@ -67,27 +82,28 @@
       <button
         type="button"
         class="hud-pill primary take-control"
-        [disabled]="engageDisabled()"
-        [title]="disabledReason() ?? 'Take control — your selected input source drives this drone'"
-        (click)="requestEngage()"
+        [disabled]="openDisabled()"
+        [title]="openDisabledReason() ?? 'Take control — choose an input source and start'"
+        (click)="openTakeControl()"
       >
         {{ client.state() === 'engaging' ? 'Engaging…' : 'Take control' }}
       </button>
     }
-
-    <label class="hud-pill source-select" title="Input source — frozen for the life of a session">
-      <select
-        aria-label="Input source"
-        [disabled]="sourceChoiceLocked()"
-        [value]="source.kind()"
-        (change)="selectSource($any($event.target).value)"
-      >
-        <option value="virtual">On-screen</option>
-        <option value="gamepad">Transmitter</option>
-        <option value="keyboard">Keys</option>
-      </select>
-    </label>
   </div>
+}
+
+<!-- The connect ritual (docs/plans/active/FLY-FLOW-PLAN.md §4 W4 item 2) — mounted only while open;
+     inherits this component's own RC provider stack (see this class's own doc comment). Sits as a
+     sibling of the zones above rather than nested inside either `@if`, matching the "stage-level
+     dialog" placement `cockpit.html`'s own `<vision-cv-setup-modal>` mount already uses. -->
+@if (takeControlOpen()) {
+  <vision-take-control-modal
+    [assetId]="assetId()"
+    [canCommand]="canCommand()"
+    [preflightItems]="preflightItems()"
+    (closed)="closeTakeControl()"
+    (confirmed)="confirmTakeControl($event)"
+  />
 }
 
 <!-- Bottom-right zone — Arm/Disarm (`flight-command-panel.html`'s own `.hud-arm-zone` is what this

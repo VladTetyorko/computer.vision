@@ -311,9 +311,10 @@ export interface PreflightSummary {
 }
 
 /**
- * Rolls `derivePreflight`'s rows up into the single line the checklist card shows once it collapses
- * (the cockpit collapses it the moment the stream starts — see `cockpit-facade.ts`'s own
- * `preflightCollapsed`). Deliberately pessimistic, the same poka-yoke rule every row itself follows:
+ * Rolls `derivePreflight`'s rows up into the single line `<vision-preflight-checklist>`'s own
+ * collapsed header shows, and (docs/plans/active/FLY-FLOW-PLAN.md §4 W4) what `cockpit-facade.ts#
+ * preflightDockSummary`/`fly-logic.ts#dockPreflightSummaryLabel` reuse for the idle dock card's own
+ * quiet pre-flight line. Deliberately pessimistic, the same poka-yoke rule every row itself follows:
  * one `'fail'` makes the whole summary `'fail'`, and any remaining `'unknown'` keeps it `'unknown'`
  * — a collapsed card never reads `All clear` while a reading is still missing.
  */

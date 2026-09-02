@@ -1,0 +1,72 @@
+<div class="backdrop" role="dialog" aria-modal="true" aria-label="Take control" (click)="closed.emit()">
+  <div class="dialog card" (click)="$event.stopPropagation()">
+    <header class="dialog-head">
+      <h2>Take control</h2>
+      <button type="button" class="btn secondary small" (click)="closed.emit()" aria-label="Cancel">×</button>
+    </header>
+
+    <section class="tcm-section">
+      <vision-preflight-checklist [items]="preflightItems()" />
+    </section>
+
+    <section class="tcm-section">
+      <span class="label">Control with</span>
+      <div class="tiles" role="radiogroup" aria-label="Input source">
+        <button
+          type="button"
+          class="tile"
+          role="radio"
+          [attr.aria-checked]="selected() === 'virtual'"
+          [class.selected]="selected() === 'virtual'"
+          [disabled]="locked()"
+          (click)="choose('virtual')"
+        >
+          On-screen
+        </button>
+        <button
+          type="button"
+          class="tile"
+          role="radio"
+          [attr.aria-checked]="selected() === 'gamepad'"
+          [class.selected]="selected() === 'gamepad'"
+          [disabled]="locked()"
+          (click)="choose('gamepad')"
+        >
+          Transmitter
+        </button>
+        <button
+          type="button"
+          class="tile"
+          role="radio"
+          [attr.aria-checked]="selected() === 'keyboard'"
+          [class.selected]="selected() === 'keyboard'"
+          [disabled]="locked()"
+          (click)="choose('keyboard')"
+        >
+          Keys
+        </button>
+      </div>
+    </section>
+
+    <!-- Honest denial (docs/plans/active/FLY-FLOW-PLAN.md §4 W4 item 2: "denial reason renders inside
+         the modal, honest, never a silent spinner") — the same wording `fly-hud-logic.ts#
+         hudTransitionToast`'s own one-shot toast uses for the identical fact, so an operator who
+         missed the toast still reads the same sentence here. -->
+    @if (denied()) {
+      <p class="notice tcm-denied">Control denied — {{ client.deniedReason() ?? 'the vehicle refused control.' }}</p>
+    }
+
+    <div class="tcm-actions">
+      <button
+        type="button"
+        class="btn primary"
+        [disabled]="startDisabled()"
+        [title]="startDisabledReason() ?? 'Start control with the selected source'"
+        (click)="confirm()"
+      >
+        {{ engaging() ? 'Engaging…' : 'Start control' }}
+      </button>
+      <button type="button" class="btn secondary" (click)="closed.emit()">Cancel</button>
+    </div>
+  </div>
+</div>

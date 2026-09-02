@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, i
 import { Icon } from '../../shared/ui/icon';
 import { FlightCommandPanel } from './flight-command-panel';
 import { RcMonitor } from './rc-monitor';
+import { TakeControlModal } from './take-control-modal';
 import { RcInputService } from '../../core/rc/rc-input.service';
 import { VirtualRcInputService } from '../../core/rc/virtual-rc-input.service';
 import { KeyboardRcInputService } from '../../core/rc/keyboard-rc-input.service';
@@ -20,11 +21,14 @@ import {
   hudBadgeFor,
   hudElementsFrom,
   hudTransitionToast,
+  openTakeControlDisabledReason,
   sourceLocked,
   type HudElement,
+  type OpenTakeControlGateInput,
 } from '../../core/rc/fly-hud-logic';
 import { REST_VALUE, displayPercentFor, knobLeftPercent, knobTopPercent, padsFrom } from '../../core/rc/control-surface-logic';
 import type { FlightCapability, ManualControlChannelBinding } from '../../core/api/models';
+import type { PreflightItem } from '../../core/telemetry/flight-state-logic';
 import type { FlyStage } from './fly-logic';
 
 /**
@@ -62,42 +66,45 @@ import type { FlyStage } from './fly-logic';
  * signals (`activeProfile`/`transmitterChannelMap`/`normalizedChannelMap`) for its own rendering —
  * safe to duplicate, since a `computed()` with no side effect can never race another.
  *
- * <h2>Zones (§3's own contract)</h2>
- * Bottom-center: the input-source pills (`On-screen · Transmitter · Keys`), and beside them either
- * the at-rest badge + Take-control pill, or — once `client.state() === 'engaged'` — the live input
- * widget (bars/a 2D glyph/a keyboard key-glyph ticker) + a Release pill. Bottom-right: this
- * component's own `<vision-flight-command-panel>` (Arm/Disarm). The informational rail
- * (`<vision-rc-monitor>`) mounts only while `rcPanelOpen()` — this component forwards `close` as
- * {@link closeRcPanel} rather than owning the `UiStore` toggle itself, which stays `cockpit.ts`'s own
- * tool-rail concern (this component has no opinion on *where* the rail lives, only on what feeds it).
+ * <h2>Zones (§3's own contract, at-rest content revised by FLY-FLOW-PLAN.md §4 W4)</h2>
+ * Bottom-center, at rest: the badge and the Take-control pill — nothing else (docs/plans/active/
+ * FLY-FLOW-PLAN.md §4 W4 item 2, owner's own words: *"at rest the dock is `[badge] [Take control]` —
+ * nothing else"*). Once `client.state() === 'engaged'`: the live input widget (bars/a 2D glyph/a
+ * keyboard key-glyph ticker) + a Release pill, plus the locked source pill (unchanged — see this
+ * class's own "The connect ritual" section below for why that one pill survives while its at-rest
+ * twin doesn't). Bottom-right: this component's own `<vision-flight-command-panel>` (Arm/Disarm). The
+ * informational rail (`<vision-rc-monitor>`) mounts only while `rcPanelOpen()` — this component
+ * forwards `close` as {@link closeRcPanel} rather than owning the `UiStore` toggle itself, which stays
+ * `cockpit.ts`'s own tool-rail concern (this component has no opinion on *where* the rail lives, only
+ * on what feeds it).
  *
- * <h2>Contract friction, flagged rather than silently resolved (§0's own instruction)</h2>
- * §3's literal text for the at-rest zone is "ONE frosted 'Take control' pill + one commandable badge
- * ... Nothing else new on video." This component also renders the three input-source pills at rest,
- * **before** engaging — a deliberate deviation, not an oversight: {@link sourceLocked} freezes the
- * source choice for the life of a session (§3's own "the input choice is frozen ... swapping sticks
- * mid-flight is not a gesture this platform offers"), so if the picker only appeared after Take
- * Control there would be no way to ever pick anything but whatever `RcSource` happened to already be
- * selected. The alternative — leaving the picker only in the now-optional rail — would silently make
- * "which sticks do I fly with" undiscoverable without first opening a drawer the whole rest of this
- * wave is built to make optional. Three quiet pills, not three sentences, is judged the smaller
- * violation of "nothing else new" than a HUD an operator cannot actually configure before pressing
- * the one button that locks the choice in.
+ * <h2>The connect ritual (FLY-FLOW-PLAN.md §4 W4 item 2) — history, not just current state</h2>
+ * §3 (wave WEB1) originally wanted the at-rest zone bare — "ONE frosted 'Take control' pill + one
+ * commandable badge ... Nothing else new on video" — but that wave added the three input-source pills
+ * at rest anyway, flagged as a deliberate deviation: {@link sourceLocked} freezes the source choice
+ * the instant a handshake starts, so a picker that only appeared *after* Take Control would give the
+ * operator no way to ever choose anything but whatever `RcSource` already held. W4's owner review
+ * called that same always-on trio "overwhelming" and asked for a modal instead — so the pills are
+ * deleted again, this time for good, and {@link openTakeControl}/`<vision-take-control-modal>`
+ * (mounted below, `@if`-gated on {@link takeControlOpen}) now hold the picker: it opens *before* the
+ * handshake starts, closes the exact same gap WEB1's deviation existed to close, and does it without
+ * three pills sitting on the video at every rest frame. The engaged-state source pill is unaffected —
+ * that one shows what is actually driving the vehicle post-engage, a different fact from "what could I
+ * pick", and stays exactly as before.
  *
- * A second, related friction this component resolves rather than leaves broken: the on-screen
- * source's actual *draggable* stick surface (`vision-transmitter-view`'s `[interactive]` mode) still
- * lives only inside `<vision-rc-monitor>` — §3 describes the HUD's own engaged widget as a read-only
- * live *readout* ("bars/glyphs"), never a drag target, and building a second interactive surface
- * directly on the video is explicitly not this wave's scope. Left alone, an operator who picks
- * "On-screen" and never opens the rail would have selected a source with no way to actually move it.
- * {@link selectSource} closes that gap the cheap way: choosing `'virtual'` also emits
- * {@link openRcPanel}, so picking the on-screen source opens the one place it can actually be driven
- * from. This is new behavior beyond §3's literal text, called out here explicitly per this wave's own
- * "flag, don't silently resolve" instruction.
+ * A second friction, unrelated to the modal and still live: the on-screen source's actual *draggable*
+ * stick surface (`vision-transmitter-view`'s `[interactive]` mode) lives only inside
+ * `<vision-rc-monitor>` — §3 describes the HUD's own engaged widget as a read-only live *readout*
+ * ("bars/glyphs"), never a drag target, and building a second interactive surface directly on the
+ * video is out of scope for either wave. Left alone, an operator who confirms "On-screen" in the modal
+ * and never opens the rail would have selected a source with no way to actually move it.
+ * {@link selectSource} closes that gap the cheap way, unchanged since WEB1: choosing `'virtual'` also
+ * emits {@link openRcPanel} — now reached via {@link confirmTakeControl} rather than a pill's own
+ * click, same side effect either way.
  */
 @Component({
   selector: 'vision-fly-hud',
-  imports: [Icon, FlightCommandPanel, RcMonitor],
+  imports: [Icon, FlightCommandPanel, RcMonitor, TakeControlModal],
   templateUrl: './fly-hud.html',
   styleUrl: './fly-hud.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -131,20 +138,27 @@ export class FlyHud implements OnInit {
    * `input()`, not read from a facade injected here: this component has no dependency on
    * `CockpitFacade` today (its own inputs are already the full contract with `cockpit.ts`), and
    * `client.state()` — this component's *other* notion of "engaged" — lives in this component's own
-   * injector, not the facade's, so the two can never be unified into one signal anyway (see this
-   * class's own doc comment's "Contract friction" section for the general shape of that mismatch). */
+   * injector, not the facade's, so the two can never be unified into one signal anyway (see
+   * `fly-logic.ts#flyStage`'s own doc comment, "the two 'engaged's are not the same thing, on
+   * purpose", for the general shape of that mismatch). */
   readonly stage = input<FlyStage>('idle');
   /** `GroundingStore.groundedReason` (docs/plans/active/ASSET-FLOWS-PLAN.md §2 "S1 gate semantics") —
    * forwarded straight through to `<vision-flight-command-panel>`, composed there with
    * {@link sticksNotNeutralReason} (grounding wins). */
   readonly groundedReason = input<string | undefined>(undefined);
+  /** `CockpitFacade#preflightItems` (docs/plans/active/FLY-FLOW-PLAN.md §4 W4 item 2a) — forwarded
+   * straight through to `<vision-take-control-modal>`, since this component has no `CockpitFacade` of
+   * its own (see this class's own doc comment). `[]` before the facade's first telemetry read
+   * resolves; `<vision-preflight-checklist>` already renders that honestly (every row `'unknown'`,
+   * never fabricated). */
+  readonly preflightItems = input<readonly PreflightItem[]>([]);
   /** `cockpit.ts`'s own `panels` `UiStore` — whether the informational rail is open. This component
    * owns no toggle of its own; it only reads whether to mount `<vision-rc-monitor>` and forwards its
    * `close`. */
   readonly rcPanelOpen = input<boolean>(false);
   readonly closeRcPanel = output<void>();
   /** Emitted when picking the on-screen source ought to open the rail — see this class's own doc
-   * comment's second "contract friction" section. */
+   * comment's "The connect ritual" section, second paragraph ("A second friction..."). */
   readonly openRcPanel = output<void>();
   readonly engageAssetLink = output<void>();
   readonly endAssetSession = output<void>();
@@ -182,14 +196,37 @@ export class FlyHud implements OnInit {
     gamepadConnected: this.rc.connected(),
     engageState: this.client.state(),
   }));
-  /** The Take-control pill's own poka-yoke reason (also its `title`) — `'Engaging…'` while a
-   * handshake is already in flight, which doubles as the pill's own busy-guard. */
-  protected readonly disabledReason = computed(() => engageDisabledReason(this.engageGate()));
-  protected readonly engageDisabled = computed(() => this.disabledReason() !== undefined);
+  /** {@link requestEngage}'s own internal poka-yoke guard, against the *committed* `source.kind()` —
+   * no longer the Take-control pill's own displayed reason (FLY-FLOW-PLAN.md §4 W4: see
+   * {@link openDisabledReason} below for that). Kept as defense-in-depth against a future direct
+   * caller of {@link requestEngage} that bypasses the connect-ritual modal entirely. */
+  private readonly disabledReason = computed(() => engageDisabledReason(this.engageGate()));
+  private readonly engageDisabled = computed(() => this.disabledReason() !== undefined);
 
-  /** §3's own "input choice is frozen for the life of a session" — the source pills lock the instant
-   * a handshake starts, not only once `engaged` (mirrors `fly-hud-logic.ts#sourceLocked`'s own doc
-   * comment: swapping mid-handshake is exactly as undoable as swapping mid-flight). */
+  /** The at-rest Take-control pill's own poka-yoke reason/title (FLY-FLOW-PLAN.md §4 W4 item 2) —
+   * `fly-hud-logic.ts#openTakeControlDisabledReason`'s own doc comment explains why this is a
+   * narrower gate than {@link disabledReason} above: it must never block on the *selected* source,
+   * since picking a different one is exactly what the modal this pill opens is for. */
+  private readonly openGate = computed<OpenTakeControlGateInput>(() => ({
+    canCommand: this.canCommand(),
+    engageState: this.client.state(),
+  }));
+  protected readonly openDisabledReason = computed(() => openTakeControlDisabledReason(this.openGate()));
+  protected readonly openDisabled = computed(() => this.openDisabledReason() !== undefined);
+
+  /** Whether `<vision-take-control-modal>` is mounted (`fly-hud.html`'s own `@if`) — see this class's
+   * own doc comment's "connect ritual" section. Closed automatically once the session actually
+   * reaches `engaged` (the constructor effect below); Cancel/scrim-click/`Esc`/the header "×" all
+   * close it early without touching any in-flight handshake (`take-control-modal.ts`'s own doc
+   * comment explains why closing is not a promise to abort). */
+  protected readonly takeControlOpen = signal(false);
+
+  /** §3's own "input choice is frozen for the life of a session" — the engaged-state source pill locks
+   * the instant a handshake starts, not only once `engaged` (mirrors `fly-hud-logic.ts#sourceLocked`'s
+   * own doc comment: swapping mid-handshake is exactly as undoable as swapping mid-flight). The
+   * connect-ritual modal keeps its own independent read of the identical function, scoped to its own
+   * in-progress {@link TakeControlModal.selected} rather than this component's committed
+   * `source.kind()` — see that class's own doc comment. */
   protected readonly sourceChoiceLocked = computed(() => sourceLocked(this.client.state()));
 
   // --- Engaged widget ------------------------------------------------------------------------------
@@ -252,6 +289,17 @@ export class FlyHud implements OnInit {
       }
       this.previousEngageState.set(to);
     });
+
+    // --- Connect-ritual auto-close (docs/plans/active/FLY-FLOW-PLAN.md §4 W4 item 2, "auto-closes once
+    // engaged") — lives beside the toast effect above since both watch the same `client.state()`
+    // transition; a `'denied'`/`'released'` result deliberately leaves the modal open so the operator
+    // reads the denial reason (`take-control-modal.html`'s own `@if (denied())` block) and can retry
+    // without re-opening the ritual from scratch. -----------------------------------------------------
+    effect(() => {
+      if (this.client.state() === 'engaged') {
+        this.takeControlOpen.set(false);
+      }
+    });
   }
 
   /** `rc.start()` moved here from `rc-monitor.ts` — see this class's own doc comment's "Lifecycle
@@ -262,6 +310,35 @@ export class FlyHud implements OnInit {
     // honestly (a bound switch simply does nothing) rather than as an error the operator can act on
     // from a HUD control.
     void this.profiles.load().catch(() => undefined);
+  }
+
+  /** Opens `<vision-take-control-modal>` (docs/plans/active/FLY-FLOW-PLAN.md §4 W4 item 2) — the at-rest
+   * pill's own click handler. Guarded on {@link openDisabled} the same way every other pill in this
+   * component guards its own action, even though the template also disables the button itself
+   * (defense-in-depth against a stray programmatic call). */
+  protected openTakeControl(): void {
+    if (this.openDisabled()) {
+      return;
+    }
+    this.takeControlOpen.set(true);
+  }
+
+  /** `<vision-take-control-modal>`'s own `(closed)` — see that class's own doc comment for why this
+   * never touches `client`/`source` (closing is not a promise to abort an in-flight handshake). */
+  protected closeTakeControl(): void {
+    this.takeControlOpen.set(false);
+  }
+
+  /** `<vision-take-control-modal>`'s own `(confirmed)` — reuses {@link selectSource}/{@link
+   * requestEngage} verbatim rather than duplicating the commit/engage sequence, so choosing "On-screen"
+   * still opens the informational rail exactly as it always has (this class's own doc comment's "The
+   * connect ritual" section, second paragraph). Does not itself close the modal — {@link requestEngage} drives
+   * `client.state()` to `'engaging'`, and the auto-close effect in the constructor above closes the
+   * modal once (and only once) that resolves to `'engaged'`; a denial leaves it open so the operator
+   * reads the reason in place. */
+  protected confirmTakeControl(kind: RcSourceKind): void {
+    this.selectSource(kind);
+    this.requestEngage();
   }
 
   protected requestEngage(): void {
@@ -281,7 +358,7 @@ export class FlyHud implements OnInit {
     }
     this.source.use(kind);
     if (kind === 'virtual') {
-      // See this class's own doc comment's second "contract friction" section.
+      // See this class's own doc comment's "The connect ritual" section, second paragraph.
       this.openRcPanel.emit();
     }
   }

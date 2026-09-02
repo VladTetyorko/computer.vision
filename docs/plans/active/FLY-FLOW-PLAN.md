@@ -140,3 +140,35 @@ separate [module]."*
    the stage. Pre-flight is visible (a) inside the connect modal per (2) and (b) as one quiet
    summary line on the idle dock card ("Pre-flight: N unchecked"). The engaged source pill (locked)
    stays; the at-rest source select is deleted.
+
+## Close-out — W4 (2026-09-02)
+
+| Wave | Result |
+|---|---|
+| W4 | Map slot split into `@if (mapVisible() && hasTelemetryDevice())` outer / `@if (hasKnownPosition())` inner (`cockpit.html`) — `<vision-tactical-map>` or a new `.main-map-placeholder` (`cockpit.css`, `--hud-*`, 220px), never neither; new 3-file `take-control-modal.{ts,html,css}` mounted inside `<vision-fly-hud>` (hierarchical DI, no new `@Input()` plumbing for `RcInputService`/`RcSource`/`ManualControlClient`), same overlay family as `cv-setup-modal`; at-rest dock reduced to `[badge] [Take control]`, the at-rest `.hud-pill.source-select` deleted (engaged-only twin kept); new `fly-hud-logic.ts#openTakeControlDisabledReason`/`OpenTakeControlGateInput` gate the outer pill narrower than the modal's own reused `engageDisabledReason`; `.main-preflight` deleted outright, replaced by the modal's checklist + a new `CockpitFacade#preflightDockSummary`/`fly-logic.ts#dockPreflightSummaryLabel` one-line dock summary; dead `CockpitFacade#showPreflightChecklist`/`preflightCollapsed` (no remaining caller) removed alongside |
+
+**Accepted contract deviations (flagged in the wave spec itself, now shipped):** the modal's Escape
+handling is a second, component-scoped `document` keydown listener rather than an extension of
+`cockpit.ts`'s single page-level listener/`collapseOverlays()` cascade — that cascade cannot see
+into `FlyHud`'s own component-scoped injector without a new `viewChild` + public method just for
+one key. Accepted narrow cosmetic cost: a tool-rail drawer left open behind this modal sees both
+listeners react to one `Esc` press. Cancel/backdrop/`Esc`/the header "×" only hide the modal, never
+call `client.release()` — closing is not a promise to abort an in-flight handshake, a deliberate
+scope-minimizing choice not asked for explicitly by the spec text.
+
+**Ambiguity resolved toward the least at-rest UI (this plan's own tie-break rule):** the modal's
+reused `<vision-preflight-checklist>` stays always-expanded (`collapsible` left at its own default
+`false`) rather than adding a new collapse affordance the spec's "interactive" wording didn't
+clearly request — read as descriptive of the checklist's existing live telemetry readout, not a
+request for new checkbox/toggle behavior (none exists on that component today, confirmed by
+reading it in full); the dock's new one-line summary never softens a real `'fail'` blocker into the
+spec's own "unchecked" example wording (CLAUDE.md rule 9) — a fail summary reads
+`'Pre-flight: N blockers'`, keeping `preflightSummary`'s own worst-state-wins label instead of the
+literal two example strings in the owner's feedback.
+
+**Residuals, deliberate:** same standing residual as W1-W3's own close-out — no live/SITL
+screenshot verification of the shipped modal/placeholder in both themes; the build+test chain is
+green and every new surface was checked against the token/HUD rules (frontend-style §§2/4) by
+inspection, not a live rendered screenshot. Dev parity unaffected: every signal this wave reads or
+gates on (`canCommand`, `client.state()`, `hasKnownPosition()`, telemetry) is identical to W1-W3's
+own set, none auth- or role-derived.

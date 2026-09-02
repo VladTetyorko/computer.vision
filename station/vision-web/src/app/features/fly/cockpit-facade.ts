@@ -1,4 +1,4 @@
-import { DestroyRef, Injectable, computed, effect, inject, linkedSignal, signal } from '@angular/core';
+import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet/fleet-store';
@@ -21,7 +21,7 @@ import { WeatherStore } from '../../core/weather/weather-store';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { videoDevices } from '../../core/fleet/device-logic';
 import { ageSeconds, humanAge, selectOpenUsage, telemetryDevices } from '../../core/telemetry/telemetry-logic';
-import { canCommandReturnHome, deriveDiagnostics, derivePreflight, flightBanner } from '../../core/telemetry/flight-state-logic';
+import { canCommandReturnHome, deriveDiagnostics, derivePreflight, flightBanner, preflightSummary } from '../../core/telemetry/flight-state-logic';
 import { capitalizeLabel, filterEvents, formatConfidence } from '../../core/events/events-logic';
 import { parseWindLimitMps } from '../../core/weather/weather-logic';
 import { AuthStore } from '../../core/auth/auth-store';
@@ -35,6 +35,7 @@ import { resolveDetectionEnabled, videoNotice } from './stream-state-logic';
 import {
   ALL_DRONES_OPTION_VALUE,
   TICKER_MAX_EVENTS,
+  dockPreflightSummaryLabel,
   earlierReplayableUsages,
   flyStage,
   isAllDronesOption,
@@ -329,7 +330,7 @@ export class CockpitFacade {
    * own doc comment for the priority order and for why its `'engaged'` is a different fact from
    * `fly-hud.ts`'s own `ManualControlClient.state() === 'engaged'`. `cockpit.html` reads this to
    * choose between the idle/starting dock card and nothing (the live/engaged row is `<vision-fly-
-   * hud>`'s own zone, gated on this same value); {@link preflightCollapsed} below reads it too.
+   * hud>`'s own zone, gated on this same value).
    */
   readonly stage = computed(() =>
     flyStage({
@@ -369,36 +370,16 @@ export class CockpitFacade {
     ),
   );
 
-  /** Pre-arm ground check — hidden once watch-mode drops the controls entirely, or once the FC
-   * itself confirms armed (the OSD chip bar is the live instrument from that point on). Within that
-   * window it is never hidden by the stream starting — it only *collapses*, see
-   * {@link preflightCollapsed}. */
-  readonly showPreflightChecklist = computed(() => {
-    if (this.watchMode()) {
-      return false;
-    }
-    const sample = this.telemetry.latest();
-    return sample === undefined || sample.flightState?.armed !== true;
-  });
+  /** The worst-state-wins rollup of {@link preflightItems} — same call
+   * `<vision-preflight-checklist>`'s own collapsed head already makes, promoted here (docs/plans/active/
+   * FLY-FLOW-PLAN.md §4 W4) so {@link preflightDockSummary} below and the connect-ritual modal's own
+   * checklist read one shared value rather than two independent calls that could drift. */
+  readonly preflightSummary = computed(() => preflightSummary(this.preflightItems()));
 
-  /**
-   * Whether the pre-flight card is collapsed to its one-line summary head (per direct user request:
-   * "appear before starting stream, and after that — collapse"). A `linkedSignal` over {@link stage},
-   * not a plain `computed`, so it does both jobs at once: the default re-derives on every stage
-   * transition — expanded through `idle`/`starting` (running the ground check *is* the operator's
-   * job at that moment), collapsed the instant the dock reaches `live`/`engaged` and the video stage
-   * (or, for a telemetry-only asset, the commandable session) becomes the thing worth the space —
-   * while the card's own head can still write to it for as long as that state lasts (an operator who
-   * re-opens the card mid-stream keeps it open until the stage itself drops back to `idle`/`starting`).
-   * Deliberately **not** persisted: this is a per-flight glance, not a remembered preference like the
-   * map inset.
-   *
-   * **Widened from `live()` alone** (docs/plans/active/FLY-FLOW-PLAN.md §4 W2): a telemetry-only
-   * asset that becomes commandable via `engageSession()` without ever streaming video used to leave
-   * this card expanded indefinitely (its own `live()` never flips) — `stage`'s `'engaged'` covers
-   * exactly that case, same reasoning as {@link stage}'s own doc comment.
-   */
-  readonly preflightCollapsed = linkedSignal(() => this.stage() === 'live' || this.stage() === 'engaged');
+  /** The idle/starting dock card's own one-line pre-flight fact (docs/plans/active/FLY-FLOW-PLAN.md §4
+   * W4 item 3b) — see `fly-logic.ts#dockPreflightSummaryLabel`'s own doc comment for the exact
+   * wording rule. */
+  readonly preflightDockSummary = computed(() => dockPreflightSummaryLabel(this.preflightSummary()));
 
   /** docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e — same `TelemetryStore.latest()` sample every OSD chip
    * already reads; `deriveDiagnostics` itself omits every row whose keys aren't in `extra`. */
