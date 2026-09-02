@@ -16,6 +16,12 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @Value} rather than this record (vision-api may not depend on vision-app) — see that class's own
  * javadoc; both readers stay in sync because they read the identical property key.
  *
+ * <p>{@code vision.rc.engage-slow-threshold-ms} (FLY-CONTROL-UX-PLAN.md H1) is the one {@code
+ * vision.rc.*} key that deliberately has <b>no</b> field here: it bounds only {@code
+ * ManualControlWebSocketHandler}'s own {@code engage()}-duration log escalation (WARNING once
+ * reached, DEBUG below it), a vision-api-local concern this record has nothing to do with sizing or
+ * wiring — see that class's own {@code @Value} constructor parameter and javadoc.
+ *
  * <p>{@link #overrideHz()}/{@link #minOverrideHz()}/{@link #maxOverrideHz()}/{@link
  * #releaseFrames()} map onto {@code com.drones.vision.adapter.mavlink.MavlinkSettings.Rc}, threaded
  * into {@code MavlinkManualControlSender}'s constructor by {@code wiring.TelemetryWiring} — every

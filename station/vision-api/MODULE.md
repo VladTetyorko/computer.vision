@@ -225,6 +225,33 @@ distinct, operator-facing sentences (`vision-flight`'s `UnidentifiedReason`-keye
 sniffed or rewritten here. `ManualControlDeniedFrame.code` is a plain `String`, not a closed enum, so
 this needed no wire-contract/DTO change at all.
 
+**FLY-CONTROL-UX H1 — catch-all denial + engage-duration instrumentation.** Traced from a real
+report ("Control denied — the station never confirmed control"): `docs/plans/active/fly-control-ux/R3-handshake-denial.md`
+proved this is a client-local 4s abandon (`ManualControlClient`'s `ENGAGE_TIMEOUT_MS`) that fires
+only when *neither* an `engaged` nor a `denied` frame arrives, and that `engage()`'s whole path
+(`DefaultManualControlService` → `MavlinkManualControlSender` → `mavlink-core`'s
+`ManualControlService`) is local and ack-less — no vehicle round-trip exists to be slow, so a
+firing timeout is always a station fault. `handleEngage` now has a fourth, final
+`catch (RuntimeException e)` after the three documented types (`AccessDeniedException`/
+`VehicleUnidentifiedException`/`IllegalStateException`) — it logs WARNING with the full stack trace
+and still answers `denied` with the additive code `INTERNAL_ERROR`, a generic operator-facing
+sentence plus the exception's simple class name **only** (never its message, which could leak
+internals). This closes the one gap R3's trace could not rule out (an uncaught type — e.g. a plain
+`NoSuchElementException` from an unknown `assetId`, which `AssetService#details` throws and none of
+the three documented types cover) and guarantees `handleEngage` never returns without a reply on an
+open socket; the `engaged` response DTO is now built *before* `state.session` is assigned, so a
+failure composing it cannot leave local state claiming a session the client was told was denied.
+Every `engage` attempt's wall time is also measured and logged — WARNING once it reaches
+`vision.rc.engage-slow-threshold-ms` (default 2000, read via `@Value`, vision-app's `application.yaml`
+documents the same default), DEBUG otherwise — so a real "never confirmed" report is diagnosable from
+this station's own log instead of a bisect. Blocking audit (read-only, no bound added): every step
+under `engage()` — scope/readiness/maintenance checks (DB-backed, no live link, per
+`DefaultManualControlService`'s own javadoc), `MavlinkManualControlSender.engage` (a map read plus a
+non-blocking `ManualControlService(mavlink-core).engage`, which only checks `PeerDirectory` and calls
+`TxScheduler.repeat` — itself a non-blocking `ScheduledExecutorService.scheduleAtFixedRate`) — was
+traced and found to contain no wait, sleep, or socket read that could approach 4s; no bound was added
+because none was needed.
+
 ### Error mapping (`ApiExceptionHandler`, body `{"error","message"}`)
 
 | Exception | Status | code |
@@ -714,3 +741,19 @@ built from" fixture.
 duplicated; the module's total moved from the 949 documented at BK4 to 951 from other concurrently-landed
 waves on this shared branch, not from this one). Docker not needed for this module. Also green in the
 same session: `station/vision-app` **326** (see that module's own MODULE.md entry). Nothing deferred.
+
+**FLY-CONTROL-UX-PLAN wave H1 done.** See "Live updates"/`/ws/manual-control` above for the catch-all
+denial + engage-duration instrumentation this wave added, and `docs/plans/active/fly-control-ux/R3-handshake-denial.md`
+for the trace that motivated it plus its own appended "Firmware note" (read-only rover-sim/firmware
+finding: F4's learned-peer authority gate also silently drops `RC_CHANNELS_OVERRIDE` from a second
+source, confirmed by reading the real sketch at `~/Arduino/ardupoilot-start/MavlinkUdpLink.cpp`
+outside this repo — no firmware file touched). Blocking audit found no wait/sleep/socket-read
+anywhere under `engage()` that could approach the web client's 4s abandon, so **no bound was added**
+in `drone-link/mavlink` or `contexts/vision-flight` — neither module was touched this wave.
+`ManualControlWebSocketHandlerTest` gained 3 new cases (14 → 17): unexpected-exception →
+`INTERNAL_ERROR` denied frame + WARNING log with stack trace (and that the exception's own message
+never reaches the client), a `NoSuchElementException` (unknown asset) instance of the same gap, and a
+0ms-threshold smoke test proving the duration log actually escalates to WARNING.
+`./mvnw -B -pl station/vision-api -am test` — **954** tests, 0 failures, 0 errors (951 → 954, +3, all
+new; nothing else changed). Docker not needed. `drone-link/mavlink`/`contexts/vision-flight` gates not
+run — this wave changed no file in either module.

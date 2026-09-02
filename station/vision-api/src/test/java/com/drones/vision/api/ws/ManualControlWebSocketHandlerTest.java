@@ -36,6 +36,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -51,6 +54,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class ManualControlWebSocketHandlerTest {
 
     private static final long WATCHDOG_TIMEOUT_MS = 300L;
+    private static final long ENGAGE_SLOW_THRESHOLD_MS = 2000L;
 
     private final JsonMapper jsonMapper = new JsonMapper();
     private FakeManualControlService service;
@@ -60,7 +64,7 @@ class ManualControlWebSocketHandlerTest {
     @BeforeEach
     void setUp() {
         service = new FakeManualControlService();
-        handler = new ManualControlWebSocketHandler(service, WATCHDOG_TIMEOUT_MS);
+        handler = new ManualControlWebSocketHandler(service, WATCHDOG_TIMEOUT_MS, ENGAGE_SLOW_THRESHOLD_MS);
         session = new FakeWebSocketSession();
         session.getAttributes().put(ManualControlHandshakeInterceptor.ATTR_USER_ID, UserId.random());
         session.getAttributes().put(ManualControlHandshakeInterceptor.ATTR_SCOPE, VisibilityScope.unbounded());
@@ -224,6 +228,109 @@ class ManualControlWebSocketHandlerTest {
                 "a gimbal on the link and an unsupported airframe must not read as the same refusal");
         assertNotEquals(notAVehicleReason, neverIdentifiedReason);
         assertNotEquals(unsupportedReason, neverIdentifiedReason);
+    }
+
+    /**
+     * FLY-CONTROL-UX H1: the catch-all that closes the one gap
+     * docs/plans/active/fly-control-ux/R3-handshake-denial.md could not rule out -- an exception type
+     * {@link ManualControlService#engage} does not document must still get an honest {@code denied}
+     * reply (never silence, which is what let the web client's own 4s {@code ENGAGE_TIMEOUT_MS} fire
+     * and misreport a station fault as "the station never confirmed control"), and must be logged
+     * with its stack trace for diagnosis, without leaking the exception's own message to the client.
+     */
+    @Test
+    void engageUnexpectedExceptionSendsInternalErrorDeniedFrameAndLogsWarningWithStackTrace() throws Exception {
+        service.nextEngageFailure = new IllegalArgumentException("boom -- not one of the three documented types");
+        handler.afterConnectionEstablished(session);
+
+        List<LogRecord> records = captureLogRecords(() -> handler.handleMessage(session, engageFrame(AssetId.random())));
+
+        JsonNode denied = lastFrame();
+        assertEquals("denied", denied.get("type").asString());
+        assertEquals("INTERNAL_ERROR", denied.get("code").asString());
+        assertTrue(denied.get("reason").asString().contains("IllegalArgumentException"),
+                "the client-facing reason should name the exception class: " + denied.get("reason").asString());
+        assertFalse(denied.get("reason").asString().contains("boom"),
+                "the exception's own message must never reach the client: " + denied.get("reason").asString());
+        assertTrue(records.stream().anyMatch(r -> r.getLevel() == Level.WARNING && r.getThrown() instanceof IllegalArgumentException),
+                "expected a WARNING log record carrying the exception (with stack trace)");
+    }
+
+    /**
+     * A {@link java.util.NoSuchElementException} (e.g. an unknown {@code assetId}, per
+     * {@code DefaultManualControlService#engage}'s own javadoc) is one concrete instance of the same
+     * gap the test above covers with a synthetic exception -- neither {@link AccessDeniedException},
+     * {@link VehicleUnidentifiedException} nor {@link IllegalStateException} names it.
+     */
+    @Test
+    void engageUnknownAssetSurfacesAsInternalErrorRatherThanSilence() throws Exception {
+        service.nextEngageFailure = new java.util.NoSuchElementException("no asset with that id");
+        handler.afterConnectionEstablished(session);
+
+        handler.handleMessage(session, engageFrame(AssetId.random()));
+
+        JsonNode denied = lastFrame();
+        assertEquals("denied", denied.get("type").asString());
+        assertEquals("INTERNAL_ERROR", denied.get("code").asString());
+    }
+
+    /**
+     * Engage-duration instrumentation smoke test (FLY-CONTROL-UX H1): a handler configured with a
+     * 0ms slow-engage threshold must escalate even a fast, successful engage to WARNING, naming the
+     * outcome -- proving the duration measurement actually wraps the {@code engage()} call rather
+     * than being dead code.
+     */
+    @Test
+    void engageDurationEscalatesToWarnOnceItReachesTheConfiguredSlowThreshold() throws Exception {
+        ManualControlWebSocketHandler zeroThresholdHandler =
+                new ManualControlWebSocketHandler(service, WATCHDOG_TIMEOUT_MS, 0L);
+        zeroThresholdHandler.afterConnectionEstablished(session);
+
+        List<LogRecord> records =
+                captureLogRecords(() -> zeroThresholdHandler.handleMessage(session, engageFrame(AssetId.random())));
+
+        assertTrue(records.stream().anyMatch(r -> r.getLevel() == Level.WARNING
+                        && r.getMessage() != null && r.getMessage().contains("outcome=engaged")),
+                "a 0ms slow-engage threshold must escalate even a successful engage's duration log to WARNING");
+    }
+
+    /** Captures every {@code java.util.logging} record the handler's own logger publishes during {@code action}. */
+    private static List<LogRecord> captureLogRecords(ThrowingRunnable action) throws Exception {
+        java.util.logging.Logger julLogger =
+                java.util.logging.Logger.getLogger(ManualControlWebSocketHandler.class.getName());
+        List<LogRecord> records = Collections.synchronizedList(new ArrayList<>());
+        Handler handler = new Handler() {
+            @Override
+            public void publish(LogRecord record) {
+                records.add(record);
+            }
+
+            @Override
+            public void flush() {
+                // no-op fake
+            }
+
+            @Override
+            public void close() {
+                // no-op fake
+            }
+        };
+        Level previousLevel = julLogger.getLevel();
+        julLogger.setLevel(Level.ALL);
+        julLogger.addHandler(handler);
+        try {
+            action.run();
+        } finally {
+            julLogger.removeHandler(handler);
+            julLogger.setLevel(previousLevel);
+        }
+        return records;
+    }
+
+    /** Lets {@link #captureLogRecords} wrap {@code handleMessage}, which declares {@code throws Exception}. */
+    @FunctionalInterface
+    private interface ThrowingRunnable {
+        void run() throws Exception;
     }
 
     @Test

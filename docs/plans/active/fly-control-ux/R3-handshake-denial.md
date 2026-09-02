@@ -183,3 +183,30 @@ the rover doesn't move," a different, currently unverified symptom.
 Lower confidence on the specific exception/path that silently drops the WS reply — no smoking gun
 found in the code read in this pass; recommend option (a-1) both as the fix and as the fastest way
 to get a real stack trace out of the next reproduction.
+
+## Firmware note (FLY-CONTROL-UX H1, read-only)
+
+§5's open question is answered: **yes, F4's learned-peer authority gate also drops
+`RC_CHANNELS_OVERRIDE` from a second source, not just `COMMAND_LONG`.** The real sketch (outside
+this repo, `~/Arduino/ardupoilot-start/`, mirrored for host testing by `infra/rover-sim/` per its
+`Makefile`'s `FIRMWARE ?= $(HOME)/Arduino/ardupoilot-start`) shows `handleRcOverride()`
+(`MavlinkUdpLink.cpp:356-367`) calling `acceptCommandSource(nowMs)` at line 367 and returning
+immediately, silently, when it answers `false` — the exact same gate function `handleCommandLong()`
+calls at line 470 (`acceptCommandSource()` itself: `MavlinkUdpLink.cpp:800-844`, keyed on
+`commandSourceIp_`/`commandSourcePort_`, 500ms `timing_.commandTimeoutMs` re-learn window, identical
+to the `COMMAND_LONG` case `infra/rover-sim/link_test.cpp`'s `"a second transmitter cannot steal
+command authority"` block already exercises). `handleRcOverride`'s own comment at that call site
+says it plainly: *"A second transmitter cannot steer or throttle the rover just by also claiming
+sysid 255 -- see acceptCommandSource(). Silently dropped, same as any other frame this link does
+not act on; there is no ACK protocol for RC_CHANNELS_OVERRIDE to withhold."* `infra/rover-sim`'s own
+harness has no direct test of this RC-override case (only `COMMAND_LONG` is exercised in
+`link_test.cpp`), so §5's gap stands as a harness gap, but the firmware source itself settles the
+question directly. Net effect for H1: the reported "Control denied — never confirmed" timeout and
+this gate are two independent, non-overlapping failure modes — this gate produces "engaged but
+inert" (`ManualControlService(mavlink-core).engage` never queries vehicle state, so the station-side
+`engaged` frame still sends normally) whenever a real rover still has an incumbent command source
+"learned" from an earlier station/SITL session within the last 500ms; it does not explain a 4s
+no-reply timeout, which §2/§3 above trace entirely to the station side. Not addressed by this
+wave's code changes (H1 is scoped to the station-side timeout; this file's own §6(b) already named
+the ask: confirm this behavior, which is now confirmed rather than open) — no firmware file was
+edited or staged.

@@ -675,6 +675,12 @@ vision:
   #   latency (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md's SITL verification steps 6-7) before relying
   #   on it. Commented out here to document the default rather than override it.
   #   watchdog-timeout-ms: 300
+  #   FLY-CONTROL-UX H1: ManualControlWebSocketHandler measures every "engage" call's own wall time
+  #   (vision-api-local; engage() is documented local/ack-less, so nothing here should ever approach
+  #   this) and logs WARNING, not DEBUG, once it reaches this many milliseconds -- turning a silent
+  #   near-timeout into a diagnosable log line instead of only the web client's own 4s abandon.
+  #   Commented out here to document the default rather than override it.
+  #   engage-slow-threshold-ms: 2000
   #   MavlinkManualControlSender's RC_CHANNELS_OVERRIDE cadence (docs/plans/active/LAYERING-REFACTOR-PLAN.md §2.2,
   #   wave F2) -- replaces the VISION_RC_OVERRIDE_HZ/VISION_RC_RELEASE_FRAMES environment variables that
   #   used to be the only place in the repo bypassing Spring config entirely.

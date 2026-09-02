@@ -49,19 +49,33 @@ import java.util.concurrent.ConcurrentHashMap;
  * #mapIllegalState}).
  *
  * <h2>Exception&rarr;{@code denied} mapping (best-effort, documented rough edge)</h2>
- * {@link ManualControlService#engage} throws three types: {@link AccessDeniedException}
- * (unambiguous &rarr; {@code OUT_OF_SCOPE}); {@link VehicleUnidentifiedException} (FLEET-RADIO R2,
- * caught <em>before</em> the plain form below since it is a subtype) &rarr; the additive {@code
- * VEHICLE_UNIDENTIFIED} code, with the operator-facing distinction between "never identified",
- * "a real airframe we don't support" and "not a vehicle at all" carried entirely in its own
- * message, not in the code — see that exception's javadoc for why a dedicated exception type
- * exists here instead of a fourth message-sniffed case; and the plain {@link IllegalStateException}
- * for the three remaining causes ("already active on this handle", "no active manual-control-capable
- * device", or the port's own "not currently reachable"/"does not support device" messages) that the
- * application layer does not distinguish by exception type — only by message text. {@link
- * #mapIllegalState} matches on message substrings in priority order; the "not currently reachable"
- * case (a commandable device that isn't currently heard) falls through to {@code NOT_COMMANDABLE}
- * for lack of a more specific frozen code — see that method's own javadoc.
+ * {@link ManualControlService#engage} throws three <em>documented</em> types: {@link
+ * AccessDeniedException} (unambiguous &rarr; {@code OUT_OF_SCOPE}); {@link
+ * VehicleUnidentifiedException} (FLEET-RADIO R2, caught <em>before</em> the plain form below since
+ * it is a subtype) &rarr; the additive {@code VEHICLE_UNIDENTIFIED} code, with the operator-facing
+ * distinction between "never identified", "a real airframe we don't support" and "not a vehicle at
+ * all" carried entirely in its own message, not in the code — see that exception's javadoc for why
+ * a dedicated exception type exists here instead of a fourth message-sniffed case; and the plain
+ * {@link IllegalStateException} for the three remaining causes ("already active on this handle", "no
+ * active manual-control-capable device", or the port's own "not currently reachable"/"does not
+ * support device" messages) that the application layer does not distinguish by exception type —
+ * only by message text. {@link #mapIllegalState} matches on message substrings in priority order;
+ * the "not currently reachable" case (a commandable device that isn't currently heard) falls through
+ * to {@code NOT_COMMANDABLE} for lack of a more specific frozen code — see that method's own
+ * javadoc.
+ *
+ * <h2>Everything else is {@code INTERNAL_ERROR}, never silence (FLY-CONTROL-UX H1)</h2>
+ * docs/plans/active/fly-control-ux/R3-handshake-denial.md traced a real, reported "Control denied —
+ * The station never confirmed control" to the web client's own {@code ENGAGE_TIMEOUT_MS} (4s)
+ * firing with <em>no</em> reply at all — a timeout that can only fire from a station fault, since
+ * {@code engage()}'s whole path is local and ack-less (no vehicle round-trip exists to be slow). A
+ * fourth, final {@code catch (RuntimeException e)} closes that gap: any exception the three clauses
+ * above do not name (including a plain {@link java.util.NoSuchElementException} from an unknown
+ * {@code assetId}, or anything thrown while composing the {@code engaged} frame's response fields)
+ * is logged WARNING with its stack trace and still answers with a {@code denied} frame — {@code
+ * INTERNAL_ERROR}, a generic operator-facing sentence, and the exception's simple class name (never
+ * its message — that could leak internals a caller has no business seeing). {@link #handleEngage}
+ * must never return without a reply on a socket that is still open.
  *
  * <h2>Per-connection send lock</h2>
  * {@link WebSocketSession#sendMessage} is not safe to call concurrently from two threads for the
@@ -70,6 +84,16 @@ import java.util.concurrent.ConcurrentHashMap;
  * runs on, via {@link WatchdogListener#watchdogTripped()}) can race, so every send goes through
  * {@link #sendFrame}, which synchronizes on {@link ConnectionState#sendLock} — exactly the guard
  * {@code LiveConnection} uses around {@code SseEmitter#send}.
+ *
+ * <h2>Engage duration is measured, not assumed (FLY-CONTROL-UX H1)</h2>
+ * Every {@code engage} call's wall time — success or denial alike — is logged: WARNING, naming the
+ * outcome and the elapsed milliseconds, once it reaches {@link #engageSlowThresholdMillis} ({@code
+ * vision.rc.engage-slow-threshold-ms}, default 2000); DEBUG otherwise, so a real "never confirmed"
+ * report is diagnosable from this station's own log in seconds — R3 found the server side had no
+ * equivalent of the client's own console-warn on abandon. This is observability only: nothing in
+ * {@link ManualControlService#engage}'s own contract (see that interface's javadoc, and {@code
+ * mavlink-core}'s {@code ManualControlService.engage}) performs a vehicle round-trip, so the
+ * threshold exists to catch a station-side regression, not a genuinely slow vehicle.
  *
  * <h2>The stick layout comes from the vehicle, and its labels come with it</h2>
  * The {@code engaged} frame carries the session's {@link ControlProfile} — the vehicle kind the
@@ -102,27 +126,36 @@ public class ManualControlWebSocketHandler extends TextWebSocketHandler {
     private static final String CODE_BAD_REQUEST = "BAD_REQUEST";
     private static final String CODE_MALFORMED = "MALFORMED";
     private static final String CODE_UNKNOWN_TYPE = "UNKNOWN_TYPE";
+    private static final String CODE_INTERNAL_ERROR = "INTERNAL_ERROR";
 
     private final ManualControlService manualControlService;
     private final long watchdogTimeoutMillis;
+    private final long engageSlowThresholdMillis;
     private final JsonMapper jsonMapper = new JsonMapper();
     private final Map<String, ConnectionState> connections = new ConcurrentHashMap<>();
 
     /**
-     * @param manualControlService  the shared relay-session service (see class javadoc for the
-     *                               "one connection, one app-wide singleton" split)
-     * @param watchdogTimeoutMillis {@code vision.rc.watchdog-timeout-ms} — read independently here
-     *                              (rather than asked of {@code manualControlService}, which has no
-     *                              getter for it) purely to echo it on the {@code watchdog} frame;
-     *                              {@code WiringConfiguration} reads the same property key to build
-     *                              {@code manualControlService}'s actual watchdog, so the two stay
-     *                              in sync by construction as long as both read that one key
+     * @param manualControlService      the shared relay-session service (see class javadoc for the
+     *                                   "one connection, one app-wide singleton" split)
+     * @param watchdogTimeoutMillis     {@code vision.rc.watchdog-timeout-ms} — read independently
+     *                                  here (rather than asked of {@code manualControlService},
+     *                                  which has no getter for it) purely to echo it on the {@code
+     *                                  watchdog} frame; {@code WiringConfiguration} reads the same
+     *                                  property key to build {@code manualControlService}'s actual
+     *                                  watchdog, so the two stay in sync by construction as long as
+     *                                  both read that one key
+     * @param engageSlowThresholdMillis {@code vision.rc.engage-slow-threshold-ms} (FLY-CONTROL-UX
+     *                                  H1) — the elapsed-time bound past which an {@code engage}
+     *                                  call's own duration log escalates from DEBUG to WARNING; see
+     *                                  the class javadoc's "Engage duration is measured" section
      */
     public ManualControlWebSocketHandler(ManualControlService manualControlService,
-                                          @Value("${vision.rc.watchdog-timeout-ms:300}") long watchdogTimeoutMillis) {
+                                          @Value("${vision.rc.watchdog-timeout-ms:300}") long watchdogTimeoutMillis,
+                                          @Value("${vision.rc.engage-slow-threshold-ms:2000}") long engageSlowThresholdMillis) {
         this.manualControlService =
                 Objects.requireNonNull(manualControlService, "manualControlService must not be null");
         this.watchdogTimeoutMillis = watchdogTimeoutMillis;
+        this.engageSlowThresholdMillis = engageSlowThresholdMillis;
     }
 
     @Override
@@ -201,24 +234,67 @@ public class ManualControlWebSocketHandler extends TextWebSocketHandler {
             sendFrame(session, state, new ManualControlWatchdogFrame(watchdogTimeoutMillis));
         };
 
+        long engageStartNanos = System.nanoTime();
         try {
             ManualControlSession mcSession = manualControlService.engage(assetId, actor, scope, onWatchdog);
-            state.session = mcSession;
+            // Built before state.session is set: if composing the response somehow throws, the
+            // catch-all below still sees an unengaged connection rather than one whose local state
+            // disagrees with what the client was told.
             ControlProfile profile = mcSession.controlProfile();
-            sendFrame(session, state, new ManualControlEngagedFrame(assetId.value().toString(), mcSession.rateHz(),
-                    profile.kind().name(), profile.id().value().toString(),
+            ManualControlEngagedFrame engagedFrame = new ManualControlEngagedFrame(assetId.value().toString(),
+                    mcSession.rateHz(), profile.kind().name(), profile.id().value().toString(),
                     profile.isBuiltIn() ? ControlProfileResponse.SOURCE_BUILT_IN : ControlProfileResponse.SOURCE_SAVED,
-                    profile.code(), profile.displayName(), toChannelMapResponse(profile)));
+                    profile.code(), profile.displayName(), toChannelMapResponse(profile));
+            state.session = mcSession;
+            logEngageDuration(engageStartNanos, assetId, "engaged");
+            sendFrame(session, state, engagedFrame);
         } catch (AccessDeniedException e) {
+            logEngageDuration(engageStartNanos, assetId, "denied:" + CODE_OUT_OF_SCOPE);
             sendFrame(session, state, new ManualControlDeniedFrame(CODE_OUT_OF_SCOPE, e.getMessage()));
         } catch (VehicleUnidentifiedException e) {
             // A dedicated code, not message-sniffed like the generic IllegalStateException causes
             // below -- the exception itself already carries which of the three UnidentifiedReason
             // causes applied (FLEET-RADIO R2), so the operator-facing distinction rides entirely in
             // this one exception's own message, composed by DefaultManualControlService per reason.
+            logEngageDuration(engageStartNanos, assetId, "denied:" + CODE_VEHICLE_UNIDENTIFIED);
             sendFrame(session, state, new ManualControlDeniedFrame(CODE_VEHICLE_UNIDENTIFIED, e.getMessage()));
         } catch (IllegalStateException e) {
-            sendFrame(session, state, new ManualControlDeniedFrame(mapIllegalState(e), e.getMessage()));
+            String code = mapIllegalState(e);
+            logEngageDuration(engageStartNanos, assetId, "denied:" + code);
+            sendFrame(session, state, new ManualControlDeniedFrame(code, e.getMessage()));
+        } catch (RuntimeException e) {
+            // FLY-CONTROL-UX H1: the one gap R3 could not rule out -- anything not one of the three
+            // documented types above must still answer, or the client's own ENGAGE_TIMEOUT_MS (4s)
+            // fires with no reply at all and reports a station fault as "the station never confirmed
+            // control" (see class javadoc). The full exception (with stack trace) goes to the log;
+            // only its simple class name -- never its message, which may carry internals a caller
+            // has no business seeing -- goes to the client.
+            logEngageDuration(engageStartNanos, assetId, "denied:" + CODE_INTERNAL_ERROR);
+            String assetIdValue = assetId.value().toString();
+            LOG.log(System.Logger.Level.WARNING,
+                    () -> "unexpected exception from ManualControlService.engage for asset " + assetIdValue, e);
+            sendFrame(session, state, new ManualControlDeniedFrame(CODE_INTERNAL_ERROR,
+                    "The station hit an internal error taking control -- check station logs ("
+                            + e.getClass().getSimpleName() + ")"));
+        }
+    }
+
+    /**
+     * Logs one {@code engage} attempt's wall time and outcome — WARNING once it reaches {@link
+     * #engageSlowThresholdMillis}, DEBUG otherwise (see the class javadoc's "Engage duration is
+     * measured" section). {@code outcome} is either {@code "engaged"} or {@code "denied:<code>"}.
+     */
+    private void logEngageDuration(long startNanos, AssetId assetId, String outcome) {
+        long elapsedMillis = (System.nanoTime() - startNanos) / 1_000_000L;
+        String assetIdValue = assetId.value().toString();
+        if (elapsedMillis >= engageSlowThresholdMillis) {
+            LOG.log(System.Logger.Level.WARNING, () -> "engage() for asset " + assetIdValue + " took "
+                    + elapsedMillis + "ms (outcome=" + outcome + "), at/past the " + engageSlowThresholdMillis
+                    + "ms slow-engage threshold -- engage() is documented local/ack-less, so this points at a "
+                    + "station-side fault, not vehicle slowness");
+        } else {
+            LOG.log(System.Logger.Level.DEBUG, () -> "engage() for asset " + assetIdValue + " took "
+                    + elapsedMillis + "ms (outcome=" + outcome + ")");
         }
     }
 
