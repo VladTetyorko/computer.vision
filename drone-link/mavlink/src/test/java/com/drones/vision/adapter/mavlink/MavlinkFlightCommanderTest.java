@@ -238,6 +238,60 @@ class MavlinkFlightCommanderTest {
         }
     }
 
+    // ---- FLY-CONTROL-UX-PLAN.md H2: one wire identity for RX and every TX path -------------
+
+    @Test
+    @Timeout(value = 20, unit = TimeUnit.SECONDS)
+    void sendsCommandLongFromTheSameLocalPortTelemetryIsBoundToOnTheSharedSocket() throws Exception {
+        // The rover firmware gates both COMMAND_LONG and RC_CHANNELS_OVERRIDE behind a
+        // first-learned-peer authority check keyed on the station's own UDP source (ip, port) --
+        // see docs/plans/active/fly-control-ux/R3-handshake-denial.md's Firmware note. The station
+        // must therefore present the exact same wire identity for command TX that it already uses
+        // for telemetry RX; MavlinkManualControlSenderTest's
+        // engageStartsAFixedRateSenderThatCarriesSentChannelsToTheVehicleOnTheSharedSocket proves
+        // this for RC_CHANNELS_OVERRIDE. This is the COMMAND_LONG half of the same proof:
+        // MavlinkFlightCommander.send builds its CommandService from the resolved device's own
+        // MavlinkGateway.sink() (see MavlinkFlightCommander.java) rather than opening a socket of
+        // its own, so the vehicle must see every COMMAND_LONG arrive from the exact local port
+        // MavlinkTelemetrySource itself bound for this device's stream.
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkFlightCommander commander = new MavlinkFlightCommander(telemetrySource);
+        DeviceId deviceId = DeviceId.random();
+        Device device = device(port, deviceId, Map.of());
+        String bindKey = MavlinkTelemetrySource.bindKey("127.0.0.1", port);
+
+        try (FakeVehicle vehicle =
+                     FakeVehicle.start(port, 151, MavAutopilot.MAV_AUTOPILOT_ARDUPILOTMEGA, MavType.MAV_TYPE_QUADROTOR)) {
+            telemetrySource.open(device);
+            awaitClaimedWithFirmware(telemetrySource, bindKey, deviceId, "ardupilot", Duration.ofSeconds(10));
+
+            AtomicReference<Exception> vehicleError = new AtomicReference<>();
+            Thread vehicleThread = new Thread(() -> {
+                try {
+                    vehicle.awaitCommandLong(Duration.ofSeconds(10));
+                    vehicle.replyAck(MavResult.MAV_RESULT_ACCEPTED);
+                } catch (Exception e) {
+                    vehicleError.set(e);
+                }
+            }, "fake-vehicle-151");
+            vehicleThread.start();
+
+            CommandResult result = commander.returnToHome(device);
+
+            vehicleThread.join(Duration.ofSeconds(10).toMillis());
+            assertNull(vehicleError.get(), "vehicle-side listener must not error: " + vehicleError.get());
+            assertEquals(CommandResult.ACCEPTED, result);
+            // The load-bearing assertion: the COMMAND_LONG the vehicle received must have arrived
+            // from the exact same local port telemetry RX is bound to -- the rover's learned-peer
+            // gate keys on this (ip, port) pair, and a mismatch here is exactly "engaged but inert".
+            assertEquals(port, vehicle.lastCommandSourcePort(),
+                    "COMMAND_LONG must originate from the telemetry socket's own local port, not a separate one");
+        } finally {
+            telemetrySource.close(deviceId);
+        }
+    }
+
     @Test
     @Timeout(value = 20, unit = TimeUnit.SECONDS)
     void throwsIllegalStateExceptionWhenTheVehicleDeniesTheCommand() throws Exception {
@@ -1180,6 +1234,15 @@ class MavlinkFlightCommanderTest {
         }
 
         /**
+         * The UDP source port the most recently captured (non-negotiation) {@code COMMAND_LONG} in
+         * {@link #awaitCommandLong} arrived from -- FLY-CONTROL-UX-PLAN.md H2: proves {@link
+         * MavlinkFlightCommander} sends over the exact same local port {@link MavlinkTelemetrySource}
+         * is bound to for this device's stream (the shared {@link MavlinkGateway} socket), never a
+         * socket of its own. {@code -1} until a real command has actually been captured.
+         */
+        private volatile int lastCommandSourcePort = -1;
+
+        /**
          * Blocks (bounded by {@code timeout}) until a {@code COMMAND_LONG} arrives, skipping anything
          * else -- <b>and</b> transparently auto-answering (never returning) {@link
          * MavlinkStreamNegotiator}'s own on-claim traffic (see {@link #NEGOTIATED_MESSAGE_IDS}'s own
@@ -1203,8 +1266,8 @@ class MavlinkFlightCommanderTest {
                         CommandLong candidate = frame.as(CommandLong.class);
                         if (isStreamNegotiationTraffic(candidate)) {
                             autoAnswerStreamNegotiation(candidate);
-                        } else {
-                            found.compareAndSet(null, candidate);
+                        } else if (found.compareAndSet(null, candidate)) {
+                            lastCommandSourcePort = frame.source().port();
                         }
                     }
                 });
@@ -1213,6 +1276,11 @@ class MavlinkFlightCommanderTest {
                 throw new AssertionError("expected a COMMAND_LONG within " + timeout);
             }
             return found.get();
+        }
+
+        /** See {@link #lastCommandSourcePort}. */
+        int lastCommandSourcePort() {
+            return lastCommandSourcePort;
         }
 
         private static boolean isStreamNegotiationTraffic(CommandLong candidate) {

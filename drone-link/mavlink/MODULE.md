@@ -1094,3 +1094,31 @@ device-selection edge case, not a currently-user-visible cockpit bug. New tests:
 renamed to scope its claim correctly (see the C5 Gotchas above).
 `./mvnw -B -pl drone-link/mavlink -am test` — **265 tests**, all green, foreground/blocking run
 (2026-09-01).
+
+**`docs/plans/active/FLY-CONTROL-UX-PLAN.md` H2 done — already unified, proved rather than fixed.**
+The rover firmware's learned-peer authority gate (MAVLINK-COMMANDS-PLAN F4, extended by the H1
+firmware note to cover `RC_CHANNELS_OVERRIDE` too, not just `COMMAND_LONG`) requires the station to
+present one wire identity toward a vehicle for telemetry RX and every command TX path. Traced and
+confirmed already true, no production code changed: `MavlinkFlightCommander.send` and
+`MavlinkManualControlSender.engage` both build their `mavlink-core` service (`CommandService`/
+`ManualControlService`) from `gateway.sink()`/`gateway.correlator()`/`gateway.peers()` — the *same*
+`MavlinkGateway` (one `UdpListenLink`, one `MavlinkSession`) telemetry RX registered against, never a
+socket of their own; `MavlinkTelemetrySource.open`/`holdLobby` both key into the identical
+`gateways.compute(bindKey, ...)` map, so a zero-config-announced rover's later `open()` reuses the
+exact gateway the standing lobby already held (`MavlinkHeartbeatScanner.toDiscoveredDevice` builds its
+`StreamDescriptor` URI from the wildcard `DEFAULT_BIND_HOST`, never the vehicle's own learned address,
+so no split-socket risk there). RC-override TX already had a proof test
+(`MavlinkManualControlSenderTest.engageStartsAFixedRateSenderThatCarriesSentChannelsToTheVehicleOnTheSharedSocket`,
+asserting the vehicle receives the frame from the exact local port telemetry is bound to); this wave
+closed the matching gap for `COMMAND_LONG` — new
+`MavlinkFlightCommanderTest.sendsCommandLongFromTheSameLocalPortTelemetryIsBoundToOnTheSharedSocket`
+and a small `lastCommandSourcePort()` capture on that test's `FakeVehicle` double, both test-only. One
+residual, narrow, unfixed risk documented (not a defect): the gateway binds the wildcard host, so the
+OS — not this code — chooses which local interface IP labels an outgoing datagram's source; a station
+host changing its own primary IP mid-session (multi-homed roam/DHCP renewal) could momentarily mismatch
+the rover's learned identity, self-healing via the firmware's own 500ms re-learn window
+(`infra/rover-sim/link_test.cpp`'s `commandTimeoutMs`) rather than staying stuck. Full verdict with
+file:line citations: `docs/plans/active/fly-control-ux/R3-handshake-denial.md`'s "Station identity
+note".
+`./mvnw -B -pl drone-link/mavlink -am test` — **266 tests**, all green, foreground/blocking run
+(2026-09-02).

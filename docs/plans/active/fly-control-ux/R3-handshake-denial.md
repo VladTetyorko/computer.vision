@@ -184,6 +184,44 @@ Lower confidence on the specific exception/path that silently drops the WS reply
 found in the code read in this pass; recommend option (a-1) both as the fix and as the fastest way
 to get a real stack trace out of the next reproduction.
 
+## Station identity note (FLY-CONTROL-UX H2)
+
+**Already unified — no station-side fix was needed.** `MavlinkGateway`
+(`drone-link/mavlink/.../MavlinkGateway.java:162-201`) owns exactly one `UdpListenLink` (one bound
+`DatagramSocket`) and one `mavlink-core` `MavlinkSession` per distinct bind address, reference-counted
+across every device sharing it (`MavlinkTelemetrySource.open`, `:151-156`, and the claim-free
+zero-config lobby, `holdLobby`, `:287-298`, both key into the identical `gateways.compute(bindKey,
+...)` map). `MavlinkFlightCommander.send` builds its `CommandService` from `gateway.sink()`/
+`gateway.correlator()` (`MavlinkFlightCommander.java:447-453`), and `MavlinkManualControlSender.engage`
+builds its `ManualControlService` from `gateway.sink()`/`gateway.peers()`
+(`MavlinkManualControlSender.java:139-145`) — the exact same gateway telemetry RX registered against,
+never a socket of their own (both classes' own javadoc say this explicitly: "shares telemetrySource's
+own MavlinkGateway registry"). `mavlink-core`'s `RoutingFrameSink.send` resolves each peer's own
+last-known address and sends via `FrameWriter.sendTo(payload, link, peer.address())` on that one link
+object (drone-link/mavlink-core/MODULE.md's W3 "Update" gotcha) — so telemetry RX, `COMMAND_LONG` TX,
+and `RC_CHANNELS_OVERRIDE` TX all originate from the identical local `(bindHost, port)` toward the
+identical last-heard peer address. Zero-config discovery does not create a split-socket risk either:
+`MavlinkHeartbeatScanner.toDiscoveredDevice` builds its `StreamDescriptor` URI from
+`MavlinkTelemetrySource.DEFAULT_BIND_HOST` (the wildcard `0.0.0.0`), never the vehicle's own learned
+source address, so a zero-config-announced rover's later `open()` resolves to the exact same `bindKey`
+— and therefore the exact same gateway/socket — the standing lobby already held; only a *manually*
+entered, non-blank host in a device's `udp://` URI would diverge from that (a pre-existing operator-
+input footgun documented in `MavlinkTelemetrySource`'s own class javadoc, not a new identity-sharing
+gap, and it fails loudly at bind time rather than silently). This was already proven by test on the RC-
+override side (`MavlinkManualControlSenderTest.engageStartsAFixedRateSenderThatCarriesSentChannelsToTheVehicleOnTheSharedSocket`,
+asserting the vehicle receives `RC_CHANNELS_OVERRIDE` from the exact local port telemetry is bound to);
+this wave added the missing `COMMAND_LONG` half,
+`MavlinkFlightCommanderTest.sendsCommandLongFromTheSameLocalPortTelemetryIsBoundToOnTheSharedSocket`,
+closing the proof gap so both TX paths are now asserted, not merely argued from the source, to share
+telemetry's own wire identity. The one residual, narrow risk found (not fixed, not station-side):
+because the gateway binds the wildcard host `0.0.0.0`, the OS — not this code — chooses which local
+interface IP labels an outgoing datagram's source at send time; a station host that changes its own
+primary IP mid-session (a wifi roam/DHCP renewal on a multi-homed machine) could see the rover's
+learned-peer identity mismatch for one instant. This self-heals: the old identity goes quiet, the
+firmware's own 500ms re-learn window (`commandTimeoutMs`, `infra/rover-sim/link_test.cpp`) re-adopts
+the new source on the very next accepted frame, so the worst case is a brief RC-override gap, not a
+lasting "engaged but inert" — no fix is indicated for this wave.
+
 ## Firmware note (FLY-CONTROL-UX H1, read-only)
 
 §5's open question is answered: **yes, F4's learned-peer authority gate also drops
