@@ -104,3 +104,23 @@ two-stage dialog (R2 likes it; our dialog is built+tested — revisit only if th
 moving `fly-osd` telemetry onto the video (deliberately a below-video row, R1 §5) · z-index
 token scale (one more documented literal; scale is a named future task) · any firmware editing
 (sketch lives outside the repo — H1 produces the requirement text).
+
+## Close-out (2026-09-02)
+
+| Wave | Commit | Result |
+|---|---|---|
+| BK1 | `019e653d` | `vision.ops.rc.neutral-tolerance-percent` (5, 1..25) + `rc` block on `GET /api/ops/thresholds`; 326+951 tests green |
+| H1 | `42c45d50` | engage denial made honest: catch-all → `denied` frame (`INTERNAL_ERROR`), duration WARN ≥ `vision.rc.engage-slow-threshold-ms` (2000); audit proved NO >4s block exists; firmware note: first-peer gate covers RC_CHANNELS_OVERRIDE too |
+| H2 | `bfc9e779` | station identity already unified — one gateway socket per vehicle for telemetry RX + COMMAND_LONG + RC override; added missing same-port proof test (266 green); residual: host-IP change mid-session transiently mismatches, self-heals via firmware 500ms re-learn |
+| WEB1 | `b7573860` | `fly-hud` on-video HUD (Take-control pill + badge at rest; input widget + source pills + Arm/Disarm engaged), neutral-gate logic + first-ever disable-reason composition (grounding > sticks, worst offender named with live %), rc-monitor drawer informational-only, mode picker split out; 3474 web tests, tsc + prod build green |
+
+**Accepted contract deviations (WEB1, flagged not silent):** input-source pills render at rest —
+the source choice locks the instant a handshake starts, so a post-engage picker would be
+unreachable; picking On-screen also opens the rail because the HUD input widget is read-only and
+the draggable stick surface still lives in `rc-monitor`.
+
+**Residuals, deliberate:** server-side neutral gate (needs port exposure of latest RcChannels +
+arm↔manual-control coupling + a no-session policy) · draggable on-video virtual joystick (QGC
+precedent; follow-up candidate) · real-screen visual verification in both themes not yet done —
+owner smoke of /fly is the next step · host-IP-change transient (H2, self-healing) · firmware
+"engaged but inert" surface documented in R3, needs no station or sketch change today.

@@ -38,6 +38,12 @@
 | R2 | Sonnet, web | Design research: how QGC/DJI/Betaflight/racing sims lay out on-video control HUDs vs info rails; overlay legibility rules → `fly-control-ux/R2-design-research.md` |
 | P | Fable | Frozen plan `FLY-CONTROL-UX-PLAN.md` (overlay contract + neutral-gate contract), then implementation waves |
 
-## Outcome
+## Outcome (2026-09-02)
 
-(to fill at close)
+Same-day research→plan→build. R1/R2/R3 under `fly-control-ux/`; plan frozen and executed as
+BK1 (`019e653d`), H1 (`42c45d50`), H2 (`bfc9e779`), WEB1 (`b7573860`) — details in
+[FLY-CONTROL-UX-PLAN.md](FLY-CONTROL-UX-PLAN.md) §Close-out. Key discoveries: no vehicle
+confirmation exists for take-control (denial was a station-local silent-exception timeout, now
+honest); the rover firmware's first-peer gate covers RC override frames but the station already
+presents one socket identity per vehicle; the 50-center/0-rest neutral law already existed in
+`control-surface-logic.ts` travel semantics. Owner smoke of /fly (both themes) pending.
