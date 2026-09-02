@@ -89,3 +89,30 @@ live screenshot of S1→S3, `station/vision-web/MODULE.md` + this plan's close-o
 Frozen ids/contracts: `ToolRailPanelId` unchanged; no backend/API change anywhere; keyboard map
 unchanged. Style law: `.claude/skills/frontend-style` — HUD pills only over glass, one selection
 language, no new tokens.
+
+## Close-out (2026-09-02)
+
+| Wave | Result |
+|---|---|
+| W1 | `fly-logic.ts#flyStage`/`FlyStage` (pure, `fly-logic.spec.ts` — 8 cases) + `CockpitFacade#stage` drive one `.dock` (`cockpit.html`/`.css`) replacing `.stage-notice`, `.not-streaming-card` (→ `.dock-card`) and `.grid-controls`; `<vision-fly-hud>`'s `.hud-bottom-center` gated on the same `stage()` (new `stage` input) instead of mounting unconditionally, its three source-pill buttons collapsed into one `.hud-pill.source-select` native `<select>`; Stop stream moved to a small `.telemetry-stop` ghost on the OSD shelf, confirm scrim unchanged |
+| W2 | Header `.header-status` armed/mode chips deleted (`cockpit.ts`/`.html`/`.css` — OSD groups are the one remaining source); `.main-left`/`.main-right` real flex columns (`column-reverse`, `--space-8` gap) replace `.main-secondary`/`.main-map`/`.main-preflight`'s independent approximate offsets; map inset gated on `CockpitFacade#hasKnownPosition` (`hasFix`); `preflightCollapsed` now driven by `stage()` instead of a second `live()` read; events ticker restored (found deleted by an unrelated ad-hoc commit, its facade plumbing was still live) as a `pointer-events: none` overlay, `TICKER_MAX_EVENTS` 4→3; `.cockpit` grid drops the `ticker`/`controls` rows (five rows → three) |
+| W3 | `npx tsc --noEmit` clean on both configs; `npm run test:ci` **178/178 files, 3482/3482 tests**, no existing spec touched the deleted zones directly so none needed changes; `ng build --configuration production` green, bundle delta vs. `master` net flat (initial +0.09 kB raw/+0.03 kB transfer; `cockpit` chunk −0.26 kB raw/+0.02 kB transfer) |
+
+**Accepted contract deviations (both flagged in the wave plan itself, now shipped):** the three
+input-source pills no longer render at rest — only once `live`/`engaged` — reversing
+FLY-CONTROL-UX-PLAN.md §3's "always visible" call; the header no longer carries its own armed/mode
+chip pair, reversing that same plan's §3 header-chip decision. Both were the plan's own explicit
+purpose (superseding those two decisions by direct owner request), not a silent drift.
+
+**Ambiguity resolved toward the least at-rest UI (this plan's own tie-break rule), stated
+explicitly:** the collapsed source-select stays visible-but-disabled through `engaged` rather than
+disappearing — the alternative would hide the exact control the "same lock rule" text is
+describing as locked; `stage()` flips to `'live'` the instant `live()` is true regardless of
+`streamState`, so a genuinely-live stream never shows a stale "Not streaming" card (CLAUDE.md rule
+9) — "waiting for first frame" stays `videoNotice()`'s job, not a fifth stage value.
+
+**Residuals, deliberate:** no live/SITL screenshot verification of the shipped layout in both
+themes — the build+test chain is green and the CSS was checked against the token/HUD rules by
+inspection, but an owner smoke pass of `/fly` (light + dark, S1→S4) is the next step, same
+residual FLY-CONTROL-UX-PLAN.md's own close-out left open for its wave. Dev parity unaffected:
+no signal this plan touches is auth- or role-derived.
