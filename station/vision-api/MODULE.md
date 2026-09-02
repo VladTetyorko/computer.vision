@@ -97,7 +97,7 @@ the full mechanism.
 | HlsProxyController | GET | `/hls/{streamId}/**` | Reverse-proxy this asset's live HLS bytes to the mediamtx sidecar | scope (`StreamAccess`, checked **before** the upstream is ever contacted) |
 | CvModelsController | GET | `/api/cv/models` | Detection-model roster — widened (CV-SETTINGS-PLAN §5.2) to serve the registry's live roster (`registrySource: true`) when `vision.cv.registry.enabled`, else the static config catalogue; never errors | open |
 | CvTrackersController | GET | `/api/cv/trackers` | Static tracker-engine roster | open |
-| OpsThresholdsController | GET | `/api/ops/thresholds` | Battery urgency thresholds (ASSET-FLOWS-PLAN §2 D6) — `{"battery":{"warningPercent":25,"criticalPercent":10}}`, frozen wire shape, values from `vision.ops.battery.*` | open |
+| OpsThresholdsController | GET | `/api/ops/thresholds` | Battery urgency thresholds (ASSET-FLOWS-PLAN §2 D6) + RC neutral-stick tolerance (FLY-CONTROL-UX-PLAN §2/BK1) — `{"battery":{"warningPercent":25,"criticalPercent":10},"rc":{"neutralTolerancePercent":5}}`, frozen wire shape, values from `vision.ops.battery.*`/`vision.ops.rc.*` | open |
 | CvProfileController | GET | `/api/cv/profiles` | List profiles the caller may see (every built-in + the caller's own group's) | scope |
 | CvProfileController | GET | `/api/cv/profiles/{id}` | Read one profile | scope |
 | CvProfileController | POST | `/api/cv/profiles` | Create a profile owned by the caller's own group (201) | manageOrg |
@@ -693,3 +693,24 @@ changes were concurrently present in this shared working tree at either wave's g
 independently verified green inside the full `-am` reactor build gating BK3's own `station/vision-app`
 run (`station/vision-api` section of that log: 944, 0 failures). Docker not needed for this module
 (`vision-api` has no Testcontainers-backed test). Nothing deferred on the vision-api side.
+
+**FLY-CONTROL-UX-PLAN wave BK1 done.** New `RcThresholdsResponse(int neutralTolerancePercent)` `dto/`
+record — same one-field, no-validation wire-record shape `BatteryThresholdsResponse` already
+establishes (validation lives server-side in `vision-app`'s `VisionOpsProperties.Rc`, not on the wire
+DTO). `OpsThresholdsResponse` widened to `OpsThresholdsResponse(BatteryThresholdsResponse battery,
+RcThresholdsResponse rc)` — a second constructor parameter at the one record, not a new overload
+(CLAUDE.md rule 10); the only call site is `vision-app`'s `OpsWiringConfiguration#opsThresholds` (see
+that module's own MODULE.md entry), updated in the same wave. `OpsThresholdsController` gained no new
+endpoint and no new exception mapping — `GET /api/ops/thresholds` now serves `{"battery":{...},
+"rc":{"neutralTolerancePercent":5}}`; its Javadoc return line was updated to match. No new `@OpenByDesign`
+decision needed — the existing "display config, any signed-in caller may read it" reasoning already
+covers the RC tolerance. `OpsThresholdsControllerTest` gained no new test methods; its 2 existing cases
+were widened with `jsonPath("$.rc.neutralTolerancePercent")` assertions alongside the pre-existing
+`battery` ones, exercising both the frozen-default fixture and the "reflects whatever config it was
+built from" fixture.
+
+`./mvnw -B -pl station/vision-api -am test` — **951** tests, 0 failures, 0 errors (0 net new test
+*methods* from this wave — the 2 `OpsThresholdsControllerTest` cases were widened in place, not
+duplicated; the module's total moved from the 949 documented at BK4 to 951 from other concurrently-landed
+waves on this shared branch, not from this one). Docker not needed for this module. Also green in the
+same session: `station/vision-app` **326** (see that module's own MODULE.md entry). Nothing deferred.

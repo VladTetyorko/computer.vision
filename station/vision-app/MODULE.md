@@ -67,7 +67,7 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 | `ControlProfileWiring` | Control | `controlProfileService`, `auxFunctionCatalog` (`AuxFunctionCatalog.defaults()` unless `properties.auxFunctions()` configured) — unconditional; the catalog is display-only, never a whitelist |
 | `AfterActionWiringConfiguration` | — | `afterActionProperties`, `afterActionSources`, `afterActionAssembler` — unconditional, no flag. `maxPoints` is derived from `vision.application.replay.max-points-ceiling`, not its own key |
 | `UsageWiringConfiguration` | Usage | `usageIdleCloseService(AssetUsageRepositoryPort, AssetLiveStatePort, UsageSessionService, VisionUsageProperties)` (warehouse's `DefaultUsageIdleCloseService`), `usageIdleCloseRunner` (`initMethod="start"`, `destroyMethod="close"`) — both **unconditional, no enable flag** (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U1, wave W1: a data-correctness fix, not an optional feature). Pure downstream leaf — composes three already-unconditional beans from `PersistenceWiringConfiguration`/`ApplicationServiceWiring`, no new bean-cycle risk |
-| `OpsWiringConfiguration` | Ops | `opsThresholds(VisionOpsProperties)` → `OpsThresholdsResponse` (vision-api DTO), **unconditional, no enable flag** — display config, not a feature. Same "plain config-backed DTO bean, no service layer" shape `TrackingWiring#cvTrackerRoster` established (ASSET-FLOWS-PLAN §2/BK3) |
+| `OpsWiringConfiguration` | Ops | `opsThresholds(VisionOpsProperties)` → `OpsThresholdsResponse` (vision-api DTO), **unconditional, no enable flag** — display config, not a feature. Same "plain config-backed DTO bean, no service layer" shape `TrackingWiring#cvTrackerRoster` established (ASSET-FLOWS-PLAN §2/BK3). FLY-CONTROL-UX-PLAN §2/BK1 widened the built response with `RcThresholdsResponse(properties.rc().neutralTolerancePercent())`, mirroring the `battery` mapping verbatim — no new bean, no constructor overload |
 | `ApplicationServiceWiring` | Cv, Live, Rc, Application, Publish, Simulation | The largest class — every `vision-application`/context `DefaultXService` bean. See "Application-service beans" below |
 
 ### Application-service beans (`ApplicationServiceWiring`)
@@ -114,7 +114,7 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 | `VisionStreamsProperties` | `vision.streams` | `StreamLifecycleWiring`'s idle-stream reaper |
 | `VisionTrackingProperties` | `vision.tracking` | `TrackingWiring` seed + per-stream read-model windows |
 | `VisionUsageProperties` | `vision.usage` | `UsageWiringConfiguration`'s idle-usage-close sweep (`idleClose` default 10m, `sweepPeriod` default 60s) |
-| `VisionOpsProperties` | `vision.ops` | `OpsWiringConfiguration`'s `opsThresholds` bean, behind `GET /api/ops/thresholds` (vision-api). Nested `Battery(int warningPercent, int criticalPercent)`, defaults 25/10, compact-constructor validated (`critical < warning`, both `[0,100]`); absent `battery` block falls back to `Battery.defaults()` since Spring relaxed binding does not apply a nested record's own `@DefaultValue`s when the whole block is missing (`VisionMavlinkProperties`'s `Scan`/`Transmit` precedent). `ApplicationServiceWiring#batteryMonitor` (BK2, this same cycle) independently reads the identical `vision.ops.battery.critical-percent`/`warning-percent` keys via raw `@Value`, by deliberate design (see that bean's own javadoc) rather than by accident — it carries the same 10/25 defaults inline so it behaves correctly whether or not this record/its `application.yaml` block exists yet, and now that both do, an operator override of the yaml block reaches **both** consumers identically since they bind the same property keys, which is the actual "one configured severity source" ASSET-FLOWS-PLAN §2 asks for. The two Java binding mechanisms (this `@ConfigurationProperties` record vs. `batteryMonitor`'s two `@Value`s) staying separate rather than both consuming this one record is a minor follow-up cleanup, not a config-drift risk. |
+| `VisionOpsProperties` | `vision.ops` | `OpsWiringConfiguration`'s `opsThresholds` bean, behind `GET /api/ops/thresholds` (vision-api). Nested `Battery(int warningPercent, int criticalPercent)`, defaults 25/10, compact-constructor validated (`critical < warning`, both `[0,100]`); absent `battery` block falls back to `Battery.defaults()` since Spring relaxed binding does not apply a nested record's own `@DefaultValue`s when the whole block is missing (`VisionMavlinkProperties`'s `Scan`/`Transmit` precedent). `ApplicationServiceWiring#batteryMonitor` (BK2, this same cycle) independently reads the identical `vision.ops.battery.critical-percent`/`warning-percent` keys via raw `@Value`, by deliberate design (see that bean's own javadoc) rather than by accident — it carries the same 10/25 defaults inline so it behaves correctly whether or not this record/its `application.yaml` block exists yet, and now that both do, an operator override of the yaml block reaches **both** consumers identically since they bind the same property keys, which is the actual "one configured severity source" ASSET-FLOWS-PLAN §2 asks for. The two Java binding mechanisms (this `@ConfigurationProperties` record vs. `batteryMonitor`'s two `@Value`s) staying separate rather than both consuming this one record is a minor follow-up cleanup, not a config-drift risk. FLY-CONTROL-UX-PLAN §2/BK1 added a second nested record, `Rc(int neutralTolerancePercent)`, default **5**, compact-constructor validated `[1,25]`, absent `rc` block falling back to `Rc.defaults()` under the exact same whole-block-absent rule as `Battery` — the web cockpit's neutral-stick arm gate's tolerance, read off `GET /api/ops/thresholds`'s new `rc` field. |
 
 `vision.discovery.enabled` and `vision.api.rate-limit.enabled` are read directly via
 `@ConditionalOnProperty` with no dedicated properties record.
@@ -619,3 +619,33 @@ same reactor run: `station/vision-api` **944** (2 of which are this wave's own `
 — see that module's own MODULE.md entry), `adapter-persistence` **1:12 min** wall time (Testcontainers
 Postgres actually spun up, not skipped), `RtspSimulationDockerE2ETest` (real docker, 8.878s). Docker ran
 for real throughout — not skipped. Nothing deferred on this side beyond the flagged duplication above.
+
+**FLY-CONTROL-UX-PLAN wave BK1 done.** `VisionOpsProperties` gained a second nested record, `Rc(int
+neutralTolerancePercent)` — default **5**, compact-constructor validated `[1,25]` (outside throws
+`IllegalArgumentException`), absent `rc` block falling back to `Rc.defaults()` under the exact same
+whole-block-absent rule the `battery` field already documents (Spring relaxed binding does not apply a
+nested record's own `@DefaultValue`s when the block is entirely missing). `OpsWiringConfiguration#opsThresholds`
+now also builds `RcThresholdsResponse(rc.neutralTolerancePercent())` into the response — a widened
+constructor call at the one call site, per CLAUDE.md rule 10 (no overload, no `null`-means-off param).
+`application.yaml` gained a `#   rc:` / `#     neutral-tolerance-percent: 5` pair nested under the
+existing commented-out `# ops:` block (module key itself already commented per this module's own
+convention), plus a one-line WHY: arm is enabled in the web cockpit only when live sticks read neutral
+within this tolerance — no key turned on, every default-config deployment byte-for-byte unchanged.
+`RcThresholdsResponse`/`OpsThresholdsResponse` widening itself is vision-api's own change (see that
+module's MODULE.md) — this module only supplies the new field's value.
+
+Extended (not new-file) tests: `VisionOpsPropertiesTest` gained 7 cases (explicit value carried through,
+absent-block default, four compact-constructor bounds cases `[1,25]`, one `Binder`-against-empty-source
+case pinning `application.yaml`'s documented default of 5, one `Binder`-with-explicit-key case proving
+`battery` stays at its own defaults when only `rc` is configured — same "whole-block-absent vs.
+one-key-present" distinction the existing `battery` tests already draw). `OpsWiringConfigurationTest`
+gained 2 cases (explicit `Rc` maps verbatim onto the response; `null` `Rc` yields the 5% default).
+
+`./mvnw -B -pl station/vision-app -am test -DskipWeb` — **326** tests, 0 failures, 0 errors (+9 over this
+file's own previously-documented 317 baseline — exactly this wave's 7 + 2 new cases, no other net change
+observed at this gate). Docker ran for real (Postgres Testcontainer migrated through `V32`; the
+`asset_usages does not exist` warning logged by a background idle-close sweep during the brief pre-Flyway
+window is the pre-existing async race already known from prior waves, not a new failure — surfaced as a
+caught-and-logged warning, not a test failure). Also green in the same session: `station/vision-api`
+**951** (0 new test methods this wave — see that module's own MODULE.md entry for the widened-assertion
+detail). Nothing deferred.

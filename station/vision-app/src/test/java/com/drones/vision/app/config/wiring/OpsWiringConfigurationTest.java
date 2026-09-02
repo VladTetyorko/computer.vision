@@ -16,8 +16,8 @@ class OpsWiringConfigurationTest {
 
     @Test
     void mapsBatteryThresholdsVerbatimOntoTheResponse() {
-        OpsThresholdsResponse response = new OpsWiringConfiguration()
-                .opsThresholds(new VisionOpsProperties(new VisionOpsProperties.Battery(30, 12)));
+        OpsThresholdsResponse response = new OpsWiringConfiguration().opsThresholds(new VisionOpsProperties(
+                new VisionOpsProperties.Battery(30, 12), new VisionOpsProperties.Rc(8)));
 
         assertEquals(30, response.battery().warningPercent());
         assertEquals(12, response.battery().criticalPercent());
@@ -25,9 +25,24 @@ class OpsWiringConfigurationTest {
 
     @Test
     void defaultPropertiesYieldTwentyFiveAndTen() {
-        OpsThresholdsResponse response = new OpsWiringConfiguration().opsThresholds(new VisionOpsProperties(null));
+        OpsThresholdsResponse response = new OpsWiringConfiguration().opsThresholds(new VisionOpsProperties(null, null));
 
         assertEquals(25, response.battery().warningPercent());
         assertEquals(10, response.battery().criticalPercent());
+    }
+
+    @Test
+    void mapsNeutralTolerancePercentVerbatimOntoTheResponse() {
+        OpsThresholdsResponse response = new OpsWiringConfiguration().opsThresholds(new VisionOpsProperties(
+                new VisionOpsProperties.Battery(30, 12), new VisionOpsProperties.Rc(15)));
+
+        assertEquals(15, response.rc().neutralTolerancePercent());
+    }
+
+    @Test
+    void defaultPropertiesYieldFivePercentNeutralTolerance() {
+        OpsThresholdsResponse response = new OpsWiringConfiguration().opsThresholds(new VisionOpsProperties(null, null));
+
+        assertEquals(5, response.rc().neutralTolerancePercent());
     }
 }

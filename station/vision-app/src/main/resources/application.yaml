@@ -1154,7 +1154,13 @@ vision:
     # "battery critical" edge and must stay strictly below warning-percent. BATTERY_LOW (docs/plans/
     # active/ASSET-FLOWS-PLAN.md §2 "New system-event kinds") fires as a rising edge on crossing
     # critical-percent, re-arming only once telemetry is back above warning-percent.
+    #
+    # rc.neutral-tolerance-percent (docs/plans/active/FLY-CONTROL-UX-PLAN.md §2 "Frozen contract --
+    # neutral gate") documents VisionOpsProperties.Rc's own default the same way: arm is enabled in
+    # the web cockpit only when live sticks read neutral within this tolerance.
     # ops:
     #   battery:
     #     warning-percent: 25
     #     critical-percent: 10
+    #   rc:
+    #     neutral-tolerance-percent: 5

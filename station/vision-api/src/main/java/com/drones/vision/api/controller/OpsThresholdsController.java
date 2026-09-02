@@ -29,9 +29,12 @@ public class OpsThresholdsController {
     }
 
     /**
-     * The battery urgency thresholds every severity-coloring surface should use.
+     * The battery urgency thresholds every severity-coloring surface should use, plus the RC
+     * neutral-stick tolerance the web cockpit's arm gate uses (docs/plans/active/FLY-CONTROL-UX-PLAN.md
+     * §2 "Frozen contract — neutral gate").
      *
-     * @return {@code {"battery":{"warningPercent":...,"criticalPercent":...}}}; never throws
+     * @return {@code {"battery":{"warningPercent":...,"criticalPercent":...},"rc":{
+     *         "neutralTolerancePercent":...}}}; never throws
      */
     @OpenByDesign(reason = "Display config (battery severity thresholds), not fleet or per-user data "
             + "-- any signed-in caller may read it.")

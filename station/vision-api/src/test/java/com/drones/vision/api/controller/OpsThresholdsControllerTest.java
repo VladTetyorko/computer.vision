@@ -2,6 +2,7 @@ package com.drones.vision.api.controller;
 
 import com.drones.vision.api.dto.BatteryThresholdsResponse;
 import com.drones.vision.api.dto.OpsThresholdsResponse;
+import com.drones.vision.api.dto.RcThresholdsResponse;
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -31,7 +32,8 @@ class OpsThresholdsControllerTest {
 
     @BeforeEach
     void setUp() {
-        mockMvc = mockMvcFor(new OpsThresholdsResponse(new BatteryThresholdsResponse(25, 10)));
+        mockMvc = mockMvcFor(new OpsThresholdsResponse(
+                new BatteryThresholdsResponse(25, 10), new RcThresholdsResponse(5)));
     }
 
     @Test
@@ -39,15 +41,18 @@ class OpsThresholdsControllerTest {
         mockMvc.perform(get("/api/ops/thresholds"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.battery.warningPercent").value(25))
-                .andExpect(jsonPath("$.battery.criticalPercent").value(10));
+                .andExpect(jsonPath("$.battery.criticalPercent").value(10))
+                .andExpect(jsonPath("$.rc.neutralTolerancePercent").value(5));
     }
 
     @Test
     void thresholdsReflectsWhateverConfigItWasBuiltFrom() throws Exception {
-        mockMvcFor(new OpsThresholdsResponse(new BatteryThresholdsResponse(30, 15)))
+        mockMvcFor(new OpsThresholdsResponse(
+                        new BatteryThresholdsResponse(30, 15), new RcThresholdsResponse(15)))
                 .perform(get("/api/ops/thresholds"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.battery.warningPercent").value(30))
-                .andExpect(jsonPath("$.battery.criticalPercent").value(15));
+                .andExpect(jsonPath("$.battery.criticalPercent").value(15))
+                .andExpect(jsonPath("$.rc.neutralTolerancePercent").value(15));
     }
 }
