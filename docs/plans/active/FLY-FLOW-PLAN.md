@@ -116,3 +116,27 @@ themes — the build+test chain is green and the CSS was checked against the tok
 inspection, but an owner smoke pass of `/fly` (light + dark, S1→S4) is the next step, same
 residual FLY-CONTROL-UX-PLAN.md's own close-out left open for its wave. Dev parity unaffected:
 no signal this plan touches is auth- or role-derived.
+
+## W4 — owner feedback round 2 (2026-09-02, live review of W1-W3)
+
+Owner: *"map not working; Take control is overwhelming — better a modal with 3 choices and then,
+based on it, start; pre-flight should be visible pre-flight, maybe before the modal but not as a
+separate [module]."*
+
+1. **Honest map slot, never a dead toggle.** The W2 position-gate made the header map button
+   appear broken (toggle on → nothing renders). New rule: `mapVisible()` always renders *something*
+   in the map slot — the Leaflet inset when a position is known, otherwise a compact HUD placeholder
+   ("No position yet — the map follows this drone once it reports a fix"). The world-zoomed empty
+   Leaflet stays banned (D5).
+2. **The connect ritual.** At rest the dock is `[badge] [Take control]` — nothing else. Pressing
+   Take control opens a centered modal over the stage (same family as the CV setup modal):
+   top-to-bottom (a) the pre-flight checklist, interactive, exactly the items the floating chip
+   carried; (b) "Control with" — three choice tiles (On-screen / Transmitter / Keys), one
+   selection language (§4 inset bar + info tint), remembering the last choice; (c) primary
+   **Start control** (disabled-with-reason under the same honest-denial rules; engaging state
+   inline) + Cancel. Confirm = selectSource + requestEngage; close on engaged; denial reason
+   renders inside the modal, honest, never a silent spinner.
+3. **Pre-flight lives in the flow, not on the glass.** The floating `.main-preflight` chip leaves
+   the stage. Pre-flight is visible (a) inside the connect modal per (2) and (b) as one quiet
+   summary line on the idle dock card ("Pre-flight: N unchecked"). The engaged source pill (locked)
+   stays; the at-rest source select is deleted.
