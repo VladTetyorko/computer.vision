@@ -29,6 +29,13 @@
   max-width: calc(100% - 2 * var(--overlay-pad));
 }
 
+/* One row at rest (FLY-FLOW-PLAN.md §3 S3) — a watching pilot sees `[badge] [Take control]
+   [source ▾]` as a single low-profile line, not a 3-high center stack; the engaged widget keeps
+   the column default above. */
+.hud-bottom-center.at-rest {
+  flex-direction: row;
+}
+
 .hud-arm {
   right: var(--overlay-pad);
   display: flex;

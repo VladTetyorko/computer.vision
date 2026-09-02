@@ -11,7 +11,10 @@
      showing what is actually driving the vehicle right up until Release is worth the one extra glyph,
      not a reason to hide the control the "same lock rule" sentence above is describing. -->
 @if (stage() === 'live' || stage() === 'engaged') {
-  <div class="hud-bottom-center">
+  <!-- `.at-rest` (FLY-FLOW-PLAN.md §3 S3 "dock collapses to one row"): badge · Take control ·
+       source read as one horizontal row while nothing is engaged; the engaged widget keeps the
+       column stack (widget row above, Release + source below). -->
+  <div class="hud-bottom-center" [class.at-rest]="client.state() !== 'engaged'">
     @if (client.state() === 'engaged') {
       <div class="hud-widget">
         @if (source.kind() === 'keyboard') {
