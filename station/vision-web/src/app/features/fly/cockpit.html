@@ -1,11 +1,14 @@
 @if (facade.asset(); as a) {
-  <!-- ---- Cockpit grid (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2, D-C; relayout below per direct user
+  <!-- ---- Cockpit grid (docs/plans/active/FLY-FLOW-PLAN.md §4 W1/W2; relayout below per direct user
        request — see cockpit.css's own grid comment for the full reasoning) ------------------------
        Named CSS-grid areas (cockpit.css): `banner` is a real grid row that reflows the rest of the
        grid while showing (no manual shift math), `main` is the full-width video hero, `rail` is the
-       tool-rail column (spans every row below `banner`), `telemetry`/`ticker`/`controls` are real
-       rows *below* `main` now — not a left column beside it — so the video fills and centers in the
-       cockpit instead of sharing width with a stacked instrument column. The map inset and whichever
+       tool-rail column (spans every row below `banner`), `telemetry` is the one real row *below*
+       `main` — not a left column beside it — so the video fills and centers in the cockpit instead
+       of sharing width with a stacked instrument column. Three rows now, not five: the former
+       `ticker`/`controls` rows are gone (the ticker is a transient overlay inside `.main-left`
+       below; Start/Stop/Replay live in the one bottom-center dock, `.dock`, and Stop moved to the
+       telemetry row's own shelf — see this file's own comments at each). The map inset and whichever
        tool-rail drawer is open both overlay `main` itself (absolute within `.grid-main`, never
        within `.cockpit`) — see cockpit.css's own comment on `.grid-main`. -->
   <!-- `.surface-dark` (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/W4): the cockpit is a full-bleed video
@@ -42,85 +45,120 @@
           (trackFollowed)="facade.followTrack($event)"
         />
 
-        @if (!facade.primaryDevice()) {
-          <div class="notice stage-notice">This drone has no camera device to watch.</div>
-        } @else if (facade.live() && !facade.stream()?.viewUrl) {
-          <div class="notice stage-notice">The stream is running but has no view URL yet.</div>
-        } @else if (facade.videoNotice(); as videoState) {
-          <!-- ---- Video-flow state (docs/plans/done/STREAM-STATE-PLAN.md §2.3) ------------------------
-               Server-measured, not inferred here from "the player has not errored yet". Ahead of the
-               detection chip below because a stalled feed is the more urgent fact and makes
-               "video only" untrue. Silent for `LIVE` (the video is the message) and for `UNOBSERVED`
-               (a proxied source counts no frames in the JVM — "cannot judge" is not a fault to
-               report); see `stream-state-logic.ts#videoNotice`. -->
-          <div class="stage-notice" [class.notice]="videoState.tone === 'warn'"
-               [class.stream-state-chip]="videoState.tone === 'neutral'">
-            @if (videoState.tone === 'neutral') {
+        <!-- ---- The dock (docs/plans/active/FLY-FLOW-PLAN.md §3/§4 W1) — ONE bottom-center anchor stack
+             replacing three independently-positioned zones that used to collide (`.stage-notice`'s
+             own floating anchor, `.not-streaming-card`, and the `.grid-controls` row below the
+             video): a notice line above, then the stage's own action content below — collision-free
+             by construction, since exactly one notice and one action block can ever be present at
+             once. The `idle`/`starting` action content (the card just below) lives here, in this
+             component; the `live`/`engaged` action content (state badge + Take control + source
+             pill, or the engaged widget + Release) is `<vision-fly-hud>`'s own `.hud-bottom-center`
+             zone further down this file, gated on the identical `facade.stage()` value so the two
+             can never both render — see that component's own doc comment for why `stage()` can't
+             fully unify the two into one template block (its `client.state()` lives in a different
+             component's injector). -->
+        <div class="dock">
+          @if (facade.live() && !facade.stream()?.viewUrl) {
+            <div class="notice">The stream is running but has no view URL yet.</div>
+          } @else if (facade.videoNotice(); as videoState) {
+            <!-- ---- Video-flow state (docs/plans/done/STREAM-STATE-PLAN.md §2.3) ------------------------
+                 Server-measured, not inferred here from "the player has not errored yet". Ahead of the
+                 detection chip below because a stalled feed is the more urgent fact and makes
+                 "video only" untrue. Silent for `LIVE` (the video is the message) and for `UNOBSERVED`
+                 (a proxied source counts no frames in the JVM — "cannot judge" is not a fault to
+                 report); see `stream-state-logic.ts#videoNotice`. -->
+            <div [class.notice]="videoState.tone === 'warn'"
+                 [class.stream-state-chip]="videoState.tone === 'neutral'">
+              @if (videoState.tone === 'neutral') {
+                <span class="dot" aria-hidden="true"></span>
+              }
+              <span>{{ videoState.text }}</span>
+            </div>
+          } @else if (facade.detectionsPausedNotice(); as pausedText) {
+            <!-- ---- Detections-staleness honesty (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.4) ------
+                 Detection is meant to be on ({@link detectionsPausedNotice} is `null` whenever it isn't —
+                 see `CockpitFacade`'s own doc comment), but nothing has arrived recently — the same amber
+                 `.notice` chrome as a stalled video feed above, since a batch that stopped arriving is an
+                 equally genuine fault. Mutually exclusive with the video-notice branch above (a stalled
+                 *video* feed already explains why detections stopped too) and with the "Detection off"
+                 chip below (that one only ever shows once this is `null`). -->
+            <div class="notice">
+              <span>{{ pausedText }}</span>
+            </div>
+          } @else if (detectionOffChipVisible()) {
+            <!-- ---- Detection-off affordance (docs/plans/done/CV-DEMAND-PLAN.md wave D3) --------------------
+                 Detection now defaults off, both here and server-side, so a stream with no boxes is the
+                 normal case, not a fault — an operator would otherwise have no idea why nothing is being
+                 drawn, with the only control buried at the bottom of the `cv` drawer (`cv-control-panel.html`).
+                 A neutral status pill (never the amber `.notice` above, which is reserved for a genuine
+                 problem), same slot: the three states here are mutually exclusive, this one only shows once
+                 a stream is actually live, exactly when the other two cannot be showing. -->
+            <div class="detection-off-chip">
               <span class="dot" aria-hidden="true"></span>
-            }
-            <span>{{ videoState.text }}</span>
-          </div>
-        } @else if (facade.detectionsPausedNotice(); as pausedText) {
-          <!-- ---- Detections-staleness honesty (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.4) ------
-               Detection is meant to be on ({@link detectionsPausedNotice} is `null` whenever it isn't —
-               see `CockpitFacade`'s own doc comment), but nothing has arrived recently — the same amber
-               `.notice` chrome as a stalled video feed above, since a batch that stopped arriving is an
-               equally genuine fault. Mutually exclusive with the video-notice branch above (a stalled
-               *video* feed already explains why detections stopped too) and with the "Detection off"
-               chip below (that one only ever shows once this is `null`). -->
-          <div class="stage-notice notice">
-            <span>{{ pausedText }}</span>
-          </div>
-        } @else if (detectionOffChipVisible()) {
-          <!-- ---- Detection-off affordance (docs/plans/done/CV-DEMAND-PLAN.md wave D3) --------------------
-               Detection now defaults off, both here and server-side, so a stream with no boxes is the
-               normal case, not a fault — an operator would otherwise have no idea why nothing is being
-               drawn, with the only control buried at the bottom of the `cv` drawer (`cv-control-panel.html`).
-               A neutral status pill (never the amber `.notice` above, which is reserved for a genuine
-               problem), same slot: the three states here are mutually exclusive, this one only shows once
-               a stream is actually live, exactly when the other two cannot be showing. -->
-          <div class="stage-notice detection-off-chip">
-            <span class="dot" aria-hidden="true"></span>
-            <span>Detection off — video only</span>
-            @if (!facade.watchMode()) {
-              <button type="button" class="btn small" (click)="facade.enableDetection()">Turn on</button>
-            }
-          </div>
-        }
+              <span>Detection off — video only</span>
+              @if (!facade.watchMode()) {
+                <button type="button" class="btn small" (click)="facade.enableDetection()">Turn on</button>
+              }
+            </div>
+          }
 
-        <!-- ---- Not-streaming card (docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1) ----------------
-             `vision-player` itself already renders a centered "Not streaming"/"Stream stopped" caption
-             for this state (`player.html`'s own `.overlay-status`, out of scope here) — this card is a
-             later sibling within the same `.stage-video` stacking context, so it renders on top and
-             replaces that bare caption with the two honest facts this app actually has for an asset
-             nothing is currently streaming from: when a sample was last seen and where it last put the
-             asset (`CockpitFacade#notStreamingLastSeen`/`notStreamingPosition`), never a fabricated
-             "live" value (CLAUDE.md rule 9 — newest data only, honest about staleness). An opaque
-             `--panel-raised` card, not one of this cockpit's `--hud-*` frosted controls: the frame
-             behind it is a static idle/black one, not unpredictable video, so the HUD-over-imagery
-             rationale (frontend-style §2) doesn't apply. Gated on `facade.primaryDevice()` so it never
-             doubles the "no camera device" notice above — that one already says everything there is to
-             say when there is no device to have ever streamed from. -->
-        @if (facade.primaryDevice() && !facade.live()) {
-          <div class="not-streaming-card card">
-            <p class="not-streaming-title">Not streaming</p>
-            <p class="muted">{{ facade.notStreamingLastSeen() }}</p>
-            @if (facade.notStreamingPosition(); as position) {
-              <p class="mono">{{ position }}</p>
-              <a class="muted hint" routerLink="/command">Open on map ›</a>
-            }
-            @if (!facade.watchMode()) {
-              <button
-                type="button"
-                class="btn big"
-                (click)="facade.start()"
-                [disabled]="facade.busy()"
-              >
-                {{ facade.busy() ? 'Starting…' : 'Start stream' }}
-              </button>
-            }
-          </div>
-        }
+          <!-- ---- Idle/starting dock card (docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1, folded per
+               FLY-FLOW-PLAN.md §3 S1/S2) — the two honest facts this app has for an asset nothing is
+               currently streaming from (when a sample was last seen and where it last put the asset,
+               `CockpitFacade#notStreamingLastSeen`/`notStreamingPosition`), never a fabricated "live"
+               value (CLAUDE.md rule 9). Renders regardless of `facade.primaryDevice()` now — a
+               telemetry-only asset gets the identical card with its Start button disabled and the
+               reason stated inline (folded in from the old `.grid-controls` row's own poka-yoke
+               pattern), rather than a second, separate "no camera" notice saying the same thing.
+               Opaque `--panel-raised`, not this cockpit's `--hud-*` frosted chrome: the frame behind
+               it is a static idle/black one, not unpredictable video, so the HUD-over-imagery
+               rationale (frontend-style §2) doesn't apply — same reasoning the old `.not-streaming-
+               card` already carried. -->
+          @if (facade.stage() === 'idle' || facade.stage() === 'starting') {
+            <div class="dock-card card">
+              <p class="dock-card-title">Not streaming</p>
+              <p class="muted">{{ facade.notStreamingLastSeen() }}</p>
+              @if (facade.notStreamingPosition(); as position) {
+                <p class="mono">{{ position }}</p>
+                <a class="muted hint" routerLink="/command">Open on map ›</a>
+              }
+              @if (!facade.watchMode()) {
+                <button
+                  type="button"
+                  class="btn big"
+                  (click)="facade.start()"
+                  [disabled]="facade.busy() || !facade.primaryDevice()"
+                >
+                  {{ facade.busy() ? 'Starting…' : 'Start stream' }}
+                </button>
+                @if (!facade.primaryDevice()) {
+                  <p class="muted hint start-hint">No camera device on this drone — nothing to stream.</p>
+                }
+                <!-- D3r (docs/plans/active/ASSET-FLOWS-PLAN.md §3 WB2) — a quiet link, not the `.btn
+                     secondary` this used to be in `.grid-controls`: Start is this card's one real
+                     call-to-action, Replay is a lesser, always-available side door. -->
+                @if (facade.latestFinishedUsageEntry(); as finished) {
+                  <div class="replay-control">
+                    <a class="muted hint" [routerLink]="['/assets', a.assetId, 'replay', finished.usageId]">
+                      Replay last flight
+                    </a>
+                    @if (facade.olderReplayableUsages().length > 0) {
+                      <vision-kebab-menu [label]="'Replay an earlier flight for ' + a.displayName">
+                        @for (usage of facade.olderReplayableUsages(); track usage.usageId) {
+                          <div class="kebab-item">
+                            <button type="button" [routerLink]="['/assets', a.assetId, 'replay', usage.usageId]">
+                              <span class="mono">{{ usage.startedAt }}</span>
+                            </button>
+                          </div>
+                        }
+                      </vision-kebab-menu>
+                    }
+                  </div>
+                }
+              }
+            </div>
+          }
+        </div>
       </div>
 
       <!-- ---- Main header overlay: exit, map toggle, drone switcher, "Bring home" ---------------
@@ -153,17 +191,6 @@
               [active]="facade.mapVisible()"
               (activated)="facade.toggleMapVisible()"
             />
-          }
-          <!-- Status chips (docs/plans/active/FLY-CONTROL-UX-PLAN.md §3) — armed/mode joined the
-               existing header cluster rather than opening a new zone; full sentences for either stay
-               off the video, in the informational rail's own state strip / diagnostics block. -->
-          @if (headerStatusVisible()) {
-            <div class="header-status">
-              <span class="chip" [class.ok]="headerArmedChip().tone === 'ok'">{{ headerArmedChip().text }}</span>
-              @if (headerMode(); as m) {
-                <span class="chip" [class.stale]="headerModeStale()">{{ m }}</span>
-              }
-            </div>
           }
         </div>
 
@@ -199,72 +226,110 @@
         </div>
       </div>
 
-      <!-- ---- Map inset (M, or the header's own map-toggle button, docs/conclusions/MAP-UX-RESEARCH.md M5) —
-           a separate persisted toggle, not a drawer (docs/plans/done/UI-REDESIGN-PLAN.md D-D: "glanceable,
-           not a modal drawer"); overlays `main`, hidden entirely below `--bp-md` (900px, cockpit.css)
-           regardless of this toggle's own state. -->
-      @if (facade.mapVisible() && facade.hasTelemetryDevice()) {
-        <div class="main-map">
-          <vision-tactical-map
-            [assets]="facade.mapAssets()"
-            [followAssetId]="facade.mapFollowAssetId()"
-            [zones]="facade.geofence.zones()"
-            [marks]="facade.marks.displayMarks()"
-            [drawings]="facade.drawings.displayDrawings()"
-            [layers]="facade.layers.layers()"
-            [corrections]="facade.mapCorrections()"
-            [interactionMode]="facade.interactionMode()"
-            [selectedMarkId]="facade.marks.selectedMarkId()"
-            (markSelected)="facade.marks.select($event)"
-            (mapClicked)="facade.marks.handleMapClick($event)"
-            (drawingCompleted)="facade.completeDrawing($event)"
-            (drawingSelected)="facade.selectDrawing($event)"
-          />
-        </div>
-      }
+      <!-- ---- Left column (docs/plans/active/FLY-FLOW-PLAN.md §4 W2, D4) — ONE flex column, bottom-left
+           of `.grid-main`, `flex-direction: column-reverse` so DOM order reads bottom-up exactly like
+           the stack visually does: secondary tiles (bottom) → map inset → pre-flight checklist → the
+           events ticker overlay (top). A real `gap` between whichever of these actually render — no
+           more three independent absolutes each carrying its own approximate `calc(... + --space-64)`
+           offset guessing at its neighbor's height. `column-reverse` also means the ticker (the one
+           transient, size-changing member) only ever grows/shrinks the stack's *top* edge — the three
+           persistent items below it stay anchored to this column's own fixed `bottom`, never jump
+           position as events come and go. -->
+      <div class="main-left">
+        <!-- ---- Secondary video-device tiles ------------------------------------------------------ -->
+        @if (facade.secondaryDevices().length > 0) {
+          <div class="main-secondary">
+            @for (device of facade.secondaryDevices(); track device.id) {
+              <button
+                type="button"
+                class="secondary-tile"
+                (click)="facade.setPrimaryDevice(device.id)"
+                [title]="'Switch to ' + device.name"
+              >
+                <vision-player
+                  [src]="facade.fleet.streamFor(device.id)?.viewUrl ?? null"
+                  [whepUrl]="facade.fleet.streamFor(device.id)?.whepUrl ?? null"
+                  [compact]="true"
+                />
+                <span class="tile-label">{{ device.name }}</span>
+              </button>
+            }
+          </div>
+        }
 
-      <!-- ---- Secondary video-device tiles ------------------------------------------------------ -->
-      @if (facade.secondaryDevices().length > 0) {
-        <div class="main-secondary">
-          @for (device of facade.secondaryDevices(); track device.id) {
-            <button
-              type="button"
-              class="secondary-tile"
-              (click)="facade.setPrimaryDevice(device.id)"
-              [title]="'Switch to ' + device.name"
-            >
-              <vision-player
-                [src]="facade.fleet.streamFor(device.id)?.viewUrl ?? null"
-                [whepUrl]="facade.fleet.streamFor(device.id)?.whepUrl ?? null"
-                [compact]="true"
-              />
-              <span class="tile-label">{{ device.name }}</span>
-            </button>
-          }
-        </div>
-      }
+        <!-- ---- Map inset (M, or the header's own map-toggle button, docs/conclusions/MAP-UX-RESEARCH.md M5) —
+             a separate persisted toggle, not a drawer (docs/plans/done/UI-REDESIGN-PLAN.md D-D:
+             "glanceable, not a modal drawer"); hidden entirely below `--bp-md` (900px, cockpit.css)
+             regardless of this toggle's own state. Additionally gated on `facade.hasKnownPosition()`
+             (docs/plans/active/FLY-FLOW-PLAN.md §4 W2, D5) — without a real fix the map would only ever
+             render world-zoomed on Null Island, "pure noise, answers nothing". -->
+        @if (facade.mapVisible() && facade.hasTelemetryDevice() && facade.hasKnownPosition()) {
+          <div class="main-map">
+            <vision-tactical-map
+              [assets]="facade.mapAssets()"
+              [followAssetId]="facade.mapFollowAssetId()"
+              [zones]="facade.geofence.zones()"
+              [marks]="facade.marks.displayMarks()"
+              [drawings]="facade.drawings.displayDrawings()"
+              [layers]="facade.layers.layers()"
+              [corrections]="facade.mapCorrections()"
+              [interactionMode]="facade.interactionMode()"
+              [selectedMarkId]="facade.marks.selectedMarkId()"
+              (markSelected)="facade.marks.select($event)"
+              (mapClicked)="facade.marks.handleMapClick($event)"
+              (drawingCompleted)="facade.completeDrawing($event)"
+              (drawingSelected)="facade.selectDrawing($event)"
+            />
+          </div>
+        }
 
-      <!-- ---- Pre-flight checklist (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — ground-check only: hidden
-           in watch mode, and once the FC itself confirms armed. Collapsible per direct user request:
-           open before the stream starts, collapsed to its summary head once it's running (the video
-           stage owns that space then), re-openable by clicking the head — the state itself is
-           `CockpitFacade#preflightCollapsed`'s job, see that signal's own doc comment. -->
-      @if (facade.showPreflightChecklist()) {
-        <div class="main-preflight">
-          <vision-preflight-checklist
-            [items]="facade.preflightItems()"
-            [collapsible]="true"
-            [collapsed]="facade.preflightCollapsed()"
-            (collapsedChange)="facade.preflightCollapsed.set($event)"
-          />
-        </div>
-      }
+        <!-- ---- Pre-flight checklist (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — ground-check only: hidden
+             in watch mode, and once the FC itself confirms armed. Collapsible per direct user request:
+             open before the stream starts, collapsed to its summary head once the dock reaches
+             `live`/`engaged` (the video stage, or a telemetry-only commandable session, owns that
+             space then), re-openable by clicking the head — the state itself is
+             `CockpitFacade#preflightCollapsed`'s job, see that signal's own doc comment. -->
+        @if (facade.showPreflightChecklist()) {
+          <div class="main-preflight">
+            <vision-preflight-checklist
+              [items]="facade.preflightItems()"
+              [collapsible]="true"
+              [collapsed]="facade.preflightCollapsed()"
+              (collapsedChange)="facade.preflightCollapsed.set($event)"
+            />
+          </div>
+        }
 
-      <!-- ---- Diagnostics (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e) — ArduPilot-only extras (wind/
-           vibration/EKF/rangefinder/mission progress); hidden entirely with no diagnostic keys. -->
+        <!-- ---- Events ticker (docs/plans/active/FLY-FLOW-PLAN.md §4 W2) — a transient, non-interactive
+             overlay (`pointer-events: none`, `aria-hidden`: the header bell / Wall's own events rail
+             are this app's real, actionable feed for the identical events; this is a glance, not a
+             second access path), capped to `TICKER_MAX_EVENTS` rows (`fly-logic.ts`). Used to be its
+             own full-width grid row below the video (`grid-ticker`) — folded into this same anchor-
+             stable left column as its topmost member per this file's own comment above. -->
+        @if (facade.tickerEvents().length > 0) {
+          <div class="ticker" aria-hidden="true">
+            @for (event of facade.tickerEvents(); track event.id) {
+              <div class="ticker-row" [class.open]="event.state === 'OPEN'">
+                <span class="dot" [class.live]="event.state === 'OPEN'"></span>
+                <span class="truncate">{{ facade.tickerLabel(event) }}</span>
+              </div>
+            }
+          </div>
+        }
+      </div>
+
+      <!-- ---- Right column (docs/plans/active/FLY-FLOW-PLAN.md §4 W2) — mirrors `.main-left`'s naming for a
+           single member today (diagnostics); still its own named column, not an inline absolute, so a
+           second right-side card has a real home to join later. Stays a fixed `--space-64` offset
+           above `.hud-arm` (`fly-hud.css`'s bottom-right Arm/Disarm zone) — unlike `.main-left`'s own
+           stack, this can't become a real `gap` clearing a *sibling*'s measured height: `.hud-arm` is
+           a different component's own box, not a child of this column, and this page has no live
+           measurement of it. -->
       @if (facade.diagnosticsRows().length > 0) {
-        <div class="main-diagnostics">
-          <vision-diagnostics-card [rows]="facade.diagnosticsRows()" />
+        <div class="main-right">
+          <div class="main-diagnostics">
+            <vision-diagnostics-card [rows]="facade.diagnosticsRows()" />
+          </div>
         </div>
       }
 
@@ -341,6 +406,7 @@
         [sessionBusy]="facade.sessionBusy()"
         [groundedReason]="facade.groundedReason()"
         [rcPanelOpen]="isPanelOpen('rc')"
+        [stage]="facade.stage()"
         (closeRcPanel)="panels.close()"
         (openRcPanel)="panels.open('rc')"
         (engageAssetLink)="facade.engageSession()"
@@ -418,6 +484,15 @@
          relaid out as a bottom row per direct user request; see cockpit.css's own grid comment). ---- -->
     <div class="grid-telemetry">
       <vision-fly-osd [latencySeconds]="facade.latencySeconds()" [transport]="facade.transport()" [windLimitMps]="facade.windLimitMps()" />
+
+      <!-- Stop stream (docs/plans/active/FLY-FLOW-PLAN.md §4 W1) — moved off the deleted `.grid-controls`
+           row onto the right end of this shelf: a small, quiet ghost, not a second big red button
+           competing with the dock's own Take-control pill. Same confirm scrim as before, verbatim. -->
+      @if (facade.live() && !facade.watchMode()) {
+        <button type="button" class="btn danger small telemetry-stop" (click)="requestStop()" [disabled]="facade.busy()">
+          Stop stream
+        </button>
+      }
     </div>
 
 
@@ -507,48 +582,6 @@
         />
       </div>
     </div>
-
-    <!-- ---- Controls: Start/Stop, Replay ------------------------------------------------------ -->
-    @if (!facade.watchMode()) {
-      <div class="grid-controls">
-        @if (facade.latestFinishedUsageEntry(); as finished) {
-          <div class="replay-control">
-            <a class="btn secondary" [routerLink]="['/assets', a.assetId, 'replay', finished.usageId]">
-              Replay last flight
-            </a>
-            <!-- D3r (docs/plans/active/ASSET-FLOWS-PLAN.md §3 WB2) — a small menu of earlier finished
-                 flights, absent entirely when there is at most one to offer. -->
-            @if (facade.olderReplayableUsages().length > 0) {
-              <vision-kebab-menu [label]="'Replay an earlier flight for ' + a.displayName">
-                @for (usage of facade.olderReplayableUsages(); track usage.usageId) {
-                  <div class="kebab-item">
-                    <button type="button" [routerLink]="['/assets', a.assetId, 'replay', usage.usageId]">
-                      <span class="mono">{{ usage.startedAt }}</span>
-                    </button>
-                  </div>
-                }
-              </vision-kebab-menu>
-            }
-          </div>
-        }
-        @if (facade.live()) {
-          <button type="button" class="btn danger big danger-action" (click)="requestStop()" [disabled]="facade.busy()">
-            Stop stream
-          </button>
-        } @else {
-          <!-- Poka-yoke rule 1 (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §2): disabled with the reason inline,
-               never enabled-then-error — a drone with no camera device has nothing to stream. -->
-          <div class="start-control">
-            <button type="button" class="btn big" (click)="facade.start()" [disabled]="facade.busy() || !facade.primaryDevice()">
-              {{ facade.busy() ? 'Starting…' : 'Start stream' }}
-            </button>
-            @if (!facade.primaryDevice()) {
-              <p class="muted hint start-hint">No camera device on this drone — nothing to stream.</p>
-            }
-          </div>
-        }
-      </div>
-    }
 
     @if (isDialogOpen('stop')) {
       <div class="hud-confirm">

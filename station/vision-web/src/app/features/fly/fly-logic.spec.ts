@@ -4,6 +4,7 @@ import {
   ALL_DRONES_OPTION_VALUE,
   REPLAY_PICKER_MAX_USAGES,
   earlierReplayableUsages,
+  flyStage,
   isAllDronesOption,
   isSwitcherOptionSelected,
   isWatchMode,
@@ -18,6 +19,7 @@ import {
   showDetectionOffChip,
   sortAssetsForPicker,
   streamStateLabel,
+  type FlyStageInput,
 } from './fly-logic';
 
 function asset(partial: Partial<AssetSummary>): AssetSummary {
@@ -36,6 +38,49 @@ function asset(partial: Partial<AssetSummary>): AssetSummary {
 function usage(partial: Partial<AssetUsage>): AssetUsage {
   return { usageId: 'u-0', startedAt: '2026-07-22T00:00:00Z', sampleCount: 0, ...partial };
 }
+
+function stageInput(partial: Partial<FlyStageInput>): FlyStageInput {
+  return { live: false, stopped: false, busy: false, streamState: undefined, operatorEngaged: false, ...partial };
+}
+
+describe('flyStage', () => {
+  it('is idle when nothing is happening', () => {
+    expect(flyStage(stageInput({}))).toBe('idle');
+  });
+
+  it('is starting while a Start click is in flight', () => {
+    expect(flyStage(stageInput({ busy: true }))).toBe('starting');
+  });
+
+  it('is live once a stream exists, regardless of streamState', () => {
+    expect(flyStage(stageInput({ live: true, streamState: 'STARTING' }))).toBe('live');
+    expect(flyStage(stageInput({ live: true, streamState: 'LIVE' }))).toBe('live');
+  });
+
+  it('is engaged when a telemetry-only asset has an open operator session with no video', () => {
+    expect(flyStage(stageInput({ operatorEngaged: true }))).toBe('engaged');
+  });
+
+  it('prefers live over busy', () => {
+    // A stream can be `live` while `busy` also happens to still be true (e.g. Stop just clicked) —
+    // the video already exists, so the compact live row is the honest thing to show, not the
+    // idle/starting card.
+    expect(flyStage(stageInput({ live: true, busy: true }))).toBe('live');
+  });
+
+  it('prefers live over operatorEngaged — resolveSessionAffordance already stands the session-engage affordance down once live', () => {
+    expect(flyStage(stageInput({ live: true, operatorEngaged: true }))).toBe('live');
+  });
+
+  it('prefers busy over operatorEngaged', () => {
+    expect(flyStage(stageInput({ busy: true, operatorEngaged: true }))).toBe('starting');
+  });
+
+  it('ignores stopped/streamState for the idle/starting split — the dock card is honest even for a dropped-out stream', () => {
+    expect(flyStage(stageInput({ stopped: true }))).toBe('idle');
+    expect(flyStage(stageInput({ stopped: true, busy: true }))).toBe('starting');
+  });
+});
 
 describe('sortAssetsForPicker', () => {
   it('puts streaming assets before offline ones regardless of name', () => {

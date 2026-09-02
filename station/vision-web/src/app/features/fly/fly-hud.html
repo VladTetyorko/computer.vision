@@ -1,98 +1,91 @@
-<!-- Bottom-center zone (docs/plans/active/FLY-CONTROL-UX-PLAN.md §3) — the input-source pills always
-     render here (this class's own doc comment explains the deliberate deviation from "nothing else
-     new on video"), locked once a handshake starts; beside them, either the at-rest badge + Take-
-     control pill, or — once actually engaged — the live input widget + Release pill. -->
-<div class="hud-bottom-center">
-  <div class="hud-source-pills" role="group" aria-label="Input source">
-    <button
-      type="button"
-      class="hud-pill source-pill"
-      [class.active]="source.kind() === 'virtual'"
-      [disabled]="sourceChoiceLocked()"
-      (click)="selectSource('virtual')"
-    >
-      On-screen
-    </button>
-    <button
-      type="button"
-      class="hud-pill source-pill"
-      [class.active]="source.kind() === 'gamepad'"
-      [disabled]="sourceChoiceLocked()"
-      (click)="selectSource('gamepad')"
-    >
-      Transmitter
-    </button>
-    <button
-      type="button"
-      class="hud-pill source-pill"
-      [class.active]="source.kind() === 'keyboard'"
-      [disabled]="sourceChoiceLocked()"
-      (click)="selectSource('keyboard')"
-    >
-      Keys
-    </button>
-  </div>
-
-  @if (client.state() === 'engaged') {
-    <div class="hud-widget">
-      @if (source.kind() === 'keyboard') {
-        <div class="key-ticker" title="Keyboard input — held keys light up">
-          @for (glyph of keyGlyphs(); track glyph.code) {
-            <span class="key-glyph" [class.active]="keyboard.axisKeysDown().has(glyph.code)">{{ glyph.label }}</span>
-          }
-        </div>
-      } @else {
-        @for (el of hudElements(); track el.id) {
-          <div class="hud-element">
-            @switch (el.kind) {
-              @case ('bar') {
-                <div class="hud-bar-h">
-                  <span class="rest-tick" [style.left.%]="restPercent(el.x)"></span>
-                  <span class="fill" [style.left.%]="fillFrom(el.x)" [style.width.%]="fillSpan(el.x)"></span>
-                </div>
-              }
-              @case ('throttle') {
-                <div class="hud-bar-v">
-                  <span class="rest-tick" [style.bottom.%]="restPercent(el.y)"></span>
-                  <span class="fill" [style.bottom.%]="fillFrom(el.y)" [style.height.%]="fillSpan(el.y)"></span>
-                </div>
-              }
-              @case ('glyph2d') {
-                <div class="hud-pad">
-                  <span class="crosshair-x"></span>
-                  <span class="crosshair-y"></span>
-                  <span class="knob" [style.left.%]="knobLeft(el.x)" [style.top.%]="knobTop(el.y)"></span>
-                </div>
-              }
+<!-- Bottom-center zone (docs/plans/active/FLY-FLOW-PLAN.md §3/§4 W1, superseding FLY-CONTROL-UX-PLAN.md
+     §3's own "pills always visible" call by direct owner request) — gated on `stage()` (`fly-logic.ts`)
+     rather than mounting unconditionally: at `idle`/`starting` this whole zone is silent, ceding the
+     one bottom-center anchor to `cockpit.html`'s own `.dock` (its "why `stage()` can't fully unify the
+     two" note explains why this is a second `@if` against the identical value rather than one shared
+     template). At `live`, one row: the at-rest badge, Take-control, and the collapsed source control —
+     three separate pills folded into a single HUD-styled `<select>` (D-scan finding: three always-on
+     buttons for a choice made once per session and then frozen was worse than a compact picker). At
+     `engaged`, the live input widget + Release pill — "unchanged" per §4 S4 — plus the identical
+     source control, now disabled: `sourceChoiceLocked()` is exactly as true here as mid-handshake, and
+     showing what is actually driving the vehicle right up until Release is worth the one extra glyph,
+     not a reason to hide the control the "same lock rule" sentence above is describing. -->
+@if (stage() === 'live' || stage() === 'engaged') {
+  <div class="hud-bottom-center">
+    @if (client.state() === 'engaged') {
+      <div class="hud-widget">
+        @if (source.kind() === 'keyboard') {
+          <div class="key-ticker" title="Keyboard input — held keys light up">
+            @for (glyph of keyGlyphs(); track glyph.code) {
+              <span class="key-glyph" [class.active]="keyboard.axisKeysDown().has(glyph.code)">{{ glyph.label }}</span>
             }
-            <span class="element-label">{{ el.label }}</span>
-            <span class="element-value mono">{{ elementValueLabel(el) }}</span>
           </div>
+        } @else {
+          @for (el of hudElements(); track el.id) {
+            <div class="hud-element">
+              @switch (el.kind) {
+                @case ('bar') {
+                  <div class="hud-bar-h">
+                    <span class="rest-tick" [style.left.%]="restPercent(el.x)"></span>
+                    <span class="fill" [style.left.%]="fillFrom(el.x)" [style.width.%]="fillSpan(el.x)"></span>
+                  </div>
+                }
+                @case ('throttle') {
+                  <div class="hud-bar-v">
+                    <span class="rest-tick" [style.bottom.%]="restPercent(el.y)"></span>
+                    <span class="fill" [style.bottom.%]="fillFrom(el.y)" [style.height.%]="fillSpan(el.y)"></span>
+                  </div>
+                }
+                @case ('glyph2d') {
+                  <div class="hud-pad">
+                    <span class="crosshair-x"></span>
+                    <span class="crosshair-y"></span>
+                    <span class="knob" [style.left.%]="knobLeft(el.x)" [style.top.%]="knobTop(el.y)"></span>
+                  </div>
+                }
+              }
+              <span class="element-label">{{ el.label }}</span>
+              <span class="element-value mono">{{ elementValueLabel(el) }}</span>
+            </div>
+          }
         }
-      }
-    </div>
-    <button type="button" class="hud-pill release" (click)="release()">Release</button>
-  } @else {
-    <span
-      class="hud-badge"
-      [class.ready]="badge().text === 'Ready'"
-      [class.no-link]="badge().text === 'No link'"
-      [class.not-commandable]="badge().text === 'Not commandable'"
-    >
-      <vision-icon [name]="badge().icon" [size]="14" />
-      {{ badge().text }}
-    </span>
-    <button
-      type="button"
-      class="hud-pill primary take-control"
-      [disabled]="engageDisabled()"
-      [title]="disabledReason() ?? 'Take control — your selected input source drives this drone'"
-      (click)="requestEngage()"
-    >
-      {{ client.state() === 'engaging' ? 'Engaging…' : 'Take control' }}
-    </button>
-  }
-</div>
+      </div>
+      <button type="button" class="hud-pill release" (click)="release()">Release</button>
+    } @else {
+      <span
+        class="hud-badge"
+        [class.ready]="badge().text === 'Ready'"
+        [class.no-link]="badge().text === 'No link'"
+        [class.not-commandable]="badge().text === 'Not commandable'"
+      >
+        <vision-icon [name]="badge().icon" [size]="14" />
+        {{ badge().text }}
+      </span>
+      <button
+        type="button"
+        class="hud-pill primary take-control"
+        [disabled]="engageDisabled()"
+        [title]="disabledReason() ?? 'Take control — your selected input source drives this drone'"
+        (click)="requestEngage()"
+      >
+        {{ client.state() === 'engaging' ? 'Engaging…' : 'Take control' }}
+      </button>
+    }
+
+    <label class="hud-pill source-select" title="Input source — frozen for the life of a session">
+      <select
+        aria-label="Input source"
+        [disabled]="sourceChoiceLocked()"
+        [value]="source.kind()"
+        (change)="selectSource($any($event.target).value)"
+      >
+        <option value="virtual">On-screen</option>
+        <option value="gamepad">Transmitter</option>
+        <option value="keyboard">Keys</option>
+      </select>
+    </label>
+  </div>
+}
 
 <!-- Bottom-right zone — Arm/Disarm (`flight-command-panel.html`'s own `.hud-arm-zone` is what this
      positions; the component itself is `:host { display: contents }`, so this wrapper is what

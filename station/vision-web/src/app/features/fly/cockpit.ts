@@ -28,7 +28,6 @@ import { LayerManager } from '../../shared/map/map-controls/layer-manager';
 import { MarksPanel } from './marks-panel';
 import { CockpitFacade } from './cockpit-facade';
 import { migratedPanelId, nextCollapseAction, showDetectionOffChip, type ToolRailPanelId } from './fly-logic';
-import { armedChip, sampleIsStale } from './rc-monitor-logic';
 
 /** `UiStore`'s own storage key for this page's tool-rail (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2, D-D) —
  * one key for all seven drawers (`flight`/`rc`/`cv`/`detections`/`marks`/`map`/`help`; the former
@@ -153,22 +152,6 @@ export class CockpitPage {
     // read over a stalled feed, since there is no video either.
     showDetectionOffChip(this.facade.live(), this.facade.detectionOn()) && !this.facade.videoNotice(),
   );
-
-  /**
-   * `.header-status` — armed/mode chips (docs/plans/active/FLY-CONTROL-UX-PLAN.md §3: "Status:
-   * armed/mode chips join existing `.main-header` cluster (top), not a new zone"). Reuses
-   * `rc-monitor-logic.ts#armedChip`/`#sampleIsStale` verbatim — the exact functions the former
-   * state-strip read, now a second call site against the same pure rule rather than a re-derived
-   * copy, so a reading can never be graded "live" here and "stale" in the rail at once. Gated on
-   * `facade.hasTelemetryDevice()`: an armed/disarmed dash for a camera-only asset that has no
-   * `flightState` to ever report would be a permanent, meaningless "—" chip cluttering the header.
-   */
-  protected readonly headerStatusVisible = computed(() => this.facade.hasTelemetryDevice());
-  protected readonly headerArmedChip = computed(() =>
-    armedChip(this.facade.telemetry.latest()?.flightState?.armed, this.facade.telemetry.sampleAgeSeconds()),
-  );
-  protected readonly headerMode = computed(() => this.facade.telemetry.latest()?.flightState?.mode);
-  protected readonly headerModeStale = computed(() => sampleIsStale(this.facade.telemetry.sampleAgeSeconds()));
 
   // --- Overlay state — host-owned, see this class's own doc comment above ------------------------
 

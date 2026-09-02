@@ -1,5 +1,6 @@
 /* ---- Cockpit grid (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2, D-C; relayout below per direct user request:
-   "player = full-screen centered hero, key telemetry moves to a bottom row") -------------------- */
+   "player = full-screen centered hero, key telemetry moves to a bottom row"; row count reduced
+   again in docs/plans/active/FLY-FLOW-PLAN.md §4 W1/W2) ------------------------------------------ */
 /* Named CSS-grid areas replace the old ten `position: absolute` `.hud-*` regions and their
    duplicated `.banner-active` offset set — the failsafe banner is a real grid row (content reflows
    on its own when it appears/disappears, no manual shift math), so is the bottom telemetry strip
@@ -10,18 +11,19 @@
    **Relayout, concretely**: `<vision-fly-osd>` used to sit in a `minmax(0,20rem)` left column
    beside the video (`telemetry`/`ticker` sharing that column, `main` spanning both their rows) —
    video-as-hero and a narrow instrument column pulling the eye left compete for the same "main
-   thing on screen" role. `telemetry`/`ticker` are now full-width rows *below* `main` instead,
-   which does two things at once: `main` drops to a single `1fr` row spanning the *entire* width
-   (minus the rail column) rather than sharing width with a side column, so the video genuinely
-   fills and centers in the cockpit; and the OSD reads left-to-right along the bottom like an
-   FPV/ground-station strip rather than a stacked instrument panel. Grid:
+   thing on screen" role. `telemetry` is now a full-width row *below* `main` instead, which does two
+   things at once: `main` drops to a single `1fr` row spanning the *entire* width (minus the rail
+   column) rather than sharing width with a side column, so the video genuinely fills and centers in
+   the cockpit; and the OSD reads left-to-right along the bottom like an FPV/ground-station strip
+   rather than a stacked instrument panel. Grid, three rows now (FLY-FLOW-PLAN.md §4 W2 D2/D4 — the
+   old `ticker` and `controls` rows are both gone: the ticker is a transient overlay inside
+   `.main-left`, Start/Stop/Replay live in the bottom-center `.dock` plus the telemetry shelf's own
+   `.telemetry-stop`):
 
      grid-template-areas:
        "banner    banner"
        "main      rail"
-       "telemetry rail"
-       "ticker    rail"
-       "controls  rail";
+       "telemetry rail";
      grid-template-columns: 1fr auto;
 
    This is now the layout at *every* width — the previous `--bp-md` (900px) override that reshuffled
@@ -36,11 +38,9 @@
   grid-template-areas:
     'banner    banner'
     'main      rail'
-    'telemetry rail'
-    'ticker    rail'
-    'controls  rail';
+    'telemetry rail';
   grid-template-columns: 1fr auto;
-  grid-template-rows: auto 1fr auto auto auto;
+  grid-template-rows: auto 1fr auto;
   /* The one edge-inset every `.main-*` overlay below shares (docs/plans/done/NAV-IA-REDESIGN-PLAN.md F11,
      docs/extracts/design/01-fly.md — "a grid overlay ... with an --overlay-pad"): named so "the safe margin
      from the video's own edge" reads as one rule, not half a dozen independent `var(--space-16)`
@@ -113,6 +113,7 @@
    `.surface-hud` cluster pills already carry their own chrome). */
 .grid-telemetry {
   grid-area: telemetry;
+  position: relative;
   padding: var(--space-8) var(--space-16);
   display: flex;
   align-items: center;
@@ -120,32 +121,20 @@
   border-top: var(--hud-border);
 }
 
-/* The events ticker — also a real row now, directly below the OSD strip; `max-width` + auto margins
-   keep its short-lived rows from stretching edge-to-edge across the now much wider bottom area. */
-.grid-ticker {
-  grid-area: ticker;
-  width: 100%;
-  max-width: 34rem;
-  margin: 0 auto;
-  padding: 0 var(--space-16) var(--space-8);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-  overflow: hidden;
-}
-
-.grid-controls {
-  grid-area: controls;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: var(--space-16);
-  padding: var(--space-16);
+/* Stop stream (docs/plans/active/FLY-FLOW-PLAN.md §4 W1) — a small quiet ghost pinned to this shelf's
+   own right edge, not a second big red button competing with the dock's Take-control pill below the
+   video. `<vision-fly-osd>` itself stays centered (its own rule, unchanged); this is positioned
+   independently so it never pushes the OSD clusters off-center on a narrow viewport. */
+.telemetry-stop {
+  position: absolute;
+  right: var(--space-16);
+  top: 50%;
+  transform: translateY(-50%);
 }
 
 /* D3r (docs/plans/active/ASSET-FLOWS-PLAN.md §3 WB2) — "Replay last flight" plus its own small
    "earlier flights" kebab trigger, kept snug together as one control rather than two independently
-   spaced `.grid-controls` children. */
+   spaced children. */
 .replay-control {
   display: inline-flex;
   align-items: center;
@@ -266,12 +255,23 @@
   border-radius: 0;
 }
 
-.stage-notice {
+/* ---- The dock (docs/plans/active/FLY-FLOW-PLAN.md §3/§4 W1) — ONE bottom-center anchor stack,
+   replacing the three independently-positioned zones that used to collide here (`.stage-notice`,
+   `.not-streaming-card`, and the `.grid-controls` row below the video): a notice line, then the
+   stage's own action content, stacked with a real `gap` rather than three separate `bottom: Nrem`
+   guesses. Exactly one notice and one action block can ever be present at once (see cockpit.html's
+   own comment at this element), so there is nothing left for them to collide over. */
+.dock {
   position: absolute;
   left: 50%;
   bottom: 6.5rem;
   transform: translateX(-50%);
   z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
+  max-width: min(90%, 24rem);
 }
 
 .notice {
@@ -285,9 +285,9 @@
   text-align: center;
 }
 
-/* Detection-off affordance (docs/plans/done/CV-DEMAND-PLAN.md wave D3) — shares `.stage-notice`'s own
-   position above (the three stage states are mutually exclusive, see `cockpit.html`'s own comment)
-   but never the amber `.notice` chrome above it: detection defaulting off is the new normal, not a
+/* Detection-off affordance (docs/plans/done/CV-DEMAND-PLAN.md wave D3) — shares `.dock`'s own notice
+   slot above (the mutually-exclusive notice branches are cockpit.html's own comment on `.dock`) but
+   never the amber `.notice` chrome above it: detection defaulting off is the new normal, not a
    fault, so this reads as a neutral HUD pill instead — the same frosted-chrome family every other
    overlay control in this cockpit already uses (`.icon-btn`/`.switcher-control` above,
    `fly-osd.ts`'s own `.osd-group`), not a warning banner. `.dot` (base, unmodified — styles.css) is
@@ -312,9 +312,11 @@
   color: var(--text);
   font-size: 0.78rem;
   /* Never nowrap here (unlike the compact `.icon-btn`/`.switcher-control` pills above) — this one
-     carries a full sentence plus a button, wide enough on a narrow phone to need the wrap; capped so
-     it can never push past the video's own safe margin regardless of viewport width. */
-  max-width: calc(100% - 2 * var(--overlay-pad));
+     carries a full sentence plus a button, wide enough on a narrow phone to need the wrap. `100%`,
+     not a `--overlay-pad` calc (docs/plans/active/FLY-FLOW-PLAN.md §4 W1) — this pill is now a child
+     of `.dock`, which already caps its own width against the video's safe margin (`min(90%, 24rem)`),
+     so a second independent margin calc here would just double-count the same constraint. */
+  max-width: 100%;
 }
 
 .detection-off-chip .dot,
@@ -322,49 +324,44 @@
   flex: none;
 }
 
-/* ---- Not-streaming card (docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1) — centered, opaque,
-   `--panel-raised` rather than this cockpit's usual `--hud-*` frosted chrome: everything else
-   floating over `.stage-video` (the icon buttons, the detection-off pill above) sits over
-   unpredictable live video and needs to stay translucent so the picture still reads through it;
-   this one only ever shows while there is no picture (a static idle/black frame), so an opaque card
-   reads as a page panel, not a HUD control — the same reasoning `.hud-confirm .card` already
-   documents for its own shadow exception below, which this rule also borrows (a genuine floating
-   overlay over the stage, not a page panel we're placing a shadow on for decoration). Sits above
-   `vision-player`'s own centered "Not streaming"/"Stream stopped" caption (z-index: auto, so this
-   just needs to out-rank that): below `.main-header` (6) and `.hud-confirm` (20) so header controls
-   and the stop-stream scrim still win, above the bottom `.stage-notice` chips (5, which live lower
-   in the frame and never overlap this card's centered position anyway). */
-.not-streaming-card {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 2;
+/* ---- Dock card, the idle/starting stage's action content (docs/plans/active/FLY-FLOW-PLAN.md §3
+   S1/S2, formerly `.not-streaming-card` — docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1) —
+   centered, opaque, `--panel-raised` rather than this cockpit's usual `--hud-*` frosted chrome:
+   everything else floating over `.stage-video` (the icon buttons, the notice pills above it in the
+   dock) sits over unpredictable live video and needs to stay translucent so the picture still reads
+   through it; this one only ever shows while there is no picture (a static idle/black frame), so an
+   opaque card reads as a page panel, not a HUD control — the same reasoning `.hud-confirm .card`
+   already documents for its own shadow exception below, which this rule also borrows (a genuine
+   floating overlay over the stage, not a page panel we're placing a shadow on for decoration). Sits
+   above `vision-player`'s own centered "Not streaming"/"Stream stopped" caption (z-index: auto, so
+   this just needs to out-rank that) via `.dock`'s own `z-index: 5`, below `.main-header` (6) and
+   `.hud-confirm` (20) so header controls and the stop-stream scrim still win. No independent
+   position of its own any more — `.dock`, its parent, owns the one anchor point now. */
+.dock-card {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--space-8);
-  width: min(90%, 22rem);
-  margin-bottom: 0;
+  width: min(100%, 22rem);
   text-align: center;
   background: var(--panel-raised);
   box-shadow: var(--shadow);
 }
 
-.not-streaming-card p {
+.dock-card p {
   margin: 0;
 }
 
-.not-streaming-title {
+.dock-card-title {
   font-weight: 600;
   color: var(--text);
 }
 
-.not-streaming-card .mono {
+.dock-card .mono {
   font-size: 0.85rem;
 }
 
-.not-streaming-card .btn.big {
+.dock-card .btn.big {
   align-self: stretch;
   justify-content: center;
   margin-top: var(--space-8);
@@ -403,20 +400,6 @@
   display: flex;
   align-items: center;
   gap: var(--space-8);
-}
-
-/* Status chips (docs/plans/active/FLY-CONTROL-UX-PLAN.md §3) — armed/mode, joined onto the existing
-   header cluster rather than a new HUD zone. Same `.chip`/`.chip.ok`/`.chip.stale` language the old
-   Controller-drawer state strip used (`rc-monitor.css`'s own identical `.state-strip .chip.stale`
-   rule) — a second call site against the same visual vocabulary, not a new one. */
-.header-status {
-  display: flex;
-  align-items: center;
-  gap: var(--space-8);
-}
-
-.header-status .chip.stale {
-  color: var(--text-faint);
 }
 
 /* The right-hand cluster (switcher + "Bring home") — `min-width: 0` is load-bearing (the grid-item
@@ -509,20 +492,61 @@
   color: var(--text);
 }
 
-/* ---- Main overlays: map inset, secondary tiles, preflight/diagnostics ---------------------- */
+/* ---- Main overlays: left/right columns, map inset, secondary tiles, preflight/diagnostics ------ */
+
+/* Left column (docs/plans/active/FLY-FLOW-PLAN.md §4 W2, D4) — see cockpit.html's own comment on
+   this element for the `column-reverse` + real-`gap` reasoning. Replaces the independent
+   `position: absolute` overlays this file used to carry for `.main-secondary`/`.main-preflight`
+   (each guessing at its neighbor's height via an approximate `calc(--overlay-pad + --space-64)`
+   offset) with one real anchor. One shared z-index for the whole stack — the three members used to
+   need their own tiers (4/3) purely to survive their approximate offsets occasionally
+   under/overlapping; a real `gap` means they never occupy the same region on screen any more, so
+   there is nothing left to arbitrate between them. */
+.main-left {
+  position: absolute;
+  left: var(--overlay-pad);
+  bottom: var(--overlay-pad);
+  z-index: 3;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: flex-start;
+  gap: var(--space-8);
+  max-width: min(90%, 24rem);
+}
+
+/* Right column (docs/plans/active/FLY-FLOW-PLAN.md §4 W2) — mirrors `.main-left` for a single member
+   today (diagnostics); still its own named anchor, not an inline absolute, so a second right-side
+   card has a real home to join later without re-deriving this offset. Stays the fixed `--space-64`
+   offset above `.hud-arm` (`fly-hud.css`'s bottom-right Arm/Disarm zone, z-index 8) rather than a
+   real `gap` — unlike `.main-left`, this can't clear a *sibling*'s measured height: `.hud-arm` is a
+   different component's own box, not a child of this column, and this page has no live measurement
+   of it. */
+.main-right {
+  position: absolute;
+  right: var(--overlay-pad);
+  bottom: calc(var(--overlay-pad) + var(--space-64));
+  z-index: 3;
+}
+
+/* `.main-preflight`/`.main-diagnostics` are now bare structural wrappers (cockpit.html) — everything
+   they used to own themselves (position, offset, z-index) moved to their parent column above, so
+   they no longer need a box of their own; `display: contents` promotes each one's single child
+   (the checklist / diagnostics card) to be the actual flex item its parent lays out, with no visual
+   change and no HTML restructuring needed. */
+.main-preflight,
+.main-diagnostics {
+  display: contents;
+}
 
 /* Map inset (M) — a separate persisted toggle, not a tool-rail drawer (D-D); hidden entirely below
    `--bp-md` regardless of the toggle's own state (`src/styles.css`'s own --bp-md token note: "cockpit
-   map inset hides"). */
+   map inset hides"). A flex item of `.main-left` now, not its own absolute overlay — only its own
+   size (not its position) is still this rule's job. */
 .main-map {
-  position: absolute;
-  left: var(--overlay-pad);
-  bottom: var(--space-32);
   width: min(22rem, 32vw);
   /* Same Leaflet z-index containment as command.css's .command-map: keep pane z-indexes
      (400+) from escaping to the root and painting over this page's own header overlay above. */
   isolation: isolate;
-  z-index: 0;
 }
 
 @media (max-width: 900px) {
@@ -533,10 +557,6 @@
 }
 
 .main-secondary {
-  position: absolute;
-  left: var(--overlay-pad);
-  bottom: var(--overlay-pad);
-  z-index: 4;
   display: flex;
   gap: var(--space-8);
 }
@@ -580,43 +600,44 @@
   text-overflow: ellipsis;
 }
 
-/* Pre-flight checklist (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — left column, elevated above
-   `.main-secondary`'s own tile strip (also left-anchored, but shorter) — an approximate, not
-   computed, offset (this cockpit's own long-standing convention: see `.main-diagnostics`'s twin). */
-.main-preflight {
-  position: absolute;
-  left: var(--overlay-pad);
-  bottom: calc(var(--overlay-pad) + var(--space-64));
-  z-index: 3;
-}
-
-/* Diagnostics (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e) — right column, raised above the HUD's own
-   bottom-right Arm/Disarm zone (docs/plans/active/FLY-CONTROL-UX-PLAN.md §3, `fly-hud.css`'s own
-   `.hud-arm`, z-index 8) rather than sharing its corner — the same approximate `--space-64` offset
-   `.main-preflight`'s own left-side twin already uses to clear `.main-secondary` below it. This used
-   to sit flush in the corner ("no neighbor to clear on this side") before Arm/Disarm moved onto the
-   video; now there is one. */
-.main-diagnostics {
-  position: absolute;
-  right: var(--overlay-pad);
-  bottom: calc(var(--overlay-pad) + var(--space-64));
-  z-index: 3;
-}
-
-/* ---- Controls row (Start/Stop, Replay) ----------------------------------------------------- */
-
-/* Poka-yoke rule 1 (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §2) — the disabled Start button's own inline
-   reason sits directly under it, not off in the video-stage notice, so the "why" is right where
-   the eye already is. */
-.start-control {
+/* ---- Events ticker (docs/plans/active/FLY-FLOW-PLAN.md §4 W2) — a transient, non-interactive
+   overlay: the topmost member of `.main-left`'s `column-reverse` stack (cockpit.html's own comment),
+   so it grows/shrinks the stack's top edge only, never displacing the persistent tiles/map/
+   checklist below it. Capped to `TICKER_MAX_EVENTS` rows (`fly-logic.ts`) rather than by a height
+   limit here. `pointer-events: none` + `aria-hidden` (cockpit.html) — the header bell and Wall's own
+   events rail are this app's real, actionable feed for the identical events; this is a glance, not a
+   second access path, so it never intercepts clicks meant for whatever is behind/below it. */
+.ticker {
   display: flex;
   flex-direction: column;
-  align-items: center;
   gap: var(--space-4);
+  pointer-events: none;
 }
 
+.ticker-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  max-width: 20rem;
+  padding: var(--space-2) var(--space-8);
+  border-radius: var(--radius-pill);
+  background: var(--hud-bg);
+  backdrop-filter: blur(var(--hud-blur));
+  border: var(--hud-border);
+  color: var(--text-muted);
+  font-size: 0.72rem;
+}
+
+/* An open (unresolved) event reads as live text, not just its dot — same tier `.stream-state-chip`
+   above and `fly-osd.ts`'s own groups already use for "this fact is current". */
+.ticker-row.open {
+  color: var(--text);
+}
+
+/* Poka-yoke rule 1 (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §2) — the disabled Start button's own
+   inline reason, right under it inside `.dock-card` (`.dock-card`'s own `text-align: center` handles
+   centering now; this rule just keeps the sentence on one line). */
 .start-hint {
-  text-align: center;
   white-space: nowrap;
 }
 

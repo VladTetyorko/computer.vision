@@ -25,6 +25,7 @@ import {
 } from '../../core/rc/fly-hud-logic';
 import { REST_VALUE, displayPercentFor, knobLeftPercent, knobTopPercent, padsFrom } from '../../core/rc/control-surface-logic';
 import type { FlightCapability, ManualControlChannelBinding } from '../../core/api/models';
+import type { FlyStage } from './fly-logic';
 
 /**
  * `vision-fly-hud` — the on-video control HUD (docs/plans/active/FLY-CONTROL-UX-PLAN.md §3), reversing
@@ -124,6 +125,15 @@ export class FlyHud implements OnInit {
   readonly live = input<boolean>(false);
   readonly operatorEngaged = input<boolean>(false);
   readonly sessionBusy = input<boolean>(false);
+  /** `CockpitFacade.stage()` (`fly-logic.ts#flyStage`, docs/plans/active/FLY-FLOW-PLAN.md §4 W1) — this
+   * component's own `.hud-bottom-center` zone renders only at `'live'`/`'engaged'`, ceding the one
+   * bottom-center anchor to `cockpit.html`'s `.dock` at `'idle'`/`'starting'`. Deliberately a plain
+   * `input()`, not read from a facade injected here: this component has no dependency on
+   * `CockpitFacade` today (its own inputs are already the full contract with `cockpit.ts`), and
+   * `client.state()` — this component's *other* notion of "engaged" — lives in this component's own
+   * injector, not the facade's, so the two can never be unified into one signal anyway (see this
+   * class's own doc comment's "Contract friction" section for the general shape of that mismatch). */
+  readonly stage = input<FlyStage>('idle');
   /** `GroundingStore.groundedReason` (docs/plans/active/ASSET-FLOWS-PLAN.md §2 "S1 gate semantics") —
    * forwarded straight through to `<vision-flight-command-panel>`, composed there with
    * {@link sticksNotNeutralReason} (grounding wins). */

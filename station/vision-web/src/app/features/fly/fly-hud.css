@@ -8,10 +8,10 @@
 }
 
 /* One new documented z-index literal (docs/plans/active/FLY-CONTROL-UX-PLAN.md §5's own allowance):
-   above `.main-secondary` (4, cockpit.css — the secondary-device tile strip) and every other passive
-   `.main-*` overlay, below the tool-rail drawers (120, `side-panel.css`) and `.hud-confirm` (20, the
-   Stop-stream scrim) — an operator-facing control never buried under a passive card, but a drawer or
-   a confirm dialog opened on top of it still wins. */
+   above `.main-left`/`.main-right` (3, cockpit.css — the tiles/map/checklist/diagnostics column) and
+   every other passive `.main-*` overlay, below the tool-rail drawers (120, `side-panel.css`) and
+   `.hud-confirm` (20, the Stop-stream scrim) — an operator-facing control never buried under a
+   passive card, but a drawer or a confirm dialog opened on top of it still wins. */
 .hud-bottom-center,
 .hud-arm {
   position: absolute;
@@ -82,19 +82,45 @@
   font-weight: 600;
 }
 
-.hud-source-pills {
-  display: flex;
-  gap: var(--space-4);
-}
-
-.hud-pill.source-pill {
+/* The collapsed source control (docs/plans/active/FLY-FLOW-PLAN.md §4 W1) — one HUD pill wrapping a
+   native `<select>`, replacing the three independent `.source-pill` buttons this used to be (still
+   using `.hud-pill`'s own chrome, via the template's class list, just compact-sized like the old
+   pills were). Mirrors `cockpit.css`'s `.switcher-control`/`.switcher` pair — the same "native select
+   styled as a frosted HUD pill" recipe, a second call site since Angular's emulated encapsulation
+   can't share the class across component stylesheets (this file's own doc comment above, "Shared
+   frosted-pill chrome"). */
+.hud-pill.source-select {
   padding: var(--space-4) var(--space-8);
   font-size: 0.7rem;
 }
 
-.hud-pill.source-pill.active {
-  border-color: var(--color-info);
-  color: var(--color-info);
+.hud-pill.source-select select {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+
+/* No `.hud-pill:disabled` match here — the disabled state lives on the inner `<select>`, not this
+   wrapping `<label>` (labels have no `:disabled` state of their own), so this rule dims the same way
+   directly rather than relying on that shared rule. */
+.hud-pill.source-select select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.hud-pill.source-select select:focus-visible {
+  outline: 2px solid var(--color-info);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Native popup chrome, the same fix `cockpit.css`'s `.switcher option` already applies. */
+.hud-pill.source-select option {
+  background: var(--panel-raised);
+  color: var(--text);
 }
 
 /* ---- At-rest badge (§3 "one commandable badge: icon + one word") -------------------------------- */

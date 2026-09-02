@@ -36,6 +36,7 @@ import {
   ALL_DRONES_OPTION_VALUE,
   TICKER_MAX_EVENTS,
   earlierReplayableUsages,
+  flyStage,
   isAllDronesOption,
   isWatchMode,
   latestFinishedUsage,
@@ -322,6 +323,24 @@ export class CockpitFacade {
    */
   readonly operatorEngaged = computed(() => selectOpenUsage(this.asset()?.recentUsages ?? [])?.origin === 'OPERATOR');
 
+  /**
+   * The one bottom-center dock's own stage (docs/plans/active/FLY-FLOW-PLAN.md §2/§4 W1) —
+   * `fly-logic.ts#flyStage`'s pure state machine over exactly the signals above; see that function's
+   * own doc comment for the priority order and for why its `'engaged'` is a different fact from
+   * `fly-hud.ts`'s own `ManualControlClient.state() === 'engaged'`. `cockpit.html` reads this to
+   * choose between the idle/starting dock card and nothing (the live/engaged row is `<vision-fly-
+   * hud>`'s own zone, gated on this same value); {@link preflightCollapsed} below reads it too.
+   */
+  readonly stage = computed(() =>
+    flyStage({
+      live: this.live(),
+      stopped: this.stopped(),
+      busy: this.busy(),
+      streamState: this.streamState(),
+      operatorEngaged: this.operatorEngaged(),
+    }),
+  );
+
   // --- Flight-controller state: failsafe banner + pre-flight checklist (docs/plans/done/FC-INTEGRATIONS-PLAN.md
   // F-d) — both pure derivations over the same `TelemetryStore.latest()` sample every other OSD chip
   // already reads, no second telemetry source.
@@ -364,16 +383,22 @@ export class CockpitFacade {
 
   /**
    * Whether the pre-flight card is collapsed to its one-line summary head (per direct user request:
-   * "appear before starting stream, and after that — collapse"). A `linkedSignal` over `live()`, not
-   * a plain `computed`, so it does both jobs at once: the default re-derives on every stream
-   * transition — expanded while nothing is streaming (running the ground check *is* the operator's
-   * job at that moment), collapsed the instant the stream goes live and the video stage becomes the
-   * thing worth the space — while the card's own head can still write to it for as long as that
-   * state lasts (an operator who re-opens the card mid-stream keeps it open until the stream itself
-   * stops or restarts). Deliberately **not** persisted: this is a per-flight glance, not a
-   * remembered preference like the map inset.
+   * "appear before starting stream, and after that — collapse"). A `linkedSignal` over {@link stage},
+   * not a plain `computed`, so it does both jobs at once: the default re-derives on every stage
+   * transition — expanded through `idle`/`starting` (running the ground check *is* the operator's
+   * job at that moment), collapsed the instant the dock reaches `live`/`engaged` and the video stage
+   * (or, for a telemetry-only asset, the commandable session) becomes the thing worth the space —
+   * while the card's own head can still write to it for as long as that state lasts (an operator who
+   * re-opens the card mid-stream keeps it open until the stage itself drops back to `idle`/`starting`).
+   * Deliberately **not** persisted: this is a per-flight glance, not a remembered preference like the
+   * map inset.
+   *
+   * **Widened from `live()` alone** (docs/plans/active/FLY-FLOW-PLAN.md §4 W2): a telemetry-only
+   * asset that becomes commandable via `engageSession()` without ever streaming video used to leave
+   * this card expanded indefinitely (its own `live()` never flips) — `stage`'s `'engaged'` covers
+   * exactly that case, same reasoning as {@link stage}'s own doc comment.
    */
-  readonly preflightCollapsed = linkedSignal(() => this.live());
+  readonly preflightCollapsed = linkedSignal(() => this.stage() === 'live' || this.stage() === 'engaged');
 
   /** docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e — same `TelemetryStore.latest()` sample every OSD chip
    * already reads; `deriveDiagnostics` itself omits every row whose keys aren't in `extra`. */
@@ -430,6 +455,16 @@ export class CockpitFacade {
    * exists" — so `<vision-marks-panel>` renders drone-only and says so, never a fabricated distance).
    */
   readonly dronePosition = this.weatherPosition;
+
+  /**
+   * Whether {@link dronePosition} is a real fix, not merely a defined-but-fake `(0, 0)` MAVLink
+   * no-fix report (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N1's own trap — the same one
+   * {@link notStreamingPosition} below already guards against). Gates `cockpit.html`'s map inset
+   * (docs/plans/active/FLY-FLOW-PLAN.md §4 W2, D5): a `!== undefined` check alone would still let a
+   * `(0, 0)` reading through and paint a world-zoomed map centered on Null Island — "pure noise,
+   * answers nothing" is exactly as true of a fake fix as of no fix at all.
+   */
+  readonly hasKnownPosition = computed(() => hasFix(this.dronePosition()));
 
   // --- Not-streaming card (docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1) --------------------------
   // `cockpit.html` renders one honest card in place of the video hero's bare "Not streaming" caption

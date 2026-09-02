@@ -1,4 +1,4 @@
-import type { AssetStatus, AssetSummary, AssetUsage, GeoPosition, Membership, Role } from '../../core/api/models';
+import type { AssetStatus, AssetSummary, AssetUsage, GeoPosition, Membership, Role, StreamState } from '../../core/api/models';
 import { hasFix } from '../../core/geo/geo-logic';
 import { humanAge } from '../../core/telemetry/telemetry-logic';
 
@@ -17,6 +17,82 @@ export { trackingIdChanged } from '../../core/telemetry/telemetry-logic';
  * mirroring every other page's own `*-logic.ts` split (`core/map/map-logic.ts`,
  * `features/replay/replay-logic.ts`, etc.).
  */
+
+// --- Cockpit stage (docs/plans/active/FLY-FLOW-PLAN.md §2/§3) — one bottom-center dock, driven by
+// this single derived value rather than three independently-positioned overlays deciding for
+// themselves whether to render (D1/D2/D6/D7 of that plan's own diagnosis). ------------------------
+
+/**
+ * `CockpitPage`'s own four-stage read of "where is this flight right now" (FLY-FLOW-PLAN.md §2):
+ * `idle` (ground time — Start is the only next step), `starting` (a Start click is in flight —
+ * `CockpitFacade#busy`), `live` (a stream exists — `CockpitFacade#live`), `engaged` (commandable
+ * without ever having gone live — see this type's own note on the two "engaged"s below).
+ * `cockpit.html` uses it to choose between the idle/starting dock card and nothing (the S3/S4
+ * on-video row is `fly-hud.html`'s own zone, gated on this same value being `'live'`/`'engaged'`);
+ * `CockpitFacade#preflightCollapsed` uses it to decide when ground-check time is over.
+ */
+export type FlyStage = 'idle' | 'starting' | 'live' | 'engaged';
+
+/** {@link flyStage}'s own input — named after the exact `CockpitFacade` signals FLY-FLOW-PLAN.md §2
+ *  lists as the stage's source of truth, so a reader can trace every field on this record straight
+ *  back to that plan's own words. `stopped`/`streamState` are accepted for that same traceability
+ *  (a future stage reader may need either) but neither is branched on today — see {@link flyStage}'s
+ *  own doc comment for why the four-way split doesn't need them. */
+export interface FlyStageInput {
+  readonly live: boolean;
+  readonly stopped: boolean;
+  readonly busy: boolean;
+  readonly streamState: StreamState | undefined;
+  readonly operatorEngaged: boolean;
+}
+
+/**
+ * FLY-FLOW-PLAN.md §2's stage computation, `live` → `busy` → `operatorEngaged` → `idle` in that
+ * priority order.
+ *
+ * **The two "engaged"s are not the same thing, on purpose.** FLY-CONTROL-UX-PLAN.md §3's "S4
+ * engaged" (the live input widget + Release) is `ManualControlClient.state() === 'engaged'` — a
+ * signal that lives inside `fly-hud.ts`'s own component-scoped injector (its `providers` array),
+ * unreachable from this pure function or from `CockpitFacade`. This stage's `'engaged'` is a
+ * different, genuinely useful fact `CockpitFacade` *does* have: {@link FlyStageInput.operatorEngaged}
+ * (`AssetSessionController`'s own `engage`/`disengage` verb pair, `rc-monitor-logic.ts#resolveSessionAffordance`'s
+ * "opening or closing an `AssetUsage` with no RC input involved at all") — the path a
+ * telemetry-only asset (no camera, so {@link FlyStageInput.live} can never become `true`) uses to
+ * become commandable at all. Without this stage value, `fly-hud.html`'s at-rest badge/Take-control
+ * pill would have to stay gated on `live` alone, which would silently remove that asset class's only
+ * route to the on-video control dock. The two concepts still cooperate correctly: `fly-hud.ts` gates
+ * its whole `.hud-bottom-center` zone on `stage === 'live' || stage === 'engaged'` (the dock should
+ * show once *either* kind of "commandable" applies), then branches internally on its own
+ * `client.state()` for which content — badge+pill or widget+Release — to render, exactly as before
+ * this plan (FLY-FLOW-PLAN.md §4 W1: "S4 engaged — unchanged from FLY-CONTROL-UX").
+ *
+ * **`live` beats `operatorEngaged`.** Once a stream exists, `resolveSessionAffordance` itself
+ * already stands the session-engage affordance down (`'none'` while `live`), so there is no real
+ * case where both would need representing on screen at once — `live` wins deterministically rather
+ * than leaving the tie unresolved.
+ *
+ * **Why `streamState` doesn't extend `'starting'` past the moment `live` flips true.** The video's
+ * own pre-first-frame wait (`StreamState.STARTING`, `stream-state-logic.ts#videoNotice`) is one of
+ * the "mutually-exclusive stage notices" that already render as the one line above the dock's
+ * action row at *every* stage that can show it — folding it into this stage instead would mean the
+ * idle/starting card's "Not streaming" fact text keeps rendering for a stream the server has
+ * already confirmed is live, which is exactly the kind of stale claim CLAUDE.md rule 9 rules out.
+ * `stopped` is accepted on the input for the same "traceable to the plan's own words" reason as
+ * `streamState` but is likewise not read here — `stopped` only ever changes *why* nothing is
+ * streaming (explicit vs. dropped-out), never *whether* the dock shows a card at all.
+ */
+export function flyStage(input: FlyStageInput): FlyStage {
+  if (input.live) {
+    return 'live';
+  }
+  if (input.busy) {
+    return 'starting';
+  }
+  if (input.operatorEngaged) {
+    return 'engaged';
+  }
+  return 'idle';
+}
 
 /**
  * The asset picker's own order: streaming assets first (an operator most likely wants to jump
@@ -119,8 +195,11 @@ export function showDetectionOffChip(live: boolean, detectionEnabled: boolean): 
   return live && !detectionEnabled;
 }
 
-/** How many rows the events ticker overlay shows at once — glanceable, not a full feed (see the Wall rail for that). */
-export const TICKER_MAX_EVENTS = 4;
+/** How many rows the events ticker overlay shows at once — glanceable, not a full feed (see the Wall
+ *  rail for that). 3 (FLY-FLOW-PLAN.md §4 W2, down from 4): the overlay now floats directly over the
+ *  video (bottom-left, above the OSD shelf) rather than owning its own full-width grid row, so it
+ *  has less room to stay unobtrusive in. */
+export const TICKER_MAX_EVENTS = 3;
 
 // --- Tool-rail / drawer wiring (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2, D-D) ---------------------------
 // The right-edge icon tool-rail replaces the split `mapVisible`/`detectionsStripOpen`/`cvPanelOpen`/
