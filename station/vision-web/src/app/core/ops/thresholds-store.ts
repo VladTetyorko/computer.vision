@@ -1,7 +1,7 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { VisionApi } from '../api/vision-api';
-import { DEFAULT_BATTERY_THRESHOLDS } from './thresholds-logic';
-import type { BatteryThresholds } from '../api/models';
+import { DEFAULT_BATTERY_THRESHOLDS, DEFAULT_RC_THRESHOLDS } from './thresholds-logic';
+import type { BatteryThresholds, RcThresholds } from '../api/models';
 
 const LOG_PREFIX = '[ops-thresholds]';
 
@@ -23,18 +23,30 @@ const LOG_PREFIX = '[ops-thresholds]';
  * never blocking a caller or rendering a fabricated severity (CLAUDE.md "degrade honestly"). {@link
  * loaded}/{@link error} exist for a caller that wants to say so explicitly; nothing in this cycle
  * currently does, mirroring `SystemStatusStore`'s identical unused-by-every-consumer-yet fields.
+ *
+ * <h2>`rc` — the neutral-stick arm gate's tolerance (docs/plans/active/FLY-CONTROL-UX-PLAN.md §2)</h2>
+ * Same store, same fetch, no second network round trip — the plan's own instruction: "the one
+ * fetch-once store gains the matching signal … no second store." {@link rc} degrades to
+ * `DEFAULT_RC_THRESHOLDS` on the exact same two occasions {@link battery} degrades to its own
+ * default: a failed/slow fetch, **and**, uniquely to this field, a server that answered but simply
+ * omits `rc` — BK1 (the wave that adds it server-side) ships in parallel with this one, so the field
+ * being absent from an otherwise-successful response is an expected, not a faulted, shape.
  */
 @Injectable({ providedIn: 'root' })
 export class ThresholdsStore {
   private readonly api = inject(VisionApi);
 
   private readonly batterySignal = signal<BatteryThresholds>(DEFAULT_BATTERY_THRESHOLDS);
+  private readonly rcSignal = signal<RcThresholds>(DEFAULT_RC_THRESHOLDS);
   private readonly loadedSignal = signal(false);
   private readonly errorSignal = signal<string | undefined>(undefined);
 
   /** Always a real, usable value — see class doc's "degrades honestly" note. */
   readonly battery = this.batterySignal.asReadonly();
-  /** `false` until the first fetch ever succeeds — {@link battery} is already the honest default in the meantime. */
+  /** Always a real, usable value — degrades to `DEFAULT_RC_THRESHOLDS` on a failed fetch *or* a
+   * response that simply doesn't carry `rc` yet (see class doc's own "rc" section). */
+  readonly rc = this.rcSignal.asReadonly();
+  /** `false` until the first fetch ever succeeds — {@link battery}/{@link rc} are already the honest defaults in the meantime. */
   readonly loaded = this.loadedSignal.asReadonly();
   readonly error = this.errorSignal.asReadonly();
 
@@ -46,6 +58,7 @@ export class ThresholdsStore {
     try {
       const response = await this.api.opsThresholds();
       this.batterySignal.set(response.battery);
+      this.rcSignal.set(response.rc ?? DEFAULT_RC_THRESHOLDS);
       this.loadedSignal.set(true);
       this.errorSignal.set(undefined);
     } catch (error) {

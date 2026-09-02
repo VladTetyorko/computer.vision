@@ -1,47 +1,30 @@
 @if (canCommand()) {
   @if (capabilities(); as caps) {
-    <div class="command-cluster">
-      @if (caps.modeSelectSupported && caps.selectableModes.length > 0) {
-        <div class="command-row">
-          <label class="mode-picker" title="Set this aircraft's flight mode">
-            <span class="label">Mode</span>
-            <select class="mode-select" aria-label="Flight mode" (change)="onModeChange($any($event.target).value)">
-              @for (mode of caps.selectableModes; track mode) {
-                <option [value]="mode" [selected]="mode === selectedMode()">{{ mode }}</option>
-              }
-            </select>
-          </label>
-          <button
-            type="button"
-            class="btn secondary"
-            (click)="requestSetMode()"
-            [disabled]="anyBusy()"
-            title="Set the selected flight mode"
-          >
-            {{ modeBusy() ? 'Setting…' : 'Set' }}
-          </button>
-          @if (modeAlsoOn(); as hint) {
-            <span class="also-on muted">also on {{ hint }}</span>
-          }
-        </div>
-      }
-
-      @if (caps.armSupported) {
+    @if (caps.armSupported) {
+      <!-- One wrapper around the pill row + its own disable-reason line (docs/plans/active/
+           FLY-CONTROL-UX-PLAN.md §3) — `fly-hud.css` positions *this* box in the HUD's bottom-right
+           zone; without it the two would be two independent top-level siblings (this component's own
+           `:host { display: contents }`) with nothing to anchor a shared position to. -->
+      <div class="hud-arm-zone">
         <div class="command-row command-row-danger">
           <button
             type="button"
-            class="btn danger arm-btn"
+            class="btn danger arm-btn hud-pill"
+            [class.locked]="armDisabled()"
             (click)="requestArm()"
-            [disabled]="anyBusy() || armDisabled()"
-            [title]="groundedReason() ?? 'Arm — the propellers will spin'"
+            [disabled]="armBusy() || armDisabled()"
+            [title]="composedArmReason() ?? 'Arm — the propellers will spin'"
           >
+            @if (armDisabled()) {
+              <vision-icon name="alert" [size]="14" />
+            }
             Arm
           </button>
           <button
             type="button"
-            class="btn danger"
+            class="btn danger hud-pill"
             (click)="requestDisarm()"
-            [disabled]="anyBusy()"
+            [disabled]="disarmBusy()"
             title="Disarm"
           >
             Disarm
@@ -50,22 +33,11 @@
             <span class="also-on muted">also on {{ hint }}</span>
           }
         </div>
-        @if (groundedReason(); as reason) {
+        @if (composedArmReason(); as reason) {
           <p class="disabled-reason">{{ reason }}</p>
         }
-      }
-    </div>
-  }
-
-  @if (isDialogOpen('mode')) {
-    <vision-confirm-dialog
-      [message]="modeMessage()"
-      confirmLabel="Set mode"
-      cancelLabel="Cancel"
-      [busy]="modeBusy()"
-      (confirmed)="confirmMode()"
-      (cancelled)="cancelMode()"
-    />
+      </div>
+    }
   }
 
   @if (isDialogOpen('disarm')) {
@@ -83,6 +55,7 @@
     <vision-arm-confirm-dialog
       [assetDisplayName]="assetDisplayName()"
       [busy]="armBusy()"
+      [sticksNotNeutralReason]="sticksNotNeutralReason()"
       (confirmed)="confirmArm()"
       (cancelled)="cancelArm()"
     />

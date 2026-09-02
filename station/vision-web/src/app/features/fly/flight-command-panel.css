@@ -1,69 +1,86 @@
-/* Drawer *content* only — the Controller drawer's `<vision-side-panel>` (rc-monitor.html) owns the
-   head/close chrome, the drawer surface, and the bottom-sheet collapse below `--bp-sm`
-   (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C10; before it, UI-REDESIGN-PLAN Wave 2 D-E had
-   already deleted the old hand-rolled frosted-pill `.command-cluster` "island" — see
-   `mode-picker`/`arm-btn` below for what's left). `:host { display: contents }` keeps this
-   component from introducing its own box in the drawer body's own flow, mirroring
-   `cv-control-panel.css`'s identical convention. */
+/* Body-only, floating in the HUD's bottom-right zone (docs/plans/active/FLY-CONTROL-UX-PLAN.md §3) —
+   `fly-hud.css` owns this component's position; `:host { display: contents }` keeps this component
+   from introducing its own box, mirroring `mode-picker.css`'s identical convention. */
 
 :host {
   display: contents;
 }
 
-/* Plain vertical layout inside the drawer body — full-width rows, roomy buttons (large touch
-   targets on a phone-width bottom sheet), not the old frosted-pill "island" squeezed into the
-   header row. */
-.command-cluster {
+/* The one box `fly-hud.css` positions in the HUD's bottom-right zone (see this file's own doc
+   comment on `.command-row`'s new wrapper in `flight-command-panel.html`) — right-aligned so the
+   pill row and, once it appears, the disable-reason line both hug the video's own right edge rather
+   than left-aligning under a row that may be narrower once it wraps. */
+.hud-arm-zone {
   display: flex;
   flex-direction: column;
-  gap: var(--space-16);
+  align-items: flex-end;
+  gap: var(--space-4);
 }
 
 .command-row {
   display: flex;
-  align-items: flex-end;
+  align-items: center;
+  justify-content: flex-end;
   gap: var(--space-8);
   flex-wrap: wrap;
 }
 
-.command-row .btn {
-  white-space: nowrap;
+/* `.hud-pill` — the frosted-pill treatment every control floating directly over video takes
+   (frontend-style skill §2's widened `--hud-*` rule). Layered on top of `.btn.danger`'s existing
+   transparent/danger-outline look rather than replacing it: Arm/Disarm must still read as
+   destructive at a glance, just floating on glass instead of sitting in a drawer row. */
+.hud-pill {
+  border-radius: var(--radius-pill);
+  background: var(--hud-bg);
+  border: var(--hud-border);
+  backdrop-filter: blur(var(--hud-blur));
+  padding: var(--space-8) var(--space-16);
 }
 
-/* The Arm/Disarm row: two equal-width, roomy buttons rather than content-sized ones — this is the
-   one row in the drawer where both actions deserve equal visual weight. */
-.command-row-danger .btn {
-  flex: 1;
-  justify-content: center;
+.btn.danger.hud-pill {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
 }
 
-.mode-picker {
-  flex: 1;
-  min-width: 8rem;
-  display: flex;
-  flex-direction: column;
-  cursor: pointer;
+.btn.danger.hud-pill:hover:not(:disabled) {
+  background: var(--hud-bg-strong);
 }
 
-.mode-select {
-  cursor: pointer;
-}
-
-/* A quiet visual hint that Arm carries more weight than a plain `.btn.danger` (Disarm, Stop stream,
-   Bring home) — still the calmer outline red at rest (the app's full, undiluted `--live` is reserved
-   for `arm-confirm-dialog.ts`'s own modal, not this trigger button), just a firmer border so it
-   doesn't read as identical to its neighbor. */
+/* A quiet visual hint that Arm carries more weight than Disarm — a firmer border, still the calmer
+   outline red at rest (the app's full, undiluted `--color-live` is reserved for
+   `arm-confirm-dialog.ts`'s own modal, not this trigger pill). */
 .arm-btn {
   border-width: 2px;
 }
 
+/* Locked (docs/plans/active/FLY-CONTROL-UX-PLAN.md §3 "Arm pill visually locked ... while gated") —
+   dimmed plus the reason glyph (`vision-icon[name=alert]`, this component's template) rather than a
+   plain `:disabled` fade alone, so "why can't I arm" is legible from the icon before the operator
+   even reads the `title`/rail sentence. */
+.arm-btn.locked {
+  opacity: 0.6;
+}
+
+.arm-btn.locked vision-icon {
+  color: var(--color-warn);
+}
+
 /* "Also on <switch>" (docs/plans/active/CONTROLLER-UX-PLAN.md §2.2 decision U3) — pairs a clicked
-   control with the physical switch that fires the identical command, so the switch is discoverable
-   without a separate "bound switches" list. Right of the row's own buttons when there is room;
-   `.command-row`'s existing `flex-wrap: wrap` drops it to its own line on a narrow drawer rather
-   than a second, dedicated responsive rule. */
+   control with the physical switch that fires the identical command. Compact caption under the
+   pills, not a full row — the HUD has no room for a persistent aside next to a 2-button row. */
 .also-on {
-  margin-left: auto;
+  flex-basis: 100%;
   font-size: 0.72rem;
   white-space: nowrap;
+  text-align: right;
+}
+
+/* The composed disable reason (`flight-command-panel-logic.ts#armDisableReason`) — the HUD pill
+   itself only carries it as a `title`/icon; this line is what the rail's own copy of it renders
+   from, and what this component shows inline immediately under the pills when the HUD has room. */
+.disabled-reason {
+  font-size: 0.78rem;
+  color: var(--color-warn-text);
+  text-align: right;
+  max-width: 16rem;
 }

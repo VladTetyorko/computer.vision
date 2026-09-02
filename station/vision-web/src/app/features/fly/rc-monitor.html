@@ -1,4 +1,4 @@
-<vision-side-panel title="Controller" icon="gamepad" subtitle="Sticks · mode · arm" (close)="close.emit()">
+<vision-side-panel title="Controller" icon="gamepad" subtitle="Sticks · mapping · mode" (close)="close.emit()">
   <div class="rc-body">
     <!-- State strip (docs/plans/active/CONTROLLER-UX-PLAN.md §2.2 U5) — chips only, no prose above the
          sticks. Armed always renders (a faint dash while unknown); mode and the device+rate chip
@@ -21,18 +21,20 @@
     @if (!rc.supported()) {
       <vision-notice variant="warn">
         This browser doesn't expose gamepad input, so a transmitter can't be read here. The on-screen
-        controls below still work.
+        controls on the video still work.
       </vision-notice>
     } @else if (!rc.connected()) {
       <vision-notice variant="neutral">
         Plug your transmitter in over USB in <strong>USB Joystick</strong> mode to see it here — the
         radio stops transmitting over RF in that mode, so keep this a bench/SITL check. Or drive from
-        the on-screen controls below.
+        the on-screen controls on the video.
       </vision-notice>
     }
 
     <!-- The transmitter picture (§2.1) — renders before engage, mirroring whatever is plugged in or
-         selected; becomes draggable only once engaged on the on-screen source (decisions U1/U2). -->
+         selected; becomes draggable only once engaged on the on-screen source (decisions U1/U2). The
+         HUD's own live input widget (fly-hud.html) is the *engaged* readout for at-a-glance flying —
+         this picture stays the one place to see every switch/mapping at once, engaged or not. -->
     <vision-transmitter-view
       [channelMap]="transmitterChannelMap()"
       [actionMap]="actionBindings()"
@@ -78,7 +80,7 @@
     }
 
     <!-- Session link (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P4) — a calm,
-         reversible act, not a safety control (no danger/big styling, unlike Take-control below).
+         reversible act, not a safety control (no danger/big styling, unlike the HUD's own pills).
          Opens/closes the AssetUsage a telemetry-only asset needs before it is commandable at all;
          see rc-monitor-logic.ts#resolveSessionAffordance for the full gating rule, including why a
          video-capable asset that is already streaming never sees this block. -->
@@ -102,71 +104,31 @@
       }
     }
 
-    <!-- Mode/Arm/Disarm (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C10) — below the sticks now
-         (decision U3), each row naming the switch that fires the same command when one is bound. -->
-    <vision-flight-command-panel
+    <!-- Mode (docs/plans/active/FLY-CONTROL-UX-PLAN.md §3) — the one command that stayed in this
+         drawer; Arm/Disarm moved to the HUD's own bottom-right pills. -->
+    <vision-mode-picker
       [assetId]="assetId()"
       [assetDisplayName]="assetDisplayName()"
       [capabilities]="capabilities()"
       [canCommand]="canCommand()"
-      [armed]="armed()"
       [modeAlsoOn]="modeAlsoOn()"
-      [armAlsoOn]="armAlsoOn()"
-      [groundedReason]="groundedReason()"
     />
-  </div>
 
-  <!-- Take control (decision U6) — a sticky footer via `SidePanel`'s own `[footer]` slot, so
-       engage/release stays reachable without scrolling past the sticks; it is the safety control. -->
-  <div footer class="rc-footer">
-    <span class="label">Input</span>
-    <div class="segmented rc-source" role="group" aria-label="Input source">
-      <button
-        type="button"
-        class="btn secondary small"
-        [class.active]="source.kind() === 'virtual'"
-        [disabled]="sourceLocked()"
-        (click)="useSource('virtual')"
-      >
-        On-screen
-      </button>
-      <button
-        type="button"
-        class="btn secondary small"
-        [class.active]="source.kind() === 'gamepad'"
-        [disabled]="sourceLocked() || !rc.connected()"
-        (click)="useSource('gamepad')"
-      >
-        Transmitter
-      </button>
-      <button
-        type="button"
-        class="btn secondary small"
-        [class.active]="source.kind() === 'keyboard'"
-        [disabled]="sourceLocked()"
-        (click)="useSource('keyboard')"
-      >
-        Keyboard
-      </button>
-    </div>
-
-    @switch (client.state()) {
-      @case ('engaged') {
-        <button type="button" class="btn danger big danger-action" (click)="release()">RELEASE</button>
+    <!-- Diagnostics (docs/plans/active/FLY-CONTROL-UX-PLAN.md §3) — the full-sentence counterpart to
+         whatever the HUD's own Take-control pill/badge abbreviated to an icon, a word, or a `title`.
+         Opening this drawer is never required to read any of this live — it is context, not a gate. -->
+    <div class="rc-diagnostics">
+      @if (client.state() === 'engaged') {
         <div class="rc-link-chips">
           <span class="chip ok mono">{{ client.rateHz() }} Hz</span>
           <span class="chip mono">{{ latencyLabel(client.latencyMs()) }} RTT</span>
           <span class="chip">{{ client.profileName() }}</span>
         </div>
-      }
-      @case ('denied') {
+      } @else if (client.state() === 'denied') {
         <vision-notice variant="danger">
           Control denied — {{ client.deniedReason() ?? 'the vehicle refused control.' }}
         </vision-notice>
-        <button type="button" class="btn big" (click)="engage()" [disabled]="engageDisabled()">Try again</button>
-        <ng-container [ngTemplateOutlet]="engageBlockTpl" />
-      }
-      @case ('released') {
+      } @else if (client.state() === 'released') {
         @if (client.watchdogTripped()) {
           <vision-notice variant="warn">
             Control released — input stalled. The vehicle's own failsafe took over.
@@ -174,45 +136,29 @@
         } @else {
           <vision-notice variant="neutral">Control released.</vision-notice>
         }
-        <button type="button" class="btn big" (click)="engage()" [disabled]="engageDisabled()">
-          Take control
-        </button>
-        <ng-container [ngTemplateOutlet]="engageBlockTpl" />
       }
-      @default {
-        <button type="button" class="btn big" (click)="engage()" [disabled]="engageDisabled()">
-          {{ client.state() === 'engaging' ? 'Engaging…' : 'Take control' }}
-        </button>
-        <ng-container [ngTemplateOutlet]="engageBlockTpl" />
-      }
-    }
-  </div>
 
-  <!-- Shared under the Take-control button (docs/plans/active/CONTROLLER-UX-PLAN.md §5 wave R) — a
-       more fundamental gate's plain-text reason, or once every one of those is clear, the RC-relay
-       readiness row(s) themselves so the operator sees which row is red instead of one flattened
-       sentence. Advisory only: never changes whether the button above is clickable. -->
-  <ng-template #engageBlockTpl>
-    @if (block().reason; as reason) {
-      <p class="disabled-reason">{{ reason }}</p>
-    } @else if (block().rows; as rows) {
-      <div class="readiness-rows">
-        @for (row of rows; track row.label) {
-          <p class="readiness-row">
-            <span
-              class="dot"
-              [class.ok]="row.tone === 'ok'"
-              [class.warn]="row.tone === 'warn'"
-              [class.danger]="row.tone === 'danger'"
-            ></span>
-            <span>{{ row.label }}</span>
-            @if (row.detail; as detail) {
-              <span class="muted">{{ detail }}</span>
-            }
-          </p>
-        }
-        <a class="muted" routerLink="/operate/preflight">Open preflight ›</a>
-      </div>
-    }
-  </ng-template>
+      @if (block().reason; as reason) {
+        <p class="disabled-reason">{{ reason }}</p>
+      } @else if (block().rows; as rows) {
+        <div class="readiness-rows">
+          @for (row of rows; track row.label) {
+            <p class="readiness-row">
+              <span
+                class="dot"
+                [class.ok]="row.tone === 'ok'"
+                [class.warn]="row.tone === 'warn'"
+                [class.danger]="row.tone === 'danger'"
+              ></span>
+              <span>{{ row.label }}</span>
+              @if (row.detail; as detail) {
+                <span class="muted">{{ detail }}</span>
+              }
+            </p>
+          }
+          <a class="muted" routerLink="/operate/preflight">Open preflight ›</a>
+        </div>
+      }
+    </div>
+  </div>
 </vision-side-panel>

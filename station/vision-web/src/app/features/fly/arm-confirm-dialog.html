@@ -12,9 +12,18 @@
     <p class="arm-warning">{{ warningMessage() }}</p>
 
     @if (stage() === 'warn') {
-      <p class="arm-hint">Stand clear of the propellers before continuing.</p>
+      @if (sticksNotNeutralReason(); as reason) {
+        <p class="arm-blocked">{{ reason }}</p>
+      } @else {
+        <p class="arm-hint">Stand clear of the propellers before continuing.</p>
+      }
       <div class="row dialog-actions">
-        <button type="button" class="btn secondary" (click)="continueToFinalStage()" [disabled]="busy()">
+        <button
+          type="button"
+          class="btn secondary"
+          (click)="continueToFinalStage()"
+          [disabled]="busy() || sticksNotNeutralReason() !== undefined"
+        >
           Continue
         </button>
         <button type="button" class="btn secondary" #safe (click)="cancelled.emit()" [disabled]="busy()">
@@ -22,9 +31,18 @@
         </button>
       </div>
     } @else {
-      <p class="arm-hint">Last step — this cannot be recalled once sent.</p>
+      @if (sticksNotNeutralReason(); as reason) {
+        <p class="arm-blocked">{{ reason }}</p>
+      } @else {
+        <p class="arm-hint">Last step — this cannot be recalled once sent.</p>
+      }
       <div class="row dialog-actions">
-        <button type="button" class="btn arm-final" (click)="confirmed.emit()" [disabled]="busy()">
+        <button
+          type="button"
+          class="btn arm-final"
+          (click)="confirmed.emit()"
+          [disabled]="busy() || sticksNotNeutralReason() !== undefined"
+        >
           {{ busy() ? 'Arming…' : finalLabel() }}
         </button>
         <button type="button" class="btn secondary" (click)="cancelled.emit()" [disabled]="busy()">Cancel</button>

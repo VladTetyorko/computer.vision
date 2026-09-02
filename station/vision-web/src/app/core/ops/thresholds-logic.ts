@@ -1,4 +1,4 @@
-import type { BatteryThresholds } from '../api/models';
+import type { BatteryThresholds, RcThresholds } from '../api/models';
 
 /**
  * Pure, Angular-free constants behind `core/ops/thresholds-store.ts` — the fallback battery severity
@@ -17,4 +17,16 @@ import type { BatteryThresholds } from '../api/models';
 export const DEFAULT_BATTERY_THRESHOLDS: BatteryThresholds = Object.freeze({
   warningPercent: 25,
   criticalPercent: 10,
+});
+
+/**
+ * The neutral-stick arm gate's fallback tolerance (docs/plans/active/FLY-CONTROL-UX-PLAN.md §2) —
+ * used while `GET /api/ops/thresholds`'s `rc` field hasn't answered yet, failed, or (BK1 landing in
+ * parallel with this wave) simply isn't served yet. Mirrors the backend's own
+ * `vision.ops.rc.neutral-tolerance-percent` default of `5`, the same "same number on both sides of
+ * the wire, one written as a literal here" convention {@link DEFAULT_BATTERY_THRESHOLDS} already
+ * follows above.
+ */
+export const DEFAULT_RC_THRESHOLDS: RcThresholds = Object.freeze({
+  neutralTolerancePercent: 5,
 });

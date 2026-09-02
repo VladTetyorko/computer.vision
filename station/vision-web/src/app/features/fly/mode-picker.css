@@ -1,0 +1,39 @@
+/* Drawer *content* only — the Controller drawer's `<vision-side-panel>` (rc-monitor.html) owns the
+   head/close chrome and the drawer surface. `:host { display: contents }` keeps this component from
+   introducing its own box in the drawer body's own flow, same convention
+   `flight-command-panel.css`/`cv-control-panel.css` already establish. */
+
+:host {
+  display: contents;
+}
+
+.command-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}
+
+.command-row .btn {
+  white-space: nowrap;
+}
+
+.mode-picker {
+  flex: 1;
+  min-width: 8rem;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+}
+
+.mode-select {
+  cursor: pointer;
+}
+
+/* "Also on <switch>" (docs/plans/active/CONTROLLER-UX-PLAN.md §2.2 decision U3) — pairs a clicked
+   control with the physical switch that fires the identical command. */
+.also-on {
+  margin-left: auto;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}

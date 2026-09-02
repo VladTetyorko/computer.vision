@@ -154,6 +154,17 @@
               (activated)="facade.toggleMapVisible()"
             />
           }
+          <!-- Status chips (docs/plans/active/FLY-CONTROL-UX-PLAN.md §3) — armed/mode joined the
+               existing header cluster rather than opening a new zone; full sentences for either stay
+               off the video, in the informational rail's own state strip / diagnostics block. -->
+          @if (headerStatusVisible()) {
+            <div class="header-status">
+              <span class="chip" [class.ok]="headerArmedChip().tone === 'ok'">{{ headerArmedChip().text }}</span>
+              @if (headerMode(); as m) {
+                <span class="chip" [class.stale]="headerModeStale()">{{ m }}</span>
+              }
+            </div>
+          }
         </div>
 
         <div class="header-actions">
@@ -308,32 +319,33 @@
         </vision-side-panel>
       }
 
-      <!-- Controller — the one drawer an operator commands from (docs/plans/active/RC-CONTROL-PLAN.md
-           Phase 0's read-only monitor + docs/plans/done/RC-CONTROL-PHASE1-PLAN.md R5's engage/release
-           + the mode/arm/disarm section the former separate `flight` drawer used to be,
-           docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C10 — `<vision-flight-command-panel>` is
-           body-only now and mounts inside this component). Mounted only while open so its Gamepad
-           rAF poll loop — and any live relay session, via `ManualControlClient`'s own `DestroyRef`
-           teardown — only run then. -->
-      @if (isPanelOpen('rc')) {
-        <vision-rc-monitor
-          [assetId]="a.assetId"
-          [assetDisplayName]="a.displayName"
-          [canCommand]="facade.canShowCommands()"
-          [capabilities]="facade.capabilities()"
-          [armed]="facade.telemetry.latest()?.flightState?.armed"
-          [mode]="facade.telemetry.latest()?.flightState?.mode"
-          [sampleAgeSeconds]="facade.telemetry.sampleAgeSeconds()"
-          [hasTelemetryDevice]="facade.hasTelemetryDevice()"
-          [live]="facade.live()"
-          [operatorEngaged]="facade.operatorEngaged()"
-          [sessionBusy]="facade.sessionBusy()"
-          [groundedReason]="facade.groundedReason()"
-          (close)="panels.close()"
-          (engageAssetLink)="facade.engageSession()"
-          (endAssetSession)="facade.endSession()"
-        />
-      }
+      <!-- The on-video control HUD (docs/plans/active/FLY-CONTROL-UX-PLAN.md §3) — always mounted once
+           an asset is selected (its at-rest badge/Take-control pill must be reachable without opening
+           any drawer), unlike the old `<vision-rc-monitor>` mount this replaces, which used to gate
+           the entire RC provider stack — and so the Gamepad rAF poll loop — on `isPanelOpen('rc')`.
+           `<vision-fly-hud>` is now that stack's own host (see its own doc comment); the rail's `rc`
+           button below still toggles the informational drawer it hosts as a template child, and
+           picking the on-screen input source also opens it (`(openRcPanel)`) — see `fly-hud.ts`'s own
+           "contract friction" note for why. -->
+      <vision-fly-hud
+        [assetId]="a.assetId"
+        [assetDisplayName]="a.displayName"
+        [canCommand]="facade.canShowCommands()"
+        [capabilities]="facade.capabilities()"
+        [armed]="facade.telemetry.latest()?.flightState?.armed"
+        [mode]="facade.telemetry.latest()?.flightState?.mode"
+        [sampleAgeSeconds]="facade.telemetry.sampleAgeSeconds()"
+        [hasTelemetryDevice]="facade.hasTelemetryDevice()"
+        [live]="facade.live()"
+        [operatorEngaged]="facade.operatorEngaged()"
+        [sessionBusy]="facade.sessionBusy()"
+        [groundedReason]="facade.groundedReason()"
+        [rcPanelOpen]="isPanelOpen('rc')"
+        (closeRcPanel)="panels.close()"
+        (openRcPanel)="panels.open('rc')"
+        (engageAssetLink)="facade.engageSession()"
+        (endAssetSession)="facade.endSession()"
+      />
 
       <!-- Map — layers + drawing (docs/plans/done/MAP-REWORK-PLAN.md §5.2). One drawer for both rather than
            two rail buttons: the cockpit's own map is a 220px inset, so a toolbar floating over it

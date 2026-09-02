@@ -86,6 +86,22 @@ export class KeyboardRcInputService {
    * while no axis is moving. */
   readonly actionKeysDown = this._actionKeysDown.asReadonly();
 
+  /**
+   * Which axis-driving key `code`s (`KeyW`/`KeyA`/`KeyS`/`KeyD`/the four arrows) are physically held
+   * right now — the on-video HUD's keyboard "key-glyph ticker"
+   * (docs/plans/active/FLY-CONTROL-UX-PLAN.md §3: "keyboard mode shows key-glyph ticker instead of
+   * stick glyphs") reads this to light up the keys actually driving the vehicle, the same idea as
+   * {@link actionKeysDown} but for the ramped axis keys rather than the edge-triggered action chords.
+   * Republished on every held/released key (not every {@link TICK_MS} tick like `actionKeysDown` —
+   * this set only ever changes on a key edge, so there is nothing to re-emit while it's steady), with
+   * a fresh `Set` identity each time, mirroring `emitActionKeys`'s own "always a new object" contract.
+   * Codes only, not functions — a key that resolves to no bound function (`resolveKey` returning
+   * `undefined`) never enters `heldKeys` in the first place, so this is already only ever the keys
+   * that are actually driving something.
+   */
+  private readonly _axisKeysDown = signal<ReadonlySet<string>>(new Set());
+  readonly axisKeysDown = this._axisKeysDown.asReadonly();
+
   constructor() {
     inject(DestroyRef).onDestroy(() => this.setEnabled(false));
   }
@@ -159,6 +175,7 @@ export class KeyboardRcInputService {
     event.preventDefault();
     if (!this.heldKeys.has(event.code)) {
       this.heldKeys.set(event.code, target);
+      this.emitAxisKeys();
       this.ensureTicking();
     }
   };
@@ -191,6 +208,7 @@ export class KeyboardRcInputService {
       return;
     }
     this.heldKeys.delete(code);
+    this.emitAxisKeys();
     const stillHeld = [...this.heldKeys.values()].some((held) => held.function === target.function);
     if (!stillHeld) {
       const binding = this.findBinding(target.function);
@@ -208,6 +226,12 @@ export class KeyboardRcInputService {
    * dispatcher's effect re-runs on every tick, not only when membership actually differs. */
   private emitActionKeys(): void {
     this._actionKeysDown.set(new Set(this.heldActionKeys.values()));
+  }
+
+  /** Publishes {@link axisKeysDown} — see that field's own doc comment. Called at every `heldKeys`
+   * mutation point (key down, key release, `releaseAll`'s own per-key `releaseKey` calls). */
+  private emitAxisKeys(): void {
+    this._axisKeysDown.set(new Set(this.heldKeys.keys()));
   }
 
   private findBinding(fn: ControlFunction): ManualControlChannelBinding | undefined {

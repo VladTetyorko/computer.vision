@@ -3,66 +3,62 @@ import { UiStore } from '../../core/ui/ui-store';
 import { VisionApi } from '../../core/api/vision-api';
 import { ToastService } from '../../core/toast.service';
 import { describeHttpError } from '../../core/api-error';
-import { ConfirmDialog } from '../../shared/ui/confirm-dialog';
+import { Icon } from '../../shared/ui/icon';
 import { ArmConfirmDialog } from './arm-confirm-dialog';
+import { ConfirmDialog } from '../../shared/ui/confirm-dialog';
 import type { FlightCapability } from '../../core/api/models';
-import { commandOutcomeToast, disarmConfirmMessage, modeConfirmMessage } from './flight-command-panel-logic';
+import { armDisableReason, commandOutcomeToast, disarmConfirmMessage } from './flight-command-panel-logic';
 import type { FlightCommandToast } from './flight-command-panel-logic';
 
-/** The panel's mutually-exclusive confirm dialogs (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — a typed id set so
- * the template can't ask about a dialog that doesn't exist. */
-type CommandDialog = 'mode' | 'arm' | 'disarm';
+/** This panel's own two confirm dialogs (arm / disarm) as one mutually-exclusive overlay group
+ * (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — a typed id set so the template can't ask about a
+ * dialog that doesn't exist. */
+type CommandDialog = 'arm' | 'disarm';
 
 /**
- * The Fly cockpit's Arm/Disarm/Mode panel (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2 — "UI — Wave C"),
- * extending Stage 1's `shared/ui/return-home-button.ts` with the two next command classes now that
- * capability-gating (`GET .../flight-capabilities`) is real.
+ * The Fly cockpit's Arm/Disarm pills — the bottom-right zone of the on-video control HUD
+ * (docs/plans/active/FLY-CONTROL-UX-PLAN.md §3), extending
+ * docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2's original capability-gated command trio.
  *
- * <h2>Body-only, inside the Controller drawer</h2>
- * This began as a frosted-pill island in the cockpit header, became the `flight` tool-rail drawer
- * (docs/plans/done/UI-REDESIGN-PLAN.md Wave 2, D-E), and is now the top section of the **Controller**
- * drawer (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md decision C10) — it owns no
- * `<vision-side-panel>`, no `open`, no `close`; `<vision-rc-monitor>` is the one drawer shell for
- * both, exactly as `<vision-cv-control-panel>` became body-only inside the merged Vision drawer.
+ * <h2>Arm/Disarm only — mode picking moved out</h2>
+ * This used to be a combined Mode+Arm+Disarm panel living inside the Controller drawer
+ * (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md decision C10). FLY-CONTROL-UX-PLAN §0 reverses
+ * that placement for exactly these two commands: they are "the one live action" an operator reaches
+ * for *while* holding the sticks (R2's QGC/DJI/Betaflight survey), so they now render as HUD pills
+ * on the video itself, mounted by `fly-hud.ts`. **Mode picking stayed in the rail** — it's a
+ * deliberate, infrequent choice made looking at a dropdown, not a live action — and now lives in its
+ * own `mode-picker.ts`, still inside `<vision-rc-monitor>`.
  *
- * The merge is not cosmetic: mode and arm/disarm are what an operator reaches for *while* deciding
- * whether to take the sticks, and a separate drawer meant closing one to reach the other. It also
- * puts the clicked Arm control next to the switch-bound one, which is the same command by a
- * different gesture (`core/rc/control-action-dispatcher.ts`).
+ * **Body-only** — this owns no `<vision-side-panel>`/`open`/`close` and no positioning of its own;
+ * `fly-hud.css` anchors it to the HUD's bottom-right zone, mirroring how `<vision-cv-control-panel>`
+ * stays body-only inside its own drawer.
  *
- * Same "own HTTP call + toast directly" shape as `ReturnHomeButton` throughout, since there's no
- * shared store a one-shot command like any of these three could sensibly live behind.
+ * Same "own HTTP call + toast directly" shape as `ReturnHomeButton`/`ModePicker` throughout, since
+ * there's no shared store a one-shot command like either of these sensibly lives behind.
  *
- * **Single consumer today** (only `<vision-rc-monitor>`) — lives under `features/fly/`, not `shared/ui/`, unlike
- * `ReturnHomeButton` (which already had two call sites, `FlyPage` + Command's `AssetPanel`, the day
- * it was written). Promote it to `shared/ui/` the day a second consumer needs it, per this codebase's
- * own established "second consumer moves it" precedent — not before.
+ * **Single consumer today** (`fly-hud.ts`) — lives under `features/fly/`, not `shared/ui/`. Promote
+ * it to `shared/ui/` the day a second consumer needs it, per this codebase's own established "second
+ * consumer moves it" precedent — not before.
  *
  * **Gating is the host's job, not this component's** (mirrors `ReturnHomeButton`'s own rule): the
- * whole panel is hidden unless `canCommand` is `true` (`FlyPage` computes it via
- * `flight-command-panel-logic.ts#canShowCommandPanel`); each individual control inside additionally
- * gates on `capabilities()`'s own per-capability flags (`armSupported`/`modeSelectSupported`/a
- * non-empty `selectableModes`) — a vehicle can be commandable at all yet support only a subset (the
- * plan's own capability matrix: INAV's mavlink is telemetry-only in practice despite reporting
- * `commandable=true`, so its commands are attempted and honestly `NO_ACK`, never hidden outright).
+ * whole panel is hidden unless `canCommand` is `true`; Arm additionally gates on
+ * `capabilities()?.armSupported` — a vehicle can be commandable at all yet not support Arm (the
+ * plan's own capability matrix).
  *
- * **Busy-guards, one per control** (`modeBusy`/`armBusy`/`disarmBusy`, plain signals — mirrors
- * `ReturnHomeButton`'s own "single one-shot request, not a saga" reasoning, just three of them
- * instead of one since the three commands are independent actions a user could otherwise fire
- * concurrently) — each disables only its own control + its own confirm dialog's buttons, not the
- * whole panel, so (for example) a slow Arm request doesn't block reading the Mode picker.
+ * **Busy-guards, one per control** (`armBusy`/`disarmBusy`, plain signals — mirrors
+ * `ReturnHomeButton`'s own "single one-shot request, not a saga" reasoning) — each disables only its
+ * own control + its own confirm dialog's buttons. **The old cross-command `anyBusy` lock (blocking
+ * Arm while a Mode-change request was still in flight) is deliberately dropped** now that Mode lives
+ * in a different component entirely with no shared state to coordinate through — introducing one
+ * just to preserve that lock would be new machinery this wave's scope doesn't otherwise justify.
  *
- * **No optimistic UI, ever** (the plan's own wording, identical to Stage 1): every confirm only ever
- * sends the command and reports what the server said (`ACCEPTED`/`NO_ACK`/an error via
- * `describeHttpError` — a `403` renders as "You do not have access to that.", a `409`'s message
- * verbatim, same existing switch Stage 1 already established, no new decoding needed for this trio).
- * The aircraft's actual armed state / active mode arrives later over ordinary telemetry
- * (`flightState.armed`/`flightState.mode`), which the OSD chip bar and `flightBanner`/
- * `<vision-failsafe-banner>` already render on their own — nothing here writes to `TelemetryStore`.
+ * **No optimistic UI, ever** (identical rule to `ModePicker`/`ReturnHomeButton`): every confirm only
+ * ever sends the command and reports what the server said. The aircraft's actual armed state arrives
+ * later over ordinary telemetry, which the OSD chip bar and header status chips already render.
  */
 @Component({
   selector: 'vision-flight-command-panel',
-  imports: [ConfirmDialog, ArmConfirmDialog],
+  imports: [Icon, ConfirmDialog, ArmConfirmDialog],
   templateUrl: './flight-command-panel.html',
   styleUrl: './flight-command-panel.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -76,101 +72,47 @@ export class FlightCommandPanel {
   readonly canCommand = input<boolean>(false);
   /** Latest telemetry's `flightState.armed` — gates Disarm's crash-warning copy, nothing else. */
   readonly armed = input<boolean | undefined>(undefined);
-  /**
-   * The switch, if any, whose action map fires the same command as the Set-mode button
-   * (`rc-monitor.ts#modeAlsoOn`, docs/plans/active/CONTROLLER-UX-PLAN.md §2.2 decision U3) —
-   * rendered as a faint "also on <switch>" line beside the row it pairs with. `undefined` (no
-   * active profile, or none of its bindings fire this command) omits the hint entirely, never a
-   * fabricated pairing.
-   */
-  readonly modeAlsoOn = input<string | undefined>(undefined);
-  /** Same idea for the Arm/Disarm row — the switch whose action map fires `ARM`/`TOGGLE_ARM`. */
+  /** The switch, if any, whose action map fires the same command as this row's own buttons
+   * (`rc-monitor.ts#armAlsoOn`, docs/plans/active/CONTROLLER-UX-PLAN.md §2.2 decision U3) —
+   * rendered as a faint "also on <switch>" line. `undefined` omits the hint entirely. */
   readonly armAlsoOn = input<string | undefined>(undefined);
   /**
-   * `CockpitPage`'s own `GroundingStore.groundedReason`, forwarded through `<vision-rc-monitor>`
-   * (docs/plans/active/ASSET-FLOWS-PLAN.md §2 "S1 gate semantics",
-   * wave WB1) — `undefined` unless this asset carries an open `MAINTENANCE_GROUNDED:` blocker.
-   * Blocks Arm only, following this codebase's own "disabled-with-reason inline" idiom
-   * (`.disabled-reason`, first established by `rc-monitor-logic.ts#engageBlock`) rather than letting
-   * the click reach the server and eat a 409. **Disarm/mode stay untouched** — S1's own frozen rule:
-   * energy-reducing/recovery verbs must always work on a vehicle that is somehow already moving.
+   * `CockpitPage`'s own `GroundingStore.groundedReason`, forwarded through `fly-hud.ts`
+   * (docs/plans/active/ASSET-FLOWS-PLAN.md §2 "S1 gate semantics", wave WB1) — `undefined` unless
+   * this asset carries an open `MAINTENANCE_GROUNDED:` blocker.
    */
   readonly groundedReason = input<string | undefined>(undefined);
+  /**
+   * `core/rc/neutral-gate-logic.ts#neutralGateReason`, forwarded from `fly-hud.ts`
+   * (docs/plans/active/FLY-CONTROL-UX-PLAN.md §2) — `undefined` when there's no engaging/engaged
+   * session, or every bound axis reads neutral. Composed with {@link groundedReason} via
+   * `flight-command-panel-logic.ts#armDisableReason` (grounding wins when both hold).
+   */
+  readonly sticksNotNeutralReason = input<string | undefined>(undefined);
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
 
-  /**
-   * The panel's three confirm dialogs (mode / arm / disarm) as **one mutually-exclusive overlay
-   * group** (docs/plans/done/UI-ARCHITECTURE-PLAN.md) rather than three independent `signal(false)` flags:
-   * opening any one closes whichever other was open, so the panel can never show two confirms at
-   * once — a consistency guarantee by construction, not by discipline. Transient (no `storageKey`) —
-   * a confirm must never survive a reload. `isDialogOpen` is the typed template accessor.
-   */
+  /** Transient (no `storageKey`) — a confirm must never survive a reload. */
   private readonly dialog = new UiStore();
   protected isDialogOpen(id: CommandDialog): boolean {
     return this.dialog.isOpen(id);
   }
 
-  // --- Mode picker ---------------------------------------------------------------------------
-  /** `undefined` = "use the first selectable mode" — mirrors `fly.ts#primaryDeviceIdOverride`'s own
-   * "no effect-based defaulting, fallback computed fresh every read" idiom. */
-  private readonly selectedModeOverride = signal<string | undefined>(undefined);
-  protected readonly selectedMode = computed(() => {
-    const modes = this.capabilities()?.selectableModes ?? [];
-    const override = this.selectedModeOverride();
-    return override !== undefined && modes.includes(override) ? override : modes[0];
-  });
-  protected readonly modeBusy = signal(false);
-  protected readonly modeMessage = computed(() => modeConfirmMessage(this.assetDisplayName(), this.selectedMode() ?? ''));
-
-  protected onModeChange(value: string): void {
-    this.selectedModeOverride.set(value);
-  }
-
-  protected requestSetMode(): void {
-    if (this.selectedMode() !== undefined) {
-      this.dialog.open('mode');
-    }
-  }
-
-  protected cancelMode(): void {
-    this.dialog.close('mode');
-  }
-
-  protected async confirmMode(): Promise<void> {
-    const mode = this.selectedMode();
-    if (mode === undefined) {
-      this.dialog.close('mode');
-      return;
-    }
-    this.modeBusy.set(true);
-    try {
-      const response = await this.api.setMode(this.assetId(), mode);
-      this.showOutcome(commandOutcomeToast(response.result, 'mode'));
-    } catch (error) {
-      this.toasts.error(describeHttpError(error));
-    } finally {
-      this.modeBusy.set(false);
-      this.dialog.close('mode');
-    }
-  }
-
   // --- Arm -------------------------------------------------------------------------------------
   /**
-   * Gates `<vision-arm-confirm-dialog>` in the template. Now that this panel is projected into the
-   * Controller drawer, its three confirms are DOM children of that drawer's `<aside>` — which
-   * catches `Esc` — so an `Esc` pressed while a confirm is up would otherwise close the drawer out
-   * from under it, and with it any live manual-control session. Both modals therefore own the key
-   * themselves: they take focus on open and stop `Esc` at their own backdrop (see
-   * `shared/ui/confirm-dialog.ts`), which is what a modal should have been doing all along. Neither
-   * dialog *dismisses* on `Esc` — that poka-yoke is unchanged; only its own buttons close it.
+   * Gates `<vision-arm-confirm-dialog>` in the template. Both this panel's confirms take focus on
+   * open and stop `Esc` at their own backdrop (see `shared/ui/confirm-dialog.ts`) rather than
+   * dismissing — an `Esc` that reached the HUD/drawer underneath could otherwise close a live
+   * manual-control session out from under an open confirm.
    */
   protected readonly armBusy = signal(false);
 
-  /** `groundedReason() !== undefined` — poka-yoke: the trigger button is disabled from this exact
-   * condition (never enabled-then-error), and {@link requestArm} re-checks it too, since a disabled
-   * DOM button is still reachable by a stray keyboard Enter on some browsers. */
-  protected readonly armDisabled = computed(() => this.groundedReason() !== undefined);
+  /** Composed reason (`flight-command-panel-logic.ts#armDisableReason` — grounding wins over
+   * sticks-not-neutral). Poka-yoke: the trigger button is disabled from this exact condition
+   * (never enabled-then-error), and {@link requestArm} re-checks it too, since a disabled DOM
+   * button is still reachable by a stray keyboard Enter on some browsers. */
+  protected readonly composedArmReason = computed(() => armDisableReason(this.groundedReason(), this.sticksNotNeutralReason()));
+  protected readonly armDisabled = computed(() => this.composedArmReason() !== undefined);
 
   protected requestArm(): void {
     if (this.armDisabled()) {
@@ -220,15 +162,6 @@ export class FlightCommandPanel {
       this.dialog.close('disarm');
     }
   }
-
-  /**
-   * A single combined busy flag, used to disable every trigger button (not just each one's own) —
-   * these three commands all target the same physical vehicle, so firing two at once (e.g. Arm
-   * while a mode-change request is still in flight) is worth ruling out entirely, not just
-   * preventing each one's own double-fire. Each individual confirm dialog still only shows its own
-   * `xBusy` for its own "Sending…"/label text.
-   */
-  protected readonly anyBusy = computed(() => this.modeBusy() || this.armBusy() || this.disarmBusy());
 
   private showOutcome(toast: FlightCommandToast): void {
     if (toast.kind === 'ok') {

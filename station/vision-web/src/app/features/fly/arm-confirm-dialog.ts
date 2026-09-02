@@ -36,11 +36,20 @@ export type ArmConfirmStage = 'warn' | 'final';
  *    calmer, transparent `--danger` outline. Arm is now the one *other* place `--live` appears at
  *    full strength, by design — a step up from `--danger`, not a repaint of it.
  *
- * `assetDisplayName` is the only input needed — this dialog carries no asset-specific data beyond
- * the name embedded in its own copy (`flight-command-panel-logic.ts#armWarningMessage`/
- * `armFinalConfirmLabel`). `busy` disables every button in both stages (covers "the request is in
- * flight"); mirrors `confirm-dialog.ts`'s own no-backdrop-click/no-`Escape` poka-yoke rule — every
- * dismissal here is an explicit `Cancel` click too.
+ * `assetDisplayName` is the only asset-specific input this dialog's own copy needs
+ * (`flight-command-panel-logic.ts#armWarningMessage`/`armFinalConfirmLabel`). `busy` disables every
+ * button in both stages (covers "the request is in flight"); mirrors `confirm-dialog.ts`'s own
+ * no-backdrop-click/no-`Escape` poka-yoke rule — every dismissal here is an explicit `Cancel` click.
+ *
+ * **`sticksNotNeutralReason`** (docs/plans/active/FLY-CONTROL-UX-PLAN.md §2 — "the arm-confirm dialog
+ * additionally shows the live neutral state and refuses to reach the final step while the gate
+ * holds") — a live `core/rc/neutral-gate-logic.ts#neutralGateReason` string, re-evaluated on every
+ * tick same as the HUD's own stick readout, not a snapshot taken when the dialog opened. While
+ * defined, the `'warn'` stage's own reason line shows it and its "Continue" button is disabled —
+ * an operator who nudges a stick mid-dialog sees the block appear/disappear live, and can never
+ * reach the `'final'` stage (where the actual dangerous button lives) while it holds. `undefined`
+ * renders the plain "stand clear of the propellers" hint unchanged, same as before this input
+ * existed.
  */
 @Component({
   selector: 'vision-arm-confirm-dialog',
@@ -52,6 +61,8 @@ export class ArmConfirmDialog {
   readonly assetDisplayName = input.required<string>();
   /** Disables every button in both stages — see this class's own doc comment. */
   readonly busy = input<boolean>(false);
+  /** Live, re-evaluated every tick — see this class's own doc comment. */
+  readonly sticksNotNeutralReason = input<string | undefined>(undefined);
 
   readonly confirmed = output<void>();
   readonly cancelled = output<void>();
@@ -70,6 +81,9 @@ export class ArmConfirmDialog {
   }
 
   protected continueToFinalStage(): void {
+    if (this.sticksNotNeutralReason() !== undefined) {
+      return;
+    }
     this.stage.set('final');
   }
 }

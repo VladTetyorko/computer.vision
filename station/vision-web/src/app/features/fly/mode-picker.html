@@ -1,0 +1,37 @@
+@if (canCommand() && capabilities(); as caps) {
+  @if (caps.modeSelectSupported && caps.selectableModes.length > 0) {
+    <div class="command-row">
+      <label class="mode-picker" title="Set this aircraft's flight mode">
+        <span class="label">Mode</span>
+        <select class="mode-select" aria-label="Flight mode" (change)="onModeChange($any($event.target).value)">
+          @for (mode of caps.selectableModes; track mode) {
+            <option [value]="mode" [selected]="mode === selectedMode()">{{ mode }}</option>
+          }
+        </select>
+      </label>
+      <button
+        type="button"
+        class="btn secondary"
+        (click)="requestSetMode()"
+        [disabled]="modeBusy()"
+        title="Set the selected flight mode"
+      >
+        {{ modeBusy() ? 'Setting…' : 'Set' }}
+      </button>
+      @if (modeAlsoOn(); as hint) {
+        <span class="also-on muted">also on {{ hint }}</span>
+      }
+    </div>
+  }
+
+  @if (isDialogOpen()) {
+    <vision-confirm-dialog
+      [message]="modeMessage()"
+      confirmLabel="Set mode"
+      cancelLabel="Cancel"
+      [busy]="modeBusy()"
+      (confirmed)="confirmMode()"
+      (cancelled)="cancelMode()"
+    />
+  }
+}

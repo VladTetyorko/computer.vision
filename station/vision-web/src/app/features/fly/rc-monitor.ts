@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, input, output, signal } from '@angular/core';
-import { NgTemplateOutlet } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { SidePanel } from '../../shared/ui/side-panel';
 import { Notice } from '../../shared/ui/notice';
@@ -7,19 +6,17 @@ import { TransmitterView, type ActionKeyRow } from '../../shared/ui/transmitter-
 import { RcInputService } from '../../core/rc/rc-input.service';
 import { VirtualRcInputService } from '../../core/rc/virtual-rc-input.service';
 import { KeyboardRcInputService } from '../../core/rc/keyboard-rc-input.service';
-import { RcSource, type RcSourceKind } from '../../core/rc/rc-source.service';
+import { RcSource } from '../../core/rc/rc-source.service';
 import { ManualControlClient } from '../../core/rc/manual-control-client';
 import { ControlActionDispatcher } from '../../core/rc/control-action-dispatcher';
 import { ControlProfileStore } from '../../core/rc/control-profile-store';
 import { activeProfileFor } from '../../core/rc/control-action-logic';
 import { VisionApi } from '../../core/api/vision-api';
-import { FlightCommandPanel } from './flight-command-panel';
+import { ModePicker } from './mode-picker';
 import {
   actionKeyRows,
   armedChip,
-  armAlsoOnHint,
   engageBlock,
-  engageDisabledReason,
   keyLegendLines,
   latencyLabel,
   modeAlsoOnHint,
@@ -31,54 +28,48 @@ import { normalizeChannelMap, type ChannelMapLike } from '../../core/rc/transmit
 import type { FlightCapability, ReadinessReport, VehicleKind } from '../../core/api/models';
 
 /**
- * `vision-rc-monitor` — the Fly cockpit's Controller drawer, rebuilt around `vision-transmitter-view`
- * (docs/plans/active/CONTROLLER-UX-PLAN.md §2.2, wave X2 — superseding the raw axis-bar/switch-pill
- * monitor Phase 0 (docs/plans/active/RC-CONTROL-PLAN.md) and R5 (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md)
- * originally shipped). Anatomy, top to bottom: a chips-only state strip, the transmitter picture
- * (before *and* during a session — decision U1), `<vision-flight-command-panel>`'s mode/arm/disarm
- * rows with "also on <switch>" hints (U3), and a sticky footer carrying the input-source picker and
- * engage/release (U6, via `SidePanel`'s existing `[footer]` slot).
+ * `vision-rc-monitor` — the Fly cockpit's Controller drawer, now **purely informational**
+ * (docs/plans/active/FLY-CONTROL-UX-PLAN.md §3): the transmitter picture, per-axis mapping/mode
+ * picking, device/rate/latency chips, hints, and diagnostics. Anatomy, top to bottom: a chips-only
+ * state strip, the transmitter picture, `<vision-mode-picker>`, the asset session link, and a
+ * diagnostics block spelling out — in full sentences — whatever the HUD's own Take-control
+ * pill/badge abbreviated to an icon, a word, or a `title`.
  *
- * Provides the whole RC stack — `RcInputService`, `VirtualRcInputService`, `RcSource` and
- * `ManualControlClient` — and drives `RcInputService`'s lifecycle (reading starts when this drawer
- * mounts, per `ngOnInit`); `ManualControlClient` needs no explicit start: its own constructor wires
- * the deadman triggers, and its own `DestroyRef` teardown (this component unmounting, i.e. the RC
- * panel closing) is one of them. The cockpit mounts this component via `@if (isPanelOpen('rc'))`,
- * so both the Gamepad rAF loop and any live relay session only exist while the drawer is open.
+ * <h2>§0's reversal — Take-control/Arm/Disarm/the input-source picker all moved to `fly-hud.ts`</h2>
+ * §0's own framing: "chips, bars and pills move onto the video; every *sentence* leaves it." This
+ * drawer used to own the sticky Take-control/Release footer (decision U6) and the mode/arm/disarm
+ * panel (decision C10) — both are now on the video itself, the live control surface an operator
+ * reaches for *while* holding the sticks. What's left here is exactly what R2's own GCS survey says
+ * stays off video: mapping, setup, diagnostics. **Opening this drawer is never required to take
+ * control or arm** — both work from the always-visible HUD whether or not this panel is open.
+ *
+ * <h2>No providers of its own — inherits the RC stack from `fly-hud.ts`</h2>
+ * `RcInputService`/`VirtualRcInputService`/`KeyboardRcInputService`/`RcSource`/`ManualControlClient`/
+ * `ControlActionDispatcher` are now provided by `fly-hud.ts`, this component's own host — hierarchical
+ * DI resolves every `inject()` call below to that single shared instance set, so a bound switch fires,
+ * the transmitter picture animates, and a live session survives exactly the same whether or not this
+ * drawer happens to be open. `fly-hud.ts` mounts unconditionally (the HUD's "at rest" badge must
+ * always be visible), so — unlike before this wave — the Gamepad rAF loop now runs for the life of
+ * the cockpit route, not just while this drawer is open; see `fly-hud.ts`'s own doc comment.
  *
  * <h2>One picture, mirror or interactive</h2>
  * `vision-transmitter-view` draws whatever `channelMap`/`actionMap` this operator is bound to, fed
- * live `axes`/`buttons` from whichever `RcSource` is selected — a plugged transmitter or the
- * on-screen surface. It renders **before** engage so the operator sees their own sticks/switches
- * move immediately (decision U1); once engaged it becomes interactive only for the on-screen source
- * (decision U2) — a mirrored transmitter is never draggable, dragging a mirror of hardware sticks
- * would be meaningless. `transmitterChannelMap` prefers the server's own `engaged.channelMap` once a
- * session exists ("it's what the server is really applying"), falling back to this operator's own
- * resolved layout for the vehicle kind before/without one.
+ * live `axes`/`buttons` from whichever `RcSource` is selected — a plugged transmitter, the on-screen
+ * surface, or the keyboard. It renders **before** engage so the operator sees their own
+ * sticks/switches move immediately (decision U1); once engaged it becomes interactive only for the
+ * on-screen source (decision U2) — a mirrored transmitter is never draggable. `transmitterChannelMap`
+ * prefers the server's own `engaged.channelMap` once a session exists, falling back to this
+ * operator's own resolved layout for the vehicle kind before/without one.
  *
- * <h2>A transmitter is no longer required</h2>
- * Control can come from a plugged-in gamepad or from the on-screen surface
- * (docs/plans/active/VEHICLE-CONTROL-PROFILES-CONTEXT.md §2 P10) — `RcSource` picks, and prefers a
- * connected gamepad. The surface is shaped by the engaged `channelMap`, so a rover gets one
- * steer/drive pad and an aircraft two, without this component knowing the difference.
- *
- * <h2>One drawer, not two</h2>
- * Mode and arm/disarm live inside this drawer as of docs/plans/active/CONTROLLER-SETUP-CONTEXT.md
- * decision C10 — `<vision-flight-command-panel>` is body-only now and this is its shell. This
- * component only passes `capabilities`/`armed`/the "also on" hints through — it owns none of that
- * panel's commands or confirms.
+ * <h2>Diagnostics, not gates</h2>
+ * `disabledReason`/`block`/`_readiness` all still exist here, computed off the exact same pure
+ * functions `fly-hud.ts` calls for its own Take-control pill — but nothing here disables a button
+ * (there is none left to disable): this component only ever renders their text, the full-sentence
+ * counterpart to whatever the HUD showed as an icon/word/`title`.
  */
 @Component({
   selector: 'vision-rc-monitor',
-  imports: [SidePanel, Notice, TransmitterView, FlightCommandPanel, RouterLink, NgTemplateOutlet],
-  providers: [
-    RcInputService,
-    VirtualRcInputService,
-    KeyboardRcInputService,
-    RcSource,
-    ManualControlClient,
-    ControlActionDispatcher,
-  ],
+  imports: [SidePanel, Notice, TransmitterView, ModePicker, RouterLink],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './rc-monitor.html',
   styleUrl: './rc-monitor.css',
@@ -142,13 +133,6 @@ export class RcMonitor implements OnInit {
   /** `CockpitFacade.sessionBusy` — disables the button for the life of the in-flight request, the
    * same "no double-submit" posture `flight-command-panel.ts` already applies to its own commands. */
   readonly sessionBusy = input<boolean>(false);
-  /** `CockpitPage`'s own `GroundingStore.groundedReason` — plain pass-through to
-   * `<vision-flight-command-panel>`'s own input; this component owns no grounding logic of its own
-   * (docs/plans/active/ASSET-FLOWS-PLAN.md §2, wave WB1). Deliberately not derived from this
-   * component's own private readiness fetch below (`_readiness`, scoped to the `rc-relay` feature
-   * row only) — `GroundingStore` is the one place grounding is read from, everywhere in the cockpit
-   * (see that class's own doc comment for why it's a dedicated store, not `CockpitFacade`). */
-  readonly groundedReason = input<string | undefined>(undefined);
   readonly engageAssetLink = output<void>();
   readonly endAssetSession = output<void>();
 
@@ -172,8 +156,11 @@ export class RcMonitor implements OnInit {
   );
   /** Only the action-bound controls — passed to the transmitter view's switch-gauge rows. */
   protected readonly actionBindings = computed(() => this.activeProfile()?.actionMap ?? []);
+  /** `<vision-mode-picker>`'s own `modeAlsoOn` input — see `rc-monitor-logic.ts#modeAlsoOnHint`.
+   * The Arm/Disarm row's identical hint (`armAlsoOnHint`) now lives in `fly-hud.ts`, which owns
+   * `<vision-flight-command-panel>` directly — not duplicated logic, a second call site against the
+   * same pure function reading each component's own `activeProfile`. */
   protected readonly modeAlsoOn = computed(() => modeAlsoOnHint(this.actionBindings()));
-  protected readonly armAlsoOn = computed(() => armAlsoOnHint(this.actionBindings()));
 
   protected readonly armedChipView = computed(() => armedChip(this.armed(), this.sampleAgeSeconds()));
 
@@ -230,49 +217,33 @@ export class RcMonitor implements OnInit {
     gamepadConnected: this.rc.connected(),
     engageState: this.client.state(),
   }));
-  protected readonly disabledReason = computed(() => engageDisabledReason(this.engageGate()));
-  protected readonly engageDisabled = computed(() => this.disabledReason() !== undefined);
-  /** The input choice is frozen for the life of a session — swapping sticks mid-flight is not a
-   * gesture this platform offers, and the surface below is shaped by the engaged map anyway. */
-  protected readonly sourceLocked = computed(() => this.client.state() === 'engaging' || this.client.state() === 'engaged');
-
   /** This asset's own `rc-relay` readiness row (docs/plans/active/CONTROLLER-UX-PLAN.md §5 wave R) —
    * read directly here rather than plumbed through `CockpitFacade`/`cockpit.html`, since nothing
    * else in the cockpit needs it today; `undefined` while loading or on a failed read (CLAUDE.md
-   * "degrade honestly" — the footer below renders nothing for that, never a fabricated warning). */
+   * "degrade honestly" — this drawer's diagnostics block renders nothing for that, never a
+   * fabricated warning). */
   private readonly _readiness = signal<ReadinessReport | undefined>(undefined);
-  /** What renders under the Take-control button: `engageDisabledReason`'s own text while a more
-   * fundamental gate blocks, else the RC-relay readiness row(s) once one is actually available —
-   * advisory only, never affecting {@link engageDisabled} itself. */
+  /** This drawer's diagnostics block: `engageDisabledReason`'s own text while a more fundamental gate
+   * blocks, else the RC-relay readiness row(s) once one is actually available — always advisory, this
+   * component owns no button for it to gate. */
   protected readonly block = computed(() => engageBlock(this.engageGate(), this._readiness()));
 
   constructor() {
-    // Bound switches fire over the ordinary command endpoints, not the stick socket — so they are
-    // wired to the asset itself, not to a session, and stay live whether or not one is engaged.
-    effect(() => {
-      this.dispatcher.bind(this.assetId(), this.activeProfile(), this.profiles.rules(), this.canCommand());
-      this.dispatcher.setArmed(this.armed());
-    });
+    // `fly-hud.ts` — this component's own host — owns the dispatcher-bind/virtual-bindTo/
+    // keyboard-bind effects now (its own doc comment explains why: they must keep running whether or
+    // not this drawer happens to be open, since a bound switch fires over the ordinary command
+    // endpoints independently of any session). This component's own `activeProfile`/
+    // `transmitterChannelMap`/`normalizedChannelMap` computeds below are pure re-derivations of the
+    // identical shared signals for this drawer's own read-only rendering — safe to keep independent
+    // (no effect, no write), unlike those three writes, which must have exactly one owner.
 
-    // The on-screen surface is shaped by whatever the server said this vehicle is; it exists only
-    // for the life of a session, so it is bound on `engaged` and cleared the moment the map goes.
-    effect(() => {
-      const map = this.client.channelMap();
-      if (map) {
-        this.virtual.bindTo(map);
-      } else {
-        this.virtual.clear();
-      }
-    });
-
-    // Unlike the on-screen surface, the keyboard has no session of its own to wait for — a tap
-    // before engage should already move the transmitter picture (decision U1 extends to this third
-    // source too), so it is kept bound to the same live map continuously, not just from `engaged`.
-    effect(() => this.keyboard.bind(this.normalizedChannelMap()));
-
-    // Re-read on every asset change; a failed read degrades to `undefined` (CLAUDE.md), which the
-    // footer already renders as nothing rather than an error the operator can't act on from here —
-    // the full picture, with a retry, lives at `/operate/preflight`.
+    // This asset's own `rc-relay` readiness read — re-fetched here independently of `fly-hud.ts`'s own
+    // copy (a second GET while this drawer happens to be open, not a shared derivation) since a plain
+    // read has no state to race, and plumbing the report down as an input would add coupling this
+    // component doesn't otherwise need just for its own diagnostics block. Re-read on every asset
+    // change; a failed read degrades to `undefined` (CLAUDE.md), which this drawer already renders as
+    // nothing rather than an error the operator can't act on from here — the full picture, with a
+    // retry, lives at `/operate/preflight`.
     effect(() => {
       const assetId = this.assetId();
       this._readiness.set(undefined);
@@ -283,28 +254,13 @@ export class RcMonitor implements OnInit {
     });
   }
 
+  /** `fly-hud.ts` starts `RcInputService`'s own gamepad rAF loop once, for the life of the cockpit
+   * route, since the HUD's badge/pills need a live `rc.connected()` whether or not this drawer is
+   * open — see that class's own doc comment. This component no longer calls `rc.start()` itself. */
   ngOnInit(): void {
-    this.rc.start();
-    // Silent on failure: without a layout nothing is bound, which the drawer already renders as
-    // "no switches are bound" rather than as an error the operator can act on.
+    // Silent on failure: without a layout nothing is bound, which this drawer already renders as
+    // "nothing on your transmitter is bound" rather than as an error the operator can act on.
     void this.profiles.load().catch(() => undefined);
-  }
-
-  protected useSource(kind: RcSourceKind): void {
-    if (!this.sourceLocked()) {
-      this.source.use(kind);
-    }
-  }
-
-  protected engage(): void {
-    if (this.engageDisabled()) {
-      return;
-    }
-    this.client.engage(this.assetId());
-  }
-
-  protected release(): void {
-    this.client.release();
   }
 
   /** `vision-transmitter-view`'s `valuesChange` — absorbs `virtual-control-surface.ts`'s own

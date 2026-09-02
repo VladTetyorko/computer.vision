@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { FlightCapability } from '../../core/api/models';
 import {
+  armDisableReason,
   armFinalConfirmLabel,
   armWarningMessage,
   canShowCommandPanel,
@@ -71,6 +72,28 @@ describe('confirm copy', () => {
   it('builds a crash-warning disarm confirm when armed', () => {
     expect(disarmConfirmMessage('Falcon 1', true)).toBe(
       "Falcon 1 is armed — if it's currently flying, disarming will make it fall.",
+    );
+  });
+});
+
+describe('armDisableReason (docs/plans/active/FLY-CONTROL-UX-PLAN.md §2 — grounding wins)', () => {
+  it('is undefined with neither gate holding — Arm is enabled', () => {
+    expect(armDisableReason(undefined, undefined)).toBeUndefined();
+  });
+
+  it('passes through the sticks reason alone', () => {
+    expect(armDisableReason(undefined, 'Throttle 62% — center sticks to arm')).toBe(
+      'Throttle 62% — center sticks to arm',
+    );
+  });
+
+  it('passes through the grounding reason alone', () => {
+    expect(armDisableReason('Grounded for maintenance.', undefined)).toBe('Grounded for maintenance.');
+  });
+
+  it('grounding wins when both hold at once — the sticks hint never shadows a safety blocker', () => {
+    expect(armDisableReason('Grounded for maintenance.', 'Throttle 62% — center sticks to arm')).toBe(
+      'Grounded for maintenance.',
     );
   });
 });

@@ -405,6 +405,20 @@
   gap: var(--space-8);
 }
 
+/* Status chips (docs/plans/active/FLY-CONTROL-UX-PLAN.md §3) — armed/mode, joined onto the existing
+   header cluster rather than a new HUD zone. Same `.chip`/`.chip.ok`/`.chip.stale` language the old
+   Controller-drawer state strip used (`rc-monitor.css`'s own identical `.state-strip .chip.stale`
+   rule) — a second call site against the same visual vocabulary, not a new one. */
+.header-status {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.header-status .chip.stale {
+  color: var(--text-faint);
+}
+
 /* The right-hand cluster (switcher + "Bring home") — `min-width: 0` is load-bearing (the grid-item
    shrink-to-fit trap `.switcher-control`'s own `min-width: 0` already fixes for its child, needed
    again one level up): without it this flex box would refuse to shrink below its content's natural
@@ -576,12 +590,16 @@
   z-index: 3;
 }
 
-/* Diagnostics (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e) — right column; no neighbor to clear on this side
-   now that the old bottom-right detections toggle moved into its own tool-rail drawer. */
+/* Diagnostics (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-e) — right column, raised above the HUD's own
+   bottom-right Arm/Disarm zone (docs/plans/active/FLY-CONTROL-UX-PLAN.md §3, `fly-hud.css`'s own
+   `.hud-arm`, z-index 8) rather than sharing its corner — the same approximate `--space-64` offset
+   `.main-preflight`'s own left-side twin already uses to clear `.main-secondary` below it. This used
+   to sit flush in the corner ("no neighbor to clear on this side") before Arm/Disarm moved onto the
+   video; now there is one. */
 .main-diagnostics {
   position: absolute;
   right: var(--overlay-pad);
-  bottom: var(--overlay-pad);
+  bottom: calc(var(--overlay-pad) + var(--space-64));
   z-index: 3;
 }
 

@@ -1,0 +1,283 @@
+/* `:host { display: contents }` — mirrors `rc-monitor.css`/`flight-command-panel.css`/
+   `mode-picker.css`'s identical convention: this component's own top-level elements become direct
+   children of `cockpit.html`'s `.grid-main` (a `position: relative` box), which is what lets the
+   `position: absolute` rules below anchor to the video frame itself rather than to this component's
+   own (non-existent) box. */
+:host {
+  display: contents;
+}
+
+/* One new documented z-index literal (docs/plans/active/FLY-CONTROL-UX-PLAN.md §5's own allowance):
+   above `.main-secondary` (4, cockpit.css — the secondary-device tile strip) and every other passive
+   `.main-*` overlay, below the tool-rail drawers (120, `side-panel.css`) and `.hud-confirm` (20, the
+   Stop-stream scrim) — an operator-facing control never buried under a passive card, but a drawer or
+   a confirm dialog opened on top of it still wins. */
+.hud-bottom-center,
+.hud-arm {
+  position: absolute;
+  bottom: var(--overlay-pad);
+  z-index: 8;
+}
+
+.hud-bottom-center {
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
+  max-width: calc(100% - 2 * var(--overlay-pad));
+}
+
+.hud-arm {
+  right: var(--overlay-pad);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-8);
+  max-width: calc(100% - 2 * var(--overlay-pad));
+}
+
+/* ---- Shared frosted-pill chrome — this file's own copy of the same recipe `cockpit.css`'s
+   `.icon-btn`/`.switcher-control` and `flight-command-panel.css`'s `.hud-pill` each already carry
+   (frontend-style §2's widened `--hud-*` rule); Angular's emulated encapsulation means a class can't
+   be shared *across* component stylesheets, so every file that needs this look re-declares it, same
+   established precedent throughout this cockpit. ---------------------------------------------------- */
+
+.hud-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  border-radius: var(--radius-pill);
+  background: var(--hud-bg);
+  border: var(--hud-border);
+  backdrop-filter: blur(var(--hud-blur));
+  color: var(--text);
+  font-size: 0.8rem;
+  padding: var(--space-8) var(--space-16);
+  cursor: pointer;
+}
+
+.hud-pill:hover:not(:disabled) {
+  background: var(--hud-bg-strong);
+}
+
+.hud-pill:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Take-control — the one live *action* at rest, so it earns the app's one interactive/selected accent
+   (frontend-style §3: "Blue means interactive/selected, nothing else"). */
+.hud-pill.primary {
+  border-color: var(--color-info);
+  color: var(--color-info);
+  font-weight: 600;
+}
+
+/* Release — deliberately not danger-red (releasing control is a safe, reversible act; the flight
+   controller's own failsafe already holds the vehicle once this is pressed) — a quiet pill, same as
+   every other non-destructive control here. */
+.hud-pill.release {
+  font-weight: 600;
+}
+
+.hud-source-pills {
+  display: flex;
+  gap: var(--space-4);
+}
+
+.hud-pill.source-pill {
+  padding: var(--space-4) var(--space-8);
+  font-size: 0.7rem;
+}
+
+.hud-pill.source-pill.active {
+  border-color: var(--color-info);
+  color: var(--color-info);
+}
+
+/* ---- At-rest badge (§3 "one commandable badge: icon + one word") -------------------------------- */
+
+.hud-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-8) var(--space-4) var(--space-12);
+  border-radius: var(--radius-pill);
+  background: var(--hud-bg);
+  border: var(--hud-border);
+  backdrop-filter: blur(var(--hud-blur));
+  color: var(--text);
+  font-size: 0.72rem;
+}
+
+/* Only the icon carries the status colour (frontend-style §3: saturated colour is reserved for the
+   one accent + the status hues, never a large fill floating over live video) — the word stays plain
+   `--text` in every state. */
+.hud-badge.ready vision-icon {
+  color: var(--color-success);
+}
+
+.hud-badge.no-link vision-icon {
+  color: var(--color-warn);
+}
+
+.hud-badge.not-commandable vision-icon {
+  color: var(--color-danger);
+}
+
+/* ---- Engaged live input widget (§3 "live stick state as bars/glyphs, --mono numerals") ----------- */
+
+.hud-widget {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--space-16);
+}
+
+.hud-element {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.hud-element .element-label {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+
+.hud-element .element-value {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--text);
+}
+
+/* A steering/yaw bar — horizontal, always `CENTERED` travel, so the fill grows out from the 50%
+   centre mark in either direction rather than from an edge. */
+.hud-bar-h {
+  position: relative;
+  width: 5.5rem;
+  height: 0.4rem;
+  border-radius: var(--radius-pill);
+  background: var(--hud-bg);
+  border: var(--hud-border);
+  overflow: hidden;
+}
+
+/* A throttle bar — vertical, its own rest point at 0% (unidirectional: a copter/plane idle) or 50%
+   (centred: a rover's stop) per `restPercent()`, same shared math the horizontal bar uses — one
+   render path, travel-driven, not a second fork per throttle kind (this class's own doc comment). */
+.hud-bar-v {
+  position: relative;
+  width: 0.4rem;
+  height: 3.5rem;
+  border-radius: var(--radius-pill);
+  background: var(--hud-bg);
+  border: var(--hud-border);
+  overflow: hidden;
+}
+
+.hud-bar-h .fill,
+.hud-bar-v .fill {
+  position: absolute;
+  background: var(--color-live);
+}
+
+.hud-bar-h .fill {
+  top: 0;
+  bottom: 0;
+}
+
+.hud-bar-v .fill {
+  left: 0;
+  right: 0;
+}
+
+.hud-bar-h .rest-tick,
+.hud-bar-v .rest-tick {
+  position: absolute;
+  background: var(--hairline);
+}
+
+.hud-bar-h .rest-tick {
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+}
+
+.hud-bar-v .rest-tick {
+  left: -2px;
+  right: -2px;
+  height: 1px;
+}
+
+/* A roll/pitch pair — one 2D pad, the same crosshair-plus-knob idiom `transmitter-view`'s own pads
+   use for the drawer's picture, at HUD scale. */
+.hud-pad {
+  position: relative;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: var(--radius);
+  background: var(--hud-bg);
+  border: var(--hud-border);
+}
+
+.hud-pad .crosshair-x,
+.hud-pad .crosshair-y {
+  position: absolute;
+  background: var(--hairline);
+}
+
+.hud-pad .crosshair-x {
+  left: 0;
+  right: 0;
+  top: 50%;
+  height: 1px;
+}
+
+.hud-pad .crosshair-y {
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+}
+
+.hud-pad .knob {
+  position: absolute;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 50%;
+  background: var(--color-live);
+  transform: translate(-50%, -50%);
+}
+
+/* ---- Keyboard key-glyph ticker (§3 "keyboard mode shows key-glyph ticker instead of stick
+   glyphs") ------------------------------------------------------------------------------------- */
+
+.key-ticker {
+  display: flex;
+  gap: var(--space-4);
+}
+
+.key-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: var(--radius-sm);
+  background: var(--hud-bg);
+  border: var(--hud-border);
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--text-faint);
+}
+
+.key-glyph.active {
+  color: var(--color-live);
+  border-color: var(--color-live);
+  background: var(--hud-bg-strong);
+}

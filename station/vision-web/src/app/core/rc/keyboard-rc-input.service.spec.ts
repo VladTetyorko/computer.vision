@@ -392,6 +392,92 @@ describe('KeyboardRcInputService', () => {
     });
   });
 
+  describe('axisKeysDown (docs/plans/active/FLY-CONTROL-UX-PLAN.md §3 — HUD key-glyph ticker)', () => {
+    it('starts empty', () => {
+      const service = create();
+      expect(service.axisKeysDown().size).toBe(0);
+    });
+
+    it('reports a bound key the instant it is pressed', () => {
+      const service = create();
+      service.bind(ROVER_MAP);
+      service.setEnabled(true);
+
+      press('KeyW');
+
+      expect(service.axisKeysDown()).toEqual(new Set(['KeyW']));
+    });
+
+    it('reports two keys held at once, e.g. opposite steering keys', () => {
+      const service = create();
+      service.bind(ROVER_MAP);
+      service.setEnabled(true);
+
+      press('KeyD');
+      press('KeyA');
+
+      expect(service.axisKeysDown()).toEqual(new Set(['KeyD', 'KeyA']));
+    });
+
+    it('drops a key from the set on release, keeping the rest', () => {
+      const service = create();
+      service.bind(ROVER_MAP);
+      service.setEnabled(true);
+
+      press('KeyW');
+      press('KeyD');
+      release('KeyW');
+
+      expect(service.axisKeysDown()).toEqual(new Set(['KeyD']));
+    });
+
+    it('never reports a key for a function the layout does not bind (no roll on a rover)', () => {
+      const service = create();
+      service.bind(ROVER_MAP);
+      service.setEnabled(true);
+
+      press('ArrowLeft');
+
+      expect(service.axisKeysDown().size).toBe(0);
+    });
+
+    it('is unaffected by action keys held alongside — the two sets are independent', () => {
+      const service = create();
+      service.bind(ROVER_MAP);
+      service.setEnabled(true);
+
+      press('KeyW');
+      press('Space');
+
+      expect(service.axisKeysDown()).toEqual(new Set(['KeyW']));
+      expect(service.actionKeysDown()).toEqual(new Set(['EMERGENCY_STOP']));
+    });
+
+    it('a window blur clears it immediately, same as it clears the ramped values', () => {
+      const service = create();
+      service.bind(ROVER_MAP);
+      service.setEnabled(true);
+
+      press('KeyW');
+      window.dispatchEvent(new Event('blur'));
+
+      expect(service.axisKeysDown().size).toBe(0);
+    });
+
+    it('disabling clears it and stops listening entirely', () => {
+      const service = create();
+      service.bind(ROVER_MAP);
+      service.setEnabled(true);
+
+      press('KeyW');
+      service.setEnabled(false);
+      expect(service.axisKeysDown().size).toBe(0);
+
+      press('KeyW'); // no longer listening
+      expect(service.axisKeysDown().size).toBe(0);
+    });
+  });
+
   it('re-binding to a fresh map clears any ramped value', () => {
     const service = create();
     service.bind(ROVER_MAP);

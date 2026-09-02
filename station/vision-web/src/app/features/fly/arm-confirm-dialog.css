@@ -53,6 +53,17 @@
   color: var(--text-muted);
 }
 
+/* The live neutral-gate reason (docs/plans/active/FLY-CONTROL-UX-PLAN.md §2) — replaces `.arm-hint`
+   in place, same size/position, so the dialog doesn't reflow as the operator centers the sticks and
+   this line disappears back to the plain hint. Warn-toned, not danger — this is a "not yet", not a
+   failure. */
+.arm-blocked {
+  margin: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-warn-text);
+}
+
 .dialog-actions {
   justify-content: flex-end;
 }

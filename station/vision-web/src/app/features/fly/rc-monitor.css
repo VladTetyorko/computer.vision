@@ -66,25 +66,13 @@
   align-self: flex-start;
 }
 
-/* ---- Take control footer (decision U6) ------------------------------------------------------------ */
-
-.rc-footer {
+/* ---- Diagnostics (docs/plans/active/FLY-CONTROL-UX-PLAN.md §3) — the full-sentence counterpart to
+   the HUD's own Take-control pill/badge; plain body content now, not a sticky footer (the footer,
+   and everything that used to live in it, moved to `fly-hud.css`). ------------------------------- */
+.rc-diagnostics {
   display: flex;
   flex-direction: column;
   gap: var(--space-8);
-  width: 100%;
-}
-
-.rc-footer .label {
-  margin-bottom: 0;
-}
-
-.rc-footer .btn.big {
-  padding: var(--space-8) var(--space-24);
-  font-size: 1rem;
-  border-radius: var(--radius);
-  align-self: stretch;
-  justify-content: center;
 }
 
 .rc-link-chips {

@@ -2953,12 +2953,29 @@ export interface BatteryThresholds {
 }
 
 /**
+ * Mirrors `dto.RcThresholdsResponse` (docs/plans/active/FLY-CONTROL-UX-PLAN.md §2, wave BK1) — the
+ * neutral-stick arm gate's one tunable, `vision.ops.rc.neutral-tolerance-percent` (validated 1..25,
+ * default 5). How many display-percent points of slop around a control's rest point still counts as
+ * "neutral" — see `core/rc/neutral-gate-logic.ts` for the gate itself.
+ */
+export interface RcThresholds {
+  readonly neutralTolerancePercent: number;
+}
+
+/**
  * Mirrors `dto.OpsThresholdsResponse`, the body of `GET /api/ops/thresholds` — deploy-time config
- * (`vision.ops.battery.*`), not a per-request computation, read once per SPA session
- * (`core/ops/thresholds-store.ts`).
+ * (`vision.ops.battery.*`, `vision.ops.rc.*`), not a per-request computation, read once per SPA
+ * session (`core/ops/thresholds-store.ts`).
+ *
+ * `rc` is **optional** — BK1 (the server-side wave adding it) ships in parallel with the web wave
+ * that reads it (docs/plans/active/FLY-CONTROL-UX-PLAN.md §4: "WEB1 builds against the frozen JSON
+ * contract with local fallback"), so this client must degrade honestly to
+ * `DEFAULT_RC_THRESHOLDS` against a server that hasn't shipped the field yet, not just one that's
+ * unreachable.
  */
 export interface OpsThresholdsResponse {
   readonly battery: BatteryThresholds;
+  readonly rc?: RcThresholds;
 }
 
 // --- Auth (docs/plans/done/U-AUTH-PLAN.md wave 3's frozen contract; wave 4 is this app's own UI) -----------

@@ -86,6 +86,29 @@ export function disarmConfirmMessage(assetDisplayName: string, armed: boolean | 
     : `Disarm ${assetDisplayName}?`;
 }
 
+// --- Arm disable reason composition (docs/plans/active/FLY-CONTROL-UX-PLAN.md §2 — first time two
+// disable reasons exist for the same control in this codebase) --------------------------------------
+
+/**
+ * Composes the Arm trigger's one disable reason out of the two independent gates that can hold it:
+ * grounding (`groundedReason` — a safety/custody blocker, ASSET-FLOWS §2 S1) and sticks-not-neutral
+ * (`core/rc/neutral-gate-logic.ts#neutralGateReason`). **Grounding wins** — the plan's own frozen
+ * ordering: a vehicle that's grounded for a safety reason must never be shadowed by a "center your
+ * sticks" hint, which would read as the *only* blocker and vanish the instant the operator centres
+ * them, silently leaving the real reason unstated. Neither gate is ever shown alongside the other —
+ * this always resolves to exactly one reason (or none).
+ *
+ * `undefined` when neither gate holds — the trigger is enabled. Never gates Disarm/emergency
+ * verbs/mode (S1's own frozen rule, unchanged) — this function is Arm-only by construction, callers
+ * simply never invoke it for anything else.
+ */
+export function armDisableReason(
+  groundedReason: string | undefined,
+  sticksNotNeutralReason: string | undefined,
+): string | undefined {
+  return groundedReason ?? sticksNotNeutralReason;
+}
+
 // --- Outcome toasts (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 2's frozen contract) ---------------------
 
 export type FlightCommandAction = 'mode' | 'arm' | 'disarm';
