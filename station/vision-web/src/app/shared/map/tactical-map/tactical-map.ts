@@ -8,7 +8,6 @@ import {
   effect,
   inject,
   input,
-  linkedSignal,
   output,
   signal,
   untracked,
@@ -38,6 +37,7 @@ import {
   MAP_LAYERS,
   correctionDivIcon,
   droneDivIcon,
+  droneHollowDivIcon,
   effectiveMapLayerId,
   ensureLeafletStylesheet,
   importLeaflet,
@@ -67,11 +67,14 @@ import {
   drawingColor,
   escapeHtml,
   isLayerHidden,
+  isMarkerLive,
+  lastContactLabel,
   layerRows,
   markKindCounts,
   markKindIcon,
   markKindLabel,
   markSymbolClasses,
+  markerLastContact,
   readHiddenLayers,
   resolveMapColors,
   toggleLayerHidden,
@@ -320,13 +323,12 @@ export class TacticalMap {
   protected readonly tilesOk = signal(true);
 
   /**
-   * The legend defaults to open on a full-page fleet map and closed on a follow-mode inset (§5.1's
-   * "defaults per host container width", resolved by mode rather than by measuring the DOM — the
-   * two follow-mode hosts are the two small insets). A `linkedSignal` rather than a plain one
-   * because the inputs aren't readable yet when fields initialize; the operator's own toggle wins
-   * from then on.
+   * The full symbol-key panel starts closed in both modes (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md D6/W1):
+   * the always-visible one-row chip summary (`assetCounts()`, in the template) already answers "how
+   * many of what" at rest, so the detail panel is opt-in rather than defaulting to open and
+   * competing with the map for attention. The operator's own toggle is the only thing that changes it.
    */
-  protected readonly legendOpen = linkedSignal(() => !this.followMode());
+  protected readonly legendOpen = signal(false);
   /** The map's own corner panel — basemap picker only since M1 (see the class doc's "Self-explaining chrome"). */
   protected readonly basemapPanelOpen = signal(false);
 
@@ -394,6 +396,28 @@ export class TacticalMap {
   protected readonly assetCounts = computed(() =>
     assetLegendCounts(this.shownAssets(), this.attentionAssetIds(), this.unplottedAssets()),
   );
+
+  /**
+   * Follow mode's own on-map honesty label (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.3) — the
+   * inset has no popup (`upsertAsset`'s own comment: "follow-mode inset deliberately stayed
+   * popup-free"), so this is the only place a stale followed asset gets called out on the map
+   * itself. Reuses the exact `'LAST KNOWN · {humanAge}'` wording `features/fly/fly-osd-logic.ts#osdGroupLabel`
+   * already uses once telemetry goes stale, so the map and the cockpit OSD never disagree on how
+   * this state reads. `undefined` while the followed asset is live, unplotted, or its age is
+   * genuinely unknown — nothing to caption honestly in that last case.
+   */
+  protected readonly followLastKnownLabel = computed<string | undefined>(() => {
+    if (!this.followMode()) {
+      return undefined;
+    }
+    const followId = this.followAssetId();
+    const asset = this.assets().find((candidate) => candidate.assetId === followId);
+    if (!asset || isMarkerLive(asset)) {
+      return undefined;
+    }
+    const contact = markerLastContact(asset);
+    return contact.ageSeconds === undefined ? undefined : `LAST KNOWN · ${humanAge(contact.ageSeconds)}`;
+  });
   protected readonly affiliationRows = computed(() => {
     const counts = affiliationCounts(this.shownMarks());
     return AFFILIATIONS.map((affiliation) => ({
@@ -413,6 +437,10 @@ export class TacticalMap {
     })).filter((row) => row.count > 0);
   });
   protected readonly hasMarks = computed(() => this.shownMarks().length > 0);
+  /** Whether the opt-in symbol-key panel has anything to show beyond the always-visible asset chip row. */
+  protected readonly hasMoreLegendSymbols = computed(
+    () => this.hasMarks() || this.shownZones().length > 0 || this.hasTracks() || this.hasCorrections(),
+  );
   protected readonly hasTracks = computed(() => this.shownTracks().length > 0);
   /** No layer-visibility filter — `CorrectionResponse` carries no `layerId` (asset-scoped, not layer-scoped); only rows with an actual fix are plottable (see `applyCorrections`). */
   protected readonly hasCorrections = computed(() => this.corrections().some((c) => hasCorrectionFix(c)));
@@ -797,25 +825,24 @@ export class TacticalMap {
   }
 
   /**
-   * One asset glyph, state carried by colour only (docs/plans/done/VISUAL-REFRESH-PLAN.md F7): a
-   * heading-rotated arrow while streaming, a dot while offline, `--color-danger` when the asset needs
-   * attention, a `--color-info` ring when selected. Own assets are always friendly by definition
-   * (docs/plans/done/MAP-REWORK-PLAN.md §5.1), which is why they keep this rounded glyph rather than ever
-   * taking a hostile/unknown frame — affiliation symbology applies to *marks*.
+   * One asset glyph, state carried by colour only (docs/plans/done/VISUAL-REFRESH-PLAN.md F7,
+   * honesty-fixed by docs/plans/active/COMMAND-MAP-FLOW-PLAN.md D2/W1): `--color-danger` when the
+   * asset needs attention, else `--color-live` while {@link isMarkerLive} (fresh telemetry, not
+   * just a `STREAMING` status bucket that might be minutes stale) and muted otherwise, `--color-info`
+   * ring when selected. Shape is a *separate* axis from colour, purely honest about heading: a
+   * directional arrow only when `headingDegrees` is actually known, otherwise the hollow
+   * non-directional ring — never a fabricated 0°/North. Own assets are always friendly by
+   * definition (docs/plans/done/MAP-REWORK-PLAN.md §5.1), which is why they keep this rounded glyph
+   * rather than ever taking a hostile/unknown frame — affiliation symbology applies to *marks*.
    */
   private assetIcon(L: typeof Leaflet, asset: FleetMarker): Leaflet.DivIcon {
-    const modifiers = `${this.attentionAssetIds().has(asset.assetId) ? ' attention' : ''}${
-      asset.assetId === this.selectedAssetId() ? ' selected' : ''
-    }`;
-    if (asset.live) {
-      return droneDivIcon(L, asset.headingDegrees ?? 0, `asset-marker live${modifiers}`);
+    const modifiers = `${isMarkerLive(asset) ? ' live' : ''}${
+      this.attentionAssetIds().has(asset.assetId) ? ' attention' : ''
+    }${asset.assetId === this.selectedAssetId() ? ' selected' : ''}`;
+    if (asset.headingDegrees === undefined) {
+      return droneHollowDivIcon(L, `asset-marker${modifiers}`);
     }
-    return L.divIcon({
-      className: `asset-marker offline${modifiers}`,
-      html: '<div class="offline-dot"></div>',
-      iconSize: [14, 14],
-      iconAnchor: [7, 7],
-    });
+    return droneDivIcon(L, asset.headingDegrees, `asset-marker${modifiers}`);
   }
 
   private flagIcon(L: typeof Leaflet): Leaflet.DivIcon {
@@ -843,9 +870,10 @@ export class TacticalMap {
     if (asset.position.altitudeMeters !== undefined) {
       rows.push(`<div class="popup-row">Altitude ${asset.position.altitudeMeters.toFixed(0)} m</div>`);
     }
-    if (asset.sampleAgeSeconds !== undefined) {
-      rows.push(`<div class="popup-row faint">Updated ${humanAge(asset.sampleAgeSeconds)} ago</div>`);
-    }
+    // Always rendered (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md D3/§3.3) — an offline asset used to lose
+    // this row entirely (`sampleAgeSeconds` is never set for that bucket); `markerLastContact` gives
+    // every marker an honest answer, even if it's just "unknown".
+    rows.push(`<div class="popup-row faint">${escapeHtml(lastContactLabel(markerLastContact(asset)))}</div>`);
     if (asset.live) {
       rows.push(
         `<button type="button" class="btn small secondary preview-btn" data-asset-id="${escapeHtml(asset.assetId)}" title="Watch live, inline beside the map">Watch live</button>`,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AssetSummary, GeoPosition, TelemetrySample } from '../api/models';
+import type { AssetAttention, AssetSummary, GeoPosition, TelemetrySample } from '../api/models';
 import {
   bucketAssets,
   bucketForAsset,
@@ -7,10 +7,13 @@ import {
   buildMarkers,
   fingerprintMarkers,
   nextAutoFitEnabled,
+  resolveLastContact,
   snapshotFromSamples,
   windowTrail,
+  withLastContact,
   type AssetTelemetrySnapshot,
   type FleetMarker,
+  type LastContact,
 } from './map-logic';
 
 const POSITION: GeoPosition = { latitude: 10, longitude: 20 };
@@ -356,5 +359,84 @@ describe('nextAutoFitEnabled', () => {
 
   it('is idempotent: recenter while already on stays on', () => {
     expect(nextAutoFitEnabled(true, 'recenterClicked')).toBe(true);
+  });
+});
+
+describe('resolveLastContact', () => {
+  const NOW = Date.parse('2026-07-22T00:10:00Z');
+
+  function attention(partial: Partial<AssetAttention> = {}): AssetAttention {
+    return {
+      assetId: 'a-1',
+      displayName: 'Drone One',
+      categoryId: 'drone',
+      categoryName: 'Drone',
+      lifecycle: 'ACTIVE',
+      streaming: false,
+      openEventCount: 0,
+      ...partial,
+    };
+  }
+
+  it('tier 1: prefers telemetryAgeMs when present, converted to seconds', () => {
+    expect(resolveLastContact(attention({ telemetryAgeMs: 4500 }), '2026-07-21T00:00:00Z', NOW)).toEqual({
+      source: 'telemetry',
+      ageSeconds: 4.5,
+    });
+  });
+
+  it('tier 2: falls back to lastUsedAt when telemetryAgeMs is absent', () => {
+    const lastUsedAt = '2026-07-22T00:00:00Z'; // 10 minutes before NOW
+    expect(resolveLastContact(attention(), lastUsedAt, NOW)).toEqual({ source: 'flight', ageSeconds: 600 });
+  });
+
+  it('tier 2: also used when no attention row was given at all', () => {
+    expect(resolveLastContact(undefined, '2026-07-22T00:00:00Z', NOW)).toEqual({ source: 'flight', ageSeconds: 600 });
+  });
+
+  it('tier 3: unknown when neither telemetry age nor a last flight exists', () => {
+    expect(resolveLastContact(attention(), undefined, NOW)).toEqual({ source: 'unknown' });
+    expect(resolveLastContact(undefined, undefined, NOW)).toEqual({ source: 'unknown' });
+  });
+
+  it('never resolves a negative age from clock skew', () => {
+    expect(resolveLastContact(undefined, '2026-07-23T00:00:00Z', NOW).ageSeconds).toBe(0);
+  });
+});
+
+describe('withLastContact', () => {
+  function marker(partial: Partial<FleetMarker> = {}): FleetMarker {
+    return {
+      assetId: 'a-1',
+      displayName: 'Drone One',
+      category: 'drone',
+      categoryName: 'Drone',
+      status: 'STREAMING',
+      live: true,
+      position: POSITION,
+      trail: [],
+      ...partial,
+    };
+  }
+
+  it('attaches a resolved LastContact by asset id', () => {
+    const contact: LastContact = { source: 'telemetry', ageSeconds: 3 };
+    const result = withLastContact([marker()], new Map([['a-1', contact]]));
+    expect(result[0].lastContact).toEqual(contact);
+  });
+
+  it('leaves a marker with no matching entry unchanged, still undefined', () => {
+    const result = withLastContact([marker()], new Map());
+    expect(result[0].lastContact).toBeUndefined();
+    expect(result[0]).toEqual(marker());
+  });
+
+  it('preserves order and every other field', () => {
+    const a = marker({ assetId: 'a-1' });
+    const b = marker({ assetId: 'a-2' });
+    const result = withLastContact([a, b], new Map([['a-2', { source: 'unknown' }]]));
+    expect(result.map((m) => m.assetId)).toEqual(['a-1', 'a-2']);
+    expect(result[0]).toEqual(a);
+    expect(result[1]).toEqual({ ...b, lastContact: { source: 'unknown' } });
   });
 });

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { FleetMarker } from '../../../core/map/map-logic';
+import type { FleetMarker, LastContact } from '../../../core/map/map-logic';
 import {
   BUILTIN_ASSETS_LAYER,
   BUILTIN_EVENTS_LAYER,
@@ -18,9 +18,12 @@ import {
   escapeHtml,
   followMarker,
   followMarkers,
+  isMarkerLive,
+  lastContactLabel,
   layerRows,
   markKindCounts,
   markSymbolClasses,
+  markerLastContact,
   minPointsFor,
   parseHiddenLayers,
   readHiddenLayers,
@@ -227,6 +230,63 @@ describe('legend counts', () => {
     ];
     expect(affiliationCounts(marks)).toEqual({ FRIENDLY: 1, HOSTILE: 2, NEUTRAL: 0, UNKNOWN: 0 });
     expect(markKindCounts(marks)).toEqual({ UNIT: 1, EQUIPMENT: 0, HAZARD: 1, POI: 0, TARGET: 1 });
+  });
+
+  // docs/plans/active/COMMAND-MAP-FLOW-PLAN.md D2/D4 — the legend's own split must track what the
+  // glyph actually draws (`isMarkerLive`), not the raw `live` bucket.
+  it('splits by isMarkerLive, demoting a STREAMING asset whose telemetry has gone stale', () => {
+    const stale = asset({ assetId: 'a1', live: true, sampleAgeSeconds: 200 });
+    const counts = assetLegendCounts([stale], new Set(), 0);
+    expect(counts).toEqual({ streaming: 0, offline: 1, attention: 0, noPosition: 0 });
+  });
+
+  it('still counts a fresh streaming asset as live, unchanged from the raw bucket', () => {
+    const fresh = asset({ assetId: 'a1', live: true, sampleAgeSeconds: 2 });
+    expect(assetLegendCounts([fresh], new Set(), 0).streaming).toBe(1);
+  });
+});
+
+describe('markerLastContact / lastContactLabel (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.3)', () => {
+  it('prefers an already-resolved lastContact', () => {
+    const contact: LastContact = { source: 'flight', ageSeconds: 600 };
+    expect(markerLastContact(asset({ lastContact: contact, sampleAgeSeconds: 2 }))).toEqual(contact);
+  });
+
+  it('falls back to sampleAgeSeconds as a telemetry-sourced contact when lastContact is absent', () => {
+    expect(markerLastContact(asset({ sampleAgeSeconds: 7 }))).toEqual({ source: 'telemetry', ageSeconds: 7 });
+  });
+
+  it('falls back to unknown when neither is present — never fabricates an age', () => {
+    expect(markerLastContact(asset())).toEqual({ source: 'unknown' });
+  });
+
+  it('labels each of the three tiers with the frozen copy', () => {
+    expect(lastContactLabel({ source: 'telemetry', ageSeconds: 5 })).toBe('Last contact 5s ago');
+    expect(lastContactLabel({ source: 'flight', ageSeconds: 3600 })).toBe('Last flight started 1h ago');
+    expect(lastContactLabel({ source: 'unknown' })).toBe('Last contact unknown');
+  });
+});
+
+describe('isMarkerLive (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md D2)', () => {
+  it('falls back to the raw live bucket when no age is known anywhere (today\'s offline bucket)', () => {
+    expect(isMarkerLive(asset({ live: false }))).toBe(false);
+    expect(isMarkerLive(asset({ live: true }))).toBe(true);
+  });
+
+  it('is true for a streaming asset with a fresh sample', () => {
+    expect(isMarkerLive(asset({ live: true, sampleAgeSeconds: 2 }))).toBe(true);
+  });
+
+  it('is false for a STREAMING-bucket asset whose telemetry poll has frozen (D1 symptom)', () => {
+    expect(isMarkerLive(asset({ live: true, sampleAgeSeconds: 200 }))).toBe(false);
+  });
+
+  it('is true when a wired lastContact reports fresh telemetry, even off the streaming bucket', () => {
+    expect(isMarkerLive(asset({ live: false, lastContact: { source: 'telemetry', ageSeconds: 2 } }))).toBe(true);
+  });
+
+  it('is false for a lastContact of source flight, however recent — that is history, not a live reading', () => {
+    expect(isMarkerLive(asset({ live: true, lastContact: { source: 'flight', ageSeconds: 2 } }))).toBe(false);
   });
 });
 

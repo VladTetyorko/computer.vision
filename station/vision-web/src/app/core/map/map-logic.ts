@@ -1,4 +1,4 @@
-import type { AssetStatus, AssetSummary, GeoPosition, TelemetrySample } from '../api/models';
+import type { AssetAttention, AssetStatus, AssetSummary, GeoPosition, TelemetrySample } from '../api/models';
 import { hasFix } from '../geo/geo-logic';
 import { ageSeconds, deriveTrail } from '../telemetry/telemetry-logic';
 
@@ -147,6 +147,67 @@ export interface FleetMarker {
    * Absent entirely for the `offline` bucket, like every other live-telemetry-sourced field.
    */
   readonly extra?: Record<string, number>;
+  /**
+   * docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.3 — the map's one honest "when did we last hear
+   * from this asset" fact, independent of the `streaming`/`offline` bucket. Populated by
+   * `withLastContact` once `features/command/command-facade.ts` has both a `FleetSummaryResponse`
+   * (for {@link AssetAttention.telemetryAgeMs}) and the asset's own `lastUsedAt` to resolve from —
+   * `undefined` until then, which every reader here already treats as "not known yet", never as a
+   * fabricated "fine".
+   */
+  readonly lastContact?: LastContact;
+}
+
+/** Which fact `LastContact` is actually reporting — the map never blurs these into one number. */
+export type LastContactSource = 'telemetry' | 'flight' | 'unknown';
+
+/**
+ * The map's one "last heard from" fact (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.3), resolved through
+ * three tiers so an offline asset — which gets no live telemetry poll at all
+ * (`buildMarker`'s own doc comment) — still gets an honest answer instead of silence:
+ *
+ * 1. `telemetry` — `AssetAttention.telemetryAgeMs` is present (the fleet summary saw a sample,
+ *    streaming or not). Label: `Last contact {humanAge} ago`.
+ * 2. `flight` — no telemetry age, but `AssetSummary.lastUsedAt` is present. Label:
+ *    `Last flight started {humanAge} ago`.
+ * 3. `unknown` — neither. Label: `Last contact unknown`. `ageSeconds` is absent iff this tier.
+ *
+ * First hit wins; the tiers are never blended into one number, so the label always names which
+ * fact it's reporting rather than implying a freshness the data doesn't back up.
+ */
+export interface LastContact {
+  readonly source: LastContactSource;
+  readonly ageSeconds?: number;
+}
+
+/** `resolveLastContact`'s three-tier resolution, see {@link LastContact}'s own doc comment. */
+export function resolveLastContact(
+  attention: Pick<AssetAttention, 'telemetryAgeMs'> | undefined,
+  lastUsedAt: string | undefined,
+  nowMs: number,
+): LastContact {
+  if (attention?.telemetryAgeMs !== undefined) {
+    return { source: 'telemetry', ageSeconds: attention.telemetryAgeMs / 1000 };
+  }
+  if (lastUsedAt !== undefined) {
+    return { source: 'flight', ageSeconds: Math.max(0, (nowMs - Date.parse(lastUsedAt)) / 1000) };
+  }
+  return { source: 'unknown' };
+}
+
+/**
+ * Merges a resolved `LastContact` onto every marker that has one, by asset id. A marker with no
+ * entry in `lastContactByAssetId` (not yet resolved, or the host hasn't wired this up — see
+ * COMMAND-MAP-FLOW-PLAN.md wave W1 vs. W3) passes through unchanged, `lastContact` still `undefined`.
+ */
+export function withLastContact(
+  markers: readonly FleetMarker[],
+  lastContactByAssetId: ReadonlyMap<string, LastContact>,
+): readonly FleetMarker[] {
+  return markers.map((marker) => {
+    const lastContact = lastContactByAssetId.get(marker.assetId);
+    return lastContact ? { ...marker, lastContact } : marker;
+  });
 }
 
 /**

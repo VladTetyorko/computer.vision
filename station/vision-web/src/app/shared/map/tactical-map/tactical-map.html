@@ -42,6 +42,11 @@
   <!-- ---- Top-right: camera controls (mode-dependent) --------------------------------------- -->
   <div class="chrome chrome-tr">
     @if (followMode()) {
+      <!-- No popup exists in follow mode (one asset, already shown by the host page) — this is the
+           only on-map honesty cue when the followed asset's own telemetry has gone stale. -->
+      @if (followLastKnownLabel(); as label) {
+        <span class="badge surface-dark last-known-badge">{{ label }}</span>
+      }
       <button
         type="button"
         class="btn secondary small surface-dark"
@@ -67,22 +72,36 @@
     }
   </div>
 
-  <!-- ---- Bottom-left: the legend, then the tiles-unavailable badge -------------------------- -->
+  <!-- ---- Bottom-left: the legend, then the tiles-unavailable badge --------------------------
+       docs/plans/active/COMMAND-MAP-FLOW-PLAN.md D6 — the legend is one quiet row of count chips at rest
+       (frontend-style §7), always visible rather than gated behind a toggle; the full symbol key
+       (marks/zones/tracks/corrections) stays an opt-in expansion, since most sessions never place a
+       mark and don't need that detail on screen by default. -->
   <div class="chrome chrome-bl">
-    @if (legendOpen()) {
-      <div class="panel legend surface-dark" role="note" aria-label="Map legend">
-        <p class="panel-label">Assets</p>
-        <ul class="rows">
-          <li class="row"><span class="swatch dot live"></span><span class="row-name">Streaming</span><span class="row-count mono">{{ assetCounts().streaming }}</span></li>
-          <li class="row"><span class="swatch dot"></span><span class="row-name">Offline</span><span class="row-count mono">{{ assetCounts().offline }}</span></li>
-          @if (assetCounts().attention > 0) {
-            <li class="row"><span class="swatch dot attention"></span><span class="row-name">Needs attention</span><span class="row-count mono">{{ assetCounts().attention }}</span></li>
-          }
-          @if (assetCounts().noPosition > 0) {
-            <li class="row"><span class="swatch dot faint"></span><span class="row-name">No position</span><span class="row-count mono">{{ assetCounts().noPosition }}</span></li>
-          }
-        </ul>
+    <div class="legend-chips surface-dark" role="note" aria-label="Map legend summary">
+      <span class="legend-chip"><span class="swatch dot live"></span>{{ assetCounts().streaming }} live</span>
+      <span class="legend-chip"><span class="swatch dot"></span>{{ assetCounts().offline }} last known</span>
+      @if (assetCounts().attention > 0) {
+        <span class="legend-chip"><span class="swatch dot attention"></span>{{ assetCounts().attention }} attention</span>
+      }
+      @if (assetCounts().noPosition > 0) {
+        <span class="legend-chip"><span class="swatch dot faint"></span>{{ assetCounts().noPosition }} no position</span>
+      }
+      @if (hasMoreLegendSymbols()) {
+        <button
+          type="button"
+          class="chrome-toggle legend-more"
+          (click)="toggleLegend()"
+          [attr.aria-expanded]="legendOpen()"
+          title="More map symbols"
+        >
+          <vision-icon name="help" [size]="14" />
+        </button>
+      }
+    </div>
 
+    @if (legendOpen() && hasMoreLegendSymbols()) {
+      <div class="panel legend surface-dark" role="note" aria-label="Map symbol key">
         @if (hasMarks()) {
           <p class="panel-label">Affiliation</p>
           <ul class="rows">
@@ -138,18 +157,6 @@
         }
       </div>
     }
-
-    <button
-      type="button"
-      class="btn secondary small chrome-toggle surface-dark"
-      [class.active]="legendOpen()"
-      (click)="toggleLegend()"
-      [attr.aria-expanded]="legendOpen()"
-      title="Explain the symbols on this map"
-    >
-      <vision-icon name="help" [size]="14" />
-      <span class="chrome-toggle-label">Legend</span>
-    </button>
 
     @if (!tilesOk()) {
       <div class="badge surface-dark">Tiles unavailable — overlays still shown</div>

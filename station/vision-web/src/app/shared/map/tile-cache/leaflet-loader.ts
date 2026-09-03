@@ -371,6 +371,25 @@ export function droneDivIcon(
 }
 
 /**
+ * A divIcon for an asset whose heading is genuinely unknown (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md
+ * §3.3/W1) — a hollow, non-directional ring, same footprint as {@link droneDivIcon}'s arrow so the
+ * glyph doesn't jump size when heading arrives or is lost. Deliberately a separate function rather
+ * than teaching `droneDivIcon` to accept `undefined`: its two other call sites
+ * (`features/replay/replay-map.ts`) always have a definite heading and are out of this wave's
+ * scope, so widening that signature would touch a file this plan doesn't own. Colour/opacity are
+ * resolved entirely by the host's own `::ng-deep` rule (`TacticalMap`'s freshness/attention
+ * classes) — this only builds the DOM, same division of labour as `droneDivIcon`/`correctionDivIcon`.
+ */
+export function droneHollowDivIcon(L: typeof Leaflet, className = 'drone-marker'): Leaflet.DivIcon {
+  return L.divIcon({
+    className,
+    html: '<div class="drone-hollow"></div>',
+    iconSize: [22, 22],
+    iconAnchor: [11, 11],
+  });
+}
+
+/**
  * A divIcon for a visual-geolocation correction (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.8, wave
  * H6) — a hollow ring with a small heading tick, deliberately **not** {@link droneDivIcon}'s filled
  * arrow: §3.8 requires the corrected marker to read as "visually secondary to the raw one", never a

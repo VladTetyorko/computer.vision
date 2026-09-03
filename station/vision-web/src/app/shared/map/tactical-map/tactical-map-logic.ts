@@ -11,9 +11,10 @@ import type {
   TelemetrySample,
   VerificationState,
 } from '../../../core/api/models';
-import type { FleetMarker } from '../../../core/map/map-logic';
+import type { FleetMarker, LastContact } from '../../../core/map/map-logic';
 import { zoneKindLabel } from '../../../core/geofence/geofence-logic';
 import { readPersistedString, writePersistedString } from '../../../core/panel-state';
+import { freshness, humanAge } from '../../../core/telemetry/telemetry-logic';
 import type { IconName } from '../../ui/icon-registry';
 
 /**
@@ -342,6 +343,11 @@ export interface AssetLegendCounts {
  * returns `undefined` otherwise) — so it is passed in by the host that knows (Command's own
  * `FleetMapStore.buckets()`), and stays 0 (row hidden) everywhere else. Honest by construction:
  * the map never invents a count for assets it was never given.
+ *
+ * `streaming`/`offline` are split by {@link isMarkerLive}, not the raw `asset.live` bucket, so the
+ * legend's own count never drifts from what `assetIcon` actually draws (COMMAND-MAP-FLOW-PLAN.md
+ * D2/D4) — a `STREAMING`-status asset whose telemetry has actually gone stale counts (and draws)
+ * as "last known", the same as a genuinely offline one.
  */
 export function assetLegendCounts(
   assets: readonly FleetMarker[],
@@ -352,7 +358,7 @@ export function assetLegendCounts(
   let offline = 0;
   let attention = 0;
   for (const asset of assets) {
-    if (asset.live) {
+    if (isMarkerLive(asset)) {
       streaming++;
     } else {
       offline++;
@@ -362,6 +368,63 @@ export function assetLegendCounts(
     }
   }
   return { streaming, offline, attention, noPosition };
+}
+
+/**
+ * The one "last heard from" fact for a plotted marker (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.3),
+ * bridging two rollout stages of the same feature: once `features/command/command-facade.ts` wires
+ * `core/map/map-logic.ts#withLastContact` (wave W3), `asset.lastContact` is the answer. Until then
+ * — and forever, for a host that never wires it — this falls back to the live telemetry poll this
+ * map already has for a streaming asset (`sampleAgeSeconds`), and only reports `'unknown'` when
+ * neither exists. Never fabricates an age: a marker with genuinely nothing to report gets `'unknown'`,
+ * not a stale zero.
+ */
+export function markerLastContact(asset: Pick<FleetMarker, 'lastContact' | 'sampleAgeSeconds'>): LastContact {
+  if (asset.lastContact) {
+    return asset.lastContact;
+  }
+  if (asset.sampleAgeSeconds !== undefined) {
+    return { source: 'telemetry', ageSeconds: asset.sampleAgeSeconds };
+  }
+  return { source: 'unknown' };
+}
+
+/**
+ * The three last-contact label variants (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.3), reusing
+ * `core/telemetry/telemetry-logic.ts#humanAge` — the app's one age vocabulary — rather than
+ * formatting seconds again here.
+ */
+export function lastContactLabel(contact: LastContact): string {
+  switch (contact.source) {
+    case 'telemetry':
+      return `Last contact ${humanAge(contact.ageSeconds!)} ago`;
+    case 'flight':
+      return `Last flight started ${humanAge(contact.ageSeconds!)} ago`;
+    case 'unknown':
+      return 'Last contact unknown';
+  }
+}
+
+/**
+ * Whether a marker draws as "live" (full-colour, directional-capable glyph) rather than "last
+ * known" (muted) — frontend-style §7's three-state vocabulary (live/offline/attention). Honesty
+ * fix for COMMAND-MAP-FLOW-PLAN.md D2: `asset.live` alone only reflects the `STREAMING`/`OFFLINE`
+ * status bucket (`core/map/map-logic.ts#buildMarker`), not whether the telemetry behind it is
+ * still fresh — a frozen poll (D1) left a marker looking "live" forever. When {@link
+ * markerLastContact} resolves a `'telemetry'`-sourced age, `freshness()` (the app's one staleness
+ * clock) is the tiebreaker: only a genuinely fresh sample counts as live, regardless of bucket. A
+ * `'flight'`-sourced age never counts as live, however recent — "last flight started 2s ago" is a
+ * historical fact, not a live reading, so it would be dishonest to colour the glyph as confidently
+ * as a fresh telemetry sample. `'unknown'` (the common case for the `offline` bucket, which gets no
+ * live telemetry poll at all) falls back to the raw bucket, so nothing regresses before
+ * `lastContact` is wired everywhere.
+ */
+export function isMarkerLive(asset: Pick<FleetMarker, 'live' | 'lastContact' | 'sampleAgeSeconds'>): boolean {
+  const contact = markerLastContact(asset);
+  if (contact.source === 'unknown') {
+    return asset.live;
+  }
+  return contact.source === 'telemetry' && freshness(contact.ageSeconds) === 'live';
 }
 
 /** How many marks carry each affiliation — the count beside each legend swatch. */

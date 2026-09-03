@@ -228,6 +228,72 @@
   font-size: 0.72rem;
 }
 
+/* Follow mode's own "the followed asset's telemetry is stale" cue (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md
+   §3.3) — same frosted-pill shape as `.badge`, muted rather than warn-coloured: this is a statement
+   of fact ("here's the last thing we knew"), not an alarm. */
+.last-known-badge {
+  padding: var(--space-4) var(--space-8);
+  border-radius: var(--radius-pill);
+  background: var(--hud-bg-strong);
+  border: var(--hud-border);
+  backdrop-filter: blur(var(--hud-blur));
+  color: var(--text-muted);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+}
+
+/* ---- Legend chip row (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md D6) — one quiet row, always visible,
+   the same frosted-HUD shape every other piece of this component's chrome already uses. Individual
+   chips stay bespoke `span`s rather than the global `.chip` pill: a pill nested inside this pill
+   would read as over-designed for what's meant to be one quiet strip of counts. */
+.legend-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-8) var(--space-12);
+  padding: var(--space-4) var(--space-8);
+  border-radius: var(--radius-pill);
+  background: var(--hud-bg-strong);
+  border: var(--hud-border);
+  backdrop-filter: blur(var(--hud-blur));
+  box-shadow: var(--shadow);
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.legend-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  white-space: nowrap;
+}
+
+.legend-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.625rem;
+  height: 1.625rem;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.legend-more:hover,
+.legend-more:focus-visible {
+  background: var(--hud-bg);
+  color: var(--text);
+}
+
+.legend-more[aria-expanded='true'] {
+  background: var(--color-info);
+  color: var(--color-on-info);
+}
+
 /* ---- Legend swatches ------------------------------------------------------------------------ */
 
 .swatch {
@@ -380,33 +446,56 @@
   cursor: not-allowed;
 }
 
-/* ---- Asset markers: one glyph, state by colour only (docs/plans/done/VISUAL-REFRESH-PLAN.md F7) --------- */
+/* ---- Asset markers: one glyph, state by colour only (docs/plans/done/VISUAL-REFRESH-PLAN.md F7,
+   honesty-fixed by docs/plans/active/COMMAND-MAP-FLOW-PLAN.md D2/W1) ------------------------------------
+   `--marker-color` is set once per state on `.asset-marker` itself and read by whichever shape is
+   actually drawn inside it (`isMarkerLive`/heading-known decide the shape in `tactical-map.ts#assetIcon`,
+   not this file) — one declaration per state instead of one per state-per-shape, and `.attention`
+   only needs to override the single custom property to recolour either shape. Order matters: `.attention`
+   must stay declared after the base/`.live` rules so it wins the cascade regardless of freshness. */
+
+:host ::ng-deep .asset-marker {
+  --marker-color: var(--text-faint);
+}
+
+:host ::ng-deep .asset-marker.live {
+  --marker-color: var(--color-live);
+}
 
 :host ::ng-deep .asset-marker .drone-arrow {
   width: 0;
   height: 0;
   border-left: 7px solid transparent;
   border-right: 7px solid transparent;
-  border-bottom: 16px solid var(--color-live);
+  border-bottom: 16px solid var(--marker-color);
   transform-origin: 50% 60%;
   filter: drop-shadow(0 2px 4px color-mix(in srgb, var(--black) 40%, transparent));
 }
 
-:host ::ng-deep .asset-marker .offline-dot {
-  width: 10px;
-  height: 10px;
+/* The honest "heading unknown" glyph (`droneHollowDivIcon`) — a hollow ring, never a fabricated
+   0°/North arrow. Same footprint as `.drone-arrow` so the glyph doesn't jump size across the two
+   shapes as heading arrives or is lost. */
+:host ::ng-deep .asset-marker .drone-hollow {
+  width: 12px;
+  height: 12px;
+  margin: 5px;
   border-radius: 50%;
-  background: var(--text-faint);
-  border: 2px solid var(--panel-raised);
-  opacity: 0.85;
+  border: 2px solid var(--marker-color);
+  background: transparent;
+  filter: drop-shadow(0 1px 3px color-mix(in srgb, var(--black) 40%, transparent));
 }
 
-:host ::ng-deep .asset-marker.attention .drone-arrow {
-  border-bottom-color: var(--color-danger);
+:host ::ng-deep .asset-marker:not(.live) .drone-arrow,
+:host ::ng-deep .asset-marker:not(.live) .drone-hollow {
+  opacity: 0.75;
 }
 
-:host ::ng-deep .asset-marker.attention .offline-dot {
-  background: var(--color-danger);
+:host ::ng-deep .asset-marker.attention {
+  --marker-color: var(--color-danger);
+}
+
+:host ::ng-deep .asset-marker.attention .drone-arrow,
+:host ::ng-deep .asset-marker.attention .drone-hollow {
   opacity: 1;
 }
 
