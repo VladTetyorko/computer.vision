@@ -2,6 +2,8 @@ import type { AssetAttention, AssetStatus } from '../../core/api/models';
 import type { GeofenceBreach } from '../../core/geofence/geofence-logic';
 import { REASON_RANK, attentionReasons, type AttentionReason, type AttentionSeverity } from '../../core/fleet/attention-logic';
 import { groupAndSort, offlineLabel, type PickerGroups } from '../../core/fleet/triage-logic';
+import type { LastContact } from '../../core/map/map-logic';
+import { freshness } from '../../core/telemetry/telemetry-logic';
 
 /**
  * Pure, Angular-free logic behind `CommandPage` (docs/plans/done/UX-REWORK-PLAN.md §U-c — the map-first
@@ -214,4 +216,33 @@ export function commandGridColumns(railOpen: boolean, panel: DetailPanelState): 
   const stage = 'minmax(0, 1fr)';
   const panelTrack = panel === 'hidden' ? '' : panel === 'open' ? ` auto ${COMMAND_PANEL_WIDTH}` : ' auto';
   return `${rail} ${stage}${panelTrack}`;
+}
+
+// --- "All quiet" earns its words (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.6 D5, frozen) ----------
+
+export type QuietVerdict = 'quiet' | 'no-basis';
+
+/**
+ * Whether `AssetPanel`'s Status tab has actually earned an "All quiet" reading, or is standing on no
+ * basis at all (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.6 D5). Before this, zero triggered
+ * `reasons` alone rendered "All quiet" — true even for an asset that was never plotted, or one whose
+ * last sample is days old; that isn't quiet, it's silence with nothing behind it.
+ *
+ * `'quiet'` only when **all three** (frozen) conjuncts hold:
+ * 1. `reasons.length === 0` — nothing is actively flagged.
+ * 2. `contact?.source === 'telemetry'` — the freshest fact on hand is a real sample, not merely a
+ *    flight having once started (`'flight'`) or nothing at all (`'unknown'`) — see
+ *    `core/map/map-logic.ts#LastContact`'s own three-tier account.
+ * 3. `freshness(contact.ageSeconds) !== 'stale'` — and that sample is not itself stale
+ *    (`core/telemetry/telemetry-logic.ts#freshness`, this app's one live/aging/stale rule, reused
+ *    rather than a second staleness threshold living here).
+ *
+ * Any other combination is `'no-basis'`, which the caller renders as *"Nothing to report — no recent
+ * telemetry from this asset ({last-contact label})."* — naming the actual fact instead of implying a
+ * confidence the data doesn't back up.
+ */
+export function quietVerdict(reasons: readonly AttentionReason[], contact: LastContact | undefined): QuietVerdict {
+  return reasons.length === 0 && contact?.source === 'telemetry' && freshness(contact.ageSeconds) !== 'stale'
+    ? 'quiet'
+    : 'no-basis';
 }

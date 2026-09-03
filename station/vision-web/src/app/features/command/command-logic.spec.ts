@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AssetAttention } from '../../core/api/models';
-import { buildEntityRows, commandGridColumns } from './command-logic';
+import type { LastContact } from '../../core/map/map-logic';
+import { buildEntityRows, commandGridColumns, quietVerdict, type AttentionReason } from './command-logic';
 
 /**
  * The `batteryAttentionSeverity`/`attentionReasons`/`attentionAgeLabel` cases that used to live here
@@ -163,5 +164,39 @@ describe('commandGridColumns', () => {
 
   it('rail closed, panel collapsed', () => {
     expect(commandGridColumns(false, 'collapsed')).toBe('auto minmax(0, 1fr) auto');
+  });
+});
+
+describe('quietVerdict (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.6 D5)', () => {
+  const reason: AttentionReason = { kind: 'battery-critical', severity: 'critical', text: 'Battery critical at 5%.' };
+
+  it('is quiet only with zero reasons, a telemetry-sourced contact, and a non-stale sample', () => {
+    const contact: LastContact = { source: 'telemetry', ageSeconds: 5 };
+    expect(quietVerdict([], contact)).toBe('quiet');
+  });
+
+  it('is quiet at the aging tier too — only "stale" disqualifies, not "aging"', () => {
+    const contact: LastContact = { source: 'telemetry', ageSeconds: 8 };
+    expect(quietVerdict([], contact)).toBe('quiet');
+  });
+
+  it('is no-basis whenever any reason is triggered, even against fresh telemetry', () => {
+    const contact: LastContact = { source: 'telemetry', ageSeconds: 1 };
+    expect(quietVerdict([reason], contact)).toBe('no-basis');
+  });
+
+  it('is no-basis when the freshest fact is only a flight having started, never actual telemetry', () => {
+    const contact: LastContact = { source: 'flight', ageSeconds: 30 };
+    expect(quietVerdict([], contact)).toBe('no-basis');
+  });
+
+  it('is no-basis when nothing is known about this asset at all', () => {
+    expect(quietVerdict([], { source: 'unknown' })).toBe('no-basis');
+    expect(quietVerdict([], undefined)).toBe('no-basis');
+  });
+
+  it('is no-basis when the telemetry sample itself has gone stale', () => {
+    const contact: LastContact = { source: 'telemetry', ageSeconds: 20 };
+    expect(quietVerdict([], contact)).toBe('no-basis');
   });
 });

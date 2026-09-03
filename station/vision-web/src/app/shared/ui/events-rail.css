@@ -26,7 +26,7 @@
 }
 
 /* `Include removed devices` toggle (docs/plans/active/OPERATOR-UX-7-PLAN.md finding W1) — mirrors
-   `features/command/command.css`'s own `.rail-hide-simulated` idiom (a `.row` label with a
+   `features/command/command.css`'s own `.rail-list-filter` idiom (a `.row` label with a
    naturally-sized checkbox). Deliberately not persisted — see `events-rail.ts`'s own class doc. */
 .removed-toggle {
   gap: var(--space-8);

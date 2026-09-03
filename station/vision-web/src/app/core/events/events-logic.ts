@@ -233,18 +233,51 @@ export function resolveReplayDeepLink(event: DetectionEvent, recentUsages: reado
 export const MAX_EVENT_MARKERS = 30;
 
 /**
+ * `selectEventMarkers`'s own filter knobs (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.5, frozen) —
+ * "filter, do not hide": the events layer stays on by default (defaulting it off would be hiding
+ * data), but is now judged down to what is actually worth an operator's attention on a live map.
+ */
+export interface EventMarkerOptions {
+  /** Most-recent cap — unchanged from before this wave, still `MAX_EVENT_MARKERS`. */
+  readonly max: number;
+  /** `true` — a CLOSED event is history, not "what is happening right now". */
+  readonly openOnly: boolean;
+  /** How far back `lastSeen` may sit and still plot — "what is happening", not "what ever happened". */
+  readonly maxAgeMinutes: number;
+}
+
+const DEFAULT_EVENT_MARKER_OPTIONS: EventMarkerOptions = {
+  max: MAX_EVENT_MARKERS,
+  openOnly: true,
+  maxAgeMinutes: 60,
+};
+
+/**
  * The events worth plotting on the fleet map: only ones carrying a `position` (E-a's own "best
  * effort, absent if unavailable" — most events never get one, e.g. an asset with no telemetry
- * device), capped to the `max` most recent. `events` is assumed already newest-first (every reader
- * of `EventsStore.events()` gets that for free from `mergeEvents`), so this is a filter + slice,
- * not a re-sort.
+ * device), open (by default) and recent (by default), capped to the `max` most recent. `events` is
+ * assumed already newest-first (every reader of `EventsStore.events()` gets that for free from
+ * `mergeEvents`), so this is a filter + slice, not a re-sort.
+ *
+ * `options` is `Partial<EventMarkerOptions>` merged onto {@link DEFAULT_EVENT_MARKER_OPTIONS} —
+ * every existing bare call (`command-facade.ts#eventMarkers`) keeps compiling **and** picks up the
+ * open+recent filter for free, no call-site change needed. On the live station this is the exact
+ * difference between the old 30-dot swarm (all CLOSED, on a removed device) rendering in full and
+ * rendering empty, while a genuinely new detection still appears the instant it opens.
  */
 export function selectEventMarkers(
   events: readonly DetectionEvent[],
-  max: number = MAX_EVENT_MARKERS,
+  options?: Partial<EventMarkerOptions>,
 ): readonly DetectionEvent[] {
-  const withPosition = events.filter((event) => event.position !== undefined);
-  return withPosition.slice(0, max);
+  const { max, openOnly, maxAgeMinutes } = { ...DEFAULT_EVENT_MARKER_OPTIONS, ...options };
+  const cutoffMs = Date.now() - maxAgeMinutes * 60_000;
+  const worthPlotting = events.filter(
+    (event) =>
+      event.position !== undefined &&
+      (!openOnly || event.state === 'OPEN') &&
+      Date.parse(event.lastSeen) >= cutoffMs,
+  );
+  return worthPlotting.slice(0, max);
 }
 
 // --- Notification decision (new-open-event × permission × hidden) -----------------------------

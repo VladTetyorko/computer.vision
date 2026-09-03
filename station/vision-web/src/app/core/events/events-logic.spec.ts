@@ -18,6 +18,11 @@ import {
   shouldNotify,
 } from './events-logic';
 
+/** A `lastSeen` a few seconds ago — inside every default/custom `maxAgeMinutes` window this file tests. */
+function recentIso(secondsAgo = 5): string {
+  return new Date(Date.now() - secondsAgo * 1000).toISOString();
+}
+
 function usage(partial: Partial<AssetUsage> = {}): AssetUsage {
   return {
     usageId: 'u-1',
@@ -266,14 +271,14 @@ describe('resolveEventTarget', () => {
 
 describe('selectEventMarkers', () => {
   it('keeps only events carrying a position', () => {
-    const withPos = event({ id: 'has-pos', position: { latitude: 1, longitude: 2 } });
-    const withoutPos = event({ id: 'no-pos' });
+    const withPos = event({ id: 'has-pos', position: { latitude: 1, longitude: 2 }, lastSeen: recentIso() });
+    const withoutPos = event({ id: 'no-pos', lastSeen: recentIso() });
     expect(selectEventMarkers([withPos, withoutPos]).map((e) => e.id)).toEqual(['has-pos']);
   });
 
   it('caps to the max most recent (assumes newest-first input)', () => {
     const events = Array.from({ length: MAX_EVENT_MARKERS + 5 }, (_, i) =>
-      event({ id: `e-${i}`, position: { latitude: i, longitude: i } }),
+      event({ id: `e-${i}`, position: { latitude: i, longitude: i }, lastSeen: recentIso() }),
     );
     expect(selectEventMarkers(events)).toHaveLength(MAX_EVENT_MARKERS);
     expect(selectEventMarkers(events)[0].id).toBe('e-0');
@@ -281,14 +286,53 @@ describe('selectEventMarkers', () => {
 
   it('respects a custom max', () => {
     const events = [
-      event({ id: 'a', position: { latitude: 1, longitude: 1 } }),
-      event({ id: 'b', position: { latitude: 2, longitude: 2 } }),
+      event({ id: 'a', position: { latitude: 1, longitude: 1 }, lastSeen: recentIso() }),
+      event({ id: 'b', position: { latitude: 2, longitude: 2 }, lastSeen: recentIso() }),
     ];
-    expect(selectEventMarkers(events, 1).map((e) => e.id)).toEqual(['a']);
+    expect(selectEventMarkers(events, { max: 1 }).map((e) => e.id)).toEqual(['a']);
   });
 
   it('is empty when nothing carries a position', () => {
-    expect(selectEventMarkers([event()])).toEqual([]);
+    expect(selectEventMarkers([event({ lastSeen: recentIso() })])).toEqual([]);
+  });
+
+  /** docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.5 D5 — "filter, do not hide": open+recent is the
+   *  frozen default, not an opt-in, so the bare call every existing caller already makes picks up
+   *  the judged filter for free. */
+  describe('the frozen defaults (openOnly: true, maxAgeMinutes: 60) — §3.5', () => {
+    it('drops a CLOSED event even when it is recent', () => {
+      const closed = event({ id: 'closed', position: { latitude: 1, longitude: 1 }, state: 'CLOSED', lastSeen: recentIso() });
+      expect(selectEventMarkers([closed])).toEqual([]);
+    });
+
+    it('keeps an OPEN event that is recent', () => {
+      const open = event({ id: 'open', position: { latitude: 1, longitude: 1 }, state: 'OPEN', lastSeen: recentIso() });
+      expect(selectEventMarkers([open]).map((e) => e.id)).toEqual(['open']);
+    });
+
+    it('drops an OPEN event whose lastSeen is older than an hour — the exact live-station repro (33 CLOSED events on a removed device used to render as a 30-dot swarm)', () => {
+      const stale = event({ id: 'stale', position: { latitude: 1, longitude: 1 }, state: 'OPEN', lastSeen: recentIso(61 * 60) });
+      expect(selectEventMarkers([stale])).toEqual([]);
+    });
+  });
+
+  describe('options — every field independently overridable', () => {
+    it('openOnly: false lets a recent CLOSED event through', () => {
+      const closed = event({ id: 'closed', position: { latitude: 1, longitude: 1 }, state: 'CLOSED', lastSeen: recentIso() });
+      expect(selectEventMarkers([closed], { openOnly: false }).map((e) => e.id)).toEqual(['closed']);
+    });
+
+    it('a wider maxAgeMinutes keeps an event the frozen default would have dropped', () => {
+      const hourOld = event({ id: 'hour-old', position: { latitude: 1, longitude: 1 }, state: 'OPEN', lastSeen: recentIso(90 * 60) });
+      expect(selectEventMarkers([hourOld])).toEqual([]);
+      expect(selectEventMarkers([hourOld], { maxAgeMinutes: 120 }).map((e) => e.id)).toEqual(['hour-old']);
+    });
+
+    it('a narrower maxAgeMinutes drops an event the frozen default would have kept', () => {
+      const fiveMinOld = event({ id: 'five-min', position: { latitude: 1, longitude: 1 }, state: 'OPEN', lastSeen: recentIso(5 * 60) });
+      expect(selectEventMarkers([fiveMinOld])).toHaveLength(1);
+      expect(selectEventMarkers([fiveMinOld], { maxAgeMinutes: 1 })).toEqual([]);
+    });
   });
 });
 

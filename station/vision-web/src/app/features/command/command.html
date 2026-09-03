@@ -1,4 +1,9 @@
 <div class="command-shell">
+  <!-- docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.6 — identity and fleet state only: "Command · {n}
+       assets · [weather chip]". The four tool buttons already left in W2 (one HUD drawer button on
+       the map itself); Include archived moves below into the rail head, beside Hide simulated,
+       where the page's own list-filter idiom already lives — this topbar has nothing left to
+       control, only to report. -->
   <div class="command-topbar">
     <div class="row topbar-left">
       <span class="brand-label">Command</span>
@@ -6,16 +11,6 @@
         <span class="chip">{{ s.totalAssets }} assets</span>
       }
       <vision-weather-chip />
-    </div>
-    <div class="row topbar-right">
-      <label class="row archived-toggle">
-        <input
-          type="checkbox"
-          [checked]="facade.includeArchived()"
-          (change)="facade.toggleIncludeArchived($any($event.target).checked)"
-        />
-        <span class="muted">Include archived</span>
-      </label>
     </div>
   </div>
 
@@ -54,11 +49,25 @@
           <span class="muted">{{ facade.entityRows().length }}</span>
         </header>
 
+        <!-- docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.6 — Include archived moved down from the
+             topbar into the rail's own list-filter row, beside Hide simulated (same idiom, same
+             `<label class="row rail-list-filter">` markup); always shown, unlike Hide simulated
+             which only appears once there is a simulated row to hide. -->
+        <label class="row rail-list-filter">
+          <input
+            type="checkbox"
+            name="includeArchived"
+            [checked]="facade.includeArchived()"
+            (change)="facade.toggleIncludeArchived($any($event.target).checked)"
+          />
+          <span>Include archived</span>
+        </label>
+
         <!-- docs/plans/active/OPERATOR-UX-4-PLAN.md finding N3, §2 N3 — the same persisted preference
              `/fly`'s picker uses (`CommandFacade#hideSimulated`'s own doc comment), only shown once
              there is at least one simulated row to hide. -->
         @if (facade.railGroups().simulated.length > 0) {
-          <label class="row rail-hide-simulated">
+          <label class="row rail-list-filter">
             <input
               type="checkbox"
               name="hideSimulated"

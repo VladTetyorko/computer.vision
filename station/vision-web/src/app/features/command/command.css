@@ -42,25 +42,12 @@
   gap: var(--space-8);
 }
 
-.topbar-right {
-  gap: var(--space-16);
-}
-
 .brand-label {
   font-size: 0.78rem;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-muted);
-}
-
-.archived-toggle {
-  gap: var(--space-8);
-  font-size: 0.82rem;
-}
-
-.archived-toggle input {
-  width: auto;
 }
 
 /* ---- Body — the collapsible-rail × collapsible-panel grid (command-logic.ts#commandGridColumns
@@ -113,6 +100,22 @@
    the row split into its own `<vision-command-rail-row>` component — see that file's own doc
    comment. */
 
+/* docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.6 — the rail's own list-filter row idiom, now shared
+   by both Include archived (always shown) and Hide simulated (shown once there is something to
+   hide) — Include archived used to live in the topbar; §3.6 moved it down here, beside the filter
+   it already matches in kind (`shared/ui/events-rail.css`'s `.removed-toggle` mirrors this same
+   idiom independently, for the same reason). */
+.rail-list-filter {
+  gap: var(--space-8);
+  margin-bottom: var(--space-8);
+  padding: 0 var(--space-2);
+  font-size: 0.8rem;
+}
+
+.rail-list-filter input {
+  width: auto;
+}
+
 /* docs/plans/active/OPERATOR-UX-4-PLAN.md finding N3, §2 N3 — two groups, mirrors `drone-picker.css`'s
    own `.picker-group`/`.picker-group-label` exactly (frontend-style §8 structural-label register). */
 .rail-group + .rail-group {
@@ -127,17 +130,6 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-muted);
-}
-
-.rail-hide-simulated {
-  gap: var(--space-8);
-  margin-bottom: var(--space-8);
-  padding: 0 var(--space-2);
-  font-size: 0.8rem;
-}
-
-.rail-hide-simulated input {
-  width: auto;
 }
 
 /* ---- Toggle tabs — the slim, always-present drawer handle (mirrors `features/live/live.css`'s

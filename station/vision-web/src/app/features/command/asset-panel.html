@@ -80,8 +80,13 @@
               </div>
             }
           </div>
-        } @else {
+        } @else if (verdict() === 'quiet') {
           <p class="muted hint">All quiet — nothing needs attention on this asset right now.</p>
+        } @else {
+          <!-- docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.6 D5 — "All quiet" earns its words: zero
+               triggered reasons alone is not enough to claim quiet when there is no recent telemetry
+               backing that claim (never plotted, archived, or last heard from days ago). -->
+          <p class="muted hint">Nothing to report — no recent telemetry from this asset ({{ noBasisContactLabel() }}).</p>
         }
       }
       @case ('telemetry') {

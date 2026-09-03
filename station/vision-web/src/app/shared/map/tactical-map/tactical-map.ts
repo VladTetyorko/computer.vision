@@ -1023,8 +1023,15 @@ export class TacticalMap {
       `<div class="popup-row faint">Last seen ${escapeHtml(relativeTimeLabel(event.lastSeen, nowMs))}</div>`,
     ];
     if (event.assetId) {
+      // docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.5's popup retarget — the primary action stays
+      // on the map (select the asset here, the panel opens, its route draws) rather than navigating
+      // away: `.preview-btn` is the exact same delegated listener/`preview` output `assetPopupHtml`'s
+      // own "Watch live" button already uses above, just a different label for this popup. "Open
+      // asset" (`.event-asset-btn` → `openEventAsset`, unchanged target/behavior) stays as the
+      // secondary, still-reachable "leave the map" escape hatch.
       rows.push(
-        `<button type="button" class="btn small event-asset-btn" data-asset-id="${escapeHtml(event.assetId)}">Details</button>`,
+        `<button type="button" class="btn small preview-btn" data-asset-id="${escapeHtml(event.assetId)}">Preview asset</button>`,
+        `<button type="button" class="btn small secondary event-asset-btn" data-asset-id="${escapeHtml(event.assetId)}">Open asset</button>`,
       );
     } else {
       rows.push('<div class="popup-row faint">No asset resolved for this event.</div>');

@@ -1,12 +1,13 @@
 import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
 import { Player } from '../../shared/player/player';
 import { ReturnHomeButton } from '../../shared/ui/return-home-button';
-import { attentionAgeLabel, batteryAttentionSeverity, type AttentionReason } from './command-logic';
+import { attentionAgeLabel, batteryAttentionSeverity, quietVerdict, type AttentionReason } from './command-logic';
 import { canCommandReturnHome, deriveDiagnostics, gpsFixLabel, gpsSeverity } from '../../core/telemetry/flight-state-logic';
 import type { AssetAttention, ActiveStream } from '../../core/api/models';
-import type { FleetMarker } from '../../core/map/map-logic';
+import type { FleetMarker, LastContact } from '../../core/map/map-logic';
 import { humanAge } from '../../core/telemetry/telemetry-logic';
 import type { AssetRoute, RouteSpan } from '../../core/map-data/route-logic';
+import { lastContactLabel, markerLastContact } from '../../shared/map/tactical-map/tactical-map-logic';
 
 export type AssetPanelTab = 'status' | 'telemetry' | 'video';
 
@@ -85,6 +86,24 @@ export class AssetPanel {
 
   protected readonly ageLabel = computed(() => attentionAgeLabel(this.asset()));
   protected readonly batterySeverity = computed(() => batteryAttentionSeverity(this.marker()?.batteryPercent));
+
+  /**
+   * "All quiet" earns its words (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.6 D5) — the Status
+   * tab's own honest verdict, computed straight off two inputs this panel already has (`reasons`,
+   * `marker`), never a third store injected for it. `contact` reuses
+   * `tactical-map-logic.ts#markerLastContact`'s identical fallback the map's own popup already
+   * applies (this panel's `marker` predates the `lastContact` field existing at all, so a caller
+   * that somehow still doesn't populate it degrades to the marker's own live `sampleAgeSeconds`
+   * before finally landing on `'unknown'` — never silently mismatching what the map itself shows for
+   * the same asset).
+   */
+  protected readonly contact = computed<LastContact>(() => {
+    const marker = this.marker();
+    return marker ? markerLastContact(marker) : { source: 'unknown' };
+  });
+  protected readonly verdict = computed(() => quietVerdict(this.reasons(), this.contact()));
+  /** The `'no-basis'` line's own `{last-contact label}` — the exact fact backing (or not backing) the verdict. */
+  protected readonly noBasisContactLabel = computed(() => lastContactLabel(this.contact()));
 
   // --- Mode / Armed / GPS (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — prefer the live marker (fresher,
   // sourced from the latest telemetry sample's own `flightState`) and fall back to the
