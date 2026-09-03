@@ -1,80 +1,132 @@
+/* One tile — the click target for focus-in-place (D9/D10, WALL-FLOW-PLAN.md §3.4). A real
+   `<button>` (not an `<article>` with a nested link, the pre-W2 shape) so the whole surface is one
+   keyboard-reachable control; `.secondary-tile` (`fly/cockpit.css`) is the same idiom at cockpit
+   scale. */
 .tile {
-  background: var(--panel);
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius);
+  background: var(--panel);
   overflow: hidden;
+  cursor: pointer;
+  text-align: left;
   transition: border-color 0.15s ease;
 }
 
-.tile:hover {
+.tile:hover,
+.tile:focus-visible {
   border-color: var(--border-strong);
 }
 
-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: var(--space-4) var(--space-8);
-  padding: var(--space-8);
+.tile vision-player {
+  display: block;
 }
 
-.chips {
-  gap: var(--space-4);
+:host ::ng-deep .tile vision-player .frame {
+  aspect-ratio: 16 / 9;
+  border-radius: 0;
+}
+
+/* Attention (A2) — a border tint, never a second dot vocabulary; the reason list rides the
+   button's own `title` tooltip. */
+.tile.severity-warning {
+  border-color: var(--color-warn);
+}
+
+.tile.severity-critical {
+  border-color: var(--color-danger);
+}
+
+/* Pulse (A3) — a brief flash on arrival, not a loop; the label chip below is the persistent
+   signal for as long as the pulse window stays open. A shrinking ring (`box-shadow`, not
+   `border-color`) so it never has to know which colour the border itself should settle back to
+   (plain, or a severity tint) — it simply fades to nothing. Skipped entirely under
+   `prefers-reduced-motion` (frontend-style §9) — the chip alone still says it. */
+@media (prefers-reduced-motion: no-preference) {
+  .tile.pulsing {
+    animation: tile-pulse-flash 1.2s ease-out 1;
+  }
+}
+
+@keyframes tile-pulse-flash {
+  0% {
+    box-shadow: 0 0 0 3px var(--color-live);
+  }
+  100% {
+    box-shadow: 0 0 0 0 var(--color-live);
+  }
+}
+
+.severity-dot {
+  position: absolute;
+  top: var(--space-8);
+  left: var(--space-8);
+  box-shadow: 0 0 0 2px var(--scrim);
+}
+
+.pulse-chip {
+  position: absolute;
+  top: var(--space-8);
+  right: var(--space-8);
+  max-width: calc(100% - var(--space-16));
+  background: var(--hud-bg);
+  border: var(--hud-border);
+  backdrop-filter: blur(var(--hud-blur));
+  color: var(--white);
+}
+
+.pulse-label {
+  text-transform: capitalize;
+  max-width: 8rem;
+}
+
+/* Identity (L2) — always visible at rest: the name, and (only when non-null) one honest health
+   line. Everything else (battery, telemetry age, "Not linked to an asset") lives in `.detail`,
+   hover/focus-within only. */
+.identity {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-8);
 }
 
 .name {
   color: var(--text);
   font-size: 0.85rem;
   font-weight: 500;
-  min-width: 0;
 }
 
-.telemetry-chip {
+.health-line {
+  color: var(--text-muted);
   font-size: 0.72rem;
-  white-space: nowrap;
-  /* docs/plans/done/UX-REWORK-PLAN.md §U-b item 3 — battery/altitude readouts. */
+}
+
+.detail {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-4) var(--space-8);
+  padding: 0 var(--space-8) var(--space-8);
+  opacity: 0;
+  max-height: 0;
+  overflow: hidden;
+  transition: opacity 0.15s ease;
+}
+
+.tile:hover .detail,
+.tile:focus-visible .detail {
+  opacity: 1;
+  max-height: none;
+}
+
+.battery-chip {
+  font-size: 0.72rem;
   font-variant-numeric: tabular-nums;
 }
 
-.telemetry-chip.stale {
-  color: var(--color-danger);
-  border-color: var(--color-danger);
-}
-
-.mode-chip {
+.detail .muted {
   font-size: 0.72rem;
-  white-space: nowrap;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-
-/* --live red is reserved for exactly this — a genuine failsafe (see styles.css's own token
-   doc comment) — never the generic .telemetry-chip.stale's --danger. */
-.mode-chip.failsafe {
-  color: var(--color-live);
-  border-color: var(--color-live);
-}
-
-/* Verb dictionary (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §1) — sized down from the global .btn.small's
-   own default to fit alongside the telemetry chip and boxes toggle at wall-tile scale. */
-.watch-link {
-  font-size: 0.72rem;
-  padding: var(--space-4) var(--space-8);
-}
-
-.boxes-btn {
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-faint);
-  font-size: 0.7rem;
-  line-height: 1;
-  padding: var(--space-2) var(--space-8);
-}
-
-.boxes-btn:hover {
-  color: var(--text);
-  border-color: var(--border-strong);
 }

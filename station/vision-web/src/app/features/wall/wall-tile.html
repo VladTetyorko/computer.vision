@@ -1,50 +1,61 @@
-<article class="tile">
+<button
+  type="button"
+  class="tile"
+  [class.severity-warning]="tile().severity === 'warning'"
+  [class.severity-critical]="tile().severity === 'critical'"
+  [class.pulsing]="tile().pulse !== null"
+  [title]="reasonsTooltip() || null"
+  (click)="onActivate()"
+>
   <vision-player
-    [src]="stream().viewUrl ?? null"
-    [whepUrl]="stream().whepUrl ?? null"
+    [src]="tile().viewUrl ?? null"
+    [whepUrl]="tile().whepUrl ?? null"
     [suspended]="!visible()"
     [compact]="true"
     [detections]="detections.results()"
     [boxesMode]="boxesMode()"
   />
-  <footer>
-    <span class="name truncate" [title]="device()?.name ?? stream().deviceId">
-      {{ device()?.name ?? stream().deviceId }}
+
+  @if (tile().severity !== 'ok') {
+    <span
+      class="dot severity-dot"
+      [class.warn]="tile().severity === 'warning'"
+      [class.danger]="tile().severity === 'critical'"
+    ></span>
+  }
+
+  @if (tile().pulse; as pulse) {
+    <span class="chip pulse-chip">
+      <span class="dot live"></span>
+      <span class="pulse-label truncate">{{ pulse.label }}</span>
+      @if (pulse.count > 1) {
+        <span class="mono">&times;{{ pulse.count }}</span>
+      }
     </span>
-    <div class="row chips">
-      @if (telemetry.hasTelemetry()) {
-        <span class="chip telemetry-chip" [class.stale]="telemetry.stale()">
-          @if (batteryLabel(); as battery) {
-            <span>⬢{{ battery }}</span>
-          }
-          @if (altitudeLabel(); as altitude) {
-            <span>▲{{ altitude }}</span>
-          }
-        </span>
-      }
-      <!-- Mode badge (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — red when failsafe, otherwise the
-           plain neutral chip look every other wall-tile chip already uses; omitted entirely
-           with no flightState yet, never a fabricated placeholder. -->
-      @if (modeLabel(); as mode) {
-        <span class="chip mode-chip" [class.failsafe]="failsafe()">{{ mode }}</span>
-      }
-      <!-- Verb dictionary (docs/plans/done/UX-REWORK-PLAN.md §U-a2 §1) — this tile's one navigating action
-           used to be the bare device name itself, silently clickable; it now states itself. -->
-      <a
-        class="btn secondary small watch-link"
-        [routerLink]="['/live', stream().deviceId]"
-        [title]="'Watch live: ' + (device()?.name ?? stream().deviceId)"
-      >
-        Watch live
-      </a>
-      <button
-        type="button"
-        class="boxes-btn"
-        (click)="cycleBoxesMode()"
-        [title]="'Detection boxes: ' + boxesModeLabel(boxesMode()) + ' (click to cycle)'"
-      >
-        {{ boxesModeGlyph(boxesMode()) }}
-      </button>
-    </div>
+  }
+
+  <footer class="identity">
+    <span class="name truncate">{{ tile().title }}</span>
+    @if (tile().healthLabel; as label) {
+      <span class="health-line truncate">{{ label }}</span>
+    }
   </footer>
-</article>
+
+  <div class="detail">
+    @if (tile().unlinked) {
+      <span class="muted truncate">Not linked to an asset</span>
+    }
+    @if (tile().batteryPercent !== undefined) {
+      <span
+        class="chip battery-chip"
+        [class.warn]="tile().batterySeverity === 'warning'"
+        [class.danger]="tile().batterySeverity === 'critical'"
+      >
+        <vision-icon name="battery" [size]="12" />{{ tile().batteryPercent }}%
+      </span>
+    }
+    @if (tile().telemetryAgeLabel; as age) {
+      <span class="muted">{{ age }}</span>
+    }
+  </div>
+</button>

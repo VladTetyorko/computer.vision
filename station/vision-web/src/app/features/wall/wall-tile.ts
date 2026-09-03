@@ -7,105 +7,60 @@ import {
   effect,
   inject,
   input,
+  output,
   signal,
 } from '@angular/core';
-import { RouterLink } from '@angular/router';
 import { Player, type BoxesMode } from '../../shared/player/player';
-import { cycleBoxesMode, declutterLevelLabel } from '../../shared/player/detection-overlay-logic';
-import { TelemetryStore } from '../../core/telemetry/telemetry-store';
+import { Icon } from '../../shared/ui/icon';
 import { DetectionsStore } from '../../core/detections/detections-store';
-import { SettingsStore } from '../../core/settings/settings-store';
-import type { ActiveStream, Device } from '../../core/api/models';
+import type { WallTileModel } from './wall-logic';
 
 /** Start decoding slightly before a tile scrolls into view, so it is ready on arrival. */
 const PREROLL_MARGIN = '250px';
 
 /**
- * One live tile.
+ * One live tile (docs/plans/active/WALL-FLOW-PLAN.md wave W2, frozen I/O `§3.4`) — one input
+ * `[tile]: WallTileModel`, one input `[boxesMode]: BoxesMode` (the wall-level declutter control,
+ * `WallFacade#boxesMode`, bound identically by every tile), one output `(focused): string`
+ * (`streamId`) — the tile *is* the click target for drill-in (D9/D10); there is no separate
+ * "Watch live" link, boxes-cycle button, glyph chips or altitude readout any more (D5–D10), and no
+ * per-tile `TelemetryStore` — `WallTile`'s identity/battery/telemetry-age/mode/armed/failsafe all
+ * arrive pre-derived on `tile()` from `WallFacade`'s one fleet-summary join (D4/D5).
  *
- * Suspends its player while off-screen: a 30-camera wall that decodes every tile at once
- * saturates the CPU and drops frames on the tiles the user is actually looking at
- * (docs/plans/done/WEB-PLAN.md, W6).
+ * **At rest** (L2 — "identity + at most ONE state indicator"): the picture, the title, and — only
+ * when `tile().healthLabel` is non-null — one HUD line. Severity reads as a border tint + a
+ * `.dot`; `pulse` reads as a brief border flash (skipped under `prefers-reduced-motion`, the chip
+ * alone stays) plus one label chip. The footer (battery, telemetry age, "Not linked to an asset")
+ * is hover/focus-within only — see `wall-tile.css`.
  *
- * Also carries its own `TelemetryStore`/`DetectionsStore` (docs/main/CYCLES-PLAN.md §2,
- * docs/main/CYCLES-PLAN.md §11 item 6): a tile only exists for a device that is currently streaming
- * (`WallPage` builds `tiles()` from `fleet.streams()`), so "only show telemetry/detections while
- * the tile's stream is live" is automatic — what this component adds is gating both polls on
- * on-screen visibility too, the same idea as suspending the player, so a 30-tile wall doesn't run
- * 30 telemetry/detections pollers for tiles nobody is looking at (the O(visible) posture item 4
- * asks for). The per-tile "boxes: overlay/off" toggle (item 6) is a tiny cycling button rather
- * than a labeled toggle group — there is no room for one at wall-tile scale.
+ * Still suspends its player while off-screen (`IntersectionObserver`, unchanged from the pre-W2
+ * tile — docs/plans/done/WEB-PLAN.md W6) and still runs its own `DetectionsStore`, now calling
+ * `track(streamId, assetId)`: per-frame detection boxes cannot come from a summary poll, but
+ * passing `assetId` (when the tile has one) lets it use the free asset-scoped live SSE transport
+ * instead of a poll (D4's other half).
  */
 @Component({
   selector: 'vision-wall-tile',
-  imports: [Player, RouterLink],
+  imports: [Player, Icon],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [TelemetryStore, DetectionsStore],
+  providers: [DetectionsStore],
   templateUrl: './wall-tile.html',
   styleUrl: './wall-tile.css',
 })
 export class WallTile {
-  readonly stream = input.required<ActiveStream>();
-  readonly device = input<Device | undefined>();
+  readonly tile = input.required<WallTileModel>();
+  readonly boxesMode = input.required<BoxesMode>();
+
+  readonly focused = output<string>();
 
   protected readonly visible = signal(true);
-  protected readonly telemetry = inject(TelemetryStore);
   protected readonly detections = inject(DetectionsStore);
-  private readonly settings = inject(SettingsStore);
 
-  /** The shared, persisted declutter level (docs/plans/active/CV-SETTINGS-PLAN.md wave W7, H12) —
-   * aliases `SettingsStore.declutterLevel` directly, the same instance `CockpitFacade`/`LiveFacade`
-   * read/write, replacing this tile's own previously-unshared in-memory signal (see
-   * `CockpitFacade#boxesMode`'s identical simplification for the full rationale). This tile has no
-   * FOLLOW-lock plumbing at all (no `CvControlPanel` at wall scale), so `<vision-player>`'s
-   * `lockedTrackId` input is simply never bound here — it stays its own default `0`. */
-  protected readonly boxesMode = this.settings.declutterLevel;
+  protected readonly reasonsTooltip = computed(() => this.tile().reasons.map((reason) => reason.text).join(' '));
 
-  private readonly hasTelemetryCapability = computed(() =>
-    (this.device()?.capabilities ?? []).includes('TELEMETRY'),
-  );
-
-  protected cycleBoxesMode(): void {
-    this.boxesMode.update((current) => cycleBoxesMode(current));
+  protected onActivate(): void {
+    this.focused.emit(this.tile().streamId);
   }
-
-  /** The current declutter level's own display name — the toggle button's title (`wall-tile.html`);
-   *  the wording every other surface uses, never a locally-invented abbreviation. */
-  protected boxesModeLabel(mode: BoxesMode): string {
-    return declutterLevelLabel(mode);
-  }
-
-  /** The toggle button's own tiny glyph — at wall-tile scale there is no room for a labeled control
-   *  (this class's own doc comment), so the button shows one character and {@link boxesModeLabel}
-   *  carries the real name in its `title` tooltip instead. `'priority'` (the default) and `'off'`
-   *  keep the exact glyphs this button always drew for its old two-state "overlay"/"off" toggle — a
-   *  wall the operator hasn't touched since before this wave looks byte-identical. */
-  protected boxesModeGlyph(mode: BoxesMode): string {
-    switch (mode) {
-      case 'all':
-        return '▦';
-      case 'priority':
-        return '▢';
-      case 'locked':
-        return '◉';
-      case 'off':
-        return '▢×';
-    }
-  }
-
-  protected readonly batteryLabel = computed(() => {
-    const percent = this.telemetry.latest()?.batteryPercent;
-    return percent === undefined ? null : `${percent.toFixed(0)}%`;
-  });
-
-  protected readonly altitudeLabel = computed(() => {
-    const meters = this.telemetry.latest()?.altitudeMeters;
-    return meters === undefined ? null : `${meters.toFixed(0)}m`;
-  });
-
-  /** The FC's own human mode name (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — no badge at all until one is reported. */
-  protected readonly modeLabel = computed(() => this.telemetry.latest()?.flightState?.mode ?? null);
-  protected readonly failsafe = computed(() => this.telemetry.latest()?.flightState?.failsafe === true);
 
   constructor() {
     const host = inject(ElementRef<HTMLElement>).nativeElement;
@@ -116,27 +71,15 @@ export class WallTile {
     observer.observe(host);
     inject(DestroyRef).onDestroy(() => observer.disconnect());
 
-    // Detections poll the same way — on-screen only (docs/main/CYCLES-PLAN.md §11 item 4/6), no
-    // capability gate (any streaming device can have CV running on its stream).
+    // On-screen only (docs/main/CYCLES-PLAN.md §11 item 4/6) — off-screen tiles already stop
+    // decoding video (above), so they stop polling/subscribing for detections too. `assetId` is
+    // passed whenever the tile has one, so an on-wall asset with `LiveStore` already open gets the
+    // live SSE transport for free (D4).
     effect(() => {
       if (this.visible()) {
-        this.detections.track(this.stream().streamId);
+        this.detections.track(this.tile().streamId, this.tile().assetId);
       } else {
         this.detections.reset();
-      }
-    });
-
-    // Poll only for a telemetry-capable device that is actually on-screen — off-screen tiles
-    // already stop decoding video (above), so they stop polling telemetry too.
-    // No `assetId` to pass here (docs/plans/done/REALTIME-PLAN.md Phase R-a item 3) — `stream: ActiveStream`
-    // carries no asset id, only a bare `deviceId`; `TelemetryStore` falls back to its own
-    // list-then-find lookup for this call site, unchanged.
-    effect(() => {
-      const deviceId = this.stream().deviceId;
-      if (this.hasTelemetryCapability() && this.visible()) {
-        this.telemetry.track(deviceId);
-      } else {
-        this.telemetry.reset();
       }
     });
   }
