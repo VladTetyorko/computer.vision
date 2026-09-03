@@ -55,7 +55,12 @@ export interface WallTileModel {
   readonly healthLabel: string | null;
   readonly severity: AttentionSeverity | 'ok';
   readonly reasons: readonly AttentionReason[];
-  readonly batteryPercent?: number;
+  /** Whole-percent, formatted (`"58%"`) — never the raw float `AssetAttention.batteryPercent` carries
+   *  (a live tile once rendered `"58.349999999999994%"`; rounded once here, at production, the same
+   *  way {@link telemetryAgeLabel} is a finished label rather than a raw `telemetryAgeMs` the
+   *  component would have to format itself). `null` when the join has no battery reading, same "—"
+   *  contract as every other absent fact. */
+  readonly batteryLabel: string | null;
   readonly batterySeverity: BatteryAttentionSeverity;
   readonly telemetryAgeLabel: string | null;
   readonly flightMode?: string;
@@ -253,7 +258,9 @@ export function buildWallTiles(input: BuildWallTilesInput): readonly WallTileMod
       healthLabel,
       severity: reasons[0]?.severity ?? 'ok',
       reasons,
-      batteryPercent: asset?.batteryPercent,
+      batteryLabel: asset?.batteryPercent !== undefined ? `${Math.round(asset.batteryPercent)}%` : null,
+      // Severity classification still reads the raw value — rounding only ever happens at the
+      // display boundary, never before a threshold comparison.
       batterySeverity: batteryAttentionSeverity(asset?.batteryPercent),
       telemetryAgeLabel: asset?.telemetryAgeMs !== undefined ? attentionAgeLabel(asset) : null,
       flightMode: asset?.flightMode,

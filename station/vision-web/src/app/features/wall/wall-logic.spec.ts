@@ -201,8 +201,9 @@ describe('buildWallTiles — title fallback ladder + unlinked (D3/D4)', () => {
     expect(tile.unlinked).toBe(false);
     expect(tile.assetId).toBe('asset-vampire-2');
     expect(tile.title).toBe('Skyfall Vampire 2');
-    // The summary facts a linked tile is supposed to surface are all present, not "—".
-    expect(tile.batteryPercent).toBe(98.6);
+    // The summary facts a linked tile is supposed to surface are all present, not "—" — battery
+    // rounded to a whole percent (98.6 -> "99%"), never the raw float.
+    expect(tile.batteryLabel).toBe('99%');
     expect(tile.telemetryAgeLabel).not.toBeNull();
     expect(tile.flightMode).toBe('Loiter');
     expect(tile.armed).toBe(true);
@@ -231,6 +232,33 @@ describe('buildWallTiles — cold-mount window before the first summary response
     const tiles = buildWallTiles(baseInput({ summaryLoaded: true }));
     expect(tileFor(tiles).unlinked).toBe(false);
     expect(tileFor(tiles).title).toBe('Skyfall One');
+  });
+});
+
+describe('buildWallTiles — battery label rounding (fix)', () => {
+  it('rounds a raw float battery reading to a whole percent — regression for a live tile that rendered "58.349999999999994%"', () => {
+    const tiles = buildWallTiles(baseInput({ assets: [asset({ batteryPercent: 58.349999999999994 })] }));
+    expect(tileFor(tiles).batteryLabel).toBe('58%');
+  });
+
+  it('rounds .5-and-up up — 98.6 -> "99%"', () => {
+    const tiles = buildWallTiles(baseInput({ assets: [asset({ batteryPercent: 98.6 })] }));
+    expect(tileFor(tiles).batteryLabel).toBe('99%');
+  });
+
+  it('is null, not "—" or "NaN%", when the asset has no battery reading at all', () => {
+    const tiles = buildWallTiles(baseInput({ assets: [asset({ batteryPercent: undefined })] }));
+    expect(tileFor(tiles).batteryLabel).toBeNull();
+  });
+
+  it('never rounds the value severity is classified from — a value just above the warning threshold still reads "ok"', () => {
+    // Default warning threshold is 25 (inclusive, <=). Raw 25.4 rounds to "25%" for display, but is
+    // itself > 25, so severity must read "ok" — if rounding happened before classification, the
+    // rounded 25 would incorrectly trip the <=25 warning boundary.
+    const tiles = buildWallTiles(baseInput({ assets: [asset({ batteryPercent: 25.4 })] }));
+    const tile = tileFor(tiles);
+    expect(tile.batteryLabel).toBe('25%');
+    expect(tile.batterySeverity).toBe('ok');
   });
 });
 

@@ -51,7 +51,7 @@
           [class.warn]="tile().batterySeverity === 'warning'"
           [class.danger]="tile().batterySeverity === 'critical'"
         >
-          {{ tile().batteryPercent !== undefined ? tile().batteryPercent + '%' : '—' }}
+          {{ tile().batteryLabel ?? '—' }}
         </span>
       </span>
       <span class="fact">
