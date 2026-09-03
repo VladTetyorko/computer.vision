@@ -1,0 +1,108 @@
+/* Fixed to the viewport, not the grid — so it reads as a layer over the whole wall (§3 law 2),
+   not a panel inside one tile's flow. z-index sits below the shared side panel (120,
+   `vision-side-panel`) on purpose: the activity drawer and the focus view are allowed open
+   together (A4 — "not mutually exclusive"), and the drawer must stay readable/interactive over
+   the dimmed backdrop while a tile is focused. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-16);
+  background: var(--scrim-strong);
+}
+
+.focus-card {
+  width: min(52rem, 100%);
+  max-height: calc(100dvh - 2 * var(--space-16));
+  overflow-y: auto;
+  border-radius: var(--radius);
+  padding: var(--space-16);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-12);
+  color: var(--text);
+}
+
+.focus-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+.identity {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  min-width: 0;
+}
+
+.name {
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.stage {
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--black);
+}
+
+:host ::ng-deep .stage vision-player .frame {
+  aspect-ratio: 16 / 9;
+  border-radius: 0;
+}
+
+.health-line {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-16);
+}
+
+.fact {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 6rem;
+}
+
+.fact-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+}
+
+.fact-value {
+  font-size: 0.9rem;
+}
+
+.fact-value.warn {
+  color: var(--color-warn);
+}
+
+.fact-value.danger {
+  color: var(--color-danger);
+}
+
+.unlinked-note {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-faint);
+}
+
+.exits {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-8);
+  flex-wrap: wrap;
+}

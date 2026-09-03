@@ -1,0 +1,74 @@
+<!-- Drill-in stays on the wall (§3 law 2) — this is a layer over the grid, not a route; `Esc` and a
+     backdrop click both close it (`wall-focus.ts`'s `(closed)` output), and the two real exits are
+     the only things here that leave `/wall` at all. -->
+<div class="backdrop" (click)="onBackdrop()">
+  <div class="focus-card surface-hud-strong" (click)="$event.stopPropagation()">
+    <header class="focus-header">
+      <div class="identity">
+        @if (tile().severity !== 'ok') {
+          <span
+            class="dot"
+            [class.warn]="tile().severity === 'warning'"
+            [class.danger]="tile().severity === 'critical'"
+            [title]="tile().reasons.length ? tile().reasons.map((r) => r.text).join(' ') : null"
+          ></span>
+        }
+        <span class="name truncate">{{ tile().title }}</span>
+      </div>
+      <vision-icon-button icon="close" label="Close" variant="hud" (activated)="closed.emit()" />
+    </header>
+
+    <div class="stage">
+      <vision-player
+        [src]="tile().viewUrl ?? null"
+        [whepUrl]="tile().whepUrl ?? null"
+        [detections]="detections.results()"
+        [boxesMode]="boxesMode()"
+      />
+    </div>
+
+    @if (tile().healthLabel; as label) {
+      <p class="health-line">{{ label }}</p>
+    }
+
+    <!-- A4's frozen fact list — mode / armed / battery / telemetry age / health (health is the line
+         above). An honest "—" wherever the summary join has never reported a value, never a guess. -->
+    <div class="facts">
+      <span class="fact">
+        <span class="fact-label">Mode</span>
+        <span class="fact-value">{{ tile().flightMode ?? '—' }}</span>
+      </span>
+      <span class="fact">
+        <span class="fact-label">Armed</span>
+        <span class="fact-value" [class.danger]="tile().failsafe">
+          {{ tile().armed === undefined ? '—' : tile().armed ? 'Armed' : 'Disarmed' }}
+        </span>
+      </span>
+      <span class="fact">
+        <span class="fact-label">Battery</span>
+        <span
+          class="fact-value mono"
+          [class.warn]="tile().batterySeverity === 'warning'"
+          [class.danger]="tile().batterySeverity === 'critical'"
+        >
+          {{ tile().batteryPercent !== undefined ? tile().batteryPercent + '%' : '—' }}
+        </span>
+      </span>
+      <span class="fact">
+        <span class="fact-label">Telemetry</span>
+        <span class="fact-value">{{ tile().telemetryAgeLabel ?? '—' }}</span>
+      </span>
+    </div>
+
+    @if (tile().unlinked) {
+      <p class="muted unlinked-note">Not linked to an asset.</p>
+    }
+
+    <footer class="exits">
+      @if (tile().assetId; as assetId) {
+        <button type="button" class="btn" (click)="onOpenCockpit(assetId)">Open cockpit</button>
+      }
+      <button type="button" class="btn secondary" (click)="onWatchLive()">Watch live</button>
+    </footer>
+  </div>
+</div>

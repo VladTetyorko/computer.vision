@@ -1,58 +1,80 @@
-<!-- `.surface-dark` (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/W4) on this page's own root: the Wall is
-     genuinely a video surface end to end, not a themed page with a video region inside it — its
-     one job is a grid of live tiles, and the page-bar/notice/events-rail around that grid are all
-     part of the same "watching a wall of live feeds" picture, not separate light chrome (compare
-     the replay library, which stays themed because it never shows video pixels at all). Matches
-     `fly.routes.ts`'s cockpit precedent. -->
+<!-- `.surface-dark` (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/W4) on this page's own root — the Wall
+     is genuinely a video surface end to end: the grid, the bar, the focus layer and (wave W4) the
+     activity drawer are all part of the same "watching a wall of live feeds" picture. -->
 <div class="page surface-dark">
-  <!-- docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2 / docs/extracts/design/03-wall.md — `page-head` (title + a two-line
-       "how this works" paragraph) becomes the bar; per 03-wall.md the description is redundant
-       once "Wall" + a live count says the same thing, so it is deleted outright rather than moved
-       behind a `?` hint. `Tiles per row` moves into `[pageBarFilters]` unchanged — the density
-       segmented control this select is slated to become is wave 3/4 scope, out of this task. -->
-  <vision-page-bar title="Wall" icon="grid" [count]="facade.tiles().length" countNoun="stream">
-    @if (facade.tiles().length > 0) {
-      <label pageBarFilters class="row density">
-        <span class="muted">Tiles per row</span>
-        <select [value]="facade.settings.wallDensity()" (change)="facade.setDensity($any($event.target).value)">
-          @for (density of facade.densities; track density) {
-            <option [value]="density">{{ density }}</option>
+  <!-- L1 — the one 40px frame: title + live count + density + one declutter control + Activity(n)
+       (WALL-FLOW-PLAN.md §3.4). No `[pageBarFilters]`/`[pageBarActions]` at all with zero tiles —
+       there is nothing to filter or act on in the P0 empty state. -->
+  <vision-page-bar title="Wall" icon="grid" [count]="facade.liveCount()" countNoun="stream">
+    @if (facade.liveCount() > 0) {
+      <div pageBarFilters class="row bar-controls">
+        <div class="segmented" role="group" aria-label="Tile density">
+          @for (stop of densityStops; track stop.value) {
+            <button
+              type="button"
+              class="btn secondary small"
+              [class.active]="facade.density() === stop.value"
+              (click)="facade.setDensity(stop.value)"
+            >
+              {{ stop.label }}
+            </button>
           }
-        </select>
-      </label>
+        </div>
+        <button
+          type="button"
+          class="btn secondary small"
+          (click)="facade.cycleBoxesMode()"
+          [title]="'Detection boxes: ' + declutterLevelLabel(facade.boxesMode()) + ' — click to change'"
+        >
+          Boxes: {{ declutterLevelLabel(facade.boxesMode()) }}
+        </button>
+      </div>
+    }
+    @if (facade.liveCount() > 0) {
+      <div pageBarActions>
+        <button
+          type="button"
+          class="btn secondary small"
+          (click)="facade.toggleActivity()"
+          [class.active]="facade.activityOpen()"
+          [attr.aria-expanded]="facade.activityOpen()"
+        >
+          Activity ({{ facade.activityCount() }})
+        </button>
+      </div>
     }
   </vision-page-bar>
 
-  @if (facade.unwatchable() > 0) {
-    <vision-notice variant="warn">
-      {{ pluralize(facade.unwatchable(), 'stream') }} running without a publisher URL — nothing to watch until
-      mediamtx is reachable and <code>vision.publish.enabled</code> is true.
-    </vision-notice>
-  }
-
-  <div class="wall-layout">
-    <div class="wall-main">
-      @if (facade.tiles().length === 0) {
-        <div class="card">
-          <vision-empty
-            title="Nothing is streaming"
-            message="Start a stream from Assets and it appears here. With no hardware to hand, the simulated source works end to end."
-          >
-            <a class="btn" routerLink="/assets">Go to Assets</a>
-          </vision-empty>
-        </div>
-      } @else {
-        <div class="grid" [style.--columns]="facade.settings.wallDensity()">
-          @for (tile of facade.tiles(); track tile.stream.streamId) {
-            <vision-wall-tile [stream]="tile.stream" [device]="tile.device" />
-          }
-        </div>
+  @if (facade.liveCount() === 0) {
+    <!-- P0 — full width, no rail stealing the column (D21). -->
+    <div class="empty-wrap">
+      <vision-empty
+        title="Nothing is streaming"
+        message="Start a stream from Inventory and it appears here. With no hardware to hand, the simulated source works end to end."
+      >
+        <a class="btn" routerLink="/assets">Go to Inventory</a>
+      </vision-empty>
+    </div>
+  } @else {
+    <!-- P1 — the grid IS the page. `--tile-min` drives `repeat(auto-fill, minmax(…))`, so the
+         window reflows tiles with no control touched (D11). Stable order (never attention-sorted,
+         §3's frozen decision) — `buildWallTiles` already sorted `facade.tiles()`, so `@for` just
+         renders it. -->
+    <div class="grid" [style.--tile-min.px]="facade.tileMinPx()">
+      @for (tile of facade.tiles(); track tile.streamId) {
+        <vision-wall-tile [tile]="tile" [boxesMode]="facade.boxesMode()" (focused)="facade.focus($event)" />
       }
     </div>
+  }
 
-    <!-- ---- Events rail (docs/plans/done/MVP2-PLAN.md §E, E-b bullet 1; docs/plans/done/MVP3-PLAN.md §C-c: extracted
-         to shared/ui/events-rail.ts so the Command dashboard could reuse it — see that component's own
-         doc comment) ------------------------------------------------------------------------ -->
-    <vision-events-rail class="events-rail" (open)="facade.openEvent($event)" />
-  </div>
+  <!-- P2 — L3 focus layer, over the wall, never a navigation (§3 law 2). -->
+  @if (facade.focusedTile(); as tile) {
+    <vision-wall-focus
+      [tile]="tile"
+      [boxesMode]="facade.boxesMode()"
+      (closed)="facade.clearFocus()"
+      (openCockpit)="onOpenCockpit($event)"
+      (watchLive)="onWatchLive($event)"
+    />
+  }
 </div>

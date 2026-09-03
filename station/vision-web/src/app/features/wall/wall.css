@@ -1,86 +1,31 @@
 /* `.page` (styles.css) is padding-only — no height, no background of its own — so with few tiles
    its box only grows to content height, leaving `<main>`'s own light-theme background exposed
    below/beside it (confirmed live, docs/plans/done/VISUAL-REFRESH-PLAN.md follow-up, 2026-08-05: a 2-stream
-   Wall showed a white gap under the grid). `min-height: 100dvh`, not `100%` — `<vision-wall>`'s own
-   host has no explicit `display: block`, and a percentage height needs a definite-size ancestor to
-   resolve at all (the exact bug `app.css`'s own `<main>` doc comment already names for `.sidebar`);
-   a viewport unit sidesteps that rather than patching around it, the same reasoning Fly's `.cockpit`
-   and Command's `.command-shell` already use for their own dark, full-bleed roots. `min-`, not a
-   fixed `height`, so a wall with enough tiles to exceed one screen still grows past it and scrolls
-   inside `<main>` instead of clipping. `--shell-h`, not a bare `100dvh`, for the same reason those
-   two roots now read it: the shell's banner strip is out of flow and reserved with a `padding-top`
-   no viewport unit down here can see. */
+   Wall showed a white gap under the grid). `min-height: var(--shell-h)`, not a bare `100dvh` — the
+   shell's banner strip is out of flow and reserved with a `padding-top` no viewport unit down here
+   can see (`app.css`'s own `<main>` doc comment). `min-`, not a fixed `height`, so a wall with
+   enough tiles to exceed one screen still grows past it and scrolls inside `<main>`. */
 .page.surface-dark {
-    min-height: var(--shell-h);
+  min-height: var(--shell-h);
 }
 
-.wall-layout {
-    display: flex;
-    align-items: flex-start;
-    gap: var(--space-16);
+.bar-controls {
+  gap: var(--space-8);
+  flex-wrap: wrap;
 }
 
-.wall-main {
-    flex: 1;
-    min-width: 0;
+/* P0 — full width (D21: the old rail no longer steals the column at the emptiest moment). */
+.empty-wrap {
+  display: flex;
+  justify-content: center;
+  padding: var(--space-32) 0;
 }
 
+/* D11 — a 3-stop density control writing `--tile-min` into `repeat(auto-fill, minmax(…))`, replacing
+   the old fixed-column-count `<select>`: the window reflows tiles with no control touched, and one
+   stream at any width is a comfortably-sized tile, never a thumbnail in a void. */
 .grid {
-    display: grid;
-    grid-template-columns: repeat(var(--columns, 3), minmax(0, 1fr));
-    gap: var(--space-16);
-}
-
-/* ---- Events rail (docs/plans/done/MVP2-PLAN.md §E, E-b bullet 1) — sizing/positioning only; the rail's own
-   internal look lives in shared/ui/events-rail.css now (docs/plans/done/MVP3-PLAN.md §C-c) ---------------------- */
-
-.events-rail {
-    width: 300px;
-    flex: none;
-    max-height: 80vh;
-    overflow-y: auto;
-    position: sticky;
-    top: var(--space-16);
-}
-
-@media (max-width: 1000px) {
-    .wall-layout {
-        flex-direction: column;
-    }
-
-    .events-rail {
-        width: 100%;
-        position: static;
-        max-height: 320px;
-    }
-}
-
-.density select {
-    width: 4.5rem;
-}
-
-/* `<vision-notice>` (shared/ui/notice.ts) now owns the amber banner's box entirely — this
-   stylesheet only styles the inline `<code>` inside its projected message, since the shared
-   component has no opinion on that. */
-.notice code {
-    font-family: var(--mono);
-    /* Bespoke 25% black wash for an inline code chip — much lighter than either `--scrim` (55%) or
-       `--scrim-strong` (70%), and not a video/map compositing overlay, so neither canonical scrim
-       step reproduces this look without visibly darkening the chip (docs/plans/done/STYLE-TOKENS-PLAN.md
-       §Geometry note's "bespoke opacity... genuinely needed" exception). Left literal; flagged. */
-    background: rgb(0 0 0 / 25%);
-    padding: var(--space-2) var(--space-4);
-    border-radius: 4px;
-}
-
-@media (max-width: 1100px) {
-    .grid {
-        grid-template-columns: repeat(min(var(--columns, 3), 3), minmax(0, 1fr));
-    }
-}
-
-@media (max-width: 700px) {
-    .grid {
-        grid-template-columns: 1fr;
-    }
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(var(--tile-min, 320px), 1fr));
+  gap: var(--space-16);
 }
