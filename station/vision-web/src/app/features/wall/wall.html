@@ -77,4 +77,15 @@
       (watchLive)="onWatchLive($event)"
     />
   }
+
+  <!-- Activity drawer — this wall's own streams, last hour (D14/D19). Not mutually exclusive with
+       the focus layer above (A4): a row click focuses a tile with the drawer still open, so the
+       watcher can step through several without losing their place. -->
+  @if (facade.activityOpen()) {
+    <vision-wall-activity
+      [rows]="facade.activity()"
+      (closed)="facade.toggleActivity()"
+      (rowActivated)="facade.focus($event)"
+    />
+  }
 </div>

@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { Router, RouterLink } from '@angular/router';
 import { WallTile } from './wall-tile';
 import { WallFocus } from './wall-focus';
+import { WallActivity } from './wall-activity';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { declutterLevelLabel } from '../../shared/player/detection-overlay-logic';
@@ -33,7 +34,7 @@ import { WallFacade } from './wall-facade';
  */
 @Component({
   selector: 'vision-wall',
-  imports: [WallTile, WallFocus, EmptyState, PageBar, RouterLink],
+  imports: [WallTile, WallFocus, WallActivity, EmptyState, PageBar, RouterLink],
   templateUrl: './wall.html',
   styleUrl: './wall.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

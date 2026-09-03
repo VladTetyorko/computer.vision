@@ -1,0 +1,19 @@
+.rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.empty-note {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.footer-link {
+  font-size: 0.8rem;
+  color: var(--color-info);
+}
+
+.footer-link:hover {
+  text-decoration: underline;
+}

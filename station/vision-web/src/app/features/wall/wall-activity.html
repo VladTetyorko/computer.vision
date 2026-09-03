@@ -1,0 +1,29 @@
+<vision-side-panel
+  title="Activity"
+  [subtitle]="rows().length + ' in the last hour'"
+  icon="history"
+  (close)="closed.emit()"
+>
+  @if (rows().length === 0) {
+    <p class="muted empty-note">No activity on this wall in the last hour.</p>
+  } @else {
+    <div class="rows">
+      @for (row of rows(); track row.event.id) {
+        <vision-event-row
+          [event]="row.event"
+          [sourceLabel]="row.sourceLabel"
+          [relativeTime]="relativeTime(row)"
+          actionLabel="Focus"
+          (activated)="rowActivated.emit(row.tile.streamId)"
+        />
+      }
+    </div>
+  }
+
+  <!-- Honest about being a window, not a history (§5 residual #2) — the drawer shows strictly less
+       than the old rail did (this wall's streams, one hour) on purpose; anything older or from a
+       stream not on this wall lives at the one place that actually indexes it all. -->
+  <div footer class="drawer-footer">
+    <a class="footer-link" routerLink="/monitor/alerts">Older activity &rsaquo; Alerts center</a>
+  </div>
+</vision-side-panel>
