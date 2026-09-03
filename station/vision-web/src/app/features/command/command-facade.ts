@@ -6,7 +6,10 @@ import { FleetStore } from '../../core/fleet/fleet-store';
 import { buildTestDroneRequest } from '../../core/fleet/simulation-logic';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { FleetMapStore } from '../../core/map/map-store';
-import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
+import { resolveLastContact, withLastContact, type LastContact } from '../../core/map/map-logic';
+import { readPersistedFlag, readPersistedString, writePersistedFlag, writePersistedString } from '../../core/panel-state';
+import { RouteStore } from '../../core/map-data/route-store';
+import type { RouteSpan } from '../../core/map-data/route-logic';
 import { GeofenceStore } from '../../core/geofence/geofence-store';
 import { activeGeofenceBreaches, groupBreachesByAsset } from '../../core/geofence/geofence-logic';
 import { activePipelineErrorMessagesByStreamId } from '../../core/system-events/system-events-logic';
@@ -30,6 +33,17 @@ const SUMMARY_POLL_INTERVAL_MS = 5_000;
 
 const RAIL_OPEN_KEY = 'vision.command.railOpen';
 const PANEL_OPEN_KEY = 'vision.command.panelOpen';
+
+/** `AssetPanel`'s Telemetry-tab Route control's own persisted preference (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md
+ *  §3.4) — per-browser, not per-asset: the operator's "show me the last flight" preference should
+ *  survive picking a different asset, the same way `hideSimulated` survives switching pages. */
+const ROUTE_SPAN_KEY = 'vision.command.routeSpan';
+
+/** Guards a stored preference that predates this key, or was hand-edited — falls back to `'last'` (§3.4's own default) rather than trusting an arbitrary string as a `RouteSpan`. */
+function loadRouteSpan(): RouteSpan {
+  const raw = readPersistedString(ROUTE_SPAN_KEY, 'last');
+  return raw === 'off' || raw === 'last' || raw === 'last3' ? raw : 'last';
+}
 
 /**
  * `hideSimulated`'s persisted key (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N3, §2 N3 — "the same
@@ -80,6 +94,9 @@ export class CommandFacade {
   private readonly events = inject(EventsStore);
   private readonly liveStore = inject(LiveStore);
   private readonly weather = inject(WeatherStore);
+  /** §3.4's on-demand route fetch — page-provided alongside `FleetMapStore`/`WeatherStore` in
+   *  `CommandPage`'s own `providers` (see `RouteStore`'s own class doc comment for why). */
+  private readonly routeStore = inject(RouteStore);
 
   private readonly summarySignal = signal<FleetSummary | undefined>(undefined);
   readonly summary = this.summarySignal.asReadonly();
@@ -105,6 +122,23 @@ export class CommandFacade {
   readonly marks = inject(MarksStore);
   readonly layers = inject(LayersStore);
   readonly drawings = inject(DrawingsStore);
+
+  // --- Recent-flight routes (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.4, wave W3) ---------------
+  // `AssetPanel` stays "deliberately dumb" (its own class doc comment) — every route read-model and
+  // the span control's own state live here, threaded to the panel as plain inputs/an output, exactly
+  // like every other fact that component shows.
+
+  private readonly routeSpanSignal = signal<RouteSpan>(loadRouteSpan());
+  readonly routeSpan = this.routeSpanSignal.asReadonly();
+  readonly routes = this.routeStore.routes;
+  readonly routesLoading = this.routeStore.loading;
+  readonly routesError = this.routeStore.error;
+  readonly routesNoUsages = this.routeStore.noUsages;
+
+  setRouteSpan(span: RouteSpan): void {
+    this.routeSpanSignal.set(span);
+    writePersistedString(ROUTE_SPAN_KEY, span);
+  }
 
   /**
    * The map's single `[interactionMode]`, folded from the two independent arming states that can
@@ -218,12 +252,39 @@ export class CommandFacade {
   readonly assetPositions = computed(() => this.mapStore.markers().map((marker) => marker.position));
 
   /**
+   * `assetId → LastContact` (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.3, wave W3 closing the
+   * fallback gap wave W1 left open) — resolved per marker from whichever tier actually has an
+   * answer: `AssetAttention.telemetryAgeMs` (the fleet-summary poll, tier 1) first, then
+   * `AssetSummary.lastUsedAt` (`FleetMapStore.assets()`, tier 2 — the offline bucket gets no live
+   * telemetry poll at all, so this is its only honest fact), `'unknown'` otherwise
+   * (`resolveLastContact`'s own doc comment has the full three-tier account). `nowSignal` is the
+   * same wall clock `pipelineErrorMessagesByStreamId` above already ticks off the 5s summary poll —
+   * reused rather than a second clock, per CLAUDE.md rule 9 ("newest data … even if previous is
+   * still available").
+   */
+  private readonly lastContactByAssetId = computed<ReadonlyMap<string, LastContact>>(() => {
+    const attentionByAssetId = new Map(this.summary()?.assets.map((asset) => [asset.assetId, asset]) ?? []);
+    const lastUsedAtByAssetId = new Map(this.mapStore.assets().map((asset) => [asset.assetId, asset.lastUsedAt]));
+    const now = this.nowSignal();
+    const result = new Map<string, LastContact>();
+    for (const marker of this.mapStore.markers()) {
+      result.set(
+        marker.assetId,
+        resolveLastContact(attentionByAssetId.get(marker.assetId), lastUsedAtByAssetId.get(marker.assetId), now),
+      );
+    }
+    return result;
+  });
+
+  /**
    * `<vision-tactical-map>`'s `[assets]` (docs/plans/done/MAP-REWORK-PLAN.md §5.1). The map component is dumb
    * now — unlike the deleted `FleetMap`, which injected `FleetMapStore` itself and therefore only
    * worked on a page that provided it — so the store's markers are handed over as an input from
-   * here, the one place already holding that store.
+   * here, the one place already holding that store. Enriched with `lastContact` (§3.3/W3, above) so
+   * the map's own tri-state freshness colouring and "Last contact …" popup line are honest for the
+   * offline bucket too, not just the ones still getting a live telemetry poll.
    */
-  readonly markers = this.mapStore.markers;
+  readonly markers = computed(() => withLastContact(this.mapStore.markers(), this.lastContactByAssetId()));
 
   /**
    * The map's `[unplottedAssets]` legend count — assets with no position at all, which by
@@ -268,7 +329,7 @@ export class CommandFacade {
 
   readonly selectedMarker = computed(() => {
     const assetId = this.selectedAssetId();
-    return assetId ? this.mapStore.markers().find((marker) => marker.assetId === assetId) : undefined;
+    return assetId ? this.markers().find((marker) => marker.assetId === assetId) : undefined;
   });
 
   /** `AssetPanel`'s own `[reasons]` input — see `attentionByAssetId`'s own doc comment for the
@@ -352,6 +413,21 @@ export class CommandFacade {
     // Keeps the weather chip fresh as the fleet centroid moves — `WeatherStore.track` itself
     // no-ops instantly unless the 10-minute cache is actually stale (docs/plans/done/OPS-CORE-PLAN.md §W).
     effect(() => this.weather.track(this.weatherPosition()));
+
+    // The route interaction contract, frozen (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.4):
+    // selecting an asset auto-shows its route at the current span; changing span while selected
+    // re-shows at the new span; deselecting clears it. One effect over both signals covers all
+    // three — `RouteStore.show`/`hide` are themselves idempotent/generation-guarded, so there is no
+    // "did this already fire" bookkeeping needed here.
+    effect(() => {
+      const assetId = this.selectedAssetId();
+      const span = this.routeSpanSignal();
+      if (assetId) {
+        void this.routeStore.show(assetId, span);
+      } else {
+        this.routeStore.hide();
+      }
+    });
 
     void this.loadSetupChecklistData();
 

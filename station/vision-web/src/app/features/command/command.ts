@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, effect, inject, input, vi
 import { RouterLink } from '@angular/router';
 import { UiStore } from '../../core/ui/ui-store';
 import { FleetMapStore } from '../../core/map/map-store';
+import { RouteStore } from '../../core/map-data/route-store';
 import { WeatherStore } from '../../core/weather/weather-store';
 import { TacticalMap } from '../../shared/map/tactical-map/tactical-map';
 import { WeatherChip } from '../../shared/ui/weather-chip';
@@ -53,11 +54,12 @@ import { CommandFacade } from './command-facade';
   templateUrl: './command.html',
   styleUrl: './command.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  // `FleetMapStore`/`WeatherStore`: own instance per route activation (page-provided, not
-  // `providedIn: 'root'` — see their own class doc comments). `CommandFacade` is provided alongside
-  // them so it can `inject()` both; `<vision-weather-chip>` still resolves `WeatherStore` through
-  // this same component-level injector, while the map now receives its markers as inputs instead.
-  providers: [FleetMapStore, WeatherStore, CommandFacade],
+  // `FleetMapStore`/`WeatherStore`/`RouteStore`: own instance per route activation (page-provided,
+  // not `providedIn: 'root'` — see their own class doc comments). `CommandFacade` is provided
+  // alongside them so it can `inject()` all three; `<vision-weather-chip>` still resolves
+  // `WeatherStore` through this same component-level injector, while the map now receives its
+  // markers/routes as inputs instead.
+  providers: [FleetMapStore, WeatherStore, RouteStore, CommandFacade],
 })
 export class CommandPage {
   protected readonly facade = inject(CommandFacade);

@@ -6,6 +6,7 @@ import { canCommandReturnHome, deriveDiagnostics, gpsFixLabel, gpsSeverity } fro
 import type { AssetAttention, ActiveStream } from '../../core/api/models';
 import type { FleetMarker } from '../../core/map/map-logic';
 import { humanAge } from '../../core/telemetry/telemetry-logic';
+import type { AssetRoute, RouteSpan } from '../../core/map-data/route-logic';
 
 export type AssetPanelTab = 'status' | 'telemetry' | 'video';
 
@@ -55,6 +56,20 @@ export class AssetPanel {
    */
   readonly reasons = input.required<readonly AttentionReason[]>();
 
+  /**
+   * The Telemetry tab's Route control (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.4, wave W3) —
+   * every one of these is a plain input/output fed from `CommandFacade`'s own `RouteStore`
+   * orchestration, same "deliberately dumb" discipline as the rest of this panel's inputs (this
+   * class doc comment's own "zero new recurring requests" case still holds: `RouteStore` fetches
+   * on `show()`/`hide()`, never a poll). `routeSpanChanged` is the segmented control's own click.
+   */
+  readonly routeSpan = input.required<RouteSpan>();
+  readonly routes = input.required<readonly AssetRoute[]>();
+  readonly routesLoading = input.required<boolean>();
+  readonly routesError = input.required<boolean>();
+  readonly routesNoUsages = input.required<boolean>();
+  readonly routeSpanChanged = output<RouteSpan>();
+
   /** `4d 2h ago`, never a raw second count — the one age vocabulary (`humanAge`). */
   protected sampleAgeText(seconds: number | undefined): string {
     return seconds === undefined ? '—' : `${humanAge(seconds)} ago`;
@@ -99,5 +114,10 @@ export class AssetPanel {
 
   protected selectTab(tab: AssetPanelTab): void {
     this.activeTab.set(tab);
+  }
+
+  /** One route row's own label — `Flight started {humanAge} ago`, the same age vocabulary every other timestamp in this panel already uses. */
+  protected routeRowLabel(route: AssetRoute): string {
+    return `Flight started ${humanAge((Date.now() - Date.parse(route.startedAt)) / 1000)} ago`;
   }
 }

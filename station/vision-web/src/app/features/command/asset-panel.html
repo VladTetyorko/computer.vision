@@ -85,6 +85,40 @@
         }
       }
       @case ('telemetry') {
+        <!-- Route control (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.4, wave W3) — the map draws
+             whatever `routes()` currently holds; this segmented control only ever changes span,
+             never touches the map directly. -->
+        <div class="route-control">
+          <div class="segmented" role="group" aria-label="Route">
+            <button type="button" class="btn secondary small" [class.active]="routeSpan() === 'off'" (click)="routeSpanChanged.emit('off')">Off</button>
+            <button type="button" class="btn secondary small" [class.active]="routeSpan() === 'last'" (click)="routeSpanChanged.emit('last')">Last flight</button>
+            <button type="button" class="btn secondary small" [class.active]="routeSpan() === 'last3'" (click)="routeSpanChanged.emit('last3')">Last 3</button>
+          </div>
+
+          @if (routeSpan() !== 'off') {
+            @if (routesLoading()) {
+              <p class="muted hint">Loading flight history…</p>
+            } @else if (routesError()) {
+              <p class="muted hint">Could not load flight history — try again.</p>
+            } @else if (routesNoUsages()) {
+              <p class="muted hint">No recorded flights for this asset.</p>
+            } @else {
+              <ul class="route-list">
+                @for (route of routes(); track route.usageId) {
+                  <li class="route-row">
+                    <span>{{ routeRowLabel(route) }}</span>
+                    @if (route.points.length === 0) {
+                      <span class="muted">This flight recorded no positions</span>
+                    } @else if (route.truncated) {
+                      <span class="muted">Simplified — long flight</span>
+                    }
+                  </li>
+                }
+              </ul>
+            }
+          }
+        </div>
+
         @if (marker(); as m) {
           <dl class="facts">
             <div class="fact">

@@ -94,6 +94,36 @@
   margin: 0;
 }
 
+/* Route control (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.4, wave W3) — sits above the raw
+   marker facts on the Telemetry tab; its own list is deliberately plain text rows, not another
+   `.facts` grid, since a route's own label/notice pair reads more like a short list item than a
+   key-value fact. */
+.route-control {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin-bottom: var(--space-16);
+  padding-bottom: var(--space-16);
+  border-bottom: 1px solid var(--border);
+}
+
+.route-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.route-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-8);
+  font-size: 0.8rem;
+}
+
 .why-block {
   display: flex;
   flex-direction: column;

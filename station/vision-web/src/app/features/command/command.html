@@ -156,6 +156,7 @@
           [marks]="facade.marks.displayMarks()"
           [drawings]="facade.drawings.displayDrawings()"
           [layers]="facade.layers.layers()"
+          [routes]="facade.routes()"
           [interactionMode]="facade.interactionMode()"
           [selectedMarkId]="facade.marks.selectedMarkId()"
           [focusRequest]="facade.focusRequest()"
@@ -221,9 +222,15 @@
             [reasons]="facade.selectedAttentionReasons()"
             [videoDeviceId]="facade.selectedVideoDeviceId()"
             [stream]="facade.selectedStream()"
+            [routeSpan]="facade.routeSpan()"
+            [routes]="facade.routes()"
+            [routesLoading]="facade.routesLoading()"
+            [routesError]="facade.routesError()"
+            [routesNoUsages]="facade.routesNoUsages()"
             (watchLive)="facade.watchSelected()"
             (openDetails)="facade.openSelectedDetails()"
             (closePanel)="facade.closePanel()"
+            (routeSpanChanged)="facade.setRouteSpan($event)"
           />
         }
       }

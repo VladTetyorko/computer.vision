@@ -20,6 +20,7 @@ import { capitalizeLabel, formatConfidence, relativeTimeLabel } from '../../../c
 import { humanAge } from '../../../core/telemetry/telemetry-logic';
 import type { CorrectionResponse, GeoPosition, GeofenceZone } from '../../../core/api/models';
 import { fingerprintMarkers, nextAutoFitEnabled, type FleetMarker } from '../../../core/map/map-logic';
+import type { AssetRoute } from '../../../core/map-data/route-logic';
 import { resolveZoneColors, zoneLayerStyle, FALLBACK_ZONE_COLORS, type ZoneColors } from '../../../core/geofence/geofence-logic';
 import {
   trackChipLabel,
@@ -143,6 +144,19 @@ interface CorrectionHandle {
 }
 
 /**
+ * One recent-flight route's three Leaflet objects (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.4,
+ * wave W3) — the polyline itself, a start `flagIcon` (reusing `upsertAsset`'s own live-trail
+ * precedent), and an end dot marking where the recorded points stop. Keyed by `usageId`, not
+ * `assetId` — `last3` can plot more than one flight for the same asset at once, unlike the one
+ * live trail per asset `AssetHandle` above tracks.
+ */
+interface RouteHandle {
+  line: Leaflet.Polyline;
+  startFlag: Leaflet.Marker;
+  endDot: Leaflet.CircleMarker;
+}
+
+/**
  * `<vision-tactical-map>` — the one Leaflet map in this app (docs/plans/done/MAP-REWORK-PLAN.md §5.1),
  * replacing the deleted `FleetMap` (774 ln) and `LiveMap` (437 ln), which duplicated
  * zones/marks/`escapeHtml`/layer-switch logic byte-for-byte. Every host — Command, the Fly cockpit,
@@ -255,6 +269,16 @@ export class TacticalMap {
    * silently absent, never an empty state (§3.8's own "Off state" row).
    */
   readonly corrections = input<readonly CorrectionResponse[]>([]);
+
+  /**
+   * The selected asset's recent-flight route(s) (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.4,
+   * wave W3) — `core/map-data/route-store.ts#routes`, orchestrated by the host's own facade
+   * (`CommandFacade` today). **Not** a `Drawing` and **not** `assets[].trail` (the always-on live
+   * breadcrumb, capped at `TRAIL_WINDOW`): a route is a deliberately separate, larger, opt-in
+   * history the operator asked to see, drawn by `applyRoutes` below. Empty on every host that
+   * hasn't wired it — the same "feature inert, not wrong" posture `tracks`/`corrections` use.
+   */
+  readonly routes = input<readonly AssetRoute[]>([]);
 
   readonly selectedMarkId = input<string | undefined>(undefined);
 
@@ -458,6 +482,7 @@ export class TacticalMap {
   private readonly drawingHandles = new Map<string, DrawingHandle>();
   private readonly trackHandles = new Map<string, TrackHandle>();
   private readonly correctionHandles = new Map<string, CorrectionHandle>();
+  private readonly routeHandles = new Map<string, RouteHandle>();
   private draftLine: Leaflet.Polyline | null = null;
   private suppressAutoFitDisable = false;
   private lastFitFingerprint: string | null = null;
@@ -534,6 +559,7 @@ export class TacticalMap {
     effect(() => this.applyDrawings(this.shownDrawings(), this.mapColors()));
     effect(() => this.applyTracks(this.shownTracks(), this.mapColors()));
     effect(() => this.applyCorrections(this.corrections(), this.mapColors()));
+    effect(() => this.applyRoutes(this.routes(), this.mapColors()));
     effect(() => this.applyDraft(this.draft(), this.mapColors().trail));
 
     // Leaflet sizes itself from the DOM at creation time; expanding/collapsing resizes that DOM out
@@ -1239,6 +1265,67 @@ export class TacticalMap {
     }
   }
 
+  // --- Recent-flight routes (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.4, wave W3) --------------
+
+  /**
+   * Draws each route as a polyline plus a start `flagIcon` (`upsertAsset`'s own precedent) and an
+   * end dot at its last recorded point — one shared colour, `colors.trail`, the same token an
+   * asset's own live breadcrumb uses (this is a history of the *same* fact, just a longer window).
+   * §3.4's frozen rendering rule: **dashed** once the flight has closed (`endedAt` present),
+   * **solid** while still open. A route with zero points (every sample was fix-less) is skipped
+   * entirely — the panel's own per-route empty state names that, not a phantom empty layer here.
+   */
+  private applyRoutes(routes: readonly AssetRoute[], colors: MapColors): void {
+    const L = this.leaflet;
+    const map = this.map;
+    if (!L || !map) {
+      return;
+    }
+    const seen = new Set<string>();
+    for (const route of routes) {
+      if (route.points.length === 0) {
+        continue;
+      }
+      seen.add(route.usageId);
+      const latLngs = route.points.map((p) => L.latLng(p.latitude, p.longitude));
+      const start = latLngs[0];
+      const end = latLngs[latLngs.length - 1];
+      const dashArray = route.endedAt !== undefined ? '6 4' : undefined;
+
+      let handle = this.routeHandles.get(route.usageId);
+      if (!handle) {
+        const line = L.polyline(latLngs, { color: colors.trail, weight: 3, opacity: 0.85, dashArray }).addTo(map);
+        const startFlag = L.marker(start, { icon: this.flagIcon(L), keyboard: false, interactive: false }).addTo(map);
+        const endDot = L.circleMarker(end, {
+          radius: 5,
+          color: colors.trail,
+          weight: 2,
+          fill: true,
+          fillColor: colors.trail,
+          fillOpacity: 0.9,
+          interactive: false,
+        }).addTo(map);
+        handle = { line, startFlag, endDot };
+        this.routeHandles.set(route.usageId, handle);
+      } else {
+        handle.line.setLatLngs(latLngs);
+        handle.line.setStyle({ color: colors.trail, dashArray });
+        handle.startFlag.setLatLng(start);
+        handle.endDot.setLatLng(end);
+        handle.endDot.setStyle({ color: colors.trail, fillColor: colors.trail });
+      }
+    }
+    for (const usageId of [...this.routeHandles.keys()]) {
+      if (!seen.has(usageId)) {
+        const handle = this.routeHandles.get(usageId);
+        handle?.line.remove();
+        handle?.startFlag.remove();
+        handle?.endDot.remove();
+        this.routeHandles.delete(usageId);
+      }
+    }
+  }
+
   // --- Drawings -------------------------------------------------------------------------------------
 
   private applyDrawings(drawings: readonly MapDrawing[], colors: MapColors): void {
@@ -1383,6 +1470,12 @@ export class TacticalMap {
       handle.errorCircle.remove();
     }
     this.correctionHandles.clear();
+    for (const handle of this.routeHandles.values()) {
+      handle.line.remove();
+      handle.startFlag.remove();
+      handle.endDot.remove();
+    }
+    this.routeHandles.clear();
     this.draftLine?.remove();
     this.draftLine = null;
     this.map?.remove();
