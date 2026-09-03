@@ -62,7 +62,7 @@ the full mechanism.
 | AssetController | DELETE | `/api/assets/{id}` | Soft delete (archive) | manage |
 | AssetController | POST | `/api/assets/{id}/devices` | Attach a device | manage |
 | AssetController | DELETE | `/api/assets/{id}/devices/{deviceId}` | Detach a device | manage |
-| AssetController | GET | `/api/usages/{usageId}/telemetry?limit=` | Raw (unwindowed) telemetry trail | **unscoped** (ledger: `AssetController#telemetry`) |
+| AssetController | GET | `/api/usages/{usageId}/telemetry?limit=` | Raw (unwindowed) telemetry trail — the **latest** `limit` samples, ascending (COMMAND-MAP-FLOW-PLAN.md B1; was earliest-first) | **unscoped** (ledger: `AssetController#telemetry`) |
 | AssetInventoryController | POST | `/api/assets/{id}/custody` | Issue to a custodian / return to stock (`{action:ISSUE\|RETURN,custodianId?,location?}`) | manage (via `AssetCustodyService`) |
 | AssetInventoryController | POST | `/api/assets/{id}/inventory` | Ground / release / retire (`{action:GROUND\|RELEASE\|RETIRE,kind?,summary?}`) | manage (via `AssetCustodyService`) |
 | AssetInventoryController | GET | `/api/assets/{id}/maintenance` | List an asset's maintenance history, open and closed | scope (via `MaintenanceService`) |
@@ -493,8 +493,13 @@ auto-wiring by type).
   is fire-and-forget with no read side at all, and `Event`'s shape shares nothing with `DetectionEvent`'s.
   A future "pipeline errors in the events feed" ask needs a new `EventRepositoryPort`-shaped read side.
 - **Usage-scoped reads are split across two controllers on purpose**: `AssetController` still owns the
-  original, unwindowed `.../telemetry` (unscoped, see ledger above); `UsageTimelineController` owns
-  the windowed/downsampled `.../timeline`. Neither depends on the other's presence.
+  original, unwindowed `.../telemetry` (unscoped, see ledger above) — now reading
+  `TelemetryRepositoryPort#findLatestByUsage` rather than `#findByUsage`
+  (COMMAND-MAP-FLOW-PLAN.md B1/D1: the `/command` fleet map polls this endpoint and was freezing once
+  a flight passed `limit` earliest-first samples; same wire contract, different window) —
+  `UsageTimelineController` owns the windowed/downsampled `.../timeline`, unaffected, which still
+  reads `#findByUsage` via `DefaultReplayService` in `vision-events`. Neither depends on the other's
+  presence.
 - **`AfterActionController`'s two endpoints resolve the whole package synchronously before returning**,
   so a 404/403 always lands on the response before any streaming (ZIP or otherwise) starts — the
   archive endpoint's body is a `StreamingResponseBody` whose failure could not otherwise change an
@@ -757,3 +762,23 @@ never reaches the client), a `NoSuchElementException` (unknown asset) instance o
 `./mvnw -B -pl station/vision-api -am test` — **954** tests, 0 failures, 0 errors (951 → 954, +3, all
 new; nothing else changed). Docker not needed. `drone-link/mavlink`/`contexts/vision-flight` gates not
 run — this wave changed no file in either module.
+
+**COMMAND-MAP-FLOW-PLAN wave B1 done (D1 fix).** `AssetController#telemetry`
+(`GET /api/usages/{usageId}/telemetry`) now reads `TelemetryRepositoryPort#findLatestByUsage`
+instead of `#findByUsage` — the `/command` fleet map polls this endpoint treating the last array
+element as "current position", and `findByUsage`'s earliest-first window meant that element never
+changed again past `limit` samples (`docs/plans/active/COMMAND-MAP-FLOW-PLAN.md` D1). Wire contract
+unchanged: same path, same `limit` param, same `TelemetrySampleResponse[]` shape, same ascending
+order, same `200 []` on an unknown usage — only which window of the flight comes back. `AssetController`'s
+constructor is unchanged (still the same `TelemetryRepositoryPort` field, just a different method
+called on it). `AssetControllerTest`'s existing telemetry-block tests (`888`–`1018`) were repointed
+to stub/verify `findLatestByUsage` in place — no test methods added or removed here, since the
+port-level "latest window" / "ascending order" / "empty case" proofs live in
+`storage/persistence`'s `PostgresDockerIntegrationTest$TelemetryRepositoryTests` instead (271 → 274
+tests there). `./mvnw -B -pl station/vision-api test` — **954** tests, 0 failures, 0 errors (unchanged
+from before this wave — every edit here was a rename of an existing stub/verify call plus one
+javadoc rewrite, not a new test). Docker not needed for this module. Also green in the same session:
+`storage/persistence` **274** and `station/vision-app` **326** (both docker-ran, not skipped — see
+those modules' own MODULE.md entries). Nothing deferred; `vision-events`/`DefaultReplayService` and
+`UsageTimelineController` untouched by design (they own the earliest-first replay window, a
+different question — see plan §3.7/§5).

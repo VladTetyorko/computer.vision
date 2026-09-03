@@ -1088,9 +1088,11 @@ class PostgresDockerIntegrationTest {
         }
 
         /**
-         * Mirrors {@code InMemoryTelemetryRepository}'s exact (surprising) semantics: {@code
-         * limit} bounds the <strong>earliest</strong> samples, not the most recent — see {@link
-         * JpaTelemetryRepository}'s javadoc.
+         * {@code findByUsage}'s {@code limit} bounds the <strong>earliest</strong> samples, not the
+         * most recent — see {@link JpaTelemetryRepository}'s javadoc. Left unchanged by
+         * COMMAND-MAP-FLOW-PLAN.md B1: {@code DefaultReplayService} genuinely wants a window from
+         * the start of a flight. {@link #findLatestByUsageReturnsTheMostRecentSamplesUpToLimit}
+         * proves the sibling method B1 adds answers the opposite question.
          */
         @Test
         void findByUsageReturnsEarliestSamplesFirstUpToLimit() {
@@ -1107,6 +1109,57 @@ class PostgresDockerIntegrationTest {
             List<Telemetry> found = repository.findByUsage(usageId, 3);
 
             assertEquals(saved.subList(0, 3), found);
+        }
+
+        /**
+         * COMMAND-MAP-FLOW-PLAN.md B1/D1: {@code findLatestByUsage} is the live-tail read a
+         * map/trail view actually wants — the newest {@code limit} samples, not the flight's first
+         * few seconds ({@link #findByUsageReturnsEarliestSamplesFirstUpToLimit}'s window). Ten
+         * samples saved, three requested: the three <em>most recent</em> must come back.
+         */
+        @Test
+        void findLatestByUsageReturnsTheMostRecentSamplesUpToLimit() {
+            UsageId usageId = UsageId.random();
+            DeviceId deviceId = DeviceId.random();
+            List<Telemetry> saved = new ArrayList<>();
+            for (int i = 0; i < 10; i++) {
+                Telemetry sample = new Telemetry(deviceId, NOW.plusSeconds(i), (double) i, (double) i, null, null,
+                        null, Map.of());
+                saved.add(sample);
+                repository.save(usageId, sample);
+            }
+
+            List<Telemetry> found = repository.findLatestByUsage(usageId, 3);
+
+            assertEquals(saved.subList(7, 10), found);
+        }
+
+        /**
+         * The port's contract requires ascending {@code at} order regardless of which method
+         * answered it, so every caller's chronological ordering assumption holds — a "select
+         * newest-N via {@code order by at desc}, then reverse before returning" implementation is
+         * exactly the kind of thing that can come back backwards by accident.
+         */
+        @Test
+        void findLatestByUsageReturnsAscendingOrderNotNewestFirst() {
+            UsageId usageId = UsageId.random();
+            DeviceId deviceId = DeviceId.random();
+            List<Telemetry> saved = new ArrayList<>();
+            for (int i = 0; i < 5; i++) {
+                Telemetry sample = new Telemetry(deviceId, NOW.plusSeconds(i), (double) i, (double) i, null, null,
+                        null, Map.of());
+                saved.add(sample);
+                repository.save(usageId, sample);
+            }
+
+            List<Telemetry> found = repository.findLatestByUsage(usageId, 5);
+
+            assertEquals(saved, found, "must read oldest-of-the-window first, same as findByUsage's ordering");
+        }
+
+        @Test
+        void findLatestByUsageReturnsEmptyListForUnknownUsage() {
+            assertTrue(repository.findLatestByUsage(UsageId.random(), 10).isEmpty());
         }
 
         @Test

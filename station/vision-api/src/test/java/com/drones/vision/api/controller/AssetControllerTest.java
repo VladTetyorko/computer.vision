@@ -893,7 +893,7 @@ class AssetControllerTest {
         DeviceId deviceId = DeviceId.random();
         Telemetry sample = new Telemetry(deviceId, Instant.parse("2026-07-20T10:00:00Z"), 50.45, 30.52, 120.0, 90.0,
                 87.5, Map.of());
-        when(telemetryRepositoryPort.findByUsage(usageId, 100)).thenReturn(List.of(sample));
+        when(telemetryRepositoryPort.findLatestByUsage(usageId, 100)).thenReturn(List.of(sample));
 
         mockMvc.perform(get("/api/usages/{usageId}/telemetry", usageId.value()))
                 .andExpect(status().isOk())
@@ -906,7 +906,7 @@ class AssetControllerTest {
                 .andExpect(jsonPath("$[0].headingDegrees").value(90.0))
                 .andExpect(jsonPath("$[0].batteryPercent").value(87.5));
 
-        verify(telemetryRepositoryPort).findByUsage(usageId, 100);
+        verify(telemetryRepositoryPort).findLatestByUsage(usageId, 100);
     }
 
     @Test
@@ -915,7 +915,7 @@ class AssetControllerTest {
         DeviceId deviceId = DeviceId.random();
         Telemetry sample = new Telemetry(deviceId, Instant.parse("2026-07-20T10:00:00Z"), 50.45, 30.52, 120.0, 90.0,
                 87.5, Map.of());
-        when(telemetryRepositoryPort.findByUsage(usageId, 100)).thenReturn(List.of(sample));
+        when(telemetryRepositoryPort.findLatestByUsage(usageId, 100)).thenReturn(List.of(sample));
 
         mockMvc.perform(get("/api/usages/{usageId}/telemetry", usageId.value()))
                 .andExpect(status().isOk())
@@ -934,7 +934,7 @@ class AssetControllerTest {
                 List.of("Arm: Compass not calibrated"));
         Telemetry sample = new Telemetry(deviceId, Instant.parse("2026-07-20T10:00:00Z"), 50.45, 30.52, 120.0, 90.0,
                 87.5, Map.of("groundspeedMps", 12.3), flightState);
-        when(telemetryRepositoryPort.findByUsage(usageId, 100)).thenReturn(List.of(sample));
+        when(telemetryRepositoryPort.findLatestByUsage(usageId, 100)).thenReturn(List.of(sample));
 
         mockMvc.perform(get("/api/usages/{usageId}/telemetry", usageId.value()))
                 .andExpect(status().isOk())
@@ -957,7 +957,7 @@ class AssetControllerTest {
         DeviceId deviceId = DeviceId.random();
         Telemetry sample = new Telemetry(deviceId, Instant.parse("2026-07-20T10:00:00Z"), null, null, null, null,
                 null, Map.of(), FlightState.empty());
-        when(telemetryRepositoryPort.findByUsage(usageId, 100)).thenReturn(List.of(sample));
+        when(telemetryRepositoryPort.findLatestByUsage(usageId, 100)).thenReturn(List.of(sample));
 
         mockMvc.perform(get("/api/usages/{usageId}/telemetry", usageId.value()))
                 .andExpect(status().isOk())
@@ -977,7 +977,7 @@ class AssetControllerTest {
                 Map.of());
         Telemetry sampleB = new Telemetry(deviceB, Instant.parse("2026-07-20T10:00:01Z"), 3.0, 4.0, null, null, null,
                 Map.of());
-        when(telemetryRepositoryPort.findByUsage(usageId, 100)).thenReturn(List.of(sampleA, sampleB));
+        when(telemetryRepositoryPort.findLatestByUsage(usageId, 100)).thenReturn(List.of(sampleA, sampleB));
 
         mockMvc.perform(get("/api/usages/{usageId}/telemetry", usageId.value()))
                 .andExpect(status().isOk())
@@ -989,21 +989,21 @@ class AssetControllerTest {
     @Test
     void telemetryUsesExplicitLimitQueryParam() throws Exception {
         UsageId usageId = UsageId.random();
-        when(telemetryRepositoryPort.findByUsage(eq(usageId), anyInt())).thenReturn(List.of());
+        when(telemetryRepositoryPort.findLatestByUsage(eq(usageId), anyInt())).thenReturn(List.of());
 
         mockMvc.perform(get("/api/usages/{usageId}/telemetry", usageId.value()).param("limit", "5"))
                 .andExpect(status().isOk());
 
-        verify(telemetryRepositoryPort).findByUsage(usageId, 5);
+        verify(telemetryRepositoryPort).findLatestByUsage(usageId, 5);
     }
 
     @Test
     void telemetryReturnsEmptyListForUnknownUsagePerPortContract() throws Exception {
-        // TelemetryRepositoryPort#findByUsage documents no "unknown usage"
+        // TelemetryRepositoryPort#findLatestByUsage documents no "unknown usage"
         // failure mode; an unrecognized id behaves exactly like a usage with
         // no recorded samples (empty list), not a 404.
         UsageId unknown = UsageId.random();
-        when(telemetryRepositoryPort.findByUsage(unknown, 100)).thenReturn(List.of());
+        when(telemetryRepositoryPort.findLatestByUsage(unknown, 100)).thenReturn(List.of());
 
         mockMvc.perform(get("/api/usages/{usageId}/telemetry", unknown.value()))
                 .andExpect(status().isOk())

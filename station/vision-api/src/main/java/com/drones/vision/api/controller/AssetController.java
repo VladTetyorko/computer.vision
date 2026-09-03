@@ -274,25 +274,33 @@ public class AssetController {
     }
 
     /**
-     * Lists telemetry samples recorded for a usage — for a future map/trail
-     * view; plain JSON for now. An unknown usage id behaves exactly as
-     * {@link TelemetryRepositoryPort#findByUsage} does (an empty list, per
-     * its driven-port contract), not a 404 — this endpoint has no service
-     * method of its own to layer "unknown usage" validation onto.
+     * Lists a usage's most recent telemetry samples — the live-tail read the
+     * {@code /command} fleet map polls; plain JSON for now. An unknown usage
+     * id behaves exactly as {@link TelemetryRepositoryPort#findLatestByUsage}
+     * does (an empty list, per its driven-port contract), not a 404 — this
+     * endpoint has no service method of its own to layer "unknown usage"
+     * validation onto.
      *
-     * <p>Unwindowed and undownsampled — every sample up to {@code limit}, earliest first (see
-     * {@link TelemetryRepositoryPort#findByUsage}'s gotcha). {@link UsageTimelineController}'s
-     * {@code GET /api/usages/{usageId}/timeline} is the endpoint actually meant for replaying a
-     * long flight.
+     * <p>Unwindowed and undownsampled — the latest {@code limit} samples,
+     * always ascending by {@code at} (oldest of the window first) — see
+     * {@link TelemetryRepositoryPort#findLatestByUsage}. This is a wire-
+     * contract-preserving fix (COMMAND-MAP-FLOW-PLAN.md B1/D1): earlier this
+     * endpoint read {@link TelemetryRepositoryPort#findByUsage}, whose
+     * earliest-first window freezes a live poll once a flight passes {@code
+     * limit} samples; nothing about the path, params, response shape, or
+     * ordering changed, only *which* window of the flight comes back.
+     * {@link UsageTimelineController}'s {@code GET
+     * /api/usages/{usageId}/timeline} is the endpoint actually meant for
+     * replaying a long flight from its start.
      *
      * @param usageId the usage id, as a canonical UUID string
      * @param limit   maximum number of samples to return; defaults to 100
-     * @return the usage's telemetry samples
+     * @return the usage's most recent telemetry samples, oldest of the window first
      */
     @GetMapping("/api/usages/{usageId}/telemetry")
     public List<TelemetrySampleResponse> telemetry(@PathVariable String usageId,
                                                      @RequestParam(defaultValue = "100") int limit) {
-        return telemetryRepositoryPort.findByUsage(UsageId.of(usageId), limit).stream()
+        return telemetryRepositoryPort.findLatestByUsage(UsageId.of(usageId), limit).stream()
                 .map(TelemetrySampleResponse::from)
                 .toList();
     }

@@ -16,9 +16,9 @@ All version pins come from `spring-boot-dependencies` (this module's grandparent
 
 **Used by:** vision-app (`PersistenceWiringConfiguration`, unconditional).
 
-**Build/test:** `./mvnw -B -pl storage/persistence test` — 269 tests (last measured, ASSET-FLOWS
-BK4; up from 267 after ZERO-CONFIG-ONBOARDING Z2c, 260 before that — count from Maven's own summary
-line, see Gotchas), one shared `postgres:16`
+**Build/test:** `./mvnw -B -pl storage/persistence test` — 274 tests (last measured, COMMAND-MAP-FLOW
+B1; up from 269 after ASSET-FLOWS BK4, 267 after ZERO-CONFIG-ONBOARDING Z2c, 260 before that — count
+from Maven's own summary line, see Gotchas), one shared `postgres:16`
 Testcontainers container per test class. Requires a running Docker daemon — there is no non-Docker
 path; tests skip cleanly (not fail) when Docker is unavailable. Use a **two-step** build when a
 sibling context module is mid-flight elsewhere in the reactor: `./mvnw -B -pl
@@ -50,7 +50,7 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 | `JpaDeviceRepository` | `DeviceRepositoryPort` | merge upsert, hard delete |
 | `JpaAssetRepository` | `AssetRepositoryPort` | merge upsert, hard delete, `findByDeviceId`; `AssetMapper` flattens `Identity`/`Custody` onto the asset row directly (see WAREHOUSE-UX-PLAN.md D7, `V28`) |
 | `JpaAssetUsageRepository` | `AssetUsageRepositoryPort` | merge upsert; `findByStream` is a deliberately unindexed scan (one-row-per-flight table, read once per stream lookup); `findRecent(int)` is the fleet-wide sibling of `findRecentByAsset`; `totalFlightSecondsByAsset()` (WAREHOUSE-UX W8) is this module's **first native SELECT-with-row-projection query** (every earlier native query was a batch `DELETE`/`executeUpdate`) — `em.createNativeQuery(...)` returning `List<Object[]>`, needed because plain JPQL cannot express `coalesce(ended_at, now())`; `AssetUsageEntity#pilotId`/`AssetUsageMapper` (ASSET-FLOWS-PLAN §2 D1p, wave BK4) finally map the `pilot_id` column `V28` added schema-only — no new migration, see the `V28` row below |
-| `JpaTelemetryRepository` | `TelemetryRepositoryPort` | always `persist` (append-only); prune-on-write retention (100k rows/usage default); optional batched-write mode via `TelemetryBatchSettings` (see Batching) — production wiring still uses the immediate-mode constructor; `findByUsage`'s `limit` returns the **earliest** samples, not the newest (see Gotchas) |
+| `JpaTelemetryRepository` | `TelemetryRepositoryPort` | always `persist` (append-only); prune-on-write retention (100k rows/usage default); optional batched-write mode via `TelemetryBatchSettings` (see Batching) — production wiring still uses the immediate-mode constructor; `findByUsage`'s `limit` returns the **earliest** samples, not the newest, unchanged (see Gotchas); `findLatestByUsage` (COMMAND-MAP-FLOW-PLAN.md B1) returns the **latest** `limit` samples via `order by at desc` + `setMaxResults`, reversed in Java before returning so the result stays ascending |
 | `JpaDetectionRepository` | `DetectionRepositoryPort` | always `persist`; prune-on-write (100k rows/stream); `DetectionQuery#to` treated as inclusive despite the port's javadoc calling it exclusive (see Gotchas) |
 | `JpaAssetImageRepository` | `AssetImageRepositoryPort` | keyed by `assetId` itself (no synthetic id — at most one image per asset); `data` plain `byte[]`/`bytea` |
 | `JpaGeofenceRepository` | `GeofenceRepositoryPort` | merge upsert, hard delete; no soft-delete concept (`enabled=false` is just a column) |
@@ -369,7 +369,12 @@ buffered samples per open usage; `DEFAULT_BATCH_WINDOW_MILLIS` is non-zero on pu
   more than one migration with version 25` against a working tree that no longer contains such a file
   — `mvn clean` is the fix.
 - **`JpaTelemetryRepository#findByUsage`'s `limit` returns the earliest samples, not the most
-  recent** — a caller expecting "newest N" gets the flight's first N seconds instead.
+  recent** — a caller expecting "newest N" gets the flight's first N seconds instead. Left
+  unchanged by COMMAND-MAP-FLOW-PLAN.md B1: `DefaultReplayService` genuinely wants this window.
+  A caller that wants "newest N" — `AssetController`'s `GET /api/usages/{usageId}/telemetry`, which
+  this defect (D1) was silently freezing the `/command` fleet map's poll against — now calls the
+  new sibling `findLatestByUsage` instead; same wire contract, same ascending order, different
+  window.
 - **`DetectionQuery#to` is treated as inclusive** by both the query and `JpaDetectionRepository`,
   despite the port's own javadoc calling it exclusive.
 - **Count this module's tests from Maven's own summary line, not by summing
@@ -455,6 +460,15 @@ already carries the column and nothing here needed a schema change. `PostgresDoc
 gained two new `AssetUsageRepositoryTests` cases (`savedUsageWithAKnownPilotRoundTripsExactly`,
 `savedUsageWithNoPilotRoundTripsAsNull`). 267 → 269 tests (Maven's own summary line); `BUILD SUCCESS`,
 Docker ran (not skipped — Testcontainers started a real `postgres:16`).
+
+**COMMAND-MAP-FLOW-PLAN.md B1 (D1 fix)** added `JpaTelemetryRepository#findLatestByUsage` — the
+`/command` fleet map polls `GET /api/usages/{usageId}/telemetry` and treated the last element of
+`findByUsage`'s earliest-first window as "latest position", so the map froze once a flight passed
+`limit` samples. Additive only: `findByUsage`/`DefaultReplayService` untouched, `TelemetryRepositoryPort`
+gained one method, `AssetController#telemetry` now calls it instead — same path, same param, same
+DTO, same ascending order, same `200 []` on an unknown usage. `PostgresDockerIntegrationTest`'s
+`TelemetryRepositoryTests` gained three cases (latest-window selection, ascending order preserved,
+empty case). 271 → 274 tests (Maven's own summary line); `BUILD SUCCESS`, Docker ran (not skipped).
 
 See `docs/plans/README.md` for the plan-status authority behind the phase references throughout this
 file (MVP2, POSTGRES-ONLY-CONTEXT, SCALE-100, FIXED-CAMERA-GEO, VISUAL-GEO-V2, DRONE-ONBOARDING,
