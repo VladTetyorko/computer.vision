@@ -74,6 +74,7 @@ import {
   markKindIcon,
   markKindLabel,
   markSymbolClasses,
+  markerFreshnessClass,
   markerLastContact,
   readHiddenLayers,
   resolveMapColors,
@@ -825,18 +826,18 @@ export class TacticalMap {
   }
 
   /**
-   * One asset glyph, state carried by colour only (docs/plans/done/VISUAL-REFRESH-PLAN.md F7,
-   * honesty-fixed by docs/plans/active/COMMAND-MAP-FLOW-PLAN.md D2/W1): `--color-danger` when the
-   * asset needs attention, else `--color-live` while {@link isMarkerLive} (fresh telemetry, not
-   * just a `STREAMING` status bucket that might be minutes stale) and muted otherwise, `--color-info`
-   * ring when selected. Shape is a *separate* axis from colour, purely honest about heading: a
-   * directional arrow only when `headingDegrees` is actually known, otherwise the hollow
+   * One asset glyph, state carried by colour/opacity only (docs/plans/done/VISUAL-REFRESH-PLAN.md F7,
+   * honesty-fixed by docs/plans/active/COMMAND-MAP-FLOW-PLAN.md D2/§3.3/W1): the marker root always
+   * carries exactly one of `live`/`aging`/`stale` ({@link markerFreshnessClass}, §3.3's frozen tri-state
+   * — full colour / muted / muted+dimmed), `--color-danger` on top when the asset needs attention,
+   * `--color-info` ring when selected. Shape is a *separate* axis from colour, purely honest about
+   * heading: a directional arrow only when `headingDegrees` is actually known, otherwise the hollow
    * non-directional ring — never a fabricated 0°/North. Own assets are always friendly by
    * definition (docs/plans/done/MAP-REWORK-PLAN.md §5.1), which is why they keep this rounded glyph
    * rather than ever taking a hostile/unknown frame — affiliation symbology applies to *marks*.
    */
   private assetIcon(L: typeof Leaflet, asset: FleetMarker): Leaflet.DivIcon {
-    const modifiers = `${isMarkerLive(asset) ? ' live' : ''}${
+    const modifiers = ` ${markerFreshnessClass(asset)}${
       this.attentionAssetIds().has(asset.assetId) ? ' attention' : ''
     }${asset.assetId === this.selectedAssetId() ? ' selected' : ''}`;
     if (asset.headingDegrees === undefined) {

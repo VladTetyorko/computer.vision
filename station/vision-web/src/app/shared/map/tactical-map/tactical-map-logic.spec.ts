@@ -23,6 +23,7 @@ import {
   layerRows,
   markKindCounts,
   markSymbolClasses,
+  markerFreshnessClass,
   markerLastContact,
   minPointsFor,
   parseHiddenLayers,
@@ -264,6 +265,29 @@ describe('markerLastContact / lastContactLabel (docs/plans/active/COMMAND-MAP-FL
     expect(lastContactLabel({ source: 'telemetry', ageSeconds: 5 })).toBe('Last contact 5s ago');
     expect(lastContactLabel({ source: 'flight', ageSeconds: 3600 })).toBe('Last flight started 1h ago');
     expect(lastContactLabel({ source: 'unknown' })).toBe('Last contact unknown');
+  });
+});
+
+describe('markerFreshnessClass (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.3 frozen tri-state)', () => {
+  it('is live for a fresh telemetry-sourced age', () => {
+    expect(markerFreshnessClass(asset({ live: true, sampleAgeSeconds: 2 }))).toBe('live');
+  });
+
+  it('is aging for a telemetry-sourced age in the amber band', () => {
+    expect(markerFreshnessClass(asset({ live: true, sampleAgeSeconds: 7 }))).toBe('aging');
+  });
+
+  it('is stale for a telemetry-sourced age past the red threshold — folds freshness\' own "none" tier in too', () => {
+    expect(markerFreshnessClass(asset({ live: true, sampleAgeSeconds: 200 }))).toBe('stale');
+  });
+
+  it('is always stale for a flight-sourced age, however recent', () => {
+    expect(markerFreshnessClass(asset({ live: true, lastContact: { source: 'flight', ageSeconds: 1 } }))).toBe('stale');
+  });
+
+  it('falls back to the raw live bucket when unknown (pre-W3 offline bucket, or never wired)', () => {
+    expect(markerFreshnessClass(asset({ live: false }))).toBe('stale');
+    expect(markerFreshnessClass(asset({ live: true }))).toBe('live');
   });
 });
 

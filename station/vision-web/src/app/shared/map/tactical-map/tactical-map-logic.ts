@@ -14,7 +14,7 @@ import type {
 import type { FleetMarker, LastContact } from '../../../core/map/map-logic';
 import { zoneKindLabel } from '../../../core/geofence/geofence-logic';
 import { readPersistedString, writePersistedString } from '../../../core/panel-state';
-import { freshness, humanAge } from '../../../core/telemetry/telemetry-logic';
+import { freshness, humanAge, type Freshness } from '../../../core/telemetry/telemetry-logic';
 import type { IconName } from '../../ui/icon-registry';
 
 /**
@@ -406,25 +406,36 @@ export function lastContactLabel(contact: LastContact): string {
 }
 
 /**
- * Whether a marker draws as "live" (full-colour, directional-capable glyph) rather than "last
- * known" (muted) — frontend-style §7's three-state vocabulary (live/offline/attention). Honesty
- * fix for COMMAND-MAP-FLOW-PLAN.md D2: `asset.live` alone only reflects the `STREAMING`/`OFFLINE`
- * status bucket (`core/map/map-logic.ts#buildMarker`), not whether the telemetry behind it is
- * still fresh — a frozen poll (D1) left a marker looking "live" forever. When {@link
- * markerLastContact} resolves a `'telemetry'`-sourced age, `freshness()` (the app's one staleness
- * clock) is the tiebreaker: only a genuinely fresh sample counts as live, regardless of bucket. A
- * `'flight'`-sourced age never counts as live, however recent — "last flight started 2s ago" is a
- * historical fact, not a live reading, so it would be dishonest to colour the glyph as confidently
- * as a fresh telemetry sample. `'unknown'` (the common case for the `offline` bucket, which gets no
- * live telemetry poll at all) falls back to the raw bucket, so nothing regresses before
- * `lastContact` is wired everywhere.
+ * The marker glyph's own three-state colour/opacity tier (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md
+ * §3.3, "Rendering, frozen": *"live (full colour) · aging (muted) · stale/none (muted + reduced
+ * opacity)"*) — `core/telemetry/telemetry-logic.ts#freshness`'s own tri-state, reused verbatim, not
+ * a new threshold. Honesty fix for D2: `asset.live` alone only reflects the `STREAMING`/`OFFLINE`
+ * status bucket (`core/map/map-logic.ts#buildMarker`), not whether the telemetry behind it is still
+ * fresh — a frozen poll (D1) left a marker looking "live" forever regardless of how stale its last
+ * sample actually was. `'flight'`-sourced ages (§3.3 tier 2) always read `'stale'`, however recent
+ * — "last flight started 2s ago" is a historical fact, not a live reading, so it would be dishonest
+ * to colour the glyph as confidently as a fresh telemetry sample. `'unknown'` (the common case for
+ * the `offline` bucket pre-wave-W3, which gets no live telemetry poll at all) falls back to the raw
+ * `live`/`stale` bucket, so nothing regresses before `lastContact` is wired everywhere; `freshness`'s
+ * own `'none'` tier is folded into `'stale'` — the plan brackets them together as one visual state.
  */
-export function isMarkerLive(asset: Pick<FleetMarker, 'live' | 'lastContact' | 'sampleAgeSeconds'>): boolean {
+export function markerFreshnessClass(
+  asset: Pick<FleetMarker, 'live' | 'lastContact' | 'sampleAgeSeconds'>,
+): Exclude<Freshness, 'none'> {
   const contact = markerLastContact(asset);
   if (contact.source === 'unknown') {
-    return asset.live;
+    return asset.live ? 'live' : 'stale';
   }
-  return contact.source === 'telemetry' && freshness(contact.ageSeconds) === 'live';
+  if (contact.source === 'flight') {
+    return 'stale';
+  }
+  const tier = freshness(contact.ageSeconds);
+  return tier === 'none' ? 'stale' : tier;
+}
+
+/** Whether a marker draws with full "live" confidence — {@link markerFreshnessClass} narrowed to its top tier. */
+export function isMarkerLive(asset: Pick<FleetMarker, 'live' | 'lastContact' | 'sampleAgeSeconds'>): boolean {
+  return markerFreshnessClass(asset) === 'live';
 }
 
 /** How many marks carry each affiliation — the count beside each legend swatch. */

@@ -446,13 +446,15 @@
   cursor: not-allowed;
 }
 
-/* ---- Asset markers: one glyph, state by colour only (docs/plans/done/VISUAL-REFRESH-PLAN.md F7,
-   honesty-fixed by docs/plans/active/COMMAND-MAP-FLOW-PLAN.md D2/W1) ------------------------------------
-   `--marker-color` is set once per state on `.asset-marker` itself and read by whichever shape is
-   actually drawn inside it (`isMarkerLive`/heading-known decide the shape in `tactical-map.ts#assetIcon`,
-   not this file) — one declaration per state instead of one per state-per-shape, and `.attention`
-   only needs to override the single custom property to recolour either shape. Order matters: `.attention`
-   must stay declared after the base/`.live` rules so it wins the cascade regardless of freshness. */
+/* ---- Asset markers: one glyph, state by colour/opacity only (docs/plans/done/VISUAL-REFRESH-PLAN.md F7,
+   honesty-fixed by docs/plans/active/COMMAND-MAP-FLOW-PLAN.md D2/§3.3/W1) --------------------------------
+   Every marker root carries exactly one of `.live`/`.aging`/`.stale` (`markerFreshnessClass`,
+   §3.3's frozen tri-state — full colour / muted / muted+dimmed, `freshness()`'s own tiers reused
+   verbatim). `--marker-color` is set once per tier on `.asset-marker` itself and read by whichever
+   shape is actually drawn inside it (heading-known decides the shape in `tactical-map.ts#assetIcon`,
+   not this file) — one declaration per tier instead of one per tier-per-shape, and `.attention`
+   only needs to override the single custom property to recolour either shape. Order matters:
+   `.attention` must stay declared after the tier rules so it wins the cascade regardless of freshness. */
 
 :host ::ng-deep .asset-marker {
   --marker-color: var(--text-faint);
@@ -485,8 +487,10 @@
   filter: drop-shadow(0 1px 3px color-mix(in srgb, var(--black) 40%, transparent));
 }
 
-:host ::ng-deep .asset-marker:not(.live) .drone-arrow,
-:host ::ng-deep .asset-marker:not(.live) .drone-hollow {
+/* `aging` stays full-opacity muted — only `stale`/`none` (folded into `.stale`, see
+   `markerFreshnessClass`'s own doc comment) additionally dims. */
+:host ::ng-deep .asset-marker.stale .drone-arrow,
+:host ::ng-deep .asset-marker.stale .drone-hollow {
   opacity: 0.75;
 }
 
