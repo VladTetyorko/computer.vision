@@ -4,6 +4,7 @@
   [class.severity-warning]="tile().severity === 'warning'"
   [class.severity-critical]="tile().severity === 'critical'"
   [class.pulsing]="tile().pulse !== null"
+  [attr.aria-label]="'Focus ' + tile().title"
   [title]="reasonsTooltip() || null"
   (click)="onActivate()"
 >
