@@ -74,6 +74,11 @@ function baseInput(overrides: Partial<BuildWallTilesInput> = {}): BuildWallTiles
     pipelineErrors: new Map(),
     breaches: [],
     nowMs: NOW,
+    // Every existing test in this file predates `summaryLoaded` and assumes the fleet-summary poll
+    // has already resolved at least once — default it `true` so those cases (including the
+    // deliberately-empty-`assets` "degraded summary" ones) keep meaning "loaded and confirmed," not
+    // "hasn't answered yet." Tests for the cold-mount window override this explicitly.
+    summaryLoaded: true,
     ...overrides,
   };
 }
@@ -164,6 +169,68 @@ describe('buildWallTiles — title fallback ladder + unlinked (D3/D4)', () => {
   it('falls back to an 8-char device-id fragment when neither asset nor device resolves', () => {
     const tiles = buildWallTiles(baseInput({ assets: [], devices: [], streams: [stream({ deviceId: 'abcdefghijklmnop' })] }));
     expect(tileFor(tiles).title).toBe('abcdefgh');
+  });
+
+  it('joins a live stream and summary row that share a streamId — regression for a live-verification defect where a matching pair still rendered unlinked', () => {
+    // Exact shape from the live repro: /api/streams and /api/fleet/summary both carry
+    // streamId "a7fcb809-bb57-493f-9518-a24a6fcb03c4" for the same device/asset, yet the tile
+    // rendered "Skyfall Vampire 2 · telemetry" (the device name) and "Not linked to an asset".
+    const streamId = 'a7fcb809-bb57-493f-9518-a24a6fcb03c4';
+    const deviceId = '14707108-8d65-4346-a6c0-484f477832d1';
+    const tiles = buildWallTiles(
+      baseInput({
+        streams: [stream({ streamId, deviceId, state: 'LIVE' })],
+        devices: [device({ id: deviceId, name: 'Skyfall Vampire 2 · telemetry' })],
+        assets: [
+          asset({
+            assetId: 'asset-vampire-2',
+            displayName: 'Skyfall Vampire 2',
+            streaming: true,
+            streamId,
+            batteryPercent: 98.6,
+            telemetryAgeMs: 836,
+            flightMode: 'Loiter',
+            armed: true,
+          }),
+        ],
+      }),
+    );
+    const tile = tileFor(tiles, streamId);
+    // The join hit: linked, and the title is the asset name ALONE — never "· telemetry" or any
+    // other device-plumbing suffix, even though the device's own name carries one.
+    expect(tile.unlinked).toBe(false);
+    expect(tile.assetId).toBe('asset-vampire-2');
+    expect(tile.title).toBe('Skyfall Vampire 2');
+    // The summary facts a linked tile is supposed to surface are all present, not "—".
+    expect(tile.batteryPercent).toBe(98.6);
+    expect(tile.telemetryAgeLabel).not.toBeNull();
+    expect(tile.flightMode).toBe('Loiter');
+    expect(tile.armed).toBe(true);
+  });
+});
+
+describe('buildWallTiles — cold-mount window before the first summary response (fix)', () => {
+  it('never claims "unlinked" before summaryLoaded is true, even with no asset data yet', () => {
+    // WallFacade is request-scoped: on every fresh navigation to /wall, `assets` legitimately starts
+    // empty for the brief window before its own first `fleetSummary()` fetch resolves, even though
+    // FleetStore's streams/devices may already be warm. That window must render as "we don't know
+    // yet", never as the confirmed-negative "Not linked to an asset".
+    const tiles = buildWallTiles(baseInput({ assets: [], summaryLoaded: false }));
+    const tile = tileFor(tiles);
+    expect(tile.unlinked).toBe(false);
+    expect(tile.assetId).toBeUndefined();
+    expect(tile.title).toBe('Device One'); // still a reasonable placeholder, just not asserted as final
+  });
+
+  it('still claims "unlinked" once summaryLoaded is true and no asset resolves — the pre-existing degrade path is unchanged', () => {
+    const tiles = buildWallTiles(baseInput({ assets: [], summaryLoaded: true }));
+    expect(tileFor(tiles).unlinked).toBe(true);
+  });
+
+  it('links immediately once both summaryLoaded and a matching asset are present, regardless of prior loading state', () => {
+    const tiles = buildWallTiles(baseInput({ summaryLoaded: true }));
+    expect(tileFor(tiles).unlinked).toBe(false);
+    expect(tileFor(tiles).title).toBe('Skyfall One');
   });
 });
 

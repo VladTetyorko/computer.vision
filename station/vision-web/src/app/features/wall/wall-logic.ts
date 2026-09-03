@@ -79,6 +79,15 @@ export interface BuildWallTilesInput {
   readonly pipelineErrors: ReadonlyMap<string, string>;
   readonly breaches: readonly GeofenceBreach[];
   readonly nowMs: number;
+  /** `true` once `WallFacade`'s fleet-summary poll has resolved at least once (success OR a failure
+   *  that fell back to a stale-but-real summary) — `false` only for the brief window between mount
+   *  and that first response landing. Distinguishes "no asset data yet" from "asset data arrived and
+   *  confirms no link": `assets: []` means the former on a cold mount and the latter after a
+   *  failed/forbidden poll with no prior summary, and only `unlinked` should tell them apart — a tile
+   *  is never allowed to assert "Not linked to an asset" before the join has actually had a chance to
+   *  run (the defect a live check caught: a real, matching asset existed, but the tile rendered
+   *  unlinked because it painted before the first summary response arrived). */
+  readonly summaryLoaded: boolean;
 }
 
 /**
@@ -199,12 +208,15 @@ export const ACTIVITY_WINDOW_MS = 60 * 60 * 1000;
  * by `title` (case-insensitive), then `streamId` as the deterministic tie-break — never
  * attention-sorted, so a watcher's spatial memory of the grid survives an alarm.
  *
- * Degrades honestly on a failed/forbidden fleet summary: `assets: []` leaves every tile `unlinked`,
- * `severity: 'ok'`, `batterySeverity: 'unknown'`, title falling to the device name — never a
- * fabricated fact (§3.2's own framing, WALL-FLOW-PLAN.md wave W1 scope).
+ * Degrades honestly on a failed/forbidden fleet summary: `assets: []` leaves every tile `severity:
+ * 'ok'`, `batterySeverity: 'unknown'`, title falling to the device name — never a fabricated fact
+ * (§3.2's own framing, WALL-FLOW-PLAN.md wave W1 scope). `unlinked` itself only ever turns `true`
+ * once {@link BuildWallTilesInput.summaryLoaded} is `true` — before the first summary response lands,
+ * "no asset data yet" is not the same claim as "confirmed no asset," and only the latter earns the
+ * "Not linked to an asset" note.
  */
 export function buildWallTiles(input: BuildWallTilesInput): readonly WallTileModel[] {
-  const { streams, devices, assets, events, pipelineErrors, breaches, nowMs } = input;
+  const { streams, devices, assets, events, pipelineErrors, breaches, nowMs, summaryLoaded } = input;
 
   const assetByStreamId = new Map<string, AssetAttention>();
   for (const asset of assets) {
@@ -234,7 +246,7 @@ export function buildWallTiles(input: BuildWallTilesInput): readonly WallTileMod
       deviceId: stream.deviceId,
       assetId: asset?.assetId,
       title,
-      unlinked: asset === undefined,
+      unlinked: asset === undefined && summaryLoaded,
       viewUrl: stream.viewUrl,
       whepUrl: stream.whepUrl,
       health,

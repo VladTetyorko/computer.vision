@@ -35,9 +35,19 @@ const SUMMARY_POLL_INTERVAL_MS = 5_000;
  * **Degrades honestly, matching `command-facade.ts#refreshSummary` byte-for-byte**: a failed poll
  * (backend down, a forbidden org) simply keeps the last-known summary; when there has never been one
  * (`summarySignal() === undefined`), `tiles` is built with `assets: []`, which `wall-logic.ts#buildWallTiles`
- * already turns into an honest all-`unlinked`/`ok`/`unknown` picture — no separate error signal is
- * needed here (unlike Command's own banner), since a wall tile's degrade path is silent by
- * construction (§3.2's own framing).
+ * already turns into an honest `ok`/`unknown` picture — no separate error signal is needed here
+ * (unlike Command's own banner), since a wall tile's degrade path is silent by construction (§3.2's
+ * own framing).
+ *
+ * **`unlinked` waits for the first summary response** (fix, live-verification defect: a matching
+ * `streamId` existed on both `/api/streams` and `/api/fleet/summary`, yet a freshly-mounted tile
+ * still rendered "Not linked to an asset") — `WallFacade` is request-scoped (no `providedIn: 'root'`,
+ * §3.4), so `summarySignal` restarts at `undefined` on every navigation to `/wall` even when
+ * `FleetStore`'s `streams()`/`devices()` are already warm (root-provided, possibly SSE-live from a
+ * prior page). `buildWallTiles` only asserts `unlinked: true` once {@link summaryLoadedSignal} flips
+ * (set the moment `refreshSummary` first resolves, success or failure — mirroring the "keeps the
+ * last-known summary" degrade rule above), so the join has always had a real chance to run before a
+ * tile is allowed to claim "confirmed no asset."
  */
 @Injectable()
 export class WallFacade {
@@ -48,6 +58,9 @@ export class WallFacade {
   private readonly settings = inject(SettingsStore);
 
   private readonly summarySignal = signal<FleetSummary | undefined>(undefined);
+  /** Flips once, after `refreshSummary`'s first attempt settles (success or failure) — see the class
+   *  doc comment's "`unlinked` waits for the first summary response" note. Never resets. */
+  private readonly summaryLoadedSignal = signal(false);
   /** Piggybacks the summary poll's own 5s cadence for the pipeline-error decay window and the pulse
    *  window — the same "tick alongside the poll that already runs" idiom `command-facade.ts#nowSignal`
    *  uses, rather than a second independent clock. */
@@ -68,6 +81,7 @@ export class WallFacade {
       pipelineErrors: this.pipelineErrorMessagesByStreamId(),
       breaches: this.breaches(),
       nowMs: this.nowSignal(),
+      summaryLoaded: this.summaryLoadedSignal(),
     }),
   );
 
@@ -156,6 +170,11 @@ export class WallFacade {
     } catch {
       // Silent-degrade — a background poll failure keeps showing the last-known summary, matching
       // every other poller in this app (and `command-facade.ts`'s own non-first-load path).
+    } finally {
+      // Set unconditionally, success or failure — a failed *first* attempt still resolves the
+      // "have we ever heard back" question, and `buildWallTiles` needs that answer (not the summary
+      // itself) to tell "no asset data yet" apart from "confirmed no link."
+      this.summaryLoadedSignal.set(true);
     }
   }
 }
