@@ -1,0 +1,298 @@
+import type { ActiveStream, AssetAttention, DetectionEvent, Device } from '../../core/api/models';
+import {
+  attentionAgeLabel,
+  attentionReasons,
+  batteryAttentionSeverity,
+  type AttentionReason,
+  type AttentionSeverity,
+  type BatteryAttentionSeverity,
+} from '../../core/fleet/attention-logic';
+import type { GeofenceBreach } from '../../core/geofence/geofence-logic';
+
+/**
+ * Pure, Angular-free model behind `WallFacade`/`wall.ts`/`wall-tile.ts`/`wall-focus.ts`/
+ * `wall-activity.ts` (docs/plans/active/WALL-FLOW-PLAN.md §3.4, frozen) — every rule the wall's
+ * per-tile health/attention/pulse verdicts and its activity drawer's rows derive from, split out so
+ * they're unit-testable without HTTP, a poller, or a component, mirroring every other feature's own
+ * `*-logic.ts` split (`core/fleet/attention-logic.ts`, `features/command/command-logic.ts`, …).
+ *
+ * **The fleet-summary join replaces per-tile telemetry polling** (WALL-FLOW-PLAN.md §2.1 D4/D5,
+ * accepted decision #3): a tile's identity/battery/telemetry-age/mode/armed/failsafe/open-event-count
+ * all come from one `AssetAttention` row (`GET /api/fleet/summary`, already polled fleet-wide by
+ * `WallFacade`) rather than a per-tile `TelemetryStore` poller. The join key is `AssetAttention.streamId`
+ * (present only while `asset.streaming` is `true` — that field's own doc comment), matched against
+ * `ActiveStream.streamId` — the same shape `features/command/command-logic.ts#buildEntityRows` reads,
+ * applied to a stream-keyed tile instead of an asset-keyed row (the wall's tiles are *streams*, not
+ * assets — a streaming device with no asset still gets a tile, `unlinked: true`).
+ */
+
+// --- Tile health (§3.2 A1) -----------------------------------------------------------------------
+
+export type TileHealth =
+  | 'live'
+  | 'starting'
+  | 'stalled'
+  | 'reconnecting'
+  | 'no-publisher'
+  | 'pipeline-error'
+  | 'unknown';
+
+export interface TilePulse {
+  readonly label: string;
+  readonly count: number;
+  readonly atIso: string;
+}
+
+export interface WallTileModel {
+  readonly streamId: string;
+  readonly deviceId: string;
+  readonly assetId?: string;
+  readonly title: string;
+  readonly unlinked: boolean;
+  readonly viewUrl?: string;
+  readonly whepUrl?: string;
+  readonly health: TileHealth;
+  readonly healthLabel: string | null;
+  readonly severity: AttentionSeverity | 'ok';
+  readonly reasons: readonly AttentionReason[];
+  readonly batteryPercent?: number;
+  readonly batterySeverity: BatteryAttentionSeverity;
+  readonly telemetryAgeLabel: string | null;
+  readonly flightMode?: string;
+  readonly armed?: boolean;
+  readonly failsafe?: boolean;
+  readonly pulse: TilePulse | null;
+  readonly openEventCount: number;
+}
+
+export interface WallActivityRow {
+  readonly event: DetectionEvent;
+  readonly tile: WallTileModel;
+  readonly sourceLabel: string;
+}
+
+export interface BuildWallTilesInput {
+  readonly streams: readonly ActiveStream[];
+  readonly devices: readonly Device[];
+  readonly assets: readonly AssetAttention[];
+  readonly events: readonly DetectionEvent[];
+  readonly pipelineErrors: ReadonlyMap<string, string>;
+  readonly breaches: readonly GeofenceBreach[];
+  readonly nowMs: number;
+}
+
+/**
+ * `wallDensity` → the 3-stop segmented control (§3.1, replacing the old `Tiles per row` `<select>`,
+ * D11) — `value` is the number `SettingsStore.wallDensity` persists (unchanged key/type, so an
+ * existing 2/3/4/5/6 value from before this wave still resolves via {@link tileMinPx}'s own clamp),
+ * `tileMinPx` feeds `repeat(auto-fill, minmax(var(--tile-min), 1fr))` directly.
+ */
+export const DENSITY_STOPS: readonly { value: number; label: string; tileMinPx: number }[] = [
+  { value: 2, label: 'Comfortable', tileMinPx: 480 },
+  { value: 3, label: 'Compact', tileMinPx: 320 },
+  { value: 4, label: 'Dense', tileMinPx: 240 },
+];
+
+/** `≥4` reads as `Dense`, `<2` as `Comfortable` — a stale/pre-wave persisted value (the old
+ *  `<select>` allowed 2..6) degrades to the nearest real stop rather than an undefined `--tile-min`. */
+export function tileMinPx(wallDensity: number): number {
+  if (wallDensity <= DENSITY_STOPS[0].value) {
+    return DENSITY_STOPS[0].tileMinPx;
+  }
+  if (wallDensity >= DENSITY_STOPS[2].value) {
+    return DENSITY_STOPS[2].tileMinPx;
+  }
+  return DENSITY_STOPS[1].tileMinPx;
+}
+
+/**
+ * `ActiveStream.state` + "no publisher URL" + an active `PIPELINE_ERROR` collapse into one verdict,
+ * frozen precedence (§3.2 A1): `no-publisher` → `pipeline-error` → `stalled` → `reconnecting` →
+ * `starting` → `live`/`unknown`. `live`/`unknown` both return a `null` label — the picture is the
+ * message for `live`, and `unknown` (`UNOBSERVED`, or an absent `state` from an older backend) is the
+ * honest "cannot judge" rather than a fabricated fault (`stream-state-logic.ts#videoNotice`'s own
+ * rule, applied at tile scale).
+ *
+ * `pipelineErrorDetail` renders **verbatim** (CLAUDE.md rule: never paraphrase a server-supplied
+ * failure reason) — this is the one health label with a variable tail; every other label is a fixed,
+ * tile-scale phrase (two-to-four words, `wall-tile.html`'s own single HUD line — see
+ * WALL-FLOW-PLAN.md §3.3's reuse-ledger note on why this doesn't reuse `stream-state-logic.ts`'s
+ * cockpit-scale sentences).
+ */
+function deriveHealth(
+  stream: ActiveStream,
+  pipelineErrorDetail: string | undefined,
+): { readonly health: TileHealth; readonly healthLabel: string | null } {
+  if (!stream.viewUrl) {
+    return { health: 'no-publisher', healthLabel: 'No publisher — nothing to watch.' };
+  }
+  if (pipelineErrorDetail) {
+    return { health: 'pipeline-error', healthLabel: `Pipeline error — ${pipelineErrorDetail}` };
+  }
+  switch (stream.state) {
+    case 'STALLED':
+      return { health: 'stalled', healthLabel: 'No video arriving.' };
+    case 'RECONNECTING':
+      return { health: 'reconnecting', healthLabel: 'Reconnecting…' };
+    case 'STARTING':
+      return { health: 'starting', healthLabel: 'Starting…' };
+    case 'LIVE':
+      return { health: 'live', healthLabel: null };
+    default:
+      return { health: 'unknown', healthLabel: null };
+  }
+}
+
+/**
+ * The tile's pulse (§3.2 A3, `UX-DESIGN.md:171` finally built) — the *dominant* label among this
+ * stream's active `OPEN` detection events within {@link PULSE_WINDOW_MS}: group by label, the
+ * label with the most concurrently-open events wins (a `Person ×3` chip means three concurrently
+ * open person-detections, not three historical ones — `count` only ever counts events still `OPEN`
+ * and still inside the window), ties broken by whichever label's own most-recent event is more
+ * recent. A single late arrival of a different label must not steal the chip from an
+ * already-larger, still-open group — the dominant activity is the more honest "what does this tile
+ * need me for" signal than whichever event merely arrived last. `label` is the raw wire label
+ * (lowercase); the template capitalizes it via CSS, matching `shared/ui/event-row.css#.event-label`'s
+ * own `text-transform: capitalize` convention rather than a second JS capitalizer.
+ */
+function tilePulse(events: readonly DetectionEvent[], streamId: string, nowMs: number): TilePulse | null {
+  const cutoffMs = nowMs - PULSE_WINDOW_MS;
+  const active = events.filter(
+    (event) => event.streamId === streamId && event.state === 'OPEN' && Date.parse(event.lastSeen) >= cutoffMs,
+  );
+  if (active.length === 0) {
+    return null;
+  }
+
+  const countByLabel = new Map<string, number>();
+  const mostRecentByLabel = new Map<string, DetectionEvent>();
+  for (const event of active) {
+    countByLabel.set(event.label, (countByLabel.get(event.label) ?? 0) + 1);
+    const current = mostRecentByLabel.get(event.label);
+    if (!current || Date.parse(event.lastSeen) > Date.parse(current.lastSeen)) {
+      mostRecentByLabel.set(event.label, event);
+    }
+  }
+
+  let winner: DetectionEvent | undefined;
+  let winnerCount = -1;
+  for (const [label, count] of countByLabel) {
+    const candidate = mostRecentByLabel.get(label)!;
+    const candidateIsNewerTie = count === winnerCount && Date.parse(candidate.lastSeen) > Date.parse(winner!.lastSeen);
+    if (count > winnerCount || candidateIsNewerTie) {
+      winner = candidate;
+      winnerCount = count;
+    }
+  }
+
+  return { label: winner!.label, count: winnerCount, atIso: winner!.lastSeen };
+}
+
+/** How long an `OPEN` event keeps a tile pulsing after its own `lastSeen` (§3.2 A3). */
+export const PULSE_WINDOW_MS = 60_000;
+
+/** The activity drawer's own recency floor (§3.2 A4, D19) — older activity is `/monitor/alerts`' job. */
+export const ACTIVITY_WINDOW_MS = 60 * 60 * 1000;
+
+/**
+ * The wall's tiles, one per currently-running stream, **stable-ordered** (§3, accepted decision #2):
+ * by `title` (case-insensitive), then `streamId` as the deterministic tie-break — never
+ * attention-sorted, so a watcher's spatial memory of the grid survives an alarm.
+ *
+ * Degrades honestly on a failed/forbidden fleet summary: `assets: []` leaves every tile `unlinked`,
+ * `severity: 'ok'`, `batterySeverity: 'unknown'`, title falling to the device name — never a
+ * fabricated fact (§3.2's own framing, WALL-FLOW-PLAN.md wave W1 scope).
+ */
+export function buildWallTiles(input: BuildWallTilesInput): readonly WallTileModel[] {
+  const { streams, devices, assets, events, pipelineErrors, breaches, nowMs } = input;
+
+  const assetByStreamId = new Map<string, AssetAttention>();
+  for (const asset of assets) {
+    if (asset.streaming && asset.streamId) {
+      assetByStreamId.set(asset.streamId, asset);
+    }
+  }
+
+  const tiles: WallTileModel[] = streams.map((stream) => {
+    const asset = assetByStreamId.get(stream.streamId);
+    const device = devices.find((candidate) => candidate.id === stream.deviceId);
+    const title = asset?.displayName ?? device?.name ?? stream.deviceId.slice(0, 8);
+    const pipelineErrorDetail = pipelineErrors.get(stream.streamId);
+    const { health, healthLabel } = deriveHealth(stream, pipelineErrorDetail);
+
+    const assetBreaches = asset ? breaches.filter((breach) => breach.assetId === asset.assetId) : [];
+    const rawReasons = asset ? attentionReasons(asset, undefined, assetBreaches, pipelineErrorDetail) : [];
+    // Two anti-double-signal rules (§3.2 A2, frozen): `open-events` is dropped — the pulse (A3)
+    // already says it, with the label; `pipeline-error` is dropped too — when it's this tile's
+    // health, the health line already says it (once), and when something worse pre-empted it as the
+    // health (`no-publisher`), a leftover pipeline-error chip would just be noise about a stream
+    // that isn't watchable anyway.
+    const reasons = rawReasons.filter((reason) => reason.kind !== 'open-events' && reason.kind !== 'pipeline-error');
+
+    return {
+      streamId: stream.streamId,
+      deviceId: stream.deviceId,
+      assetId: asset?.assetId,
+      title,
+      unlinked: asset === undefined,
+      viewUrl: stream.viewUrl,
+      whepUrl: stream.whepUrl,
+      health,
+      healthLabel,
+      severity: reasons[0]?.severity ?? 'ok',
+      reasons,
+      batteryPercent: asset?.batteryPercent,
+      batterySeverity: batteryAttentionSeverity(asset?.batteryPercent),
+      telemetryAgeLabel: asset?.telemetryAgeMs !== undefined ? attentionAgeLabel(asset) : null,
+      flightMode: asset?.flightMode,
+      armed: asset?.armed,
+      failsafe: asset?.failsafe,
+      pulse: tilePulse(events, stream.streamId, nowMs),
+      openEventCount: asset?.openEventCount ?? 0,
+    };
+  });
+
+  return [...tiles].sort((a, b) => {
+    const byTitle = a.title.localeCompare(b.title, undefined, { sensitivity: 'base' });
+    return byTitle !== 0 ? byTitle : a.streamId.localeCompare(b.streamId);
+  });
+}
+
+/**
+ * The activity drawer's rows (§3.2 A4, W4) — newest-first, scoped to *this wall's* tiles, inside
+ * {@link ACTIVITY_WINDOW_MS}. Frozen matching rule: **by `assetId` when the event and a tile both
+ * carry one, else by `streamId`** — so an asset whose stream restarted mid-session still shows its
+ * earlier events against its current tile rather than falling off the wall (an asset's `assetId`
+ * survives a stream restart; a bare `streamId` does not). An event matching neither is dropped —
+ * this is deliberately *not* the fleet's full activity, only what this wall can honestly name (the
+ * fix for D15/D16: a row's `sourceLabel` is always its matched tile's own `title`, never
+ * `describeEventSource`'s `Removed device · …` fallback, by construction).
+ */
+export function wallActivityRows(
+  events: readonly DetectionEvent[],
+  tiles: readonly WallTileModel[],
+  nowMs: number,
+): readonly WallActivityRow[] {
+  const tilesByAssetId = new Map<string, WallTileModel>();
+  const tilesByStreamId = new Map<string, WallTileModel>();
+  for (const tile of tiles) {
+    if (tile.assetId) {
+      tilesByAssetId.set(tile.assetId, tile);
+    }
+    tilesByStreamId.set(tile.streamId, tile);
+  }
+
+  const cutoffMs = nowMs - ACTIVITY_WINDOW_MS;
+  const rows: WallActivityRow[] = [];
+  for (const event of events) {
+    if (Date.parse(event.lastSeen) < cutoffMs) {
+      continue;
+    }
+    const tile = (event.assetId ? tilesByAssetId.get(event.assetId) : undefined) ?? tilesByStreamId.get(event.streamId);
+    if (!tile) {
+      continue;
+    }
+    rows.push({ event, tile, sourceLabel: tile.title });
+  }
+  return rows.sort((a, b) => Date.parse(b.event.lastSeen) - Date.parse(a.event.lastSeen));
+}

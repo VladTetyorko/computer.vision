@@ -1,80 +1,161 @@
-import { DestroyRef, Injectable, computed, inject } from '@angular/core';
-import { Router } from '@angular/router';
+import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
+import type { FleetSummary } from '../../core/api/models';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { SettingsStore } from '../../core/settings/settings-store';
 import { EventsStore } from '../../core/events/events-store';
-import { resolveEventTarget, resolveReplayDeepLink } from '../../core/events/events-logic';
-import type { DetectionEvent } from '../../core/api/models';
+import { LiveStore } from '../../core/live/live-store';
+import { PollScheduler } from '../../core/poll-scheduler';
+import { activeGeofenceBreaches } from '../../core/geofence/geofence-logic';
+import { activePipelineErrorMessagesByStreamId } from '../../core/system-events/system-events-logic';
+import { cycleBoxesMode, type BoxesMode } from '../../shared/player/detection-overlay-logic';
+import { buildWallTiles, tileMinPx, wallActivityRows, type WallActivityRow, type WallTileModel } from './wall-logic';
+
+/** Matches `command-facade.ts#SUMMARY_POLL_INTERVAL_MS` verbatim — this is the same fleet-summary
+ *  read, on the same cadence, just consumed by the wall instead of Command. */
+const SUMMARY_POLL_INTERVAL_MS = 5_000;
 
 /**
- * `WallPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — orchestrates `FleetStore`/`SettingsStore`/
- * `EventsStore`/`VisionApi`/`Router`, exactly what the page injected directly before this refactor.
- * Every read-model/command below is byte-for-byte what `WallPage` owned before.
+ * `WallPage`'s facade (docs/plans/active/WALL-FLOW-PLAN.md, wave W1) — the wall's one frozen surface
+ * (§3.4): `wall.ts`/`wall-tile.ts`/`wall-focus.ts`/`wall-activity.ts` inject nothing else (`wall.ts`
+ * is guarded by `architecture.spec.ts`; the other three are non-routed presentational children per
+ * that spec's own carve-out, but stay dumb by design here too — see WALL-FLOW-PLAN.md §4's own
+ * per-wave file scope: "so W2 and W3 never touch this file").
+ *
+ * **Replaces per-tile polling with one fleet-wide join** (§2.1 D4/D5, accepted decision #3): a 5s
+ * `api.fleetSummary()` poll (the exact `command-facade.ts` precedent — same interval, same
+ * silent-degrade-on-background-failure shape) feeds `buildWallTiles` alongside `FleetStore`'s
+ * devices/streams, `EventsStore`'s shared detection-event feed, `LiveStore.liveEvents()`-derived
+ * pipeline-error/geofence-breach facts, and the wall clock — one 5s tick for identity, attention,
+ * health and pulses across every tile, replacing the old per-tile `TelemetryStore`+`DetectionsStore`
+ * pair `WallTile` used to stand up itself (D5). `DetectionsStore` still lives in `wall-tile.ts` (W2
+ * scope) — per-frame detection *boxes* cannot come from a summary; only the *event* feed that drives
+ * health/attention/pulses centralizes here.
+ *
+ * **Degrades honestly, matching `command-facade.ts#refreshSummary` byte-for-byte**: a failed poll
+ * (backend down, a forbidden org) simply keeps the last-known summary; when there has never been one
+ * (`summarySignal() === undefined`), `tiles` is built with `assets: []`, which `wall-logic.ts#buildWallTiles`
+ * already turns into an honest all-`unlinked`/`ok`/`unknown` picture — no separate error signal is
+ * needed here (unlike Command's own banner), since a wall tile's degrade path is silent by
+ * construction (§3.2's own framing).
  */
 @Injectable()
 export class WallFacade {
-  private readonly router = inject(Router);
   private readonly api = inject(VisionApi);
-  readonly fleet = inject(FleetStore);
-  readonly settings = inject(SettingsStore);
-  readonly events = inject(EventsStore);
+  private readonly fleet = inject(FleetStore);
+  private readonly events = inject(EventsStore);
+  private readonly live = inject(LiveStore);
+  private readonly settings = inject(SettingsStore);
 
-  readonly densities = [2, 3, 4, 5, 6] as const;
+  private readonly summarySignal = signal<FleetSummary | undefined>(undefined);
+  /** Piggybacks the summary poll's own 5s cadence for the pipeline-error decay window and the pulse
+   *  window — the same "tick alongside the poll that already runs" idiom `command-facade.ts#nowSignal`
+   *  uses, rather than a second independent clock. */
+  private readonly nowSignal = signal(Date.now());
 
-  readonly tiles = computed(() =>
-    this.fleet.streams().map((stream) => ({
-      stream,
-      device: this.fleet.device(stream.deviceId),
-    })),
+  private readonly pipelineErrorMessagesByStreamId = computed(() =>
+    activePipelineErrorMessagesByStreamId(this.live.liveEvents(), this.nowSignal()),
+  );
+  private readonly breaches = computed(() => activeGeofenceBreaches(this.live.liveEvents()));
+
+  /** The frozen tile model (§3.4) — every field a tile/focus/activity component reads. */
+  readonly tiles = computed<readonly WallTileModel[]>(() =>
+    buildWallTiles({
+      streams: this.fleet.streams(),
+      devices: this.fleet.devices(),
+      assets: this.summarySignal()?.assets ?? [],
+      events: this.events.events(),
+      pipelineErrors: this.pipelineErrorMessagesByStreamId(),
+      breaches: this.breaches(),
+      nowMs: this.nowSignal(),
+    }),
   );
 
-  /** Streams with no publisher URL cannot be watched; say so instead of showing black boxes. */
-  readonly unwatchable = computed(
-    () => this.fleet.streams().filter((stream) => !stream.viewUrl).length,
-  );
+  readonly liveCount = computed(() => this.tiles().length);
 
-  // --- Events rail (docs/plans/done/MVP2-PLAN.md §E, E-b bullet 1; docs/plans/done/MVP3-PLAN.md §C-c moved the rail's
-  // own markup/filters/clock into `shared/ui/events-rail.ts` — this page still owns the shared feed's
-  // activate/release lifecycle and its own click-to-navigate target resolution, see that
-  // component's own doc comment for why the split lands there) ------------------------------
+  // --- Density (§3.1, D11 — replaces the old `Tiles per row` <select>) ------------------------
+
+  /** Aliases `SettingsStore.wallDensity` directly — unchanged key/type, so an operator's existing
+   *  preference (2..6 from the old select) survives this wave; {@link tileMinPx} clamps it to the
+   *  nearest of the three frozen stops. */
+  readonly density = this.settings.wallDensity;
+  setDensity(value: number): void {
+    this.settings.wallDensity.set(value);
+  }
+  readonly tileMinPx = computed(() => tileMinPx(this.density()));
+
+  // --- Declutter (D6 — one wall-level control, no longer per-tile) ----------------------------
+
+  /** Aliases `SettingsStore.declutterLevel` directly — the same shared, persisted preference the
+   *  Fly cockpit and `/live` already read/write (H12, `CockpitFacade#boxesMode`'s identical
+   *  simplification). */
+  readonly boxesMode = this.settings.declutterLevel;
+  cycleBoxesMode(): void {
+    this.boxesMode.update((mode: BoxesMode) => cycleBoxesMode(mode));
+  }
+
+  // --- Focus (§3.2 A4 L3 — drill-in stays on the wall, never a navigation) --------------------
+
+  private readonly focusedStreamIdSignal = signal<string | null>(null);
+  readonly focusedStreamId = this.focusedStreamIdSignal.asReadonly();
+  readonly focusedTile = computed<WallTileModel | null>(() => {
+    const streamId = this.focusedStreamIdSignal();
+    if (streamId === null) {
+      return null;
+    }
+    return this.tiles().find((tile) => tile.streamId === streamId) ?? null;
+  });
+
+  focus(streamId: string): void {
+    this.focusedStreamIdSignal.set(streamId);
+  }
+  clearFocus(): void {
+    this.focusedStreamIdSignal.set(null);
+  }
+
+  // --- Activity drawer (§3.2 A4, W4 — this wall's streams only, last hour) -------------------
+
+  private readonly activityOpenSignal = signal(false);
+  readonly activityOpen = this.activityOpenSignal.asReadonly();
+  toggleActivity(): void {
+    this.activityOpenSignal.update((open) => !open);
+  }
+  readonly activity = computed<readonly WallActivityRow[]>(() =>
+    wallActivityRows(this.events.events(), this.tiles(), this.nowSignal()),
+  );
+  readonly activityCount = computed(() => this.activity().length);
 
   constructor() {
-    // "O(visible) discipline" (docs/plans/done/MVP2-PLAN.md §E, E-b bullet 5) — see `EventsStore`'s own doc
-    // comment: this is one of exactly three pages that keeps the shared events poll alive.
+    // "O(visible) discipline" (docs/plans/done/MVP2-PLAN.md §E, E-b bullet 5) — see `EventsStore`'s own
+    // doc comment: the header bell has held a refcount since app boot, so this call is honest about
+    // what it does (bumps the refcount) but not about ever actually pausing the poll on its own — D22.
     this.events.activate();
     inject(DestroyRef).onDestroy(() => this.events.release());
-  }
 
-  setDensity(value: string): void {
-    this.settings.wallDensity.set(Number(value));
-  }
+    void this.refreshSummary();
+    const stopPoll = inject(PollScheduler).schedule(SUMMARY_POLL_INTERVAL_MS, () => this.refreshSummary());
+    inject(DestroyRef).onDestroy(stopPoll);
 
-  /**
-   * Navigates to the event's replay deep link (docs/plans/done/OPS-CORE-PLAN.md §Q1) when a finished covering
-   * usage resolves (a lazy, click-time-only lookup — see `shared/ui/notification-bell.ts`'s own
-   * doc comment for the identical idiom), else the event's asset detail page, or its live view when
-   * no asset resolved yet.
-   */
-  async openEvent(event: DetectionEvent): Promise<void> {
-    if (event.assetId) {
-      try {
-        const asset = await this.api.getAsset(event.assetId);
-        const deepLink = resolveReplayDeepLink(event, asset.recentUsages);
-        if (deepLink) {
-          void this.router.navigate(['/replay'], {
-            queryParams: { asset: event.assetId, usage: deepLink.usageId, t: deepLink.offsetMs },
-          });
-          return;
-        }
-      } catch {
-        // Falls through to the pre-existing target below.
+    // Never leaves the focus view pointed at a tile that just vanished (its stream stopped, or the
+    // fleet-summary poll simply hasn't caught up yet) — honest "nothing to show" beats a frozen
+    // focus view of a picture that no longer updates.
+    effect(() => {
+      if (this.focusedStreamIdSignal() !== null && this.focusedTile() === null) {
+        this.clearFocus();
       }
+    });
+  }
+
+  private async refreshSummary(): Promise<void> {
+    // Ticks the shared clock on every attempt, success or failure — the pipeline-error decay window
+    // and the pulse window should keep advancing even while the summary itself fails to refresh
+    // (mirrors `command-facade.ts#refreshSummary`'s identical unconditional tick).
+    this.nowSignal.set(Date.now());
+    try {
+      this.summarySignal.set(await this.api.fleetSummary());
+    } catch {
+      // Silent-degrade — a background poll failure keeps showing the last-known summary, matching
+      // every other poller in this app (and `command-facade.ts`'s own non-first-load path).
     }
-    const target = resolveEventTarget(event, this.fleet.streams());
-    if (!target) {
-      return;
-    }
-    void this.router.navigate(target.kind === 'asset' ? ['/assets', target.id] : ['/live', target.id]);
   }
 }
