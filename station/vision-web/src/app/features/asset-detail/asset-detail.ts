@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { UiStore } from '../../core/ui/ui-store';
@@ -14,6 +14,7 @@ import {
 import { formatDuration } from '../../core/stream-info-logic';
 import { usageDurationSeconds, type FlightBar } from '../../core/fleet/asset-stats-logic';
 import { TacticalMap } from '../../shared/map/tactical-map/tactical-map';
+import { MapTools, type MapToolsCapabilities } from '../../shared/map/map-controls/map-tools/map-tools';
 import { SectionHeader } from '../../shared/ui/section-header';
 import { SidePanel } from '../../shared/ui/side-panel';
 import { Icon } from '../../shared/ui/icon';
@@ -87,7 +88,21 @@ type IdentityDraft = { serialNumber: string; make: string; model: string; regist
  */
 @Component({
   selector: 'vision-asset-detail',
-  imports: [RouterLink, TacticalMap, PilotsCard, CameraPosePanel, SectionHeader, SidePanel, Icon, KebabMenu, ConfirmDialog, EmptyState, Stat, PageBar],
+  imports: [
+    RouterLink,
+    TacticalMap,
+    PilotsCard,
+    CameraPosePanel,
+    SectionHeader,
+    SidePanel,
+    Icon,
+    KebabMenu,
+    ConfirmDialog,
+    EmptyState,
+    Stat,
+    PageBar,
+    MapTools,
+  ],
   templateUrl: './asset-detail.html',
   styleUrl: './asset-detail.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -131,6 +146,14 @@ export class AssetDetailPage {
 
   protected readonly panels = new UiStore();
   protected readonly subView = signal<'overview' | 'usage' | 'hardware'>('overview');
+
+  /** The Position card's own map inset instance, for the Map tools drawer's Layers section (docs/
+   * conclusions/MAP-UX-RESEARCH.md M1) — mirrors `command.ts#tacticalMap`'s identical doc comment. */
+  protected readonly tacticalMap = viewChild(TacticalMap);
+
+  /** This inset's one HUD door (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.2, D9) — read-write now:
+   * `layers: 'view'` (administration stays `/command`-only), no `cockpit` (this page flies nothing). */
+  protected readonly mapToolsCapabilities: MapToolsCapabilities = { marks: true, layers: 'view', draw: false, zones: true };
 
   /**
    * The Archive-asset confirm's own one-member `UiStore` group (docs/extracts/design/05-asset-detail.md's

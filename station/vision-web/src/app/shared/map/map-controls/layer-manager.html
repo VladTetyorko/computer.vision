@@ -65,14 +65,19 @@
       </div>
     </div>
 
-    <span class="label manage-heading">Manage layers</span>
+    @if (manage()) {
+      <span class="label manage-heading">Manage layers</span>
+    }
   }
 
   <!-- ---- Create (docs/conclusions/MAP-UX-RESEARCH.md M2) --------------------------------------------
        `showCreateTrigger()` only ever narrows this on Fly (`compactCreate()`, see this component's
        own class doc) — Command's manager rail keeps it unconditionally, and even on Fly it never
-       hides when hiding it would strand the viewer with nowhere to put a mark. -->
-  @if (showCreateTrigger()) {
+       hides when hiding it would strand the viewer with nowhere to put a mark. Gated first by
+       `manage()` (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.2.1's `'view'`/`'manage'` split) —
+       a `'view'` host offers no administration at all, so create never renders regardless of
+       `compactCreate`. -->
+  @if (manage() && showCreateTrigger()) {
     <div class="section">
       @if (creating()) {
         <div class="create-form">
@@ -138,7 +143,8 @@
     </div>
   }
 
-  <!-- ---- Rows --------------------------------------------------------------------------------- -->
+  <!-- ---- Rows (manage tier only — a `'view'` host has nowhere for rename/delete/Access to point) - -->
+  @if (manage()) {
   <div class="section">
     <span class="label">Layers ({{ layers.layers().length }})</span>
 
@@ -287,4 +293,5 @@
       </ul>
     }
   </div>
+  }
 </div>

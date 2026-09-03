@@ -750,13 +750,7 @@ dd {
   }
 }
 
-/* ---- Map drawer (docs/plans/done/MAP-REWORK-PLAN.md §5.2) ------------------------------------------------
-   One rail drawer carries both map tools — the drawing toolbar and the layer manager — separated by
-   the same hairline every other stacked section in this app uses rather than a second panel shell.
-   See `cockpit.html`'s own comment at that drawer for why they share one button. */
-
-.map-drawer-section + .map-drawer-section {
-  margin-top: var(--space-24);
-  padding-top: var(--space-24);
-  border-top: 1px solid var(--border);
-}
+/* ---- Map tools / Marks doors (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.2) --------------------
+   `<vision-map-tools>` (`map-tools.css`) owns its own section spacing now — nothing left to style
+   here. See `cockpit.html`'s own comment at those two doors for why they render one shared component
+   with disjoint capabilities rather than each keeping a bespoke drawer body. */

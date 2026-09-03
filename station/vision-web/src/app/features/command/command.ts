@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, effect, inject, input, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, input, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { UiStore } from '../../core/ui/ui-store';
 import { FleetMapStore } from '../../core/map/map-store';
@@ -6,30 +6,12 @@ import { WeatherStore } from '../../core/weather/weather-store';
 import { TacticalMap } from '../../shared/map/tactical-map/tactical-map';
 import { WeatherChip } from '../../shared/ui/weather-chip';
 import { Notice } from '../../shared/ui/notice';
-import { SidePanel } from '../../shared/ui/side-panel';
 import { DrawingToolbar } from '../../shared/map/map-controls/drawing-toolbar';
-import { LayerManager } from '../../shared/map/map-controls/layer-manager';
+import { MapTools, type MapToolsCapabilities } from '../../shared/map/map-controls/map-tools/map-tools';
 import { AssetPanel } from './asset-panel';
-import { ZonesPanel } from './zones-panel';
-import { MarksPanel } from './marks-panel';
 import { SetupChecklist } from './setup-checklist';
 import { CommandRailRow } from './rail-row';
 import { CommandFacade } from './command-facade';
-
-/** Command's mutually-exclusive overlay group (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — Zones, Marks (since
- * docs/plans/done/TACTICAL-MARKS-PLAN.md M5), and, since docs/plans/done/MAP-REWORK-PLAN.md §5.2, **Layers** (the layer
- * manager) and **Draw** (the drawing toolbar card floating over the map); typed as a union (not a
- * bare string) so a typo'd id can't compile, mirroring `flight-command-panel.ts#CommandDialog`'s
- * identical precedent. **Deliberately different shells**: Zones stays its pre-existing full backdrop
- * modal (`<vision-zones-panel>`'s own `role="dialog" aria-modal="true"`), while Marks and Layers use
- * the non-blocking `<vision-side-panel>` drawer shell (no backdrop) and Draw is a small card pinned
- * over the map — a true modal would swallow every click on the map underneath, which
- * create-by-map-click and drawing-by-map-click both need to still reach.
- *
- * All four share one group, so opening Draw closes Marks and vice versa. That is deliberate rather
- * than incidental: both arm the map's single `[interactionMode]`, and two open panels each claiming
- * the next click is exactly the drift `UiStore` exists to prevent. */
-type CommandOverlay = 'zones' | 'marks' | 'layers' | 'draw';
 
 /**
  * `/command` — the manager dashboard (docs/plans/done/UX-REWORK-PLAN.md §U-c, superseding docs/plans/done/MVP3-PLAN.md
@@ -67,20 +49,7 @@ type CommandOverlay = 'zones' | 'marks' | 'layers' | 'draw';
  */
 @Component({
   selector: 'vision-command',
-  imports: [
-    TacticalMap,
-    AssetPanel,
-    ZonesPanel,
-    MarksPanel,
-    SetupChecklist,
-    CommandRailRow,
-    SidePanel,
-    LayerManager,
-    DrawingToolbar,
-    WeatherChip,
-    RouterLink,
-    Notice,
-  ],
+  imports: [TacticalMap, AssetPanel, SetupChecklist, CommandRailRow, MapTools, DrawingToolbar, WeatherChip, RouterLink, Notice],
   templateUrl: './command.html',
   styleUrl: './command.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -112,49 +81,59 @@ export class CommandPage {
   protected readonly tacticalMap = viewChild(TacticalMap);
 
   /**
-   * The Zones panel's own mutually-exclusive overlay group (docs/plans/done/UI-ARCHITECTURE-PLAN.md) —
-   * generalizes the old `zonesPanelOpen` boolean `signal(false)` into a `UiStore`, transient (no
-   * `storageKey`, matching the prior behavior: the panel never survived a reload either). Kept as a
-   * plain field on the component, not the facade — mirrors `flight-command-panel.ts`'s own `dialog`
-   * field precedent: overlay open/closed-ness is template-rendering state the facade's read-models
-   * don't otherwise need, not domain state.
+   * The one Map tools drawer (`docs/plans/active/COMMAND-MAP-FLOW-PLAN.md` §3.2) — Command's four
+   * former overlays (Zones/Marks/Layers/Draw, each its own topbar button and its own shell: a
+   * backdrop modal, two side-panel drawers, and a floating card) are now one door onto one drawer
+   * with four fixed-order sections. `CommandOverlay`'s union collapses to this single `'map-tools'`
+   * id (§3.2's own wording); still a `UiStore` group, not a bare `signal<boolean>`, per
+   * `architecture.spec.ts`'s own rule that every overlay flag routes through one — a future second
+   * overlay on this page (there is none today) then costs nothing to add correctly. Kept as a plain
+   * field on the component, not the facade, mirroring the retired `overlay` field's own precedent:
+   * this is template-rendering state, not domain state.
    */
   private readonly overlay = new UiStore();
 
-  protected isOverlayOpen(id: CommandOverlay): boolean {
-    return this.overlay.isOpen(id);
+  protected mapToolsOpen(): boolean {
+    return this.overlay.isOpen('map-tools');
   }
 
-  protected toggleZonesPanel(): void {
-    this.overlay.toggle('zones' satisfies CommandOverlay);
-  }
+  /** `/command`'s own fixed capability set (`docs/plans/active/COMMAND-MAP-FLOW-PLAN.md` §3.2's table)
+   * — every section on, `layers: 'manage'` since this is the one surface layer administration
+   * (create/rename/delete/grants) renders on. No `cockpit`: there is no one drone this page is flying. */
+  protected readonly mapToolsCapabilities: MapToolsCapabilities = {
+    marks: true,
+    layers: 'manage',
+    draw: true,
+    zones: true,
+  };
 
-  protected toggleMarksPanel(): void {
-    this.overlay.toggle('marks' satisfies CommandOverlay);
-  }
+  /** The HUD button's own badge — marks + drawings + zones, so a manager glancing at the map's corner
+   * sees how much is already on the picture before opening the drawer. */
+  protected readonly mapToolsBadge = computed(
+    () => this.facade.marks.marks().length + this.facade.drawings.displayDrawings().length + this.facade.zones().length,
+  );
 
-  protected toggleLayersPanel(): void {
-    this.overlay.toggle('layers' satisfies CommandOverlay);
-  }
-
-  /** Shows/hides the drawing toolbar card. Closing it also stops any drawing in progress, so the map
-   * never stays armed behind a toolbar the manager can no longer see. */
-  protected toggleDrawToolbar(): void {
-    this.overlay.toggle('draw' satisfies CommandOverlay);
-    if (!this.overlay.isOpen('draw')) {
-      this.facade.drawings.stopDrawing();
+  protected toggleMapTools(): void {
+    if (this.overlay.isOpen('map-tools')) {
+      this.overlay.close();
+    } else {
+      this.overlay.open('map-tools');
     }
+  }
+
+  protected closeMapTools(): void {
+    this.overlay.close('map-tools');
   }
 
   constructor() {
     this.facade.trackRequestedAsset(this.requestedAssetId);
 
     // Tactical marks (docs/plans/done/TACTICAL-MARKS-PLAN.md M5) — see `fly.ts`'s identical effect's own doc
-    // comment: a map click always produces a `MarksStore.draft()` regardless of whether the Marks
-    // panel happens to be open; this is what keeps a draft from landing out of sight.
+    // comment: a map click always produces a `MarksStore.draft()` regardless of whether the drawer
+    // happens to be open; this is what keeps a draft from landing out of sight.
     effect(() => {
       if (this.facade.marks.draft()) {
-        this.overlay.open('marks' satisfies CommandOverlay);
+        this.overlay.open('map-tools');
       }
     });
   }

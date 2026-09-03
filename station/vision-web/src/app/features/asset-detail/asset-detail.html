@@ -142,17 +142,40 @@
             </div>
             <!-- Zones + marks are new here (docs/plans/done/MAP-REWORK-PLAN.md §5.1): the old inset dropped
                  both silently, so this card showed a different picture from Command's map. -->
-            <vision-tactical-map
-              [assets]="facade.mapAssets()"
-              [followAssetId]="facade.mapFollowAssetId()"
-              [zones]="facade.geofence.zones()"
-              [marks]="facade.marks.displayMarks()"
-              [drawings]="facade.drawings.displayDrawings()"
-              [layers]="facade.layers.layers()"
-              [tracks]="facade.tracks.tracks()"
-              [selectedMarkId]="facade.marks.selectedMarkId()"
-              (markSelected)="facade.marks.select($event)"
-            />
+            <div class="map-inset">
+              <vision-tactical-map
+                [assets]="facade.mapAssets()"
+                [followAssetId]="facade.mapFollowAssetId()"
+                [zones]="facade.geofence.zones()"
+                [marks]="facade.marks.displayMarks()"
+                [drawings]="facade.drawings.displayDrawings()"
+                [layers]="facade.layers.layers()"
+                [tracks]="facade.tracks.tracks()"
+                [selectedMarkId]="facade.marks.selectedMarkId()"
+                (markSelected)="facade.marks.select($event)"
+              />
+
+              <!-- Map tools HUD control (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.2's "one HUD
+                   control on the inset's chrome", D9) — this inset used to be read-only. -->
+              <button
+                type="button"
+                class="btn secondary small map-tools-btn surface-dark"
+                [class.active]="panels.isOpen('map-tools')"
+                [attr.aria-expanded]="panels.isOpen('map-tools')"
+                (click)="panels.open('map-tools')"
+              >
+                Map tools
+              </button>
+
+              @if (panels.isOpen('map-tools')) {
+                <vision-map-tools
+                  [capabilities]="mapToolsCapabilities"
+                  [map]="tacticalMap()"
+                  title="Map tools"
+                  (close)="panels.close()"
+                />
+              }
+            </div>
             <dl class="facts freshest-facts">
               @for (row of facade.freshestFacts(); track row.label) {
                 <div class="fact"><dt>{{ row.label }}</dt><dd [class.mono]="row.mono" [class.faint]="row.faint">{{ row.value }}</dd></div>

@@ -1,0 +1,38 @@
+<vision-side-panel [title]="title()" icon="layers" (close)="close.emit()">
+  @if (capabilities().marks) {
+    <div class="section">
+      <h3>Marks</h3>
+      <vision-marks-panel [cockpit]="capabilities().cockpit" />
+    </div>
+  }
+
+  @if (capabilities().layers !== 'off') {
+    <div class="section">
+      <h3>Layers</h3>
+      <vision-layer-manager
+        [mapAvailable]="!!map()"
+        [builtinLayerRows]="map()?.builtinLayerRows() ?? []"
+        [dataLayerRows]="map()?.dataRows() ?? []"
+        [basemaps]="map()?.basemaps ?? []"
+        [activeBasemapId]="map()?.activeBasemapId() ?? null"
+        [manage]="capabilities().layers === 'manage'"
+        (toggleLayerVisibility)="map()?.toggleLayer($event)"
+        (basemapChanged)="map()?.setBasemap($event)"
+      />
+    </div>
+  }
+
+  @if (capabilities().draw) {
+    <div class="section">
+      <h3>Draw</h3>
+      <vision-drawing-toolbar layout="stacked" />
+    </div>
+  }
+
+  @if (capabilities().zones) {
+    <div class="section">
+      <h3>Zones</h3>
+      <vision-zones-panel [assetPositions]="assetPositions()" [centerHint]="centerHint()" />
+    </div>
+  }
+</vision-side-panel>

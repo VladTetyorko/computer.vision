@@ -141,3 +141,20 @@ input[type="range"] {
         display: none;
     }
 }
+
+/* ---- Map inset chrome (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.2, D9) --------------------------
+   `<vision-tactical-map>` fills `.map-inset`; the Map tools HUD button floats over its own bottom-
+   right corner (its top-right/top-left/bottom-left are already the map's own camera/basemap/legend
+   chrome — mirrors `command.css`'s identical `.map-tools-btn` placement and reasoning). `--hud-*`
+   frosted, `surface-dark`-locked (frontend-style §2's widened rule: it sits directly on the bare
+   tile, not a card of its own). */
+.map-inset {
+    position: relative;
+}
+
+.map-tools-btn {
+    position: absolute;
+    bottom: var(--space-8);
+    right: var(--space-8);
+    z-index: 500;
+}

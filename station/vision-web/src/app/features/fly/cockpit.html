@@ -415,43 +415,23 @@
         (endAssetSession)="facade.endSession()"
       />
 
-      <!-- Map — layers + drawing (docs/plans/done/MAP-REWORK-PLAN.md §5.2). One drawer for both rather than
-           two rail buttons: the cockpit's own map is a 220px inset, so a toolbar floating over it
-           (Command's shape) would eat the picture it is meant to annotate. See
-           `<vision-layer-manager>`'s doc comment for why the grants editor is a sibling panel rather
-           than an expansion of the map's own data-layer panel — and for its own "Show on map"/
-           "Basemap" sections below (docs/conclusions/MAP-UX-RESEARCH.md M1): this is now the one drawer
-           that answers both "what's visible" and "who manages what", fed straight from the map
-           inset's own instance (`tacticalMap()`) so nothing here duplicates the map's own state. -->
+      <!-- Map tools — Layers + Draw + Zones (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.2). Same
+           `<vision-map-tools>` drawer Command opens, a disjoint capability set: no Marks section here
+           (that's the `marks` door below), `layers: 'view'` (administration renders on `/command`
+           only, §3.2.1), `zones: true` — new: Fly previously had no zones access at all (D9), now
+           gets the same list/rename/enable/delete every other capable host does. -->
       @if (isPanelOpen('map')) {
-        <vision-side-panel title="Map" icon="layers" subtitle="Layers and drawing" (close)="panels.close()">
-          <div class="map-drawer-section">
-            <vision-drawing-toolbar layout="stacked" />
-          </div>
-          <div class="map-drawer-section">
-            <vision-layer-manager
-              [mapAvailable]="!!tacticalMap()"
-              [builtinLayerRows]="tacticalMap()?.builtinLayerRows() ?? []"
-              [dataLayerRows]="tacticalMap()?.dataRows() ?? []"
-              [basemaps]="tacticalMap()?.basemaps ?? []"
-              [activeBasemapId]="tacticalMap()?.activeBasemapId() ?? null"
-              [compactCreate]="true"
-              (toggleLayerVisibility)="tacticalMap()?.toggleLayer($event)"
-              (basemapChanged)="tacticalMap()?.setBasemap($event)"
-            />
-          </div>
-        </vision-side-panel>
+        <vision-map-tools [capabilities]="mapCapabilities" [map]="tacticalMap()" title="Map" (close)="panels.close()" />
       }
 
       <!-- Marks — the shared tactical-marks operational picture (docs/plans/done/TACTICAL-MARKS-PLAN.md M5).
            Always available (no `canShowCommands()`/`watchMode()` gate — annotating the shared
-           picture is not a flight command, any in-scope viewer may create/annotate). -->
-      <vision-marks-panel
-        [assetId]="a.assetId"
-        [dronePosition]="facade.dronePosition()"
-        [open]="isPanelOpen('marks')"
-        (close)="panels.close()"
-      />
+           picture is not a flight command, any in-scope viewer may create/annotate). Disjoint from
+           the `map` door above: `marks: true` and nothing else, plus `cockpit` for "Mark target" and
+           the bearing/distance readout. -->
+      @if (isPanelOpen('marks')) {
+        <vision-map-tools [capabilities]="marksCapabilities()" title="Marks" (close)="panels.close()" />
+      }
 
       <!-- Help — the old `.hud-shortcuts` modal's content, unchanged copy, now a drawer. -->
       @if (isPanelOpen('help')) {

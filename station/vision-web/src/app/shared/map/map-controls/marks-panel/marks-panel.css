@@ -1,5 +1,6 @@
-/* Drawer *content* only — `<vision-side-panel>` owns the head/close chrome and the drawer surface,
-   mirroring `features/fly/marks-panel.css`'s identical convention.
+/* Drawer *content* only — `<vision-map-tools>` owns the head/close chrome and the drawer surface
+   (this component no longer wraps itself in its own `<vision-side-panel>`), mirroring
+   `layer-manager.css`'s identical "bare content, host owns the shell" convention.
    The affiliation-swatch rules come from the shared `shared/map/map-controls/mark-symbol.css`,
    pulled in via this component's `styleUrls` — see that file's own header. */
 
@@ -20,6 +21,10 @@ vision-notice {
 
 .section:last-child {
   margin-bottom: 0;
+}
+
+.mark-target-section .btn {
+  align-self: flex-start;
 }
 
 /* ---- List head: the section label plus the UNVERIFIED view filter ---------------------------- */
@@ -45,10 +50,7 @@ vision-notice {
   border-color: var(--color-warn-line);
 }
 
-.edit-form {
-  border-top: 1px solid var(--border);
-  padding-top: var(--space-8);
-}
+/* ---- Active marks list ---------------------------------------------------------------------- */
 
 .mark-list {
   list-style: none;
@@ -70,8 +72,8 @@ vision-notice {
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-/* Selected per docs/plans/done/VISUAL-REFRESH-PLAN.md F4 — the same left-bar + soft-tint idiom every other
-   selected row/card in the app uses (e.g. `features/assets/assets.css`'s `.asset-card.selected`). */
+/* Selected per frontend-style §4 — the same left-bar + soft-tint idiom every other selected
+   row/card in the app uses. */
 .mark-row.selected {
   background: var(--color-info-soft);
   border-left-color: var(--color-info);
@@ -116,6 +118,11 @@ vision-notice {
   flex-wrap: wrap;
 }
 
+.edit-form {
+  border-top: 1px solid var(--border);
+  padding-top: var(--space-8);
+}
+
 .mark-detail {
   border-top: 1px solid var(--border);
   padding-top: var(--space-8);
@@ -126,6 +133,31 @@ vision-notice {
 
 .mark-note {
   margin: 0;
+}
+
+/* ---- Selected-mark fact grid (frontend-style §6) — Source/Position, plus From drone on a cockpit
+   host; mirrors `command/asset-panel.css`'s own `.facts`/`.fact` rules (fixed-width muted label,
+   value below in `.mono` where it ticks/is a coordinate). Restated rather than shared: Angular's
+   default view encapsulation scopes a component's CSS to its own template only, so a sibling
+   component's `.facts` rule (`verify-controls.css`) never reaches this one's markup. ------------- */
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-8) var(--space-16);
+  margin: 0;
+}
+
+.fact dt {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+
+.fact dd {
+  margin: var(--space-2) 0 0;
+  font-size: 0.85rem;
 }
 
 /* ---- Responsive: bigger row actions on touch ------------------------------------------------- */

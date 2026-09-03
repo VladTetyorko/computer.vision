@@ -1,0 +1,24 @@
+/* `<vision-side-panel>` owns the head/close chrome and the drawer surface — this stylesheet only
+   spaces the four fixed-order sections (frontend-style §6's "h3 sections" anatomy) that hold each
+   capability's own bare-content body (`LayerManager`/`MarksPanel`/`DrawingToolbar`/`ZonesPanel`, all
+   `:host { display: contents }` themselves). */
+
+:host {
+  display: contents;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.section + .section {
+  margin-top: var(--space-24);
+  padding-top: var(--space-24);
+  border-top: 1px solid var(--border);
+}
+
+h3 {
+  color: var(--text-muted);
+}

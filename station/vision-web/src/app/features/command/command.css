@@ -193,6 +193,18 @@
   max-width: min(32rem, calc(100% - var(--space-32)));
 }
 
+/* Map tools HUD button — pinned to the stage's own bottom-right corner (see `command.html`'s own
+   comment on this button for why not top-right, `<vision-tactical-map>`'s own chrome-tr/-tl/-bl are
+   all already spoken for and it isn't in this wave's file scope to add a fourth corner). Same
+   z-index tier as the draw toolbar card — both sit above Leaflet's panes, below the page's own
+   docked side-panels/drawer. */
+.map-tools-btn {
+  position: absolute;
+  bottom: var(--space-8);
+  right: var(--space-8);
+  z-index: 500;
+}
+
 .command-map {
   position: absolute;
   inset: 0;

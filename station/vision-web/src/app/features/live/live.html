@@ -119,16 +119,40 @@
               @if (facade.mapInsetVisible()) {
                 <!-- Zones + marks are new here (docs/plans/done/MAP-REWORK-PLAN.md §5.1): this inset used to
                      drop both, showing a different picture from Command and the cockpit. -->
-                <vision-tactical-map
-                  [assets]="facade.mapAssets()"
-                  [followAssetId]="facade.mapFollowAssetId()"
-                  [zones]="facade.geofence.zones()"
-                  [marks]="facade.marks.displayMarks()"
-                  [drawings]="facade.drawings.displayDrawings()"
-                  [layers]="facade.layers.layers()"
-                  [selectedMarkId]="facade.marks.selectedMarkId()"
-                  (markSelected)="facade.marks.select($event)"
-                />
+                <div class="map-inset">
+                  <vision-tactical-map
+                    [assets]="facade.mapAssets()"
+                    [followAssetId]="facade.mapFollowAssetId()"
+                    [zones]="facade.geofence.zones()"
+                    [marks]="facade.marks.displayMarks()"
+                    [drawings]="facade.drawings.displayDrawings()"
+                    [layers]="facade.layers.layers()"
+                    [selectedMarkId]="facade.marks.selectedMarkId()"
+                    (markSelected)="facade.marks.select($event)"
+                  />
+
+                  <!-- Map tools HUD control (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.2's "one HUD
+                       control on the inset's chrome", D9) — this inset used to be read-only: no way to
+                       declutter, create, verify or promote a mark/zone from here. -->
+                  <button
+                    type="button"
+                    class="btn secondary small map-tools-btn surface-dark"
+                    [class.active]="mapToolsOpen()"
+                    [attr.aria-expanded]="mapToolsOpen()"
+                    (click)="openMapTools()"
+                  >
+                    Map tools
+                  </button>
+
+                  @if (mapToolsOpen()) {
+                    <vision-map-tools
+                      [capabilities]="mapToolsCapabilities"
+                      [map]="tacticalMap()"
+                      title="Map tools"
+                      (close)="closeMapTools()"
+                    />
+                  }
+                </div>
               }
             </section>
           }

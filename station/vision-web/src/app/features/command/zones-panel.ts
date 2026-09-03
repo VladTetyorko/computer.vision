@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { GeofenceStore } from '../../core/geofence/geofence-store';
 import { zoneKindLabel } from '../../core/geofence/geofence-logic';
@@ -6,12 +6,20 @@ import type { GeoPosition, GeofenceZone, ZoneKind } from '../../core/api/models'
 import { GeofenceZoneDialog, type ZoneDraft } from './geofence-zone-dialog';
 
 /**
- * The Zones management panel (docs/plans/done/OPS-CORE-PLAN.md §G-c) — a modal overlay opened from Command's
- * topbar "Zones" button (mirrors `shared/map/fleet-plan-dialog/flight-plan-dialog.ts`'s own
- * "modal, not embedded inline" choice, for the identical reason: doesn't touch
- * `command-logic.ts#commandGridColumns`'s own rail/map/panel grid arithmetic at all — a fourth
- * always-reserved track was rejected in favor of an on-demand overlay, since zone management is an
- * occasional admin task, not something browsed side-by-side with the map every session).
+ * The Zones section body (`docs/plans/active/COMMAND-MAP-FLOW-PLAN.md` §3.2/§3.2.1, superseding
+ * `docs/plans/done/OPS-CORE-PLAN.md` §G-c) — the fourth, fixed-last section inside every host's
+ * `<vision-map-tools>` drawer wherever `capabilities.zones` is on (Command, Fly's `map` door,
+ * `/live/:deviceId`, `/assets/:id`).
+ *
+ * **No backdrop modal anymore.** §3.2.1's second refusal-reconsidered: the old full-screen modal
+ * shell existed on the theory that zone management "needs to block accidental map clicks" — false of
+ * the shipped code. This list's own actions (rename/enable/delete, "New … zone") never arm the
+ * stage map's `[interactionMode]`; only `<vision-geofence-zone-dialog>` (unchanged, still its own
+ * backdrop + its own Leaflet mini-map) actually draws a zone, and that dialog's modal already blocks
+ * on its own. So this component is now bare drawer content, mirroring `LayerManager`'s/`MarksPanel`'s
+ * identical "no self-wrapping shell, the host's `<vision-side-panel>` owns it" posture — `<vision-
+ * map-tools>` mounts this directly, no `closePanel` output to wire (the drawer's own close handles
+ * dismissal for every section at once).
  *
  * List: kind badge (`.chip.danger`/`.chip.accent` — matching the map layer's own KEEP_OUT-red/
  * KEEP_IN-accent color language), an enable/disable toggle, inline rename (click the name, mirrors
@@ -22,8 +30,16 @@ import { GeofenceZoneDialog, type ZoneDraft } from './geofence-zone-dialog';
  * established for archive/deactivate.
  *
  * "New keep-in/keep-out zone" opens `<vision-geofence-zone-dialog>` with `kind` fixed for that
- * dialog's lifetime; `assetPositions` (from `CommandPage`'s own `FleetMapStore.markers()`) is
- * threaded straight through so the KEEP_IN save-time advisory needs no second lookup of its own.
+ * dialog's lifetime; `assetPositions`/`centerHint` (derived by `<vision-map-tools>` from its own
+ * `map` input, the host's `TacticalMap` instance) are threaded straight through so the KEEP_IN
+ * save-time advisory needs no second lookup of its own.
+ *
+ * A non-routed presentational child, so it injects `GeofenceStore` directly
+ * (`architecture.spec.ts`'s own carve-out). Physically still in `features/command/` (co-located with
+ * `GeofenceZoneDialog`, which several unrelated files reference by this path in doc comments only —
+ * moving it would ripple untouched files for no behavior change); `shared/map/map-controls/map-
+ * tools.ts` imports it directly, an intentional exception to the usual features-depend-on-shared
+ * direction, same reasoning `MODULE.md` records for this wave.
  */
 @Component({
   selector: 'vision-zones-panel',
@@ -38,8 +54,6 @@ export class ZonesPanel {
   /** Every asset's currently-known position — passed straight through to the draw dialog's own advisory. */
   readonly assetPositions = input<readonly GeoPosition[]>([]);
   readonly centerHint = input<GeoPosition | null>(null);
-
-  readonly closePanel = output<void>();
 
   protected readonly zoneKindLabel = zoneKindLabel;
 
@@ -94,9 +108,5 @@ export class ZonesPanel {
 
   protected removeZone(zone: GeofenceZone): void {
     void this.geofence.remove(zone);
-  }
-
-  protected close(): void {
-    this.closePanel.emit();
   }
 }

@@ -22,9 +22,7 @@ import { ReturnHomeButton } from '../../shared/ui/return-home-button';
 import { CvControlPanel } from './cv-control-panel';
 import { CvSetupModal } from './cv-setup-modal';
 import { FlyHud } from './fly-hud';
-import { DrawingToolbar } from '../../shared/map/map-controls/drawing-toolbar';
-import { LayerManager } from '../../shared/map/map-controls/layer-manager';
-import { MarksPanel } from './marks-panel';
+import { MapTools, type MapToolsCapabilities } from '../../shared/map/map-controls/map-tools/map-tools';
 import { CockpitFacade } from './cockpit-facade';
 import { migratedPanelId, nextCollapseAction, showDetectionOffChip, type ToolRailPanelId } from './fly-logic';
 
@@ -101,9 +99,7 @@ type CockpitDialog = 'stop' | 'cv-setup';
     CvControlPanel,
     CvSetupModal,
     FlyHud,
-    MarksPanel,
-    DrawingToolbar,
-    LayerManager,
+    MapTools,
   ],
   templateUrl: './cockpit.html',
   styleUrl: './cockpit.css',
@@ -136,6 +132,28 @@ export class CockpitPage {
    * (docs/conclusions/MAP-UX-RESEARCH.md M1) — see `cockpit.html`'s own comment on that drawer.
    */
   protected readonly tacticalMap = viewChild(TacticalMap);
+
+  /**
+   * The two `<vision-map-tools>` doors' own fixed capability sets (`docs/plans/active/COMMAND-MAP-
+   * FLOW-PLAN.md` §3.2's table) — disjoint by design, so `marks` and `map` can never re-create the
+   * old "two controls, one meaning" defect (§3.2's "why `/fly` keeps two buttons" note). `marks`
+   * carries {@link cockpit} (recomputed as the selected asset or its position changes across a
+   * same-route drone switch); `map` needs neither, so it stays a plain object like Command's own.
+   */
+  protected readonly marksCapabilities = computed<MapToolsCapabilities>(() => ({
+    marks: true,
+    layers: 'off',
+    draw: false,
+    zones: false,
+    cockpit: { assetId: this.assetId(), dronePosition: this.facade.dronePosition() },
+  }));
+
+  protected readonly mapCapabilities: MapToolsCapabilities = {
+    marks: false,
+    layers: 'view',
+    draw: true,
+    zones: true,
+  };
 
   /**
    * `cockpit.html`'s own video-surface "Detection is off — video only" chip

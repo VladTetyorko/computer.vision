@@ -1,52 +1,20 @@
+/* Drawer *content* only — `<vision-map-tools>`'s `<vision-side-panel>` owns the head/close chrome
+   and the drawer surface, mirroring `layer-manager.css`/`marks-panel.css`'s identical "bare content,
+   host owns the shell" convention (this section lost its own backdrop-modal shell in
+   `docs/plans/active/COMMAND-MAP-FLOW-PLAN.md` §3.2.1 — see `zones-panel.ts`'s own class doc). */
+
 :host {
   display: contents;
 }
 
-.backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 140; /* just under the zone-draw dialog's own 150, so drawing opens visibly "on top" */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: var(--space-16);
-  background: var(--hud-bg-strong);
-  backdrop-filter: blur(2px);
-}
-
-.dialog {
-  width: min(560px, 100%);
-  max-height: calc(100vh - 2rem);
-  overflow-y: auto;
-  background: var(--panel);
-  border: 1px solid var(--border-strong);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  padding: var(--space-16) var(--space-24);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-16);
-}
-
-.dialog-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-16);
-}
-
-.dialog-head h2 {
-  margin: 0 0 var(--space-4);
-  font-size: 1.05rem;
-}
-
-.dialog-head .hint {
-  margin: 0;
+.hint {
+  margin: 0 0 var(--space-16);
   max-width: 32rem;
 }
 
 .new-zone-actions {
   flex-wrap: wrap;
+  margin-bottom: var(--space-16);
 }
 
 .zone-list {

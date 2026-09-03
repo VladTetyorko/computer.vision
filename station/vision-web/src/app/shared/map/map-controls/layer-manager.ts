@@ -96,6 +96,17 @@ export class LayerManager {
   readonly basemaps = input<readonly MapLayerDef[]>([]);
   readonly activeBasemapId = input<MapLayerId | null>(null);
 
+  /**
+   * `MapToolsCapabilities.layers` (`docs/plans/active/COMMAND-MAP-FLOW-PLAN.md` §3.2/§3.2.1) —
+   * `true` (default, Command's `'manage'` tier) renders "Manage layers" (create/rename/delete/
+   * grants) below "Show on map"/"Basemap"; `false` (`/fly`, `/live`, `/assets/:id` — the `'view'`
+   * tier) hides that whole section, since administration was the research's own "wrong surface"
+   * finding for every host but Command. `mapAvailable` stays the separate, orthogonal gate for
+   * "Show on map"/"Basemap" — a host can offer management with no map instance to preview against,
+   * or a preview with no management rights.
+   */
+  readonly manage = input(true);
+
   /** An eye toggle was clicked — the host forwards this to its `TacticalMap`'s own `toggleLayer`. */
   readonly toggleLayerVisibility = output<string>();
   /** A basemap was picked — the host forwards this to its `TacticalMap`'s own `setBasemap`. */

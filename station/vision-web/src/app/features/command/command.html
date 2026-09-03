@@ -8,24 +8,6 @@
       <vision-weather-chip />
     </div>
     <div class="row topbar-right">
-      <button type="button" class="btn secondary small" (click)="toggleZonesPanel()">
-        Zones ({{ facade.zones().length }})
-      </button>
-      <button type="button" class="btn secondary small" (click)="toggleMarksPanel()">
-        Marks ({{ facade.marks.marks().length }})
-      </button>
-      <button type="button" class="btn secondary small" (click)="toggleLayersPanel()">
-        Layers ({{ facade.layers.layers().length }})
-      </button>
-      <button
-        type="button"
-        class="btn secondary small"
-        [class.active]="isOverlayOpen('draw')"
-        [attr.aria-pressed]="isOverlayOpen('draw')"
-        (click)="toggleDrawToolbar()"
-      >
-        Draw
-      </button>
       <label class="row archived-toggle">
         <input
           type="checkbox"
@@ -37,35 +19,20 @@
     </div>
   </div>
 
-  @if (isOverlayOpen('zones')) {
-    <vision-zones-panel
-      [assetPositions]="facade.assetPositions()"
-      [centerHint]="facade.weatherPosition() ?? null"
-      (closePanel)="toggleZonesPanel()"
+  <!-- Map tools (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.2) — the one drawer for Marks, Layers,
+       Draw and Zones, replacing the four separate overlays (a backdrop modal, two side-panel drawers,
+       a floating card) this page used to open independently. Entry point is the HUD button pinned to
+       the stage map's own bottom-right corner (`command.css`'s `.map-tools-btn`) — see that class's
+       own comment for why: `<vision-tactical-map>` isn't in this wave's file scope, so its own
+       top-right corner (already camera controls) and its other two corners (basemap, legend) aren't
+       available to add a fifth control into. -->
+  @if (mapToolsOpen()) {
+    <vision-map-tools
+      [capabilities]="mapToolsCapabilities"
+      [map]="tacticalMap()"
+      title="Map tools"
+      (close)="closeMapTools()"
     />
-  }
-
-  @if (isOverlayOpen('marks')) {
-    <vision-marks-panel (closePanel)="toggleMarksPanel()" />
-  }
-
-  <!-- Layer manager (docs/plans/done/MAP-REWORK-PLAN.md §5.2). A sibling drawer rather than an expansion of
-       the map's own data-layer panel — see `<vision-layer-manager>`'s own doc comment for why, and
-       for its "Show on map"/"Basemap" sections (docs/conclusions/MAP-UX-RESEARCH.md M1) fed from the stage
-       map's own instance below. Same non-blocking `<vision-side-panel>` shell as Marks, for the same
-       reason (a modal backdrop would swallow map clicks). -->
-  @if (isOverlayOpen('layers')) {
-    <vision-side-panel title="Map layers" icon="layers" subtitle="Who sees what" (close)="toggleLayersPanel()">
-      <vision-layer-manager
-        [mapAvailable]="!!tacticalMap()"
-        [builtinLayerRows]="tacticalMap()?.builtinLayerRows() ?? []"
-        [dataLayerRows]="tacticalMap()?.dataRows() ?? []"
-        [basemaps]="tacticalMap()?.basemaps ?? []"
-        [activeBasemapId]="tacticalMap()?.activeBasemapId() ?? null"
-        (toggleLayerVisibility)="tacticalMap()?.toggleLayer($event)"
-        (basemapChanged)="tacticalMap()?.setBasemap($event)"
-      />
-    </vision-side-panel>
   }
 
   @if (facade.summaryError() && facade.summary() === undefined) {
@@ -203,13 +170,32 @@
           (drawingSelected)="facade.selectDrawing($event)"
         />
 
+        <!-- Map tools HUD button (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.2's "one HUD control
+             on the map's top-right chrome"). Pinned to the stage's own bottom-right corner instead —
+             `<vision-tactical-map>`'s top-right is already the camera controls (Recenter/Follow) and
+             its other two corners are Basemap/Legend; that component isn't in this wave's file scope
+             to add a fifth. `--hud-*` frosted, `surface-dark`-locked (frontend-style §2's widened
+             rule): it floats directly on the bare tile, exactly the case that rule exists for. -->
+        <button
+          type="button"
+          class="btn secondary small map-tools-btn surface-dark"
+          [class.active]="mapToolsOpen()"
+          [attr.aria-expanded]="mapToolsOpen()"
+          (click)="toggleMapTools()"
+        >
+          Map tools ({{ mapToolsBadge() }})
+        </button>
+
         <!-- Drawing toolbar (docs/plans/done/MAP-REWORK-PLAN.md §5.2's "mode buttons on the map chrome") — a
              `--panel-raised` card floating over the map, not `--hud-*`: frontend-style §2/§7's HUD
              rule (widened 2026-08-16 to cover `TacticalMap`'s own corner chrome, which sits directly
              on the bare tile) still exempts a control like this one that carries a card of its own
-             rather than sitting straight on the tile. Only rendered while the Draw overlay is on, so
-             the map's own corners stay clear the rest of the time. -->
-        @if (isOverlayOpen('draw')) {
+             rather than sitting straight on the tile. Rendered whenever a drawing mode is armed or a
+             drawing is selected — **not** whether the drawer is open — so it stays reachable after
+             the drawer (where the Draw section lives) closes (§3.2: "must be reachable with the
+             drawer closed"); hidden while the drawer itself is open so the armed state isn't shown
+             twice (the drawer's own Draw section renders the identical `layout="stacked"` toolbar). -->
+        @if (!mapToolsOpen() && (facade.drawings.mode() !== null || facade.drawings.selected())) {
           <vision-drawing-toolbar class="command-draw-toolbar" layout="card" />
         }
       }
