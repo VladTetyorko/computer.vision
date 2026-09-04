@@ -67,4 +67,13 @@ public final class UdpListenLink implements MavlinkLink {
     public void close() {
         io.close();
     }
+
+    /**
+     * What has arrived at this link's socket so far, counted pre-parse. Safe to call from any
+     * thread — see {@link LinkIntake}. This is the raw signal a "listening, nothing yet" or
+     * "bytes arriving but nothing decodable" diagnostic is built from one layer up.
+     */
+    public LinkIntake intake() {
+        return io.intake();
+    }
 }

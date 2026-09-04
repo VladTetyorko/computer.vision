@@ -4,9 +4,11 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -81,6 +83,53 @@ class UdpLoopbackTest {
              UdpTargetLink target = new UdpTargetLink("127.0.0.1", extractPort(listener.id()))) {
             assertTrue(listener.preservesMessageBoundaries());
             assertTrue(target.preservesMessageBoundaries());
+        }
+    }
+
+    @Test
+    void intakeStartsAtZeroWithNothingHeard() throws Exception {
+        try (UdpListenLink listener = new UdpListenLink("127.0.0.1", 0)) {
+            LinkIntake intake = listener.intake();
+            assertEquals(0, intake.datagramsReceived());
+            assertEquals(0, intake.bytesReceived());
+            assertNull(intake.lastDatagramAt());
+        }
+    }
+
+    @Test
+    void intakeCountsDatagramsAndBytesPreParseEvenForGarbage() throws Exception {
+        try (UdpListenLink listener = new UdpListenLink("127.0.0.1", 0)) {
+            int port = extractPort(listener.id());
+            try (UdpTargetLink sender = new UdpTargetLink("127.0.0.1", port)) {
+                Instant before = Instant.now();
+                byte[] garbage = "not-a-mavlink-frame".getBytes(StandardCharsets.UTF_8);
+                sender.send(garbage, 0, garbage.length, sender.defaultTarget());
+                assertNotNullChunk(listener.poll(TIMEOUT));
+
+                LinkIntake afterOne = listener.intake();
+                assertEquals(1, afterOne.datagramsReceived());
+                assertEquals(garbage.length, afterOne.bytesReceived());
+                assertFalse(afterOne.lastDatagramAt().isBefore(before));
+
+                byte[] second = {9, 9, 9};
+                sender.send(second, 0, second.length, sender.defaultTarget());
+                assertNotNullChunk(listener.poll(TIMEOUT));
+
+                LinkIntake afterTwo = listener.intake();
+                assertEquals(2, afterTwo.datagramsReceived());
+                assertEquals(garbage.length + second.length, afterTwo.bytesReceived());
+                assertFalse(afterTwo.lastDatagramAt().isBefore(afterOne.lastDatagramAt()));
+            }
+        }
+    }
+
+    @Test
+    void intakeIsUnaffectedByATimeoutWithNothingArriving() throws Exception {
+        try (UdpListenLink listener = new UdpListenLink("127.0.0.1", 0)) {
+            assertNull(listener.poll(Duration.ofMillis(50)));
+            LinkIntake intake = listener.intake();
+            assertEquals(0, intake.datagramsReceived());
+            assertNull(intake.lastDatagramAt());
         }
     }
 

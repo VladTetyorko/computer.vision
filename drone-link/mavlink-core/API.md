@@ -51,6 +51,7 @@ Bytes in, bytes out. Knows nothing about frames.
 | `LinkPeer` | record | `String host, int port`. `LinkPeer.NONE` for links with no addressable peer (serial). |
 | `ByteChunk` | record | `byte[] data, int length, LinkPeer source, Instant receivedAt` |
 | `MavlinkLink` | interface | `LinkId id()` · `boolean preservesMessageBoundaries()` · `ByteChunk poll(Duration timeout)` · `void send(byte[] frame, int off, int len, LinkPeer target)` · `LinkPeer defaultTarget()` · `void close()` |
+| `LinkIntake` | record | `long datagramsReceived, long bytesReceived, Instant lastDatagramAt` (**added additively, SOURCE-ONBOARDING-2 A1**, following the same precedent as `VehicleClass`/`LinkHealth.Health.peerId` above — see the note below the table) |
 
 **`poll` returns `null` on timeout** — named for `BlockingQueue.poll`'s established contract, so the return
 value carries its own documentation. It throws `IOException` only on genuine socket failure; a closed link
@@ -67,6 +68,20 @@ for the TX simulator), `TcpClientLink`. `SerialLink` deferred (§9 open question
 
 **Send is thread-safe on every implementation.** Multiple services share one link concurrently
 (`DatagramSocket#send` already is; TCP needs a write lock).
+
+**(SOURCE-ONBOARDING-2 A1, additive) `UdpListenLink.intake(): LinkIntake` is new.** A dead UDP port
+never errors — `DatagramSocket#receive` on a port nothing transmits to blocks forever, no timeout, no
+log (a genuine silent failure this module cannot fix at the socket, only report honestly around). Both
+UDP link implementations share the counting (in package-private `UdpSocketIo`, incremented on every
+successful `receive`, **pre-parse** — before `FrameReader`/`MavlinkConnection` ever see the bytes), but
+only `UdpListenLink` exposes it publicly, since it is the shape a standing lobby/dead-port diagnostic
+needs; `UdpTargetLink`/`TcpClientLink` gained no new public method. `datagramsReceived`/`bytesReceived`
+are monotonic counters, never reset; `lastDatagramAt` is `null` until the first datagram. Safe to call
+from any thread (the counters are `AtomicLong`/`AtomicReference`, independent of the one-reader-thread
+`poll()` contract). No behavior change to `poll()`/`send()`/`defaultTarget()` — this is bookkeeping
+only, added at the one point ("just received these bytes off the wire") that is true regardless of
+whether they ever decode into a valid frame. See `LinkIntake`'s own javadoc for why
+`datagramsReceived` vs. a higher layer's `framesDecoded` is the actual diagnostic value.
 
 ---
 
