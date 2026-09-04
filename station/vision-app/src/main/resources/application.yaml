@@ -45,6 +45,32 @@ spring:
   # server.tomcat.max-connections is likewise unpinned: the same baseline should
   # choose it. The S0 numbers show thread count, not connection count, as the
   # binding constraint at 100 viewers.
+  session:
+    # Sessions that survive the station (docs/plans/active/AUTH-ROLES-PLAN.md §3.6, wave B5):
+    # store-type=jdbc backs HttpSession with SPRING_SESSION/SPRING_SESSION_ATTRIBUTES rows in the
+    # same Postgres this app already runs against (V34__spring_session.sql, storage/persistence),
+    # replacing Tomcat's in-memory session map -- a restart/redeploy no longer logs every operator
+    # out. Only takes effect once vision.auth.enabled=true wires the SecuritySessionAuthenticator/
+    # secured filter chain that actually puts something meaningful into a session; with auth off
+    # (this file's own default, see vision.auth.enabled below) a session is still opened per the
+    # JDBC store, it just never carries an authenticated principal.
+    store-type: jdbc
+    jdbc:
+      # Flyway owns this schema (V34__spring_session.sql) -- same "one migration path, not two"
+      # rule as every other table in this app; letting Spring Session ALSO try to initialize it
+      # would either race Flyway on a fresh database or silently no-op against an already-migrated
+      # one, neither of which this app wants as its actual behavior.
+      initialize-schema: never
+      # "-" disables Spring Session's own @Scheduled expired-row sweep outright, rather than
+      # leaving its default cron ("0 * * * * *") configured but silently inert: this codebase never
+      # calls @EnableScheduling anywhere (every background loop is a hand-rolled Runner --
+      # UsageIdleCloseRunner, DiscoveryInboxRunner, TrackProjectionRunner all say so in their own
+      # javadoc), so that cron trigger would never actually fire. An expired row is already
+      # harmless -- JdbcIndexedSessionRepository.findById checks expiryTime itself before ever
+      # returning one as live -- so the only cost of leaving this off is unbounded storage growth
+      # from stale rows, a hygiene concern, not a correctness one, and not one this wave's own file
+      # scope (adding a background sweep) covers.
+      cleanup-cron: "-"
 
 # Liveness probe (docs/plans/done/SYSTEM-STATUS-PLAN.md §4.4) -- ONLY `health` is exposed over
 # HTTP. Deliberately not metrics/env/beans/configprops: this is a container healthcheck endpoint
@@ -56,6 +82,22 @@ management:
     web:
       exposure:
         include: health
+
+# Session cookie policy (docs/plans/active/AUTH-ROLES-PLAN.md §3.6, wave B5). http-only/same-site
+# are fixed platform decisions, not per-deployment settings -- no browser JS in this SPA ever needs
+# to read the session cookie, and every request is same-origin (SecurityConfig's own CSRF-off
+# rationale already leans on the same fact). secure is the one axis that genuinely varies by
+# deployment (CLAUDE.md "Deployment maintenance": operators run this on servers they control), so
+# it is bound to vision.auth.session.cookie-secure (VisionAuthProperties) by placeholder
+# interpolation rather than fixed here -- default false (plain HTTP), flip via
+# VISION_AUTH_SESSION_COOKIE_SECURE once a deployment terminates TLS in front of this station.
+server:
+  servlet:
+    session:
+      cookie:
+        http-only: true
+        same-site: strict
+        secure: ${vision.auth.session.cookie-secure:false}
 
 vision:
 
@@ -176,6 +218,24 @@ vision:
     # table locks every deployment out permanently. Flipping this key is that
     # plan's wave B0b, gated on B3 landing first.
     enabled: false
+    # Session mechanics (docs/plans/active/AUTH-ROLES-PLAN.md §3.6, wave B5) -- VisionAuthProperties.
+    # Every key below is commented out: each documents the record's own @DefaultValue rather than
+    # overriding it.
+    # session:
+    #   How long a normal login's session may sit idle before it stops being accepted -- reset by
+    #   every request, no absolute expiry. SecuritySessionAuthenticator sets this as the session's
+    #   maxInactiveInterval on login.
+    #   idle-timeout: 12h
+    #   The idle window a `kiosk` login gets instead (POST /api/auth/login, "kiosk": true) --
+    #   refused by AuthController for anything but a VIEWER, the long-lived window an always-on
+    #   wall display needs.
+    #   kiosk-idle-timeout: 365d
+    #   Whether the session cookie carries the Secure attribute -- see this file's own `server`
+    #   block (server.servlet.session.cookie.secure binds to this exact key). false: this station
+    #   is plain HTTP by default. Set true only once a deployment terminates TLS in front of it --
+    #   a Secure cookie sent over plain HTTP is silently dropped by the browser, which looks like
+    #   login "not sticking".
+    #   cookie-secure: false
 
   # --- adapter-publish-hls: stream egress (Phase 1, see docs/plans/done/PHASE1-PLAN.md Task U5) ---
   publish:

@@ -34,9 +34,12 @@ import com.drones.vision.adapter.persistence.repository.*;
 import com.drones.vision.app.config.properties.VisionPersistenceProperties;
 
 import jakarta.persistence.EntityManagerFactory;
+import javax.sql.DataSource;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.support.JdbcTransactionManager;
+import org.springframework.transaction.PlatformTransactionManager;
 
 /**
  * Wires the fleet-side repository ports (docs/plans/done/MVP2-PLAN.md P-a: categories, devices, assets) and
@@ -63,10 +66,54 @@ import org.springframework.context.annotation.Configuration;
 @EnableConfigurationProperties(VisionPersistenceProperties.class)
 public class PersistenceWiringConfiguration {
 
+    /**
+     * The one pooled {@code DataSource} this class shares between Hibernate/Flyway (via {@link
+     * #persistenceEntityManagerFactory}), Spring Session JDBC and {@link
+     * #visionSessionTransactionManager} (docs/plans/active/AUTH-ROLES-PLAN.md &sect;3.6, wave B5):
+     * Spring Session JDBC's autoconfiguration ({@code spring-session-jdbc} on the classpath plus
+     * {@code spring.session.store-type=jdbc}, {@code application.yaml}) needs a {@code DataSource}
+     * bean to bind to, and this app has none — every repository here is a plain class built via
+     * {@code new} against a {@code PersistenceUnit}-built {@link EntityManagerFactory}, never
+     * through Spring's own {@code DataSourceAutoConfiguration}. Building the pool here once and
+     * handing this SAME instance to {@link PersistenceUnit#start(DataSource, boolean)} below avoids
+     * Spring Session opening an independent second pool against the identical database — one shared,
+     * bounded pool, matching docs/plans/done/SCALE-100-PLAN.md S3's own precedent, now with a third
+     * consumer instead of a third pool.
+     *
+     * <p>{@code destroyMethod = ""}: {@link #persistenceEntityManagerFactory}'s own {@code
+     * destroyMethod = "close"} already closes this same pool via {@code
+     * ClosingDatasourceConnectionProvider} (see {@code PersistenceUnit}'s javadoc), and Spring
+     * destroys a dependent bean (that one, which takes this {@code DataSource} as a constructor-like
+     * {@code @Bean} argument) before the bean it depends on — so by the time Spring would otherwise
+     * infer-and-call {@code close()} on the {@code HikariDataSource} a second time, {@link
+     * #persistenceEntityManagerFactory} has already done so.
+     */
+    @Bean(destroyMethod = "")
+    public DataSource visionDataSource(VisionPersistenceProperties properties) {
+        return PersistenceUnit.buildDataSource(properties.jdbcUrl(), properties.username(), properties.password(),
+                properties.pool().toSettings());
+    }
+
     @Bean(destroyMethod = "close")
-    public EntityManagerFactory persistenceEntityManagerFactory(VisionPersistenceProperties properties) {
-        return PersistenceUnit.start(properties.jdbcUrl(), properties.username(), properties.password(),
-                properties.seedDevUsers(), properties.pool().toSettings());
+    public EntityManagerFactory persistenceEntityManagerFactory(DataSource dataSource,
+                                                                 VisionPersistenceProperties properties) {
+        return PersistenceUnit.start(dataSource, properties.seedDevUsers());
+    }
+
+    /**
+     * The one {@link PlatformTransactionManager} in this app, bound to {@link #visionDataSource} —
+     * exists solely for Spring Session JDBC's own internal reads/writes against {@code
+     * SPRING_SESSION}/{@code SPRING_SESSION_ATTRIBUTES} (docs/plans/active/AUTH-ROLES-PLAN.md
+     * &sect;3.6, wave B5), which its autoconfiguration wraps in a real transaction when one is
+     * available rather than falling back to Spring Session's own no-op {@code
+     * ResourcelessTransactionManager}. Every {@code Jpa*Repository} in this module still manages its
+     * own transactions natively through {@code EntityManager}/{@code EntityTransaction} (see {@code
+     * JpaOperations}), never through this bean — the two never contend for the same resource because
+     * they never touch the same tables.
+     */
+    @Bean
+    public PlatformTransactionManager visionSessionTransactionManager(DataSource dataSource) {
+        return new JdbcTransactionManager(dataSource);
     }
 
     @Bean

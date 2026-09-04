@@ -520,6 +520,15 @@ services:
       # compose-level override flips it, never the compiled default (see
       # station/vision-app/MODULE.md's "Auth / session security" section).
       VISION_AUTH_ENABLED: "true"
+      # docs/plans/active/AUTH-ROLES-PLAN.md §3.6, wave B5: sessions now live in SPRING_SESSION rows
+      # in the `postgres` service above (V34__spring_session.sql), inside the SAME postgres-data
+      # named volume already mounted below -- no separate session store/volume needed, and a
+      # `docker compose restart`/redeploy of vision-app no longer logs every operator out. secure
+      # stays false (VisionAuthProperties' own default) for this stack: it terminates plain HTTP on
+      # 8080, no reverse proxy in front, and a Secure cookie sent over plain HTTP is silently
+      # dropped by the browser -- which would look like login "not sticking". Flip to "true" once
+      # this stack sits behind a TLS-terminating reverse proxy.
+      VISION_AUTH_SESSION_COOKIE_SECURE: ${VISION_AUTH_SESSION_COOKIE_SECURE:-false}
     ports:
       - "8080:8080" # REST + web console + WebSocket (/ws/manual-control) + the HLS proxy
       # MAVLink telemetry AND commands, both directions, on this ONE UDP port. A

@@ -142,6 +142,19 @@
             <artifactId>spring-boot-starter-security</artifactId>
         </dependency>
         <!--
+          Sessions that survive the station (docs/plans/active/AUTH-ROLES-PLAN.md §3.6, wave B5):
+          Spring Session JDBC backs the session store with the same Postgres persistence already
+          runs on, replacing Tomcat's in-memory session map. Brings spring-jdbc/spring-tx onto the
+          classpath transitively, which is what PersistenceWiringConfiguration's new DataSource
+          and PlatformTransactionManager beans (see that class's own javadoc) get bound to.
+          Version managed by spring-boot-dependencies (this module's grandparent POM), same
+          convention as spring-boot-starter-security above.
+        -->
+        <dependency>
+            <groupId>org.springframework.session</groupId>
+            <artifactId>spring-session-jdbc</artifactId>
+        </dependency>
+        <!--
           Liveness probe (docs/plans/done/SYSTEM-STATUS-PLAN.md §4.4): only the `health` endpoint
           is exposed (see application.yaml's management.endpoints.web.exposure.include); metrics,
           env, beans and configprops stay off. Backs docker-compose.yml's vision-app healthcheck and

@@ -323,13 +323,18 @@ class PostgresDockerIntegrationTest {
      * it might otherwise resemble. {@code track_corrections}, added by {@code
      * V23__track_corrections.sql} (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.7/D12), is the same
      * classification as {@code projected_track_points}: append-only, ~1 Hz per flying asset,
-     * telemetry-character machine output.
+     * telemetry-character machine output. {@code spring_session}/{@code spring_session_attributes},
+     * added by {@code V34__spring_session.sql} (docs/plans/active/AUTH-ROLES-PLAN.md §3.6, wave B5),
+     * join for the same reason as {@code flyway_schema_history}: this table's own infrastructure
+     * (Spring Session JDBC's row-per-HttpSession store), not domain data an operator ever asks "who
+     * changed this" about — and Postgres folds the migration's unquoted upper-case identifiers to
+     * lower-case, so the live schema's actual names are these two.
      */
     private static final Set<String> EXCLUDED_TABLES = Set.of(
             "telemetry_samples", "detection_results", "detection_events",
             "training_samples", "sample_images", "asset_images",
             "audit_entries", "db_audit_log", "flyway_schema_history", "projected_track_points",
-            "track_corrections");
+            "track_corrections", "spring_session", "spring_session_attributes");
 
     private static EntityManagerFactory entityManagerFactory;
 

@@ -38,6 +38,7 @@ import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
 
 import jakarta.persistence.EntityManagerFactory;
+import javax.sql.DataSource;
 
 import org.flywaydb.core.Flyway;
 import org.hibernate.cfg.Configuration;
@@ -68,6 +69,14 @@ import org.hibernate.cfg.Configuration;
  * rather than Hibernate's own {@code HikariCPConnectionProvider} (that class always builds a
  * second, unshared pool, so {@code hibernate-hikaricp} is not a dependency here at all).
  *
+ * <p><strong>{@link #start(DataSource, boolean)}</strong> (docs/plans/active/AUTH-ROLES-PLAN.md §3.6,
+ * wave B5) extends this same one-pool principle past Flyway/Hibernate: {@code
+ * PersistenceWiringConfiguration} now builds the pool once via {@link #buildDataSource} and exposes
+ * it as an ordinary Spring {@code DataSource} bean too, shared with Spring Session JDBC's own
+ * repository and a {@code PlatformTransactionManager} — the same pool, a third consumer, not a
+ * third pool.
+ *
+
  * <p>Every value {@link #start} sets on {@link Configuration} is either a caller-supplied
  * argument (JDBC URL/user/password), a fixed protocol/design constant (the JDBC driver class, the
  * SQL dialect, the connection-provider class name, {@code hibernate.hbm2ddl.auto=validate} — none
@@ -176,8 +185,27 @@ public final class PersistenceUnit {
      */
     public static EntityManagerFactory start(String jdbcUrl, String username, String password,
                                               boolean seedDevUsers, PersistencePoolSettings poolSettings) {
-        HikariDataSource dataSource = buildDataSource(jdbcUrl, username, password, poolSettings);
+        return start(buildDataSource(jdbcUrl, username, password, poolSettings), seedDevUsers);
+    }
 
+    /**
+     * {@link #start(String, String, String, boolean, PersistencePoolSettings)} against an
+     * ALREADY-BUILT pooled {@code DataSource} (docs/plans/active/AUTH-ROLES-PLAN.md §3.6, wave B5) —
+     * the caller builds it via {@link #buildDataSource} and owns exposing that SAME instance
+     * elsewhere too (a Spring {@code DataSource} bean shared with Spring Session JDBC and a {@code
+     * PlatformTransactionManager}, see {@code PersistenceWiringConfiguration}), rather than this
+     * method building a second, unshared pool against the identical database. Every other {@code
+     * start} overload above still builds its own pool internally and delegates here — nothing about
+     * their contract changed.
+     *
+     * @param dataSource   the one pooled {@code DataSource} Flyway migrates through and Hibernate
+     *                     binds to
+     * @param seedDevUsers see {@link #start(String, String, String, boolean, PersistencePoolSettings)}
+     * @return an open {@link EntityManagerFactory}; the caller owns its lifecycle and must
+     *         {@code close()} it on shutdown — closing it also closes {@code dataSource}, see
+     *         {@link ClosingDatasourceConnectionProvider}
+     */
+    public static EntityManagerFactory start(DataSource dataSource, boolean seedDevUsers) {
         String[] locations = seedDevUsers
                 ? new String[] {"classpath:db/migration", "classpath:db/seed/dev"}
                 : new String[] {"classpath:db/migration"};
@@ -275,10 +303,13 @@ public final class PersistenceUnit {
     /**
      * The one pooled {@code DataSource} {@link #start} shares between Flyway and Hibernate — see
      * this class's own javadoc for why sharing one pool (rather than each building its own) is
-     * the point of docs/plans/done/SCALE-100-PLAN.md S3.
+     * the point of docs/plans/done/SCALE-100-PLAN.md S3. Public (docs/plans/active/AUTH-ROLES-PLAN.md
+     * §3.6, wave B5) so a caller that needs the pool for something else too (Spring Session JDBC, a
+     * {@code PlatformTransactionManager}) can build it once here and hand the SAME instance to
+     * {@link #start(DataSource, boolean)} — see that overload's own javadoc.
      */
-    private static HikariDataSource buildDataSource(String jdbcUrl, String username, String password,
-                                                      PersistencePoolSettings poolSettings) {
+    public static HikariDataSource buildDataSource(String jdbcUrl, String username, String password,
+                                                     PersistencePoolSettings poolSettings) {
         HikariConfig hikariConfig = new HikariConfig();
         hikariConfig.setPoolName(POOL_NAME);
         hikariConfig.setJdbcUrl(jdbcUrl);

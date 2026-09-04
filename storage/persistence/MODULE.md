@@ -16,9 +16,11 @@ All version pins come from `spring-boot-dependencies` (this module's grandparent
 
 **Used by:** vision-app (`PersistenceWiringConfiguration`, unconditional).
 
-**Build/test:** `./mvnw -B -pl storage/persistence test` — 276 tests (last measured, AUTH-ROLES B3;
-up from 274 after COMMAND-MAP-FLOW B1, 269 after ASSET-FLOWS BK4, 267 after ZERO-CONFIG-ONBOARDING Z2c,
-260 before that — count from Maven's own summary line, see Gotchas), one shared `postgres:16`
+**Build/test:** `./mvnw -B -pl storage/persistence test` — 276 tests (unchanged since AUTH-ROLES B3,
+confirmed again after AUTH-ROLES B5 — B5 touched this module only with a new migration + an
+`EXCLUDED_TABLES` classification, no new test method; up from 274 after COMMAND-MAP-FLOW B1, 269 after
+ASSET-FLOWS BK4, 267 after ZERO-CONFIG-ONBOARDING Z2c, 260 before that — count from Maven's own summary
+line, see Gotchas), one shared `postgres:16`
 Testcontainers container per test class. Requires a running Docker daemon — there is no non-Docker
 path; tests skip cleanly (not fail) when Docker is unavailable. Use a **two-step** build when a
 sibling context module is mid-flight elsewhere in the reactor: `./mvnw -B -pl
@@ -172,7 +174,7 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
   (mode 2, forward-up), the same "every existing row already has an arrangement" reasoning
   `AssetUsageEntity#origin` (`V26`) uses.
 
-## Schema (`src/main/resources/db/migration`) — migration ledger, V1 through V32
+## Schema (`src/main/resources/db/migration`) — migration ledger, V1 through V34
 
 | Migration | What it does |
 |---|---|
@@ -209,6 +211,7 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 | `V31__discovery_inbox.sql` | `discovery_candidates` (audited): domain-owned `id` PK, `identity_key` (the mDNS/ONVIF/MAVLink-derived stable key `DiscoveryCandidate` upserts on), `method`/`name`/`address`, flattened `suggested_category`/`suggested_stream_protocol`/`suggested_stream_uri`/`suggested_stream_options` (nullable as a group — a candidate with no offered stream), `details` jsonb `NOT NULL DEFAULT '{}'`, `first_seen`/`last_seen` `TIMESTAMPTZ`, `status`, nullable `registered_asset_id` (no FK — the same "no cross-aggregate FK" posture every other table in this schema takes, see Conventions); unique index on `identity_key` (the upsert target) + index on `last_seen` (the inbox list's sort column) |
 | `V32__control_profile_transmitter_view.sql` | `control_profiles` += `stick_mode SMALLINT NOT NULL DEFAULT 2`, `forward_is_up BOOLEAN NOT NULL DEFAULT TRUE`, `ck_control_profiles_stick_mode CHECK (stick_mode BETWEEN 1 AND 4)` — how the owner's transmitter is arranged (CONTROLLER-SETUP-CONTEXT.md wave C15); defaults rather than nullable since every existing row already has an arrangement (the platform's); **renumbered from the branch's own `V25` during the `feat/controller-setup-c15` merge** — see the Gotchas entry below for the collision this replaced |
 | `V33__assignment_roles.sql` | `pilot_assignments.role` (`VARCHAR(16) NOT NULL DEFAULT 'PILOT'`), `users.must_change_password` (`BOOLEAN NOT NULL DEFAULT FALSE`) — the per-asset seat (`AssignmentRole`, PILOT/CREW) and the forced-password-change latch (AUTH-ROLES-PLAN.md §3.4/D13, wave B3); purely additive, no backfill logic needed beyond the column defaults; no trigger changes — `V21`'s `audit_row_change()` resolves every column via `to_jsonb(NEW/OLD)`, not a fixed list |
+| `V34__spring_session.sql` | `spring_session`/`spring_session_attributes` — a **byte-for-byte copy** of Spring Session JDBC 4.1.0's own official `org/springframework/session/jdbc/schema-postgresql.sql` (extracted from the jar, not hand-transcribed), so sessions survive an app restart (AUTH-ROLES-PLAN.md §3.6, wave B5); no entity/mapper/repository — this table is read/written entirely by Spring Session's own `JdbcIndexedSessionRepository`, wired in `vision-app`'s `PersistenceWiringConfiguration`/`AuthWiringConfiguration`, not by anything in this module; both tables added to `PostgresDockerIntegrationTest`'s `EXCLUDED_TABLES` (infrastructure, same classification as `flyway_schema_history`) |
 
 A second, conditional Flyway location, `src/main/resources/db/seed/dev`, holds
 `V90001__dev_accounts.sql` (the `admin`/`manager`/`pilot` DEV-ONLY accounts) — it only joins Flyway's
@@ -250,7 +253,9 @@ automatically.**
   `detection_results`, `detection_events`, `training_samples`, `sample_images`, `asset_images` (a
   `bytea` column would duplicate image bytes into every audit row), `audit_entries` (auditing an
   audit trail buys nothing), `db_audit_log` itself (would recurse), `flyway_schema_history`,
-  `projected_track_points`, `track_corrections`.
+  `projected_track_points`, `track_corrections`, `spring_session`/`spring_session_attributes` (`V34`,
+  wave B5 — this table's own infrastructure, same classification as `flyway_schema_history`; not
+  domain data, and neither has a Java entity in this module for a trigger to be redundant against).
 
 Coverage is tested against the **live schema** (`information_schema.tables`/`pg_trigger`), not
 trusted from a migration comment — `DbAuditLogCoverageTests` fails if a new table is added without
@@ -280,6 +285,22 @@ subclass of `DatasourceConnectionProviderImpl` that also closes the pool when th
 internally, which cannot be handed to Flyway before the `EntityManagerFactory` exists; `hibernate-hikaricp`
 is not even a declared dependency of this module. `hibernate.hbm2ddl.auto=validate` — Flyway owns all
 schema creation/evolution, Hibernate only validates its mapping matches.
+
+**Two entry points into `start`, one pool-building step now a public seam (AUTH-ROLES-PLAN.md §3.6,
+wave B5).** `buildDataSource(String jdbcUrl, String username, String password,
+PersistencePoolSettings poolSettings)` — the Hikari-pool-construction step above — is now `public`
+(was `private`), and a new `start(DataSource dataSource, boolean seedDevUsers)` overload accepts an
+already-built pool instead of building one internally (the original 5-arg `start(String, String,
+String, boolean, PersistencePoolSettings)` now just calls `buildDataSource` then delegates to this
+overload — behavior unchanged, same single call for every existing caller). This exists so a THIRD
+consumer can share the exact same pool without this module knowing anything about it: `vision-app`'s
+`PersistenceWiringConfiguration` now builds the pool once as its own `visionDataSource` bean and hands
+it to Spring Session JDBC (via Boot's own autoconfiguration, binding to any `DataSource` bean it finds)
+as well as to this module's own `start(DataSource, boolean)` — see that module's own MODULE.md for the
+destroy-method-ordering reasoning (`visionDataSource`'s `@Bean(destroyMethod = "")`, since
+`persistenceEntityManagerFactory`'s own `destroyMethod="close"` already closes the same pool
+transitively). This module has no Spring dependency itself and does not know Spring Session JDBC
+exists — the new overload is a plain constructor-injection seam, nothing more.
 
 `PersistencePoolSettings`/telemetry batching (below) are constructor-argument opt-ins the module
 defines and validates but does not read from Spring config itself — binding `vision.persistence.pool.*`
@@ -403,10 +424,9 @@ buffered samples per open usage; `DEFAULT_BATCH_WINDOW_MILLIS` is non-zero on pu
 ## Status
 
 Fully implements every repository port the platform currently defines (32 `Jpa*Repository`/`Jpa*Store`
-classes; see API surface) against a schema migrated through `V32` (`feat/controller-setup-c15`'s
-`stickMode`/`forwardIsUp` columns, reconciled here as `V32__control_profile_transmitter_view.sql` —
-see the ledger and Gotchas above for the renumbering). Wired into vision-app unconditionally via
-`PersistenceWiringConfiguration` — Postgres is the only store.
+classes; see API surface) against a schema migrated through `V34` (`V34__spring_session.sql`, wave B5 —
+Spring Session JDBC's own schema, the one migration in this ledger with no domain entity behind it).
+Wired into vision-app unconditionally via `PersistenceWiringConfiguration` — Postgres is the only store.
 
 Open items, all deliberate rather than oversights:
 - Connection pooling and telemetry write batching both exist but are constructor-argument opt-ins
@@ -482,6 +502,24 @@ cases (`roleForReflectsTheMostRecentlyAssignedSeat`, `assignmentsForAssetListsEv
 plus mechanical fixes to every pre-existing `new User(...)`/`repository.assign(...)` call site for
 the two widened constructors. 274 → 276 tests (Maven's own summary line); `BUILD SUCCESS`, Docker ran
 (not skipped — Testcontainers started a real `postgres:16`, Flyway migrated through `V33`).
+
+**AUTH-ROLES wave B5 done.** New `V34__spring_session.sql` (byte-for-byte official Spring Session JDBC
+4.1.0 Postgres schema) so sessions survive an app restart — see the ledger row and the Bootstrap
+section above for the shared-pool seam this wave added (`buildDataSource` now public, new
+`start(DataSource, boolean)` overload). `PostgresDockerIntegrationTest`'s `EXCLUDED_TABLES` gained
+`spring_session`/`spring_session_attributes` (this table's own infrastructure, same classification as
+`flyway_schema_history`) — added proactively, before the live-schema `DbAuditLogCoverageTests` test
+would otherwise have failed against the two new unclassified tables. No entity, no mapper, no
+repository added — Spring Session's own `JdbcIndexedSessionRepository` (vision-app) reads/writes these
+tables directly; this module only supplies the schema and the shared connection pool.
+
+`./mvnw -B -pl storage/persistence test` — **276** tests, unchanged from the AUTH-ROLES B3 baseline (no
+new test method this wave — the migration and the `EXCLUDED_TABLES` fix are exercised by the
+pre-existing `DbAuditLogCoverageTests` methods, both reconfirmed green against the live schema,
+including `everyPublicBaseTableIsEitherAuditedOrExplicitlyExcluded` and
+`everyAuditedTableCarriesExactlyTheAuditTriggerAndNoExcludedTableDoes`). `BUILD SUCCESS`, Docker ran
+(not skipped — Testcontainers started a real `postgres:16`, Flyway migrated through `V34`, all 230
+nested-class test methods inside `PostgresDockerIntegrationTest` executed and passed).
 
 See `docs/plans/README.md` for the plan-status authority behind the phase references throughout this
 file (MVP2, POSTGRES-ONLY-CONTEXT, SCALE-100, FIXED-CAMERA-GEO, VISUAL-GEO-V2, DRONE-ONBOARDING,

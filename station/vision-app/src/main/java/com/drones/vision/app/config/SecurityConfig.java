@@ -84,6 +84,18 @@ import org.springframework.security.web.context.SecurityContextRepository;
  * Cookie-to-header double-submit ({@code CookieCsrfTokenRepository.withHttpOnlyFalse}) is the
  * recommended hardening when this leaves the internal-tool stage — it was weighed against the
  * chicken-and-egg it adds to a custom JSON login endpoint and deferred, not overlooked.
+ *
+ * <h2>Sessions (docs/plans/active/AUTH-ROLES-PLAN.md §3.6, wave B5)</h2>
+ * Two concerns this class's own file-scope line names, both actually implemented elsewhere:
+ * session-id rotation on login lives in {@link SecuritySessionAuthenticator#login} (this login flow
+ * bypasses Spring Security's own filter-based authentication, so the {@code sessionManagement()}
+ * DSL's automatic fixation protection never fires here — see that class's own javadoc for why
+ * rotation has to be done by hand); cookie policy ({@code HttpOnly}/{@code SameSite=Strict}/{@code
+ * Secure}) is plain Spring Boot auto-binding, not code here — see {@code application.yaml}'s
+ * {@code server.servlet.session.cookie.*} block. The session store itself is Spring Session JDBC
+ * ({@code station/vision-app}'s {@code pom.xml}, {@code spring.session.store-type=jdbc} in {@code
+ * application.yaml}) — the same Postgres this app already runs against, not Tomcat's in-memory
+ * session map, so a restart no longer logs every operator out.
  */
 @Configuration
 @EnableWebSecurity

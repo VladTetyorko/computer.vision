@@ -55,8 +55,8 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 | `DiscoveryWiringConfiguration` | Discovery, Mavlink | `onvifWsDiscoveryScanner`/`mdnsScanner`/`v4l2Scanner`/`mavlinkHeartbeatScanner` — each COP `vision.discovery.enabled` default true. `mediamtxPathScanner` (ZERO-CONFIG-ONBOARDING Z3) is the fifth scanner, COP `name = {"enabled", "mediamtx.enabled"}` under the `vision.discovery` prefix — Spring ANDs the array together, so it needs **both** `vision.discovery.enabled` and `vision.discovery.mediamtx.enabled` (default true, its own independent off-switch since it is the one scanner that depends on another subsystem, mediamtx/`vision.publish.enabled`, being present at all). Built from `MediamtxScannerSettings(publishProperties.mediamtx().apiBase(), publishProperties.mediamtx().rtspBase(), properties.mediamtx().pathPrefix())` — takes `VisionPublishProperties` as a plain constructor param (registered by `PublishWiring`'s own `@EnableConfigurationProperties`, not this class's; autowires here as an ordinary bean regardless of `vision.publish.enabled` since only the publisher beans themselves are conditional on that flag) rather than inventing a parallel `vision.discovery.mediamtx.api-url`/`rtsp-base` pair, so the two consumers of "where mediamtx is" can never disagree. `discoveryService` and `mavlinkPort` **unconditional** (`DiscoveryController` needs the service regardless; `DefaultDiscoveryService` tolerates an empty port list). `mavlinkHeartbeatScanner` lives in adapter-mavlink, not adapter-discovery like its other 3 siblings, because it borrows `mavlinkTelemetrySource`'s open socket and adapters can't depend on each other |
 | `DiscoveryInboxWiringConfiguration` | Discovery | `discoveryInboxService(DiscoveryCandidateRepositoryPort, AssetService)` → `DefaultDiscoveryInboxService`, **unconditional** (`DiscoveryInboxController`, vision-api, needs it regardless of whether the sweep runs — an operator can still read/register/dismiss by hand with the runner off). `discoveryInboxRunner` (`initMethod="start"`, `destroyMethod="close"`) COP `vision.discovery.inbox.enabled=true` (matchIfMissing=true, the default — ZERO-CONFIG-ONBOARDING-CONTEXT.md §11 Z2c deliberately overrides CLAUDE.md's usual opt-in-guardrail default, since shipping the sweep off by default would defeat the whole zero-config purpose) |
 | `FeedTransmitterWiring` | Publish, Rtsp, Mjpeg, Mavlink, Rc, Onboarding | `rtspFeedTransmitter`, `mjpegFeedTransmitter` (`destroyMethod="close"` — owns a shared `HttpServer`), `mavlinkFeedTransmitter`, `feedTransmitterRegistry` — all unconditional |
-| `PersistenceWiringConfiguration` | Persistence | **Every bean unconditional**, no `@Conditional*` anywhere — 23 one-line `Jpa*Repository(entityManagerFactory)` ports (WAREHOUSE-UX W3 added `maintenanceRepositoryPort`/`assetNoteRepositoryPort`; ZERO-CONFIG-ONBOARDING Z2c added `discoveryCandidateRepositoryPort`) + `persistenceEntityManagerFactory` (`destroyMethod="close"`, opens a real JDBC connection eagerly). No in-memory fallback exists for any repository port (Postgres is the only store) |
-| `AuthWiringConfiguration` | — | `passwordHasherPort`, `authService`, `userService`, `groupService`, `scopeResolver`, `assignmentService` (`DefaultAssignmentService(assignmentRepositoryPort, assetService)` — takes `AssetService`, not `AssetRepositoryPort`), `activityService` — all unconditional; `authService`/`userService`/`assignmentService` (AUTH-ROLES wave B3) take a third constructor arg, `AuditTrailPort`, threaded to the 3-arg `Default*` constructors D15 added. `devPrincipalResolver`/`noopSessionAuthenticator` COP `vision.auth.enabled=false` (matchIfMissing=true, the default); `securityContextPrincipalResolver`/`securitySessionAuthenticator` COP `vision.auth.enabled=true`. `securitySessionAuthenticator`'s factory method (wave B3) additionally declares two bare `@Value`-annotated `long` params (`vision.auth.session.idle-timeout-hours:12`, `vision.auth.session.kiosk-idle-timeout-days:365`) — `@Value` on the *constructor* would be silently ignored since the bean is built with `new SecuritySessionAuthenticator(...)` inside this factory method rather than via Spring's own reflective construction, so the annotation has to live on the factory method's own parameters instead; folding these into a real `VisionAuthProperties` record is deferred to wave B5. Repository ports (`UserRepositoryPort`/`GroupRepositoryPort`) come from `PersistenceWiringConfiguration`, orthogonal to `vision.auth.enabled` |
+| `PersistenceWiringConfiguration` | Persistence | **Every bean unconditional**, no `@Conditional*` anywhere — 23 one-line `Jpa*Repository(entityManagerFactory)` ports (WAREHOUSE-UX W3 added `maintenanceRepositoryPort`/`assetNoteRepositoryPort`; ZERO-CONFIG-ONBOARDING Z2c added `discoveryCandidateRepositoryPort`) + `persistenceEntityManagerFactory` (`destroyMethod="close"`, opens a real JDBC connection eagerly). No in-memory fallback exists for any repository port (Postgres is the only store). **AUTH-ROLES wave B5** split the pooled connection out into its own bean, `visionDataSource` (`destroyMethod=""` — `persistenceEntityManagerFactory` closes the same pool transitively via `ClosingDatasourceConnectionProvider`, and Spring destroys the dependent bean first, so a second close on this one is avoided) built via `PersistenceUnit.buildDataSource` (now public); `persistenceEntityManagerFactory` takes that `DataSource` plus `properties.seedDevUsers()` and binds via the new `PersistenceUnit.start(DataSource, boolean)` overload rather than building its own pool. A third new bean, `visionSessionTransactionManager` (`JdbcTransactionManager`, bound to the same `visionDataSource`), exists solely so Spring Session JDBC wraps its own `SPRING_SESSION`/`SPRING_SESSION_ATTRIBUTES` reads/writes in a real transaction rather than falling back to Spring Session's own no-op `ResourcelessTransactionManager` — no `Jpa*Repository` uses it, each still manages its own transaction natively via `EntityManager`/`EntityTransaction`. This is the first `DataSource`/`PlatformTransactionManager` bean this app has ever exposed to Spring — needed because Spring Session JDBC's autoconfiguration binds to one, and this app's persistence layer otherwise never goes through Spring's own `DataSourceAutoConfiguration`. |
+| `AuthWiringConfiguration` | — | `passwordHasherPort`, `authService`, `userService`, `groupService`, `scopeResolver`, `assignmentService` (`DefaultAssignmentService(assignmentRepositoryPort, assetService)` — takes `AssetService`, not `AssetRepositoryPort`), `activityService` — all unconditional; `authService`/`userService`/`assignmentService` (AUTH-ROLES wave B3) take a third constructor arg, `AuditTrailPort`, threaded to the 3-arg `Default*` constructors D15 added. `devPrincipalResolver`/`noopSessionAuthenticator` COP `vision.auth.enabled=false` (matchIfMissing=true, the default); `securityContextPrincipalResolver`/`securitySessionAuthenticator` COP `vision.auth.enabled=true`. `securitySessionAuthenticator`'s factory method now takes `VisionAuthProperties` as an ordinary `@Bean`-method argument instead of the two bare `@Value`-annotated `long` params wave B3 used (`@Value` on the *constructor* would have been silently ignored since the bean is built with `new SecuritySessionAuthenticator(...)` inside this factory method rather than via Spring's own reflective construction — AUTH-ROLES wave B5 closed that gap by giving the session-config surface its own `@ConfigurationProperties` record instead, registered here via `@EnableConfigurationProperties(VisionAuthProperties.class)`). Repository ports (`UserRepositoryPort`/`GroupRepositoryPort`) come from `PersistenceWiringConfiguration`, orthogonal to `vision.auth.enabled` |
 | `RateLimitWiring` | Api | Whole-class COP `vision.api.rate-limit.enabled=true` (default false): `rateLimitFilterRegistration` — `FilterRegistrationBean<RateLimitFilter>` on `/api/*` |
 | `SystemStatusWiring` | — | Two mutually-exclusive beans per subsystem, each repeating the exact enabling expression its real resource already uses (never `@ConditionalOnBean` — order-sensitive, see Gotchas): `cvServiceStatus`/`cvServiceStatusDisabled`, `videoPublishStatus`/`videoPublishStatusDisabled` (COP `vision.publish.enabled`). `mavlinkLinkStatus` is **unconditional** (mavlink telemetry source always exists; reports `UNKNOWN` with no claimed vehicle, never `DISABLED`); **FLEET-RADIO R4** — the class now also declares `@EnableConfigurationProperties(VisionMavlinkProperties.class)` (matching `TelemetryWiring`'s/`DiscoveryWiringConfiguration`'s own identical declarations of the same class) and `mavlinkLinkStatus` takes a second parameter, `VisionMavlinkProperties`, building a `MavlinkSettings.LinkStatus` from its three D7 threshold fields to construct `MavlinkLinkStatusProvider` |
 | `StreamLifecycleWiring` | Streams | `mediamtxReaderProbe` (COP `vision.publish.enabled` default true), `videoDemandPort` (unconditional — `HlsProxyController` needs it regardless of whether the idle policy is on), `idleStreamReaper` (`initMethod="start"`, `AutoCloseable`). Resolves `usageTracker` lazily inside a resolver lambda to avoid the same circular-reference hazard as `CvWiring#detectionDemandPort` |
@@ -115,6 +115,7 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 | `VisionTrackingProperties` | `vision.tracking` | `TrackingWiring` seed + per-stream read-model windows |
 | `VisionUsageProperties` | `vision.usage` | `UsageWiringConfiguration`'s idle-usage-close sweep (`idleClose` default 10m, `sweepPeriod` default 60s) |
 | `VisionOpsProperties` | `vision.ops` | `OpsWiringConfiguration`'s `opsThresholds` bean, behind `GET /api/ops/thresholds` (vision-api). Nested `Battery(int warningPercent, int criticalPercent)`, defaults 25/10, compact-constructor validated (`critical < warning`, both `[0,100]`); absent `battery` block falls back to `Battery.defaults()` since Spring relaxed binding does not apply a nested record's own `@DefaultValue`s when the whole block is missing (`VisionMavlinkProperties`'s `Scan`/`Transmit` precedent). `ApplicationServiceWiring#batteryMonitor` (BK2, this same cycle) independently reads the identical `vision.ops.battery.critical-percent`/`warning-percent` keys via raw `@Value`, by deliberate design (see that bean's own javadoc) rather than by accident — it carries the same 10/25 defaults inline so it behaves correctly whether or not this record/its `application.yaml` block exists yet, and now that both do, an operator override of the yaml block reaches **both** consumers identically since they bind the same property keys, which is the actual "one configured severity source" ASSET-FLOWS-PLAN §2 asks for. The two Java binding mechanisms (this `@ConfigurationProperties` record vs. `batteryMonitor`'s two `@Value`s) staying separate rather than both consuming this one record is a minor follow-up cleanup, not a config-drift risk. FLY-CONTROL-UX-PLAN §2/BK1 added a second nested record, `Rc(int neutralTolerancePercent)`, default **5**, compact-constructor validated `[1,25]`, absent `rc` block falling back to `Rc.defaults()` under the exact same whole-block-absent rule as `Battery` — the web cockpit's neutral-stick arm gate's tolerance, read off `GET /api/ops/thresholds`'s new `rc` field. |
+| `VisionAuthProperties` | `vision.auth` | **AUTH-ROLES-PLAN §3.6, wave B5.** `record VisionAuthProperties(Session session)`, one nested record `Session(Duration idleTimeout, Duration kioskIdleTimeout, boolean cookieSecure)` — defaults `12h`/`365d`/`false`, compact-constructor validated (both durations positive). Consumed by `AuthWiringConfiguration#securitySessionAuthenticator` → `SecuritySessionAuthenticator`'s constructor (idle/kiosk timeouts, replacing two bare `@Value`s) and by `application.yaml`'s `server.servlet.session.cookie.secure` (placeholder interpolation onto `vision.auth.session.cookie-secure`, not Java). **Scope note**: this record covers only the `session.*` block, deliberately narrower than §3.6/D2's full target shape (`enabled`+`session.*`+`password.*` in one record) — `vision.auth.enabled` (`SecurityConfig`'s/`AuthWiringConfiguration`'s own `@ConditionalOnProperty`s) and `password.*` (`AuthController`/`BootstrapController`/`AuthPasswordController`/`PasswordPolicy`'s scattered `@Value`s) are untouched, deferred to a later wave — see the record's own javadoc. |
 
 `vision.discovery.enabled` and `vision.api.rate-limit.enabled` are read directly via
 `@ConditionalOnProperty` with no dedicated properties record.
@@ -762,3 +763,94 @@ either module needed to change for this wave's actual scope (the `AssetAuthority
 one implementation live entirely in `vision-api`; `AssignmentRepositoryPort` was already reachable
 from there, and `FlightCommandController`'s new edge gate sits strictly in front of
 `DefaultFlightCommandService`'s own pre-existing scope check, not inside it). Waves B5/B6/B0b open.
+
+**AUTH-ROLES-PLAN wave B5 done.** Sessions now survive a restart: `spring-session-jdbc` (new `pom.xml`
+dependency) backs the session store with the same Postgres this app already runs against
+(`spring.session.store-type=jdbc`, `application.yaml`), replacing Tomcat's in-memory session map —
+`spring.session.jdbc.initialize-schema` stays `never` since Flyway owns the schema (new
+`storage/persistence` migration `V34__spring_session.sql`, below) and `spring.session.jdbc.cleanup-cron`
+is explicitly set to `"-"` (disabling Spring Session's own built-in `@Scheduled` cleanup cron) since
+this codebase deliberately never calls `@EnableScheduling` anywhere — an honest "no automatic cleanup"
+rather than a silently-inert default cron, flagged as unbounded storage growth (a hygiene concern, not
+correctness: `JdbcIndexedSessionRepository.findById` already checks `expiryTime` before returning a
+session as live).
+
+New `config/properties/VisionAuthProperties` (prefix `vision.auth`, one nested `Session(Duration
+idleTimeout, Duration kioskIdleTimeout, boolean cookieSecure)` record — `@DefaultValue`s `12h`/`365d`/
+`false`, compact-constructor-validated positive-duration) replaces the two bare `@Value` longs
+`SecuritySessionAuthenticator` used since B3 — see that class's own javadoc for why kiosk logins (top
+role exactly VIEWER, see `AuthController`) get the long-lived window. **Deliberately narrower than
+D2's full three-part target shape** (`enabled`+`session.*`+`password.*`): `enabled` and `password.*`
+stay on their existing scattered `@Value`s/call sites this wave, deferred to a later wave —
+`AuthWiringConfiguration` gained `@EnableConfigurationProperties(VisionAuthProperties.class)`.
+
+**Session-id rotation (fixation fix).** This app's login flow calls `AuthService` directly rather than
+through Spring Security's own `UsernamePasswordAuthenticationFilter`, so the `sessionManagement()` DSL's
+automatic `ChangeSessionIdAuthenticationStrategy` never fires here (confirmed: `SecurityConfig` declares
+no `sessionManagement()` DSL at all) — fixation protection had to be done by hand.
+`SecuritySessionAuthenticator#login` now calls `request.getSession(true)` then `request.changeSessionId()`
+*before* building/writing the `SecurityContext`, closing a real gap: a pre-login session id (e.g. one an
+attacker planted and lured a victim into using) could previously be reused, now authenticated, after
+login. Spring Session JDBC's own request wrapper implements `changeSessionId()` correctly against the
+JDBC-backed store (verified: not a no-op). Cookie policy is plain Spring Boot auto-binding, no code —
+new `server.servlet.session.cookie.{http-only: true, same-site: strict, secure:
+${vision.auth.session.cookie-secure:false}}` block in `application.yaml`; `SecurityConfig` gained a
+documentation-only javadoc section pointing at where rotation/cookie-policy/session-store each actually
+live (no functional code changed in that file).
+
+**Shared `DataSource` seam (storage/persistence).** Spring Session JDBC's autoconfiguration needs a
+`DataSource`/`PlatformTransactionManager` bean to bind to, but `PersistenceUnit.start()` has always built
+its own Hikari pool manually via Hibernate's native bootstrap API, never through Spring's
+`DataSourceAutoConfiguration`. Resolved by exposing that pool as a reusable seam rather than building a
+second, independent pool: `PersistenceUnit.buildDataSource(...)` (was private) is now public, and a new
+`PersistenceUnit.start(DataSource, boolean seedDevUsers)` overload lets the caller hand in an
+already-built pool instead of building one internally. `PersistenceWiringConfiguration` now builds the
+pool once as its own `visionDataSource` bean (`@Bean(destroyMethod = "")` — no double-close, since
+`persistenceEntityManagerFactory`'s own `destroyMethod="close"` already closes the same pool transitively
+via `ClosingDatasourceConnectionProvider`, and Spring destroys a dependent bean before the bean it depends
+on) and shares that one instance three ways: Hibernate/Flyway (via the new `start(DataSource, boolean)`
+overload), Spring Session JDBC (Boot's own autoconfiguration binds directly to the exposed `DataSource`
+bean — no explicit wiring needed), and a new `visionSessionTransactionManager` bean
+(`org.springframework.jdbc.support.JdbcTransactionManager`, the sole `PlatformTransactionManager` in this
+app, existing solely for Spring Session JDBC's own internal reads/writes).
+
+`storage/persistence` gained `V34__spring_session.sql` — a byte-for-byte copy of Spring Session JDBC
+4.1.0's own official Postgres schema (`SPRING_SESSION`/`SPRING_SESSION_ATTRIBUTES`, extracted from the
+jar, not hand-transcribed, per this repo's Flyway-migrations-are-frozen convention). Both new tables
+(Postgres folds the unquoted identifiers to lowercase `spring_session`/`spring_session_attributes`) were
+added to `PostgresDockerIntegrationTest`'s `EXCLUDED_TABLES` set (this repo's own infrastructure, same
+classification as `flyway_schema_history` — not domain data) — caught proactively before the live-schema
+`DbAuditLogCoverageTests.everyPublicBaseTableIsEitherAuditedOrExplicitlyExcluded()` test would have failed
+against the new tables.
+
+`docker-compose.yml` gained `VISION_AUTH_SESSION_COOKIE_SECURE` (defaults `false`, same posture as every
+other `VISION_*` env passthrough) — sessions live in the existing Postgres volume, no new store/volume
+needed; `.env.example` documents the override (commented out) for a deployment that terminates TLS in
+front of this station.
+
+**Test-suite impact confirmed near-zero by design**: every existing `@SpringBootTest`/`MockHttpSession`
+test in this module drives its `MockMvc` via `webAppContextSetup(...).addFilters(<one security filter
+bean>)`, which never routes through Spring Session's own `SessionRepositoryFilter` — so none of the
+~50 pre-existing session-touching tests are affected by the JDBC-backed store; they keep using MockMvc's
+own in-memory `MockHttpSession` exactly as before.
+
+New `security/SecuritySessionAuthenticatorTest` (5 cases, `vision-app`) exercises the real
+`SecuritySessionAuthenticator` against a real `HttpSessionSecurityContextRepository` and Spring's mock
+servlet request/response (no Spring context, no Docker): `loginRotatesTheSessionId`,
+`loginPersistsTheAuthenticatedPrincipalIntoTheNewSessionId`, `normalLoginGetsTheIdleTimeoutFromProperties`,
+`kioskLoginGetsTheKioskIdleTimeoutFromProperties`, `failedLoginReturnsEmptyAndNeverTouchesTheSession`.
+
+`./mvnw -B -pl storage/persistence,station/vision-app -am test -DskipWeb` — vision-app (this module)
+**333** (328 → 333, +5: exactly `SecuritySessionAuthenticatorTest`'s new cases, no other net change),
+`storage/persistence` unaffected at **276** (no new test method there this wave — the migration ledger and
+`EXCLUDED_TABLES` fix are exercised by pre-existing `DbAuditLogCoverageTests` methods, both confirmed
+still green against the live schema, including `everyPublicBaseTableIsEitherAuditedOrExplicitlyExcluded`
+and `everyAuditedTableCarriesExactlyTheAuditTriggerAndNoExcludedTableDoes`). `BUILD SUCCESS` on both
+scoped runs. Docker ran for real throughout (Testcontainers `postgres:16`, Flyway migrated through `V34`,
+230 nested-class test methods executed inside `PostgresDockerIntegrationTest`). `vision.auth.enabled`
+stays `false` by default, unchanged this wave — `AuthDisabledSecurityTest`/`ManualControlSecurityDisabledTest`
+(the default-config auth-off suites) stayed green throughout, proving the opt-in guardrail held.
+`ArchitectureTest`/`ContextArchitectureTest`/`EndpointAuthorizationTest` unaffected (no new
+`@RestController`, no new ArchUnit-relevant type). Deferred: `enabled`/`password.*` on
+`VisionAuthProperties` (D2's full shape, left on their existing scattered `@Value`s/call sites); the SPA
+logout-teardown half of §3.6 (web-side, out of this backend wave). Waves B6/B0b open.

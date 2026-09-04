@@ -13,11 +13,12 @@ import com.drones.vision.app.security.DevPrincipalResolver;
 import com.drones.vision.app.security.NoopSessionAuthenticator;
 import com.drones.vision.app.security.SecurityContextPrincipalResolver;
 import com.drones.vision.app.security.SecuritySessionAuthenticator;
+import com.drones.vision.app.config.properties.VisionAuthProperties;
 import com.drones.vision.identity.application.*;
 import com.drones.vision.identity.application.scope.*;
 
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.web.context.SecurityContextRepository;
@@ -57,6 +58,7 @@ import org.springframework.security.web.context.SecurityContextRepository;
  * that used to gate them) — orthogonal to {@code vision.auth.enabled}.
  */
 @Configuration
+@EnableConfigurationProperties(VisionAuthProperties.class)
 public class AuthWiringConfiguration {
 
     /** The one BCrypt {@link PasswordHasherPort} — the only place BCrypt is referenced. */
@@ -131,20 +133,17 @@ public class AuthWiringConfiguration {
 
     /**
      * Real session establishment when auth is on — verifies via {@link AuthService}, persists to
-     * session. The two idle-timeout {@code @Value}s are declared here, not just on {@link
-     * SecuritySessionAuthenticator}'s own constructor — Spring only resolves {@code @Value} on a
-     * bean it constructs itself via reflection/component-scan, not on a type this factory method
-     * builds with a bare {@code new}, so they must be read here and threaded through explicitly.
+     * session. {@link VisionAuthProperties} is injected as an ordinary {@code @Bean} method
+     * argument (docs/plans/active/AUTH-ROLES-PLAN.md §3.6, wave B5) — Spring resolves {@code
+     * @ConfigurationProperties} beans like any other bean, unlike the {@code @Value} pair this
+     * method used to read and re-thread through {@link SecuritySessionAuthenticator}'s constructor
+     * (which could not receive {@code @Value} itself, being built with a bare {@code new}).
      */
     @Bean
     @ConditionalOnProperty(prefix = "vision.auth", name = "enabled", havingValue = "true")
     public SessionAuthenticator securitySessionAuthenticator(AuthService authService,
                                                              SecurityContextRepository securityContextRepository,
-                                                             @Value("${vision.auth.session.idle-timeout-hours:12}")
-                                                             long idleTimeoutHours,
-                                                             @Value("${vision.auth.session.kiosk-idle-timeout-days:365}")
-                                                             long kioskIdleTimeoutDays) {
-        return new SecuritySessionAuthenticator(authService, securityContextRepository, idleTimeoutHours,
-                kioskIdleTimeoutDays);
+                                                             VisionAuthProperties authProperties) {
+        return new SecuritySessionAuthenticator(authService, securityContextRepository, authProperties);
     }
 }
