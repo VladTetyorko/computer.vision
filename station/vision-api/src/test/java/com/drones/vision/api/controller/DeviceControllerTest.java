@@ -21,6 +21,8 @@ import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.perception.application.stream.StreamService;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
@@ -107,6 +109,16 @@ class DeviceControllerTest {
             @Override
             public MapAccessPolicy.Viewer viewer() {
                 throw new UnsupportedOperationException("DeviceController never calls viewer()");
+            }
+
+            @Override
+            public Role role() {
+                throw new UnsupportedOperationException("DeviceController never calls role()");
+            }
+
+            @Override
+            public Authority authority() {
+                throw new UnsupportedOperationException("DeviceController never calls authority()");
             }
         });
     }

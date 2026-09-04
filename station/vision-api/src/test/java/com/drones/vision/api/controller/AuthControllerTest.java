@@ -1,5 +1,6 @@
 package com.drones.vision.api.controller;
 
+import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.identity.application.AuthService;
 import com.drones.vision.identity.application.GroupService;
 import com.drones.vision.identity.domain.model.Group;
@@ -19,8 +20,10 @@ import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.api.security.SessionAuthenticator;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -46,12 +49,18 @@ class AuthControllerTest {
         return MockMvcBuilders
                 .standaloneSetup(new AuthController(authService, groupService, currentUser,
                         sessionAuthenticator, authEnabled))
+                .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
 
     private User seededUser() {
-        return new User(userId, "manager", "Manager", "manager@vision.local", "hash", true,
+        return new User(userId, "manager", "Manager", "manager@vision.local", "hash", true, false,
                 List.of(new Membership(groupId, Role.MANAGER)));
+    }
+
+    private User seededViewer() {
+        return new User(userId, "viewer", "Viewer", "viewer@vision.local", "hash", true, false,
+                List.of(new Membership(groupId, Role.VIEWER)));
     }
 
     @Test
@@ -93,7 +102,7 @@ class AuthControllerTest {
 
     @Test
     void loginSuccessReturnsMeResponseWhenAuthEnabled() throws Exception {
-        when(sessionAuthenticator.login(eq("manager"), eq("secret"), any(), any()))
+        when(sessionAuthenticator.login(eq("manager"), eq("secret"), eq(false), any(), any()))
                 .thenReturn(Optional.of(seededUser()));
         when(groupService.list(any())).thenReturn(List.of(new Group(groupId, "Root", null)));
 
@@ -107,11 +116,46 @@ class AuthControllerTest {
 
     @Test
     void loginFailureIs401WhenAuthEnabled() throws Exception {
-        when(sessionAuthenticator.login(any(), any(), any(), any())).thenReturn(Optional.empty());
+        when(sessionAuthenticator.login(any(), any(), anyBoolean(), any(), any())).thenReturn(Optional.empty());
 
         mockMvc(true).perform(post("/api/auth/login")
                         .contentType("application/json")
                         .content("{\"username\":\"manager\",\"password\":\"wrong\"}"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    /**
+     * docs/plans/active/AUTH-ROLES-PLAN.md §3.5/§3.7, wave B3 — a kiosk session is granted for a
+     * login that resolves to {@link Role#VIEWER}.
+     */
+    @Test
+    void loginWithKioskTrueForAViewerSucceeds() throws Exception {
+        when(sessionAuthenticator.login(eq("viewer"), eq("secret"), eq(true), any(), any()))
+                .thenReturn(Optional.of(seededViewer()));
+        when(groupService.list(any())).thenReturn(List.of(new Group(groupId, "Root", null)));
+
+        mockMvc(true).perform(post("/api/auth/login")
+                        .contentType("application/json")
+                        .content("{\"username\":\"viewer\",\"password\":\"secret\",\"kiosk\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.username").value("viewer"));
+    }
+
+    /**
+     * A kiosk session requested for a non-{@code VIEWER} login is refused {@code 400
+     * KIOSK_NOT_PERMITTED} <em>after</em> a real successful login (credentials are verified exactly
+     * once), and the just-established session is torn down.
+     */
+    @Test
+    void loginWithKioskTrueForAManagerIsRefusedAndTheSessionIsTornDown() throws Exception {
+        when(sessionAuthenticator.login(eq("manager"), eq("secret"), eq(true), any(), any()))
+                .thenReturn(Optional.of(seededUser()));
+
+        mockMvc(true).perform(post("/api/auth/login")
+                        .contentType("application/json")
+                        .content("{\"username\":\"manager\",\"password\":\"secret\",\"kiosk\":true}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("KIOSK_NOT_PERMITTED"));
+        verify(sessionAuthenticator).logout(any(), any());
     }
 }

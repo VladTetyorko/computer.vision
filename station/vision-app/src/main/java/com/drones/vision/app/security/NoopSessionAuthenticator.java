@@ -17,7 +17,7 @@ import java.util.Optional;
 public final class NoopSessionAuthenticator implements SessionAuthenticator {
 
     @Override
-    public Optional<User> login(String username, String password, HttpServletRequest request,
+    public Optional<User> login(String username, String password, boolean kiosk, HttpServletRequest request,
                                 HttpServletResponse response) {
         return Optional.empty();
     }

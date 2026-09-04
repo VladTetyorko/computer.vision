@@ -11,6 +11,7 @@ import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.identity.domain.model.AssignmentRole;
 import com.drones.vision.identity.domain.model.Group;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamDescriptor;
@@ -121,7 +122,8 @@ class ScopedAssetReadAuthEnabledTest {
                 .andExpect(jsonPath("$..assetId", not(hasItem(otherId))));
 
         // Assign the pilot to the OTHER group's asset — a pilot flies assigned aircraft, not a group subtree.
-        assignmentService.assign(pilotId(), otherAsset.id(), VisibilityScope.unbounded());
+        assignmentService.assign(pilotId(), otherAsset.id(), AssignmentRole.PILOT, UserId.random(),
+                VisibilityScope.unbounded());
 
         MockHttpSession after = login("pilot", "pilot");
         mockMvc.perform(get("/api/assets").session(after))

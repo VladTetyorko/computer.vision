@@ -20,6 +20,8 @@ import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.map.application.MapAccessPolicy;
 import com.drones.vision.api.security.PrincipalResolver;
 import org.junit.jupiter.api.BeforeEach;
@@ -108,6 +110,16 @@ class AssetStreamControllerTest {
             @Override
             public MapAccessPolicy.Viewer viewer() {
                 throw new UnsupportedOperationException("AssetStreamController never calls viewer()");
+            }
+
+            @Override
+            public Role role() {
+                throw new UnsupportedOperationException("AssetStreamController never calls role()");
+            }
+
+            @Override
+            public Authority authority() {
+                throw new UnsupportedOperationException("AssetStreamController never calls authority()");
             }
         });
     }

@@ -1,6 +1,7 @@
 package com.drones.vision.api.security;
 
 import com.drones.vision.map.application.MapAccessPolicy;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.identity.domain.model.Role;
@@ -70,19 +71,41 @@ public interface PrincipalResolver {
     MapAccessPolicy.Viewer viewer();
 
     /**
+     * The highest {@link Role} the current request is attributed to (docs/plans/active/AUTH-ROLES-PLAN.md
+     * §3.9, wave B3) — the same privilege {@link #viewer()}'s {@code topRole()} already carries,
+     * exposed here directly so a per-asset authority seam (e.g. {@code AssetAuthority}) can read it
+     * without reaching into the map-specific {@link MapAccessPolicy.Viewer} shape.
+     *
+     * @return the acting user's highest held role; never {@code null}
+     */
+    Role role();
+
+    /**
+     * What the current request may <em>do</em> — {@link #scope()} paired with the capabilities
+     * {@link #role()} grants (docs/plans/active/AUTH-ROLES-PLAN.md §3.1/§3.3, wave B3). Sibling to
+     * {@link #scope()}'s "what may this caller see."
+     *
+     * @return the acting user's authority; never {@code null}
+     */
+    Authority authority();
+
+    /**
      * A resolver that always answers with one fixed {@link Ownership} (and its {@code ownerId} as
-     * the acting user), and an {@link VisibilityScope#unbounded()} scope — the shape {@link
-     * CurrentUser}'s pre-auth behavior had, kept for tests and for {@code vision-app}'s
-     * dev-principal wiring when {@code vision.auth.enabled=false}. An unbounded scope is the
-     * slice-2 guardrail: a scoped read given it returns exactly the unscoped result.
+     * the acting user), an {@link VisibilityScope#unbounded()} scope, and full {@link Authority} —
+     * the shape {@link CurrentUser}'s pre-auth behavior had, kept for tests and for {@code
+     * vision-app}'s dev-principal wiring when {@code vision.auth.enabled=false}. An unbounded scope
+     * is the slice-2 guardrail: a scoped read given it returns exactly the unscoped result; {@link
+     * Authority#full()} is the matching authority-axis guardrail (docs/plans/active/AUTH-ROLES-PLAN.md
+     * §3.1) — every gate that moves onto {@code Authority} answers exactly as it did under a bare
+     * {@link VisibilityScope} before that type existed.
      *
      * <p>Its {@link #viewer()} is the matching map-side guardrail: {@link Role#ADMIN} over {@code
      * ownership.groupId()}, which {@link MapAccessPolicy} grants {@code MANAGE} on every layer — so
      * an auth-disabled deployment sees the whole map exactly as it did before layers existed.
      *
      * @param ownership the fixed ownership to answer with; must not be {@code null}
-     * @return a resolver returning {@code ownership}, {@code ownership.ownerId()}, an unbounded scope
-     *         and an ADMIN viewer
+     * @return a resolver returning {@code ownership}, {@code ownership.ownerId()}, an unbounded scope,
+     *         an ADMIN viewer/role and full authority
      */
     static PrincipalResolver fixed(Ownership ownership) {
         Objects.requireNonNull(ownership, "ownership must not be null");
@@ -105,6 +128,16 @@ public interface PrincipalResolver {
             @Override
             public MapAccessPolicy.Viewer viewer() {
                 return new MapAccessPolicy.Viewer(ownership.ownerId(), Set.of(ownership.groupId()), Role.ADMIN);
+            }
+
+            @Override
+            public Role role() {
+                return Role.ADMIN;
+            }
+
+            @Override
+            public Authority authority() {
+                return Authority.full();
             }
         };
     }

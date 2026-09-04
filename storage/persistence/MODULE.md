@@ -16,9 +16,9 @@ All version pins come from `spring-boot-dependencies` (this module's grandparent
 
 **Used by:** vision-app (`PersistenceWiringConfiguration`, unconditional).
 
-**Build/test:** `./mvnw -B -pl storage/persistence test` — 274 tests (last measured, COMMAND-MAP-FLOW
-B1; up from 269 after ASSET-FLOWS BK4, 267 after ZERO-CONFIG-ONBOARDING Z2c, 260 before that — count
-from Maven's own summary line, see Gotchas), one shared `postgres:16`
+**Build/test:** `./mvnw -B -pl storage/persistence test` — 276 tests (last measured, AUTH-ROLES B3;
+up from 274 after COMMAND-MAP-FLOW B1, 269 after ASSET-FLOWS BK4, 267 after ZERO-CONFIG-ONBOARDING Z2c,
+260 before that — count from Maven's own summary line, see Gotchas), one shared `postgres:16`
 Testcontainers container per test class. Requires a running Docker daemon — there is no non-Docker
 path; tests skip cleanly (not fail) when Docker is unavailable. Use a **two-step** build when a
 sibling context module is mid-flight elsewhere in the reactor: `./mvnw -B -pl
@@ -54,9 +54,9 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 | `JpaDetectionRepository` | `DetectionRepositoryPort` | always `persist`; prune-on-write (100k rows/stream); `DetectionQuery#to` treated as inclusive despite the port's javadoc calling it exclusive (see Gotchas) |
 | `JpaAssetImageRepository` | `AssetImageRepositoryPort` | keyed by `assetId` itself (no synthetic id — at most one image per asset); `data` plain `byte[]`/`bytea` |
 | `JpaGeofenceRepository` | `GeofenceRepositoryPort` | merge upsert, hard delete; no soft-delete concept (`enabled=false` is just a column) |
-| `JpaUserRepository` | `UserRepositoryPort` | merge upsert; `findByUsername` lower-cases the key then exact-matches the already-lower-cased stored value; `memberships` is jsonb |
+| `JpaUserRepository` | `UserRepositoryPort` | merge upsert; `findByUsername` lower-cases the key then exact-matches the already-lower-cased stored value; `memberships` is jsonb; `UserEntity.mustChangePassword` (AUTH-ROLES-PLAN.md D13, wave B3, `V33`) round-trips through `UserMapper`'s 7-arg `toEntity`/`toDomain` alongside every other column |
 | `JpaGroupRepository` | `GroupRepositoryPort` | merge upsert; `parentGroupId` a nullable UUID (null = root) |
-| `JpaAssignmentRepository` | `AssignmentRepositoryPort` | composite-key (`pilot_user_id`,`asset_id`) `merge` upsert, idempotent unassign; **no mapper** — no domain aggregate to map to/from, only inline `UUID`↔id-wrapper conversions |
+| `JpaAssignmentRepository` | `AssignmentRepositoryPort` | composite-key (`pilot_user_id`,`asset_id`) `merge` upsert, idempotent unassign; **the one exception to "no mapper needed"** (AUTH-ROLES-PLAN.md §3.4, wave B3): `AssignmentEntity.role` (`V33`, stored as `role.name()`) round-trips through `AssignmentRole.valueOf(...)`, and `roleFor(UserId, AssetId)`/`assignmentsForAsset(AssetId)` build real `Assignment` domain records from the entity — inline `UUID`↔id-wrapper conversion is no longer the whole story once a domain aggregate exists to map to |
 | `JpaMarkRepository` | `MarkRepositoryPort` | merge upsert, hard delete |
 | `JpaMapLayerRepository` | `MapLayerRepositoryPort` | merge upsert; `save` **wholesale-replaces** the grant list (`map_layer_grants`); `deleteById` deliberately does **not** cascade to marks/drawings — that's `DefaultMapLayerService#delete`'s job (it must emit one `MapEvent` per removed row) |
 | `JpaDrawingRepository` | `DrawingRepositoryPort` | merge upsert (a drawing mutates in place as its geometry is dragged), hard delete |
@@ -208,6 +208,7 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 | `V30__cv_model_registry.sql` | `cv_models` (audited, composite PK `(model_id, version)`, every provenance column + `metrics` nullable) + `cv_training_runs` (audited, `idx_cv_training_runs_started_at` for `findAll(limit)`'s newest-first order); no seed rows — the config-seeded model roster merges with the worker's live `ListModels` response at the application layer, not baked into this schema (fixes H4/H7) |
 | `V31__discovery_inbox.sql` | `discovery_candidates` (audited): domain-owned `id` PK, `identity_key` (the mDNS/ONVIF/MAVLink-derived stable key `DiscoveryCandidate` upserts on), `method`/`name`/`address`, flattened `suggested_category`/`suggested_stream_protocol`/`suggested_stream_uri`/`suggested_stream_options` (nullable as a group — a candidate with no offered stream), `details` jsonb `NOT NULL DEFAULT '{}'`, `first_seen`/`last_seen` `TIMESTAMPTZ`, `status`, nullable `registered_asset_id` (no FK — the same "no cross-aggregate FK" posture every other table in this schema takes, see Conventions); unique index on `identity_key` (the upsert target) + index on `last_seen` (the inbox list's sort column) |
 | `V32__control_profile_transmitter_view.sql` | `control_profiles` += `stick_mode SMALLINT NOT NULL DEFAULT 2`, `forward_is_up BOOLEAN NOT NULL DEFAULT TRUE`, `ck_control_profiles_stick_mode CHECK (stick_mode BETWEEN 1 AND 4)` — how the owner's transmitter is arranged (CONTROLLER-SETUP-CONTEXT.md wave C15); defaults rather than nullable since every existing row already has an arrangement (the platform's); **renumbered from the branch's own `V25` during the `feat/controller-setup-c15` merge** — see the Gotchas entry below for the collision this replaced |
+| `V33__assignment_roles.sql` | `pilot_assignments.role` (`VARCHAR(16) NOT NULL DEFAULT 'PILOT'`), `users.must_change_password` (`BOOLEAN NOT NULL DEFAULT FALSE`) — the per-asset seat (`AssignmentRole`, PILOT/CREW) and the forced-password-change latch (AUTH-ROLES-PLAN.md §3.4/D13, wave B3); purely additive, no backfill logic needed beyond the column defaults; no trigger changes — `V21`'s `audit_row_change()` resolves every column via `to_jsonb(NEW/OLD)`, not a fixed list |
 
 A second, conditional Flyway location, `src/main/resources/db/seed/dev`, holds
 `V90001__dev_accounts.sql` (the `admin`/`manager`/`pilot` DEV-ONLY accounts) — it only joins Flyway's
@@ -470,7 +471,19 @@ DTO, same ascending order, same `200 []` on an unknown usage. `PostgresDockerInt
 `TelemetryRepositoryTests` gained three cases (latest-window selection, ascending order preserved,
 empty case). 271 → 274 tests (Maven's own summary line); `BUILD SUCCESS`, Docker ran (not skipped).
 
+**AUTH-ROLES wave B3 done.** `V33__assignment_roles.sql` adds `pilot_assignments.role` and
+`users.must_change_password` (both additive, defaulted at the column level, no trigger changes).
+`UserEntity`/`UserMapper` widened to round-trip `mustChangePassword`; `AssignmentEntity` gained
+`role`, and `JpaAssignmentRepository` gained `roleFor(UserId, AssetId)` (most-recently-assigned seat)
+and `assignmentsForAsset(AssetId)` (full roster with seats) — `AssignmentRepositoryPort`'s two new
+read methods behind `GET /api/assets/{id}/pilots` and `GET /api/me/assignments`'s seat enrichment
+(vision-api, same wave). `PostgresDockerIntegrationTest` gained two new `AssignmentRepositoryTests`
+cases (`roleForReflectsTheMostRecentlyAssignedSeat`, `assignmentsForAssetListsEveryLinkWithItsSeat`)
+plus mechanical fixes to every pre-existing `new User(...)`/`repository.assign(...)` call site for
+the two widened constructors. 274 → 276 tests (Maven's own summary line); `BUILD SUCCESS`, Docker ran
+(not skipped — Testcontainers started a real `postgres:16`, Flyway migrated through `V33`).
+
 See `docs/plans/README.md` for the plan-status authority behind the phase references throughout this
 file (MVP2, POSTGRES-ONLY-CONTEXT, SCALE-100, FIXED-CAMERA-GEO, VISUAL-GEO-V2, DRONE-ONBOARDING,
 CONTROLLER-SETUP-CONTEXT, ARCHITECTURE-AUDIT-2026-08-26, CV-SETTINGS, ZERO-CONFIG-ONBOARDING-CONTEXT,
-ASSET-FLOWS).
+ASSET-FLOWS, AUTH-ROLES).

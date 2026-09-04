@@ -18,6 +18,8 @@ import com.drones.vision.map.domain.model.CameraPose;
 import com.drones.vision.map.domain.model.CameraPoseSource;
 import com.drones.vision.map.domain.model.LayerId;
 import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.warehouse.application.asset.AssetDetails;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
@@ -111,6 +113,16 @@ class CameraPoseControllerTest {
             @Override
             public MapAccessPolicy.Viewer viewer() {
                 throw new UnsupportedOperationException("CameraPoseController never calls viewer()");
+            }
+
+            @Override
+            public Role role() {
+                throw new UnsupportedOperationException("CameraPoseController never calls role()");
+            }
+
+            @Override
+            public Authority authority() {
+                throw new UnsupportedOperationException("CameraPoseController never calls authority()");
             }
         });
     }

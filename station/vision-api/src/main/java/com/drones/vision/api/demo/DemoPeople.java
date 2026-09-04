@@ -10,6 +10,7 @@ import com.drones.vision.kernel.GroupId;
 import com.drones.vision.identity.domain.model.Membership;
 import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.identity.domain.model.User;
+import com.drones.vision.kernel.UserId;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
@@ -72,12 +73,15 @@ public class DemoPeople {
      * another press) is reported through {@code problems} and skipped, never aborting the rest.
      *
      * @param count    how many users to create
+     * @param actor    the pressing user's own id, for audit attribution (docs/plans/active/AUTH-ROLES-PLAN.md
+     *                 D15, wave B3)
      * @param acting   the pressing user's visibility scope — every gate {@link UserService} enforces
      *                 still applies
      * @param problems sink for one human-readable line per user that could not be created
      * @return the created users, in creation order (possibly shorter than {@code count})
      */
-    public List<User> seed(int count, VisibilityScope acting, Consumer<String> problems) {
+    public List<User> seed(int count, UserId actor, VisibilityScope acting, Consumer<String> problems) {
+        Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(acting, "acting must not be null");
         Objects.requireNonNull(problems, "problems must not be null");
         if (count <= 0) {
@@ -102,7 +106,8 @@ public class DemoPeople {
             Role role = index % MANAGER_EVERY == 0 ? Role.MANAGER : Role.PILOT;
             try {
                 created.add(users.create(new UserSpec(username, callSign + " (demo)",
-                        username + "@demo.local", PASSWORD, List.of(new Membership(squad.id(), role))), acting));
+                        username + "@demo.local", PASSWORD, List.of(new Membership(squad.id(), role))), actor,
+                        acting));
             } catch (RuntimeException e) {
                 problems.accept("user " + username + ": " + describe(e));
             }

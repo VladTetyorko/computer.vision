@@ -9,6 +9,8 @@ import com.drones.vision.warehouse.application.asset.AssetSpec;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.warehouse.application.device.DeviceRegistration;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.Custody;
@@ -161,6 +163,16 @@ class AssetControllerTest {
             @Override
             public MapAccessPolicy.Viewer viewer() {
                 throw new UnsupportedOperationException("AssetController never calls viewer()");
+            }
+
+            @Override
+            public Role role() {
+                throw new UnsupportedOperationException("AssetController never calls role()");
+            }
+
+            @Override
+            public Authority authority() {
+                throw new UnsupportedOperationException("AssetController never calls authority()");
             }
         });
     }

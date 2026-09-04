@@ -1,8 +1,10 @@
 package com.drones.vision.api.security;
 
 import com.drones.vision.map.application.MapAccessPolicy;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.kernel.Ownership;
+import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.kernel.UserId;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
@@ -92,5 +94,25 @@ public class CurrentUser {
      */
     public MapAccessPolicy.Viewer viewer() {
         return resolver.viewer();
+    }
+
+    /**
+     * The highest {@link Role} this request is attributed to (docs/plans/active/AUTH-ROLES-PLAN.md
+     * §3.9, wave B3).
+     *
+     * @return the acting user's highest held role; never {@code null}
+     */
+    public Role role() {
+        return resolver.role();
+    }
+
+    /**
+     * What this request may <em>do</em> — {@link #scope()} paired with {@link #role()}'s granted
+     * capabilities (docs/plans/active/AUTH-ROLES-PLAN.md §3.1/§3.3, wave B3).
+     *
+     * @return the acting user's authority; never {@code null}
+     */
+    public Authority authority() {
+        return resolver.authority();
     }
 }

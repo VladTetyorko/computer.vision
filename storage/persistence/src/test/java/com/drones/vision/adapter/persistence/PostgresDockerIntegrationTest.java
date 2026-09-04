@@ -55,6 +55,8 @@ import com.drones.vision.flight.domain.model.CorrectionStatus;
 import com.drones.vision.flight.domain.model.FeatureRequirement;
 import com.drones.vision.flight.domain.model.FlightPhase;
 import com.drones.vision.flight.domain.model.GeofenceZone;
+import com.drones.vision.identity.domain.model.Assignment;
+import com.drones.vision.identity.domain.model.AssignmentRole;
 import com.drones.vision.identity.domain.model.Group;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.map.domain.model.DrawKind;
@@ -1616,7 +1618,7 @@ class PostgresDockerIntegrationTest {
         @Test
         void savedUserWithMembershipsRoundTrips() {
             User user = new User(UserId.random(), "Round.Trip.User", "Round Trip", "rt@vision.local",
-                    "hash-value", true, List.of(new Membership(groupA, Role.MANAGER)));
+                    "hash-value", true, false, List.of(new Membership(groupA, Role.MANAGER)));
 
             repository.save(user);
 
@@ -1631,7 +1633,8 @@ class PostgresDockerIntegrationTest {
 
         @Test
         void findByUsernameIsCaseInsensitive() {
-            User user = new User(UserId.random(), "casetest", "Case", "case@vision.local", "h", true, List.of());
+            User user = new User(UserId.random(), "casetest", "Case", "case@vision.local", "h", true, false,
+                    List.of());
             repository.save(user);
 
             assertTrue(repository.findByUsername("CaseTest").isPresent());
@@ -1642,8 +1645,8 @@ class PostgresDockerIntegrationTest {
         @Test
         void saveUpsertsById() {
             UserId id = UserId.random();
-            repository.save(new User(id, "upsertuser", "First", "u@vision.local", "h1", true, List.of()));
-            repository.save(new User(id, "upsertuser", "Second", "u@vision.local", "h2", false,
+            repository.save(new User(id, "upsertuser", "First", "u@vision.local", "h1", true, false, List.of()));
+            repository.save(new User(id, "upsertuser", "Second", "u@vision.local", "h2", false, false,
                     List.of(new Membership(groupA, Role.PILOT))));
 
             Optional<User> found = repository.findById(id);
@@ -1656,8 +1659,8 @@ class PostgresDockerIntegrationTest {
 
         @Test
         void findAllReturnsEverySavedUser() {
-            User first = new User(UserId.random(), "findall-a", "A", "a@vision.local", "h", true, List.of());
-            User second = new User(UserId.random(), "findall-b", "B", "b@vision.local", "h", true, List.of());
+            User first = new User(UserId.random(), "findall-a", "A", "a@vision.local", "h", true, false, List.of());
+            User second = new User(UserId.random(), "findall-b", "B", "b@vision.local", "h", true, false, List.of());
             repository.save(first);
             repository.save(second);
 
@@ -1723,8 +1726,8 @@ class PostgresDockerIntegrationTest {
             UserId pilot = UserId.random();
             AssetId asset = AssetId.random();
 
-            repository.assign(pilot, asset);
-            repository.assign(pilot, asset); // idempotent upsert — no duplicate row, no error
+            repository.assign(pilot, asset, AssignmentRole.PILOT);
+            repository.assign(pilot, asset, AssignmentRole.PILOT); // idempotent upsert — no duplicate row, no error
 
             assertTrue(repository.isAssigned(pilot, asset));
             assertEquals(Set.of(asset), repository.assetsForPilot(pilot));
@@ -1735,7 +1738,7 @@ class PostgresDockerIntegrationTest {
         void unassignIsIdempotentDelete() {
             UserId pilot = UserId.random();
             AssetId asset = AssetId.random();
-            repository.assign(pilot, asset);
+            repository.assign(pilot, asset, AssignmentRole.PILOT);
 
             repository.unassign(pilot, asset);
             repository.unassign(pilot, asset); // idempotent — deleting a missing link is a no-op
@@ -1752,9 +1755,9 @@ class PostgresDockerIntegrationTest {
             AssetId droneOne = AssetId.random();
             AssetId droneTwo = AssetId.random();
 
-            repository.assign(alice, droneOne);
-            repository.assign(alice, droneTwo);
-            repository.assign(bob, droneOne);
+            repository.assign(alice, droneOne, AssignmentRole.PILOT);
+            repository.assign(alice, droneTwo, AssignmentRole.PILOT);
+            repository.assign(bob, droneOne, AssignmentRole.PILOT);
 
             assertEquals(Set.of(droneOne, droneTwo), repository.assetsForPilot(alice));
             assertEquals(Set.of(droneOne), repository.assetsForPilot(bob));
@@ -1767,6 +1770,43 @@ class PostgresDockerIntegrationTest {
             assertTrue(repository.assetsForPilot(UserId.random()).isEmpty());
             assertTrue(repository.pilotsForAsset(AssetId.random()).isEmpty());
             assertFalse(repository.isAssigned(UserId.random(), AssetId.random()));
+        }
+
+        /**
+         * docs/plans/active/AUTH-ROLES-PLAN.md §3.4, wave B3 — the seat a link grants round-trips
+         * through {@code role} ({@code V33__assignment_roles.sql}), and re-assigning an existing link
+         * with a different {@link AssignmentRole} changes the seat rather than creating a second row.
+         */
+        @Test
+        void roleForReflectsTheMostRecentlyAssignedSeat() {
+            UserId pilot = UserId.random();
+            AssetId asset = AssetId.random();
+
+            assertEquals(Optional.empty(), repository.roleFor(pilot, asset));
+
+            repository.assign(pilot, asset, AssignmentRole.CREW);
+            assertEquals(Optional.of(AssignmentRole.CREW), repository.roleFor(pilot, asset));
+
+            repository.assign(pilot, asset, AssignmentRole.PILOT); // re-assign changes the seat, no duplicate row
+            assertEquals(Optional.of(AssignmentRole.PILOT), repository.roleFor(pilot, asset));
+            assertEquals(Set.of(asset), repository.assetsForPilot(pilot), "still exactly one link");
+        }
+
+        @Test
+        void assignmentsForAssetListsEveryLinkWithItsSeat() {
+            UserId pilot = UserId.random();
+            UserId crew = UserId.random();
+            AssetId asset = AssetId.random();
+
+            assertTrue(repository.assignmentsForAsset(asset).isEmpty());
+
+            repository.assign(pilot, asset, AssignmentRole.PILOT);
+            repository.assign(crew, asset, AssignmentRole.CREW);
+
+            List<Assignment> roster = repository.assignmentsForAsset(asset);
+            assertEquals(2, roster.size());
+            assertTrue(roster.contains(new Assignment(pilot, asset, AssignmentRole.PILOT)));
+            assertTrue(roster.contains(new Assignment(crew, asset, AssignmentRole.CREW)));
         }
     }
 
@@ -4551,9 +4591,9 @@ class PostgresDockerIntegrationTest {
             String rowId = userId.value().toString();
 
             users.save(new User(userId, "audit.secret", "Audit Secret", "secret@vision.local",
-                    "$2a$10$ORIGINALHASHVALUE", true, List.of()));
+                    "$2a$10$ORIGINALHASHVALUE", true, false, List.of()));
             users.save(new User(userId, "audit.secret", "Audit Secret", "secret@vision.local",
-                    "$2a$10$ROTATEDHASHVALUE", true, List.of()));
+                    "$2a$10$ROTATEDHASHVALUE", true, false, List.of()));
 
             List<DbAuditLogEntity> rows = auditLog.findRecentForRow("users", rowId, 10);
             assertEquals(2, rows.size(), "one audit row for the INSERT, one for the UPDATE");

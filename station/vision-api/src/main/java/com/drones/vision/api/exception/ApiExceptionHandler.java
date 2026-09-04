@@ -116,4 +116,44 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(new ErrorResponse("SERVICE_UNAVAILABLE", ex.getMessage()));
     }
+
+    /**
+     * docs/plans/active/AUTH-ROLES-PLAN.md §3.5, wave B3 — the bootstrap one-way latch has already
+     * closed (an admin already exists).
+     */
+    @ExceptionHandler(AlreadyInitializedException.class)
+    public ResponseEntity<ErrorResponse> handleAlreadyInitialized(AlreadyInitializedException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse("ALREADY_INITIALIZED", ex.getMessage()));
+    }
+
+    /**
+     * docs/plans/active/AUTH-ROLES-PLAN.md §3.5/§3.7, wave B3 — a caller-supplied password does not
+     * meet {@link com.drones.vision.api.security.PasswordPolicy}'s configured minimum length.
+     */
+    @ExceptionHandler(WeakPasswordException.class)
+    public ResponseEntity<ErrorResponse> handleWeakPassword(WeakPasswordException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(new ErrorResponse("WEAK_PASSWORD", ex.getMessage()));
+    }
+
+    /**
+     * docs/plans/active/AUTH-ROLES-PLAN.md §3.5, wave B3 — a self-service password change was
+     * attempted while {@code vision.auth.enabled=false}; there is no real credential to change.
+     */
+    @ExceptionHandler(AuthDisabledException.class)
+    public ResponseEntity<ErrorResponse> handleAuthDisabled(AuthDisabledException ex) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ErrorResponse("AUTH_DISABLED", ex.getMessage()));
+    }
+
+    /**
+     * docs/plans/active/AUTH-ROLES-PLAN.md §3.5/§3.7, wave B3 — a kiosk (long-lived) session was
+     * requested by a login that does not resolve to {@code VIEWER}.
+     */
+    @ExceptionHandler(KioskNotPermittedException.class)
+    public ResponseEntity<ErrorResponse> handleKioskNotPermitted(KioskNotPermittedException ex) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(new ErrorResponse("KIOSK_NOT_PERMITTED", ex.getMessage()));
+    }
 }

@@ -3,6 +3,7 @@ package com.drones.vision.app.security;
 import com.drones.vision.api.security.PrincipalResolver;
 import com.drones.vision.app.devsupport.DevPrincipal;
 import com.drones.vision.map.application.MapAccessPolicy;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.identity.domain.model.Role;
@@ -25,6 +26,11 @@ import java.util.Set;
  * MapAccessPolicy} grants {@code MANAGE} on every layer — so with auth off the whole common
  * operational picture (every layer, every mark, every drawing, and every {@code map} SSE event) is
  * visible, matching the unscoped behavior the marks stack had before layers existed.
+ *
+ * <p>{@link #role()} is {@link Role#ADMIN} and {@link #authority()} is {@link Authority#full()}
+ * (docs/plans/active/AUTH-ROLES-PLAN.md §3.1, wave B3) — the same unbounded guardrail applied to the
+ * authority axis: with auth off, every capability gate answers exactly as it did before {@code
+ * Authority} existed.
  */
 public final class DevPrincipalResolver implements PrincipalResolver {
 
@@ -46,5 +52,15 @@ public final class DevPrincipalResolver implements PrincipalResolver {
     @Override
     public MapAccessPolicy.Viewer viewer() {
         return new MapAccessPolicy.Viewer(DevPrincipal.USER_ID, Set.of(DevPrincipal.GROUP_ID), Role.ADMIN);
+    }
+
+    @Override
+    public Role role() {
+        return Role.ADMIN;
+    }
+
+    @Override
+    public Authority authority() {
+        return Authority.full();
     }
 }

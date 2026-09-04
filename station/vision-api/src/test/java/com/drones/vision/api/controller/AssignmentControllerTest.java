@@ -1,6 +1,8 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.identity.domain.model.Assignment;
+import com.drones.vision.identity.domain.model.AssignmentRole;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.identity.application.AssignmentService;
@@ -10,11 +12,13 @@ import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import org.junit.jupiter.api.Test;
+import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.util.List;
 import java.util.NoSuchElementException;
-import java.util.Set;
+import java.util.Optional;
 import com.drones.vision.api.security.CurrentUser;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -54,23 +58,35 @@ class AssignmentControllerTest {
     private final String pilotId = UserId.random().value().toString();
 
     @Test
-    void assignReturns204AndCallsService() throws Exception {
+    void assignWithNoBodyDefaultsToPilotSeatAndAttributesTheActor() throws Exception {
         mockMvc.perform(put("/api/assets/{a}/pilots/{u}", assetId, pilotId))
                 .andExpect(status().isNoContent());
-        verify(assignmentService).assign(eq(UserId.of(pilotId)), eq(AssetId.of(assetId)), any(VisibilityScope.class));
+        verify(assignmentService).assign(eq(UserId.of(pilotId)), eq(AssetId.of(assetId)), eq(AssignmentRole.PILOT),
+                eq(actor), any(VisibilityScope.class));
+    }
+
+    @Test
+    void assignWithCrewBodyGrantsTheCrewSeat() throws Exception {
+        mockMvc.perform(put("/api/assets/{a}/pilots/{u}", assetId, pilotId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"role\":\"CREW\"}"))
+                .andExpect(status().isNoContent());
+        verify(assignmentService).assign(eq(UserId.of(pilotId)), eq(AssetId.of(assetId)), eq(AssignmentRole.CREW),
+                eq(actor), any(VisibilityScope.class));
     }
 
     @Test
     void unassignReturns204AndCallsService() throws Exception {
         mockMvc.perform(delete("/api/assets/{a}/pilots/{u}", assetId, pilotId))
                 .andExpect(status().isNoContent());
-        verify(assignmentService).unassign(eq(UserId.of(pilotId)), eq(AssetId.of(assetId)), any(VisibilityScope.class));
+        verify(assignmentService).unassign(eq(UserId.of(pilotId)), eq(AssetId.of(assetId)), eq(actor),
+                any(VisibilityScope.class));
     }
 
     @Test
     void assignOutOfScopeMapsTo403() throws Exception {
         doThrow(new AccessDeniedException("out of scope"))
-                .when(assignmentService).assign(any(), any(), any());
+                .when(assignmentService).assign(any(), any(), any(), any(), any());
         mockMvc.perform(put("/api/assets/{a}/pilots/{u}", assetId, pilotId))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error").value("FORBIDDEN"));
@@ -79,19 +95,21 @@ class AssignmentControllerTest {
     @Test
     void assignUnknownAssetMapsTo404() throws Exception {
         doThrow(new NoSuchElementException("unknown asset"))
-                .when(assignmentService).assign(any(), any(), any());
+                .when(assignmentService).assign(any(), any(), any(), any(), any());
         mockMvc.perform(put("/api/assets/{a}/pilots/{u}", assetId, pilotId))
                 .andExpect(status().isNotFound());
     }
 
     @Test
-    void pilotsListsAssignedPilotsWhenInScope() throws Exception {
+    void pilotsListsAssignedPilotsWithTheirSeatWhenInScope() throws Exception {
         UserId one = UserId.random();
-        when(assignmentRepository.pilotsForAsset(AssetId.of(assetId))).thenReturn(Set.of(one));
+        when(assignmentRepository.assignmentsForAsset(AssetId.of(assetId)))
+                .thenReturn(List.of(new Assignment(one, AssetId.of(assetId), AssignmentRole.CREW)));
 
         mockMvc.perform(get("/api/assets/{a}/pilots", assetId))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].userId").value(one.value().toString()));
+                .andExpect(jsonPath("$[0].userId").value(one.value().toString()))
+                .andExpect(jsonPath("$[0].role").value("CREW"));
     }
 
     @Test
@@ -103,12 +121,25 @@ class AssignmentControllerTest {
     }
 
     @Test
-    void myAssignmentsListsTheCallersAssets() throws Exception {
+    void myAssignmentsListsTheCallersAssetsWithTheirSeat() throws Exception {
         AssetId a = AssetId.random();
-        when(assignmentService.assignmentsFor(actor)).thenReturn(Set.of(a));
+        when(assignmentService.assignmentsFor(actor)).thenReturn(java.util.Set.of(a));
+        when(assignmentRepository.roleFor(actor, a)).thenReturn(Optional.of(AssignmentRole.CREW));
 
         mockMvc.perform(get("/api/me/assignments"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$[0].assetId").value(a.value().toString()));
+                .andExpect(jsonPath("$[0].assetId").value(a.value().toString()))
+                .andExpect(jsonPath("$[0].role").value("CREW"));
+    }
+
+    @Test
+    void myAssignmentsDefaultsToPilotWhenRoleForFindsNoLink() throws Exception {
+        AssetId a = AssetId.random();
+        when(assignmentService.assignmentsFor(actor)).thenReturn(java.util.Set.of(a));
+        when(assignmentRepository.roleFor(actor, a)).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/me/assignments"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].role").value("PILOT"));
     }
 }

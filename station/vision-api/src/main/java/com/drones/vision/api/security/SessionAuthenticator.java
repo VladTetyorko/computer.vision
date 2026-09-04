@@ -24,14 +24,22 @@ public interface SessionAuthenticator {
      * Verifies {@code username}/{@code password} and, on success, establishes an authenticated
      * session on {@code request}/{@code response} (a session cookie is issued via the response).
      *
+     * <p>{@code kiosk} (docs/plans/active/AUTH-ROLES-PLAN.md §3.5/§3.7, wave B3) requests the long-lived
+     * session an always-on wall display needs instead of the normal idle timeout — granted only for
+     * a {@link com.drones.vision.identity.domain.model.Role#VIEWER} login; a non-{@code VIEWER}
+     * caller requesting it is refused by {@link AuthController} before this method is ever called
+     * ({@code 400 KIOSK_NOT_PERMITTED}), so an implementation may assume {@code kiosk=true} only
+     * ever arrives for a session that is about to resolve to {@code VIEWER}.
+     *
      * @param username the attempted username, any casing
      * @param password the attempted plaintext password
+     * @param kiosk    whether the caller requested a kiosk-length session
      * @param request  the current request (its session is (re)created on success)
      * @param response the current response (the session cookie is written to it)
      * @return the authenticated user on success, or {@link Optional#empty()} on any failed login
      *         (unknown/disabled user or wrong password — indistinguishable, no info leak)
      */
-    Optional<User> login(String username, String password, HttpServletRequest request,
+    Optional<User> login(String username, String password, boolean kiosk, HttpServletRequest request,
                          HttpServletResponse response);
 
     /**

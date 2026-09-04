@@ -14,6 +14,8 @@ import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.map.application.MapAccessPolicy;
 import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.identity.domain.model.Role;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -330,6 +332,16 @@ class GeofenceControllerTest {
             @Override
             public MapAccessPolicy.Viewer viewer() {
                 throw new UnsupportedOperationException("GeofenceController never calls viewer()");
+            }
+
+            @Override
+            public Role role() {
+                throw new UnsupportedOperationException("GeofenceController never calls role()");
+            }
+
+            @Override
+            public Authority authority() {
+                throw new UnsupportedOperationException("GeofenceController never calls authority()");
             }
         });
     }

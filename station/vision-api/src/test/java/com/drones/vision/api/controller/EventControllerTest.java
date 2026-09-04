@@ -20,6 +20,8 @@ import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.Custody;
 import com.drones.vision.warehouse.domain.model.Identity;
@@ -107,6 +109,16 @@ class EventControllerTest {
             @Override
             public MapAccessPolicy.Viewer viewer() {
                 throw new UnsupportedOperationException("EventController never calls viewer()");
+            }
+
+            @Override
+            public Role role() {
+                throw new UnsupportedOperationException("EventController never calls role()");
+            }
+
+            @Override
+            public Authority authority() {
+                throw new UnsupportedOperationException("EventController never calls authority()");
             }
         });
     }

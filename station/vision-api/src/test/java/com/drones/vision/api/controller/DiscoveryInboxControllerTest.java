@@ -13,6 +13,7 @@ import com.drones.vision.map.application.MapAccessPolicy;
 import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.warehouse.application.discovery.DiscoveryInboxService;
 import com.drones.vision.warehouse.application.discovery.DiscoveryService;
 import com.drones.vision.warehouse.application.discovery.RegisterFromCandidateCommand;
@@ -79,6 +80,16 @@ class DiscoveryInboxControllerTest {
             @Override
             public MapAccessPolicy.Viewer viewer() {
                 return new MapAccessPolicy.Viewer(ownership.ownerId(), Set.of(ownership.groupId()), Role.PILOT);
+            }
+
+            @Override
+            public Role role() {
+                throw new UnsupportedOperationException("DiscoveryInboxController never calls role()");
+            }
+
+            @Override
+            public Authority authority() {
+                throw new UnsupportedOperationException("DiscoveryInboxController never calls authority()");
             }
         });
     }

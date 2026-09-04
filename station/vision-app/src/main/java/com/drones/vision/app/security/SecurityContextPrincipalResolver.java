@@ -2,7 +2,9 @@ package com.drones.vision.app.security;
 
 import com.drones.vision.api.security.PrincipalResolver;
 import com.drones.vision.map.application.MapAccessPolicy;
+import com.drones.vision.identity.application.scope.RoleAuthority;
 import com.drones.vision.identity.application.scope.ScopeResolver;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.identity.domain.model.Membership;
@@ -48,6 +50,11 @@ import java.util.Set;
  * already grants MANAGE everywhere), and a PILOT resolves to {@code ASSIGNED_ASSETS} (no groups
  * either), so their direct memberships are the only thing that makes their own team's layer
  * reachable — exactly the trap {@link MapAccessPolicy}'s javadoc warns about.
+ *
+ * <p><strong>Authority (docs/plans/active/AUTH-ROLES-PLAN.md §3.1/§3.9, wave B3).</strong> {@link
+ * #role()} reuses the same {@link #topRoleOf} the map viewer already computes — one highest-role
+ * lookup, not two. {@link #authority()} pairs that role's {@link RoleAuthority#capabilitiesOf(Role)}
+ * with {@link #scope()}, exactly the composition {@link Authority}'s own javadoc describes.
  */
 public final class SecurityContextPrincipalResolver implements PrincipalResolver {
 
@@ -79,6 +86,17 @@ public final class SecurityContextPrincipalResolver implements PrincipalResolver
         user.memberships().stream().map(Membership::groupId).forEach(groups::add);
         groups.addAll(scopeResolver.scopeFor(user).groups());
         return new MapAccessPolicy.Viewer(user.id(), groups, topRoleOf(user));
+    }
+
+    @Override
+    public Role role() {
+        return topRoleOf(principal().user());
+    }
+
+    @Override
+    public Authority authority() {
+        Role role = role();
+        return new Authority(scope(), RoleAuthority.capabilitiesOf(role));
     }
 
     /**

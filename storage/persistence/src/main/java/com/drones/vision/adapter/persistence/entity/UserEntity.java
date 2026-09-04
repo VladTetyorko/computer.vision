@@ -31,6 +31,10 @@ import java.util.UUID;
  * <p>{@code username} is stored already-lower-cased (the domain {@code User} normalizes it) and
  * carries a {@code UNIQUE} constraint, so {@code findByUsername} is an exact match on the stored
  * value.
+ *
+ * <p>{@code must_change_password} (docs/plans/active/AUTH-ROLES-PLAN.md D13, wave B3; column added by
+ * {@code V33__assignment_roles.sql}) mirrors {@link com.drones.vision.identity.domain.model.User#mustChangePassword()}
+ * field-for-field.
  */
 @Entity
 @Table(name = "users")
@@ -55,6 +59,9 @@ public class UserEntity {
     @Column(name = "enabled", nullable = false)
     private boolean enabled;
 
+    @Column(name = "must_change_password", nullable = false)
+    private boolean mustChangePassword;
+
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "memberships", columnDefinition = "jsonb", nullable = false)
     private List<Membership> memberships = new ArrayList<>();
@@ -64,13 +71,14 @@ public class UserEntity {
     }
 
     public UserEntity(UUID id, String username, String displayName, String email, String passwordHash,
-                      boolean enabled, List<Membership> memberships) {
+                      boolean enabled, boolean mustChangePassword, List<Membership> memberships) {
         this.id = id;
         this.username = username;
         this.displayName = displayName;
         this.email = email;
         this.passwordHash = passwordHash;
         this.enabled = enabled;
+        this.mustChangePassword = mustChangePassword;
         this.memberships = new ArrayList<>(memberships);
     }
 
@@ -96,6 +104,10 @@ public class UserEntity {
 
     public boolean enabled() {
         return enabled;
+    }
+
+    public boolean mustChangePassword() {
+        return mustChangePassword;
     }
 
     public List<Membership> memberships() {

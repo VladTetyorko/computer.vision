@@ -23,6 +23,12 @@ import java.util.UUID;
  * <p>No FK to {@code users}/{@code assets} — the same "no cross-entity foreign keys" convention as
  * every other table here, keeping parity with the in-memory reference repository (which does no
  * referential checks); existence of the pilot/asset is the application layer's concern.
+ *
+ * <p>{@code role} (docs/plans/active/AUTH-ROLES-PLAN.md §3.4, wave B3; column added by {@code
+ * V33__assignment_roles.sql}) stores {@link com.drones.vision.identity.domain.model.AssignmentRole#name()}
+ * — a plain {@code VARCHAR}, not jsonb, since it is a single enum value with no nested shape.
+ * Defaults to {@code 'PILOT'} at the column level so every row created before this field existed
+ * reads back as the seat it always implicitly granted.
  */
 @Entity
 @Table(name = "pilot_assignments")
@@ -37,13 +43,17 @@ public class AssignmentEntity {
     @Column(name = "asset_id", nullable = false)
     private UUID assetId;
 
+    @Column(name = "role", nullable = false, length = 16)
+    private String role;
+
     /** JPA only. */
     protected AssignmentEntity() {
     }
 
-    public AssignmentEntity(UUID pilotUserId, UUID assetId) {
+    public AssignmentEntity(UUID pilotUserId, UUID assetId, String role) {
         this.pilotUserId = pilotUserId;
         this.assetId = assetId;
+        this.role = role;
     }
 
     public UUID pilotUserId() {
@@ -52,5 +62,9 @@ public class AssignmentEntity {
 
     public UUID assetId() {
         return assetId;
+    }
+
+    public String role() {
+        return role;
     }
 }

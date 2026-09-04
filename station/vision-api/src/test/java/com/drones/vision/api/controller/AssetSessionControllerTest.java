@@ -10,6 +10,8 @@ import com.drones.vision.kernel.UsageOrigin;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.perception.application.pipeline.UsageTracker;
 import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.map.application.MapAccessPolicy;
 import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.warehouse.domain.model.UsagePhase;
@@ -87,6 +89,16 @@ class AssetSessionControllerTest {
             @Override
             public MapAccessPolicy.Viewer viewer() {
                 throw new UnsupportedOperationException("AssetSessionController never calls viewer()");
+            }
+
+            @Override
+            public Role role() {
+                throw new UnsupportedOperationException("AssetSessionController never calls role()");
+            }
+
+            @Override
+            public Authority authority() {
+                throw new UnsupportedOperationException("AssetSessionController never calls authority()");
             }
         });
     }

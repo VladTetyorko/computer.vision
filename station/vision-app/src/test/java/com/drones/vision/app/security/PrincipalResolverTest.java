@@ -2,7 +2,9 @@ package com.drones.vision.app.security;
 
 import com.drones.vision.api.security.PrincipalResolver;
 import com.drones.vision.app.devsupport.DevPrincipal;
+import com.drones.vision.identity.application.scope.RoleAuthority;
 import com.drones.vision.identity.application.scope.ScopeResolver;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.GroupId;
@@ -46,9 +48,26 @@ class PrincipalResolverTest {
             this.asked = user;
             return answer;
         }
+
+        @Override
+        public Authority authorityFor(User user) {
+            return new Authority(scopeFor(user), RoleAuthority.capabilitiesOf(
+                    user.topRole().orElse(Role.VIEWER)));
+        }
     }
 
-    private static final ScopeResolver UNBOUNDED_RESOLVER = user -> VisibilityScope.unbounded();
+    /** Mirrors {@code DefaultScopeResolver}'s ADMIN/unbounded branch — not under test here. */
+    private static final ScopeResolver UNBOUNDED_RESOLVER = new ScopeResolver() {
+        @Override
+        public VisibilityScope scopeFor(User user) {
+            return VisibilityScope.unbounded();
+        }
+
+        @Override
+        public Authority authorityFor(User user) {
+            return Authority.full();
+        }
+    };
 
     @AfterEach
     void clearContext() {
@@ -71,7 +90,7 @@ class PrincipalResolverTest {
     @Test
     void securityResolverReturnsTheAuthenticatedUsersIdAndOwnership() {
         GroupId group = GroupId.random();
-        User user = new User(UserId.random(), "op", "Operator", "op@vision.local", "hash", true,
+        User user = new User(UserId.random(), "op", "Operator", "op@vision.local", "hash", true, false,
                 List.of(new Membership(group, Role.MANAGER)));
         authenticate(new VisionUserDetails(user));
 
@@ -83,7 +102,7 @@ class PrincipalResolverTest {
 
     @Test
     void securityResolverDelegatesScopeToTheScopeResolverForTheSessionUser() {
-        User user = new User(UserId.random(), "pilot", "Pilot", "pilot@vision.local", "hash", true,
+        User user = new User(UserId.random(), "pilot", "Pilot", "pilot@vision.local", "hash", true, false,
                 List.of(new Membership(GroupId.random(), Role.PILOT)));
         authenticate(new VisionUserDetails(user));
         VisibilityScope marker = VisibilityScope.assignedAssets(Set.of(AssetId.random()));
@@ -97,7 +116,8 @@ class PrincipalResolverTest {
 
     @Test
     void securityResolverFallsBackToAPersonalGroupWhenTheUserHasNoMembership() {
-        User user = new User(UserId.random(), "loner", "Loner", "loner@vision.local", "hash", true, List.of());
+        User user = new User(UserId.random(), "loner", "Loner", "loner@vision.local", "hash", true, false,
+                List.of());
         authenticate(new VisionUserDetails(user));
 
         PrincipalResolver resolver = new SecurityContextPrincipalResolver(UNBOUNDED_RESOLVER);

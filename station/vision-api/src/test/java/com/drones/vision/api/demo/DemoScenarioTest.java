@@ -50,7 +50,7 @@ class DemoScenarioTest {
     void seedsPeopleFleetAssignmentsZonesMarksAndStreams() {
         List<User> roster = users(3);
         List<DemoAsset> created = assets(4);
-        when(people.seed(eq(3), any(), any())).thenReturn(roster);
+        when(people.seed(eq(3), any(), any(), any())).thenReturn(roster);
         when(fleet.seed(eq(4), eq(ownership), eq(ownership.ownerId()), any())).thenReturn(created);
         when(fleet.videosUsed(created)).thenReturn(List.of("drone.mp4"));
         when(operations.seedZones(any())).thenReturn(2);
@@ -72,7 +72,7 @@ class DemoScenarioTest {
     void assignsEveryAssetToAPilotRoundRobinPlusASecondPilotOnEveryThird() {
         List<User> roster = users(2);
         List<DemoAsset> created = assets(3);
-        when(people.seed(anyInt(), any(), any())).thenReturn(roster);
+        when(people.seed(anyInt(), any(), any(), any())).thenReturn(roster);
         when(fleet.seed(anyInt(), any(), any(), any())).thenReturn(created);
         when(fleet.videosUsed(any())).thenReturn(List.of());
 
@@ -81,7 +81,7 @@ class DemoScenarioTest {
         // 3 assets, one pilot each, plus a second pilot on asset index 0 (every third).
         assertEquals(4, report.assignments());
         ArgumentCaptor<AssetId> assets = ArgumentCaptor.forClass(AssetId.class);
-        verify(assignments, times(4)).assign(any(), assets.capture(), eq(VisibilityScope.unbounded()));
+        verify(assignments, times(4)).assign(any(), assets.capture(), any(), any(), eq(VisibilityScope.unbounded()));
         assertEquals(created.stream().map(DemoAsset::id).distinct().count(),
                 assets.getAllValues().stream().distinct().count(),
                 "every created asset was assigned at least once");
@@ -89,12 +89,12 @@ class DemoScenarioTest {
 
     @Test
     void aFailedAssignmentIsReportedRatherThanThrown() {
-        when(people.seed(anyInt(), any(), any())).thenReturn(users(1));
+        when(people.seed(anyInt(), any(), any(), any())).thenReturn(users(1));
         when(fleet.seed(anyInt(), any(), any(), any())).thenReturn(assets(1));
         when(fleet.videosUsed(any())).thenReturn(List.of());
         doAnswer(invocation -> {
             throw new IllegalStateException("asset out of scope");
-        }).when(assignments).assign(any(), any(), any());
+        }).when(assignments).assign(any(), any(), any(), any(), any());
 
         DemoSeedReport report = scenario.seed(new DemoPlan(1, 1, 0));
 
@@ -105,8 +105,8 @@ class DemoScenarioTest {
 
     @Test
     void problemsReportedByEachSeederAreCollectedIntoTheReport() {
-        when(people.seed(anyInt(), any(), any())).thenAnswer(invocation -> {
-            invocation.getArgument(2, Consumer.class).accept("user demo.falcon: taken");
+        when(people.seed(anyInt(), any(), any(), any())).thenAnswer(invocation -> {
+            invocation.getArgument(3, Consumer.class).accept("user demo.falcon: taken");
             return List.<User>of();
         });
         when(fleet.seed(anyInt(), any(), any(), any())).thenAnswer(invocation -> {

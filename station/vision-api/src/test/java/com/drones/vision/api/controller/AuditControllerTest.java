@@ -5,6 +5,7 @@ import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.api.security.PrincipalResolver;
 import com.drones.vision.map.application.MapAccessPolicy;
 import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
@@ -66,6 +67,16 @@ class AuditControllerTest {
             @Override
             public MapAccessPolicy.Viewer viewer() {
                 return new MapAccessPolicy.Viewer(ownership.ownerId(), Set.of(ownership.groupId()), Role.PILOT);
+            }
+
+            @Override
+            public Role role() {
+                throw new UnsupportedOperationException("AuditController never calls role()");
+            }
+
+            @Override
+            public Authority authority() {
+                throw new UnsupportedOperationException("AuditController never calls authority()");
             }
         });
     }

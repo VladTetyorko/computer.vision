@@ -185,18 +185,23 @@ the full mechanism.
 | DiscoveryInboxController | POST | `/api/discovery/inbox/{id}/dismiss` | Dismiss a candidate (idempotent-in-effect: dismissing an already-dismissed candidate just re-stamps status) | manageOrg |
 | SimulationController | POST | `/api/simulations` | Start a synthetic (or video-fed) simulated asset | manageOrg |
 | SimulationController | DELETE | `/api/simulations/{assetId}` | Stop it (idempotent) | scope |
-| AuthController | POST | `/api/auth/login` | Session login (always-200 dev admin when auth disabled) | open |
+| AuthController | POST | `/api/auth/login` | Session login (always-200 dev admin when auth disabled); body `{username,password,kiosk?}` — a non-`VIEWER` requesting `kiosk:true` is refused `400 KIOSK_NOT_PERMITTED` *after* a real successful login, and the just-established session is torn down (AUTH-ROLES-PLAN.md §3.5/§3.7, wave B3) | open |
 | AuthController | POST | `/api/auth/logout` | Invalidate session (idempotent) | open |
-| AuthController | GET | `/api/auth/me` | Caller's own identity | open (Spring Security's chain itself 401s when auth is enabled and unauthenticated) |
-| AssignmentController | PUT | `/api/assets/{assetId}/pilots/{userId}` | Assign a pilot (idempotent) | manage |
+| AuthController | GET | `/api/auth/me` | Caller's own identity; `MeResponse` now carries `capabilities[]`/`scopeKind`/`mustChangePassword` (wave B3) | open (Spring Security's chain itself 401s when auth is enabled and unauthenticated) |
+| BootstrapController | GET | `/api/auth/bootstrap` | `{"required": true|false}` — `true` iff `vision.auth.enabled` and no enabled user holds an `ADMIN` membership (AUTH-ROLES-PLAN.md §3.5, wave B3) | open, anonymous, `@OpenByDesign`, `permitAll` |
+| BootstrapController | POST | `/api/auth/bootstrap` | Body `{username,displayName,email,password}` → `201 MeResponse`, session established. Refused once any admin exists (`409 ALREADY_INITIALIZED`) or the password fails policy (`400 WEAK_PASSWORD`) | open only while `required`, anonymous, `@OpenByDesign` |
+| AuthPasswordController | POST | `/api/auth/password` | Self-service password change, `{currentPassword,newPassword}` → `204`, clears `mustChangePassword`; `401` wrong current, `400 WEAK_PASSWORD`, `409 AUTH_DISABLED` when `vision.auth.enabled=false` | self |
+| AssignmentController | PUT | `/api/assets/{assetId}/pilots/{userId}` | Assign a pilot (idempotent); body `{"role"?: "PILOT"\|"CREW"}` — absent body/field defaults to `PILOT` (byte-identical to pre-B3 callers), AUTH-ROLES-PLAN.md §3.4, wave B3 | manage |
 | AssignmentController | DELETE | `/api/assets/{assetId}/pilots/{userId}` | Unassign (idempotent) | manage |
-| AssignmentController | GET | `/api/assets/{assetId}/pilots` | List an asset's pilots | scope |
-| AssignmentController | GET | `/api/me/assignments` | Caller's own assigned assets | self |
+| AssignmentController | GET | `/api/assets/{assetId}/pilots` | List an asset's pilots; `PilotResponse` now carries `role` | scope |
+| AssignmentController | GET | `/api/me/assignments` | Caller's own assigned assets; `AssignmentResponse` now carries `role` (defaults to `PILOT` if `roleFor` finds no link — see Gotchas) | self |
 | ActivityController | GET | `/api/me/activity?limit=` | Caller's own audit entries | self |
 | AuditController | GET | `/api/audit?targetType=&targetId=&limit=` | Fleet-wide audit trail | manageOrg |
 | UserAdminController | GET | `/api/users` | List visible users | scope |
 | UserAdminController | POST | `/api/users` | Create/invite a user | manageOrg (via `UserService`) |
 | UserAdminController | POST | `/api/users/{id}/enabled` | Enable/disable a user | manageOrg |
+| UserAdminController | POST | `/api/users/{userId}/password` | Admin-resets a user's password, `{"newPassword"}` → `204`, sets `mustChangePassword=true`; `400 WEAK_PASSWORD` (AUTH-ROLES-PLAN.md D13, wave B3) | manageOrg |
+| UserAdminController | PUT | `/api/users/{userId}/memberships` | Wholesale-replaces a user's group memberships, `{"memberships":[{"groupId","role"}]}` → `200 UserResponse` (AUTH-ROLES-PLAN.md D14, wave B3) | manageOrg |
 | GroupAdminController | GET | `/api/groups` | List visible groups | scope |
 | GroupAdminController | POST | `/api/groups` | Create a group | manageOrg (via `GroupService`) |
 | LiveController | GET | `/api/live?topics=` | Open an SSE connection (`text/event-stream`) | scope, per-topic (see "Live updates" below); gated by `vision.live.enabled` (default on) |
@@ -782,3 +787,36 @@ javadoc rewrite, not a new test). Docker not needed for this module. Also green 
 those modules' own MODULE.md entries). Nothing deferred; `vision-events`/`DefaultReplayService` and
 `UsageTimelineController` untouched by design (they own the earliest-first replay window, a
 different question — see plan §3.7/§5).
+
+**AUTH-ROLES-PLAN wave B3 done.** New `BootstrapController` (`GET`/`POST /api/auth/bootstrap`,
+`@OpenByDesign`, anonymous, `permitAll`), `AuthPasswordController` (`POST /api/auth/password`, self-
+service), and two new `UserAdminController` handlers (`POST /api/users/{userId}/password`,
+`PUT /api/users/{userId}/memberships`) — see "API surface" above for every new/widened endpoint
+shape. `AuthController#login` gained an optional `kiosk` body field; a non-`VIEWER` requesting a
+kiosk session is refused `400 KIOSK_NOT_PERMITTED` *after* a real credential check (so the
+already-established session is explicitly torn down via `SessionAuthenticator#logout`, not merely
+left to expire). `AssignmentController#assign`'s body gained an optional `role` field (`AssignAssetRequest#toRole()`,
+absent body/field → `PILOT`, byte-identical to every pre-B3 caller); `pilots()`/`myAssignments()` now
+enrich each entry with its `AssignmentRole` seat (`PilotResponse`/`AssignmentResponse`), the latter
+defaulting to `PILOT` when `AssignmentRepositoryPort#roleFor` finds no link (an assignment the
+`assignmentsFor` index still lists but whose seat lookup races an unassign — the same
+"index says yes, detail lookup says no → assume the safer/older answer" shape as other scope-adjacent
+reads in this module, not a new pattern). `MeResponse` gained `capabilities[]`/`scopeKind`/
+`mustChangePassword` — every existing field byte-identical. `PrincipalResolver` (`security/`) gained
+`role()`/`authority()` — both implementations live in `vision-app` (see that module's own MODULE.md);
+this module never imports `org.springframework.security` to use them. `DemoPeople#seed`/`DemoScenario`'s
+private `assign`/`grant` helpers were threaded with an explicit `UserId actor` parameter (the demo has
+no CREW story — every demo grant is the wide `AssignmentRole#PILOT` seat, documented in place).
+Error field naming: every new `ApiExceptionHandler` mapping this wave added
+(`KIOSK_NOT_PERMITTED`/`WEAK_PASSWORD`/`ALREADY_INITIALIZED`/`AUTH_DISABLED`) uses the pre-existing
+`ErrorResponse(String error, String message)` shape — the wire field is `error`, matching every
+mapping that predates this wave (`NOT_FOUND`/`FORBIDDEN`/etc.); nothing introduced a `code` field.
+`./mvnw -B -pl storage/persistence,station/vision-api,station/vision-app test -DskipWeb` — vision-api
+**961** tests (954 → 961, +7: 2 kiosk-login cases, 3 `UserAdminController` cases, 2 `AssignmentController`
+seat-enrichment cases), 0 failures. Also green in the same run: `storage/persistence` **276**
+(274 → 276, +2, `AssignmentRepositoryTests`) and `station/vision-app` **326** (unchanged test count —
+this wave's `vision-app` edits were mechanical call-site fixes for widened application-service
+signatures, not new tests). Docker ran (not skipped — Testcontainers started a real `postgres:16`,
+Flyway migrated through `V33`). Waves B4 (per-asset command authority)/B5 (Spring Session JDBC)/B6
+(migrate the ~34 `canManageOrg`/`canManage`/`canAdminister` call sites + the VIEWER-precedence flip)/
+B0b (flip `vision.auth.enabled`'s default) are open — see `docs/plans/active/AUTH-ROLES-PLAN.md`.

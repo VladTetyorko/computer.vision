@@ -1,6 +1,7 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.api.security.PasswordPolicy;
 import com.drones.vision.identity.application.UserService;
 import com.drones.vision.identity.application.UserSpec;
 import com.drones.vision.kernel.GroupId;
@@ -22,9 +23,11 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -43,12 +46,12 @@ class UserAdminControllerTest {
     private final CurrentUser currentUser = new CurrentUser(new Ownership(UserId.random(), groupId));
 
     private final MockMvc mockMvc = MockMvcBuilders
-            .standaloneSetup(new UserAdminController(userService, currentUser))
+            .standaloneSetup(new UserAdminController(userService, currentUser, new PasswordPolicy(12)))
             .setControllerAdvice(new ApiExceptionHandler())
             .build();
 
     private User user(String name, Role role) {
-        return new User(UserId.random(), name, name, name + "@vision.local", "hash", true,
+        return new User(UserId.random(), name, name, name + "@vision.local", "hash", true, false,
                 List.of(new Membership(groupId, role)));
     }
 
@@ -66,7 +69,7 @@ class UserAdminControllerTest {
     @Test
     void createBuildsSpecFromRequestAndReturns201() throws Exception {
         User created = user("newpilot", Role.PILOT);
-        when(userService.create(any(), any())).thenReturn(created);
+        when(userService.create(any(), any(), any())).thenReturn(created);
 
         String body = "{\"username\":\"newpilot\",\"displayName\":\"New Pilot\",\"email\":\"np@vision.local\","
                 + "\"password\":\"secret\",\"enabled\":false,"
@@ -77,7 +80,7 @@ class UserAdminControllerTest {
                 .andExpect(jsonPath("$.username").value("newpilot"));
 
         ArgumentCaptor<UserSpec> spec = ArgumentCaptor.forClass(UserSpec.class);
-        org.mockito.Mockito.verify(userService).create(spec.capture(), any());
+        verify(userService).create(spec.capture(), any(), any());
         assertEquals("newpilot", spec.getValue().username());
         assertFalse(spec.getValue().enabled());
         assertEquals(Role.PILOT, spec.getValue().memberships().get(0).role());
@@ -96,11 +99,51 @@ class UserAdminControllerTest {
     @Test
     void setEnabledMapsThrough() throws Exception {
         User u = user("pilot", Role.PILOT);
-        when(userService.setEnabled(eq(u.id()), eq(false), any())).thenReturn(u);
+        when(userService.setEnabled(eq(u.id()), eq(false), any(), any())).thenReturn(u);
 
         mockMvc.perform(post("/api/users/{id}/enabled", u.id().value())
                         .contentType("application/json").content("{\"enabled\":false}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.username").value("pilot"));
+    }
+
+    /** docs/plans/active/AUTH-ROLES-PLAN.md D13, wave B3 — admin password reset is 204, actor-attributed. */
+    @Test
+    void setPasswordReturns204AndEnforcesThePolicy() throws Exception {
+        User u = user("pilot", Role.PILOT);
+
+        mockMvc.perform(post("/api/users/{id}/password", u.id().value())
+                        .contentType("application/json").content("{\"newPassword\":\"a-long-enough-password\"}"))
+                .andExpect(status().isNoContent());
+        verify(userService).setPassword(eq(u.id()), eq("a-long-enough-password"), any(), any());
+    }
+
+    @Test
+    void setPasswordBelowMinLengthIs400WeakPassword() throws Exception {
+        User u = user("pilot", Role.PILOT);
+
+        mockMvc.perform(post("/api/users/{id}/password", u.id().value())
+                        .contentType("application/json").content("{\"newPassword\":\"short\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("WEAK_PASSWORD"));
+    }
+
+    /** docs/plans/active/AUTH-ROLES-PLAN.md D14, wave B3 — wholesale membership replacement. */
+    @Test
+    void setMembershipsReplacesTheRosterAndReturnsTheUpdatedUser() throws Exception {
+        User u = user("pilot", Role.PILOT);
+        User updated = new User(u.id(), u.username(), u.displayName(), u.email(), u.passwordHash(), u.enabled(),
+                u.mustChangePassword(), List.of(new Membership(groupId, Role.MANAGER)));
+        when(userService.setMemberships(eq(u.id()), any(), any(), any())).thenReturn(updated);
+
+        String body = "{\"memberships\":[{\"groupId\":\"" + groupId.value() + "\",\"role\":\"manager\"}]}";
+        mockMvc.perform(put("/api/users/{id}/memberships", u.id().value())
+                        .contentType("application/json").content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.memberships[0].role").value("MANAGER"));
+
+        ArgumentCaptor<List<Membership>> memberships = ArgumentCaptor.forClass(List.class);
+        verify(userService).setMemberships(eq(u.id()), memberships.capture(), any(), any());
+        assertEquals(Role.MANAGER, memberships.getValue().get(0).role());
     }
 }

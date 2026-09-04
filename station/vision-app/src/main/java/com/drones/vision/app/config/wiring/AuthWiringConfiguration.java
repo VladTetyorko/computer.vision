@@ -16,6 +16,7 @@ import com.drones.vision.app.security.SecuritySessionAuthenticator;
 import com.drones.vision.identity.application.*;
 import com.drones.vision.identity.application.scope.*;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -65,13 +66,15 @@ public class AuthWiringConfiguration {
     }
 
     @Bean
-    public AuthService authService(UserRepositoryPort userRepositoryPort, PasswordHasherPort passwordHasherPort) {
-        return new DefaultAuthService(userRepositoryPort, passwordHasherPort);
+    public AuthService authService(UserRepositoryPort userRepositoryPort, PasswordHasherPort passwordHasherPort,
+                                   AuditTrailPort auditTrailPort) {
+        return new DefaultAuthService(userRepositoryPort, passwordHasherPort, auditTrailPort);
     }
 
     @Bean
-    public UserService userService(UserRepositoryPort userRepositoryPort, PasswordHasherPort passwordHasherPort) {
-        return new DefaultUserService(userRepositoryPort, passwordHasherPort);
+    public UserService userService(UserRepositoryPort userRepositoryPort, PasswordHasherPort passwordHasherPort,
+                                   AuditTrailPort auditTrailPort) {
+        return new DefaultUserService(userRepositoryPort, passwordHasherPort, auditTrailPort);
     }
 
     @Bean
@@ -95,8 +98,8 @@ public class AuthWiringConfiguration {
     /** Pilot→asset assignment roster (docs/plans/done/U-SCOPE-PLAN.md, feature 2) — behind the assignment endpoints. */
     @Bean
     public AssignmentService assignmentService(AssignmentRepositoryPort assignmentRepositoryPort,
-                                               AssetService assetService) {
-        return new DefaultAssignmentService(assignmentRepositoryPort, assetService);
+                                               AssetService assetService, AuditTrailPort auditTrailPort) {
+        return new DefaultAssignmentService(assignmentRepositoryPort, assetService, auditTrailPort);
     }
 
     /** A user's own activity feed (docs/plans/done/U-SCOPE-PLAN.md, feature 7) — behind {@code GET /api/me/activity}. */
@@ -126,11 +129,22 @@ public class AuthWiringConfiguration {
         return new NoopSessionAuthenticator();
     }
 
-    /** Real session establishment when auth is on — verifies via {@link AuthService}, persists to session. */
+    /**
+     * Real session establishment when auth is on — verifies via {@link AuthService}, persists to
+     * session. The two idle-timeout {@code @Value}s are declared here, not just on {@link
+     * SecuritySessionAuthenticator}'s own constructor — Spring only resolves {@code @Value} on a
+     * bean it constructs itself via reflection/component-scan, not on a type this factory method
+     * builds with a bare {@code new}, so they must be read here and threaded through explicitly.
+     */
     @Bean
     @ConditionalOnProperty(prefix = "vision.auth", name = "enabled", havingValue = "true")
     public SessionAuthenticator securitySessionAuthenticator(AuthService authService,
-                                                             SecurityContextRepository securityContextRepository) {
-        return new SecuritySessionAuthenticator(authService, securityContextRepository);
+                                                             SecurityContextRepository securityContextRepository,
+                                                             @Value("${vision.auth.session.idle-timeout-hours:12}")
+                                                             long idleTimeoutHours,
+                                                             @Value("${vision.auth.session.kiosk-idle-timeout-days:365}")
+                                                             long kioskIdleTimeoutDays) {
+        return new SecuritySessionAuthenticator(authService, securityContextRepository, idleTimeoutHours,
+                kioskIdleTimeoutDays);
     }
 }

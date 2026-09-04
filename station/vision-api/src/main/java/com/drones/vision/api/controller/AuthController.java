@@ -1,10 +1,12 @@
 package com.drones.vision.api.controller;
 
+import com.drones.vision.api.exception.KioskNotPermittedException;
 import com.drones.vision.api.security.OpenByDesign;
 import com.drones.vision.api.dto.LoginRequest;
 import com.drones.vision.api.dto.MeResponse;
 import com.drones.vision.identity.application.AuthService;
 import com.drones.vision.identity.application.GroupService;
+import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.identity.domain.model.Group;
 import com.drones.vision.identity.domain.model.User;
@@ -27,13 +29,20 @@ import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.api.security.SessionAuthenticator;
 
 /**
- * Driving REST adapter for session auth (docs/plans/done/U-AUTH-PLAN.md, wave 3's frozen wire contract):
- * {@code POST /api/auth/login}, {@code POST /api/auth/logout}, {@code GET /api/auth/me}.
+ * Driving REST adapter for session auth (docs/plans/done/U-AUTH-PLAN.md, wave 3's frozen wire contract;
+ * kiosk logins added by docs/plans/active/AUTH-ROLES-PLAN.md §3.5/§3.7, wave B3): {@code POST
+ * /api/auth/login}, {@code POST /api/auth/logout}, {@code GET /api/auth/me}. The bootstrap latch
+ * ({@code GET}/{@code POST /api/auth/bootstrap}) and self-service password change ({@code POST
+ * /api/auth/password}) are separate controllers ({@link BootstrapController}, {@link
+ * AuthPasswordController}) — three distinct concerns this class would otherwise cram past the
+ * five-collaborator ceiling (java-clean-code SKILL.md §3).
  *
  * <p><strong>No Spring Security here.</strong> Reading the current identity goes through {@link
  * CurrentUser}; establishing/tearing down a session goes through {@link SessionAuthenticator} —
  * both seams {@code vision-app} implements. This controller only knows {@code authEnabled} (the
- * {@code vision.auth.enabled} property) so it can answer the two modes:
+ * {@code vision.auth.enabled} property, default {@code true} — matching {@code SecurityConfig}'s own
+ * compiled default; docs/plans/active/AUTH-ROLES-PLAN.md D2, wave B3, fixed a stale {@code
+ * :false} literal here that used to disagree with it) so it can answer the two modes:
  *
  * <ul>
  *   <li><strong>disabled</strong> (default): every endpoint reports the fixed dev admin with
@@ -56,7 +65,7 @@ public class AuthController {
 
     public AuthController(AuthService authService, GroupService groupService, CurrentUser currentUser,
                           SessionAuthenticator sessionAuthenticator,
-                          @Value("${vision.auth.enabled:false}") boolean authEnabled) {
+                          @Value("${vision.auth.enabled:true}") boolean authEnabled) {
         this.authService = Objects.requireNonNull(authService, "authService must not be null");
         this.groupService = Objects.requireNonNull(groupService, "groupService must not be null");
         this.currentUser = Objects.requireNonNull(currentUser, "currentUser must not be null");
@@ -69,10 +78,23 @@ public class AuthController {
      * Logs a user in. When auth is disabled this is a no-op that always returns the dev admin;
      * when enabled it verifies credentials and, on success, issues a session cookie.
      *
+     * <p>{@code request.kiosk()} (docs/plans/active/AUTH-ROLES-PLAN.md §3.5/§3.7, wave B3) requests a
+     * long-lived session for an always-on wall display; only a login that resolves to {@link
+     * Role#VIEWER} may request it. Credentials are verified exactly once regardless of {@code kiosk}
+     * — checking role by a separate, unauthenticated username lookup before verifying the password
+     * would let a caller learn "this account is not a VIEWER" without ever proving they hold its
+     * password, the same info-leak {@link AuthService#authenticate}'s own contract forbids. So a
+     * kiosk request for a non-{@code VIEWER} account is instead caught <em>after</em> a real,
+     * successful login: the just-established session is immediately torn down
+     * ({@link SessionAuthenticator#logout}) and {@code 400 KIOSK_NOT_PERMITTED} is returned. A wrong
+     * password still answers plain {@code 401}, kiosk or not — the role check never runs for a
+     * credential that did not verify.
+     *
      * @param request  the login credentials
      * @param httpRequest  current request (session established on it)
      * @param httpResponse current response (session cookie written to it)
-     * @return {@code 200} + {@link MeResponse} on success; {@code 401} on bad credentials
+     * @return {@code 200} + {@link MeResponse} on success; {@code 401} on bad credentials; {@code
+     *         400 KIOSK_NOT_PERMITTED} if a kiosk session was requested for a non-{@code VIEWER}
      */
     @OpenByDesign(reason = "The login endpoint itself — it must be reachable with no session, or nobody can ever get one.")
     @PostMapping("/api/auth/login")
@@ -81,10 +103,17 @@ public class AuthController {
         if (!authEnabled) {
             return ResponseEntity.ok(devAdmin());
         }
-        Optional<User> user = sessionAuthenticator.login(request.username(), request.password(),
+        boolean kiosk = request.kioskRequested();
+        Optional<User> user = sessionAuthenticator.login(request.username(), request.password(), kiosk,
                 httpRequest, httpResponse);
-        return user.map(u -> ResponseEntity.ok(me(u)))
-                .orElseGet(() -> ResponseEntity.status(HttpStatus.UNAUTHORIZED).build());
+        if (user.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+        if (kiosk && user.get().topRole().orElse(null) != Role.VIEWER) {
+            sessionAuthenticator.logout(httpRequest, httpResponse);
+            throw new KioskNotPermittedException("kiosk sessions are only permitted for a VIEWER login");
+        }
+        return ResponseEntity.ok(me(user.get()));
     }
 
     /**
@@ -126,7 +155,7 @@ public class AuthController {
     }
 
     private MeResponse me(User user) {
-        return MeResponse.from(user, groupNameLookup(), true);
+        return MeResponse.from(user, groupNameLookup(), true, currentUser.authority());
     }
 
     private Function<String, String> groupNameLookup() {

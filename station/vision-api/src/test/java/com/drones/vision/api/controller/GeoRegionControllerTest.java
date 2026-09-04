@@ -16,6 +16,8 @@ import com.drones.vision.perception.domain.model.RegionIngestSpec;
 import com.drones.vision.perception.domain.model.RegionStatus;
 import com.drones.vision.perception.domain.model.ReferenceRegion;
 import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.identity.domain.model.Role;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -90,6 +92,16 @@ class GeoRegionControllerTest {
             @Override
             public MapAccessPolicy.Viewer viewer() {
                 throw new UnsupportedOperationException("GeoRegionController never calls viewer()");
+            }
+
+            @Override
+            public Role role() {
+                throw new UnsupportedOperationException("GeoRegionController never calls role()");
+            }
+
+            @Override
+            public Authority authority() {
+                throw new UnsupportedOperationException("GeoRegionController never calls authority()");
             }
         });
     }

@@ -5,6 +5,8 @@ import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.api.security.PrincipalResolver;
 import com.drones.vision.map.application.MapAccessPolicy;
 import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.warehouse.application.category.CategoryEdit;
 import com.drones.vision.warehouse.application.category.CategoryService;
 import com.drones.vision.warehouse.application.category.CategorySpec;
@@ -139,6 +141,16 @@ class CategoryControllerTest {
             @Override
             public MapAccessPolicy.Viewer viewer() {
                 throw new UnsupportedOperationException("CategoryController never calls viewer()");
+            }
+
+            @Override
+            public Role role() {
+                throw new UnsupportedOperationException("CategoryController never calls role()");
+            }
+
+            @Override
+            public Authority authority() {
+                throw new UnsupportedOperationException("CategoryController never calls authority()");
             }
         });
     }

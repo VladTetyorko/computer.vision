@@ -21,6 +21,9 @@ import org.springframework.security.web.context.SecurityContextRepository;
  *
  * <h2>Enabled (default) — {@link #securedFilterChain}</h2>
  * A session is required for {@code /api/**} except {@code /api/auth/login}/{@code /api/auth/logout}
+ * /{@code /api/auth/bootstrap} (the last added by docs/plans/active/AUTH-ROLES-PLAN.md §3.5, wave
+ * B3 — it must be reachable with no session, since it exists precisely for the moment nobody has one
+ * yet; guarded instead by {@code AuthService#adminExists()}'s one-way latch)
  * (so an unauthenticated {@code GET /api/auth/me} is answered {@code 401} by Spring Security, per
  * the frozen contract); static assets and SPA routes stay public. The authenticated principal is
  * read from / written to the session via {@link #securityContextRepository} — the same bean {@link
@@ -108,7 +111,8 @@ public class SecurityConfig {
                 .csrf(csrf -> csrf.disable())
                 .securityContext(context -> context.securityContextRepository(securityContextRepository))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/auth/login", "/api/auth/logout").permitAll()
+                        .requestMatchers("/api/auth/login", "/api/auth/logout", "/api/auth/bootstrap")
+                        .permitAll()
                         // Liveness probe (docs/plans/done/SYSTEM-STATUS-PLAN.md §4.4): a container
                         // healthcheck (docker-compose.yml) has no session to authenticate with, and
                         // only `health` is ever exposed here (application.yaml) -- no secret to

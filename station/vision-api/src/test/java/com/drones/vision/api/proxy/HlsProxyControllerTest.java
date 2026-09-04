@@ -16,6 +16,8 @@ import com.drones.vision.map.application.MapAccessPolicy;
 import com.drones.vision.perception.application.stream.ActiveStream;
 import com.drones.vision.perception.application.stream.StreamService;
 import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.Custody;
 import com.drones.vision.warehouse.domain.model.Identity;
@@ -581,6 +583,16 @@ class HlsProxyControllerTest {
             @Override
             public MapAccessPolicy.Viewer viewer() {
                 throw new UnsupportedOperationException("HlsProxyController never calls viewer()");
+            }
+
+            @Override
+            public Role role() {
+                throw new UnsupportedOperationException("HlsProxyController never calls role()");
+            }
+
+            @Override
+            public Authority authority() {
+                throw new UnsupportedOperationException("HlsProxyController never calls authority()");
             }
         });
     }

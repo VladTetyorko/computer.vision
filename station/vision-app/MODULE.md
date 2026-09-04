@@ -56,7 +56,7 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 | `DiscoveryInboxWiringConfiguration` | Discovery | `discoveryInboxService(DiscoveryCandidateRepositoryPort, AssetService)` → `DefaultDiscoveryInboxService`, **unconditional** (`DiscoveryInboxController`, vision-api, needs it regardless of whether the sweep runs — an operator can still read/register/dismiss by hand with the runner off). `discoveryInboxRunner` (`initMethod="start"`, `destroyMethod="close"`) COP `vision.discovery.inbox.enabled=true` (matchIfMissing=true, the default — ZERO-CONFIG-ONBOARDING-CONTEXT.md §11 Z2c deliberately overrides CLAUDE.md's usual opt-in-guardrail default, since shipping the sweep off by default would defeat the whole zero-config purpose) |
 | `FeedTransmitterWiring` | Publish, Rtsp, Mjpeg, Mavlink, Rc, Onboarding | `rtspFeedTransmitter`, `mjpegFeedTransmitter` (`destroyMethod="close"` — owns a shared `HttpServer`), `mavlinkFeedTransmitter`, `feedTransmitterRegistry` — all unconditional |
 | `PersistenceWiringConfiguration` | Persistence | **Every bean unconditional**, no `@Conditional*` anywhere — 23 one-line `Jpa*Repository(entityManagerFactory)` ports (WAREHOUSE-UX W3 added `maintenanceRepositoryPort`/`assetNoteRepositoryPort`; ZERO-CONFIG-ONBOARDING Z2c added `discoveryCandidateRepositoryPort`) + `persistenceEntityManagerFactory` (`destroyMethod="close"`, opens a real JDBC connection eagerly). No in-memory fallback exists for any repository port (Postgres is the only store) |
-| `AuthWiringConfiguration` | — | `passwordHasherPort`, `authService`, `userService`, `groupService`, `scopeResolver`, `assignmentService` (`DefaultAssignmentService(assignmentRepositoryPort, assetService)` — takes `AssetService`, not `AssetRepositoryPort`), `activityService` — all unconditional. `devPrincipalResolver`/`noopSessionAuthenticator` COP `vision.auth.enabled=false` (matchIfMissing=true, the default); `securityContextPrincipalResolver`/`securitySessionAuthenticator` COP `vision.auth.enabled=true`. Repository ports (`UserRepositoryPort`/`GroupRepositoryPort`) come from `PersistenceWiringConfiguration`, orthogonal to `vision.auth.enabled` |
+| `AuthWiringConfiguration` | — | `passwordHasherPort`, `authService`, `userService`, `groupService`, `scopeResolver`, `assignmentService` (`DefaultAssignmentService(assignmentRepositoryPort, assetService)` — takes `AssetService`, not `AssetRepositoryPort`), `activityService` — all unconditional; `authService`/`userService`/`assignmentService` (AUTH-ROLES wave B3) take a third constructor arg, `AuditTrailPort`, threaded to the 3-arg `Default*` constructors D15 added. `devPrincipalResolver`/`noopSessionAuthenticator` COP `vision.auth.enabled=false` (matchIfMissing=true, the default); `securityContextPrincipalResolver`/`securitySessionAuthenticator` COP `vision.auth.enabled=true`. `securitySessionAuthenticator`'s factory method (wave B3) additionally declares two bare `@Value`-annotated `long` params (`vision.auth.session.idle-timeout-hours:12`, `vision.auth.session.kiosk-idle-timeout-days:365`) — `@Value` on the *constructor* would be silently ignored since the bean is built with `new SecuritySessionAuthenticator(...)` inside this factory method rather than via Spring's own reflective construction, so the annotation has to live on the factory method's own parameters instead; folding these into a real `VisionAuthProperties` record is deferred to wave B5. Repository ports (`UserRepositoryPort`/`GroupRepositoryPort`) come from `PersistenceWiringConfiguration`, orthogonal to `vision.auth.enabled` |
 | `RateLimitWiring` | Api | Whole-class COP `vision.api.rate-limit.enabled=true` (default false): `rateLimitFilterRegistration` — `FilterRegistrationBean<RateLimitFilter>` on `/api/*` |
 | `SystemStatusWiring` | — | Two mutually-exclusive beans per subsystem, each repeating the exact enabling expression its real resource already uses (never `@ConditionalOnBean` — order-sensitive, see Gotchas): `cvServiceStatus`/`cvServiceStatusDisabled`, `videoPublishStatus`/`videoPublishStatusDisabled` (COP `vision.publish.enabled`). `mavlinkLinkStatus` is **unconditional** (mavlink telemetry source always exists; reports `UNKNOWN` with no claimed vehicle, never `DISABLED`); **FLEET-RADIO R4** — the class now also declares `@EnableConfigurationProperties(VisionMavlinkProperties.class)` (matching `TelemetryWiring`'s/`DiscoveryWiringConfiguration`'s own identical declarations of the same class) and `mavlinkLinkStatus` takes a second parameter, `VisionMavlinkProperties`, building a `MavlinkSettings.LinkStatus` from its three D7 threshold fields to construct `MavlinkLinkStatusProvider` |
 | `StreamLifecycleWiring` | Streams | `mediamtxReaderProbe` (COP `vision.publish.enabled` default true), `videoDemandPort` (unconditional — `HlsProxyController` needs it regardless of whether the idle policy is on), `idleStreamReaper` (`initMethod="start"`, `AutoCloseable`). Resolves `usageTracker` lazily inside a resolver lambda to avoid the same circular-reference hazard as `CvWiring#detectionDemandPort` |
@@ -672,3 +672,37 @@ module, no upstream dependency changed) — **326/326** green, unchanged from th
 boots," which every existing `@SpringBootTest` already proves each run). `ArchitectureTest`/
 `ContextArchitectureTest`/`EndpointAuthorizationTest` unaffected (no new bean, no new `@RestController`,
 no new ArchUnit-relevant type).
+
+**AUTH-ROLES-PLAN wave B3 done.** `DevPrincipalResolver`/`SecurityContextPrincipalResolver` gained
+`role()`/`authority()` (the two methods `PrincipalResolver`, vision-api, widened to — B4's per-asset
+`AssetAuthority` and the wire's `MeResponse.capabilities[]`/`scopeKind` both read through these).
+`DevPrincipalResolver#role()` is a fixed `Role.ADMIN`/`authority()` a fixed `Authority.full()` (the
+auth-off dev principal has always resolved to unbounded everything); `SecurityContextPrincipalResolver`
+reuses its own existing `topRoleOf(User)` for `role()` and pairs it with `RoleAuthority.capabilitiesOf(...)`
+for `authority()` — no new collaborator, no widened constructor. `SecuritySessionAuthenticator#login`
+gained a `boolean kiosk` parameter (`NoopSessionAuthenticator`'s mirrors it, unused) and now calls
+`request.getSession(true).setMaxInactiveInterval(...)` with one of two configured durations — see the
+`AuthWiringConfiguration` row above for the two new `@Value` params this threads through, and the
+deferred-to-B5 note on why they are bare primitives rather than a properties record yet.
+`SecurityConfig`'s permit-all matcher list gained `/api/auth/bootstrap`.
+
+Three pre-existing test files needed mechanical fixes for the widened contexts/vision-identity
+application-service signatures B3 also touches (`UserService#create`/`AssignmentService#assign` both
+gained parameters — see `contexts/vision-identity/MODULE.md`): `DevAccountSeeder` (the `*AuthEnabledTest`
+suites' `AuthSeedRunner` stand-in) now threads a fresh `UserId` as the seeding actor; `ScopedAssetReadAuthEnabledTest`
+now passes `AssignmentRole.PILOT` + an actor to its one direct `assignmentService.assign(...)` call;
+`PrincipalResolverTest`'s hand-rolled `ScopeResolver` test doubles (a lambda and an anonymous
+`RecordingScopeResolver`) gained `authorityFor(User)` overrides now that `ScopeResolver` carries two
+abstract methods, and three inline `new User(...)` constructions gained the `mustChangePassword`
+boolean B2 added to the domain record. None of these are behavior changes — every fix keeps the test's
+original assertion intent.
+
+`./mvnw -B -pl storage/persistence,station/vision-api,station/vision-app test -DskipWeb` —
+**326/326** green, unchanged count (every edit in this module this wave was either a new method on an
+existing class or a call-site fix in an existing test; no new test file, no new test method). Also
+green in the same run: `storage/persistence` **276** (274 → 276, +2) and `station/vision-api` **961**
+(954 → 961, +7) — see those modules' own MODULE.md entries. Docker ran for real (Testcontainers
+`postgres:16`, Flyway migrated through `V33`). `vision.auth.enabled` stays `false` by default
+(unchanged this wave — B0b flips it); `AuthDisabledSecurityTest`/`ManualControlSecurityDisabledTest`
+(the default-config auth-off suites) both still green, proving the opt-in guardrail. Waves B4/B5/B6/B0b
+open — see `docs/plans/active/AUTH-ROLES-PLAN.md`.
