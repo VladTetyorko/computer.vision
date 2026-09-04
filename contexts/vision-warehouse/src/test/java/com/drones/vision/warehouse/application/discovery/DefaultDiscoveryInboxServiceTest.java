@@ -7,13 +7,19 @@ import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.UserId;
+import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.warehouse.application.asset.AssetDetails;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetSpec;
+import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.warehouse.application.asset.DuplicateDeviceMatch;
+import com.drones.vision.warehouse.application.device.DeviceRegistration;
+import com.drones.vision.warehouse.application.device.DeviceService;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.Custody;
+import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
 import com.drones.vision.warehouse.domain.model.DiscoveryCandidate;
 import com.drones.vision.warehouse.domain.model.CandidateStatus;
@@ -32,8 +38,10 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -48,17 +56,27 @@ class DefaultDiscoveryInboxServiceTest {
 
     private DiscoveryCandidateRepositoryPort candidateRepository;
     private AssetService assetService;
+    private DeviceService deviceService;
     private final UserId actor = UserId.random();
 
     @BeforeEach
     void setUp() {
         candidateRepository = mock(DiscoveryCandidateRepositoryPort.class);
         assetService = mock(AssetService.class);
+        deviceService = mock(DeviceService.class);
         when(candidateRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     private DefaultDiscoveryInboxService serviceAt(Instant now) {
-        return new DefaultDiscoveryInboxService(candidateRepository, assetService, () -> now);
+        return new DefaultDiscoveryInboxService(candidateRepository, assetService, deviceService, () -> now);
+    }
+
+    private static AssetDetails detailsOf(AssetId assetId) {
+        Asset asset = Asset.register(assetId, "Existing asset", new CategoryId("drone"),
+                new Ownership(UserId.random(), GroupId.random()), Set.of(), Map.of(), Identity.NONE, Custody.NONE);
+        AssetSummary summary = new AssetSummary(asset, "Drone", com.drones.vision.warehouse.application.asset.AssetStatus.OFFLINE,
+                null, null, com.drones.vision.warehouse.domain.model.InventoryState.IN_STOCK, Identity.NONE, Custody.NONE);
+        return new AssetDetails(summary, java.util.List.of(), java.util.List.of());
     }
 
     private static DiscoveredDevice onvifCandidate(String host) {
@@ -82,13 +100,15 @@ class DefaultDiscoveryInboxServiceTest {
         when(candidateRepository.findByIdentityKey(DiscoveryCandidate.identityKeyFor(discovered)))
                 .thenReturn(Optional.empty());
 
-        DiscoveryCandidate result = serviceAt(NOW).report(discovered);
+        ReportOutcome outcome = serviceAt(NOW).report(discovered);
+        DiscoveryCandidate result = outcome.candidate();
 
         assertEquals(CandidateStatus.NEW, result.status());
         assertEquals(NOW, result.firstSeen());
         assertEquals(NOW, result.lastSeen());
         assertNull(result.registeredAsset());
         assertEquals(discovered, result.discovered());
+        assertTrue(outcome.changed(), "a first sighting is always \"changed\"");
         // no suggestedStream on this candidate -- the duplicate check must never even be asked.
         verifyNoInteractions(assetService);
     }
@@ -115,13 +135,29 @@ class DefaultDiscoveryInboxServiceTest {
         DiscoveredDevice reAnnounced = new DiscoveredDevice("onvif", "cam-10.0.0.2-renamed",
                 firstSeenDevice.address(), firstSeenDevice.suggestedCategory(), null, Map.of("extra", "1"));
 
-        DiscoveryCandidate result = serviceAt(LATER).report(reAnnounced);
+        ReportOutcome outcome = serviceAt(LATER).report(reAnnounced);
+        DiscoveryCandidate result = outcome.candidate();
 
         assertEquals(reAnnounced, result.discovered());
         assertEquals(NOW, result.firstSeen(), "firstSeen must not move on a re-report");
         assertEquals(LATER, result.lastSeen());
         assertEquals(CandidateStatus.NEW, result.status());
         assertEquals(existing.id(), result.id());
+        assertTrue(outcome.changed(), "discovered() differs from the pre-report value (renamed + extra detail)");
+    }
+
+    @Test
+    void reportOfAnUnchangedReAnnouncementIsNotReportedAsChanged() {
+        DiscoveredDevice discovered = onvifCandidate("10.0.0.20");
+        DiscoveryCandidate existing = DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(), discovered, NOW);
+        when(candidateRepository.findByIdentityKey(existing.identityKey())).thenReturn(Optional.of(existing));
+
+        ReportOutcome outcome = serviceAt(LATER).report(discovered);
+
+        assertEquals(CandidateStatus.NEW, outcome.candidate().status());
+        assertEquals(discovered, outcome.candidate().discovered());
+        assertFalse(outcome.changed(),
+                "a routine re-report that only refreshes lastSeen must not be reported as changed");
     }
 
     @Test
@@ -131,10 +167,12 @@ class DefaultDiscoveryInboxServiceTest {
                 DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(), discovered, NOW).dismiss();
         when(candidateRepository.findByIdentityKey(dismissed.identityKey())).thenReturn(Optional.of(dismissed));
 
-        DiscoveryCandidate result = serviceAt(LATER).report(discovered);
+        ReportOutcome outcome = serviceAt(LATER).report(discovered);
+        DiscoveryCandidate result = outcome.candidate();
 
         assertEquals(CandidateStatus.DISMISSED, result.status(), "the operator's dismissal must outlive the sweep");
         assertNull(result.registeredAsset());
+        assertFalse(outcome.changed(), "status and discovered are unchanged from the pre-report value");
     }
 
     // -- report: already-registered device wins ---------------------------------------------
@@ -147,7 +185,7 @@ class DefaultDiscoveryInboxServiceTest {
         when(assetService.findDuplicateDevice(discovered.suggestedStream()))
                 .thenReturn(Optional.of(new DuplicateDeviceMatch(com.drones.vision.kernel.DeviceId.random(), owner)));
 
-        DiscoveryCandidate result = serviceAt(NOW).report(discovered);
+        DiscoveryCandidate result = serviceAt(NOW).report(discovered).candidate();
 
         assertEquals(CandidateStatus.REGISTERED, result.status());
         assertEquals(owner, result.registeredAsset());
@@ -160,7 +198,7 @@ class DefaultDiscoveryInboxServiceTest {
         when(assetService.findDuplicateDevice(discovered.suggestedStream()))
                 .thenReturn(Optional.of(new DuplicateDeviceMatch(com.drones.vision.kernel.DeviceId.random(), null)));
 
-        DiscoveryCandidate result = serviceAt(NOW).report(discovered);
+        DiscoveryCandidate result = serviceAt(NOW).report(discovered).candidate();
 
         assertEquals(CandidateStatus.REGISTERED, result.status());
         assertNull(result.registeredAsset());
@@ -176,11 +214,47 @@ class DefaultDiscoveryInboxServiceTest {
         when(assetService.findDuplicateDevice(discovered.suggestedStream()))
                 .thenReturn(Optional.of(new DuplicateDeviceMatch(com.drones.vision.kernel.DeviceId.random(), owner)));
 
-        DiscoveryCandidate result = serviceAt(LATER).report(discovered);
+        ReportOutcome outcome = serviceAt(LATER).report(discovered);
 
-        assertEquals(CandidateStatus.REGISTERED, result.status(),
+        assertEquals(CandidateStatus.REGISTERED, outcome.candidate().status(),
                 "an objective already-registered fact must win over a stale dismissal");
-        assertEquals(owner, result.registeredAsset());
+        assertEquals(owner, outcome.candidate().registeredAsset());
+        assertTrue(outcome.changed(), "status moved from DISMISSED to REGISTERED");
+    }
+
+    // -- report: C5 auto-reopen (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C5) ------
+
+    @Test
+    void reportReopensARegisteredCandidateToNewWhenItsMatchIsGone() {
+        DiscoveredDevice discovered = mavlinkCandidate(11);
+        AssetId formerOwner = AssetId.random();
+        DiscoveryCandidate registered = DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(), discovered, NOW)
+                .registeredTo(formerOwner);
+        when(candidateRepository.findByIdentityKey(registered.identityKey())).thenReturn(Optional.of(registered));
+        // The asset/device this candidate matched was since deleted -- no active device carries the
+        // identity any more.
+        when(assetService.findDuplicateDevice(discovered.suggestedStream())).thenReturn(Optional.empty());
+
+        ReportOutcome outcome = serviceAt(LATER).report(discovered);
+
+        assertEquals(CandidateStatus.NEW, outcome.candidate().status(),
+                "a REGISTERED candidate whose match disappeared must reopen to NEW");
+        assertNull(outcome.candidate().registeredAsset());
+        assertTrue(outcome.changed(), "status moved from REGISTERED to NEW");
+    }
+
+    @Test
+    void reportDoesNotAutoReopenADismissedCandidateEvenWithNoDuplicateMatch() {
+        // Auto-reopen is specific to REGISTERED; a dismissed candidate stays dismissed regardless.
+        DiscoveredDevice discovered = mavlinkCandidate(12);
+        DiscoveryCandidate dismissed =
+                DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(), discovered, NOW).dismiss();
+        when(candidateRepository.findByIdentityKey(dismissed.identityKey())).thenReturn(Optional.of(dismissed));
+        when(assetService.findDuplicateDevice(discovered.suggestedStream())).thenReturn(Optional.empty());
+
+        DiscoveryCandidate result = serviceAt(LATER).report(discovered).candidate();
+
+        assertEquals(CandidateStatus.DISMISSED, result.status());
     }
 
     // -- candidates() -----------------------------------------------------------------------------
@@ -323,11 +397,144 @@ class DefaultDiscoveryInboxServiceTest {
                 () -> serviceAt(NOW).register(unknown, command, VisibilityScope.unbounded(), actor));
     }
 
+    // -- attach (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C1) -----------------------
+
+    private DiscoveredDevice mavlinkCandidateWithStream(int sysid) {
+        return mavlinkCandidate(sysid);
+    }
+
+    @Test
+    void attachRegistersADeviceFromTheCandidateAndAssignsItToTheAsset() {
+        DiscoveredDevice discovered = mavlinkCandidateWithStream(21);
+        DiscoveryCandidate candidate = DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(), discovered, NOW);
+        AssetId assetId = AssetId.random();
+        when(candidateRepository.findById(candidate.id())).thenReturn(Optional.of(candidate));
+        when(assetService.details(VisibilityScope.unbounded(), assetId)).thenReturn(detailsOf(assetId));
+        when(assetService.findDuplicateDevice(discovered.suggestedStream())).thenReturn(Optional.empty());
+        Device registeredDevice = new Device(DeviceId.random(), discovered.name(), Set.of(Capability.TELEMETRY),
+                discovered.suggestedStream());
+        when(deviceService.register(any(), any())).thenReturn(registeredDevice);
+
+        DiscoveryCandidate result = serviceAt(NOW).attach(candidate.id(), assetId, VisibilityScope.unbounded(), actor);
+
+        assertEquals(CandidateStatus.REGISTERED, result.status());
+        assertEquals(assetId, result.registeredAsset());
+        ArgumentCaptor<DeviceRegistration> registrationCaptor = ArgumentCaptor.forClass(DeviceRegistration.class);
+        verify(deviceService).register(registrationCaptor.capture(), org.mockito.ArgumentMatchers.eq(actor));
+        assertEquals(discovered.suggestedStream(), registrationCaptor.getValue().stream());
+        assertEquals(Set.of(Capability.TELEMETRY), registrationCaptor.getValue().capabilities());
+        verify(assetService).assignDevice(assetId, registeredDevice.id(), actor);
+    }
+
+    @Test
+    void attachRefusesWhenScopeCannotManageOrg() {
+        VisibilityScope pilotScope = VisibilityScope.assignedAssets(Set.of());
+
+        assertThrows(AccessDeniedException.class,
+                () -> serviceAt(NOW).attach(DiscoveryCandidateId.random(), AssetId.random(), pilotScope, actor));
+
+        verifyNoInteractions(assetService, deviceService);
+    }
+
+    @Test
+    void attachThrowsForUnknownCandidateId() {
+        DiscoveryCandidateId unknown = DiscoveryCandidateId.random();
+        when(candidateRepository.findById(unknown)).thenReturn(Optional.empty());
+
+        assertThrows(NoSuchElementException.class,
+                () -> serviceAt(NOW).attach(unknown, AssetId.random(), VisibilityScope.unbounded(), actor));
+    }
+
+    @Test
+    void attachThrowsNotFoundNeverForbiddenForAnAssetOutsideScope() {
+        DiscoveredDevice discovered = mavlinkCandidateWithStream(22);
+        DiscoveryCandidate candidate = DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(), discovered, NOW);
+        AssetId assetId = AssetId.random();
+        when(candidateRepository.findById(candidate.id())).thenReturn(Optional.of(candidate));
+        when(assetService.details(VisibilityScope.unbounded(), assetId))
+                .thenThrow(new NoSuchElementException("Unknown asset: " + assetId.value()));
+
+        assertThrows(NoSuchElementException.class,
+                () -> serviceAt(NOW).attach(candidate.id(), assetId, VisibilityScope.unbounded(), actor),
+                "an out-of-scope/unknown target asset must be 404, never 403 (repo convention)");
+        verify(deviceService, never()).register(any(), any());
+    }
+
+    @Test
+    void attachThrowsConflictWhenTheCandidateHasNoSuggestedStream() {
+        DiscoveredDevice discovered = onvifCandidate("10.0.0.30"); // no suggestedStream
+        DiscoveryCandidate candidate = DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(), discovered, NOW);
+        AssetId assetId = AssetId.random();
+        when(candidateRepository.findById(candidate.id())).thenReturn(Optional.of(candidate));
+
+        assertThrows(IllegalStateException.class,
+                () -> serviceAt(NOW).attach(candidate.id(), assetId, VisibilityScope.unbounded(), actor));
+        verifyNoInteractions(deviceService);
+    }
+
+    @Test
+    void attachThrowsConflictWhenTheStreamDuplicatesARegisteredDevice() {
+        DiscoveredDevice discovered = mavlinkCandidateWithStream(23);
+        DiscoveryCandidate candidate = DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(), discovered, NOW);
+        AssetId assetId = AssetId.random();
+        AssetId owningAsset = AssetId.random();
+        when(candidateRepository.findById(candidate.id())).thenReturn(Optional.of(candidate));
+        when(assetService.details(VisibilityScope.unbounded(), assetId)).thenReturn(detailsOf(assetId));
+        when(assetService.findDuplicateDevice(discovered.suggestedStream()))
+                .thenReturn(Optional.of(new DuplicateDeviceMatch(DeviceId.random(), owningAsset)));
+        when(assetService.details(owningAsset)).thenReturn(detailsOf(owningAsset));
+
+        assertThrows(IllegalStateException.class,
+                () -> serviceAt(NOW).attach(candidate.id(), assetId, VisibilityScope.unbounded(), actor));
+        verify(deviceService, never()).register(any(), any());
+    }
+
+    @Test
+    void attachThrowsAlreadyRegisteredWhenTheCandidateIsRegisteredToADifferentAsset() {
+        DiscoveredDevice discovered = mavlinkCandidateWithStream(24);
+        AssetId otherAsset = AssetId.random();
+        DiscoveryCandidate candidate = DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(), discovered, NOW)
+                .registeredTo(otherAsset);
+        AssetId targetAsset = AssetId.random();
+        when(candidateRepository.findById(candidate.id())).thenReturn(Optional.of(candidate));
+
+        assertThrows(DiscoveryCandidateAlreadyRegisteredException.class,
+                () -> serviceAt(NOW).attach(candidate.id(), targetAsset, VisibilityScope.unbounded(), actor));
+        verifyNoInteractions(deviceService);
+    }
+
+    // -- restore --------------------------------------------------------------------------------
+
+    @Test
+    void restoreReopensACandidateToNewAndClearsItsRegisteredAsset() {
+        DiscoveredDevice discovered = onvifCandidate("10.0.0.40");
+        DiscoveryCandidate registered = DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(), discovered, NOW)
+                .registeredTo(AssetId.random());
+        when(candidateRepository.findById(registered.id())).thenReturn(Optional.of(registered));
+
+        DiscoveryCandidate result = serviceAt(NOW).restore(registered.id(), actor);
+
+        assertEquals(CandidateStatus.NEW, result.status());
+        assertNull(result.registeredAsset());
+    }
+
+    @Test
+    void restoreThrowsForUnknownId() {
+        DiscoveryCandidateId unknown = DiscoveryCandidateId.random();
+        when(candidateRepository.findById(unknown)).thenReturn(Optional.empty());
+
+        assertThrows(NoSuchElementException.class, () -> serviceAt(NOW).restore(unknown, actor));
+    }
+
     // -- constructor ------------------------------------------------------------------------------
 
     @Test
     void constructorRejectsNullArguments() {
-        assertThrows(NullPointerException.class, () -> new DefaultDiscoveryInboxService(null, assetService));
-        assertThrows(NullPointerException.class, () -> new DefaultDiscoveryInboxService(candidateRepository, null));
+        assertThrows(NullPointerException.class,
+                () -> new DefaultDiscoveryInboxService(null, assetService, deviceService));
+        assertThrows(NullPointerException.class,
+                () -> new DefaultDiscoveryInboxService(candidateRepository, null, deviceService));
+        assertThrows(NullPointerException.class,
+                () -> new DefaultDiscoveryInboxService(candidateRepository, assetService, null));
     }
 }

@@ -163,4 +163,20 @@ public record DiscoveryCandidate(DiscoveryCandidateId id, String identityKey, Di
         return new DiscoveryCandidate(id, identityKey, discovered, firstSeen, lastSeen, CandidateStatus.REGISTERED,
                 owningAsset);
     }
+
+    /**
+     * A copy reopened back to {@link CandidateStatus#NEW}: used both for an operator's explicit
+     * {@link com.drones.vision.warehouse.application.discovery.DiscoveryInboxService#restore} and
+     * for the automatic reopen a later {@link
+     * com.drones.vision.warehouse.application.discovery.DiscoveryInboxService#report} performs when
+     * a {@link CandidateStatus#REGISTERED} candidate's matching device is no longer found (the
+     * asset or device it resolved to was since deleted) — in both cases the candidate is once again
+     * something an operator should look at, so {@link #registeredAsset()} is cleared along with the
+     * status.
+     *
+     * @return the reopened candidate
+     */
+    public DiscoveryCandidate restore() {
+        return new DiscoveryCandidate(id, identityKey, discovered, firstSeen, lastSeen, CandidateStatus.NEW, null);
+    }
 }

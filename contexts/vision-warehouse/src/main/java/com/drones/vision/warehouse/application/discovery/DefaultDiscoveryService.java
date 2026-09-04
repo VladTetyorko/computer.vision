@@ -7,6 +7,7 @@ import com.drones.vision.warehouse.domain.port.DeviceDiscoveryPort;
 
 import java.net.URI;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -19,9 +20,11 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -79,6 +82,17 @@ public final class DefaultDiscoveryService implements DiscoveryService {
 
     private final Map<String, DeviceDiscoveryPort> portsByMethod;
     private final Duration gracePeriod;
+    private final Supplier<Instant> clock;
+
+    /**
+     * When each registered method was last scanned by this service instance (docs/plans/active/
+     * SOURCE-ONBOARDING-2-PLAN.md B1) — a fresh station restart has scanned nothing yet, regardless
+     * of any adapter's own internal history, so this map (not the adapter) is the source of truth
+     * for {@link #health()}'s {@link SourceStatus#NEVER_SCANNED} case. Populated in {@link
+     * #scan(DiscoveryScanSpec)}, read in {@link #health()}; a {@link ConcurrentHashMap} since the
+     * two can run on different threads.
+     */
+    private final Map<String, Instant> lastScanAtByMethod = new ConcurrentHashMap<>();
 
     public DefaultDiscoveryService(List<DeviceDiscoveryPort> ports) {
         this(ports, GRACE_PERIOD);
@@ -91,8 +105,18 @@ public final class DefaultDiscoveryService implements DiscoveryService {
      *                    uses the 1-argument constructor's {@link #GRACE_PERIOD} default
      */
     public DefaultDiscoveryService(List<DeviceDiscoveryPort> ports, Duration gracePeriod) {
+        this(ports, gracePeriod, Instant::now);
+    }
+
+    /**
+     * Test seam: an explicit clock for deterministic {@link #health()} {@code lastScanAt}
+     * assertions. Package-private — production always uses the public constructors' {@link
+     * Instant#now()} default.
+     */
+    DefaultDiscoveryService(List<DeviceDiscoveryPort> ports, Duration gracePeriod, Supplier<Instant> clock) {
         Objects.requireNonNull(ports, "ports must not be null");
         this.gracePeriod = Objects.requireNonNull(gracePeriod, "gracePeriod must not be null");
+        this.clock = Objects.requireNonNull(clock, "clock must not be null");
         Map<String, DeviceDiscoveryPort> byMethod = new LinkedHashMap<>();
         for (DeviceDiscoveryPort port : ports) {
             byMethod.put(port.method(), port);
@@ -136,18 +160,31 @@ public final class DefaultDiscoveryService implements DiscoveryService {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 failedMethods.add(entry.getKey());
+            } finally {
+                lastScanAtByMethod.put(entry.getKey(), clock.get());
             }
         }
 
         return new DiscoveryScanResult(mergeCrossMethodDuplicates(rawDevices), failedMethods);
     }
 
-    /** {@inheritDoc} Iteration order is {@link #portsByMethod}'s ({@link Map#copyOf}'s), not guaranteed. */
+    /**
+     * {@inheritDoc} Iteration order is {@link #portsByMethod}'s ({@link Map#copyOf}'s), not
+     * guaranteed. A method never scanned via this service instance (no {@link
+     * #scan(DiscoveryScanSpec)} call has resolved it yet, e.g. right after a station restart)
+     * reports {@link SourceStatus#NEVER_SCANNED} with a {@code null} {@link
+     * SourceHealth#lastScanAt()} regardless of what {@link DeviceDiscoveryPort#lastStatus()} itself
+     * would answer — this service's own scan history, not the adapter's internal state, is the
+     * source of truth for "has this been asked".
+     */
     @Override
     public List<SourceHealth> health() {
         List<SourceHealth> health = new ArrayList<>(portsByMethod.size());
         for (DeviceDiscoveryPort port : portsByMethod.values()) {
-            health.add(new SourceHealth(port.method(), port.lastStatus()));
+            Instant lastScanAt = lastScanAtByMethod.get(port.method());
+            health.add(lastScanAt == null
+                    ? new SourceHealth(port.method())
+                    : new SourceHealth(port.method(), port.lastStatus(), lastScanAt));
         }
         return List.copyOf(health);
     }
