@@ -513,12 +513,17 @@ services:
       # these seeded accounts before exposing it.
       VISION_PERSISTENCE_SEED_DEV_USERS: "true"
       # docs/plans/done/U-AUTH-PLAN.md wave 3: turn on real Spring Security session auth
-      # for anyone using `docker compose up`. The *compiled* default
-      # (vision.auth.enabled=false in vision-app's application.yaml)
-      # stays off on purpose -- ~26 unrelated @SpringBootTest classes plus
-      # AuthDisabledSecurityTest rely on that default, so only this
-      # compose-level override flips it, never the compiled default (see
-      # station/vision-app/MODULE.md's "Auth / session security" section).
+      # for anyone using `docker compose up`. Redundant since
+      # docs/plans/active/AUTH-ROLES-PLAN.md B0b flipped vision.auth.enabled's own
+      # *compiled* default (vision-app's application.yaml) to true -- this compose
+      # stack would get session auth either way now. Left set explicitly anyway: it
+      # documents intent for this file's readers and survives if the compiled
+      # default is ever revisited. The compiled default staying at false was never
+      # this file's concern to begin with -- it's what ~26 unrelated
+      # @SpringBootTest classes plus AuthDisabledSecurityTest still pin in
+      # src/test/resources/application.properties, so tests are unaffected by
+      # either value here (see station/vision-app/MODULE.md's "Auth / session
+      # security" section).
       VISION_AUTH_ENABLED: "true"
       # docs/plans/active/AUTH-ROLES-PLAN.md §3.6, wave B5: sessions now live in SPRING_SESSION rows
       # in the `postgres` service above (V34__spring_session.sql), inside the SAME postgres-data

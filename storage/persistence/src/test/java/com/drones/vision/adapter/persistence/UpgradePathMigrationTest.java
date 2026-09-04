@@ -154,6 +154,35 @@ class UpgradePathMigrationTest {
     }
 
     @Test
+    void freshInstallManagerOfRootSeesAnAssetOwnedByTheDevPrincipalGroup() {
+        // D16 (docs/plans/active/AUTH-ROLES-PLAN.md, wave B0b): the auth-off -> auth-on regression
+        // itself, proved end-to-end for the scenario every fresh B0b deployment actually takes -- no
+        // pre-existing legacy random root at all, just V13's own fixed root group and V90001's seeded
+        // manager account, whose membership already points directly at that fixed root (see
+        // V90001__dev_accounts.sql's own INSERT literal). Sibling to
+        // upgradeRestoresManagerVisibilityOfDevPrincipalOwnedAssets above: that test proves the
+        // *upgrade* path (a pre-existing random root gets the fixed group adopted under it); this one
+        // proves the *default* path -- an asset stamped with DevPrincipal.OWNERSHIP (created while
+        // auth was off) must be visible to whoever holds the seeded MANAGER account the instant auth
+        // flips on, with no upgrade machinery involved at all.
+        entityManagerFactory = PersistenceUnit.start(postgres.getJdbcUrl(), postgres.getUsername(),
+                postgres.getPassword(), true);
+
+        GroupRepositoryPort groups = groupRepository();
+        User manager = userRepository().findById(new UserId(new UUID(0, 2))).orElseThrow();
+
+        DefaultScopeResolver resolver =
+                new DefaultScopeResolver(groups, new JpaAssignmentRepository(entityManagerFactory));
+        VisibilityScope scope = resolver.scopeFor(manager);
+
+        boolean sees = scope.includes(new AssetId(UUID.randomUUID()),
+                new Ownership(new UserId(UUID.randomUUID()), devPrincipalGroupId()));
+        assertTrue(sees,
+                "the seeded manager, a member of V13's fixed root group, must see DevPrincipal-owned "
+                        + "assets the instant auth is enabled -- no upgrade step required");
+    }
+
+    @Test
     void runningTheFullMigrationSetTwiceChangesNothing() {
         entityManagerFactory = PersistenceUnit.start(postgres.getJdbcUrl(), postgres.getUsername(),
                 postgres.getPassword(), true);

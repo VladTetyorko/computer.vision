@@ -241,7 +241,22 @@ maps to a real handler, so it can't quietly outlive the gap it records.
   `permitAllFilterChain` has no `matchIfMissing`, so it exists only when the property is explicitly
   `false`. Exactly one `SecurityFilterChain` bean is ever registered. CSRF is disabled in **both**
   chains deliberately (JSON-only API, same-origin, `SameSite=Lax` cookie — a documented deferred
-  hardening step, not an oversight in the permit-all chain).
+  hardening step, not an oversight in the permit-all chain). Since AUTH-ROLES-PLAN wave B0b,
+  `application.yaml`'s own explicit `vision.auth.enabled` value is `true` — this file's compiled
+  default and every deployment's actual behavior finally agree; `false` is now something an operator
+  must opt back into explicitly for a local/demo run, not the out-of-the-box posture.
+- **Lost the only admin's password? Re-enabling `seed-dev-users` does NOT help.**
+  `V90001__dev_accounts.sql`'s per-account guard is `WHERE NOT EXISTS (... id = ... OR username = ...)`
+  — once a username like `admin` already exists (true of any deployment past its very first boot),
+  that migration's `INSERT` is a permanent no-op for that row; it never overwrites an existing
+  `password_hash`, seed-dev-users on or off. There is no self-service reset endpoint (out of scope,
+  AUTH-ROLES-PLAN.md's Non-goals) and no admin-impersonation escape hatch once
+  `vision.auth.enabled=true`. The only recovery path is a direct database edit:
+  `UPDATE users SET password_hash = '<bcrypt-hash>' WHERE username = '<locked-out-admin>';` via `psql`
+  against the running Postgres instance, where `<bcrypt-hash>` is generated out-of-band with the app's
+  own hasher (e.g. `new BCryptPasswordEncoder().encode("new-password")` in a scratch test/REPL — the
+  same "real BCrypt output, not invented" posture V90001's own header documents for its three seeded
+  hashes). Restart is not required; the next login reads the updated row.
 - **Spring Boot 4.1's destroy-method handling is strict when named, lenient when inferred.** An
   explicit `@Bean(destroyMethod="close")` throws `BeanDefinitionValidationException` at startup if the
   concrete resolved type lacks that method (e.g. a `Noop*` fallback with no `close()`); the default
@@ -904,3 +919,55 @@ backgrounding) produced the real, trustworthy result. Docker ran for real throug
 `postgres:16`, Flyway through `V34`, unchanged this wave — no new migration). `vision.auth.enabled`
 stays `false` by default, unchanged — the default-config bar held throughout. Wave B0b (flip
 `vision.auth.enabled`'s default) is the only item this plan still has open.
+
+**AUTH-ROLES-PLAN wave B0b done — plan closed** (docs/plans/active/AUTH-ROLES-PLAN.md §5) — flips
+`vision.auth.enabled`'s value in `application.yaml` from `false` to `true`. This closes the last gap
+D1/D2 documented: `SecurityConfig`'s/`AuthWiringConfiguration`'s own compiled default was already
+`true` (`matchIfMissing=true`), but this file overrode it to `false` explicitly, so every real
+deployment ran auth-off regardless of the compiled default. Now both agree. `vision.persistence.
+seed-dev-users` is unchanged (`false`) — a fresh clone boots with an empty `users` table and access
+control on, which is exactly `BootstrapController`'s one-way latch's reason to exist (wave B3, already
+shipped): `GET /api/auth/bootstrap` reports `required: true` whenever `vision.auth.enabled` is on and
+no enabled user holds an `ADMIN` membership (`DefaultAuthService#adminExists()`), and `POST` creates
+that first administrator over the same open endpoint — traced through both classes' current source
+this wave to confirm the flip changes no code path, only which one is reachable at zero users.
+`resolveRootGroup()` reuses the group V13 already seeded parentless (rather than minting a second
+root), so the bootstrapped admin lands in the same fixed root every dev-mode asset is already owned
+under.
+
+D16 regression test (the one code change this wave makes, `storage/persistence`):
+`UpgradePathMigrationTest#freshInstallManagerOfRootSeesAnAssetOwnedByTheDevPrincipalGroup`, a new
+sibling to the pre-existing `upgradeRestoresManagerVisibilityOfDevPrincipalOwnedAssets`. Together the
+two close the auth-off→auth-on visibility cliff for both shapes a real deployment can be in: a
+brand-new install (V13's fixed root group directly, V90001's seeded manager already a member of it —
+no legacy state to fake) and an upgrade from a database that pre-dates the fixed root (V16 adopts the
+fixed group under the old random root). Both drive the real `DefaultScopeResolver` against a real
+Postgres, not a hand-simulated approximation of its subtree walk.
+
+`docker-compose.yml`'s `VISION_AUTH_ENABLED: "true"` comment rewritten to say it is now redundant with
+the compiled default (kept set explicitly anyway — documents intent, survives if the compiled default
+is ever revisited); the variable itself, and every other line, is untouched.
+
+**Lost-admin-password recovery** (this wave's required Non-goals documentation): see the Gotchas entry
+above.
+
+**Explicitly deferred, unchanged by this wave** (D2): the three-way default disagreement across
+`SecurityConfig`/`AuthWiringConfiguration`/`AuthController`'s scattered `@Value`/`@ConditionalOnProperty`
+defaults, and building the full `VisionAuthProperties` shape (`enabled`+`session.*`+`password.*` in one
+record — `VisionAuthProperties` today covers only `session.*`, wave B5). Flipping `application.yaml`'s
+one explicit value was sufficient because that value — not any compiled default — is what every real
+deployment actually reads; unifying the three is a separate, not-yet-scheduled cleanup.
+
+Test counts: `./mvnw -B -pl storage/persistence test` — **277/277** green (was 276/276; +1 new test —
+`UpgradePathMigrationTest` alone: 5/5, was 4/4). `./mvnw -B -pl station/vision-app test -DskipWeb` —
+**333/333** green, unchanged from B6's own ending count — proving the plan's own "Zero other test
+impact" claim: `src/test/resources/application.properties` already pinned `vision.auth.enabled=false`
+for every `@SpringBootTest` in this module before this wave landed (added ahead of time, anticipating
+exactly this flip), so the compiled-default change altered no test's effective configuration.
+`vision-api` has no `@SpringBootTest` context of its own bound to this property (every
+`vision.auth.enabled` reference there is javadoc/comment prose, confirmed by inspection this wave) and
+was not rebuilt. Docker ran for real throughout (Testcontainers `postgres:16`, Flyway through `V34`, no
+new migration this wave — the D16 test needed no schema change). Both builds ran in the foreground with
+an explicit generous timeout, never backgrounded.
+
+AUTH-ROLES-PLAN.md is now fully closed — B0b was its last open wave.

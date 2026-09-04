@@ -192,32 +192,50 @@ vision:
   # --- Session auth (docs/plans/done/U-AUTH-PLAN.md wave 3; default flipped by
   # docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R7, then flipped back to
   # false here by an unrelated commit -- corrected for honesty by
-  # docs/plans/active/AUTH-ROLES-PLAN.md B0a; see that plan's D1/D2/D3) ---
+  # docs/plans/active/AUTH-ROLES-PLAN.md B0a, then flipped ON for real by that
+  # plan's closing wave, B0b) ---
   auth:
-    # false (the value this file actually sets, below): the dev/demo escape
-    # hatch, and what a fresh clone of this repo actually boots into. NOTHING is
-    # secured -- the Spring Security filter chain becomes permit-all + CSRF-off,
-    # CurrentUser returns the fixed dev principal (auto-admin, unbounded
-    # VisibilityScope) for every request, and /api/auth/* report that dev admin
-    # with authEnabled=false. SecurityConfig logs a boot WARN naming this
-    # setting whenever this value is in effect, matching the web UI's own red
-    # "this station is unsecured" banner (station/vision-web/src/app/app.html).
-    # Appropriate for a local run or a demo stack with no login flow set up --
-    # never for anything reachable by someone who isn't already trusted with
-    # the whole fleet.
+    # true (the value this file actually sets, below): a session is required for
+    # /api/** and /ws/** except /api/auth/login|logout|bootstrap and static/SPA
+    # routes. This now agrees with SecurityConfig's own compiled default
+    # (matchIfMissing = true) -- a deployment that omits this key entirely, or
+    # sets it explicitly like this file does, gets the same access control.
     #
-    # true: a session is required for /api/** and /ws/** except
-    # /api/auth/login|logout and static/SPA routes -- but a session only has
-    # someone to log in as if vision.persistence.seed-dev-users is also true
-    # (see above), or real users were created through UserService. This *is*
-    # SecurityConfig's own compiled default (matchIfMissing = true) -- a
-    # deployment that omits this key entirely gets access control -- but this
-    # file overrides that compiled default to false, explicitly, below. Do not
-    # flip this value on its own: AUTH-ROLES-PLAN.md D3 documents that with
-    # auth on and no bootstrap path (that plan's wave B3), an empty `users`
-    # table locks every deployment out permanently. Flipping this key is that
-    # plan's wave B0b, gated on B3 landing first.
-    enabled: false
+    # A session only has someone to log in as once a user row exists. Two ways
+    # that happens:
+    #  - vision.persistence.seed-dev-users=true (see above; stays false by
+    #    default) seeds the three fixed dev accounts (admin/manager/pilot, see
+    #    V90001__dev_accounts.sql) -- what docker-compose.yml's friends-demo
+    #    stack sets explicitly, for a login flow with zero setup.
+    #  - Otherwise a fresh clone boots with an EMPTY users table. This is not a
+    #    lockout: BootstrapController's GET/POST /api/auth/bootstrap reports
+    #    `required: true` whenever auth is enabled and no enabled user holds an
+    #    ADMIN membership, and its POST creates that first admin over the open
+    #    endpoint -- first boot is self-serve. AUTH-ROLES-PLAN.md D3's
+    #    permanent-lockout defect is exactly what this bootstrap path (wave B3)
+    #    closed before B0b was allowed to flip this default.
+    #
+    # D16 regression coverage: an asset created while this flag was off is
+    # stamped with DevPrincipal's fixed ownership (station/vision-app
+    # devsupport) -- flipping this flag on must not orphan it from view.
+    # UpgradePathMigrationTest (storage/persistence) proves a MANAGER sees that
+    # asset both on a fresh install (freshInstallManagerOfRootSeesAn...) and
+    # after upgrading a database that pre-dates the fixed root group
+    # (upgradeRestoresManagerVisibilityOf...), against a real Postgres.
+    #
+    # false: the dev/demo escape hatch -- NOTHING is secured, the Spring
+    # Security filter chain becomes permit-all + CSRF-off, CurrentUser returns
+    # the fixed dev principal (auto-admin, unbounded VisibilityScope) for every
+    # request, and /api/auth/* report that dev admin with authEnabled=false.
+    # SecurityConfig logs a boot WARN naming this setting whenever this value is
+    # in effect, matching the web UI's own red "this station is unsecured"
+    # banner (station/vision-web/src/app/app.html). Set this explicitly for a
+    # local run or a demo stack with no login flow set up -- never for anything
+    # reachable by someone who isn't already trusted with the whole fleet. A
+    # lost-admin-password recovery workaround (re-enabling seed-dev-users does
+    # NOT help once accounts already exist) is documented in this module's
+    # MODULE.md.
+    enabled: true
     # Session mechanics (docs/plans/active/AUTH-ROLES-PLAN.md §3.6, wave B5) -- VisionAuthProperties.
     # Every key below is commented out: each documents the record's own @DefaultValue rather than
     # overriding it.
