@@ -19,5 +19,16 @@ public enum AuditTargetType {
     DATASET,
 
     /** A trained CV model version in the registry (docs/plans/done/CV-TRAINING-PLAN.md §8, Phase 2). */
-    MODEL
+    MODEL,
+
+    /** A login-capable account (docs/plans/active/AUTH-ROLES-PLAN.md D15, wave B2) — created, enabled/
+     * disabled, password changed/reset, or authenticated against (successfully or not). */
+    USER,
+
+    /** An org-chart node users hold memberships in (docs/plans/active/AUTH-ROLES-PLAN.md D15, wave B2). */
+    GROUP,
+
+    /** A pilot&rarr;asset link — grant, revoke, or seat change between {@code PILOT}/{@code CREW}
+     * (docs/plans/active/AUTH-ROLES-PLAN.md D15, wave B2). */
+    ASSIGNMENT
 }

@@ -13,14 +13,19 @@ import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.UserId;
+import com.drones.vision.identity.domain.model.Assignment;
+import com.drones.vision.identity.domain.model.AssignmentRole;
 import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -156,30 +161,30 @@ class DefaultAssignmentServiceTest {
                 () -> new DefaultAssignmentService(assignmentRepository, null));
     }
 
-    /** In-memory {@link AssignmentRepositoryPort}. */
+    /** In-memory {@link AssignmentRepositoryPort}, keyed by (pilot, asset) with each link's seat. */
     private static final class FakeAssignmentRepositoryPort implements AssignmentRepositoryPort {
-        private final Map<UserId, Set<AssetId>> byPilot = new ConcurrentHashMap<>();
+        private final Map<UserId, Map<AssetId, AssignmentRole>> byPilot = new ConcurrentHashMap<>();
 
         @Override
-        public void assign(UserId pilot, AssetId asset) {
-            byPilot.computeIfAbsent(pilot, k -> new HashSet<>()).add(asset);
+        public void assign(UserId pilot, AssetId asset, AssignmentRole role) {
+            byPilot.computeIfAbsent(pilot, k -> new HashMap<>()).put(asset, role);
         }
 
         @Override
         public void unassign(UserId pilot, AssetId asset) {
-            byPilot.getOrDefault(pilot, new HashSet<>()).remove(asset);
+            byPilot.getOrDefault(pilot, Map.of()).remove(asset);
         }
 
         @Override
         public Set<AssetId> assetsForPilot(UserId pilot) {
-            return Set.copyOf(byPilot.getOrDefault(pilot, Set.of()));
+            return Set.copyOf(byPilot.getOrDefault(pilot, Map.of()).keySet());
         }
 
         @Override
         public Set<UserId> pilotsForAsset(AssetId asset) {
             Set<UserId> pilots = new HashSet<>();
             byPilot.forEach((pilot, assets) -> {
-                if (assets.contains(asset)) {
+                if (assets.containsKey(asset)) {
                     pilots.add(pilot);
                 }
             });
@@ -188,7 +193,24 @@ class DefaultAssignmentServiceTest {
 
         @Override
         public boolean isAssigned(UserId pilot, AssetId asset) {
-            return byPilot.getOrDefault(pilot, Set.of()).contains(asset);
+            return byPilot.getOrDefault(pilot, Map.of()).containsKey(asset);
+        }
+
+        @Override
+        public Optional<AssignmentRole> roleFor(UserId pilot, AssetId asset) {
+            return Optional.ofNullable(byPilot.getOrDefault(pilot, Map.of()).get(asset));
+        }
+
+        @Override
+        public List<Assignment> assignmentsForAsset(AssetId asset) {
+            List<Assignment> assignments = new ArrayList<>();
+            byPilot.forEach((pilot, assets) -> {
+                AssignmentRole role = assets.get(asset);
+                if (role != null) {
+                    assignments.add(new Assignment(pilot, asset, role));
+                }
+            });
+            return List.copyOf(assignments);
         }
     }
 }

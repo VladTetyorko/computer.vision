@@ -7,6 +7,8 @@ import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.identity.domain.model.User;
 import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import com.drones.vision.identity.domain.port.GroupRepositoryPort;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.platform.Capability;
 import com.drones.vision.platform.VisibilityScope;
 
 import java.util.ArrayDeque;
@@ -65,7 +67,16 @@ public final class DefaultScopeResolver implements ScopeResolver {
 
         // PILOT-only, or no membership at all: only explicitly assigned assets. A user with no
         // assignments gets the empty set, which includes nothing — they see nothing until assigned.
+        // A VIEWER-only user resolves here too, deliberately — see this class's authorityFor(User)
+        // javadoc and docs/plans/active/AUTH-ROLES-PLAN.md §3.6's staging rule (wave B6 widens this).
         return VisibilityScope.assignedAssets(assignmentRepository.assetsForPilot(user.id()));
+    }
+
+    @Override
+    public Authority authorityFor(User user) {
+        Objects.requireNonNull(user, "user must not be null");
+        Set<Capability> capabilities = user.topRole().map(RoleAuthority::capabilitiesOf).orElse(Set.of());
+        return new Authority(scopeFor(user), capabilities);
     }
 
     /** The union of the self+descendants subtree of each root group, cycle-safe. */

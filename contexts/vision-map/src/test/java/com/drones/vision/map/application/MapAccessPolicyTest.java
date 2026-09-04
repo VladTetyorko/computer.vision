@@ -183,6 +183,55 @@ class MapAccessPolicyTest {
         assertFalse(policy.canView(pilot, otherTeam));
     }
 
+    // --- Role.VIEWER (docs/plans/active/AUTH-ROLES-PLAN.md §3.2/B1) ------------
+
+    @Test
+    void viewerSeesCopButNeverManagesItRegardlessOfNoRuleGrantingMore() {
+        // Rule 2's role check is MANAGER-or-ADMIN for MANAGE, else VIEW -- VIEWER falls into the
+        // "else" alongside PILOT, so a VIEWER account gets exactly the same COP access a PILOT does:
+        // read the whole shared picture, manage nothing.
+        MapLayer cop = layer(LayerKind.COP, new Ownership(UserId.random(), GroupId.random()), List.of());
+        Viewer viewer = new Viewer(UserId.random(), Set.of(), Role.VIEWER);
+
+        assertTrue(policy.canView(viewer, cop));
+        assertFalse(policy.canContribute(viewer, cop));
+    }
+
+    @Test
+    void viewerContributesToItsOwnTeamLayerLikeAnyOtherMember() {
+        // Rule 4 (TEAM membership -> CONTRIBUTE) is role-independent, so a VIEWER who happens to be
+        // a group member still contributes to that team's layer -- membership, not role, gates it.
+        GroupId ownGroup = GroupId.random();
+        MapLayer ownTeam = layer(LayerKind.TEAM, new Ownership(UserId.random(), ownGroup), List.of());
+        Viewer viewer = new Viewer(UserId.random(), Set.of(ownGroup), Role.VIEWER);
+
+        assertTrue(policy.canContribute(viewer, ownTeam));
+    }
+
+    @Test
+    void viewerHasNoAccessToATeamLayerItIsNotAMemberOfAndNoExplicitGrantCovers() {
+        // No rule fires for a VIEWER with no membership, no ownership and no explicit grant --
+        // low authority (this plan's §3.2) does not imply broad visibility by itself; it is the
+        // ScopeResolver/RoleAuthority pairing (wave B6) that later widens what a VIEWER may see, not
+        // this policy special-casing the role.
+        MapLayer otherTeam = layer(LayerKind.TEAM, new Ownership(UserId.random(), GroupId.random()), List.of());
+        Viewer viewer = new Viewer(UserId.random(), Set.of(), Role.VIEWER);
+
+        assertFalse(policy.canView(viewer, otherTeam));
+    }
+
+    @Test
+    void explicitGrantStillAppliesToAViewer() {
+        // Rules 6/7 (explicit grants) are role-independent -- a VIEWER explicitly granted MANAGE
+        // gets it, same as any other role would.
+        UserId userId = UserId.random();
+        MapLayer personal = layer(LayerKind.PERSONAL, new Ownership(UserId.random(), GroupId.random()),
+                List.of(new LayerGrant(SubjectType.USER, userId.value(), AccessLevel.MANAGE)));
+        Viewer viewer = new Viewer(userId, Set.of(), Role.VIEWER);
+
+        assertTrue(policy.canManage(viewer, personal));
+    }
+
     // --- accessTo/canView/canContribute/canManage null-arg validation ----------
 
     @Test

@@ -1,6 +1,8 @@
 package com.drones.vision.identity.application.scope;
 
 import com.drones.vision.kernel.AssetId;
+import com.drones.vision.identity.domain.model.Assignment;
+import com.drones.vision.identity.domain.model.AssignmentRole;
 import com.drones.vision.identity.domain.model.Group;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.identity.domain.model.Membership;
@@ -9,10 +11,13 @@ import com.drones.vision.identity.domain.model.User;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import com.drones.vision.identity.domain.port.GroupRepositoryPort;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.platform.Capability;
 import com.drones.vision.platform.VisibilityScope;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -103,7 +108,7 @@ class DefaultScopeResolverTest {
     void pilotOnlyResolvesToItsAssignedAssets() {
         User user = user(new Membership(warehouseA, Role.PILOT));
         AssetId assigned = AssetId.random();
-        assignmentRepository.assign(user.id(), assigned);
+        assignmentRepository.assign(user.id(), assigned, AssignmentRole.PILOT);
 
         VisibilityScope scope = resolver.scopeFor(user);
 
@@ -141,6 +146,59 @@ class DefaultScopeResolverTest {
                 () -> new DefaultScopeResolver(groupRepository, null));
     }
 
+    // --- authorityFor(User) (docs/plans/active/AUTH-ROLES-PLAN.md §3.3, wave B1) -----------------
+
+    @Test
+    void authorityForAnAdminPairsUnboundedScopeWithEveryCapability() {
+        User user = user(new Membership(warehouseA, Role.ADMIN));
+
+        Authority authority = resolver.authorityFor(user);
+
+        assertTrue(authority.scope().isUnbounded());
+        assertEquals(Set.of(Capability.values()), authority.capabilities());
+    }
+
+    @Test
+    void authorityForAManagerPairsGroupsScopeWithEveryCapability() {
+        User user = user(new Membership(warehouseA, Role.MANAGER));
+
+        Authority authority = resolver.authorityFor(user);
+
+        assertEquals(resolver.scopeFor(user), authority.scope());
+        assertEquals(Set.of(Capability.values()), authority.capabilities());
+    }
+
+    @Test
+    void authorityForAPilotPairsAssignedAssetsScopeWithPayloadAndFlightOnly() {
+        User user = user(new Membership(warehouseA, Role.PILOT));
+
+        Authority authority = resolver.authorityFor(user);
+
+        assertEquals(VisibilityScope.Kind.ASSIGNED_ASSETS, authority.scope().kind());
+        assertEquals(Set.of(Capability.OPERATE_PAYLOAD,
+                Capability.COMMAND_FLIGHT), authority.capabilities());
+    }
+
+    @Test
+    void authorityForAUserWithNoMembershipsHoldsNoCapabilities() {
+        Authority authority = resolver.authorityFor(user());
+
+        assertEquals(VisibilityScope.Kind.ASSIGNED_ASSETS, authority.scope().kind());
+        assertTrue(authority.capabilities().isEmpty());
+    }
+
+    @Test
+    void authorityForUsesTheSameTopRolePrecedenceAsScopeFor() {
+        // A PILOT+ADMIN pair: scopeFor already picks ADMIN (unbounded) via topRole precedence;
+        // authorityFor must derive its capabilities from that same winning role, not the pilot one.
+        User user = user(new Membership(warehouseA, Role.PILOT), new Membership(warehouseB, Role.ADMIN));
+
+        Authority authority = resolver.authorityFor(user);
+
+        assertTrue(authority.scope().isUnbounded());
+        assertEquals(Set.of(Capability.values()), authority.capabilities());
+    }
+
     /** In-memory {@link GroupRepositoryPort}. */
     private static final class FakeGroupRepositoryPort implements GroupRepositoryPort {
         private final Map<GroupId, Group> groups = new ConcurrentHashMap<>();
@@ -162,30 +220,30 @@ class DefaultScopeResolverTest {
         }
     }
 
-    /** In-memory {@link AssignmentRepositoryPort}. */
+    /** In-memory {@link AssignmentRepositoryPort}, keyed by (pilot, asset) with each link's seat. */
     private static final class FakeAssignmentRepositoryPort implements AssignmentRepositoryPort {
-        private final Map<UserId, Set<AssetId>> byPilot = new HashMap<>();
+        private final Map<UserId, Map<AssetId, AssignmentRole>> byPilot = new HashMap<>();
 
         @Override
-        public void assign(UserId pilot, AssetId asset) {
-            byPilot.computeIfAbsent(pilot, k -> new HashSet<>()).add(asset);
+        public void assign(UserId pilot, AssetId asset, AssignmentRole role) {
+            byPilot.computeIfAbsent(pilot, k -> new HashMap<>()).put(asset, role);
         }
 
         @Override
         public void unassign(UserId pilot, AssetId asset) {
-            byPilot.getOrDefault(pilot, Set.of()).remove(asset);
+            byPilot.getOrDefault(pilot, Map.of()).remove(asset);
         }
 
         @Override
         public Set<AssetId> assetsForPilot(UserId pilot) {
-            return Set.copyOf(byPilot.getOrDefault(pilot, Set.of()));
+            return Set.copyOf(byPilot.getOrDefault(pilot, Map.of()).keySet());
         }
 
         @Override
         public Set<UserId> pilotsForAsset(AssetId asset) {
             Set<UserId> pilots = new HashSet<>();
             byPilot.forEach((pilot, assets) -> {
-                if (assets.contains(asset)) {
+                if (assets.containsKey(asset)) {
                     pilots.add(pilot);
                 }
             });
@@ -194,7 +252,24 @@ class DefaultScopeResolverTest {
 
         @Override
         public boolean isAssigned(UserId pilot, AssetId asset) {
-            return byPilot.getOrDefault(pilot, Set.of()).contains(asset);
+            return byPilot.getOrDefault(pilot, Map.of()).containsKey(asset);
+        }
+
+        @Override
+        public Optional<AssignmentRole> roleFor(UserId pilot, AssetId asset) {
+            return Optional.ofNullable(byPilot.getOrDefault(pilot, Map.of()).get(asset));
+        }
+
+        @Override
+        public List<Assignment> assignmentsForAsset(AssetId asset) {
+            List<Assignment> assignments = new ArrayList<>();
+            byPilot.forEach((pilot, assets) -> {
+                AssignmentRole role = assets.get(asset);
+                if (role != null) {
+                    assignments.add(new Assignment(pilot, asset, role));
+                }
+            });
+            return List.copyOf(assignments);
         }
     }
 }

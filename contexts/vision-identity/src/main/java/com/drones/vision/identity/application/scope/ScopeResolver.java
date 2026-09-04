@@ -1,6 +1,8 @@
 package com.drones.vision.identity.application.scope;
 
+import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.identity.domain.model.User;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 
 /**
@@ -35,4 +37,25 @@ public interface ScopeResolver {
      * @return the user's visibility scope
      */
     VisibilityScope scopeFor(User user);
+
+    /**
+     * Computes the {@link Authority} — both axes at once — for a user (docs/plans/active/AUTH-ROLES-PLAN.md
+     * §3.3, wave B1): {@link #scopeFor(User)} paired with {@link RoleAuthority#capabilitiesOf(
+     * com.drones.vision.identity.domain.model.Role)} for the user's {@link User#topRole()}.
+     *
+     * <p>A user with no memberships (empty {@link User#topRole()}) holds no capabilities — the same
+     * safe default {@link Role#VIEWER} gets, and for the same reason: nothing to grant authority
+     * from. <strong>Precedence between {@link #scopeFor(User)} and this method is unchanged from
+     * before this method existed</strong> — see docs/plans/active/AUTH-ROLES-PLAN.md §3.6's staging
+     * rule: a {@link Role#VIEWER}-only user resolves through {@link #scopeFor(User)}'s existing
+     * "PILOT-only, or no membership at all" branch (assigned-assets, ordinarily empty for a viewer),
+     * not a widened group scope — that widening is wave B6's, gated on every {@code
+     * canManageOrg()}/{@code canManage()}/{@code canAdminister()} call site having first migrated
+     * onto {@link Authority}, so a {@code VIEWER} handed a wide scope today could not accidentally
+     * pass one of those deprecated predicates directly.
+     *
+     * @param user the acting user
+     * @return the user's authority — scope plus capabilities
+     */
+    Authority authorityFor(User user);
 }

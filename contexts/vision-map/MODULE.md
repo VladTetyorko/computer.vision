@@ -103,6 +103,13 @@ com.drones.vision.map.application.track — camera pose CRUD, calibration solver
 - **`MapAccessPolicy`** (final, no interface) — the map's whole authorization model: resolves effective
   `AccessLevel` for a `Viewer` on a `MapLayer`. Pure, no ports, no mutable state.
   - nested `record Viewer(UserId userId, Set<GroupId> groups, Role topRole)` — `groups` defensively copied.
+    `topRole` may now be `Role.VIEWER` (docs/plans/active/AUTH-ROLES-PLAN.md §3.2, wave B1 prepended it in
+    `vision-identity`) — no rule here names `VIEWER` explicitly, and none needed to: every rule in
+    `accessTo` either checks a *specific* higher role (`ADMIN`/`MANAGER`) or falls through to
+    group/ownership-based grants that a `VIEWER` participates in identically to a `PILOT`, so a bare
+    `VIEWER` with no matching grant naturally resolves to `null`/no access, same as a bare `PILOT` does
+    today. `MapAccessPolicyTest` pins this with explicit `VIEWER` cases rather than leaving it to be true
+    by accident of the rule table.
   - `AccessLevel accessTo(Viewer, MapLayer)` — max across every applicable rule, or `null`; `canView`/
     `canContribute`/`canManage(Viewer, MapLayer)` — thresholded at `VIEW`/`CONTRIBUTE`/`MANAGE`.
   - **Deliberately resolves from identity + group membership, never `VisibilityScope`** — see Gotchas.
@@ -278,3 +285,14 @@ Fully implemented, including fixed-camera calibration and track projection. `con
 its own Maven module (moved out of the earlier flat `vision-domain`/`vision-application` split — see
 docs/plans/active/DOMAIN-SEPARATION-W1.md §16). `vision-web` does not yet surface
 `GeolocationResult.measured` after a page reload (see Gotchas) — a known follow-up, not scheduled.
+
+**AUTH-ROLES-PLAN wave B1 done** (docs/plans/active/AUTH-ROLES-PLAN.md §3.2) — no production code in
+this module changed: `Role.VIEWER`'s prepend in `vision-identity` was traced through `MapAccessPolicy`'s
+entire rule table (own API-surface entry above) and found to already behave correctly for a `VIEWER`
+`Viewer` with zero code changes, so this wave only added pinning coverage — four new `VIEWER` cases in
+`MapAccessPolicyTest` (`accessTo`/`canView`/`canContribute`/`canManage` all resolving the same way a
+bare `PILOT` does, i.e. no access without an explicit grant). `MapAccessPolicy.java` itself is
+byte-for-byte unchanged.
+
+`./mvnw -B -pl core/vision-platform,contexts/vision-identity,contexts/vision-map -am test` — green
+(cross-module run, since this module depends on `vision-identity`'s `Role`, which wave B1 changed).

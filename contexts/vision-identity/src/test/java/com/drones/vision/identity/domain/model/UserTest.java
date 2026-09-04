@@ -156,6 +156,23 @@ class UserTest {
     }
 
     @Test
+    void topRolePicksPilotOverViewerRegardlessOfInsertionOrder() {
+        // Pins docs/plans/active/AUTH-ROLES-PLAN.md §3.2's prepend claim: VIEWER sits below PILOT in
+        // ordinal (authority) order, so topRole() must still pick PILOT over a co-held VIEWER
+        // membership, in either insertion order -- a future reorder of Role's constants would flip
+        // this and fail here rather than only in review.
+        User viewerThenPilot = user(List.of(
+                new Membership(GroupId.random(), Role.VIEWER),
+                new Membership(GroupId.random(), Role.PILOT)));
+        assertEquals(Optional.of(Role.PILOT), viewerThenPilot.topRole());
+
+        User pilotThenViewer = user(List.of(
+                new Membership(GroupId.random(), Role.PILOT),
+                new Membership(GroupId.random(), Role.VIEWER)));
+        assertEquals(Optional.of(Role.PILOT), pilotThenViewer.topRole());
+    }
+
+    @Test
     void topRoleReturnsAdminEvenWhenAdminIsInsertedFirst() {
         User user = user(List.of(
                 new Membership(GroupId.random(), Role.ADMIN),

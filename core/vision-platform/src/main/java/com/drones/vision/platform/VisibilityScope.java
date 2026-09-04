@@ -130,7 +130,17 @@ public record VisibilityScope(Kind kind, Set<GroupId> groups, Set<AssetId> assig
      * slice-2 cleanup).
      *
      * @return {@code true} iff {@link #kind()} is {@link Kind#UNBOUNDED} or {@link Kind#GROUPS}
+     * @deprecated superseded by {@link Authority#mayManageOrg()} (docs/plans/active/AUTH-ROLES-PLAN.md
+     *             §3.1/§3.3, wave B1) — this predicate answers only the visibility half of "may
+     *             manage the org," which is exactly why it must not be asked directly once a {@code
+     *             VIEWER} role can hold a {@link Kind#GROUPS} scope for wide read access (wave B6): a
+     *             wall display would pass this check even though it must never create a user. {@code
+     *             Authority} requires the {@code MANAGE_ORG} capability <em>in addition to</em> this
+     *             method's answer. No behavior change here — every existing caller's answer is
+     *             unchanged; new call sites should reach {@code Authority} instead, and existing ones
+     *             migrate in wave B6.
      */
+    @Deprecated
     public boolean canManageOrg() {
         return kind == Kind.UNBOUNDED || kind == Kind.GROUPS;
     }
@@ -169,7 +179,13 @@ public record VisibilityScope(Kind kind, Set<GroupId> groups, Set<AssetId> assig
      * off) may answer yes here.
      *
      * @return {@code true} iff {@link #kind()} is {@link Kind#UNBOUNDED}
+     * @deprecated superseded by {@link Authority#mayAdminister()} (docs/plans/active/AUTH-ROLES-PLAN.md
+     *             §3.1/§3.3, wave B1), for the same reason as {@link #canManageOrg()}: this predicate
+     *             is visibility-shaped only, and {@code Authority} additionally requires the {@code
+     *             MANAGE_ORG} capability. No behavior change here; new call sites should reach {@code
+     *             Authority} instead, and existing ones migrate in wave B6.
      */
+    @Deprecated
     public boolean canAdminister() {
         return kind == Kind.UNBOUNDED;
     }
@@ -193,7 +209,14 @@ public record VisibilityScope(Kind kind, Set<GroupId> groups, Set<AssetId> assig
      * @return {@code true} for {@link Kind#UNBOUNDED}; for {@link Kind#GROUPS} iff {@link
      *         Ownership#groupId()} is in {@link #groups()}; always {@code false} for {@link
      *         Kind#ASSIGNED_ASSETS}
+     * @deprecated superseded by {@link Authority#mayManageFleet(Ownership)}
+     *             (docs/plans/active/AUTH-ROLES-PLAN.md §3.1/§3.3, wave B1), for the same reason as
+     *             {@link #canManageOrg()}: this predicate is visibility-shaped only, and {@code
+     *             Authority} additionally requires the {@code MANAGE_FLEET} capability. No behavior
+     *             change here; new call sites should reach {@code Authority} instead, and existing
+     *             ones migrate in wave B6.
      */
+    @Deprecated
     public boolean canManage(Ownership ownership) {
         Objects.requireNonNull(ownership, "ownership must not be null");
         return switch (kind) {

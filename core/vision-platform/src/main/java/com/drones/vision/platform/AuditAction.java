@@ -26,5 +26,21 @@ public enum AuditAction {
     DELETED,
 
     /** Brought back from a soft delete. */
-    RESTORED
+    RESTORED,
+
+    /** A successful authentication (docs/plans/active/AUTH-ROLES-PLAN.md D15, wave B2). */
+    LOGIN,
+
+    /** A failed authentication attempt against a known account (docs/plans/active/AUTH-ROLES-PLAN.md
+     * D15, wave B2) — never recorded for a username that matches no account at all, since there is
+     * then no real {@link AuditEntry#actor()} to record it against; see {@code DefaultAuthService}. */
+    LOGIN_FAILED,
+
+    /** Authority was handed to someone — a role/membership grant or a pilot/crew seat assignment
+     * (docs/plans/active/AUTH-ROLES-PLAN.md D15, wave B2). */
+    GRANTED,
+
+    /** Authority was taken back — a membership removal or a pilot/crew seat unassignment
+     * (docs/plans/active/AUTH-ROLES-PLAN.md D15, wave B2). */
+    REVOKED
 }

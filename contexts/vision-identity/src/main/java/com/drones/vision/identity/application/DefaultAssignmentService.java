@@ -3,6 +3,7 @@ package com.drones.vision.identity.application;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.UserId;
+import com.drones.vision.identity.domain.model.AssignmentRole;
 import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import com.drones.vision.warehouse.application.asset.AssetService;
 
@@ -51,7 +52,10 @@ public final class DefaultAssignmentService implements AssignmentService {
     @Override
     public void assign(UserId pilot, AssetId asset, VisibilityScope granterScope) {
         requireGrantable(pilot, asset, granterScope);
-        assignmentRepository.assign(pilot, asset);
+        // AssignmentRole.PILOT is a temporary literal: this wave (AUTH-ROLES-PLAN.md B1) only widens
+        // the port to carry a seat; AssignmentService itself gains the AssignmentRole parameter (and
+        // stops hardcoding PILOT here) in wave B2, landing next in this same module.
+        assignmentRepository.assign(pilot, asset, AssignmentRole.PILOT);
     }
 
     @Override
