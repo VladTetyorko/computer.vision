@@ -18,7 +18,7 @@ extract first; see `docs/plans/active/DOMAIN-SEPARATION-W1.md` §15-16 for the d
 rationale and `docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md` for the session-ownership/
 `origin` work below.
 
-**Depends on:** `vision-kernel` · `vision-platform` (`AuditTrailPort`, `VisibilityScope`) ·
+**Depends on:** `vision-kernel` · `vision-platform` (`AuditTrailPort`, `VisibilityScope`, `Authority`) ·
 nothing else.
 **Used by:** every other context, every adapter, `vision-app`, `vision-api`.
 **Build/test:** `./mvnw -B -pl contexts/vision-warehouse test` (376 tests)
@@ -88,17 +88,17 @@ nothing else.
 - `CategoryCounts(categoryId, categoryName, total, active, deactivated, deleted, streaming, inStock, issued, inField, maintenance, retired)` — one `FleetSummary#categories()` row; the 5 inventory-state counts are the category's subset in each effective `InventoryState`, filled by `DefaultFleetSummaryService`'s accumulator from each `AssetSummary#inventoryState()`
 
 ### `application.custody`
-- `AssetCustodyService` (interface) → `DefaultAssetCustodyService(AssetRepositoryPort, MaintenanceRepositoryPort, AuditTrailPort)` — moves an asset through `IN_STOCK -> ISSUED -> IN_STOCK -> MAINTENANCE -> IN_STOCK -> RETIRED` (WAREHOUSE-UX-PLAN §3.4); `IN_FIELD` is never a verb here — it is derived the moment a usage opens. Every verb authorises via `VisibilityScope#canManage(ownership)` (mirrors vision-flight's `DefaultVehicleProfileService`, not `AssetService#setState`, which does not itself authorise — see Gotchas), audits a denial before throwing `AccessDeniedException`, and on success writes an `AuditEntry` (`AuditAction.UPDATED`/`AuditTargetType.ASSET` — no new enum values added) and stamps `updatedAt`
-  - `Asset issue(AssetId, UserId custodianId, String location, UserId actor, VisibilityScope)` — requires stored `IN_STOCK` **and** no custodian already set (an issued asset is *also* stored `IN_STOCK`, so re-issuing must go through `returnToStock` first); sets `Custody(custodianId, location, now)`
-  - `Asset returnToStock(AssetId, UserId actor, VisibilityScope)` — requires stored `IN_STOCK` with a custodian set; clears to `Custody.NONE`
-  - `Asset ground(AssetId, MaintenanceKind, String summary, UserId actor, VisibilityScope)` — refuses only `RETIRED`; opens a `MaintenanceRecord`, sets `MAINTENANCE`, **keeps** existing custody
-  - `Asset release(AssetId, UserId actor, VisibilityScope)` — requires stored `MAINTENANCE`; closes every open record whose `kind().blocksFlight()` (a `REPAIR`/`NOTE` stays open), sets `IN_STOCK`, **clears** custody (a repaired asset always returns through the stockroom)
-  - `Asset retire(AssetId, UserId actor, VisibilityScope)` — idempotent no-op if already `RETIRED`; refuses if a custodian is set; sets `RETIRED`, never deletes
+- `AssetCustodyService` (interface) → `DefaultAssetCustodyService(AssetRepositoryPort, MaintenanceRepositoryPort, AuditTrailPort)` — moves an asset through `IN_STOCK -> ISSUED -> IN_STOCK -> MAINTENANCE -> IN_STOCK -> RETIRED` (WAREHOUSE-UX-PLAN §3.4); `IN_FIELD` is never a verb here — it is derived the moment a usage opens. Every verb authorises via `Authority#mayManageFleet(ownership)` (AUTH-ROLES-PLAN wave B6, superseding the old `VisibilityScope#canManage(ownership)`; mirrors vision-flight's `DefaultVehicleProfileService`, not `AssetService#setState`, which does not itself authorise — see Gotchas), audits a denial before throwing `AccessDeniedException`, and on success writes an `AuditEntry` (`AuditAction.UPDATED`/`AuditTargetType.ASSET` — no new enum values added) and stamps `updatedAt`
+  - `Asset issue(AssetId, UserId custodianId, String location, UserId actor, Authority)` — requires stored `IN_STOCK` **and** no custodian already set (an issued asset is *also* stored `IN_STOCK`, so re-issuing must go through `returnToStock` first); sets `Custody(custodianId, location, now)`
+  - `Asset returnToStock(AssetId, UserId actor, Authority)` — requires stored `IN_STOCK` with a custodian set; clears to `Custody.NONE`
+  - `Asset ground(AssetId, MaintenanceKind, String summary, UserId actor, Authority)` — refuses only `RETIRED`; opens a `MaintenanceRecord`, sets `MAINTENANCE`, **keeps** existing custody
+  - `Asset release(AssetId, UserId actor, Authority)` — requires stored `MAINTENANCE`; closes every open record whose `kind().blocksFlight()` (a `REPAIR`/`NOTE` stays open), sets `IN_STOCK`, **clears** custody (a repaired asset always returns through the stockroom)
+  - `Asset retire(AssetId, UserId actor, Authority)` — idempotent no-op if already `RETIRED`; refuses if a custodian is set; sets `RETIRED`, never deletes
 
 ### `application.maintenance`
-- `MaintenanceService` (interface) → `DefaultMaintenanceService(MaintenanceRepositoryPort, AssetRepositoryPort, AuditTrailPort)` (also `implements MaintenanceQuery`) — `open`/`close` authorise on `canManage` like `AssetCustodyService`; `listForAsset` authorises on `scope.includes` instead (visibility, not authority — mirrors `AssetService#details`) and throws `NoSuchElementException` (404) when out of scope
-  - `MaintenanceRecord open(AssetId, MaintenanceKind, String summary, UserId actor, VisibilityScope)` — opens a record without touching inventory state (use `AssetCustodyService#ground` when the record should also ground the asset)
-  - `MaintenanceRecord close(MaintenanceId, UserId actor, VisibilityScope)`
+- `MaintenanceService` (interface) → `DefaultMaintenanceService(MaintenanceRepositoryPort, AssetRepositoryPort, AuditTrailPort)` (also `implements MaintenanceQuery`) — `open`/`close` authorise on `Authority#mayManageFleet` like `AssetCustodyService` (AUTH-ROLES-PLAN wave B6); `listForAsset`/`fleetWide` stay `VisibilityScope`-typed and authorise on `scope.includes` instead (visibility, not authority — mirrors `AssetService#details`) — the private `requireManageable(AssetId, Authority)` helper backs only `open`/`close`
+  - `MaintenanceRecord open(AssetId, MaintenanceKind, String summary, UserId actor, Authority)` — opens a record without touching inventory state (use `AssetCustodyService#ground` when the record should also ground the asset)
+  - `MaintenanceRecord close(MaintenanceId, UserId actor, Authority)`
   - `List<MaintenanceRecord> listForAsset(AssetId, VisibilityScope)` — full history, open and closed
   - `List<MaintenanceRecordSummary> fleetWide(MaintenanceListState state, int limit, VisibilityScope)` (WAREHOUSE-UX W8, `GET /api/maintenance`'s backing method) — `OPEN`/`CLOSED`/`ALL` selects `maintenanceRepository.findOpen()`/`findRecentlyClosed(limit)`/both concatenated; `limit` must be positive (`IllegalArgumentException` otherwise); each surviving record is joined **in-context** to its asset's `displayName`/`category` via the already-injected `AssetRepositoryPort` (not a cross-context join — both `MaintenanceRecord` and `Asset` live in this module); silently drops (never throws) a record whose asset is soft-deleted or `!scope.includes(asset.id(), asset.ownership())`, the same "filter, don't 403" convention `DefaultFleetSummaryService` uses
 - `MaintenanceListState` (enum, `application.maintenance`) — `OPEN`/`CLOSED`/`ALL`, `fleetWide`'s state selector
@@ -124,7 +124,7 @@ nothing else.
   - `DiscoveryCandidate report(DiscoveredDevice)` — upsert by `DiscoveryCandidate.identityKeyFor`; a first sighting is `NEW`; a re-report refreshes `discovered`/`lastSeen` and otherwise preserves status (so `DISMISSED` stays dismissed on re-report); independent of that, whenever `discovered.suggestedStream()` matches an already-registered device by `assetService.findDuplicateDevice`, the saved candidate is stamped `REGISTERED` with that device's owning asset (or `null` if unowned) — this overrides even a `DISMISSED` candidate, since "already registered" is a stronger fact than a prior dismissal. `synchronized` — see class javadoc and Gotchas
   - `List<DiscoveryCandidate> candidates()` — unscoped, every candidate regardless of status (mirrors `CategoryService#categories`); the caller (vision-api) filters/sorts for display
   - `DiscoveryCandidate dismiss(DiscoveryCandidateId, UserId actor)` — `NoSuchElementException` for an unknown id; unauthorized dismissal is not currently gated by `VisibilityScope` (candidates carry no `Ownership` to check against, same rationale as `CategoryService`)
-  - `Asset register(DiscoveryCandidateId, RegisterFromCandidateCommand, VisibilityScope, UserId actor)` — authorizes like `DefaultGroupService#create` (`scope.canManageOrg()` then `scope.includesGroup(command.ownership().groupId())`, `AccessDeniedException` on either failure), builds an `AssetSpec` from the candidate's `DiscoveredDevice` + the command's operator overrides, and calls `AssetService#createFromCandidate` — this service's **only** caller of that method to date. On success stamps the candidate `REGISTERED` with the new asset's id; on `createFromCandidate`'s `IllegalStateException` (duplicate), the candidate is left untouched (no partial stamp)
+  - `Asset register(DiscoveryCandidateId, RegisterFromCandidateCommand, Authority, UserId actor)` (AUTH-ROLES-PLAN wave B6, widened from `VisibilityScope`) — authorizes like `DefaultGroupService#create` (`scope.mayManageOrg()` then `scope.scope().includesGroup(command.ownership().groupId())`, `AccessDeniedException` on either failure), builds an `AssetSpec` from the candidate's `DiscoveredDevice` + the command's operator overrides, and calls `AssetService#createFromCandidate` — this service's **only** caller of that method to date. On success stamps the candidate `REGISTERED` with the new asset's id; on `createFromCandidate`'s `IllegalStateException` (duplicate), the candidate is left untouched (no partial stamp)
 - `RegisterFromCandidateCommand(String displayName, CategoryId category, Map<String,String> attributes, Identity identity, Ownership ownership)` — `register`'s command; `displayName` non-blank, `category`/`ownership` non-null, `attributes` null→`Map.of()`, `identity` null→`Identity.NONE`
 
 ### `application.fleet`
@@ -265,3 +265,30 @@ onto an already-open `STREAM`-origin usage at promotion time, never overwriting 
 one (see the new Gotcha above); a device-pushed stream open (`UsageTracker#deviceStreamStarted`)
 still passes `null` — no acting-user context exists at that call site, and this wave deliberately
 did not invent one. `./mvnw -B -pl contexts/vision-warehouse test` — 367 → 376 tests, all green.
+
+**AUTH-ROLES wave B6** (`docs/plans/active/AUTH-ROLES-PLAN.md` §3.6) migrated every deprecated
+`VisibilityScope#canManageOrg()`/`#canManage(Ownership)` call site in this module onto `Authority`:
+`AssetCustodyService`'s five verbs (`issue`/`returnToStock`/`ground`/`release`/`retire`) and its
+private `requireManageable` widened `VisibilityScope scope` → `Authority scope`, body now
+`scope.mayManageFleet(asset.ownership())`; `MaintenanceService#open`/`#close` and their shared
+private `requireManageable(AssetId, Authority)` widened the same way — `listForAsset`/`fleetWide`
+were **not** touched, since they authorise on `VisibilityScope#includes` (a non-deprecated method)
+and stay plain-`VisibilityScope`-typed; `DiscoveryInboxService#register` widened `VisibilityScope
+scope` → `Authority scope`, body now `scope.mayManageOrg()` then
+`scope.scope().includesGroup(command.ownership().groupId())`. No behavior change for an `Authority`
+built from `Authority.full()`/an unbounded-scope-with-every-capability caller — every existing
+production caller (all of them pre-auth-rollout ADMIN-equivalent) answers identically; the
+practical effect only appears once a `VIEWER`-role `Authority` (visibility-only, no
+`MANAGE_FLEET`/`MANAGE_ORG` capability) is threaded in from `vision-api`, which this module does
+not itself construct. Test-double fix pattern: `DefaultAssetCustodyServiceTest`'s `inScope`/
+`outOfScope` fields were retyped `VisibilityScope`→`Authority` outright (every use was
+gated-call-only); `DefaultMaintenanceServiceTest` instead added parallel `inAuthority`/
+`outOfAuthority` fields alongside the unchanged `inScope`/`outOfScope` (its `inScope`/`outOfScope`
+are shared with the untouched `listForAsset`/`fleetWide` calls); `DefaultDiscoveryInboxServiceTest`
+wrapped its four `VisibilityScope.unbounded()` register-call arguments as `Authority.full()` and its
+two locally-scoped denial-test variables as `new Authority(VisibilityScope..., Set.of(...))` — note
+this test file already imports `com.drones.vision.kernel.Capability` (device capabilities), so
+`com.drones.vision.platform.Capability` (the `Authority` capability enum) is referenced
+fully-qualified there rather than imported, to avoid a simple-name collision.
+`./mvnw -B -pl contexts/vision-warehouse test` — 376 → 376 tests, all green (no count change, only
+argument types).

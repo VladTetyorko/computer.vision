@@ -7,6 +7,7 @@ import com.drones.vision.warehouse.application.device.DeviceRegistration;
 import com.drones.vision.identity.application.GroupService;
 import com.drones.vision.identity.application.GroupSpec;
 import com.drones.vision.identity.application.UserService;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.kernel.Capability;
@@ -91,7 +92,7 @@ class ScopedAssetReadAuthEnabledTest {
                 .build();
 
         Group root = groupOf("Root");
-        Group other = groupService.create(new GroupSpec("Other Division", null), VisibilityScope.unbounded());
+        Group other = groupService.create(new GroupSpec("Other Division", null), Authority.full());
 
         // One asset owned by each group; ownerId is immaterial to group-scope, only groupId matters.
         rootAsset = assetService.create(assetSpec("Root Drone"),
@@ -123,7 +124,7 @@ class ScopedAssetReadAuthEnabledTest {
 
         // Assign the pilot to the OTHER group's asset — a pilot flies assigned aircraft, not a group subtree.
         assignmentService.assign(pilotId(), otherAsset.id(), AssignmentRole.PILOT, UserId.random(),
-                VisibilityScope.unbounded());
+                Authority.full());
 
         MockHttpSession after = login("pilot", "pilot");
         mockMvc.perform(get("/api/assets").session(after))

@@ -19,14 +19,14 @@ import com.drones.vision.api.security.CurrentUser;
  * Driving REST adapter for group management (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2) — list groups and
  * create one (optionally under a parent), the org-chart half of the org-settings surface.
  *
- * <p>Constructor-injected with {@link GroupService} and {@link CurrentUser}: both operations pass
- * {@code currentUser.scope()} into the service, which derives management authority from it and
- * enforces the ADMIN/MANAGER management gate plus the ≤-own-scope rules (only ADMIN may create a
- * root group; a manager may only create a child under a group they manage; {@code list} is
- * scope-filtered). A PILOT/empty scope is refused with
- * {@link com.drones.vision.platform.AccessDeniedException} (403 via {@link ApiExceptionHandler}).
- * With auth off (default) the dev principal's scope is unbounded, so the default-off build is
- * unchanged.
+ * <p>Constructor-injected with {@link GroupService} and {@link CurrentUser}: {@code list} passes
+ * {@code currentUser.scope()} (a read, scope-filtered); {@code create} passes {@code
+ * currentUser.authority()} (docs/plans/active/AUTH-ROLES-PLAN.md wave B6) so the service can enforce
+ * the ADMIN/MANAGER management gate plus the ≤-own-scope rules (only ADMIN may create a root group; a
+ * manager may only create a child under a group they manage). A PILOT/empty scope, or a scope with no
+ * {@code MANAGE_ORG} capability, is refused with {@link com.drones.vision.platform.AccessDeniedException}
+ * (403 via {@link ApiExceptionHandler}). With auth off (default) the dev principal's authority is
+ * {@link com.drones.vision.platform.Authority#full()}, so the default-off build is unchanged.
  */
 @RestController
 public class GroupAdminController {
@@ -58,6 +58,6 @@ public class GroupAdminController {
     @PostMapping("/api/groups")
     @ResponseStatus(HttpStatus.CREATED)
     public GroupResponse create(@RequestBody CreateGroupRequest request) {
-        return GroupResponse.from(groupService.create(request.toSpec(), currentUser.scope()));
+        return GroupResponse.from(groupService.create(request.toSpec(), currentUser.authority()));
     }
 }

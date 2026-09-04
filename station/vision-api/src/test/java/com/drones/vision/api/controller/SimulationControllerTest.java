@@ -17,6 +17,7 @@ import com.drones.vision.kernel.UserId;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.platform.Authority;
+import com.drones.vision.platform.Capability;
 import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.map.application.MapAccessPolicy;
 import com.drones.vision.api.security.PrincipalResolver;
@@ -28,6 +29,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.net.URI;
+import java.util.EnumSet;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
@@ -108,7 +110,7 @@ class SimulationControllerTest {
 
             @Override
             public Authority authority() {
-                throw new UnsupportedOperationException("SimulationController never calls authority()");
+                return new Authority(scope, EnumSet.allOf(Capability.class));
             }
         });
     }

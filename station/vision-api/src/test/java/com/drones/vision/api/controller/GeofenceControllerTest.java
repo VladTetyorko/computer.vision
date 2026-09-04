@@ -15,6 +15,7 @@ import com.drones.vision.kernel.UserId;
 import com.drones.vision.map.application.MapAccessPolicy;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.platform.Authority;
+import com.drones.vision.platform.Capability;
 import com.drones.vision.identity.domain.model.Role;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,6 +24,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.util.EnumSet;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Set;
@@ -341,7 +343,7 @@ class GeofenceControllerTest {
 
             @Override
             public Authority authority() {
-                throw new UnsupportedOperationException("GeofenceController never calls authority()");
+                return new Authority(scope, EnumSet.allOf(Capability.class));
             }
         });
     }

@@ -24,6 +24,7 @@ import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.application.asset.AssetDetails;
 import com.drones.vision.warehouse.application.asset.AssetService;
@@ -141,7 +142,7 @@ class DefaultVehicleProfileServiceTest {
         VehicleProfile profile = completeProfile();
         vehicleConfigPort.probeResult = profile;
 
-        VehicleProfile result = service.probe(assetId, WINDOW, actor, VisibilityScope.unbounded());
+        VehicleProfile result = service.probe(assetId, WINDOW, actor, Authority.full());
 
         assertEquals(profile, result);
         assertEquals(List.of("udp://127.0.0.1:14550#7"), vehicleConfigPort.probedLinkKeys);
@@ -162,7 +163,7 @@ class DefaultVehicleProfileServiceTest {
                 null, false, "AUTOPILOT_VERSION not answered within 3s");
         vehicleConfigPort.probeResult = incomplete;
 
-        service.probe(assetId, WINDOW, actor, VisibilityScope.unbounded());
+        service.probe(assetId, WINDOW, actor, Authority.full());
 
         assertEquals("INCOMPLETE:AUTOPILOT_VERSION not answered within 3s",
                 auditTrail.recorded.get(0).details().get("result"));
@@ -174,7 +175,8 @@ class DefaultVehicleProfileServiceTest {
         stubDetails(device);
 
         AccessDeniedException ex = assertThrows(AccessDeniedException.class,
-                () -> service.probe(assetId, WINDOW, actor, VisibilityScope.groups(Set.of())));
+                () -> service.probe(assetId, WINDOW, actor, new Authority(VisibilityScope.groups(Set.of()),
+                        Set.of(com.drones.vision.platform.Capability.MANAGE_FLEET))));
         assertTrue(ex.getMessage().contains(assetId.value().toString()));
 
         assertTrue(vehicleConfigPort.probedLinkKeys.isEmpty());
@@ -188,7 +190,8 @@ class DefaultVehicleProfileServiceTest {
         stubDetailsWithOwnership(new Ownership(actor, group), device);
         vehicleConfigPort.probeResult = completeProfile();
 
-        VehicleProfile result = service.probe(assetId, WINDOW, actor, VisibilityScope.groups(Set.of(group)));
+        VehicleProfile result = service.probe(assetId, WINDOW, actor, new Authority(VisibilityScope.groups(Set.of(group)),
+                Set.of(com.drones.vision.platform.Capability.MANAGE_FLEET)));
 
         assertEquals(completeProfile(), result);
         assertEquals(1, vehicleConfigPort.probedLinkKeys.size());
@@ -199,7 +202,7 @@ class DefaultVehicleProfileServiceTest {
         when(assetService.details(assetId)).thenThrow(new NoSuchElementException("Unknown asset: " + assetId.value()));
 
         assertThrows(NoSuchElementException.class,
-                () -> service.probe(assetId, WINDOW, actor, VisibilityScope.unbounded()));
+                () -> service.probe(assetId, WINDOW, actor, Authority.full()));
         assertTrue(auditTrail.recorded.isEmpty());
     }
 
@@ -209,7 +212,7 @@ class DefaultVehicleProfileServiceTest {
         vehicleConfigPort.supportsResult = false;
 
         assertThrows(IllegalStateException.class,
-                () -> service.probe(assetId, WINDOW, actor, VisibilityScope.unbounded()));
+                () -> service.probe(assetId, WINDOW, actor, Authority.full()));
         assertTrue(vehicleConfigPort.probedLinkKeys.isEmpty());
         assertTrue(auditTrail.recorded.isEmpty());
     }
@@ -268,7 +271,7 @@ class DefaultVehicleProfileServiceTest {
         vehicleConfigPort.probeResult = profile;
 
         VehicleProfile result =
-                service.captureSnapshot(assetId, usageId, FlightPhase.PREFLIGHT, WINDOW, actor, VisibilityScope.unbounded());
+                service.captureSnapshot(assetId, usageId, FlightPhase.PREFLIGHT, WINDOW, actor, Authority.full());
 
         assertEquals(profile, result);
         assertEquals(profile, profileRepository.findByUsageAndPhase(usageId, FlightPhase.PREFLIGHT).orElseThrow());
@@ -285,7 +288,7 @@ class DefaultVehicleProfileServiceTest {
     @Test
     void captureSnapshotRejectsAPhaseThatIsNeitherPreflightNorPostflight() {
         assertThrows(IllegalArgumentException.class, () -> service.captureSnapshot(assetId, UsageId.random(),
-                FlightPhase.IN_FLIGHT, WINDOW, actor, VisibilityScope.unbounded()));
+                FlightPhase.IN_FLIGHT, WINDOW, actor, Authority.full()));
 
         // Rejected before the asset is even resolved -- not an attempt, not audited.
         assertTrue(vehicleConfigPort.probedLinkKeys.isEmpty());
@@ -298,7 +301,8 @@ class DefaultVehicleProfileServiceTest {
         UsageId usageId = UsageId.random();
 
         assertThrows(AccessDeniedException.class, () -> service.captureSnapshot(assetId, usageId,
-                FlightPhase.POSTFLIGHT, WINDOW, actor, VisibilityScope.groups(Set.of())));
+                FlightPhase.POSTFLIGHT, WINDOW, actor, new Authority(VisibilityScope.groups(Set.of()),
+                        Set.of(com.drones.vision.platform.Capability.MANAGE_FLEET))));
 
         assertTrue(vehicleConfigPort.probedLinkKeys.isEmpty());
         assertEquals(1, auditTrail.recorded.size());

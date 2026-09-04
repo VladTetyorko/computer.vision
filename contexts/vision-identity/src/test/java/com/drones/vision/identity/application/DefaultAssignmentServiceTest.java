@@ -40,6 +40,8 @@ import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.platform.Capability;
 import com.drones.vision.platform.VisibilityScope;
 
 class DefaultAssignmentServiceTest {
@@ -77,7 +79,8 @@ class DefaultAssignmentServiceTest {
 
     @Test
     void assignWithinGranterScopeStoresTheLink() {
-        service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, VisibilityScope.groups(Set.of(group)));
+        service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter,
+                new Authority(VisibilityScope.groups(Set.of(group)), Set.of(Capability.MANAGE_FLEET)));
 
         assertTrue(assignmentRepository.isAssigned(pilot, asset.id()));
         assertEquals(Optional.of(AssignmentRole.PILOT), service.roleFor(pilot, asset.id()));
@@ -85,7 +88,7 @@ class DefaultAssignmentServiceTest {
 
     @Test
     void assignIsAllowedForAnUnboundedGranter() {
-        service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, VisibilityScope.unbounded());
+        service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, Authority.full());
 
         assertTrue(assignmentRepository.isAssigned(pilot, asset.id()));
     }
@@ -93,7 +96,7 @@ class DefaultAssignmentServiceTest {
     @Test
     void assignOutsideGranterScopeIsDeniedAndStoresNothing() {
         assertThrows(AccessDeniedException.class,
-                () -> service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, VisibilityScope.groups(Set.of())));
+                () -> service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, new Authority(VisibilityScope.groups(Set.of()), Set.of(Capability.MANAGE_FLEET))));
 
         assertFalse(assignmentRepository.isAssigned(pilot, asset.id()));
         assertTrue(auditTrail.entries.isEmpty(), "a denied grant must not be recorded as one");
@@ -103,7 +106,8 @@ class DefaultAssignmentServiceTest {
     void aPilotScopeMayNotGrantEvenWhenTheAssetIsAlreadyAssignedToThem() {
         // Authority is not visibility (docs/plans/done/OPS-UX-PLAN.md §1): a pilot assigned to
         // this very asset can see it, but seeing it is not authority to re-pilot it.
-        VisibilityScope pilotScope = VisibilityScope.assignedAssets(Set.of(asset.id()));
+        Authority pilotScope =
+                new Authority(VisibilityScope.assignedAssets(Set.of(asset.id())), Set.of(Capability.MANAGE_FLEET));
 
         assertThrows(AccessDeniedException.class,
                 () -> service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, pilotScope));
@@ -117,13 +121,13 @@ class DefaultAssignmentServiceTest {
         when(assetService.details(unknown)).thenThrow(new NoSuchElementException("Unknown asset: " + unknown.value()));
 
         assertThrows(NoSuchElementException.class,
-                () -> service.assign(pilot, unknown, AssignmentRole.PILOT, granter, VisibilityScope.unbounded()));
+                () -> service.assign(pilot, unknown, AssignmentRole.PILOT, granter, Authority.full()));
     }
 
     @Test
     void assignIsIdempotentAndAuditsOnlyOnce() {
-        service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, VisibilityScope.unbounded());
-        service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, VisibilityScope.unbounded());
+        service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, Authority.full());
+        service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, Authority.full());
 
         assertEquals(Set.of(asset.id()), service.assignmentsFor(pilot));
         assertEquals(1, auditTrail.entries.size(), "the identical re-assign is a true no-op, not a second grant");
@@ -131,7 +135,7 @@ class DefaultAssignmentServiceTest {
 
     @Test
     void assignRecordsAGrantedAuditEntryForANewLink() {
-        service.assign(pilot, asset.id(), AssignmentRole.CREW, granter, VisibilityScope.unbounded());
+        service.assign(pilot, asset.id(), AssignmentRole.CREW, granter, Authority.full());
 
         assertEquals(1, auditTrail.entries.size());
         AuditEntry entry = auditTrail.entries.get(0);
@@ -143,8 +147,8 @@ class DefaultAssignmentServiceTest {
 
     @Test
     void reassigningWithADifferentRoleRecordsASeatChangeGrant() {
-        service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, VisibilityScope.unbounded());
-        service.assign(pilot, asset.id(), AssignmentRole.CREW, granter, VisibilityScope.unbounded());
+        service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, Authority.full());
+        service.assign(pilot, asset.id(), AssignmentRole.CREW, granter, Authority.full());
 
         assertEquals(Optional.of(AssignmentRole.CREW), service.roleFor(pilot, asset.id()));
         assertEquals(2, auditTrail.entries.size());
@@ -153,18 +157,18 @@ class DefaultAssignmentServiceTest {
 
     @Test
     void unassignRemovesTheLink() {
-        service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, VisibilityScope.unbounded());
+        service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, Authority.full());
 
-        service.unassign(pilot, asset.id(), granter, VisibilityScope.unbounded());
+        service.unassign(pilot, asset.id(), granter, Authority.full());
 
         assertFalse(assignmentRepository.isAssigned(pilot, asset.id()));
     }
 
     @Test
     void unassignRecordsARevokedAuditEntry() {
-        service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, VisibilityScope.unbounded());
+        service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, Authority.full());
 
-        service.unassign(pilot, asset.id(), granter, VisibilityScope.unbounded());
+        service.unassign(pilot, asset.id(), granter, Authority.full());
 
         assertEquals(2, auditTrail.entries.size());
         AuditEntry revoke = auditTrail.entries.get(1);
@@ -174,24 +178,25 @@ class DefaultAssignmentServiceTest {
 
     @Test
     void unassigningANonExistentLinkIsANoOpAndAuditsNothing() {
-        service.unassign(pilot, asset.id(), granter, VisibilityScope.unbounded());
+        service.unassign(pilot, asset.id(), granter, Authority.full());
 
         assertTrue(auditTrail.entries.isEmpty());
     }
 
     @Test
     void unassignOutsideGranterScopeIsDenied() {
-        service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, VisibilityScope.unbounded());
+        service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, Authority.full());
 
         assertThrows(AccessDeniedException.class,
-                () -> service.unassign(pilot, asset.id(), granter, VisibilityScope.groups(Set.of())));
+                () -> service.unassign(pilot, asset.id(), granter, new Authority(VisibilityScope.groups(Set.of()), Set.of(Capability.MANAGE_FLEET))));
         assertTrue(assignmentRepository.isAssigned(pilot, asset.id()));
     }
 
     @Test
     void aPilotScopeMayNotUnassignEvenTheirOwnAssignment() {
-        service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, VisibilityScope.unbounded());
-        VisibilityScope pilotScope = VisibilityScope.assignedAssets(Set.of(asset.id()));
+        service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, Authority.full());
+        Authority pilotScope =
+                new Authority(VisibilityScope.assignedAssets(Set.of(asset.id())), Set.of(Capability.MANAGE_FLEET));
 
         assertThrows(AccessDeniedException.class, () -> service.unassign(pilot, asset.id(), granter, pilotScope));
 
@@ -200,7 +205,7 @@ class DefaultAssignmentServiceTest {
 
     @Test
     void assignmentsForReturnsThePilotsAssets() {
-        service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, VisibilityScope.unbounded());
+        service.assign(pilot, asset.id(), AssignmentRole.PILOT, granter, Authority.full());
 
         assertEquals(Set.of(asset.id()), service.assignmentsFor(pilot));
     }

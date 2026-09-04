@@ -12,6 +12,7 @@ import com.drones.vision.flight.domain.model.VehicleProfile;
 import com.drones.vision.flight.domain.port.FeatureRequirementRepositoryPort;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.UserId;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 
 import java.time.Duration;
@@ -96,8 +97,12 @@ public final class RemediationOrchestrator {
      * @param assetId  the asset to remediate
      * @param features requested feature keys (deduplicated, order preserved)
      * @param actions  requested remedy-kind names the caller is willing to have attempted
-     * @param actor    who requested the remediation
-     * @param scope    the actor's visibility scope
+     * @param actor     who requested the remediation
+     * @param authority the actor's authority (docs/plans/active/AUTH-ROLES-PLAN.md wave B6,
+     *                  superseding the bare {@code VisibilityScope} this took before); its
+     *                  {@link Authority#scope() scope()} half still serves the two plain reads
+     *                  below ({@link VehicleProfileService#latestProfile}/{@link
+     *                  ReadinessService#evaluate})
      * @throws com.drones.vision.platform.AccessDeniedException if the actor may not manage the asset
      *                                                           (403, audited) — from the first
      *                                                           dispatched action
@@ -112,10 +117,11 @@ public final class RemediationOrchestrator {
      *                                                           class javadoc)
      */
     public RemediationResultResponse remediate(AssetId assetId, List<String> features, List<String> actions,
-                                                 UserId actor, VisibilityScope scope) {
+                                                 UserId actor, Authority authority) {
         Objects.requireNonNull(assetId, "assetId must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
-        Objects.requireNonNull(scope, "scope must not be null");
+        Objects.requireNonNull(authority, "authority must not be null");
+        VisibilityScope scope = authority.scope();
 
         Instant requestedAt = Instant.now();
         Set<String> requestedFeatures = orderedDistinct(features);
@@ -132,7 +138,7 @@ public final class RemediationOrchestrator {
             FeatureRequirement requirement = requirementsByFeature.get(featureKey);
             if (requirement != null && requirement.requiredMessageId() != null
                     && requestedActions.contains("MESSAGE_INTERVAL")) {
-                outcomes.add(dispatchMessageInterval(assetId, requirement, actor, scope));
+                outcomes.add(dispatchMessageInterval(assetId, requirement, actor, authority));
                 anyDispatched = true;
             } else if (requirement != null && requirement.requiredParameterName() != null
                     && requestedActions.contains("PARAM_WRITE")) {
@@ -147,7 +153,7 @@ public final class RemediationOrchestrator {
         Instant verifiedAt = null;
         ReadinessReportResponse reprobe = null;
         if (anyDispatched) {
-            vehicleProfileService.probe(assetId, properties.inventoryWindow(), actor, scope);
+            vehicleProfileService.probe(assetId, properties.inventoryWindow(), actor, authority);
             reprobe = ReadinessReportResponse.from(readinessService.evaluate(assetId, scope));
             verifiedAt = Instant.now();
         }
@@ -173,12 +179,12 @@ public final class RemediationOrchestrator {
     }
 
     private RemediationActionResponse dispatchMessageInterval(AssetId assetId, FeatureRequirement requirement,
-                                                                UserId actor, VisibilityScope scope) {
+                                                                UserId actor, Authority authority) {
         double minimumHz = requirement.minimumHz();
         long intervalMicros = Math.round(1_000_000.0 / minimumHz);
         Duration interval = Duration.of(intervalMicros, ChronoUnit.MICROS);
         MessageIntervalOutcome outcome = remediationService.requestMessageInterval(assetId,
-                requirement.requiredMessageId(), interval, actor, scope);
+                requirement.requiredMessageId(), interval, actor, authority);
         long actualIntervalMicros = outcome.interval().toNanos() / 1_000L;
         return new RemediationActionResponse("MESSAGE_INTERVAL", outcome.messageId(), actualIntervalMicros,
                 outcome.outcome().name(), null, null, outcome.detail());

@@ -4,7 +4,7 @@ import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.learning.application.TrainingJobService;
 import com.drones.vision.learning.application.TrainingJobView;
-import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.learning.domain.model.Dataset;
 import com.drones.vision.learning.domain.model.DatasetId;
@@ -89,7 +89,7 @@ class TrainingJobControllerTest {
     @Test
     void startReturns202WithTheFreshJobAndThreadsActorAndScope() throws Exception {
         String datasetId = "11111111-1111-1111-1111-111111111111";
-        when(trainingJobService.start(any(TrainingJobSpec.class), eq(ownerId), any(VisibilityScope.class)))
+        when(trainingJobService.start(any(TrainingJobSpec.class), eq(ownerId), any(Authority.class)))
                 .thenReturn("job-1");
         when(trainingJobService.job("job-1"))
                 .thenReturn(Optional.of(view("job-1", datasetId, JobState.RUNNING, "")));
@@ -110,7 +110,7 @@ class TrainingJobControllerTest {
                 .andExpect(jsonPath("$.startedAt").exists());
 
         ArgumentCaptor<TrainingJobSpec> captor = ArgumentCaptor.forClass(TrainingJobSpec.class);
-        verify(trainingJobService).start(captor.capture(), eq(ownerId), eq(currentUser.scope()));
+        verify(trainingJobService).start(captor.capture(), eq(ownerId), eq(currentUser.authority()));
         assertEquals("yolo26n.pt", captor.getValue().baseModel());
         assertEquals(datasetId, captor.getValue().datasetId());
         assertEquals(50, captor.getValue().epochs());
@@ -145,7 +145,7 @@ class TrainingJobControllerTest {
     @Test
     void startReturns404ForAnUnknownDataset() throws Exception {
         String datasetId = "11111111-1111-1111-1111-111111111111";
-        when(trainingJobService.start(any(TrainingJobSpec.class), eq(ownerId), any(VisibilityScope.class)))
+        when(trainingJobService.start(any(TrainingJobSpec.class), eq(ownerId), any(Authority.class)))
                 .thenThrow(new java.util.NoSuchElementException("Unknown dataset: " + datasetId));
 
         mockMvc.perform(post("/api/datasets/{id}/train", datasetId).contentType(MediaType.APPLICATION_JSON)
@@ -157,7 +157,7 @@ class TrainingJobControllerTest {
     @Test
     void startReturns400WhenDatasetHasNoLabeledSamples() throws Exception {
         String datasetId = "11111111-1111-1111-1111-111111111111";
-        when(trainingJobService.start(any(TrainingJobSpec.class), eq(ownerId), any(VisibilityScope.class)))
+        when(trainingJobService.start(any(TrainingJobSpec.class), eq(ownerId), any(Authority.class)))
                 .thenThrow(new IllegalArgumentException("Dataset " + datasetId + " has no LABELED samples to train on"));
 
         mockMvc.perform(post("/api/datasets/{id}/train", datasetId).contentType(MediaType.APPLICATION_JSON)
@@ -168,7 +168,7 @@ class TrainingJobControllerTest {
 
     @Test
     void startReturns403WhenCallerMayNotManageTheOrganization() throws Exception {
-        when(trainingJobService.start(any(TrainingJobSpec.class), eq(ownerId), any(VisibilityScope.class)))
+        when(trainingJobService.start(any(TrainingJobSpec.class), eq(ownerId), any(Authority.class)))
                 .thenThrow(new AccessDeniedException("Not permitted to start training jobs"));
 
         mockMvc.perform(post("/api/datasets/{id}/train", "11111111-1111-1111-1111-111111111111")
@@ -242,7 +242,7 @@ class TrainingJobControllerTest {
     void runsReturns200WrappedUnderRunsWithResolvedDatasetNameAndThreadsActorAndScope() throws Exception {
         DatasetId datasetId = DatasetId.random();
         TrainingRunId runId = TrainingRunId.random();
-        when(trainingJobService.runs(eq(50), eq(ownerId), any(VisibilityScope.class)))
+        when(trainingJobService.runs(eq(50), eq(ownerId), any(Authority.class)))
                 .thenReturn(List.of(run(runId, datasetId, JobState.SUCCEEDED, ownerId)));
         when(datasetRepositoryPort.findById(datasetId)).thenReturn(Optional.of(dataset(datasetId, "my-dataset")));
 
@@ -258,13 +258,13 @@ class TrainingJobControllerTest {
                 .andExpect(jsonPath("$.runs[0].outputModelId").value("yolo26n-v4.pt"))
                 .andExpect(jsonPath("$.runs[0].startedBy").value(ownerId.value().toString()));
 
-        verify(trainingJobService).runs(50, ownerId, currentUser.scope());
+        verify(trainingJobService).runs(50, ownerId, currentUser.authority());
     }
 
     @Test
     void runsFallsBackToTheDatasetIdWhenTheDatasetIsMissing() throws Exception {
         DatasetId datasetId = DatasetId.random();
-        when(trainingJobService.runs(anyInt(), eq(ownerId), any(VisibilityScope.class)))
+        when(trainingJobService.runs(anyInt(), eq(ownerId), any(Authority.class)))
                 .thenReturn(List.of(run(TrainingRunId.random(), datasetId, JobState.RUNNING, ownerId)));
         when(datasetRepositoryPort.findById(datasetId)).thenReturn(Optional.empty());
 
@@ -276,16 +276,16 @@ class TrainingJobControllerTest {
 
     @Test
     void runsHonorsAnExplicitLimit() throws Exception {
-        when(trainingJobService.runs(anyInt(), eq(ownerId), any(VisibilityScope.class))).thenReturn(List.of());
+        when(trainingJobService.runs(anyInt(), eq(ownerId), any(Authority.class))).thenReturn(List.of());
 
         mockMvc.perform(get("/api/cv/training/runs").param("limit", "10")).andExpect(status().isOk());
 
-        verify(trainingJobService).runs(10, ownerId, currentUser.scope());
+        verify(trainingJobService).runs(10, ownerId, currentUser.authority());
     }
 
     @Test
     void runsReturns403WhenCallerMayNotManageTheOrganization() throws Exception {
-        when(trainingJobService.runs(anyInt(), eq(ownerId), any(VisibilityScope.class)))
+        when(trainingJobService.runs(anyInt(), eq(ownerId), any(Authority.class)))
                 .thenThrow(new AccessDeniedException("Not permitted to view training runs"));
 
         mockMvc.perform(get("/api/cv/training/runs"))
@@ -299,7 +299,7 @@ class TrainingJobControllerTest {
     void runReturns200WithTheRunsLatestPersistedState() throws Exception {
         DatasetId datasetId = DatasetId.random();
         TrainingRunId runId = TrainingRunId.random();
-        when(trainingJobService.run(eq(runId), eq(ownerId), any(VisibilityScope.class)))
+        when(trainingJobService.run(eq(runId), eq(ownerId), any(Authority.class)))
                 .thenReturn(run(runId, datasetId, JobState.FAILED, ownerId));
         when(datasetRepositoryPort.findById(datasetId)).thenReturn(Optional.of(dataset(datasetId, "my-dataset")));
 
@@ -313,7 +313,7 @@ class TrainingJobControllerTest {
     @Test
     void runReturns404ForAnUnknownRunId() throws Exception {
         TrainingRunId runId = TrainingRunId.random();
-        when(trainingJobService.run(eq(runId), eq(ownerId), any(VisibilityScope.class)))
+        when(trainingJobService.run(eq(runId), eq(ownerId), any(Authority.class)))
                 .thenThrow(new java.util.NoSuchElementException("Unknown training run: " + runId.value()));
 
         mockMvc.perform(get("/api/cv/training/runs/{runId}", runId.value().toString()))
@@ -331,7 +331,7 @@ class TrainingJobControllerTest {
     @Test
     void runReturns403WhenCallerMayNotManageTheOrganization() throws Exception {
         TrainingRunId runId = TrainingRunId.random();
-        when(trainingJobService.run(eq(runId), eq(ownerId), any(VisibilityScope.class)))
+        when(trainingJobService.run(eq(runId), eq(ownerId), any(Authority.class)))
                 .thenThrow(new AccessDeniedException("Not permitted to view training runs"));
 
         mockMvc.perform(get("/api/cv/training/runs/{runId}", runId.value().toString()))

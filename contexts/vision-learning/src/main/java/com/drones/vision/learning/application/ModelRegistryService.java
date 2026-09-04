@@ -3,7 +3,7 @@ package com.drones.vision.learning.application;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.learning.domain.port.CvModelRepositoryPort;
 import com.drones.vision.learning.domain.port.ModelRegistryPort;
-import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
 
 /**
  * The CV model registry control plane (docs/plans/done/CV-TRAINING-PLAN.md §7/§8; joined/governed
@@ -19,7 +19,7 @@ import com.drones.vision.platform.VisibilityScope;
  * {@link #models()} is an unscoped, unaudited read — any authenticated caller may see the roster,
  * mirroring {@code CvModelsController}'s existing "any authenticated caller may read the roster"
  * precedent, and never throws (docs/plans/active/CV-SETTINGS-PLAN.md §8 OQ5). {@link #promote}/
- * {@link #rollback} are gated on {@link VisibilityScope#canAdminister()} — ADMIN only, not any
+ * {@link #rollback} are gated on {@link Authority#mayAdminister()} — ADMIN only, not any
  * manager (docs/plans/done/OPS-UX-PLAN.md §1: swapping which model every stream infers with is a
  * deployment-global blast radius no single group's manager should have from managing their own
  * subtree alone).
@@ -43,7 +43,7 @@ public interface ModelRegistryService {
      * @param modelId the model id to promote
      * @param version the model version to promote
      * @param actor   who is promoting it, for the audit trail
-     * @param scope   the acting user's visibility; must satisfy {@link VisibilityScope#canAdminister()}
+     * @param scope   the acting user's authority; must satisfy {@link Authority#mayAdminister()}
      * @return the promotion outcome
      * @throws com.drones.vision.platform.AccessDeniedException if {@code scope} may not administer
      *                                (audited as a denial before this method throws)
@@ -52,14 +52,14 @@ public interface ModelRegistryService {
      *                                (rsync the artifact first) or no worker reachable at all;
      *                                audited as a refusal, then rethrown unchanged
      */
-    PromotionResult promote(String modelId, String version, UserId actor, VisibilityScope scope);
+    PromotionResult promote(String modelId, String version, UserId actor, Authority scope);
 
     /**
      * Restores whichever model {@link #promote}'s most recent call demoted to {@code RETIRED} back
      * to {@code LIVE}, retiring the current one in its place.
      *
      * @param actor who is rolling back, for the audit trail
-     * @param scope the acting user's visibility; must satisfy {@link VisibilityScope#canAdminister()}
+     * @param scope the acting user's authority; must satisfy {@link Authority#mayAdminister()}
      * @return the rollback outcome
      * @throws com.drones.vision.platform.AccessDeniedException if {@code scope} may not administer
      *                                (audited as a denial before this method throws)
@@ -67,5 +67,5 @@ public interface ModelRegistryService {
      *                                cv-service refuses the promotion; audited as a refusal, then
      *                                thrown
      */
-    PromotionResult rollback(UserId actor, VisibilityScope scope);
+    PromotionResult rollback(UserId actor, Authority scope);
 }

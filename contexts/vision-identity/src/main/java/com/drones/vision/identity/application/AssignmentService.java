@@ -7,11 +7,13 @@ import com.drones.vision.kernel.UserId;
 import java.util.Optional;
 import java.util.Set;
 import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 
 /**
  * Manages the pilot&rarr;asset assignment roster (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2, feature 2;
- * seats added by docs/plans/active/AUTH-ROLES-PLAN.md §3.4/D15, wave B2) — the write side behind
+ * seats added by docs/plans/active/AUTH-ROLES-PLAN.md §3.4/D15, wave B2; {@link #assign}/{@link
+ * #unassign} migrated onto {@link Authority}, wave B6) — the write side behind
  * {@code PUT/DELETE /api/assets/{id}/pilots/{userId}} and the read side behind
  * {@code GET /api/me/assignments} (vision-api, a later wave). One interface, one implementation
  * ({@link DefaultAssignmentService}).
@@ -43,11 +45,11 @@ public interface AssignmentService {
      * @param asset        the asset to assign them to
      * @param role         the seat this link grants
      * @param actor        the acting granter's own id, for audit attribution
-     * @param granterScope the acting granter's visibility scope
+     * @param granterScope the acting granter's authority
      * @throws java.util.NoSuchElementException if the asset does not exist
      * @throws AccessDeniedException            if the asset is outside {@code granterScope}
      */
-    void assign(UserId pilot, AssetId asset, AssignmentRole role, UserId actor, VisibilityScope granterScope);
+    void assign(UserId pilot, AssetId asset, AssignmentRole role, UserId actor, Authority granterScope);
 
     /**
      * Unassigns a pilot from an asset, idempotently.
@@ -59,11 +61,11 @@ public interface AssignmentService {
      * @param pilot        the pilot to unassign
      * @param asset        the asset to unassign them from
      * @param actor        the acting granter's own id, for audit attribution
-     * @param granterScope the acting granter's visibility scope
+     * @param granterScope the acting granter's authority
      * @throws java.util.NoSuchElementException if the asset does not exist
      * @throws AccessDeniedException            if the asset is outside {@code granterScope}
      */
-    void unassign(UserId pilot, AssetId asset, UserId actor, VisibilityScope granterScope);
+    void unassign(UserId pilot, AssetId asset, UserId actor, Authority granterScope);
 
     /**
      * The assets a pilot is currently assigned to.

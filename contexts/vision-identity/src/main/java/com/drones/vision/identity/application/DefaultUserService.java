@@ -17,6 +17,7 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
 import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 
 /**
@@ -39,23 +40,23 @@ public final class DefaultUserService implements UserService {
     }
 
     @Override
-    public User create(UserSpec spec, UserId actor, VisibilityScope acting) {
+    public User create(UserSpec spec, UserId actor, Authority acting) {
         Objects.requireNonNull(spec, "spec must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(acting, "acting must not be null");
-        if (!acting.canManageOrg()) {
+        if (!acting.mayManageOrg()) {
             throw new AccessDeniedException("not permitted to create users");
         }
         List<Membership> memberships = spec.memberships();
-        if (memberships.isEmpty() && !acting.isUnbounded()) {
+        if (memberships.isEmpty() && !acting.scope().isUnbounded()) {
             throw new AccessDeniedException("cannot create a user with no group membership — "
                     + "place the user in a group you manage");
         }
-        // Present whenever canManageOrg() is true (checked above), so the ceiling below is real.
-        Role maxGrantable = maxGrantableRole(acting)
+        // Present whenever mayManageOrg() is true (checked above), so the ceiling below is real.
+        Role maxGrantable = maxGrantableRole(acting.scope())
                 .orElseThrow(() -> new AccessDeniedException("not permitted to grant any role"));
         for (Membership membership : memberships) {
-            if (!acting.includesGroup(membership.groupId())) {
+            if (!acting.scope().includesGroup(membership.groupId())) {
                 throw new AccessDeniedException("cannot grant membership in a group outside your scope");
             }
             if (membership.role().compareTo(maxGrantable) > 0) {
@@ -92,17 +93,17 @@ public final class DefaultUserService implements UserService {
     }
 
     @Override
-    public User setEnabled(UserId id, boolean enabled, UserId actor, VisibilityScope acting) {
+    public User setEnabled(UserId id, boolean enabled, UserId actor, Authority acting) {
         Objects.requireNonNull(id, "id must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(acting, "acting must not be null");
-        if (!acting.canManageOrg()) {
+        if (!acting.mayManageOrg()) {
             throw new AccessDeniedException("not permitted to enable/disable users");
         }
         User existing = userRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("unknown user: " + id));
-        if (!acting.isUnbounded() && existing.memberships().stream()
-                .noneMatch(membership -> acting.includesGroup(membership.groupId()))) {
+        if (!acting.scope().isUnbounded() && existing.memberships().stream()
+                .noneMatch(membership -> acting.scope().includesGroup(membership.groupId()))) {
             throw new AccessDeniedException("cannot enable/disable a user outside your scope");
         }
         User updated = new User(existing.id(), existing.username(), existing.displayName(), existing.email(),
@@ -117,28 +118,28 @@ public final class DefaultUserService implements UserService {
     }
 
     @Override
-    public User setMemberships(UserId id, List<Membership> memberships, UserId actor, VisibilityScope acting) {
+    public User setMemberships(UserId id, List<Membership> memberships, UserId actor, Authority acting) {
         Objects.requireNonNull(id, "id must not be null");
         Objects.requireNonNull(memberships, "memberships must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(acting, "acting must not be null");
-        if (!acting.canManageOrg()) {
+        if (!acting.mayManageOrg()) {
             throw new AccessDeniedException("not permitted to edit user memberships");
         }
         User existing = userRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("unknown user: " + id));
-        if (!acting.isUnbounded() && existing.memberships().stream()
-                .noneMatch(membership -> acting.includesGroup(membership.groupId()))) {
+        if (!acting.scope().isUnbounded() && existing.memberships().stream()
+                .noneMatch(membership -> acting.scope().includesGroup(membership.groupId()))) {
             throw new AccessDeniedException("cannot edit a user outside your scope");
         }
-        if (memberships.isEmpty() && !acting.isUnbounded()) {
+        if (memberships.isEmpty() && !acting.scope().isUnbounded()) {
             throw new AccessDeniedException("cannot remove a user's last group membership — "
                     + "place the user in a group you manage");
         }
-        Role maxGrantable = maxGrantableRole(acting)
+        Role maxGrantable = maxGrantableRole(acting.scope())
                 .orElseThrow(() -> new AccessDeniedException("not permitted to grant any role"));
         for (Membership membership : memberships) {
-            if (!acting.includesGroup(membership.groupId())) {
+            if (!acting.scope().includesGroup(membership.groupId())) {
                 throw new AccessDeniedException("cannot grant membership in a group outside your scope");
             }
             if (membership.role().compareTo(maxGrantable) > 0) {
@@ -170,20 +171,20 @@ public final class DefaultUserService implements UserService {
     }
 
     @Override
-    public User setPassword(UserId id, String rawPassword, UserId actor, VisibilityScope acting) {
+    public User setPassword(UserId id, String rawPassword, UserId actor, Authority acting) {
         Objects.requireNonNull(id, "id must not be null");
         if (rawPassword == null || rawPassword.isBlank()) {
             throw new IllegalArgumentException("rawPassword must not be blank");
         }
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(acting, "acting must not be null");
-        if (!acting.canManageOrg()) {
+        if (!acting.mayManageOrg()) {
             throw new AccessDeniedException("not permitted to reset passwords");
         }
         User existing = userRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("unknown user: " + id));
-        if (!acting.isUnbounded() && existing.memberships().stream()
-                .noneMatch(membership -> acting.includesGroup(membership.groupId()))) {
+        if (!acting.scope().isUnbounded() && existing.memberships().stream()
+                .noneMatch(membership -> acting.scope().includesGroup(membership.groupId()))) {
             throw new AccessDeniedException("cannot reset a password outside your scope");
         }
         User updated = new User(existing.id(), existing.username(), existing.displayName(), existing.email(),

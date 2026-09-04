@@ -36,13 +36,17 @@ import java.util.Objects;
  * past .claude/skills/java-clean-code/SKILL.md &sect;3's five-parameter ceiling.
  *
  * <p><b>Authorisation lives in the services, not here</b> — the same pattern {@link
- * OnboardingController}'s own javadoc documents: {@link AssetCustodyService}/{@link
- * MaintenanceService} already resolve the asset through {@link CurrentUser#scope()} and check
- * {@code canManage}/{@code includes} internally, auditing and throwing {@link
- * java.util.NoSuchElementException}/{@link com.drones.vision.platform.AccessDeniedException}/{@link
- * IllegalStateException} themselves — mapped centrally by {@link
- * com.drones.vision.api.exception.ApiExceptionHandler}. This controller only translates HTTP shape
- * and forwards {@link CurrentUser#userId()}/{@link CurrentUser#scope()}.
+ * OnboardingController}'s own javadoc documents: {@link AssetCustodyService}'s custody/inventory
+ * verbs and {@link MaintenanceService#open}/{@link MaintenanceService#close} resolve the asset
+ * through {@link CurrentUser#authority()} and check {@code Authority#mayManageFleet} internally
+ * (docs/plans/active/AUTH-ROLES-PLAN.md wave B6, superseding the bare {@code VisibilityScope#canManage}
+ * check they used before); {@link MaintenanceService#listForAsset}/{@link MaintenanceService#fleetWide}
+ * stay on {@link CurrentUser#scope()} instead, since those are reads checked on {@code includes}, not
+ * authority. Every one auditing and throwing {@link java.util.NoSuchElementException}/{@link
+ * com.drones.vision.platform.AccessDeniedException}/{@link IllegalStateException} themselves — mapped
+ * centrally by {@link com.drones.vision.api.exception.ApiExceptionHandler}. This controller only
+ * translates HTTP shape and forwards {@link CurrentUser#userId()}/{@link CurrentUser#authority()}/
+ * {@link CurrentUser#scope()} as each service method requires.
  *
  * <p>Custody/inventory writes return the full {@link AssetDetailsResponse} (matching every other
  * mutation on {@link AssetController}); maintenance writes/reads return {@link
@@ -92,8 +96,8 @@ public class AssetInventoryController {
         AssetId assetId = AssetId.of(id);
         switch (request.toAction()) {
             case ISSUE -> assetCustodyService.issue(assetId, request.requireCustodianId(), request.location(),
-                    currentUser.userId(), currentUser.scope());
-            case RETURN -> assetCustodyService.returnToStock(assetId, currentUser.userId(), currentUser.scope());
+                    currentUser.userId(), currentUser.authority());
+            case RETURN -> assetCustodyService.returnToStock(assetId, currentUser.userId(), currentUser.authority());
         }
         return detailsResponse(assetId);
     }
@@ -110,9 +114,9 @@ public class AssetInventoryController {
         AssetId assetId = AssetId.of(id);
         switch (request.toAction()) {
             case GROUND -> assetCustodyService.ground(assetId, request.requireKind(), request.requireSummary(),
-                    currentUser.userId(), currentUser.scope());
-            case RELEASE -> assetCustodyService.release(assetId, currentUser.userId(), currentUser.scope());
-            case RETIRE -> assetCustodyService.retire(assetId, currentUser.userId(), currentUser.scope());
+                    currentUser.userId(), currentUser.authority());
+            case RELEASE -> assetCustodyService.release(assetId, currentUser.userId(), currentUser.authority());
+            case RETIRE -> assetCustodyService.retire(assetId, currentUser.userId(), currentUser.authority());
         }
         return detailsResponse(assetId);
     }
@@ -175,7 +179,7 @@ public class AssetInventoryController {
     public MaintenanceRecordResponse openMaintenance(@PathVariable String id,
                                                       @RequestBody CreateMaintenanceRecordRequest request) {
         return MaintenanceRecordResponse.from(maintenanceService.open(AssetId.of(id), request.toKind(),
-                request.summary(), currentUser.userId(), currentUser.scope()));
+                request.summary(), currentUser.userId(), currentUser.authority()));
     }
 
     /**
@@ -190,7 +194,7 @@ public class AssetInventoryController {
     @PostMapping("/api/assets/{id}/maintenance/{recordId}/close")
     public MaintenanceRecordResponse closeMaintenance(@PathVariable String id, @PathVariable String recordId) {
         return MaintenanceRecordResponse.from(
-                maintenanceService.close(MaintenanceId.of(recordId), currentUser.userId(), currentUser.scope()));
+                maintenanceService.close(MaintenanceId.of(recordId), currentUser.userId(), currentUser.authority()));
     }
 
     /**

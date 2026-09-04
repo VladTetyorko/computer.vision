@@ -29,6 +29,8 @@ import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.platform.Capability;
 import com.drones.vision.platform.VisibilityScope;
 
 class DefaultUserServiceTest {
@@ -38,7 +40,7 @@ class DefaultUserServiceTest {
     private FakeAuditTrailPort auditTrail;
     private UserService service;
 
-    private static final VisibilityScope ADMIN = VisibilityScope.unbounded();
+    private static final Authority ADMIN = Authority.full();
     private final UserId actor = UserId.random();
 
     @BeforeEach
@@ -111,7 +113,7 @@ class DefaultUserServiceTest {
         service.create(spec("pilot"), actor, ADMIN);
         service.create(spec("manager"), actor, ADMIN);
 
-        assertEquals(2, service.list(ADMIN).size());
+        assertEquals(2, service.list(ADMIN.scope()).size());
     }
 
     @Test
@@ -171,7 +173,7 @@ class DefaultUserServiceTest {
     @Test
     void managerCreatesUserInTheirGroupWithRoleUpToManager() {
         GroupId managed = GroupId.random();
-        VisibilityScope manager = VisibilityScope.groups(Set.of(managed));
+        Authority manager = new Authority(VisibilityScope.groups(Set.of(managed)), Set.of(Capability.MANAGE_ORG));
 
         User created = service.create(inGroup("newpilot", managed, Role.PILOT), actor, manager);
         assertEquals(Role.PILOT, created.topRole().orElseThrow());
@@ -182,7 +184,7 @@ class DefaultUserServiceTest {
 
     @Test
     void managerCannotCreateUserInAGroupOutsideTheirScope() {
-        VisibilityScope manager = VisibilityScope.groups(Set.of(GroupId.random()));
+        Authority manager = new Authority(VisibilityScope.groups(Set.of(GroupId.random())), Set.of(Capability.MANAGE_ORG));
 
         assertThrows(AccessDeniedException.class,
                 () -> service.create(inGroup("x", GroupId.random(), Role.PILOT), actor, manager));
@@ -191,7 +193,7 @@ class DefaultUserServiceTest {
     @Test
     void managerCannotGrantAdmin() {
         GroupId managed = GroupId.random();
-        VisibilityScope manager = VisibilityScope.groups(Set.of(managed));
+        Authority manager = new Authority(VisibilityScope.groups(Set.of(managed)), Set.of(Capability.MANAGE_ORG));
 
         assertThrows(AccessDeniedException.class,
                 () -> service.create(inGroup("x", managed, Role.ADMIN), actor, manager));
@@ -208,7 +210,7 @@ class DefaultUserServiceTest {
 
     @Test
     void managerCannotCreateAUserWithNoMemberships() {
-        VisibilityScope manager = VisibilityScope.groups(Set.of(GroupId.random()));
+        Authority manager = new Authority(VisibilityScope.groups(Set.of(GroupId.random())), Set.of(Capability.MANAGE_ORG));
 
         assertThrows(AccessDeniedException.class, () -> service.create(spec("unscoped"), actor, manager));
     }
@@ -221,7 +223,7 @@ class DefaultUserServiceTest {
 
     @Test
     void pilotScopeCannotCreateAtAll() {
-        VisibilityScope pilot = VisibilityScope.assignedAssets(Set.of());
+        Authority pilot = new Authority(VisibilityScope.assignedAssets(Set.of()), Set.of());
 
         assertThrows(AccessDeniedException.class,
                 () -> service.create(inGroup("x", GroupId.random(), Role.PILOT), actor, pilot));
@@ -230,7 +232,7 @@ class DefaultUserServiceTest {
     @Test
     void managerCanSetEnabledOnlyWithinTheirSubtree() {
         GroupId managed = GroupId.random();
-        VisibilityScope manager = VisibilityScope.groups(Set.of(managed));
+        Authority manager = new Authority(VisibilityScope.groups(Set.of(managed)), Set.of(Capability.MANAGE_ORG));
 
         User inSubtree = service.create(inGroup("inside", managed, Role.PILOT), actor, ADMIN);
         User outside = service.create(inGroup("outside", GroupId.random(), Role.PILOT), actor, ADMIN);
@@ -242,7 +244,7 @@ class DefaultUserServiceTest {
     @Test
     void pilotScopeCannotSetEnabled() {
         User existing = service.create(inGroup("someone", GroupId.random(), Role.PILOT), actor, ADMIN);
-        VisibilityScope pilot = VisibilityScope.assignedAssets(Set.of());
+        Authority pilot = new Authority(VisibilityScope.assignedAssets(Set.of()), Set.of());
 
         assertThrows(AccessDeniedException.class, () -> service.setEnabled(existing.id(), false, actor, pilot));
     }
@@ -258,7 +260,7 @@ class DefaultUserServiceTest {
         assertEquals(1, visible.size());
         assertEquals("mine", visible.get(0).username());
 
-        assertEquals(2, service.list(ADMIN).size());
+        assertEquals(2, service.list(ADMIN.scope()).size());
         assertTrue(service.list(VisibilityScope.assignedAssets(Set.of())).isEmpty());
     }
 
@@ -310,7 +312,7 @@ class DefaultUserServiceTest {
     @Test
     void setMembershipsRejectsARoleAboveTheGrantCeiling() {
         GroupId managed = GroupId.random();
-        VisibilityScope manager = VisibilityScope.groups(Set.of(managed));
+        Authority manager = new Authority(VisibilityScope.groups(Set.of(managed)), Set.of(Capability.MANAGE_ORG));
         User created = service.create(inGroup("pilot", managed, Role.PILOT), actor, ADMIN);
 
         assertThrows(AccessDeniedException.class, () -> service.setMemberships(created.id(),
@@ -320,7 +322,7 @@ class DefaultUserServiceTest {
     @Test
     void setMembershipsRejectsAGroupOutsideTheActingScope() {
         GroupId managed = GroupId.random();
-        VisibilityScope manager = VisibilityScope.groups(Set.of(managed));
+        Authority manager = new Authority(VisibilityScope.groups(Set.of(managed)), Set.of(Capability.MANAGE_ORG));
         User created = service.create(inGroup("pilot", managed, Role.PILOT), actor, ADMIN);
 
         assertThrows(AccessDeniedException.class, () -> service.setMemberships(created.id(),
@@ -330,7 +332,7 @@ class DefaultUserServiceTest {
     @Test
     void setMembershipsRejectsEmptyForANonUnboundedScope() {
         GroupId managed = GroupId.random();
-        VisibilityScope manager = VisibilityScope.groups(Set.of(managed));
+        Authority manager = new Authority(VisibilityScope.groups(Set.of(managed)), Set.of(Capability.MANAGE_ORG));
         User created = service.create(inGroup("pilot", managed, Role.PILOT), actor, ADMIN);
 
         assertThrows(AccessDeniedException.class,
@@ -380,7 +382,7 @@ class DefaultUserServiceTest {
     @Test
     void setPasswordRespectsTheSameManagementGateAsSetEnabled() {
         User outside = service.create(inGroup("outside", GroupId.random(), Role.PILOT), actor, ADMIN);
-        VisibilityScope manager = VisibilityScope.groups(Set.of(GroupId.random()));
+        Authority manager = new Authority(VisibilityScope.groups(Set.of(GroupId.random())), Set.of(Capability.MANAGE_ORG));
 
         assertThrows(AccessDeniedException.class,
                 () -> service.setPassword(outside.id(), "newSecret1", actor, manager));

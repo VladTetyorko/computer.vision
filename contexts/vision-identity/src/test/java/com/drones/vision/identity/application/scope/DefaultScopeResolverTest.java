@@ -117,6 +117,32 @@ class DefaultScopeResolverTest {
     }
 
     @Test
+    void viewerSeesItsGroupSubtreeJustLikeAManager() {
+        // Wave B6: a VIEWER membership widens scopeFor to the group subtree too, no longer falling
+        // through to assignedAssets -- safe now that every canManageOrg()/canManage()/
+        // canAdminister() call site has migrated onto Authority (docs/plans/active/AUTH-ROLES-PLAN.md
+        // §3.6's staging rule).
+        User user = user(new Membership(warehouseA, Role.VIEWER));
+
+        VisibilityScope scope = resolver.scopeFor(user);
+
+        assertEquals(VisibilityScope.Kind.GROUPS, scope.kind());
+        assertEquals(Set.of(warehouseA, teamA1), scope.groups());
+    }
+
+    @Test
+    void authorityForAViewerPairsGroupsScopeWithNoCapabilities() {
+        // A VIEWER's wide scope is read-only in effect: mayManageOrg()/mayManageFleet()/
+        // mayAdminister() each additionally require a capability RoleAuthority never grants VIEWER.
+        User user = user(new Membership(warehouseA, Role.VIEWER));
+
+        Authority authority = resolver.authorityFor(user);
+
+        assertEquals(VisibilityScope.Kind.GROUPS, authority.scope().kind());
+        assertTrue(authority.capabilities().isEmpty());
+    }
+
+    @Test
     void userWithNoMembershipsAndNoAssignmentsSeesNothing() {
         VisibilityScope scope = resolver.scopeFor(user());
 

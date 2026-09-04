@@ -47,6 +47,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.net.URI;
 import java.time.Instant;
+import java.util.EnumSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -172,7 +173,7 @@ class AssetControllerTest {
 
             @Override
             public Authority authority() {
-                throw new UnsupportedOperationException("AssetController never calls authority()");
+                return new Authority(scope, EnumSet.allOf(com.drones.vision.platform.Capability.class));
             }
         });
     }

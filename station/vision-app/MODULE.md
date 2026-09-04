@@ -854,3 +854,53 @@ stays `false` by default, unchanged this wave — `AuthDisabledSecurityTest`/`Ma
 `@RestController`, no new ArchUnit-relevant type). Deferred: `enabled`/`password.*` on
 `VisionAuthProperties` (D2's full shape, left on their existing scattered `@Value`s/call sites); the SPA
 logout-teardown half of §3.6 (web-side, out of this backend wave). Waves B6/B0b open.
+
+**AUTH-ROLES-PLAN wave B6 done.** The `VisibilityScope`→`Authority` migration this wave's plan text
+scoped across `contexts/{warehouse,flight,perception,learning,map,identity}` and every `vision-api`
+controller/support class also reached three genuinely un-migrated call sites in this module (a
+pre-existing gap, not new breakage — see the stale-jar note below for why the earlier build that should
+have caught them didn't):
+
+- **`onboarding/PassportCaptureObserver`** (production) — `capture(...)` called
+  `vehicleProfileService.captureSnapshot(assetId, usageId, phase, window, PlatformActor.USER_ID,
+  VisibilityScope.unbounded())`; now passes `Authority.full()`, matching `VehicleProfileService`'s
+  own widened signature (`contexts/vision-flight`, this wave's own migration — see that module's
+  MODULE.md).
+- **`onboarding/PassportCaptureObserverTest`** — two `verify(...).captureSnapshot(...)` calls updated
+  `eq(VisibilityScope.unbounded())` → `eq(Authority.full())` to match.
+- **`ScopedAssetReadAuthEnabledTest`** — `setUp()`'s `groupService.create(new GroupSpec(...),
+  VisibilityScope.unbounded())` and the pilot-scoped test's `assignmentService.assign(...,
+  VisibilityScope.unbounded())` both now pass `Authority.full()`, matching `GroupService#create`/
+  `AssignmentService#assign`'s widened signatures (`contexts/vision-identity`, own B6 migration).
+- **`DevAccountSeeder`** (test-only devsupport fixture) — `seedIfAbsent` built one `VisibilityScope
+  system = VisibilityScope.unbounded()` used for every gated call; now builds `Authority authority =
+  Authority.full()` alongside it and passes `authority` to `groupService.create`/all three
+  `userService.create` calls, while the non-gated `userService.list(system)`/`groupService.list(system)`
+  reads keep the plain scope.
+
+**Lesson worth keeping**: these four were caught only after two layers of stale-jar masking peeled
+back in sequence — first `~/.m2`'s installed `adapter-persistence`/`vision-identity`/`vision-flight`
+jars were stale relative to a freshly-changed upstream module (a `NoSuchMethodError` on
+`PersistenceUnit.buildDataSource` visibility, unrelated to this wave, fixed by a full
+`install -DskipTests` of every foundation module); *then*, with fresh jars installed, this module's own
+previously-compiled test-classes were themselves stale until a `test-compile` forced a real rebuild —
+only then did the four genuine gaps above surface as `NoSuchMethodError`s instead of silently compiling
+green against pre-migration method signatures. A scoped single-module build can mask exactly this shape
+of gap; the plan's own full multi-module `-am test` green line is what actually proves nothing was
+missed — and even that caught one more gap in a sibling module (`vision-api`'s `security.StreamAccess`,
+see that module's MODULE.md) on its first honest run.
+
+`./mvnw -B -pl station/vision-app test -DskipWeb` — **333/333** green, 0 failures/errors — unchanged
+from B5's own ending count (this wave repaired four existing call sites/tests, added none). Plan's full
+green line (`core/vision-platform,contexts/vision-warehouse,contexts/vision-flight,
+contexts/vision-perception,contexts/vision-learning,contexts/vision-map,contexts/vision-identity,
+station/vision-api,station/vision-app -am test`) — **BUILD SUCCESS**, this module's 333/333 among every
+other listed module's own green count (see `core/vision-platform/MODULE.md`'s B6 entry for the full
+per-module tally). That build had to be run **in the foreground** to actually complete: a first attempt
+was launched with `run_in_background` and reported `completed` well after the fact, but the agent turn
+that started it had already ended — a backgrounded Maven run does not survive the turn that launched
+it, so its log was abandoned mid-flight and only the foreground rerun (generous timeout, no
+backgrounding) produced the real, trustworthy result. Docker ran for real throughout (Testcontainers
+`postgres:16`, Flyway through `V34`, unchanged this wave — no new migration). `vision.auth.enabled`
+stays `false` by default, unchanged — the default-config bar held throughout. Wave B0b (flip
+`vision.auth.enabled`'s default) is the only item this plan still has open.

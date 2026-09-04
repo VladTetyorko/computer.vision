@@ -15,6 +15,7 @@ import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.application.asset.AssetDetails;
 import com.drones.vision.warehouse.application.asset.AssetService;
@@ -37,7 +38,7 @@ import java.util.Optional;
  * <h2>Authority (docs/plans/active/DRONE-ONBOARDING-PLAN.md section 6.1)</h2>
  * An active probe puts traffic on the aircraft's own link (a {@code REQUEST_MESSAGE}/{@code
  * PARAM_REQUEST_READ} exchange, not a passive listen), so {@link #probe} gates on {@link
- * VisibilityScope#canManage(com.drones.vision.kernel.Ownership)} -- the authority predicate, not
+ * Authority#mayManageFleet(com.drones.vision.kernel.Ownership)} -- the authority predicate, not
  * {@link VisibilityScope#includes} -- and audits a denial exactly like every other command gate in
  * this module (mirrors {@code DefaultFlightCommandService}). {@link #latestProfile} is a read: it
  * uses the scoped {@link AssetService#details(VisibilityScope, AssetId)} so unknown, out-of-scope
@@ -80,7 +81,7 @@ public final class DefaultVehicleProfileService implements VehicleProfileService
     }
 
     @Override
-    public VehicleProfile probe(AssetId assetId, Duration window, UserId actor, VisibilityScope scope) {
+    public VehicleProfile probe(AssetId assetId, Duration window, UserId actor, Authority scope) {
         Objects.requireNonNull(assetId, "assetId must not be null");
         Objects.requireNonNull(window, "window must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
@@ -88,7 +89,7 @@ public final class DefaultVehicleProfileService implements VehicleProfileService
 
         AssetDetails details = assetService.details(assetId); // NoSuchElementException -> 404
         Asset asset = details.summary().asset();
-        if (!scope.canManage(asset.ownership())) {
+        if (!scope.mayManageFleet(asset.ownership())) {
             audit(actor, assetId, COMMAND_PROBE, DENIED_OUT_OF_SCOPE);
             throw new AccessDeniedException(
                     "Asset " + assetId.value() + " is outside your management scope; you may not probe it");
@@ -129,7 +130,7 @@ public final class DefaultVehicleProfileService implements VehicleProfileService
 
     @Override
     public VehicleProfile captureSnapshot(AssetId assetId, UsageId usageId, FlightPhase phase, Duration window,
-                                           UserId actor, VisibilityScope scope) {
+                                           UserId actor, Authority scope) {
         Objects.requireNonNull(assetId, "assetId must not be null");
         Objects.requireNonNull(usageId, "usageId must not be null");
         Objects.requireNonNull(phase, "phase must not be null");
@@ -143,7 +144,7 @@ public final class DefaultVehicleProfileService implements VehicleProfileService
 
         AssetDetails details = assetService.details(assetId); // NoSuchElementException -> 404
         Asset asset = details.summary().asset();
-        if (!scope.canManage(asset.ownership())) {
+        if (!scope.mayManageFleet(asset.ownership())) {
             auditCapture(actor, assetId, usageId, phase, DENIED_OUT_OF_SCOPE);
             throw new AccessDeniedException(
                     "Asset " + assetId.value() + " is outside your management scope; you may not probe it");

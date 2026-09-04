@@ -6,6 +6,7 @@ import com.drones.vision.api.security.PrincipalResolver;
 import com.drones.vision.map.application.MapAccessPolicy;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.platform.Authority;
+import com.drones.vision.platform.Capability;
 import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.warehouse.application.category.CategoryEdit;
 import com.drones.vision.warehouse.application.category.CategoryService;
@@ -21,6 +22,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Set;
 
@@ -150,7 +152,7 @@ class CategoryControllerTest {
 
             @Override
             public Authority authority() {
-                throw new UnsupportedOperationException("CategoryController never calls authority()");
+                return new Authority(scope, EnumSet.allOf(Capability.class));
             }
         });
     }

@@ -85,17 +85,6 @@ class VisibilityScopeTest {
         assertThrows(UnsupportedOperationException.class, () -> scope.assignedAssets().add(AssetId.random()));
     }
 
-    // --- management-authority derivation (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2 cleanup) ---
-
-    @Test
-    void canManageOrgAcrossKinds() {
-        assertTrue(VisibilityScope.unbounded().canManageOrg());
-        assertTrue(VisibilityScope.groups(Set.of(GroupId.random())).canManageOrg());
-        assertFalse(VisibilityScope.assignedAssets(Set.of(AssetId.random())).canManageOrg());
-        // an empty groups scope is still a manager (GROUPS kind), so it can manage
-        assertTrue(VisibilityScope.groups(Set.of()).canManageOrg());
-    }
-
     @Test
     void includesGroupAcrossKinds() {
         GroupId inScope = GroupId.random();
@@ -108,46 +97,5 @@ class VisibilityScopeTest {
         assertFalse(groups.includesGroup(outOfScope));
 
         assertFalse(VisibilityScope.assignedAssets(Set.of(AssetId.random())).includesGroup(inScope));
-    }
-
-    // --- authority is not visibility (docs/plans/done/OPS-UX-PLAN.md §1) ---
-
-    @Test
-    void canAdministerIsTrueOnlyForUnbounded() {
-        assertTrue(VisibilityScope.unbounded().canAdminister());
-        assertFalse(VisibilityScope.groups(Set.of(GroupId.random())).canAdminister());
-        assertFalse(VisibilityScope.groups(Set.of()).canAdminister());
-        assertFalse(VisibilityScope.assignedAssets(Set.of(AssetId.random())).canAdminister());
-        assertFalse(VisibilityScope.assignedAssets(Set.of()).canAdminister());
-    }
-
-    @Test
-    void canManageAcrossKindsInAndOutOfGroup() {
-        GroupId inScope = GroupId.random();
-        GroupId outOfScope = GroupId.random();
-        Ownership ownedInScope = ownershipIn(inScope);
-        Ownership ownedOutOfScope = ownershipIn(outOfScope);
-
-        // UNBOUNDED manages everything, regardless of group.
-        assertTrue(VisibilityScope.unbounded().canManage(ownedInScope));
-        assertTrue(VisibilityScope.unbounded().canManage(ownedOutOfScope));
-
-        // GROUPS manages exactly the assets it can see — the group half of #includes agrees.
-        VisibilityScope manager = VisibilityScope.groups(Set.of(inScope));
-        assertTrue(manager.canManage(ownedInScope));
-        assertFalse(manager.canManage(ownedOutOfScope));
-
-        // ASSIGNED_ASSETS may fly an assigned asset but never administers it — visibility and
-        // authority diverge here, which is the whole point of this predicate existing.
-        AssetId assigned = AssetId.random();
-        VisibilityScope pilot = VisibilityScope.assignedAssets(Set.of(assigned));
-        assertTrue(pilot.includes(assigned, ownedInScope), "sanity: the pilot can see the assigned asset");
-        assertFalse(pilot.canManage(ownedInScope));
-        assertFalse(pilot.canManage(ownedOutOfScope));
-    }
-
-    @Test
-    void canManageRejectsNullOwnership() {
-        assertThrows(NullPointerException.class, () -> VisibilityScope.unbounded().canManage(null));
     }
 }

@@ -8,6 +8,8 @@ import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.platform.Capability;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.Custody;
@@ -50,6 +52,8 @@ class DefaultMaintenanceServiceTest {
     private Ownership ownership;
     private VisibilityScope inScope;
     private VisibilityScope outOfScope;
+    private Authority inAuthority;
+    private Authority outOfAuthority;
     private Asset asset;
 
     @BeforeEach
@@ -62,6 +66,8 @@ class DefaultMaintenanceServiceTest {
         ownership = new Ownership(actor, GroupId.random());
         inScope = VisibilityScope.groups(Set.of(ownership.groupId()));
         outOfScope = VisibilityScope.groups(Set.of(GroupId.random()));
+        inAuthority = new Authority(inScope, Set.of(Capability.MANAGE_FLEET));
+        outOfAuthority = new Authority(outOfScope, Set.of(Capability.MANAGE_FLEET));
         asset = Asset.register(AssetId.random(), "my drone", DRONE, ownership, Set.of(DeviceId.random()), Map.of(),
                 Identity.NONE, Custody.NONE);
         when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
@@ -72,7 +78,8 @@ class DefaultMaintenanceServiceTest {
 
     @Test
     void openCreatesARecordAgainstTheAssetWithoutTouchingItsInventoryState() {
-        MaintenanceRecord record = service.open(asset.id(), MaintenanceKind.REPAIR, "cracked prop", actor, inScope);
+        MaintenanceRecord record = service.open(asset.id(), MaintenanceKind.REPAIR, "cracked prop", actor,
+                inAuthority);
 
         assertEquals(asset.id(), record.assetId());
         assertEquals(MaintenanceKind.REPAIR, record.kind());
@@ -83,7 +90,7 @@ class DefaultMaintenanceServiceTest {
     @Test
     void openRefusesOutOfScope() {
         assertThrows(AccessDeniedException.class,
-                () -> service.open(asset.id(), MaintenanceKind.REPAIR, "cracked prop", actor, outOfScope));
+                () -> service.open(asset.id(), MaintenanceKind.REPAIR, "cracked prop", actor, outOfAuthority));
         verify(maintenanceRepository, never()).save(any());
     }
 
@@ -93,13 +100,13 @@ class DefaultMaintenanceServiceTest {
         when(assetRepository.findById(unknown)).thenReturn(Optional.empty());
 
         assertThrows(NoSuchElementException.class,
-                () -> service.open(unknown, MaintenanceKind.REPAIR, "cracked prop", actor, inScope));
+                () -> service.open(unknown, MaintenanceKind.REPAIR, "cracked prop", actor, inAuthority));
     }
 
     @Test
     void openRejectsABlankSummary() {
         assertThrows(IllegalArgumentException.class,
-                () -> service.open(asset.id(), MaintenanceKind.REPAIR, " ", actor, inScope));
+                () -> service.open(asset.id(), MaintenanceKind.REPAIR, " ", actor, inAuthority));
     }
 
     // -- close ----------------------------------------------------------------------------------
@@ -110,7 +117,7 @@ class DefaultMaintenanceServiceTest {
                 Instant.now(), null, actor, "just a note", null);
         when(maintenanceRepository.findById(open.id())).thenReturn(Optional.of(open));
 
-        MaintenanceRecord closed = service.close(open.id(), actor, inScope);
+        MaintenanceRecord closed = service.close(open.id(), actor, inAuthority);
 
         assertFalse(closed.isOpen());
         verify(auditTrail).record(any());
@@ -122,7 +129,7 @@ class DefaultMaintenanceServiceTest {
                 Instant.now(), null, actor, "just a note", null);
         when(maintenanceRepository.findById(open.id())).thenReturn(Optional.of(open));
 
-        assertThrows(AccessDeniedException.class, () -> service.close(open.id(), actor, outOfScope));
+        assertThrows(AccessDeniedException.class, () -> service.close(open.id(), actor, outOfAuthority));
         verify(maintenanceRepository, never()).save(any());
     }
 
@@ -131,7 +138,7 @@ class DefaultMaintenanceServiceTest {
         MaintenanceId unknown = MaintenanceId.random();
         when(maintenanceRepository.findById(unknown)).thenReturn(Optional.empty());
 
-        assertThrows(NoSuchElementException.class, () -> service.close(unknown, actor, inScope));
+        assertThrows(NoSuchElementException.class, () -> service.close(unknown, actor, inAuthority));
     }
 
     // -- listForAsset -----------------------------------------------------------------------------

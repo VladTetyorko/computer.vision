@@ -15,6 +15,7 @@ import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 
 /**
@@ -22,7 +23,7 @@ import com.drones.vision.platform.VisibilityScope;
  *
  * <p>Reaches {@link AssetService#details(AssetId)} for the single fact it needs — does the asset
  * exist, and what group owns it — so the grant check ({@link
- * VisibilityScope#canManage(com.drones.vision.kernel.Ownership)}) can run against the published
+ * Authority#mayManageFleet(com.drones.vision.kernel.Ownership)}) can run against the published
  * application service rather than warehouse's {@code AssetRepositoryPort} directly
  * (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R5 — a cross-context read goes through the
  * owning context's service, not its repository port). {@code details(AssetId)} does more work than
@@ -35,7 +36,7 @@ import com.drones.vision.platform.VisibilityScope;
  * <h2>Authority, not visibility (docs/plans/done/OPS-UX-PLAN.md §1)</h2>
  * A grant/revoke changes who may fly an asset — that is a management action on the asset, not a
  * read of it, so {@link #requireGrantable} gates on {@link
- * VisibilityScope#canManage(com.drones.vision.kernel.Ownership)} rather than {@link
+ * Authority#mayManageFleet(com.drones.vision.kernel.Ownership)} rather than {@link
  * VisibilityScope#includes(AssetId, Ownership)}. The two agree for a MANAGER's {@code GROUPS}
  * scope, but not for a PILOT's {@code ASSIGNED_ASSETS} scope: a pilot can see (and fly) the aircraft
  * assigned to them, but seeing it is not authority to re-pilot it, so a pilot may never grant or
@@ -59,7 +60,7 @@ public final class DefaultAssignmentService implements AssignmentService {
     }
 
     @Override
-    public void assign(UserId pilot, AssetId asset, AssignmentRole role, UserId actor, VisibilityScope granterScope) {
+    public void assign(UserId pilot, AssetId asset, AssignmentRole role, UserId actor, Authority granterScope) {
         Objects.requireNonNull(role, "role must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
         requireGrantable(pilot, asset, granterScope);
@@ -77,7 +78,7 @@ public final class DefaultAssignmentService implements AssignmentService {
     }
 
     @Override
-    public void unassign(UserId pilot, AssetId asset, UserId actor, VisibilityScope granterScope) {
+    public void unassign(UserId pilot, AssetId asset, UserId actor, Authority granterScope) {
         Objects.requireNonNull(actor, "actor must not be null");
         requireGrantable(pilot, asset, granterScope);
         Optional<AssignmentRole> previousRole = assignmentRepository.roleFor(pilot, asset);
@@ -107,12 +108,12 @@ public final class DefaultAssignmentService implements AssignmentService {
     }
 
     /** The asset must exist and the granter must administer it; otherwise this refuses. */
-    private void requireGrantable(UserId pilot, AssetId assetId, VisibilityScope granterScope) {
+    private void requireGrantable(UserId pilot, AssetId assetId, Authority granterScope) {
         Objects.requireNonNull(pilot, "pilot must not be null");
         Objects.requireNonNull(assetId, "asset must not be null");
         Objects.requireNonNull(granterScope, "granterScope must not be null");
         Asset asset = assetService.details(assetId).summary().asset(); // NoSuchElementException -> unknown asset
-        if (!granterScope.canManage(asset.ownership())) {
+        if (!granterScope.mayManageFleet(asset.ownership())) {
             throw new AccessDeniedException(
                     "Asset " + assetId.value() + " is outside your management authority; you may not change its pilots");
         }

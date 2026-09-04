@@ -4,6 +4,7 @@ import com.drones.vision.kernel.Capability;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetSpec;
@@ -105,14 +106,14 @@ public final class DefaultDiscoveryInboxService implements DiscoveryInboxService
 
     @Override
     public synchronized Asset register(DiscoveryCandidateId id, RegisterFromCandidateCommand command,
-                                        VisibilityScope scope, UserId actor) {
+                                        Authority scope, UserId actor) {
         Objects.requireNonNull(command, "command must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
-        if (!scope.canManageOrg()) {
+        if (!scope.mayManageOrg()) {
             throw new AccessDeniedException("not permitted to register a discovery candidate");
         }
-        if (!scope.includesGroup(command.ownership().groupId())) {
+        if (!scope.scope().includesGroup(command.ownership().groupId())) {
             throw new AccessDeniedException("cannot register an asset owned by a group outside your scope");
         }
 

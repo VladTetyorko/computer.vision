@@ -6,6 +6,7 @@ import com.drones.vision.identity.domain.model.AssignmentRole;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.identity.application.AssignmentService;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.Ownership;
@@ -62,7 +63,7 @@ class AssignmentControllerTest {
         mockMvc.perform(put("/api/assets/{a}/pilots/{u}", assetId, pilotId))
                 .andExpect(status().isNoContent());
         verify(assignmentService).assign(eq(UserId.of(pilotId)), eq(AssetId.of(assetId)), eq(AssignmentRole.PILOT),
-                eq(actor), any(VisibilityScope.class));
+                eq(actor), any(Authority.class));
     }
 
     @Test
@@ -72,7 +73,7 @@ class AssignmentControllerTest {
                         .content("{\"role\":\"CREW\"}"))
                 .andExpect(status().isNoContent());
         verify(assignmentService).assign(eq(UserId.of(pilotId)), eq(AssetId.of(assetId)), eq(AssignmentRole.CREW),
-                eq(actor), any(VisibilityScope.class));
+                eq(actor), any(Authority.class));
     }
 
     @Test
@@ -80,7 +81,7 @@ class AssignmentControllerTest {
         mockMvc.perform(delete("/api/assets/{a}/pilots/{u}", assetId, pilotId))
                 .andExpect(status().isNoContent());
         verify(assignmentService).unassign(eq(UserId.of(pilotId)), eq(AssetId.of(assetId)), eq(actor),
-                any(VisibilityScope.class));
+                any(Authority.class));
     }
 
     @Test

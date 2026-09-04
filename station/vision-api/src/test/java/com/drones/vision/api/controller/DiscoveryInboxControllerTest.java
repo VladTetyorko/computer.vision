@@ -14,6 +14,7 @@ import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.platform.Authority;
+import com.drones.vision.platform.Capability;
 import com.drones.vision.warehouse.application.discovery.DiscoveryInboxService;
 import com.drones.vision.warehouse.application.discovery.DiscoveryService;
 import com.drones.vision.warehouse.application.discovery.RegisterFromCandidateCommand;
@@ -33,6 +34,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.net.URI;
 import java.time.Instant;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -89,7 +91,7 @@ class DiscoveryInboxControllerTest {
 
             @Override
             public Authority authority() {
-                throw new UnsupportedOperationException("DiscoveryInboxController never calls authority()");
+                return new Authority(scope, EnumSet.allOf(Capability.class));
             }
         });
     }

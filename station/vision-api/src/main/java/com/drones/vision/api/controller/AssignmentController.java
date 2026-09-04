@@ -36,7 +36,9 @@ import com.drones.vision.api.security.CurrentUser;
  * {@code roleFor} — the same precedent {@link AssetController} sets for reading a driven port
  * directly when no service method exposes exactly the read a controller needs), {@link AssetService}
  * (to 404 a pilots-list request for an asset outside the caller's scope), and {@link CurrentUser}
- * (the granter's scope, id, and the pilot's own id). Four collaborators, under the ceiling.
+ * (the granter's authority, id, and the pilot's own id — {@code assign}/{@code unassign} pass {@code
+ * currentUser.authority()}, docs/plans/active/AUTH-ROLES-PLAN.md wave B6). Four collaborators, under
+ * the ceiling.
  *
  * <p><strong>Seat role</strong> (docs/plans/active/AUTH-ROLES-PLAN.md D6, wave B3): {@code PUT
  * .../pilots/{userId}} takes an optional {@link AssignAssetRequest} body — an absent body or absent
@@ -86,7 +88,7 @@ public class AssignmentController {
                        @RequestBody(required = false) AssignAssetRequest request) {
         AssignmentRole role = request == null ? AssignmentRole.PILOT : request.toRole();
         assignmentService.assign(UserId.of(userId), AssetId.of(assetId), role, currentUser.userId(),
-                currentUser.scope());
+                currentUser.authority());
     }
 
     /**
@@ -99,7 +101,7 @@ public class AssignmentController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void unassign(@PathVariable String assetId, @PathVariable String userId) {
         assignmentService.unassign(UserId.of(userId), AssetId.of(assetId), currentUser.userId(),
-                currentUser.scope());
+                currentUser.authority());
     }
 
     /**

@@ -3,7 +3,7 @@ package com.drones.vision.api.demo;
 import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.identity.application.AssignmentService;
 import com.drones.vision.identity.domain.model.AssignmentRole;
-import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.identity.domain.model.User;
 import com.drones.vision.kernel.UserId;
@@ -34,9 +34,11 @@ import java.util.function.Consumer;
  *
  * <h2>Who the data belongs to</h2>
  * The pressing user, resolved once at the edge through {@link CurrentUser} — assets and marks carry
- * their {@link Ownership}, users and groups are created under their {@link VisibilityScope}, and
- * every gate the underlying services enforce still applies. With {@code vision.auth.enabled=false}
- * that is the dev principal with an unbounded scope, so a local press simply works.
+ * their {@link Ownership}, users and groups are created under their {@link Authority}
+ * (docs/plans/active/AUTH-ROLES-PLAN.md wave B6, superseding the bare {@code VisibilityScope} this
+ * passed before), and every gate the underlying services enforce still applies. With {@code
+ * vision.auth.enabled=false} that is the dev principal's {@link Authority#full()}, so a local press
+ * simply works.
  */
 @Component
 @ConditionalOnProperty(prefix = "vision.demo", name = "enabled", matchIfMissing = true)
@@ -76,12 +78,12 @@ public class DemoScenario {
         Objects.requireNonNull(plan, "plan must not be null");
         Ownership ownership = currentUser.ownership();
         UserId actor = currentUser.userId();
-        VisibilityScope scope = currentUser.scope();
+        Authority authority = currentUser.authority();
         List<String> problems = new ArrayList<>();
 
-        List<User> roster = people.seed(plan.users(), actor, scope, problems::add);
+        List<User> roster = people.seed(plan.users(), actor, authority, problems::add);
         List<DemoAsset> created = fleet.seed(plan.assets(), ownership, actor, problems::add);
-        int assigned = assign(created, roster, scope, actor, problems::add);
+        int assigned = assign(created, roster, authority, actor, problems::add);
         int zones = operations.seedZones(problems::add);
         int marks = operations.seedMarks(currentUser.viewer(), problems::add);
         int streams = fleet.startStreams(created, plan.startStreams(), problems::add);
@@ -101,7 +103,7 @@ public class DemoScenario {
      * Hands every asset to a pilot, round-robin, so no roster entry is left without something to
      * fly and every asset has an owner in the assignment view.
      */
-    private int assign(List<DemoAsset> created, List<User> roster, VisibilityScope scope, UserId actor,
+    private int assign(List<DemoAsset> created, List<User> roster, Authority authority, UserId actor,
                        Consumer<String> problems) {
         if (created.isEmpty() || roster.isEmpty()) {
             return 0;
@@ -109,19 +111,19 @@ public class DemoScenario {
         int granted = 0;
         for (int index = 0; index < created.size(); index++) {
             DemoAsset asset = created.get(index);
-            granted += grant(roster.get(index % roster.size()), asset, scope, actor, problems);
+            granted += grant(roster.get(index % roster.size()), asset, authority, actor, problems);
             if (index % SECOND_PILOT_EVERY == 0 && roster.size() > 1) {
-                granted += grant(roster.get((index + 1) % roster.size()), asset, scope, actor, problems);
+                granted += grant(roster.get((index + 1) % roster.size()), asset, authority, actor, problems);
             }
         }
         return granted;
     }
 
     /** Every demo grant is the wide {@link AssignmentRole#PILOT} seat — the demo has no CREW story. */
-    private int grant(User pilot, DemoAsset asset, VisibilityScope scope, UserId actor,
+    private int grant(User pilot, DemoAsset asset, Authority authority, UserId actor,
                       Consumer<String> problems) {
         try {
-            assignments.assign(pilot.id(), asset.id(), AssignmentRole.PILOT, actor, scope);
+            assignments.assign(pilot.id(), asset.id(), AssignmentRole.PILOT, actor, authority);
             return 1;
         } catch (RuntimeException e) {
             problems.accept("assign " + pilot.username() + " to " + asset.displayName() + ": "

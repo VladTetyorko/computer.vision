@@ -33,6 +33,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.net.URI;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -118,7 +119,7 @@ class DeviceControllerTest {
 
             @Override
             public Authority authority() {
-                throw new UnsupportedOperationException("DeviceController never calls authority()");
+                return new Authority(scope, EnumSet.allOf(com.drones.vision.platform.Capability.class));
             }
         });
     }

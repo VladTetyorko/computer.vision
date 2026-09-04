@@ -76,7 +76,7 @@ public class DatasetController {
     @ResponseStatus(HttpStatus.CREATED)
     public DatasetResponse create(@RequestBody CreateDatasetRequest request) {
         Dataset created = datasetService.create(request.toSpec(), currentUser.ownership(), currentUser.userId(),
-                currentUser.scope());
+                currentUser.authority());
         return toResponse(created);
     }
 
@@ -113,7 +113,7 @@ public class DatasetController {
     @DeleteMapping("/api/datasets/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable String id) {
-        datasetService.delete(DatasetId.of(id), currentUser.userId(), currentUser.scope());
+        datasetService.delete(DatasetId.of(id), currentUser.userId(), currentUser.authority());
     }
 
     private DatasetResponse toResponse(Dataset dataset) {

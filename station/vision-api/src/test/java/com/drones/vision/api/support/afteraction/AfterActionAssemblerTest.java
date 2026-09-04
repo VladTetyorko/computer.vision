@@ -42,6 +42,8 @@ import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditId;
 import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.platform.Capability;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.application.asset.AssetDeletion;
 import com.drones.vision.warehouse.application.asset.AssetDetails;
@@ -62,6 +64,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -139,7 +142,7 @@ class AfterActionAssemblerTest {
                 new FlightPassport(usageId, assetId, minimalProfile(STARTED_AT), minimalProfile(ENDED_AT));
         auditTrailPort.entries = List.of(auditEntry());
 
-        AfterActionPackage pkg = assembler.assemble(assetId, usageId, VisibilityScope.unbounded(), viewer(Role.ADMIN),
+        AfterActionPackage pkg = assembler.assemble(assetId, usageId, Authority.full(), viewer(Role.ADMIN),
                 "referee");
 
         assertEquals(List.of(AfterActionPartKind.TELEMETRY, AfterActionPartKind.DETECTIONS,
@@ -160,7 +163,7 @@ class AfterActionAssemblerTest {
                 UsagePhase.PREFLIGHT, UsageOrigin.STREAM, null);
         replayService.timeline = new UsageTimeline(openUsage, STARTED_AT, Instant.now(), List.of(), List.of());
 
-        AfterActionPackage pkg = assembler.assemble(assetId, usageId, VisibilityScope.unbounded(), viewer(Role.ADMIN),
+        AfterActionPackage pkg = assembler.assemble(assetId, usageId, Authority.full(), viewer(Role.ADMIN),
                 "referee");
 
         assertNull(pkg.endedAt());
@@ -173,7 +176,7 @@ class AfterActionAssemblerTest {
         replayService.recording = Optional.empty();
         vehicleProfileService.passportResult = new FlightPassport(usageId, assetId, null, null);
 
-        AfterActionPackage pkg = assembler.assemble(assetId, usageId, VisibilityScope.unbounded(), viewer(Role.ADMIN),
+        AfterActionPackage pkg = assembler.assemble(assetId, usageId, Authority.full(), viewer(Role.ADMIN),
                 "referee");
 
         AfterActionPart recording = partOf(pkg, AfterActionPartKind.RECORDING);
@@ -195,7 +198,7 @@ class AfterActionAssemblerTest {
         assetService.detailsError = new NoSuchElementException("No asset with id " + assetId.value());
 
         assertThrows(NoSuchElementException.class, () -> assembler.assemble(assetId, usageId,
-                VisibilityScope.unbounded(), viewer(Role.ADMIN), "referee"));
+                Authority.full(), viewer(Role.ADMIN), "referee"));
     }
 
     @Test
@@ -206,16 +209,19 @@ class AfterActionAssemblerTest {
         replayService.timeline = new UsageTimeline(foreignUsage, STARTED_AT, ENDED_AT, List.of(), List.of());
 
         assertThrows(NoSuchElementException.class, () -> assembler.assemble(assetId, usageId,
-                VisibilityScope.unbounded(), viewer(Role.ADMIN), "referee"));
+                Authority.full(), viewer(Role.ADMIN), "referee"));
     }
 
     @Test
     void assembleThrowsAccessDeniedWhenTheViewerMaySeeButNotExportTheAsset() {
         // ASSIGNED_ASSETS (PILOT) sees the asset (it is in assignedAssets) but canManage() is
-        // always false for that scope kind -- "seeing it is not the same as administering it".
-        VisibilityScope pilotScope = VisibilityScope.assignedAssets(Set.of(assetId));
+        // always false for that scope kind -- "seeing it is not the same as administering it",
+        // regardless of the capabilities held (full capabilities here, so it is the scope, not a
+        // missing capability, that fails the mayManageFleet() gate).
+        Authority pilotAuthority = new Authority(VisibilityScope.assignedAssets(Set.of(assetId)),
+                EnumSet.allOf(Capability.class));
 
-        assertThrows(AccessDeniedException.class, () -> assembler.assemble(assetId, usageId, pilotScope,
+        assertThrows(AccessDeniedException.class, () -> assembler.assemble(assetId, usageId, pilotAuthority,
                 viewer(Role.PILOT), "pilot"));
         assertFalse(replayService.timelineCalled, "must not resolve the timeline once the export gate fails");
     }
@@ -345,7 +351,8 @@ class AfterActionAssemblerTest {
         // Unreachable end-to-end via assemble() under today's three real roles (see class javadoc)
         // -- exercised directly here, which is the whole reason resolveAudit is package-private.
         AfterActionAssembler.AuditResolution resolution =
-                assembler.resolveAudit(assetId, VisibilityScope.assignedAssets(Set.of(assetId)));
+                assembler.resolveAudit(assetId, new Authority(VisibilityScope.assignedAssets(Set.of(assetId)),
+                        EnumSet.allOf(Capability.class)));
         assertEquals(AfterActionPartState.FORBIDDEN, resolution.part().state());
         assertEquals(0, resolution.part().count());
         assertEquals(List.of(), resolution.entries());
@@ -354,14 +361,14 @@ class AfterActionAssemblerTest {
     @Test
     void resolveAuditReturnsAbsentWhenAllowedButNoEntriesExist() {
         auditTrailPort.entries = List.of();
-        AfterActionAssembler.AuditResolution resolution = assembler.resolveAudit(assetId, VisibilityScope.unbounded());
+        AfterActionAssembler.AuditResolution resolution = assembler.resolveAudit(assetId, Authority.full());
         assertEquals(AfterActionPartState.ABSENT, resolution.part().state());
     }
 
     @Test
     void resolveAuditReturnsPresentWithEntriesWhenAllowedAndEntriesExist() {
         auditTrailPort.entries = List.of(auditEntry());
-        AfterActionAssembler.AuditResolution resolution = assembler.resolveAudit(assetId, VisibilityScope.unbounded());
+        AfterActionAssembler.AuditResolution resolution = assembler.resolveAudit(assetId, Authority.full());
         assertEquals(AfterActionPartState.PRESENT, resolution.part().state());
         assertEquals(1, resolution.part().count());
         assertEquals(1, resolution.entries().size());
@@ -592,14 +599,14 @@ class AfterActionAssemblerTest {
         }
 
         @Override
-        public VehicleProfile probe(AssetId assetId, Duration window, UserId actor, VisibilityScope scope) {
+        public VehicleProfile probe(AssetId assetId, Duration window, UserId actor, Authority authority) {
             throw new UnsupportedOperationException();
         }
 
         @Override
         public VehicleProfile captureSnapshot(AssetId assetId, UsageId usageId,
                 com.drones.vision.flight.domain.model.FlightPhase phase, Duration window, UserId actor,
-                VisibilityScope scope) {
+                Authority authority) {
             throw new UnsupportedOperationException();
         }
 

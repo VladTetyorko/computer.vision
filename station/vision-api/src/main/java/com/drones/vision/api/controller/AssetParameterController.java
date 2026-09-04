@@ -10,6 +10,7 @@ import com.drones.vision.flight.domain.model.ParameterReading;
 import com.drones.vision.flight.domain.model.ParameterWriteOutcome;
 import com.drones.vision.flight.domain.model.VehicleProfile;
 import com.drones.vision.kernel.AssetId;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -36,12 +37,16 @@ import java.util.Set;
  * below.
  *
  * <h2>Authorization</h2>
- * Every call resolves {@link CurrentUser#scope()} and passes it straight into {@link
- * RemediationService#writeParameter}, which enforces {@code canManage}/{@code canAdminister}
- * per-tier (docs/plans/active/DRONE-ONBOARDING-PLAN.md §6.1) and audits a denial as {@link
- * com.drones.vision.platform.AccessDeniedException} (403) — the same scoped-command shape {@link
- * FlightCommandController} already uses for {@code arm}/{@code disarm}/{@code return-home}, so a
- * caller outside their management scope is refused exactly the same honest, audited way.
+ * Every call resolves {@link CurrentUser#authority()} and passes it straight into {@link
+ * RemediationService#writeParameter} (docs/plans/active/AUTH-ROLES-PLAN.md wave B6, superseding the
+ * bare {@code VisibilityScope} it passed before), which enforces {@code mayManageFleet}/{@code
+ * mayAdminister} per-tier (docs/plans/active/DRONE-ONBOARDING-PLAN.md §6.1) and audits a denial as
+ * {@link com.drones.vision.platform.AccessDeniedException} (403) — the same scoped-command shape
+ * {@link FlightCommandController} already uses for {@code arm}/{@code disarm}/{@code return-home},
+ * so a caller outside their management scope is refused exactly the same honest, audited way.
+ * {@link #resolveSpelling} only ever reads {@link VehicleProfileService#latestProfile}, a plain
+ * visibility read, so it still takes {@link CurrentUser#authority()}'s {@code scope()} half, not the
+ * whole {@link Authority}.
  *
  * <h2>What {@code consent} gates</h2>
  * {@link RemediationService#writeParameter}'s own {@code explicitConsent} parameter only gates
@@ -118,11 +123,11 @@ public class AssetParameterController {
         double value = request.requireValue();
 
         AssetId assetId = AssetId.of(id);
-        VisibilityScope scope = currentUser.scope();
-        String targetName = resolveSpelling(assetId, scope, requestedName);
+        Authority authority = currentUser.authority();
+        String targetName = resolveSpelling(assetId, authority.scope(), requestedName);
 
-        ParameterWriteOutcome outcome =
-                remediationService.writeParameter(assetId, targetName, value, consent, currentUser.userId(), scope);
+        ParameterWriteOutcome outcome = remediationService.writeParameter(assetId, targetName, value, consent,
+                currentUser.userId(), authority);
         return ParameterWriteResponse.from(outcome);
     }
 

@@ -26,12 +26,23 @@ public interface ScopeResolver {
      * <p>Precedence, highest privilege first:
      * <ol>
      *   <li>an ADMIN membership anywhere &rarr; {@link VisibilityScope#unbounded()};</li>
-     *   <li>otherwise any MANAGER membership &rarr; {@link VisibilityScope#groups(java.util.Set)} over
-     *       the union of each MANAGER group's subtree (self + descendants);</li>
+     *   <li>otherwise any MANAGER or VIEWER membership (wave B6) &rarr;
+     *       {@link VisibilityScope#groups(java.util.Set)} over the union of each such group's subtree
+     *       (self + descendants);</li>
      *   <li>otherwise (PILOT-only, or no membership at all) &rarr;
      *       {@link VisibilityScope#assignedAssets(java.util.Set)} over the pilot's assignments — which
      *       is the empty set, and so includes nothing, for a user with no assignments.</li>
      * </ol>
+     *
+     * <p>A {@link Role#VIEWER}-only user now resolves a {@code GROUPS} scope just like a MANAGER
+     * (docs/plans/active/AUTH-ROLES-PLAN.md §3.6's staging rule, satisfied as of wave B6: every
+     * {@code canManageOrg()}/{@code canManage()}/{@code canAdminister()} call site had first migrated
+     * onto {@link Authority} before this widening landed, so a VIEWER handed a wide {@code
+     * VisibilityScope} cannot pass one of those deprecated predicates directly — {@link
+     * Authority#mayManageOrg()}/{@link Authority#mayManageFleet(com.drones.vision.kernel.Ownership)}/
+     * {@link Authority#mayAdminister()} each additionally require a capability a VIEWER never holds,
+     * see {@link RoleAuthority#capabilitiesOf}). A VIEWER's wide scope is read-only in effect: it can
+     * see its subtree, but every mutating gate still refuses it on the capability check.
      *
      * @param user the acting user
      * @return the user's visibility scope
@@ -45,14 +56,7 @@ public interface ScopeResolver {
      *
      * <p>A user with no memberships (empty {@link User#topRole()}) holds no capabilities — the same
      * safe default {@link Role#VIEWER} gets, and for the same reason: nothing to grant authority
-     * from. <strong>Precedence between {@link #scopeFor(User)} and this method is unchanged from
-     * before this method existed</strong> — see docs/plans/active/AUTH-ROLES-PLAN.md §3.6's staging
-     * rule: a {@link Role#VIEWER}-only user resolves through {@link #scopeFor(User)}'s existing
-     * "PILOT-only, or no membership at all" branch (assigned-assets, ordinarily empty for a viewer),
-     * not a widened group scope — that widening is wave B6's, gated on every {@code
-     * canManageOrg()}/{@code canManage()}/{@code canAdminister()} call site having first migrated
-     * onto {@link Authority}, so a {@code VIEWER} handed a wide scope today could not accidentally
-     * pass one of those deprecated predicates directly.
+     * from.
      *
      * @param user the acting user
      * @return the user's authority — scope plus capabilities

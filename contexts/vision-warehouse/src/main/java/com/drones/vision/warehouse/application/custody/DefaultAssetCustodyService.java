@@ -7,6 +7,7 @@ import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.Custody;
@@ -57,7 +58,7 @@ public final class DefaultAssetCustodyService implements AssetCustodyService {
     }
 
     @Override
-    public Asset issue(AssetId id, UserId custodianId, String location, UserId actor, VisibilityScope scope) {
+    public Asset issue(AssetId id, UserId custodianId, String location, UserId actor, Authority scope) {
         Objects.requireNonNull(custodianId, "custodianId must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
@@ -76,7 +77,7 @@ public final class DefaultAssetCustodyService implements AssetCustodyService {
     }
 
     @Override
-    public Asset returnToStock(AssetId id, UserId actor, VisibilityScope scope) {
+    public Asset returnToStock(AssetId id, UserId actor, Authority scope) {
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
         Asset asset = requireManageable(id, actor, scope, "RETURN");
@@ -91,7 +92,7 @@ public final class DefaultAssetCustodyService implements AssetCustodyService {
     }
 
     @Override
-    public Asset ground(AssetId id, MaintenanceKind kind, String summary, UserId actor, VisibilityScope scope) {
+    public Asset ground(AssetId id, MaintenanceKind kind, String summary, UserId actor, Authority scope) {
         Objects.requireNonNull(kind, "kind must not be null");
         if (summary == null || summary.isBlank()) {
             throw new IllegalArgumentException("summary must not be blank");
@@ -112,7 +113,7 @@ public final class DefaultAssetCustodyService implements AssetCustodyService {
     }
 
     @Override
-    public Asset release(AssetId id, UserId actor, VisibilityScope scope) {
+    public Asset release(AssetId id, UserId actor, Authority scope) {
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
         Asset asset = requireManageable(id, actor, scope, "RELEASE");
@@ -136,7 +137,7 @@ public final class DefaultAssetCustodyService implements AssetCustodyService {
     }
 
     @Override
-    public Asset retire(AssetId id, UserId actor, VisibilityScope scope) {
+    public Asset retire(AssetId id, UserId actor, Authority scope) {
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
         Asset asset = requireManageable(id, actor, scope, "RETIRE");
@@ -154,11 +155,11 @@ public final class DefaultAssetCustodyService implements AssetCustodyService {
         return saved;
     }
 
-    private Asset requireManageable(AssetId id, UserId actor, VisibilityScope scope, String action) {
+    private Asset requireManageable(AssetId id, UserId actor, Authority scope, String action) {
         Objects.requireNonNull(id, "id must not be null");
         Asset asset = assetRepository.findById(id)
                 .orElseThrow(() -> new NoSuchElementException("Unknown asset: " + id.value()));
-        if (!scope.canManage(asset.ownership())) {
+        if (!scope.mayManageFleet(asset.ownership())) {
             audit(actor, id, action, DENIED_OUT_OF_SCOPE);
             throw new AccessDeniedException("Asset " + id.value() + " is outside your management scope; you may not "
                     + action.toLowerCase(Locale.ROOT) + " it");

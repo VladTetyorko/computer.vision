@@ -13,6 +13,7 @@ import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -75,7 +76,7 @@ class AssetParameterControllerTest {
         ParameterWriteOutcome outcome = new ParameterWriteOutcome("SR0_EXTRA1", RemediationResultCode.ACCEPTED,
                 0.0, 10.0, "written and read back");
         when(remediationService.writeParameter(eq(assetId), eq("SR0_EXTRA1"), eq(10.0), eq(true), eq(ownerId),
-                any(VisibilityScope.class))).thenReturn(outcome);
+                any(Authority.class))).thenReturn(outcome);
 
         mockMvc.perform(post("/api/assets/{id}/parameters", assetId.value())
                         .contentType(MediaType.APPLICATION_JSON)
@@ -87,7 +88,7 @@ class AssetParameterControllerTest {
                 .andExpect(jsonPath("$.newValue").value(10.0));
 
         verify(remediationService).writeParameter(eq(assetId), eq("SR0_EXTRA1"), eq(10.0), eq(true), eq(ownerId),
-                any(VisibilityScope.class));
+                any(Authority.class));
         verifyNoInteractions(vehicleProfileService); // unaliased name: no profile lookup needed
     }
 
@@ -140,7 +141,7 @@ class AssetParameterControllerTest {
     @Test
     void writeParameterReturns403WhenTheAssetIsOutsideManagementScope() throws Exception {
         when(remediationService.writeParameter(eq(assetId), eq("SR0_EXTRA1"), eq(10.0), eq(true), eq(ownerId),
-                any(VisibilityScope.class)))
+                any(Authority.class)))
                 .thenThrow(new AccessDeniedException("Asset " + assetId.value() + " is outside your management scope"));
 
         mockMvc.perform(post("/api/assets/{id}/parameters", assetId.value())
@@ -153,7 +154,7 @@ class AssetParameterControllerTest {
     @Test
     void writeParameterReturns404ForAnUnknownAsset() throws Exception {
         when(remediationService.writeParameter(eq(assetId), eq("SR0_EXTRA1"), eq(10.0), eq(true), eq(ownerId),
-                any(VisibilityScope.class)))
+                any(Authority.class)))
                 .thenThrow(new NoSuchElementException("Unknown asset: " + assetId.value()));
 
         mockMvc.perform(post("/api/assets/{id}/parameters", assetId.value())
@@ -177,7 +178,7 @@ class AssetParameterControllerTest {
     @Test
     void writeParameterReturns409WhenTheAircraftIsArmedOrHasNoConfigurableDevice() throws Exception {
         when(remediationService.writeParameter(eq(assetId), eq("SR0_EXTRA1"), eq(10.0), eq(true), eq(ownerId),
-                any(VisibilityScope.class)))
+                any(Authority.class)))
                 .thenThrow(new IllegalStateException("Asset " + assetId.value() + " is armed; refusing to write"));
 
         mockMvc.perform(post("/api/assets/{id}/parameters", assetId.value())
@@ -190,7 +191,7 @@ class AssetParameterControllerTest {
     @Test
     void writeParameterReturns400WhenTheServiceRejectsATierCOrUnclassifiedName() throws Exception {
         when(remediationService.writeParameter(eq(assetId), eq("ARMING_CHECK"), eq(1.0), eq(true), eq(ownerId),
-                any(VisibilityScope.class)))
+                any(Authority.class)))
                 .thenThrow(new IllegalArgumentException("Parameter 'ARMING_CHECK' is not on the writable allowlist"));
 
         mockMvc.perform(post("/api/assets/{id}/parameters", assetId.value())
@@ -209,7 +210,7 @@ class AssetParameterControllerTest {
         ParameterWriteOutcome outcome =
                 new ParameterWriteOutcome("MAV_SYSID", RemediationResultCode.ACCEPTED, 1.0, 2.0, "ok");
         when(remediationService.writeParameter(eq(assetId), eq("MAV_SYSID"), eq(2.0), eq(true), eq(ownerId),
-                any(VisibilityScope.class))).thenReturn(outcome);
+                any(Authority.class))).thenReturn(outcome);
 
         mockMvc.perform(post("/api/assets/{id}/parameters", assetId.value())
                         .contentType(MediaType.APPLICATION_JSON)
@@ -218,9 +219,9 @@ class AssetParameterControllerTest {
                 .andExpect(jsonPath("$.parameterName").value("MAV_SYSID"));
 
         verify(remediationService).writeParameter(eq(assetId), eq("MAV_SYSID"), eq(2.0), eq(true), eq(ownerId),
-                any(VisibilityScope.class));
+                any(Authority.class));
         verify(remediationService, never()).writeParameter(eq(assetId), eq("SYSID_THISMAV"), any(Double.class),
-                eq(true), eq(ownerId), any(VisibilityScope.class));
+                eq(true), eq(ownerId), any(Authority.class));
     }
 
     @Test
@@ -230,7 +231,7 @@ class AssetParameterControllerTest {
         ParameterWriteOutcome outcome =
                 new ParameterWriteOutcome("SYSID_THISMAV", RemediationResultCode.ACCEPTED, 1.0, 3.0, "ok");
         when(remediationService.writeParameter(eq(assetId), eq("SYSID_THISMAV"), eq(3.0), eq(true), eq(ownerId),
-                any(VisibilityScope.class))).thenReturn(outcome);
+                any(Authority.class))).thenReturn(outcome);
 
         mockMvc.perform(post("/api/assets/{id}/parameters", assetId.value())
                         .contentType(MediaType.APPLICATION_JSON)
@@ -239,7 +240,7 @@ class AssetParameterControllerTest {
                 .andExpect(jsonPath("$.parameterName").value("SYSID_THISMAV"));
 
         verify(remediationService).writeParameter(eq(assetId), eq("SYSID_THISMAV"), eq(3.0), eq(true), eq(ownerId),
-                any(VisibilityScope.class));
+                any(Authority.class));
     }
 
     @Test
@@ -249,7 +250,7 @@ class AssetParameterControllerTest {
         ParameterWriteOutcome outcome =
                 new ParameterWriteOutcome("SYSID_THISMAV", RemediationResultCode.NO_ACK, null, null, "no ack");
         when(remediationService.writeParameter(eq(assetId), eq("SYSID_THISMAV"), eq(4.0), eq(true), eq(ownerId),
-                any(VisibilityScope.class))).thenReturn(outcome);
+                any(Authority.class))).thenReturn(outcome);
 
         mockMvc.perform(post("/api/assets/{id}/parameters", assetId.value())
                         .contentType(MediaType.APPLICATION_JSON)
@@ -258,6 +259,6 @@ class AssetParameterControllerTest {
                 .andExpect(jsonPath("$.outcome").value("NO_ACK"));
 
         verify(remediationService).writeParameter(eq(assetId), eq("SYSID_THISMAV"), eq(4.0), eq(true), eq(ownerId),
-                any(VisibilityScope.class));
+                any(Authority.class));
     }
 }

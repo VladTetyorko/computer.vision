@@ -13,7 +13,7 @@ import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.platform.AuditTrailPort;
-import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -45,7 +45,7 @@ import java.util.function.Supplier;
  * CatalogSource#CONFIG} itself carrying the "not verified live" honesty signal.
  *
  * <h2>Promote/rollback</h2>
- * {@link #promote}/{@link #rollback} both require {@link VisibilityScope#canAdminister()} — ADMIN
+ * {@link #promote}/{@link #rollback} both require {@link Authority#mayAdminister()} — ADMIN
  * only (docs/plans/done/OPS-UX-PLAN.md §1). {@link #promote} resolves (or, for a worker-only model
  * with no row yet, synthesizes — same defaults {@link CvModelView#synthesize} uses, see that
  * method's own javadoc) the target row, calls the worker's own {@link ModelRegistryPort#promote}
@@ -148,12 +148,12 @@ public final class DefaultModelRegistryService implements ModelRegistryService {
     }
 
     @Override
-    public PromotionResult promote(String modelId, String version, UserId actor, VisibilityScope scope) {
+    public PromotionResult promote(String modelId, String version, UserId actor, Authority scope) {
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
         ModelRef ref = new ModelRef(modelId, version);
 
-        if (!scope.canAdminister()) {
+        if (!scope.mayAdminister()) {
             auditModel(actor, ref, DENIED_OUT_OF_SCOPE);
             throw new AccessDeniedException("Not permitted to promote models");
         }
@@ -188,11 +188,11 @@ public final class DefaultModelRegistryService implements ModelRegistryService {
     }
 
     @Override
-    public PromotionResult rollback(UserId actor, VisibilityScope scope) {
+    public PromotionResult rollback(UserId actor, Authority scope) {
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
 
-        if (!scope.canAdminister()) {
+        if (!scope.mayAdminister()) {
             auditRollback(actor, null, DENIED_OUT_OF_SCOPE);
             throw new AccessDeniedException("Not permitted to roll back models");
         }

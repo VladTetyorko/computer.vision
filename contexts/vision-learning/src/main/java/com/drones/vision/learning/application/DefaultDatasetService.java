@@ -19,13 +19,14 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.function.Supplier;
 import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 
 /**
  * The one implementation of {@link DatasetService}.
  *
  * <h2>Scope gate</h2>
- * {@link #create}/{@link #delete} require {@link VisibilityScope#canManageOrg()} — any
+ * {@link #create}/{@link #delete} require {@link Authority#mayManageOrg()} — any
  * manager/admin, not further restricted to the dataset's own owning group (docs/plans/done/CV-TRAINING-PLAN.md
  * Open Questions §4: "create/delete = canManageOrg"). {@link #get} 403s (not the usual hiding 404)
  * when the dataset exists but is outside a {@link VisibilityScope.Kind#GROUPS} scope's visible
@@ -68,14 +69,14 @@ public final class DefaultDatasetService implements DatasetService {
     }
 
     @Override
-    public Dataset create(DatasetSpec spec, Ownership ownership, UserId actor, VisibilityScope scope) {
+    public Dataset create(DatasetSpec spec, Ownership ownership, UserId actor, Authority scope) {
         Objects.requireNonNull(spec, "spec must not be null");
         Objects.requireNonNull(ownership, "ownership must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
 
         DatasetId id = DatasetId.random();
-        if (!scope.canManageOrg()) {
+        if (!scope.mayManageOrg()) {
             auditDenied(actor, id, ACTION_CREATE, "Denied creating dataset '" + spec.name() + "': out of scope");
             throw new AccessDeniedException("Not permitted to create datasets");
         }
@@ -110,12 +111,12 @@ public final class DefaultDatasetService implements DatasetService {
     }
 
     @Override
-    public void delete(DatasetId id, UserId actor, VisibilityScope scope) {
+    public void delete(DatasetId id, UserId actor, Authority scope) {
         Objects.requireNonNull(id, "id must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
         Dataset dataset = require(id);
-        if (!scope.canManageOrg()) {
+        if (!scope.mayManageOrg()) {
             auditDenied(actor, id, ACTION_DELETE, "Denied deleting dataset " + id.value() + ": out of scope");
             throw new AccessDeniedException("Not permitted to delete dataset " + id.value());
         }

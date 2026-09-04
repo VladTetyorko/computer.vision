@@ -16,6 +16,8 @@ import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.platform.Capability;
 import com.drones.vision.platform.VisibilityScope;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -139,7 +141,7 @@ class DefaultModelRegistryServiceTest {
 
     @Test
     void promoteDeniedForAPilotScopeAndAuditsTheDenialWithoutCallingThePort() {
-        VisibilityScope pilotScope = VisibilityScope.assignedAssets(Set.of());
+        Authority pilotScope = new Authority(VisibilityScope.assignedAssets(Set.of()), Set.of());
 
         AccessDeniedException ex = assertThrows(AccessDeniedException.class,
                 () -> service.promote("yolo26n.pt", "latest", actor, pilotScope));
@@ -152,7 +154,7 @@ class DefaultModelRegistryServiceTest {
 
     @Test
     void promoteDeniedForAManagerScopeAndAuditsTheDenialWithoutCallingThePort() {
-        VisibilityScope managerScope = VisibilityScope.groups(Set.of());
+        Authority managerScope = new Authority(VisibilityScope.groups(Set.of()), Set.of(Capability.MANAGE_ORG));
 
         assertThrows(AccessDeniedException.class,
                 () -> service.promote("yolo26n.pt", "latest", actor, managerScope));
@@ -164,7 +166,7 @@ class DefaultModelRegistryServiceTest {
     @Test
     void promoteRejectsABlankModelId() {
         assertThrows(IllegalArgumentException.class,
-                () -> service.promote("", "latest", actor, VisibilityScope.unbounded()));
+                () -> service.promote("", "latest", actor, Authority.full()));
     }
 
     @Test
@@ -173,7 +175,7 @@ class DefaultModelRegistryServiceTest {
                 Instant.parse("2026-08-01T00:00:00Z")));
         cvModelRepository.rows.add(row("yolo11n.pt", "latest", ModelStatus.DRAFT, null, null));
 
-        PromotionResult result = service.promote("yolo11n.pt", "latest", actor, VisibilityScope.unbounded());
+        PromotionResult result = service.promote("yolo11n.pt", "latest", actor, Authority.full());
 
         assertEquals("yolo11n.pt", result.modelId());
         assertEquals(ModelStatus.LIVE, result.status());
@@ -197,7 +199,7 @@ class DefaultModelRegistryServiceTest {
     void promoteWithNoPreviousLiveLeavesPreviousFieldsNull() {
         cvModelRepository.rows.add(row("yolo26n.pt", "latest", ModelStatus.DRAFT, null, null));
 
-        PromotionResult result = service.promote("yolo26n.pt", "latest", actor, VisibilityScope.unbounded());
+        PromotionResult result = service.promote("yolo26n.pt", "latest", actor, Authority.full());
 
         assertNull(result.previousModelId());
         assertNull(result.previousVersion());
@@ -205,7 +207,7 @@ class DefaultModelRegistryServiceTest {
 
     @Test
     void promoteSynthesizesARowForAWorkerOnlyModelWithNoPlatformRowYet() {
-        PromotionResult result = service.promote("orion12l.pt", "latest", actor, VisibilityScope.unbounded());
+        PromotionResult result = service.promote("orion12l.pt", "latest", actor, Authority.full());
 
         assertEquals(ModelStatus.LIVE, result.status());
         CvModelRecord saved = cvModelRepository.get("orion12l.pt", "latest");
@@ -219,7 +221,7 @@ class DefaultModelRegistryServiceTest {
         cvModelRepository.rows.add(row("yolo26n.pt", "latest", ModelStatus.LIVE, actor, clock.instant));
 
         IllegalStateException ex = assertThrows(IllegalStateException.class,
-                () -> service.promote("yolo11n.pt", "latest", actor, VisibilityScope.unbounded()));
+                () -> service.promote("yolo11n.pt", "latest", actor, Authority.full()));
         assertTrue(ex.getMessage().contains("unknown id"));
 
         assertTrue(onlyEntry().details().get("result").startsWith("REFUSED:"));
@@ -233,7 +235,7 @@ class DefaultModelRegistryServiceTest {
     @Test
     void rollbackDeniedForAManagerScope() {
         assertThrows(AccessDeniedException.class,
-                () -> service.rollback(actor, VisibilityScope.groups(Set.of())));
+                () -> service.rollback(actor, new Authority(VisibilityScope.groups(Set.of()), Set.of(Capability.MANAGE_ORG))));
         assertEquals("DENIED:out of scope", onlyEntry().details().get("result"));
     }
 
@@ -242,7 +244,7 @@ class DefaultModelRegistryServiceTest {
         cvModelRepository.rows.add(row("yolo26n.pt", "latest", ModelStatus.LIVE, actor, clock.instant));
 
         IllegalStateException ex = assertThrows(IllegalStateException.class,
-                () -> service.rollback(actor, VisibilityScope.unbounded()));
+                () -> service.rollback(actor, Authority.full()));
         assertTrue(ex.getMessage().contains("No previous model"));
         assertEquals("REFUSED:no previous model", onlyEntry().details().get("result"));
         assertNull(modelRegistry.lastPromoted);
@@ -257,7 +259,7 @@ class DefaultModelRegistryServiceTest {
         cvModelRepository.rows.add(row("orion12l.pt", "latest", ModelStatus.RETIRED, actor,
                 Instant.parse("2026-08-05T00:00:00Z")));
 
-        PromotionResult result = service.rollback(actor, VisibilityScope.unbounded());
+        PromotionResult result = service.rollback(actor, Authority.full());
 
         assertEquals("yolo11n.pt", result.modelId(), "the most recently retired-by-promotion row wins");
         assertEquals(ModelStatus.LIVE, result.status());
@@ -278,7 +280,7 @@ class DefaultModelRegistryServiceTest {
                 Instant.parse("2026-08-01T00:00:00Z")));
         modelRegistry.promoteFailure = new IllegalStateException("no artifact on disk");
 
-        assertThrows(IllegalStateException.class, () -> service.rollback(actor, VisibilityScope.unbounded()));
+        assertThrows(IllegalStateException.class, () -> service.rollback(actor, Authority.full()));
 
         assertTrue(onlyEntry().details().get("result").startsWith("REFUSED:"));
         assertEquals(ModelStatus.LIVE, cvModelRepository.get("yolo26n.pt", "latest").status(),

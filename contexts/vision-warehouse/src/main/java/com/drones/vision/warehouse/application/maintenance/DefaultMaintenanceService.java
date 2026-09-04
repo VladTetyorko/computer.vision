@@ -7,6 +7,7 @@ import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.MaintenanceId;
@@ -46,7 +47,7 @@ public final class DefaultMaintenanceService implements MaintenanceService, Main
 
     @Override
     public MaintenanceRecord open(AssetId assetId, MaintenanceKind kind, String summary, UserId actor,
-                                   VisibilityScope scope) {
+                                   Authority scope) {
         Objects.requireNonNull(kind, "kind must not be null");
         if (summary == null || summary.isBlank()) {
             throw new IllegalArgumentException("summary must not be blank");
@@ -63,7 +64,7 @@ public final class DefaultMaintenanceService implements MaintenanceService, Main
     }
 
     @Override
-    public MaintenanceRecord close(MaintenanceId id, UserId actor, VisibilityScope scope) {
+    public MaintenanceRecord close(MaintenanceId id, UserId actor, Authority scope) {
         Objects.requireNonNull(id, "id must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
@@ -123,10 +124,10 @@ public final class DefaultMaintenanceService implements MaintenanceService, Main
                 .toList();
     }
 
-    private Asset requireManageable(AssetId assetId, VisibilityScope scope) {
+    private Asset requireManageable(AssetId assetId, Authority scope) {
         Asset asset = assetRepository.findById(assetId)
                 .orElseThrow(() -> new NoSuchElementException("Unknown asset: " + assetId.value()));
-        if (!scope.canManage(asset.ownership())) {
+        if (!scope.mayManageFleet(asset.ownership())) {
             throw new AccessDeniedException("Asset " + assetId.value() + " is outside your management scope");
         }
         return asset;

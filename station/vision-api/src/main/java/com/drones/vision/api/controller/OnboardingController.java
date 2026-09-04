@@ -123,7 +123,7 @@ public class OnboardingController {
     @PostMapping("/api/assets/{assetId}/probe")
     public VehicleProfileResponse probe(@PathVariable String assetId) {
         VehicleProfile profile = vehicleProfileService.probe(AssetId.of(assetId), properties.inventoryWindow(),
-                currentUser.userId(), currentUser.scope());
+                currentUser.userId(), currentUser.authority());
         return VehicleProfileResponse.from(profile);
     }
 
@@ -141,7 +141,7 @@ public class OnboardingController {
     @PostMapping("/api/assets/{assetId}/remediate")
     public RemediationResultResponse remediate(@PathVariable String assetId, @RequestBody RemediationRequest request) {
         return remediationOrchestrator.remediate(AssetId.of(assetId), request.featuresOrEmpty(),
-                request.actionsOrEmpty(), currentUser.userId(), currentUser.scope());
+                request.actionsOrEmpty(), currentUser.userId(), currentUser.authority());
     }
 
     /**

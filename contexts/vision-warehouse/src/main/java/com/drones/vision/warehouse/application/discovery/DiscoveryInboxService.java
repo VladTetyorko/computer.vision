@@ -2,6 +2,7 @@ package com.drones.vision.warehouse.application.discovery;
 
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
@@ -86,14 +87,14 @@ public interface DiscoveryInboxService {
      * the new asset's id.
      *
      * <p>Authorization mirrors {@code DefaultGroupService#create}'s new-group-under-a-parent gate:
-     * {@code !scope.canManageOrg()} refuses outright (registering fleet inventory is team-scoped
+     * {@code !scope.mayManageOrg()} refuses outright (registering fleet inventory is team-scoped
      * management, the same gate {@code AssetController#create} applies at the API layer for a
-     * direct, non-candidate create); then {@code !scope.includesGroup(command.ownership().groupId())}
+     * direct, non-candidate create); then {@code !scope.scope().includesGroup(command.ownership().groupId())}
      * refuses an attempt to hand the new asset to a group outside the caller's own subtree.
      *
      * @param id      the candidate to register
      * @param command the operator's overrides, including who will own the new asset
-     * @param scope   the acting user's visibility, checked as above
+     * @param scope   the acting user's authority, checked as above
      * @param actor   the user performing the registration
      * @return the created asset
      * @throws java.util.NoSuchElementException if no candidate has that id
@@ -103,6 +104,6 @@ public interface DiscoveryInboxService {
      *                                           already-registered one (propagated from {@link
      *                                           com.drones.vision.warehouse.application.asset.AssetService#createFromCandidate})
      */
-    Asset register(DiscoveryCandidateId id, RegisterFromCandidateCommand command, VisibilityScope scope,
+    Asset register(DiscoveryCandidateId id, RegisterFromCandidateCommand command, Authority scope,
                     UserId actor);
 }

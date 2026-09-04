@@ -19,6 +19,7 @@ import com.drones.vision.map.domain.model.CameraPoseSource;
 import com.drones.vision.map.domain.model.LayerId;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.platform.Authority;
+import com.drones.vision.platform.Capability;
 import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.warehouse.application.asset.AssetDetails;
 import com.drones.vision.warehouse.application.asset.AssetService;
@@ -34,6 +35,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.time.Instant;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -122,7 +124,7 @@ class CameraPoseControllerTest {
 
             @Override
             public Authority authority() {
-                throw new UnsupportedOperationException("CameraPoseController never calls authority()");
+                return new Authority(scope, EnumSet.allOf(Capability.class));
             }
         });
     }

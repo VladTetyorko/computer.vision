@@ -123,7 +123,7 @@ public class CvProfileController {
     @ResponseStatus(HttpStatus.CREATED)
     public CvProfileResponse create(@RequestBody CvProfileRequest request) {
         CvProfile created = cvProfileService.create(request.toSpec(), currentUser.ownership().groupId(),
-                currentUser.userId(), currentUser.scope());
+                currentUser.userId(), currentUser.authority());
         return CvProfileResponse.from(created);
     }
 
@@ -138,7 +138,7 @@ public class CvProfileController {
     @PutMapping("/api/cv/profiles/{id}")
     public CvProfileResponse update(@PathVariable String id, @RequestBody CvProfileRequest request) {
         CvProfile updated = cvProfileService.update(CvProfileId.of(id), request.toSpec(), currentUser.userId(),
-                currentUser.scope());
+                currentUser.authority());
         return CvProfileResponse.from(updated);
     }
 
@@ -150,7 +150,7 @@ public class CvProfileController {
     @DeleteMapping("/api/cv/profiles/{id}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void delete(@PathVariable String id) {
-        cvProfileService.delete(CvProfileId.of(id), currentUser.userId(), currentUser.scope());
+        cvProfileService.delete(CvProfileId.of(id), currentUser.userId(), currentUser.authority());
     }
 
     /**
@@ -162,7 +162,7 @@ public class CvProfileController {
     @PutMapping("/api/cv/bindings")
     public CvProfileBindingResponse bind(@RequestBody CvProfileBindingRequest request) {
         CvProfileBinding binding = cvProfileService.bind(request.toScopeKind(), request.scopeId(),
-                request.requireProfileId(), currentUser.userId(), currentUser.scope());
+                request.requireProfileId(), currentUser.userId(), currentUser.authority());
         return CvProfileBindingResponse.from(binding);
     }
 
@@ -174,7 +174,8 @@ public class CvProfileController {
     @DeleteMapping("/api/cv/bindings")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void unbind(@RequestBody CvProfileBindingRequest request) {
-        cvProfileService.unbind(request.toScopeKind(), request.scopeId(), currentUser.userId(), currentUser.scope());
+        cvProfileService.unbind(request.toScopeKind(), request.scopeId(), currentUser.userId(),
+                currentUser.authority());
     }
 
     /**

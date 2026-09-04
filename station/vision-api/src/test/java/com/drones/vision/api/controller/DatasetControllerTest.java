@@ -4,6 +4,7 @@ import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.learning.application.DatasetService;
 import com.drones.vision.learning.application.DatasetSpec;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.learning.domain.model.Dataset;
@@ -75,7 +76,7 @@ class DatasetControllerTest {
     @Test
     void createReturns201WithSampleCountsAllZeroAndThreadsOwnershipActorAndScope() throws Exception {
         DatasetId created = DatasetId.random();
-        when(datasetService.create(any(DatasetSpec.class), eq(ownership), eq(ownerId), any(VisibilityScope.class)))
+        when(datasetService.create(any(DatasetSpec.class), eq(ownership), eq(ownerId), any(Authority.class)))
                 .thenReturn(dataset(created, "Buildings", new CategoryId("building"), List.of("building", "tower")));
         when(trainingSampleRepositoryPort.countByDataset(eq(created), any())).thenReturn(0);
 
@@ -95,7 +96,7 @@ class DatasetControllerTest {
                 .andExpect(jsonPath("$.sampleCounts.DISCARDED").value(0));
 
         ArgumentCaptor<DatasetSpec> captor = ArgumentCaptor.forClass(DatasetSpec.class);
-        verify(datasetService).create(captor.capture(), eq(ownership), eq(ownerId), eq(currentUser.scope()));
+        verify(datasetService).create(captor.capture(), eq(ownership), eq(ownerId), eq(currentUser.authority()));
         assertEquals("Buildings", captor.getValue().name());
         assertEquals(List.of("building", "tower"), captor.getValue().classes());
     }
@@ -110,7 +111,7 @@ class DatasetControllerTest {
 
     @Test
     void createReturns403WhenCallerMayNotManageTheOrganization() throws Exception {
-        when(datasetService.create(any(DatasetSpec.class), eq(ownership), eq(ownerId), any(VisibilityScope.class)))
+        when(datasetService.create(any(DatasetSpec.class), eq(ownership), eq(ownerId), any(Authority.class)))
                 .thenThrow(new AccessDeniedException("Not permitted to create datasets"));
 
         mockMvc.perform(post("/api/datasets").contentType(MediaType.APPLICATION_JSON)
@@ -203,7 +204,7 @@ class DatasetControllerTest {
 
         mockMvc.perform(delete("/api/datasets/{id}", id.value())).andExpect(status().isNoContent());
 
-        verify(datasetService).delete(id, ownerId, currentUser.scope());
+        verify(datasetService).delete(id, ownerId, currentUser.authority());
     }
 
     @Test

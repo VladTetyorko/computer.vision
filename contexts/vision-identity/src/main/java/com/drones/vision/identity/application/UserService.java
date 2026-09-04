@@ -6,21 +6,23 @@ import com.drones.vision.kernel.UserId;
 
 import java.util.List;
 import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 
 /**
  * Creates and manages {@link User} accounts (docs/plans/done/U-AUTH-PLAN.md, wave 2; management gates added
  * by docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2 — deferred slice-2 cleanup; lifecycle + audit added by
- * docs/plans/active/AUTH-ROLES-PLAN.md D13/D14/D15, wave B2).
+ * docs/plans/active/AUTH-ROLES-PLAN.md D13/D14/D15, wave B2; scope-gated methods migrated onto
+ * {@link Authority}, wave B6).
  *
- * <p><strong>Management authority is derived from the acting {@link VisibilityScope}</strong>, whose
- * kind maps 1:1 to role: unbounded = ADMIN, groups = MANAGER, else PILOT/empty. Every gated method
- * takes both the acting scope (what may this caller manage) and the acting user's own id (who to
- * attribute the resulting audit entry to — a {@link VisibilityScope} carries no identity) and
- * enforces {@link VisibilityScope#canManageOrg()} plus the ≤-own-scope grant rule (see
- * {@link #create(UserSpec, UserId, VisibilityScope)}). An {@link VisibilityScope#unbounded()} scope
- * (ADMIN / the {@code vision.auth.enabled=false} dev principal) passes every gate — behavior is
- * byte-identical to before these gates existed.
+ * <p><strong>Management authority is derived from the acting {@link Authority}</strong>, whose wrapped
+ * scope's kind maps 1:1 to role: unbounded = ADMIN, groups = MANAGER, else PILOT/empty. Every gated
+ * method takes both the acting authority (what may this caller manage) and the acting user's own id
+ * (who to attribute the resulting audit entry to — neither an {@link Authority} nor a
+ * {@link VisibilityScope} carries identity) and enforces {@link Authority#mayManageOrg()} plus the
+ * ≤-own-scope grant rule (see {@link #create(UserSpec, UserId, Authority)}). An
+ * {@link Authority#full()} authority (ADMIN / the {@code vision.auth.enabled=false} dev principal)
+ * passes every gate — behavior is byte-identical to before these gates existed.
  *
  * <p>{@link #createFirstAdmin(FirstAdminSpec)} is the one exception: it takes neither, since it
  * exists precisely for the moment nobody has authority yet (docs/plans/active/AUTH-ROLES-PLAN.md
@@ -34,7 +36,7 @@ public interface UserService {
      *
      * <p>Enforcement, in order:
      * <ul>
-     *   <li>{@code !acting.canManageOrg()} → {@link AccessDeniedException} (a PILOT/empty scope may
+     *   <li>{@code !acting.mayManageOrg()} → {@link AccessDeniedException} (a PILOT/empty scope may
      *       not create users at all).</li>
      *   <li>A spec with <strong>no memberships</strong> is permitted only for an
      *       {@link VisibilityScope#unbounded() unbounded} (ADMIN) scope — a manager must place a new
@@ -57,12 +59,12 @@ public interface UserService {
      *
      * @param spec   the new user's shape
      * @param actor  the acting user's own id, for audit attribution
-     * @param acting the acting user's visibility scope
+     * @param acting the acting user's authority
      * @return the created, persisted user
      * @throws AccessDeniedException if {@code acting} may not create this user (403)
      * @throws IllegalStateException if {@link UserSpec#username()} is already taken (409)
      */
-    User create(UserSpec spec, UserId actor, VisibilityScope acting);
+    User create(UserSpec spec, UserId actor, Authority acting);
 
     /**
      * Lists the users visible to the acting scope (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2):
@@ -78,7 +80,7 @@ public interface UserService {
     /**
      * Enables or disables a user's ability to authenticate, subject to management authority. Idempotent.
      *
-     * <p>{@code !acting.canManageOrg()} → {@link AccessDeniedException}. If {@code acting} is not
+     * <p>{@code !acting.mayManageOrg()} → {@link AccessDeniedException}. If {@code acting} is not
      * unbounded, the target must have at least one membership whose group the scope
      * {@link VisibilityScope#includesGroup includes} — a manager may only enable/disable users
      * within their own subtree. An unbounded scope is unrestricted.
@@ -92,19 +94,19 @@ public interface UserService {
      * @param id      the user to update
      * @param enabled the new enabled state
      * @param actor   the acting user's own id, for audit attribution
-     * @param acting  the acting user's visibility scope
+     * @param acting  the acting user's authority
      * @return the updated user
      * @throws AccessDeniedException            if {@code acting} may not manage this user (403)
      * @throws java.util.NoSuchElementException if {@code id} is unknown (404)
      */
-    User setEnabled(UserId id, boolean enabled, UserId actor, VisibilityScope acting);
+    User setEnabled(UserId id, boolean enabled, UserId actor, Authority acting);
 
     /**
      * Wholesale-replaces a user's group memberships, subject to the same management authority and
-     * ≤-own-scope grant ceiling as {@link #create(UserSpec, UserId, VisibilityScope)}
+     * ≤-own-scope grant ceiling as {@link #create(UserSpec, UserId, Authority)}
      * (docs/plans/active/AUTH-ROLES-PLAN.md D14, wave B2 — memberships were write-once before this).
      *
-     * <p>Enforcement, in order: {@code !acting.canManageOrg()} → {@link AccessDeniedException};
+     * <p>Enforcement, in order: {@code !acting.mayManageOrg()} → {@link AccessDeniedException};
      * the target must already have at least one membership {@code acting} {@link
      * VisibilityScope#includesGroup includes} (an unbounded scope is exempt) — a manager may not
      * reach into a user entirely outside their subtree just to add themselves a foothold; an empty
@@ -122,14 +124,14 @@ public interface UserService {
      * @param id           the user whose memberships to replace
      * @param memberships  the complete new membership set (not a delta)
      * @param actor        the acting user's own id, for audit attribution
-     * @param acting       the acting user's visibility scope
+     * @param acting       the acting user's authority
      * @return the updated user
      * @throws AccessDeniedException            if {@code acting} may not edit this user, may not
      *                                           reach one of the requested groups, or would grant a
      *                                           role above its own ceiling (403)
      * @throws java.util.NoSuchElementException if {@code id} is unknown (404)
      */
-    User setMemberships(UserId id, List<Membership> memberships, UserId actor, VisibilityScope acting);
+    User setMemberships(UserId id, List<Membership> memberships, UserId actor, Authority acting);
 
     /**
      * Admin-resets a user's password, subject to the same management authority as {@link
@@ -146,13 +148,13 @@ public interface UserService {
      * @param rawPassword the new plaintext password to hash and store; must not be blank
      * @param id          the user whose password to reset
      * @param actor       the acting user's own id, for audit attribution
-     * @param acting      the acting user's visibility scope
+     * @param acting      the acting user's authority
      * @return the updated user
      * @throws AccessDeniedException            if {@code acting} may not manage this user (403)
      * @throws java.util.NoSuchElementException if {@code id} is unknown (404)
      * @throws IllegalArgumentException         if {@code rawPassword} is blank
      */
-    User setPassword(UserId id, String rawPassword, UserId actor, VisibilityScope acting);
+    User setPassword(UserId id, String rawPassword, UserId actor, Authority acting);
 
     /**
      * Bootstraps the very first {@link User} on a fresh station — always granted exactly one

@@ -29,14 +29,17 @@ import com.drones.vision.api.security.CurrentUser;
  * password, replace a user's memberships.
  *
  * <p>Constructor-injected with {@link UserService}, {@link CurrentUser}, and (wave B3) {@link
- * PasswordPolicy}: every operation passes {@code currentUser.scope()} (and, since wave B3, {@code
- * currentUser.userId()} as the acting actor for audit attribution) into the service, which derives
- * management authority from the scope (kind maps 1:1 to role — unbounded = ADMIN, groups = MANAGER,
- * else PILOT/empty) and enforces the ADMIN/MANAGER management gate plus the ≤-own-scope grant rule. A
- * PILOT/empty scope is refused with {@link com.drones.vision.platform.AccessDeniedException} (403
- * via {@link ApiExceptionHandler}); {@code list} is scope-filtered to the caller's own subtree. With
- * auth off (default) the dev principal's scope is unbounded, so every operation is permitted and
- * unfiltered — the default-off build is unchanged.
+ * PasswordPolicy}: {@code list} passes {@code currentUser.scope()} (scope-filtered to the caller's
+ * own subtree); every mutating operation ({@code create}/{@code setEnabled}/{@code setPassword}/
+ * {@code setMemberships}) passes
+ * {@code currentUser.authority()} (docs/plans/active/AUTH-ROLES-PLAN.md wave B6, superseding the bare
+ * scope wave B3 originally passed) plus {@code currentUser.userId()} as the acting actor for audit
+ * attribution, and the service enforces the ADMIN/MANAGER management gate (a capability check, not
+ * merely the scope's kind) plus the ≤-own-scope grant rule. A PILOT/empty scope, or a scope with no
+ * {@code MANAGE_ORG} capability, is refused with {@link com.drones.vision.platform.AccessDeniedException}
+ * (403 via {@link ApiExceptionHandler}). With auth off (default) the dev principal's authority is
+ * {@link com.drones.vision.platform.Authority#full()}, so every operation is permitted and unfiltered
+ * — the default-off build is unchanged.
  */
 @RestController
 public class UserAdminController {
@@ -70,7 +73,7 @@ public class UserAdminController {
     @PostMapping("/api/users")
     @ResponseStatus(HttpStatus.CREATED)
     public UserResponse create(@RequestBody CreateUserRequest request) {
-        return UserResponse.from(userService.create(request.toSpec(), currentUser.userId(), currentUser.scope()));
+        return UserResponse.from(userService.create(request.toSpec(), currentUser.userId(), currentUser.authority()));
     }
 
     /**
@@ -83,7 +86,7 @@ public class UserAdminController {
     @PostMapping("/api/users/{id}/enabled")
     public UserResponse setEnabled(@PathVariable String id, @RequestBody SetUserEnabledRequest request) {
         return UserResponse.from(
-                userService.setEnabled(UserId.of(id), request.enabled(), currentUser.userId(), currentUser.scope()));
+                userService.setEnabled(UserId.of(id), request.enabled(), currentUser.userId(), currentUser.authority()));
     }
 
     /**
@@ -99,7 +102,7 @@ public class UserAdminController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void setPassword(@PathVariable String id, @RequestBody AdminSetPasswordRequest request) {
         passwordPolicy.require(request.newPassword());
-        userService.setPassword(UserId.of(id), request.newPassword(), currentUser.userId(), currentUser.scope());
+        userService.setPassword(UserId.of(id), request.newPassword(), currentUser.userId(), currentUser.authority());
     }
 
     /**
@@ -113,6 +116,6 @@ public class UserAdminController {
     @PutMapping("/api/users/{id}/memberships")
     public UserResponse setMemberships(@PathVariable String id, @RequestBody SetMembershipsRequest request) {
         return UserResponse.from(userService.setMemberships(UserId.of(id), request.toMemberships(),
-                currentUser.userId(), currentUser.scope()));
+                currentUser.userId(), currentUser.authority()));
     }
 }

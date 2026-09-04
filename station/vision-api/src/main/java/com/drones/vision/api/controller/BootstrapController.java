@@ -136,6 +136,6 @@ public class BootstrapController {
                 .filter(g -> g.parentGroupId() == null)
                 .findFirst()
                 .orElseGet(() -> groupService.create(new GroupSpec("Root", (GroupId) null),
-                        VisibilityScope.unbounded()));
+                        Authority.full()));
     }
 }

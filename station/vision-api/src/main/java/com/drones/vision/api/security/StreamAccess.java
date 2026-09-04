@@ -27,19 +27,20 @@ import java.util.Optional;
  *
  * <h2>Visibility, not administer-authority, gates every one of these calls</h2>
  * A stream start/stop/live-config-write reads exactly like a management action, but {@link
- * VisibilityScope#canManage(com.drones.vision.kernel.Ownership)} is deliberately {@code false} for
- * every {@link VisibilityScope.Kind#ASSIGNED_ASSETS} scope <em>regardless of the asset</em> — its
- * own javadoc states plainly that seeing-and-flying the assigned aircraft "is the whole of a
- * pilot's authority". Gating a stream write on {@code canManage} would therefore 403 a PILOT
- * starting or stopping their <em>own</em> assigned stream, which is exactly the cockpit
- * LIVE-SCOPE-PLAN.md's own §2.2 table says must keep working ("a PILOT may still start+stop their
- * own assigned asset"). Since {@code canManage} and {@link VisibilityScope#includes} agree for
- * every other {@code Kind} (both {@code true} for {@code UNBOUNDED}; identical group-membership
- * test for {@code GROUPS}), the only sound reading of the plan's table — the one that does not
- * contradict its own "may still" column — is that stream reads and stream writes are gated on the
- * same predicate: {@link VisibilityScope#includes}. This class therefore exposes one check, used
- * by all eight {@link StreamController} handlers alike; there is no separate "write" method to
- * call by mistake.
+ * com.drones.vision.platform.Authority#mayManageFleet(com.drones.vision.kernel.Ownership)
+ * Authority#mayManageFleet} is deliberately {@code false} for every {@link
+ * VisibilityScope.Kind#ASSIGNED_ASSETS} scope <em>regardless of the asset</em> — its own javadoc
+ * states plainly that a PILOT's scope grants no more than seeing (and flying) the aircraft
+ * assigned to them, never management of it. Gating a stream write on {@code mayManageFleet} would
+ * therefore 403 a PILOT starting or stopping their <em>own</em> assigned stream, which is exactly
+ * the cockpit LIVE-SCOPE-PLAN.md's own §2.2 table says must keep working ("a PILOT may still
+ * start+stop their own assigned asset"). Since that authority check and {@link
+ * VisibilityScope#includes} agree for every other {@code Kind} (both {@code true} for {@code
+ * UNBOUNDED}; identical group-membership test for {@code GROUPS}), the only sound reading of the
+ * plan's table — the one that does not contradict its own "may still" column — is that stream
+ * reads and stream writes are gated on the same predicate: {@link VisibilityScope#includes}. This
+ * class therefore exposes one check, used by all eight {@link StreamController} handlers alike;
+ * there is no separate "write" method to call by mistake.
  *
  * <h2>Unknown/not-currently-running streams</h2>
  * {@link #requireVisible(StreamId)} can only judge visibility for a stream this instance currently
@@ -55,9 +56,15 @@ import java.util.Optional;
  * A device that belongs to no asset at all ({@link AssetRepositoryPort#findByDeviceId} empty) has
  * no {@code Ownership} to test {@link VisibilityScope#includes} against. Rather than fail open
  * (visible to everyone) or fail the request outright, such a stream/device is visible only to a
- * caller whose scope {@link VisibilityScope#canAdminister()} — the same "deployment-global, no
- * group boundary" gate {@code AssetController#create} uses, since an unowned device is squarely a
- * fleet-administration concern, not any one group's.
+ * caller whose scope {@link VisibilityScope#isUnbounded()} — deliberately the bare visibility
+ * check, not {@link com.drones.vision.platform.Authority#mayAdminister() Authority#mayAdminister}:
+ * this class only ever has {@link CurrentUser#scope()} in hand, never the request's {@link
+ * com.drones.vision.platform.Authority Authority}, and widening every one of its eight callers
+ * ({@link StreamController}'s handlers) just to add a capability check onto an already-narrow
+ * fallback for orphaned devices was judged not worth the ripple
+ * (docs/plans/active/AUTH-ROLES-PLAN.md wave B6). An unowned device is squarely a
+ * fleet-administration concern, not any one group's, so restricting the fallback to the
+ * deployment-wide scope alone is enough.
  */
 @Component
 public final class StreamAccess {
@@ -79,11 +86,12 @@ public final class StreamAccess {
      * stream exists for it — {@code StreamController#start}, and (LIVE-SCOPE W5) {@link
      * DeviceController#update}/{@link DeviceController#setState}. Deliberately the same {@code
      * includes}-gated policy for all three, not {@link
-     * VisibilityScope#canManage(com.drones.vision.kernel.Ownership) canManage}: {@code canManage} is
-     * hardcoded {@code false} for every {@link VisibilityScope.Kind#ASSIGNED_ASSETS} scope regardless
-     * of the asset, which would 403 a PILOT editing or retiring their own assigned camera — exactly
-     * the case this wave must keep working. Reusing this one method for both controllers keeps the
-     * device-write gate and the stream-write gate answering the same question the same way.
+     * com.drones.vision.platform.Authority#mayManageFleet(com.drones.vision.kernel.Ownership)
+     * Authority#mayManageFleet}: that check is hardcoded {@code false} for every {@link
+     * VisibilityScope.Kind#ASSIGNED_ASSETS} scope regardless of the asset, which would 403 a PILOT
+     * editing or retiring their own assigned camera — exactly the case this wave must keep working.
+     * Reusing this one method for both controllers keeps the device-write gate and the stream-write
+     * gate answering the same question the same way.
      *
      * @param deviceId the device the caller wants to start a stream on, edit, or move between
      *                 {@code ACTIVE}/{@code DEACTIVATED}
@@ -186,16 +194,16 @@ public final class StreamAccess {
      * @param scope   the scope to test against — supplied by the caller rather than read from
      *                {@link #currentUser}, since it may not be this request's own scope
      * @return {@code true} iff {@code scope} may see this asset, or — for an asset id that does not
-     *         currently exist — iff {@code scope} can administer the deployment; see {@link
-     *         #visible(DeviceId)}'s own javadoc for why an unresolvable target favors that fallback
-     *         over failing open or hard-failing the caller
+     *         currently exist — iff {@code scope} is {@link VisibilityScope#isUnbounded()}; see
+     *         {@link #visible(DeviceId)}'s own javadoc for why an unresolvable target favors that
+     *         fallback over failing open or hard-failing the caller
      */
     public boolean visibleAsset(AssetId assetId, VisibilityScope scope) {
         Objects.requireNonNull(assetId, "assetId must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
         return assetRepositoryPort.findById(assetId)
                 .map(asset -> scope.includes(asset.id(), asset.ownership()))
-                .orElseGet(scope::canAdminister);
+                .orElseGet(scope::isUnbounded);
     }
 
     private Optional<DeviceId> deviceIdOf(StreamId streamId) {
@@ -208,6 +216,6 @@ public final class StreamAccess {
     private boolean visible(DeviceId deviceId) {
         VisibilityScope scope = currentUser.scope();
         Optional<Asset> asset = assetRepositoryPort.findByDeviceId(deviceId);
-        return asset.map(a -> scope.includes(a.id(), a.ownership())).orElseGet(scope::canAdminister);
+        return asset.map(a -> scope.includes(a.id(), a.ownership())).orElseGet(scope::isUnbounded);
     }
 }

@@ -6,6 +6,7 @@ import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.UserId;
 
 import java.util.List;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 
 /**
@@ -13,7 +14,7 @@ import com.drones.vision.platform.VisibilityScope;
  * ({@link DefaultDatasetService}), the labeling/capture side lives in {@link LabelingService}.
  *
  * <h2>Scope (docs/plans/done/CV-TRAINING-PLAN.md Open Questions §4)</h2>
- * Create/delete are management actions, gated on {@link VisibilityScope#canManageOrg()} — any
+ * Create/delete are management actions, gated on {@link Authority#mayManageOrg()} — any
  * manager/admin, not only one whose subtree contains the dataset (mirrors {@code
  * DefaultMarkService}'s own "any manager may manage" precedent, not {@code AssetService}'s
  * per-group write gate). {@link #list} and {@link #get} are group-scoped reads: a {@link
@@ -35,12 +36,11 @@ public interface DatasetService {
      *                  since a {@link VisibilityScope.Kind#GROUPS} scope carries a manager's whole
      *                  visible subtree, not their own single home group)
      * @param actor     who is creating it, for the audit trail
-     * @param scope     the acting user's visibility; must satisfy {@link
-     *                  VisibilityScope#canManageOrg()}
+     * @param scope     the acting user's authority; must satisfy {@link Authority#mayManageOrg()}
      * @return the created, persisted dataset
      * @throws com.drones.vision.platform.AccessDeniedException if {@code scope} may not manage the organization
      */
-    Dataset create(DatasetSpec spec, Ownership ownership, UserId actor, VisibilityScope scope);
+    Dataset create(DatasetSpec spec, Ownership ownership, UserId actor, Authority scope);
 
     /**
      * Lists every dataset {@code scope} may see.
@@ -74,10 +74,9 @@ public interface DatasetService {
      *
      * @param id    the dataset to delete
      * @param actor who is deleting it, for the audit trail
-     * @param scope the acting user's visibility; must satisfy {@link
-     *              VisibilityScope#canManageOrg()}
+     * @param scope the acting user's authority; must satisfy {@link Authority#mayManageOrg()}
      * @throws java.util.NoSuchElementException if no dataset has that id
      * @throws com.drones.vision.platform.AccessDeniedException            if {@code scope} may not manage the organization
      */
-    void delete(DatasetId id, UserId actor, VisibilityScope scope);
+    void delete(DatasetId id, UserId actor, Authority scope);
 }

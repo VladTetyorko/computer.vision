@@ -4,8 +4,8 @@ import com.drones.vision.flight.application.VehicleProfileService;
 import com.drones.vision.flight.domain.model.FlightPhase;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.UsageId;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.PlatformActor;
-import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.domain.model.UsagePhase;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -51,7 +51,7 @@ class PassportCaptureObserverTest {
         observer.onPhaseChanged(assetId, usageId, null, UsagePhase.PREFLIGHT, Instant.now());
 
         verify(vehicleProfileService, timeout(2000)).captureSnapshot(eq(assetId), eq(usageId),
-                eq(FlightPhase.PREFLIGHT), eq(WINDOW), eq(PlatformActor.USER_ID), eq(VisibilityScope.unbounded()));
+                eq(FlightPhase.PREFLIGHT), eq(WINDOW), eq(PlatformActor.USER_ID), eq(Authority.full()));
     }
 
     @Test
@@ -62,7 +62,7 @@ class PassportCaptureObserverTest {
         observer.onPhaseChanged(assetId, usageId, UsagePhase.IN_FLIGHT, UsagePhase.POSTFLIGHT, Instant.now());
 
         verify(vehicleProfileService, timeout(2000)).captureSnapshot(eq(assetId), eq(usageId),
-                eq(FlightPhase.POSTFLIGHT), eq(WINDOW), eq(PlatformActor.USER_ID), eq(VisibilityScope.unbounded()));
+                eq(FlightPhase.POSTFLIGHT), eq(WINDOW), eq(PlatformActor.USER_ID), eq(Authority.full()));
     }
 
     @Test

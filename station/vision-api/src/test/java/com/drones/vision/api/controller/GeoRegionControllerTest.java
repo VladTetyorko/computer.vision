@@ -17,6 +17,7 @@ import com.drones.vision.perception.domain.model.RegionStatus;
 import com.drones.vision.perception.domain.model.ReferenceRegion;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.platform.Authority;
+import com.drones.vision.platform.Capability;
 import com.drones.vision.identity.domain.model.Role;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.util.EnumSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -101,7 +103,7 @@ class GeoRegionControllerTest {
 
             @Override
             public Authority authority() {
-                throw new UnsupportedOperationException("GeoRegionController never calls authority()");
+                return new Authority(scope, EnumSet.allOf(Capability.class));
             }
         });
     }

@@ -42,9 +42,9 @@ the full mechanism.
 | Tag | Means |
 |---|---|
 | `scope` | `CurrentUser#scope()`, a `VisibilityScope`. Single-resource read/write → **404** if out of scope (existence hidden). List read → silently filtered, never 403. |
-| `manage` | `scope.canManage(ownership)` — visible but not manageable → **403**. |
-| `manageOrg` | `scope.canManageOrg()` (ADMIN or MANAGER) → **403** otherwise. |
-| `administer` | `scope.canAdminister()` (deployment-global, no group boundary) → **403** otherwise. |
+| `manage` | `authority.mayManageFleet(ownership)` (`CurrentUser#authority()`, wave B6 — was the now-deleted `scope.canManage(ownership)`) — visible but not manageable → **403**. |
+| `manageOrg` | `authority.mayManageOrg()` (ADMIN or MANAGER; wave B6 — was `scope.canManageOrg()`. A `VIEWER` now also resolves a `GROUPS`-shaped scope, contexts/vision-identity's own wave B6, but still fails this gate — `mayManageOrg()` additionally requires `Capability.MANAGE_ORG`, which `RoleAuthority` never grants `VIEWER`) → **403** otherwise. |
+| `administer` | `authority.mayAdminister()` (deployment-global, no group boundary; wave B6 — was `scope.canAdminister()`) → **403** otherwise. |
 | `self` | Filtered to the caller's own id; takes no target-user/asset parameter, so there is nothing to authorize against. |
 | `viewer:view`/`:contribute`/`:manage` | `MapAccessPolicy` gates via `CurrentUser#viewer()` — a model kept deliberately separate from `VisibilityScope` (see `contexts/vision-map/MODULE.md`). |
 | `own profile` | Gated by profile ownership inside the application service, not `VisibilityScope` — see `ControlProfileController` note below the table. |
@@ -478,13 +478,15 @@ auto-wiring by type).
   should follow up with `GET /api/assets/{id}`.
 - **`DiscoveryInboxController`'s three handlers split authorization the same way `AuditController`/
   `GroupAdminController` already do, for the same reason each does it that way**: `list`/`dismiss` gate
-  explicitly in-controller (`currentUser.scope().canManageOrg()`, throwing `AccessDeniedException`
-  itself) because `DiscoveryInboxService#candidates()`/`#dismiss(id, userId)` carry no scope parameter
-  to check against — same shape as `AuditController#list`, which has no application-service layer of
-  its own to put the check in either. `register` instead passes `currentUser.scope()` and
+  explicitly in-controller (`currentUser.authority().mayManageOrg()`, wave B6 — was
+  `currentUser.scope().canManageOrg()` — throwing `AccessDeniedException` itself) because
+  `DiscoveryInboxService#candidates()`/`#dismiss(id, userId)` carry no scope parameter to check against
+  — same shape as `AuditController#list`, which has no application-service layer of its own to put the
+  check in either. `register` instead passes `currentUser.authority()` (wave B6, was `.scope()`) and
   `currentUser.ownership()` straight through to `DiscoveryInboxService#register(...)`, which performs
-  its own `canManageOrg()`+`includesGroup` checks internally — same shape as `GroupAdminController#create`
-  delegating to `GroupService`. All three still reach `CurrentUser.scope()` directly inside the
+  its own `mayManageOrg()`+`includesGroup` checks internally (`vision-warehouse`, own wave B6 migration
+  — see that module's MODULE.md) — same shape as `GroupAdminController#create` delegating to
+  `GroupService`. All three still reach `CurrentUser.scope()`/`.authority()` directly inside the
   controller method body, so `EndpointAuthorizationTest`'s call-graph walk is satisfied without an
   `@OpenByDesign`/ledger entry either way.
 - Rationale for any of the above beyond what's stated here lives in the plan doc cited inline, under
@@ -883,3 +885,61 @@ test -DskipWeb` — vision-api **979** (961 → 979, +18: 12 `CapabilityAssetAut
 module's own MODULE.md). Docker ran for real (Testcontainers `postgres:16`, Flyway unchanged at
 `V33` — this wave added no migration). `vision.auth.enabled` stays `false` by default, unchanged;
 the default-config auth-off suites stayed green throughout. Waves B5/B6/B0b open.
+
+**AUTH-ROLES-PLAN wave B6 done.** The ~34 remaining `canManageOrg`/`canManage`/`canAdminister` call
+sites this wave's own plan text named are now migrated onto `Authority` everywhere (see "Authorization
+tags" table above, updated to `authority.mayManageOrg()`/`mayManageFleet(ownership)`/`mayAdminister()`)
+— by the time this wave reached vision-api, most controller production call sites had already migrated
+in an earlier pass of the same wave; what remained here was fixing the test fixtures and fixing one
+missed production call site:
+
+- **9 controller test fixtures** (`GeoRegionControllerTest`, `CameraPoseControllerTest`,
+  `GeofenceControllerTest`, `DiscoveryInboxControllerTest`, `CategoryControllerTest`,
+  `EventControllerTest`, `SimulationControllerTest`, `AssetControllerTest`, `DeviceControllerTest`) had
+  a `currentUserWithScope(VisibilityScope scope)`-style `CurrentUser` fake whose `authority()` override
+  threw `UnsupportedOperationException("<Controller> never calls authority()")` — written before this
+  wave's controllers actually started calling `authority()`. Once they did, every one of these 9 broke
+  (40 errors on the first honest, non-`-q` run). Fixed uniformly: `return new Authority(scope,
+  EnumSet.allOf(Capability.class))` — **full capabilities, deliberately**, so a PILOT/MANAGER-scope
+  test case still proves the *scope* gate, not a missing capability. `AssetControllerTest`/
+  `DeviceControllerTest` reference `com.drones.vision.platform.Capability` fully-qualified (no import)
+  since both already import `com.drones.vision.kernel.Capability` — a different type, unrelated device
+  capabilities (`VIDEO`, …) — under the same simple name.
+- **`AfterActionAssemblerTest`/`AssetParameterControllerTest`** — same "full capabilities, restricted
+  scope" pattern used deliberately where a test needs to prove a *scope* boundary causes a denial,
+  e.g. `AfterActionAssemblerTest#assembleThrowsAccessDeniedWhenTheViewerMaySeeButNotExportTheAsset`
+  builds `new Authority(VisibilityScope.assignedAssets(Set.of(assetId)), EnumSet.allOf(Capability.class))`
+  rather than a scope-only fixture, so the assertion is unambiguous about which axis failed.
+- **`security.StreamAccess`** — a genuine production call site this wave's earlier grep-based "zero
+  remaining callers" pass missed, surfaced only by running the plan's full multi-module `-am test`
+  build after `core/vision-platform` deleted the three methods outright (`NoSuchMethodError` at
+  runtime, 42+ cascading errors in `StreamControllerTest`/`HlsProxyControllerTest`/
+  `LiveAssetAccessDevPrincipalTest`). Two call sites, `visible(DeviceId)` and `visibleAsset(AssetId,
+  VisibilityScope)` — both an "unowned device/asset falls back to a caller whose scope is deployment-
+  wide" check. Fixed by replacing `scope.canAdminister()` with `scope.isUnbounded()` directly, **not**
+  by widening `StreamAccess` to carry an `Authority` — the deleted `canAdminister()`'s own body was
+  always exactly `kind == UNBOUNDED` (confirmed from `git log`), so `isUnbounded()` is a byte-identical
+  replacement; widening instead would have rippled into `StreamAccess`'s eight `StreamController`
+  callers for no behavior change, and would have made this fallback capability-gated
+  (`Authority#mayAdminister()` also requires `Capability.MANAGE_ORG`) when it never was before. Class
+  javadoc updated in three places to stop citing the now-deleted methods and to state plainly why this
+  fallback is deliberately scope-only.
+
+`./mvnw -B -pl station/vision-api test -DskipWeb` — **985/985** green, 0 failures/errors — the same
+count before and after this wave's fixes (every change here repaired an existing test's fixture or a
+production call site that would otherwise `NoSuchMethodError`; no test method was added or removed).
+The doc's last-recorded vision-api count (**979**, wave B4 entry above) predates an undocumented wave
+B5 (Spring Session JDBC — the `V34` migration this module's tests already exercise) that isn't this
+wave's to reconstruct; 985 is this wave's own before-and-after baseline, not a delta from 979. Plan's
+full green line (`core/vision-platform,contexts/vision-warehouse,contexts/vision-flight,
+contexts/vision-perception,contexts/vision-learning,contexts/vision-map,contexts/vision-identity,
+station/vision-api,station/vision-app -am test`) — **BUILD SUCCESS** end-to-end in the foreground (a
+first attempt was backgrounded and lost when the agent turn ended — backgrounded builds do not
+survive the turn that started them); see `core/vision-platform/MODULE.md`'s own B6 entry for the full
+per-module tally. Docker ran for real (Testcontainers `postgres:16`). `vision.auth.enabled` stays
+`false` by default, unchanged — the default-config bar held throughout. The plan's B1 text also asked
+for an ArchUnit rule banning new `canManageOrg`/`canManage`/`canAdminister` call sites (deferred there
+to this wave); it was never added and is now moot — the three methods are deleted outright, a stronger
+guarantee than any reflection-based check over a method that no longer exists to call (see
+`core/vision-platform/MODULE.md`'s B6 entry for the full reasoning). Wave B0b (flip
+`vision.auth.enabled`'s default) is the only item this plan still has open.

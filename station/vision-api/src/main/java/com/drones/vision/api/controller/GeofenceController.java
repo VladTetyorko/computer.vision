@@ -38,9 +38,11 @@ import java.util.Objects;
  * ownership, no per-user scoping, no audit trail." Every zone in this codebase is therefore the
  * plan's "global zone" case, with no narrower one to fall back from, so {@link #create}/{@link
  * #update}/{@link #delete} all require {@link
- * com.drones.vision.platform.VisibilityScope#canAdminister() scope().canAdminister()} uniformly —
- * a MANAGER's {@code canManageOrg()} authority over their own group's assets does not extend to a
- * boundary every group's aircraft must obey.
+ * com.drones.vision.platform.Authority#mayAdminister() authority().mayAdminister()}
+ * (docs/plans/active/AUTH-ROLES-PLAN.md wave B6, superseding the bare {@code
+ * VisibilityScope#canAdminister()} check this gate used before) uniformly — a MANAGER's {@code
+ * mayManageOrg()} authority over their own group's assets does not extend to a boundary every
+ * group's aircraft must obey.
  *
  * <p>{@link #list} carries no scope check and is marked {@link OpenByDesign} rather than filtered:
  * since no zone has an owning asset/group to filter by, "the zones the caller may see" is every
@@ -130,12 +132,13 @@ public class GeofenceController {
 
     /**
      * Guards every write: a no-fly zone is deployment-global safety data (see class javadoc), so
-     * authoring one requires {@code canAdminister()} rather than the group-scoped {@code
-     * canManageOrg()}/{@code canManage()} this module's other controllers use for group-owned
-     * writes.
+     * authoring one requires {@link com.drones.vision.platform.Authority#mayAdminister()} rather
+     * than the group-scoped {@code mayManageOrg()}/{@code mayManageFleet()} this module's other
+     * controllers use for group-owned writes (docs/plans/active/AUTH-ROLES-PLAN.md wave B6,
+     * superseding the bare {@code VisibilityScope#canAdminister()} check this gate used before).
      */
     private void requireAdminister() {
-        if (!currentUser.scope().canAdminister()) {
+        if (!currentUser.authority().mayAdminister()) {
             throw new AccessDeniedException("Not permitted to manage geofence zones");
         }
     }

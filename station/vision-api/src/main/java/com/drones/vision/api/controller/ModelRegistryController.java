@@ -35,8 +35,10 @@ import com.drones.vision.api.security.CurrentUser;
  * <p><strong>Not the same roster as {@link CvModelsController}</strong>: that endpoint serves any
  * authenticated caller a read-only roster (falling back to the static config catalogue when this
  * controller is absent or the worker is unreachable); this one is the mutation surface — promote and
- * rollback both require {@link com.drones.vision.platform.VisibilityScope#canAdminister()}, ADMIN
- * only (see {@link ModelRegistryService}'s own javadoc, "Scope").
+ * rollback both require {@link com.drones.vision.platform.Authority#mayAdminister()}, ADMIN
+ * only (docs/plans/active/AUTH-ROLES-PLAN.md wave B6, superseding the bare {@code
+ * VisibilityScope#canAdminister()} check this used before; see {@link ModelRegistryService}'s own
+ * javadoc, "Scope").
  *
  * <p>Error mapping is entirely {@link ModelRegistryService#promote}/{@link
  * ModelRegistryService#rollback}'s own exceptions surfacing through {@link ApiExceptionHandler}:
@@ -69,7 +71,7 @@ public class ModelRegistryController {
     @PostMapping("/api/cv/registry/models/{id}/promote")
     public PromotionResultResponse promote(@PathVariable String id, @RequestBody PromoteModelRequest request) {
         PromotionResult result =
-                modelRegistryService.promote(id, request.version(), currentUser.userId(), currentUser.scope());
+                modelRegistryService.promote(id, request.version(), currentUser.userId(), currentUser.authority());
         return PromotionResultResponse.from(result);
     }
 
@@ -82,7 +84,7 @@ public class ModelRegistryController {
      */
     @PostMapping("/api/cv/registry/rollback")
     public PromotionResultResponse rollback() {
-        PromotionResult result = modelRegistryService.rollback(currentUser.userId(), currentUser.scope());
+        PromotionResult result = modelRegistryService.rollback(currentUser.userId(), currentUser.authority());
         return PromotionResultResponse.from(result);
     }
 }

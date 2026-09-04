@@ -19,6 +19,7 @@ import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.application.asset.AssetDetails;
 import com.drones.vision.warehouse.application.asset.AssetService;
@@ -106,7 +107,7 @@ class DefaultRemediationServiceTest {
     @Test
     void writeParameterRejectsATierCNameBeforeTouchingAnythingElse() {
         IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                () -> service.writeParameter(assetId, "ARMING_CHECK", 1.0, false, actor, VisibilityScope.unbounded()));
+                () -> service.writeParameter(assetId, "ARMING_CHECK", 1.0, false, actor, Authority.full()));
         assertTrue(ex.getMessage().contains("ARMING_CHECK"));
 
         assertTrue(vehicleConfigPort.writtenParams.isEmpty());
@@ -117,7 +118,7 @@ class DefaultRemediationServiceTest {
     void writeParameterRejectsAnUnclassifiedNameJustLikeTierC() {
         assertThrows(IllegalArgumentException.class,
                 () -> service.writeParameter(assetId, "TOTALLY_MADE_UP_PARAM", 1.0, false, actor,
-                        VisibilityScope.unbounded()));
+                        Authority.full()));
         assertTrue(auditTrail.recorded.isEmpty());
     }
 
@@ -130,7 +131,7 @@ class DefaultRemediationServiceTest {
         stubArmed(true);
 
         IllegalStateException ex = assertThrows(IllegalStateException.class,
-                () -> service.writeParameter(assetId, "SYSID_THISMAV", 3.0, false, actor, VisibilityScope.unbounded()));
+                () -> service.writeParameter(assetId, "SYSID_THISMAV", 3.0, false, actor, Authority.full()));
         assertTrue(ex.getMessage().contains("armed"));
 
         assertTrue(vehicleConfigPort.writtenParams.isEmpty());
@@ -145,7 +146,7 @@ class DefaultRemediationServiceTest {
         stubArmed(null);
 
         IllegalStateException ex = assertThrows(IllegalStateException.class,
-                () -> service.writeParameter(assetId, "SYSID_THISMAV", 3.0, false, actor, VisibilityScope.unbounded()));
+                () -> service.writeParameter(assetId, "SYSID_THISMAV", 3.0, false, actor, Authority.full()));
         assertTrue(ex.getMessage().contains("unknown"));
 
         assertTrue(vehicleConfigPort.writtenParams.isEmpty());
@@ -160,7 +161,7 @@ class DefaultRemediationServiceTest {
         // an explicit FlightState with armed == null, and must refuse identically.
 
         assertThrows(IllegalStateException.class,
-                () -> service.writeParameter(assetId, "SYSID_THISMAV", 3.0, false, actor, VisibilityScope.unbounded()));
+                () -> service.writeParameter(assetId, "SYSID_THISMAV", 3.0, false, actor, Authority.full()));
         assertEquals("REFUSED:arming state unknown", auditTrail.recorded.get(0).details().get("result"));
     }
 
@@ -174,7 +175,7 @@ class DefaultRemediationServiceTest {
                 new ParameterWriteOutcome("SYSID_THISMAV", RemediationResultCode.ACCEPTED, 1.0, 3.0, null);
 
         ParameterWriteOutcome outcome =
-                service.writeParameter(assetId, "SYSID_THISMAV", 3.0, false, actor, VisibilityScope.unbounded());
+                service.writeParameter(assetId, "SYSID_THISMAV", 3.0, false, actor, Authority.full());
 
         assertEquals(RemediationResultCode.ACCEPTED, outcome.outcome());
         assertEquals(List.of("SYSID_THISMAV"), vehicleConfigPort.writtenParams);
@@ -188,7 +189,8 @@ class DefaultRemediationServiceTest {
 
         AccessDeniedException ex = assertThrows(AccessDeniedException.class,
                 () -> service.writeParameter(assetId, "SYSID_THISMAV", 3.0, false, actor,
-                        VisibilityScope.groups(Set.of())));
+                        new Authority(VisibilityScope.groups(Set.of()),
+                                Set.of(com.drones.vision.platform.Capability.MANAGE_FLEET))));
         assertTrue(ex.getMessage().contains(assetId.value().toString()));
         assertTrue(vehicleConfigPort.writtenParams.isEmpty());
         assertEquals("DENIED:out of scope", auditTrail.recorded.get(0).details().get("result"));
@@ -199,7 +201,7 @@ class DefaultRemediationServiceTest {
         when(assetService.details(assetId)).thenThrow(new NoSuchElementException("Unknown asset: " + assetId.value()));
 
         assertThrows(NoSuchElementException.class,
-                () -> service.writeParameter(assetId, "SYSID_THISMAV", 3.0, false, actor, VisibilityScope.unbounded()));
+                () -> service.writeParameter(assetId, "SYSID_THISMAV", 3.0, false, actor, Authority.full()));
         assertTrue(auditTrail.recorded.isEmpty());
     }
 
@@ -213,7 +215,8 @@ class DefaultRemediationServiceTest {
 
         assertThrows(AccessDeniedException.class,
                 () -> service.writeParameter(assetId, "FS_GCS_ENABLE", 1.0, true, actor,
-                        VisibilityScope.groups(Set.of(group))));
+                        new Authority(VisibilityScope.groups(Set.of(group)),
+                                Set.of(com.drones.vision.platform.Capability.MANAGE_ORG))));
         assertTrue(vehicleConfigPort.writtenParams.isEmpty());
     }
 
@@ -223,7 +226,7 @@ class DefaultRemediationServiceTest {
         stubArmed(false);
 
         assertThrows(IllegalArgumentException.class,
-                () -> service.writeParameter(assetId, "FS_GCS_ENABLE", 1.0, false, actor, VisibilityScope.unbounded()));
+                () -> service.writeParameter(assetId, "FS_GCS_ENABLE", 1.0, false, actor, Authority.full()));
         assertTrue(vehicleConfigPort.writtenParams.isEmpty());
     }
 
@@ -235,7 +238,7 @@ class DefaultRemediationServiceTest {
                 new ParameterWriteOutcome("FS_GCS_ENABLE", RemediationResultCode.ACCEPTED, 0.0, 1.0, null);
 
         ParameterWriteOutcome outcome =
-                service.writeParameter(assetId, "FS_GCS_ENABLE", 1.0, true, actor, VisibilityScope.unbounded());
+                service.writeParameter(assetId, "FS_GCS_ENABLE", 1.0, true, actor, Authority.full());
 
         assertEquals(RemediationResultCode.ACCEPTED, outcome.outcome());
     }
@@ -250,7 +253,7 @@ class DefaultRemediationServiceTest {
                 new MessageIntervalOutcome(74, Duration.ofMillis(200), RemediationResultCode.ACCEPTED, null);
 
         MessageIntervalOutcome outcome = service.requestMessageInterval(assetId, 74, Duration.ofMillis(200), actor,
-                VisibilityScope.unbounded());
+                Authority.full());
 
         assertEquals(RemediationResultCode.ACCEPTED, outcome.outcome());
         assertEquals("ACCEPTED", auditTrail.recorded.get(0).details().get("result"));
@@ -262,7 +265,7 @@ class DefaultRemediationServiceTest {
         stubArmed(true);
 
         assertThrows(IllegalStateException.class, () -> service.requestMessageInterval(assetId, 74,
-                Duration.ofMillis(200), actor, VisibilityScope.unbounded()));
+                Duration.ofMillis(200), actor, Authority.full()));
         assertEquals("REFUSED:aircraft is armed", auditTrail.recorded.get(0).details().get("result"));
     }
 
@@ -271,7 +274,8 @@ class DefaultRemediationServiceTest {
         stubDetails(new Ownership(actor, GroupId.random()), device);
 
         assertThrows(AccessDeniedException.class, () -> service.requestMessageInterval(assetId, 74,
-                Duration.ofMillis(200), actor, VisibilityScope.groups(Set.of())));
+                Duration.ofMillis(200), actor, new Authority(VisibilityScope.groups(Set.of()),
+                        Set.of(com.drones.vision.platform.Capability.MANAGE_FLEET))));
         assertEquals("DENIED:out of scope", auditTrail.recorded.get(0).details().get("result"));
     }
 
@@ -284,7 +288,7 @@ class DefaultRemediationServiceTest {
         vehicleConfigPort.supportsResult = false;
 
         assertThrows(IllegalStateException.class,
-                () -> service.writeParameter(assetId, "SYSID_THISMAV", 3.0, false, actor, VisibilityScope.unbounded()));
+                () -> service.writeParameter(assetId, "SYSID_THISMAV", 3.0, false, actor, Authority.full()));
         assertTrue(vehicleConfigPort.writtenParams.isEmpty());
     }
 

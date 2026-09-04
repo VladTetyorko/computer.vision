@@ -14,6 +14,7 @@ import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.domain.model.Asset;
@@ -111,14 +112,14 @@ public final class DefaultCvProfileService implements CvProfileService {
     }
 
     @Override
-    public CvProfile create(CvProfileSpec spec, GroupId groupId, UserId actor, VisibilityScope scope) {
+    public CvProfile create(CvProfileSpec spec, GroupId groupId, UserId actor, Authority scope) {
         Objects.requireNonNull(spec, "spec must not be null");
         Objects.requireNonNull(groupId, "groupId must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
 
         CvProfileId id = CvProfileId.random();
-        if (!scope.canManageOrg()) {
+        if (!scope.mayManageOrg()) {
             auditDenied(actor, id.value().toString(), ACTION_CREATE,
                     "Denied creating CV profile '" + spec.name() + "': out of scope");
             throw new AccessDeniedException("Not permitted to create CV profiles");
@@ -134,14 +135,14 @@ public final class DefaultCvProfileService implements CvProfileService {
     }
 
     @Override
-    public CvProfile update(CvProfileId id, CvProfileSpec spec, UserId actor, VisibilityScope scope) {
+    public CvProfile update(CvProfileId id, CvProfileSpec spec, UserId actor, Authority scope) {
         Objects.requireNonNull(id, "id must not be null");
         Objects.requireNonNull(spec, "spec must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
         CvProfile existing = require(id);
         String targetId = id.value().toString();
-        if (!scope.canManageOrg()) {
+        if (!scope.mayManageOrg()) {
             auditDenied(actor, targetId, ACTION_UPDATE, "Denied updating CV profile " + id.value() + ": out of scope");
             throw new AccessDeniedException("Not permitted to update CV profiles");
         }
@@ -160,13 +161,13 @@ public final class DefaultCvProfileService implements CvProfileService {
     }
 
     @Override
-    public void delete(CvProfileId id, UserId actor, VisibilityScope scope) {
+    public void delete(CvProfileId id, UserId actor, Authority scope) {
         Objects.requireNonNull(id, "id must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
         CvProfile existing = require(id);
         String targetId = id.value().toString();
-        if (!scope.canManageOrg()) {
+        if (!scope.mayManageOrg()) {
             auditDenied(actor, targetId, ACTION_DELETE, "Denied deleting CV profile " + id.value() + ": out of scope");
             throw new AccessDeniedException("Not permitted to delete CV profiles");
         }
@@ -186,7 +187,7 @@ public final class DefaultCvProfileService implements CvProfileService {
     }
 
     @Override
-    public CvProfile fork(CvProfileId builtInId, String newName, GroupId groupId, UserId actor, VisibilityScope scope) {
+    public CvProfile fork(CvProfileId builtInId, String newName, GroupId groupId, UserId actor, Authority scope) {
         Objects.requireNonNull(builtInId, "builtInId must not be null");
         if (newName == null || newName.isBlank()) {
             throw new IllegalArgumentException("newName must not be blank");
@@ -195,7 +196,7 @@ public final class DefaultCvProfileService implements CvProfileService {
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
         CvProfile source = require(builtInId);
-        if (!scope.canManageOrg()) {
+        if (!scope.mayManageOrg()) {
             auditDenied(actor, builtInId.value().toString(), ACTION_FORK,
                     "Denied forking CV profile " + builtInId.value() + ": out of scope");
             throw new AccessDeniedException("Not permitted to fork CV profiles");
@@ -216,7 +217,7 @@ public final class DefaultCvProfileService implements CvProfileService {
 
     @Override
     public CvProfileBinding bind(BindingScope scopeKind, String scopeId, CvProfileId profileId, UserId actor,
-                                  VisibilityScope scope) {
+                                  Authority scope) {
         Objects.requireNonNull(scopeKind, "scopeKind must not be null");
         Objects.requireNonNull(scopeId, "scopeId must not be null");
         Objects.requireNonNull(profileId, "profileId must not be null");
@@ -224,7 +225,7 @@ public final class DefaultCvProfileService implements CvProfileService {
         Objects.requireNonNull(scope, "scope must not be null");
         require(profileId);
         String targetId = profileId.value().toString();
-        if (!scope.canManageOrg()) {
+        if (!scope.mayManageOrg()) {
             auditDenied(actor, targetId, ACTION_BIND,
                     "Denied binding CV profile " + profileId.value() + " to " + scopeKind + " " + scopeId
                             + ": out of scope");
@@ -239,13 +240,13 @@ public final class DefaultCvProfileService implements CvProfileService {
     }
 
     @Override
-    public void unbind(BindingScope scopeKind, String scopeId, UserId actor, VisibilityScope scope) {
+    public void unbind(BindingScope scopeKind, String scopeId, UserId actor, Authority scope) {
         Objects.requireNonNull(scopeKind, "scopeKind must not be null");
         Objects.requireNonNull(scopeId, "scopeId must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
         String targetId = scopeKind + ":" + scopeId;
-        if (!scope.canManageOrg()) {
+        if (!scope.mayManageOrg()) {
             auditDenied(actor, targetId, ACTION_UNBIND, "Denied unbinding " + scopeKind + " " + scopeId + ": out of scope");
             throw new AccessDeniedException("Not permitted to unbind CV profiles");
         }

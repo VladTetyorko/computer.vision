@@ -2,7 +2,7 @@ package com.drones.vision.api.demo;
 
 import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.identity.application.AssignmentService;
-import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
@@ -81,7 +81,7 @@ class DemoScenarioTest {
         // 3 assets, one pilot each, plus a second pilot on asset index 0 (every third).
         assertEquals(4, report.assignments());
         ArgumentCaptor<AssetId> assets = ArgumentCaptor.forClass(AssetId.class);
-        verify(assignments, times(4)).assign(any(), assets.capture(), any(), any(), eq(VisibilityScope.unbounded()));
+        verify(assignments, times(4)).assign(any(), assets.capture(), any(), any(), eq(Authority.full()));
         assertEquals(created.stream().map(DemoAsset::id).distinct().count(),
                 assets.getAllValues().stream().distinct().count(),
                 "every created asset was assigned at least once");

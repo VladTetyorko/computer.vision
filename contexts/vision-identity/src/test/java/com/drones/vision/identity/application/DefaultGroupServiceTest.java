@@ -18,6 +18,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.platform.Capability;
 import com.drones.vision.platform.VisibilityScope;
 
 class DefaultGroupServiceTest {
@@ -31,7 +33,7 @@ class DefaultGroupServiceTest {
         service = new DefaultGroupService(groupRepository);
     }
 
-    private static final VisibilityScope ADMIN = VisibilityScope.unbounded();
+    private static final Authority ADMIN = Authority.full();
 
     @Test
     void createRootGroupWithNoParent() {
@@ -65,7 +67,7 @@ class DefaultGroupServiceTest {
         service.create(new GroupSpec("alpha", null), ADMIN);
         service.create(new GroupSpec("Bravo", null), ADMIN);
 
-        List<String> names = service.list(ADMIN).stream().map(Group::name).toList();
+        List<String> names = service.list(ADMIN.scope()).stream().map(Group::name).toList();
 
         assertEquals(List.of("alpha", "Bravo", "Charlie"), names);
     }
@@ -75,7 +77,7 @@ class DefaultGroupServiceTest {
     @Test
     void managerCreatesAChildUnderTheirOwnGroupButNotARoot() {
         Group parent = service.create(new GroupSpec("division", null), ADMIN);
-        VisibilityScope manager = VisibilityScope.groups(Set.of(parent.id()));
+        Authority manager = new Authority(VisibilityScope.groups(Set.of(parent.id())), Set.of(Capability.MANAGE_ORG));
 
         Group child = service.create(new GroupSpec("team-a", parent.id()), manager);
         assertEquals(parent.id(), child.parentGroupId());
@@ -86,7 +88,7 @@ class DefaultGroupServiceTest {
     @Test
     void managerCannotCreateAChildUnderAForeignParent() {
         Group foreign = service.create(new GroupSpec("foreign", null), ADMIN);
-        VisibilityScope manager = VisibilityScope.groups(Set.of(GroupId.random()));
+        Authority manager = new Authority(VisibilityScope.groups(Set.of(GroupId.random())), Set.of(Capability.MANAGE_ORG));
 
         assertThrows(AccessDeniedException.class,
                 () -> service.create(new GroupSpec("team", foreign.id()), manager));
@@ -94,7 +96,7 @@ class DefaultGroupServiceTest {
 
     @Test
     void pilotScopeCannotCreateAnyGroup() {
-        VisibilityScope pilot = VisibilityScope.assignedAssets(Set.of());
+        Authority pilot = new Authority(VisibilityScope.assignedAssets(Set.of()), Set.of());
 
         assertThrows(AccessDeniedException.class, () -> service.create(new GroupSpec("nope", null), pilot));
     }
@@ -109,7 +111,7 @@ class DefaultGroupServiceTest {
         assertEquals(1, visible.size());
         assertEquals("mine", visible.get(0).name());
 
-        assertEquals(2, service.list(ADMIN).size());
+        assertEquals(2, service.list(ADMIN.scope()).size());
         assertTrue(service.list(VisibilityScope.assignedAssets(Set.of())).isEmpty());
     }
 

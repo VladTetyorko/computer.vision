@@ -7,6 +7,7 @@ import com.drones.vision.flight.domain.model.VehicleProfile;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.UsageId;
 import com.drones.vision.kernel.UserId;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 
 import java.time.Duration;
@@ -37,7 +38,7 @@ public interface VehicleProfileService {
      *                                                            platform can probe (409, not an
      *                                                            attempt, not audited)
      */
-    VehicleProfile probe(AssetId assetId, Duration window, UserId actor, VisibilityScope scope);
+    VehicleProfile probe(AssetId assetId, Duration window, UserId actor, Authority scope);
 
     /**
      * The most recently observed profile for {@code assetId}, scoped like every other asset read.
@@ -82,7 +83,7 @@ public interface VehicleProfileService {
      *                                                            attempt, not audited)
      */
     VehicleProfile captureSnapshot(AssetId assetId, UsageId usageId, FlightPhase phase, Duration window,
-                                    UserId actor, VisibilityScope scope);
+                                    UserId actor, Authority scope);
 
     /**
      * The passport for one usage: its PREFLIGHT and POSTFLIGHT snapshots, whichever have been

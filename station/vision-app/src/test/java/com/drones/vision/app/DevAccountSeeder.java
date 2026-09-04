@@ -8,6 +8,7 @@ import com.drones.vision.identity.domain.model.Group;
 import com.drones.vision.identity.domain.model.Membership;
 import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.kernel.UserId;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 
 import java.util.List;
@@ -55,21 +56,22 @@ final class DevAccountSeeder {
 
     static void seedIfAbsent(UserService userService, GroupService groupService) {
         VisibilityScope system = VisibilityScope.unbounded();
+        Authority authority = Authority.full();
         if (!userService.list(system).isEmpty()) {
             return;
         }
         Group root = groupService.list(system).stream()
                 .filter(group -> group.name().equals("Root"))
                 .findFirst()
-                .orElseGet(() -> groupService.create(new GroupSpec("Root", null), system));
+                .orElseGet(() -> groupService.create(new GroupSpec("Root", null), authority));
         // No real caller exists yet — this recreates AuthSeedRunner's old unconditional seed, so the
         // audit attribution is a fresh, unrelated system actor rather than any of the seeded accounts.
         UserId seedActor = UserId.random();
         userService.create(new UserSpec("admin", "Administrator", "admin@vision.local", "admin",
-                List.of(new Membership(root.id(), Role.ADMIN))), seedActor, system);
+                List.of(new Membership(root.id(), Role.ADMIN))), seedActor, authority);
         userService.create(new UserSpec("manager", "Manager", "manager@vision.local", "manager",
-                List.of(new Membership(root.id(), Role.MANAGER))), seedActor, system);
+                List.of(new Membership(root.id(), Role.MANAGER))), seedActor, authority);
         userService.create(new UserSpec("pilot", "Pilot", "pilot@vision.local", "pilot",
-                List.of(new Membership(root.id(), Role.PILOT))), seedActor, system);
+                List.of(new Membership(root.id(), Role.PILOT))), seedActor, authority);
     }
 }

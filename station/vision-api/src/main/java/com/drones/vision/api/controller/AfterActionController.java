@@ -27,7 +27,7 @@ import java.util.Objects;
  * <p>Two endpoints, one collaborator ({@link AfterActionAssembler}) plus {@link CurrentUser} for
  * the acting viewer — mirroring {@link UsageTimelineController}'s own "service + acting-user"
  * shape. No {@code @PreAuthorize}: like every other controller in this module, authority is
- * resolved by threading {@link CurrentUser#scope()}/{@link CurrentUser#viewer()} down into the
+ * resolved by threading {@link CurrentUser#authority()}/{@link CurrentUser#viewer()} down into the
  * assembler, never by a Spring Security annotation — {@code vision-api} carries zero dependency on
  * {@code org.springframework.security} (see {@link CurrentUser}'s own javadoc).
  *
@@ -93,7 +93,7 @@ public class AfterActionController {
     }
 
     private AfterActionPackage assemble(String assetId, String usageId) {
-        return assembler.assemble(AssetId.of(assetId), UsageId.of(usageId), currentUser.scope(), currentUser.viewer(),
-                currentUser.userId().value().toString());
+        return assembler.assemble(AssetId.of(assetId), UsageId.of(usageId), currentUser.authority(),
+                currentUser.viewer(), currentUser.userId().value().toString());
     }
 }

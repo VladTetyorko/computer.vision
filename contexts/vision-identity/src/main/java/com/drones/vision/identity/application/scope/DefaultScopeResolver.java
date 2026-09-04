@@ -26,8 +26,9 @@ import java.util.stream.Collectors;
  * The one implementation of {@link ScopeResolver}.
  *
  * <h2>Subtree expansion</h2>
- * For a MANAGER, the scope is the union of the subtree (self + all descendants via
- * {@link Group#parentGroupId()}) of each group they manage. The tree is read once per call from
+ * For a MANAGER or a VIEWER (wave B6), the scope is the union of the subtree (self + all descendants
+ * via {@link Group#parentGroupId()}) of each group they hold that membership in. The tree is read
+ * once per call from
  * {@link GroupRepositoryPort#findAll()} into a parent&rarr;children map, then a breadth-first walk
  * from each manager group collects the reachable groups. A {@code visited} set both dedupes
  * overlapping subtrees and guards against a malformed cycle in the stored tree — a group already
@@ -57,18 +58,22 @@ public final class DefaultScopeResolver implements ScopeResolver {
             return VisibilityScope.unbounded();
         }
 
-        Set<GroupId> managerGroups = user.memberships().stream()
-                .filter(m -> m.role() == Role.MANAGER)
+        // MANAGER and VIEWER both see their group subtree (wave B6 widens this from MANAGER-only —
+        // see this class's authorityFor(User) javadoc and docs/plans/active/AUTH-ROLES-PLAN.md §3.6's
+        // staging rule, now satisfied: every canManageOrg()/canManage()/canAdminister() call site has
+        // migrated onto Authority, so a VIEWER handed a GROUPS scope can no longer accidentally pass
+        // one of those deprecated predicates directly — mayManageOrg()/mayManageFleet()/mayAdminister()
+        // additionally require a capability VIEWER never holds).
+        Set<GroupId> groupsScopeGroups = user.memberships().stream()
+                .filter(m -> m.role() == Role.MANAGER || m.role() == Role.VIEWER)
                 .map(Membership::groupId)
                 .collect(Collectors.toSet());
-        if (!managerGroups.isEmpty()) {
-            return VisibilityScope.groups(subtreeOf(managerGroups));
+        if (!groupsScopeGroups.isEmpty()) {
+            return VisibilityScope.groups(subtreeOf(groupsScopeGroups));
         }
 
         // PILOT-only, or no membership at all: only explicitly assigned assets. A user with no
         // assignments gets the empty set, which includes nothing — they see nothing until assigned.
-        // A VIEWER-only user resolves here too, deliberately — see this class's authorityFor(User)
-        // javadoc and docs/plans/active/AUTH-ROLES-PLAN.md §3.6's staging rule (wave B6 widens this).
         return VisibilityScope.assignedAssets(assignmentRepository.assetsForPilot(user.id()));
     }
 

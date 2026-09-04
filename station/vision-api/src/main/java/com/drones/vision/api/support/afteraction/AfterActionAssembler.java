@@ -14,6 +14,7 @@ import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.application.asset.AssetDetails;
 import com.drones.vision.warehouse.application.asset.AssetService;
@@ -51,27 +52,28 @@ import java.util.Optional;
  *
  * <h2>Two authority gates, not one</h2>
  * <ul>
- *   <li><b>Top-level export authority</b> — {@link VisibilityScope#canManage(com.drones.vision.kernel.Ownership)}
- *       against the asset's own ownership, checked once, before any part is resolved. This is the
- *       same predicate {@code AssetController#requireManageable}/{@code
- *       VehicleProfileService#probe} already use for "seeing it is not the same as administering
- *       it" (D8's own reasoning, applied here to exporting evidence) — a PILOT sees their assigned
- *       aircraft (no 404) but may not export its evidence package (403, docs/plans/active/
- *       AFTER-ACTION-PLAN.md &sect;3.3's fourth row). Thrown as {@link AccessDeniedException}
- *       before any part resolution begins, so a caller who fails this gate never triggers a single
- *       downstream read.</li>
- *   <li><b>The {@code audit} part's own gate</b> — {@link VisibilityScope#canManageOrg()}, the
- *       exact condition {@code AuditController} already applies to {@code GET /api/audit}, applied
- *       here to one asset's slice of the trail. Produces {@link AfterActionPartState#FORBIDDEN}
- *       rather than failing the whole request (D3) — auditing may legitimately refuse without the
- *       rest of the package being unavailable.</li>
+ *   <li><b>Top-level export authority</b> — {@link Authority#mayManageFleet(com.drones.vision.kernel.Ownership)}
+ *       against the asset's own ownership, checked once, before any part is resolved
+ *       (docs/plans/active/AUTH-ROLES-PLAN.md wave B6, superseding the bare {@code
+ *       VisibilityScope#canManage(Ownership)} check this used before). This is the same predicate
+ *       {@code AssetController#requireManageable}/{@code VehicleProfileService#probe} already use
+ *       for "seeing it is not the same as administering it" (D8's own reasoning, applied here to
+ *       exporting evidence) — a PILOT sees their assigned aircraft (no 404) but may not export its
+ *       evidence package (403, docs/plans/active/AFTER-ACTION-PLAN.md &sect;3.3's fourth row).
+ *       Thrown as {@link AccessDeniedException} before any part resolution begins, so a caller who
+ *       fails this gate never triggers a single downstream read.</li>
+ *   <li><b>The {@code audit} part's own gate</b> — {@link Authority#mayManageOrg()}, the exact
+ *       condition {@code AuditController} already applies to {@code GET /api/audit} (same wave B6
+ *       migration), applied here to one asset's slice of the trail. Produces {@link
+ *       AfterActionPartState#FORBIDDEN} rather than failing the whole request (D3) — auditing may
+ *       legitimately refuse without the rest of the package being unavailable.</li>
  * </ul>
- * <b>A structural note, not a bug</b>: under today's three-kind {@link VisibilityScope}, {@code
- * canManage(ownership) == true} always implies {@code canManageOrg() == true} (both reduce to
- * {@code UNBOUNDED} or a group-matching {@code GROUPS}) — so no real caller who clears the
- * top-level gate can ever see the {@code audit} part {@code FORBIDDEN}; only a caller who fails the
- * top-level gate could, and they never reach part resolution at all. The {@code FORBIDDEN} branch
- * is real, correctly wired to {@code AuditController}'s own policy, and exercised directly by
+ * <b>A structural note, not a bug</b>: under today's model, {@code mayManageFleet(ownership) ==
+ * true} always implies {@code mayManageOrg() == true} (both reduce to an unbounded scope or a
+ * group-matching {@code GROUPS} scope holding {@code MANAGE_ORG}) — so no real caller who clears
+ * the top-level gate can ever see the {@code audit} part {@code FORBIDDEN}; only a caller who fails
+ * the top-level gate could, and they never reach part resolution at all. The {@code FORBIDDEN}
+ * branch is real, correctly wired to {@code AuditController}'s own policy, and exercised directly by
  * {@code resolveAudit}'s own unit tests — but is not reachable end-to-end via {@link #assemble}
  * with any of this codebase's three real roles today. Flagged rather than silently designed around
  * (see this wave's report).
@@ -92,36 +94,40 @@ public final class AfterActionAssembler {
     }
 
     /**
-     * Assembles the package for one usage of one asset, as seen by {@code scope}/{@code viewer}
+     * Assembles the package for one usage of one asset, as seen by {@code authority}/{@code viewer}
      * (D6 — both describe the same requesting principal, through the two seams this codebase
-     * already splits identity into: {@code VisibilityScope} for warehouse/flight/audit reads,
+     * already splits identity into: {@code Authority} for warehouse/flight/audit reads and gates,
      * {@code MapAccessPolicy.Viewer} for map reads).
      *
-     * @param assetId  the asset the usage belongs to
-     * @param usageId  the usage (flight) to describe
-     * @param scope    the requesting viewer's visibility scope
-     * @param viewer   the requesting viewer, as the map's authorization model sees it
-     * @param scopedTo a display label for the requesting viewer (D6's {@code scopedTo}); resolved
-     *                 by the caller, not re-derived here
+     * @param assetId   the asset the usage belongs to
+     * @param usageId   the usage (flight) to describe
+     * @param authority the requesting viewer's authority (docs/plans/active/AUTH-ROLES-PLAN.md wave
+     *                  B6, superseding the bare {@code VisibilityScope} this took before); its
+     *                  {@link Authority#scope() scope()} half still serves the two plain reads below
+     *                  ({@link AssetService#details}/{@code VehicleProfileService#passport})
+     * @param viewer    the requesting viewer, as the map's authorization model sees it
+     * @param scopedTo  a display label for the requesting viewer (D6's {@code scopedTo}); resolved
+     *                  by the caller, not re-derived here
      * @return the assembled package
-     * @throws NoSuchElementException if {@code assetId} is unknown or not visible to {@code scope}
-     *                                (404), or {@code usageId} is unknown or does not belong to
-     *                                {@code assetId} (404, same shape — never leaks that it exists
-     *                                elsewhere)
-     * @throws AccessDeniedException  if {@code scope} may see the asset but may not export its
+     * @throws NoSuchElementException if {@code assetId} is unknown or not visible to {@code
+     *                                authority}'s scope (404), or {@code usageId} is unknown or does
+     *                                not belong to {@code assetId} (404, same shape — never leaks
+     *                                that it exists elsewhere)
+     * @throws AccessDeniedException  if {@code authority} may see the asset but may not export its
      *                                evidence package (403)
      */
-    public AfterActionPackage assemble(AssetId assetId, UsageId usageId, VisibilityScope scope, Viewer viewer,
+    public AfterActionPackage assemble(AssetId assetId, UsageId usageId, Authority authority, Viewer viewer,
                                         String scopedTo) {
         Objects.requireNonNull(assetId, "assetId must not be null");
         Objects.requireNonNull(usageId, "usageId must not be null");
-        Objects.requireNonNull(scope, "scope must not be null");
+        Objects.requireNonNull(authority, "authority must not be null");
         Objects.requireNonNull(viewer, "viewer must not be null");
         Objects.requireNonNull(scopedTo, "scopedTo must not be null");
+        VisibilityScope scope = authority.scope();
 
         AssetDetails assetDetails = assetService.details(scope, assetId);
         Asset asset = assetDetails.summary().asset();
-        if (!scope.canManage(asset.ownership())) {
+        if (!authority.mayManageFleet(asset.ownership())) {
             throw new AccessDeniedException("Not permitted to export the after-action package for asset " + assetId.value());
         }
 
@@ -141,7 +147,7 @@ public final class AfterActionAssembler {
         List<Mark> marks = filterMarksInWindow(sources.markService().list(viewer), startedAt, windowEnd);
         Optional<UsageRecording> recording = replayService.recordingFor(usageId);
         FlightPassport passport = sources.vehicleProfileService().passport(assetId, usageId, scope);
-        AuditResolution audit = resolveAudit(assetId, scope);
+        AuditResolution audit = resolveAudit(assetId, authority);
 
         List<AfterActionPart> parts = new ArrayList<>(AfterActionPartKind.values().length);
         parts.add(resolveTelemetry(telemetry));
@@ -225,13 +231,13 @@ public final class AfterActionAssembler {
     }
 
     /**
-     * Mirrors {@code AuditController}'s own {@code !scope.canManageOrg()} gate exactly — the
+     * Mirrors {@code AuditController}'s own {@code !authority.mayManageOrg()} gate exactly — the
      * "underlying service" for audit visibility is that one-line policy, not a dedicated
      * application service (none exists to delegate to), so this reapplies the identical condition
      * rather than inventing a new one.
      */
-    AuditResolution resolveAudit(AssetId assetId, VisibilityScope scope) {
-        if (!scope.canManageOrg()) {
+    AuditResolution resolveAudit(AssetId assetId, Authority authority) {
+        if (!authority.mayManageOrg()) {
             AfterActionPart part = new AfterActionPart(AfterActionPartKind.AUDIT, AfterActionPartState.FORBIDDEN, 0,
                     "your role cannot read the audit trail");
             return new AuditResolution(part, List.of());

@@ -81,16 +81,19 @@ import com.drones.vision.api.security.CurrentUser;
  * {@link #requireManageable}, which first re-reads the asset through the scope exactly as before
  * (an unknown or out-of-scope asset still 404s, hiding existence — the caller cannot even ask about
  * something they cannot see), then additionally requires {@link
- * com.drones.vision.platform.VisibilityScope#canManage(com.drones.vision.kernel.Ownership)
- * scope().canManage(ownership)} — an asset the caller can see but does not administer now 403s,
- * an honest "you may not do this" rather than a hiding 404, matching every other command gate in
- * this codebase (see {@link ApiExceptionHandler}'s 403 mapping). {@link #create} gains its own
- * gate, {@link com.drones.vision.platform.VisibilityScope#canManageOrg() scope().canManageOrg()} —
- * registering a new asset is team-scoped management, the same gate {@code DatasetService#create}/
- * {@code UserService#create} already use, not the deployment-global {@code canAdminister()} the
- * write gate above deliberately avoids needing (a MANAGER may administer every asset in their own
- * subtree without being an ADMIN). With auth off the scope is unbounded, so every one of these
- * gates passes and behavior is identical to before this wave.
+ * com.drones.vision.platform.Authority#mayManageFleet(com.drones.vision.kernel.Ownership)
+ * authority().mayManageFleet(ownership)} (docs/plans/active/AUTH-ROLES-PLAN.md wave B6, superseding
+ * the bare {@code VisibilityScope#canManage(Ownership)} check this gate used before) — an asset the
+ * caller can see but does not administer now 403s, an honest "you may not do this" rather than a
+ * hiding 404, matching every other command gate in this codebase (see {@link ApiExceptionHandler}'s
+ * 403 mapping). {@link #create} gains its own gate, {@link
+ * com.drones.vision.platform.Authority#mayManageOrg() authority().mayManageOrg()} — registering a
+ * new asset is team-scoped management, the same gate {@code DatasetService#create}/{@code
+ * UserService#create} already use, not the deployment-global {@code mayAdminister()} the write
+ * gate above deliberately avoids needing (a MANAGER may administer every asset in their own
+ * subtree without being an ADMIN). With auth off the dev principal's authority is {@link
+ * com.drones.vision.platform.Authority#full()}, so every one of these gates passes and behavior is
+ * identical to before this wave.
  *
  * <h2>Status codes</h2>
  * An unknown asset id surfaces as {@link java.util.NoSuchElementException} from {@link
@@ -129,7 +132,7 @@ public class AssetController {
     @PostMapping("/api/assets")
     @ResponseStatus(HttpStatus.CREATED)
     public AssetDetailsResponse create(@RequestBody CreateAssetRequest request) {
-        if (!currentUser.scope().canManageOrg()) {
+        if (!currentUser.authority().mayManageOrg()) {
             throw new AccessDeniedException("Not permitted to register new assets");
         }
         Asset created = assetService.create(request.toSpec(), currentUser.ownership(), currentUser.userId());
@@ -325,8 +328,8 @@ public class AssetController {
      * Guards a mutation: re-reads {@code id} through the caller's scope, so an out-of-scope or
      * unknown asset 404s ({@link java.util.NoSuchElementException}, hiding existence, unchanged
      * from before this wave) before the mutation runs — then, for an asset the caller can see,
-     * additionally requires {@link com.drones.vision.platform.VisibilityScope#canManage
-     * scope().canManage(ownership)}, an honest 403 rather than a hiding 404 (see the class
+     * additionally requires {@link com.drones.vision.platform.Authority#mayManageFleet
+     * authority().mayManageFleet(ownership)}, an honest 403 rather than a hiding 404 (see the class
      * javadoc's "Authority, not visibility" section for why the second check exists).
      *
      * <p>{@link #requireVisible} is the first half alone — the 404 without the 403 — used by {@link
@@ -339,7 +342,7 @@ public class AssetController {
 
     private void requireManageable(AssetId id) {
         AssetDetails details = assetService.details(currentUser.scope(), id);
-        if (!currentUser.scope().canManage(details.summary().asset().ownership())) {
+        if (!currentUser.authority().mayManageFleet(details.summary().asset().ownership())) {
             throw new AccessDeniedException("Asset " + id.value() + " is outside your management authority");
         }
     }

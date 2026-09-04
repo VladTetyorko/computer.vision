@@ -14,7 +14,7 @@ import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.platform.AuditTrailPort;
-import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.warehouse.application.asset.AssetDetails;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.domain.model.Asset;
@@ -37,8 +37,8 @@ import java.util.Objects;
  *       level" is read literally here.</li>
  *   <li><b>Resolve the asset</b> via {@link AssetService#details(AssetId)} -- unknown is a plain
  *       404, mirroring {@code DefaultFlightCommandService#resolveForCommand}.</li>
- *   <li><b>Authority</b>: {@link VisibilityScope#canManage(Ownership)} for message-interval and
- *       Tier-A writes; {@link VisibilityScope#canAdminister()} for Tier-B writes (section 6.1). A
+ *   <li><b>Authority</b>: {@link Authority#mayManageFleet(Ownership)} for message-interval and
+ *       Tier-A writes; {@link Authority#mayAdminister()} for Tier-B writes (section 6.1). A
  *       denial is audited.</li>
  *   <li><b>Tier-B consent</b> ({@link #writeParameter} only): a Tier-B write without {@code
  *       explicitConsent} is a plain {@link IllegalArgumentException} (400) -- a request-shape
@@ -80,7 +80,7 @@ public final class DefaultRemediationService implements RemediationService {
 
     @Override
     public MessageIntervalOutcome requestMessageInterval(AssetId assetId, int messageId, Duration interval,
-                                                           UserId actor, VisibilityScope scope) {
+                                                           UserId actor, Authority scope) {
         Objects.requireNonNull(assetId, "assetId must not be null");
         Objects.requireNonNull(interval, "interval must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
@@ -99,7 +99,7 @@ public final class DefaultRemediationService implements RemediationService {
 
     @Override
     public ParameterWriteOutcome writeParameter(AssetId assetId, String parameterName, double value,
-                                                 boolean explicitConsent, UserId actor, VisibilityScope scope) {
+                                                 boolean explicitConsent, UserId actor, Authority scope) {
         Objects.requireNonNull(assetId, "assetId must not be null");
         Objects.requireNonNull(parameterName, "parameterName must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
@@ -137,16 +137,16 @@ public final class DefaultRemediationService implements RemediationService {
         return details.summary().asset();
     }
 
-    private void requireCanManage(Asset asset, VisibilityScope scope, UserId actor, AssetId assetId, String command) {
-        if (!scope.canManage(asset.ownership())) {
+    private void requireCanManage(Asset asset, Authority scope, UserId actor, AssetId assetId, String command) {
+        if (!scope.mayManageFleet(asset.ownership())) {
             audit(actor, assetId, command, DENIED_OUT_OF_SCOPE);
             throw new AccessDeniedException(
                     "Asset " + assetId.value() + " is outside your management scope; you may not configure it");
         }
     }
 
-    private void requireCanAdminister(Asset asset, VisibilityScope scope, UserId actor, AssetId assetId, String command) {
-        if (!scope.canAdminister()) {
+    private void requireCanAdminister(Asset asset, Authority scope, UserId actor, AssetId assetId, String command) {
+        if (!scope.mayAdminister()) {
             audit(actor, assetId, command, DENIED_OUT_OF_SCOPE);
             throw new AccessDeniedException(
                     "Asset " + assetId.value() + " requires administrator authority for a tier-B parameter");

@@ -25,9 +25,10 @@ import java.util.Objects;
  * data every authenticated caller may read; {@link #create}/{@link #update} are org-wide
  * management acts (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3's Categories table write half),
  * gated the same way {@link AssetController#create} gates registering a brand-new asset — {@link
- * com.drones.vision.platform.VisibilityScope#canManageOrg() scope().canManageOrg()} — since a
- * category has no per-instance {@link com.drones.vision.kernel.Ownership} to {@code canManage}
- * against.
+ * com.drones.vision.platform.Authority#mayManageOrg() authority().mayManageOrg()}
+ * (docs/plans/active/AUTH-ROLES-PLAN.md wave B6, superseding the bare {@code
+ * VisibilityScope#canManageOrg()} check this used before) — since a category has no per-instance
+ * {@link com.drones.vision.kernel.Ownership} to {@code mayManageFleet} against.
  *
  * <p>Constructor-injected with {@link CategoryService} and {@link CurrentUser}. Per the hexagonal
  * dependency rule (ARCHITECTURE.md §2, enforced by ArchUnit), this module depends only on {@code
@@ -66,7 +67,7 @@ public class CategoryController {
     @PostMapping("/api/categories")
     @ResponseStatus(HttpStatus.CREATED)
     public CategoryResponse create(@RequestBody CreateCategoryRequest request) {
-        if (!currentUser.scope().canManageOrg()) {
+        if (!currentUser.authority().mayManageOrg()) {
             throw new AccessDeniedException("Not permitted to create categories");
         }
         return CategoryResponse.from(categoryService.create(request.toSpec()));
@@ -82,7 +83,7 @@ public class CategoryController {
      */
     @PutMapping("/api/categories/{id}")
     public CategoryResponse update(@PathVariable String id, @RequestBody UpdateCategoryRequest request) {
-        if (!currentUser.scope().canManageOrg()) {
+        if (!currentUser.authority().mayManageOrg()) {
             throw new AccessDeniedException("Not permitted to edit categories");
         }
         return CategoryResponse.from(categoryService.update(new CategoryId(id), request.toEdit()));

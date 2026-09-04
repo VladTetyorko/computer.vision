@@ -7,6 +7,7 @@ import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.perception.domain.model.DetectionEvent;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -49,7 +50,9 @@ import java.util.Objects;
  * gate on — it filters the fleet-wide list down to visible events instead, mirroring {@code
  * StreamController#list}'s {@code filterVisible} posture rather than 403ing the whole request; an
  * event whose {@code assetId} is {@code null} (device not yet attached to any asset) is visible only
- * to a caller whose scope {@link VisibilityScope#canAdminister()}, the same "unowned device" fallback
+ * to a caller whose authority {@link com.drones.vision.platform.Authority#mayAdminister()
+ * mayAdminister()} (docs/plans/active/AUTH-ROLES-PLAN.md wave B6, superseding the bare {@code
+ * VisibilityScope#canAdminister()} check this used before), the same "unowned device" fallback
  * {@link StreamAccess#visibleAsset} already applies elsewhere.
  */
 @RestController
@@ -93,9 +96,9 @@ public class EventController {
                                                 @RequestParam(defaultValue = "" + DEFAULT_LIMIT) int limit) {
         requirePositiveLimit(limit);
         Instant since = sinceMs == null ? null : Instant.ofEpochMilli(sinceMs);
-        VisibilityScope scope = currentUser.scope();
+        Authority authority = currentUser.authority();
         return detectionEventRepositoryPort.findRecent(since, limit).stream()
-                .filter(event -> visible(event, scope))
+                .filter(event -> visible(event, authority))
                 .map(DetectionEventResponse::from)
                 .toList();
     }
@@ -127,9 +130,9 @@ public class EventController {
                 .toList();
     }
 
-    private boolean visible(DetectionEvent event, VisibilityScope scope) {
+    private boolean visible(DetectionEvent event, Authority authority) {
         AssetId assetId = event.assetId();
-        return assetId == null ? scope.canAdminister() : streamAccess.visibleAsset(assetId, scope);
+        return assetId == null ? authority.mayAdminister() : streamAccess.visibleAsset(assetId, authority.scope());
     }
 
     private static void requirePositiveLimit(int limit) {

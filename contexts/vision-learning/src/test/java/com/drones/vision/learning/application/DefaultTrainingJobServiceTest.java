@@ -47,6 +47,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.platform.Capability;
 import com.drones.vision.platform.VisibilityScope;
 
 /**
@@ -75,9 +77,10 @@ class DefaultTrainingJobServiceTest {
     // deployment-global -- any manager may claim the shared training host to train a dataset they
     // can already label; adminScope/managerScope both prove the relaxed gate, pilotScope proves it
     // still refuses a caller with no management authority at all.
-    private final VisibilityScope adminScope = VisibilityScope.unbounded();
-    private final VisibilityScope managerScope = VisibilityScope.groups(Set.of());
-    private final VisibilityScope pilotScope = VisibilityScope.assignedAssets(Set.of());
+    private final Authority adminScope = Authority.full();
+    private final Authority managerScope =
+            new Authority(VisibilityScope.groups(Set.of()), Set.of(Capability.MANAGE_ORG));
+    private final Authority pilotScope = new Authority(VisibilityScope.assignedAssets(Set.of()), Set.of());
 
     @BeforeEach
     void setUp() {

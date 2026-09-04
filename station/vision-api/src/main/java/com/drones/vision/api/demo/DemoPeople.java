@@ -4,7 +4,7 @@ import com.drones.vision.identity.application.GroupService;
 import com.drones.vision.identity.application.GroupSpec;
 import com.drones.vision.identity.application.UserService;
 import com.drones.vision.identity.application.UserSpec;
-import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.identity.domain.model.Group;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.identity.domain.model.Membership;
@@ -75,12 +75,13 @@ public class DemoPeople {
      * @param count    how many users to create
      * @param actor    the pressing user's own id, for audit attribution (docs/plans/active/AUTH-ROLES-PLAN.md
      *                 D15, wave B3)
-     * @param acting   the pressing user's visibility scope — every gate {@link UserService} enforces
-     *                 still applies
+     * @param acting   the pressing user's authority (docs/plans/active/AUTH-ROLES-PLAN.md wave B6,
+     *                 superseding the bare {@code VisibilityScope} this took before) — every gate
+     *                 {@link UserService}/{@link GroupService} enforces still applies
      * @param problems sink for one human-readable line per user that could not be created
      * @return the created users, in creation order (possibly shorter than {@code count})
      */
-    public List<User> seed(int count, UserId actor, VisibilityScope acting, Consumer<String> problems) {
+    public List<User> seed(int count, UserId actor, Authority acting, Consumer<String> problems) {
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(acting, "acting must not be null");
         Objects.requireNonNull(problems, "problems must not be null");
@@ -92,7 +93,7 @@ public class DemoPeople {
         Set<String> taken;
         try {
             squad = squadGroup(acting);
-            taken = users.list(acting).stream().map(User::username).collect(Collectors.toSet());
+            taken = users.list(acting.scope()).stream().map(User::username).collect(Collectors.toSet());
         } catch (RuntimeException e) {
             problems.accept("users: " + describe(e));
             return List.of();
@@ -116,8 +117,8 @@ public class DemoPeople {
     }
 
     /** The demo squad group, created on first press and reused afterwards. */
-    private Group squadGroup(VisibilityScope acting) {
-        List<Group> existing = groups.list(acting);
+    private Group squadGroup(Authority acting) {
+        List<Group> existing = groups.list(acting.scope());
         return existing.stream()
                 .filter(group -> GROUP_NAME.equalsIgnoreCase(group.name()))
                 .findFirst()

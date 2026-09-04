@@ -216,7 +216,7 @@ public class LiveAssetAccess {
     private boolean resolve(UserId userId, AssetId assetId, VisibilityScope requestScope) {
         return userRepositoryPort.findById(userId)
                 .map(user -> streamAccess.visibleAsset(assetId, scopeResolver.scopeFor(user)))
-                .orElseGet(() -> requestScope.canAdminister()
+                .orElseGet(() -> requestScope.isUnbounded()
                         && streamAccess.visibleAsset(assetId, requestScope));
     }
 

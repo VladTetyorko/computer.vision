@@ -4,7 +4,7 @@ import com.drones.vision.flight.domain.model.MessageIntervalOutcome;
 import com.drones.vision.flight.domain.model.ParameterWriteOutcome;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.UserId;
-import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
 
 import java.time.Duration;
 
@@ -30,7 +30,7 @@ public interface RemediationService {
      *                                                            audited)
      */
     MessageIntervalOutcome requestMessageInterval(AssetId assetId, int messageId, Duration interval,
-                                                   UserId actor, VisibilityScope scope);
+                                                   UserId actor, Authority scope);
 
     /**
      * A single Tier-A/B {@code PARAM_SET}. Tier C, and any name matching no known tier, is refused
@@ -53,5 +53,5 @@ public interface RemediationService {
      *                                                            audited)
      */
     ParameterWriteOutcome writeParameter(AssetId assetId, String parameterName, double value,
-                                          boolean explicitConsent, UserId actor, VisibilityScope scope);
+                                          boolean explicitConsent, UserId actor, Authority scope);
 }

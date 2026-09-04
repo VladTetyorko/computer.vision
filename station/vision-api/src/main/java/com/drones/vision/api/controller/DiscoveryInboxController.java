@@ -32,21 +32,23 @@ import java.util.Objects;
  * CurrentUser}.
  *
  * <h2>Authorization</h2>
- * {@link #list} is gated on {@link com.drones.vision.platform.VisibilityScope#canManageOrg()
- * scope().canManageOrg()} directly in this controller — the same org-level read gate {@link
- * AuditController#list} already applies — per {@link DiscoveryInboxService#candidates()}'s own
- * javadoc: a not-yet-registered candidate has no {@code Ownership} for a per-instance visibility
- * check to authorise against, so the coarser org-wide gate is the only one available. {@link
- * #register} passes {@code scope}/{@code ownership} straight through to {@link
- * DiscoveryInboxService#register}, which performs its own {@code canManageOrg()} +
+ * {@link #list} is gated on {@link com.drones.vision.platform.Authority#mayManageOrg()
+ * authority().mayManageOrg()} directly in this controller (docs/plans/active/AUTH-ROLES-PLAN.md wave
+ * B6, superseding the bare {@code VisibilityScope#canManageOrg()} check this gate used before) — the
+ * same org-level read gate {@link AuditController#list} already applies — per {@link
+ * DiscoveryInboxService#candidates()}'s own javadoc: a not-yet-registered candidate has no {@code
+ * Ownership} for a per-instance visibility check to authorise against, so the coarser org-wide gate
+ * is the only one available. {@link #register} passes {@code authority()}/{@code ownership} straight
+ * through to {@link DiscoveryInboxService#register}, which performs its own {@code mayManageOrg()} +
  * {@code includesGroup} checks (see that method's own javadoc) — the same "service throws, controller
  * does not duplicate the check" shape {@code GroupAdminController#create} already follows. {@link
  * #dismiss} has no scope parameter on the service side (dismissing an inbox row commits to no
  * resource an {@code Ownership} could describe), so this controller gates it explicitly, the same
- * {@code !scope().canManageOrg()} pattern {@link AssetController#create}/{@link
+ * {@code !authority().mayManageOrg()} pattern {@link AssetController#create}/{@link
  * CategoryController#create} both use. Every mutation is attributed to {@link
- * CurrentUser#userId()}. With auth off (the default) the dev principal's scope is unbounded, so
- * every gate below passes and behavior is unchanged.
+ * CurrentUser#userId()}. With auth off (the default) the dev principal's authority is {@link
+ * com.drones.vision.platform.Authority#full()}, so every gate below passes and behavior is
+ * unchanged.
  *
  * <h2>Live updates</h2>
  * No SSE topic yet — {@link #list} is a cheap, indexed, idempotent full-list read a client polls
@@ -80,7 +82,7 @@ public class DiscoveryInboxController {
      */
     @GetMapping("/api/discovery/inbox")
     public DiscoveryInboxResponse list() {
-        if (!currentUser.scope().canManageOrg()) {
+        if (!currentUser.authority().mayManageOrg()) {
             throw new AccessDeniedException("Not permitted to view the discovery inbox");
         }
         var candidates = discoveryInboxService.candidates().stream().map(DiscoveryCandidateResponse::from).toList();
@@ -107,7 +109,7 @@ public class DiscoveryInboxController {
     public RegisterDiscoveryCandidateResponse register(@PathVariable String id,
                                                          @RequestBody RegisterDiscoveryCandidateRequest request) {
         Asset created = discoveryInboxService.register(DiscoveryCandidateId.of(id),
-                request.toCommand(currentUser.ownership()), currentUser.scope(), currentUser.userId());
+                request.toCommand(currentUser.ownership()), currentUser.authority(), currentUser.userId());
         return RegisterDiscoveryCandidateResponse.from(created);
     }
 
@@ -122,7 +124,7 @@ public class DiscoveryInboxController {
      */
     @PostMapping("/api/discovery/inbox/{id}/dismiss")
     public DiscoveryCandidateResponse dismiss(@PathVariable String id) {
-        if (!currentUser.scope().canManageOrg()) {
+        if (!currentUser.authority().mayManageOrg()) {
             throw new AccessDeniedException("Not permitted to dismiss a discovery candidate");
         }
         return DiscoveryCandidateResponse.from(

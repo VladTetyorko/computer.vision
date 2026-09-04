@@ -38,8 +38,10 @@ import java.util.Objects;
  * {@code 409} with the frozen D9 body, and {@link ReferenceRegionService} is never called.
  *
  * <h2>Authorization</h2>
- * {@code POST}/{@code DELETE} require {@link com.drones.vision.platform.VisibilityScope#canAdminister()}
- * (§3.3: "a region ingest hits an external imagery provider") — checked <em>after</em> request-body
+ * {@code POST}/{@code DELETE} require {@link com.drones.vision.platform.Authority#mayAdminister()}
+ * (docs/plans/active/AUTH-ROLES-PLAN.md wave B6, superseding the bare {@code
+ * VisibilityScope#canAdminister()} check this used before; §3.3: "a region ingest hits an external
+ * imagery provider") — checked <em>after</em> request-body
  * validation, the {@code CameraPoseController} precedent: a malformed body is a {@code 400}, before
  * the authorization guard. {@code GET} routes require no additional authorization; regions are a
  * global map-tile resource, not asset-scoped.
@@ -112,7 +114,7 @@ public class GeoRegionController {
     }
 
     private void requireAdminister() {
-        if (!currentUser.scope().canAdminister()) {
+        if (!currentUser.authority().mayAdminister()) {
             throw new AccessDeniedException("region ingest requires administer authority");
         }
     }

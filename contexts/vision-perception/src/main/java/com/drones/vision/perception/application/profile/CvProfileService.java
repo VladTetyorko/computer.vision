@@ -8,6 +8,7 @@ import com.drones.vision.perception.domain.model.CvProfile;
 import com.drones.vision.perception.domain.model.CvProfileBinding;
 import com.drones.vision.perception.domain.model.CvProfileId;
 import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 
 import java.util.List;
@@ -19,7 +20,7 @@ import java.util.List;
  *
  * <h2>Scope gate</h2>
  * {@link #create}, {@link #update}, {@link #delete}, {@link #fork}, {@link #bind} and {@link
- * #unbind} all require {@link VisibilityScope#canManageOrg()} — any manager/admin, not further
+ * #unbind} all require {@link Authority#mayManageOrg()} — any manager/admin, not further
  * restricted to a profile's own owning group, matching every other fleet-config gate in this
  * codebase (docs/plans/active/CV-SETTINGS-PLAN.md &sect;8 Q3, and {@code DefaultDatasetService}'s own
  * "create/delete = canManageOrg" precedent). A denied mutation throws {@link
@@ -74,7 +75,7 @@ public interface CvProfileService {
      * @throws com.drones.vision.platform.AccessDeniedException if {@code scope} may not manage the
      *                                                           organization
      */
-    CvProfile create(CvProfileSpec spec, GroupId groupId, UserId actor, VisibilityScope scope);
+    CvProfile create(CvProfileSpec spec, GroupId groupId, UserId actor, Authority scope);
 
     /**
      * Applies a full edit to a non-built-in profile.
@@ -89,7 +90,7 @@ public interface CvProfileService {
      *                                                           organization
      * @throws IllegalStateException                            if the profile is built-in
      */
-    CvProfile update(CvProfileId id, CvProfileSpec spec, UserId actor, VisibilityScope scope);
+    CvProfile update(CvProfileId id, CvProfileSpec spec, UserId actor, Authority scope);
 
     /**
      * Deletes a non-built-in, unbound profile.
@@ -103,7 +104,7 @@ public interface CvProfileService {
      * @throws IllegalStateException                            if the profile is built-in, or is
      *                                                           still bound to one or more scopes
      */
-    void delete(CvProfileId id, UserId actor, VisibilityScope scope);
+    void delete(CvProfileId id, UserId actor, Authority scope);
 
     /**
      * Copies a built-in profile's fields into a new, non-built-in profile owned by {@code groupId}
@@ -121,7 +122,7 @@ public interface CvProfileService {
      *                                                           organization
      * @throws IllegalArgumentException                         if the source profile is not built-in
      */
-    CvProfile fork(CvProfileId builtInId, String newName, GroupId groupId, UserId actor, VisibilityScope scope);
+    CvProfile fork(CvProfileId builtInId, String newName, GroupId groupId, UserId actor, Authority scope);
 
     /**
      * Binds a profile to a scope — an organization, a category, or a single asset — replacing
@@ -142,7 +143,7 @@ public interface CvProfileService {
      *                                                           for {@code scopeKind}
      */
     CvProfileBinding bind(BindingScope scopeKind, String scopeId, CvProfileId profileId, UserId actor,
-                          VisibilityScope scope);
+                          Authority scope);
 
     /**
      * Removes a scope's binding, if any — idempotent, matching {@link
@@ -157,7 +158,7 @@ public interface CvProfileService {
      * @throws IllegalArgumentException                         if {@code scopeId} is not a valid id
      *                                                           for {@code scopeKind}
      */
-    void unbind(BindingScope scopeKind, String scopeId, UserId actor, VisibilityScope scope);
+    void unbind(BindingScope scopeKind, String scopeId, UserId actor, Authority scope);
 
     /**
      * Resolves the one {@link PipelineConfig} {@code assetId} would start with right now — the same

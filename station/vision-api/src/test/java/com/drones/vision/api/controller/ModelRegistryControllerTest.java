@@ -58,7 +58,7 @@ class ModelRegistryControllerTest {
 
     @Test
     void promoteReturns200WithThePromotionOutcomeAndThreadsActorAndScope() throws Exception {
-        when(modelRegistryService.promote("yolo26n.pt", "v3", ownerId, currentUser.scope()))
+        when(modelRegistryService.promote("yolo26n.pt", "v3", ownerId, currentUser.authority()))
                 .thenReturn(new PromotionResult("yolo26n.pt", "v3", ModelStatus.LIVE, "yolo26n.pt", "v2"));
 
         mockMvc.perform(post("/api/cv/registry/models/{id}/promote", "yolo26n.pt")
@@ -71,12 +71,12 @@ class ModelRegistryControllerTest {
                 .andExpect(jsonPath("$.previousModelId").value("yolo26n.pt"))
                 .andExpect(jsonPath("$.previousVersion").value("v2"));
 
-        verify(modelRegistryService).promote("yolo26n.pt", "v3", ownerId, currentUser.scope());
+        verify(modelRegistryService).promote("yolo26n.pt", "v3", ownerId, currentUser.authority());
     }
 
     @Test
     void promoteOmitsThePreviousFieldsWhenNothingWasDemoted() throws Exception {
-        when(modelRegistryService.promote("yolo26n.pt", "v3", ownerId, currentUser.scope()))
+        when(modelRegistryService.promote("yolo26n.pt", "v3", ownerId, currentUser.authority()))
                 .thenReturn(new PromotionResult("yolo26n.pt", "v3", ModelStatus.LIVE, null, null));
 
         mockMvc.perform(post("/api/cv/registry/models/{id}/promote", "yolo26n.pt")
@@ -138,7 +138,7 @@ class ModelRegistryControllerTest {
 
     @Test
     void rollbackReturns200WithTheRestoredModelAndThreadsActorAndScope() throws Exception {
-        when(modelRegistryService.rollback(ownerId, currentUser.scope()))
+        when(modelRegistryService.rollback(ownerId, currentUser.authority()))
                 .thenReturn(new PromotionResult("yolo26n.pt", "v2", ModelStatus.LIVE, "yolo26n.pt", "v3"));
 
         mockMvc.perform(post("/api/cv/registry/rollback"))
@@ -149,7 +149,7 @@ class ModelRegistryControllerTest {
                 .andExpect(jsonPath("$.previousModelId").value("yolo26n.pt"))
                 .andExpect(jsonPath("$.previousVersion").value("v3"));
 
-        verify(modelRegistryService).rollback(ownerId, currentUser.scope());
+        verify(modelRegistryService).rollback(ownerId, currentUser.authority());
     }
 
     @Test

@@ -38,8 +38,10 @@ import com.drones.vision.api.security.CurrentUser;
  *
  * <h2>Authority (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2)</h2>
  * {@link #simulate} registers a brand-new asset exactly like {@link AssetController#create} does —
- * it gates on the same {@link com.drones.vision.platform.VisibilityScope#canManageOrg()
- * scope().canManageOrg()}, closing an asymmetry the LIVE-SCOPE audit found: this sibling endpoint
+ * it gates on the same {@link com.drones.vision.platform.Authority#mayManageOrg()
+ * authority().mayManageOrg()} (docs/plans/active/AUTH-ROLES-PLAN.md wave B6, superseding the bare
+ * {@code VisibilityScope#canManageOrg()} check this used before), closing an asymmetry the
+ * LIVE-SCOPE audit found: this sibling endpoint
  * had no gate at all, so any authenticated caller (including a PILOT) could register and
  * auto-start a fleet asset. {@link #stop} is now scoped — "may this caller touch this asset at
  * all", the same visibility question {@link AssetStreamController#stopStream} answers for its own
@@ -89,14 +91,16 @@ public class SimulationController {
      *
      * @param request the video file and home point to simulate
      * @return the created asset's id, and — if streaming — its stream id and viewer URLs
-     * @throws AccessDeniedException if the caller's scope may not {@code canManageOrg()}
+     * @throws AccessDeniedException if the caller's authority may not {@code mayManageOrg()}
      *                                (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2 — closes the
-     *                                asymmetry with {@link AssetController#create}'s own gate)
+     *                                asymmetry with {@link AssetController#create}'s own gate;
+     *                                docs/plans/active/AUTH-ROLES-PLAN.md wave B6 migrated this
+     *                                check off the bare {@code VisibilityScope})
      */
     @PostMapping("/api/simulations")
     @ResponseStatus(HttpStatus.CREATED)
     public SimulationResponse simulate(@RequestBody StartSimulationRequest request) {
-        if (!currentUser.scope().canManageOrg()) {
+        if (!currentUser.authority().mayManageOrg()) {
             throw new AccessDeniedException("Not permitted to register new assets");
         }
         SimulatedAsset simulated =

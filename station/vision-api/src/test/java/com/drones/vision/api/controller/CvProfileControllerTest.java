@@ -20,6 +20,7 @@ import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.model.TrackingConfig;
 import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.application.category.CategoryService;
 import com.drones.vision.warehouse.domain.model.DeviceCategory;
@@ -146,7 +147,7 @@ class CvProfileControllerTest {
     @Test
     void createReturns201AndThreadsTheCallersOwnGroup() throws Exception {
         CvProfileId id = CvProfileId.random();
-        when(cvProfileService.create(any(), eq(GROUP_ID), eq(ownerId), eq(currentUser.scope())))
+        when(cvProfileService.create(any(), eq(GROUP_ID), eq(ownerId), eq(currentUser.authority())))
                 .thenReturn(profile(id, false, GROUP_ID));
 
         mockMvc.perform(post("/api/cv/profiles").contentType(MediaType.APPLICATION_JSON)
@@ -154,7 +155,7 @@ class CvProfileControllerTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(id.value().toString()));
 
-        verify(cvProfileService).create(any(), eq(GROUP_ID), eq(ownerId), eq(currentUser.scope()));
+        verify(cvProfileService).create(any(), eq(GROUP_ID), eq(ownerId), eq(currentUser.authority()));
     }
 
     @Test
@@ -182,7 +183,7 @@ class CvProfileControllerTest {
     @Test
     void updateReturns200WithTheUpdatedProfile() throws Exception {
         CvProfileId id = CvProfileId.random();
-        when(cvProfileService.update(eq(id), any(), eq(ownerId), eq(currentUser.scope())))
+        when(cvProfileService.update(eq(id), any(), eq(ownerId), eq(currentUser.authority())))
                 .thenReturn(profile(id, false, GROUP_ID));
 
         mockMvc.perform(put("/api/cv/profiles/{id}", id.value().toString()).contentType(MediaType.APPLICATION_JSON)
@@ -229,7 +230,7 @@ class CvProfileControllerTest {
         CvProfileId profileId = CvProfileId.random();
         Instant createdAt = Instant.parse("2026-08-01T00:00:00Z");
         when(cvProfileService.bind(eq(BindingScope.ASSET), eq("11111111-1111-1111-1111-111111111111"),
-                eq(profileId), eq(ownerId), eq(currentUser.scope())))
+                eq(profileId), eq(ownerId), eq(currentUser.authority())))
                 .thenReturn(new CvProfileBinding(BindingScope.ASSET, "11111111-1111-1111-1111-111111111111",
                         profileId, createdAt));
 
@@ -266,7 +267,7 @@ class CvProfileControllerTest {
                         .content("{\"scopeKind\":\"CATEGORY\",\"scopeId\":\"fpv-drone\"}"))
                 .andExpect(status().isNoContent());
 
-        verify(cvProfileService).unbind(BindingScope.CATEGORY, "fpv-drone", ownerId, currentUser.scope());
+        verify(cvProfileService).unbind(BindingScope.CATEGORY, "fpv-drone", ownerId, currentUser.authority());
     }
 
     // ---- GET /api/cv/profiles/effective ----

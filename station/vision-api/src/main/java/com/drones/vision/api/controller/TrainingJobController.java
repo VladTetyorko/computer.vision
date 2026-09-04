@@ -110,7 +110,7 @@ public class TrainingJobController {
     public TrainingJobResponse start(@PathVariable String id, @RequestBody StartTrainingJobRequest request) {
         DatasetId datasetId = DatasetId.of(id);
         TrainingJobSpec spec = new TrainingJobSpec(request.baseModel(), datasetId.value().toString(), request.epochs());
-        String jobId = trainingJobService.start(spec, currentUser.userId(), currentUser.scope());
+        String jobId = trainingJobService.start(spec, currentUser.userId(), currentUser.authority());
         return trainingJobService.job(jobId).map(TrainingJobResponse::from)
                 .orElseThrow(() -> new IllegalStateException("Training job vanished immediately after start: " + jobId));
     }
@@ -148,7 +148,7 @@ public class TrainingJobController {
      */
     @GetMapping("/api/cv/training/runs")
     public TrainingRunsResponse runs(@RequestParam(defaultValue = "" + DEFAULT_RUNS_LIMIT) int limit) {
-        List<TrainingRunResponse> runs = trainingJobService.runs(limit, currentUser.userId(), currentUser.scope())
+        List<TrainingRunResponse> runs = trainingJobService.runs(limit, currentUser.userId(), currentUser.authority())
                 .stream().map(this::toResponse).toList();
         return new TrainingRunsResponse(runs);
     }
@@ -162,7 +162,7 @@ public class TrainingJobController {
     @GetMapping("/api/cv/training/runs/{runId}")
     public TrainingRunResponse run(@PathVariable String runId) {
         TrainingRunRecord run =
-                trainingJobService.run(TrainingRunId.of(runId), currentUser.userId(), currentUser.scope());
+                trainingJobService.run(TrainingRunId.of(runId), currentUser.userId(), currentUser.authority());
         return toResponse(run);
     }
 

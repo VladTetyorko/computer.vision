@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 
 /**
@@ -26,19 +27,19 @@ public final class DefaultGroupService implements GroupService {
     }
 
     @Override
-    public Group create(GroupSpec spec, VisibilityScope acting) {
+    public Group create(GroupSpec spec, Authority acting) {
         Objects.requireNonNull(spec, "spec must not be null");
         Objects.requireNonNull(acting, "acting must not be null");
-        if (!acting.canManageOrg()) {
+        if (!acting.mayManageOrg()) {
             throw new AccessDeniedException("not permitted to create groups");
         }
         GroupId parentGroupId = spec.parentGroupId();
         if (parentGroupId == null) {
-            if (!acting.isUnbounded()) {
+            if (!acting.scope().isUnbounded()) {
                 throw new AccessDeniedException("only an administrator may create a root group");
             }
         } else {
-            if (!acting.includesGroup(parentGroupId)) {
+            if (!acting.scope().includesGroup(parentGroupId)) {
                 throw new AccessDeniedException("cannot create a group under a parent outside your scope");
             }
             if (groupRepository.findById(parentGroupId).isEmpty()) {

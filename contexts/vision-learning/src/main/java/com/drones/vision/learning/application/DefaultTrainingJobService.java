@@ -38,18 +38,19 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 
 /**
  * The one implementation of {@link TrainingJobService}.
  *
  * <h2>Scope gate (docs/plans/active/CV-SETTINGS-PLAN.md §8 OQ9)</h2>
- * {@link #start} requires {@link VisibilityScope#canManageOrg()} — relaxed from {@code
+ * {@link #start} requires {@link Authority#mayManageOrg()} — relaxed from {@code
  * canAdminister()} (a security-gate change, accepted by the user per docs/plans/active/CV-SETTINGS-CONTEXT.md's
  * "Decisions taken"): claiming the shared training host is still a privileged act, but training a
  * dataset a manager can already label is team-scoped, not deployment-global — promoting the result
- * to production stays {@code canAdminister()} on {@link ModelRegistryService#promote}. {@link
- * #runs}/{@link #run} are gated on {@code canManageOrg()} too — see {@link TrainingJobService}'s own
+ * to production stays {@code mayAdminister()} on {@link ModelRegistryService#promote}. {@link
+ * #runs}/{@link #run} are gated on {@code mayManageOrg()} too — see {@link TrainingJobService}'s own
  * javadoc, "Scope".
  *
  * <h2>Synchronous dataset pre-check (docs/plans/done/CV-TRAINING-V2-PLAN.md §4/§E)</h2>
@@ -71,7 +72,7 @@ import com.drones.vision.platform.VisibilityScope;
  * {@link TrainingJobView#jobId()} (unchanged from before this run-persistence wave) and the same
  * UUID, wrapped, as the {@link TrainingRunId} the persisted {@link TrainingRunRecord} is keyed by —
  * so a caller can look up the same job through either {@link #job(String)} (the live poll) or
- * {@link #run(TrainingRunId, UserId, VisibilityScope)} (the durable record) without tracking two
+ * {@link #run(TrainingRunId, UserId, Authority)} (the durable record) without tracking two
  * unrelated ids. The wire {@code jobId} a particular {@link TrainingProgress} message carries is
  * still read nowhere in this class — see the "Off-thread run" section below.
  *
@@ -88,7 +89,7 @@ import com.drones.vision.platform.VisibilityScope;
  * additionally registers a {@link ModelStatus#CANDIDATE} {@link CvModelRecord} through {@link
  * TrainingRunStores#models()} (docs/plans/active/CV-SETTINGS-PLAN.md §8 OQ6 — <b>never</b> {@code
  * LIVE}; promotion stays {@link ModelRegistryService#promote}'s own human, {@code
- * canAdminister()}-gated act) — but only when the terminal message actually names a produced model
+ * mayAdminister()}-gated act) — but only when the terminal message actually names a produced model
  * id ({@link TrainingProgress#message()} non-blank); a blank one is treated as "nothing to
  * register", not a crash. Either upload or training failing is recorded as a terminal {@link
  * JobState#FAILED} job (and a matching {@code FAILED} run row) rather than escaping, exactly as
@@ -189,7 +190,7 @@ public final class DefaultTrainingJobService implements TrainingJobService {
     }
 
     @Override
-    public String start(TrainingJobSpec spec, UserId actor, VisibilityScope scope) {
+    public String start(TrainingJobSpec spec, UserId actor, Authority scope) {
         Objects.requireNonNull(spec, "spec must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
@@ -198,14 +199,14 @@ public final class DefaultTrainingJobService implements TrainingJobService {
         String jobId = uuid.toString();
         TrainingRunId runId = new TrainingRunId(uuid);
 
-        if (!scope.canManageOrg()) {
+        if (!scope.mayManageOrg()) {
             audit(actor, jobId, spec, DENIED_OUT_OF_SCOPE);
             throw new AccessDeniedException("Not permitted to start training jobs");
         }
 
         DatasetId datasetId = DatasetId.of(spec.datasetId());
         List<TrainingSample> labeledPreview =
-                labelingService.samples(datasetId, SampleStatus.LABELED, PRESENCE_CHECK_LIMIT, actor, scope);
+                labelingService.samples(datasetId, SampleStatus.LABELED, PRESENCE_CHECK_LIMIT, actor, scope.scope());
         if (labeledPreview.isEmpty()) {
             throw new IllegalArgumentException(
                     "Dataset " + spec.datasetId() + " has no LABELED samples to train on");
@@ -235,13 +236,13 @@ public final class DefaultTrainingJobService implements TrainingJobService {
     }
 
     @Override
-    public List<TrainingRunRecord> runs(int limit, UserId actor, VisibilityScope scope) {
+    public List<TrainingRunRecord> runs(int limit, UserId actor, Authority scope) {
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
         if (limit <= 0) {
             throw new IllegalArgumentException("limit must be positive: " + limit);
         }
-        if (!scope.canManageOrg()) {
+        if (!scope.mayManageOrg()) {
             auditRunsDenied(actor, RUNS_TARGET_ID);
             throw new AccessDeniedException("Not permitted to view training runs");
         }
@@ -249,11 +250,11 @@ public final class DefaultTrainingJobService implements TrainingJobService {
     }
 
     @Override
-    public TrainingRunRecord run(TrainingRunId runId, UserId actor, VisibilityScope scope) {
+    public TrainingRunRecord run(TrainingRunId runId, UserId actor, Authority scope) {
         Objects.requireNonNull(runId, "runId must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
-        if (!scope.canManageOrg()) {
+        if (!scope.mayManageOrg()) {
             auditRunsDenied(actor, runId.value().toString());
             throw new AccessDeniedException("Not permitted to view training runs");
         }
@@ -262,10 +263,10 @@ public final class DefaultTrainingJobService implements TrainingJobService {
     }
 
     private void runJob(String jobId, TrainingRunId runId, TrainingJobSpec spec, DatasetId datasetId, UserId actor,
-                         Instant startedAt, VisibilityScope scope) {
+                         Instant startedAt, Authority scope) {
         try {
             note(jobId, "Uploading dataset…");
-            DatasetUpload upload = labelingService.uploadForTraining(datasetId, actor, scope);
+            DatasetUpload upload = labelingService.uploadForTraining(datasetId, actor, scope.scope());
             note(jobId, "Uploaded " + upload.sampleCount() + " sample(s), " + upload.sizeBytes()
                     + " bytes; starting training…");
             trainingPort.startTraining(spec,

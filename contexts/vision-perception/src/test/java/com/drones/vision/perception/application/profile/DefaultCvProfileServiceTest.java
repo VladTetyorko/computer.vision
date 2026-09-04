@@ -18,6 +18,8 @@ import com.drones.vision.perception.domain.model.TrackingConfig;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.platform.Capability;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.application.asset.AssetDetails;
 import com.drones.vision.warehouse.application.asset.AssetService;
@@ -134,7 +136,7 @@ class DefaultCvProfileServiceTest {
 
     @Test
     void createDeniedWhenScopeCannotManageOrgAndAuditsTheDenial() {
-        VisibilityScope scope = VisibilityScope.assignedAssets(Set.of());
+        Authority scope = new Authority(VisibilityScope.assignedAssets(Set.of()), Set.of());
 
         assertThrows(AccessDeniedException.class,
                 () -> service.create(spec("mast-cams"), GroupId.random(), actor, scope));
@@ -146,7 +148,7 @@ class DefaultCvProfileServiceTest {
     @Test
     void createSucceedsForAManagerAndAudits() {
         GroupId groupId = GroupId.random();
-        VisibilityScope scope = VisibilityScope.groups(Set.of(groupId));
+        Authority scope = new Authority(VisibilityScope.groups(Set.of(groupId)), Set.of(Capability.MANAGE_ORG));
 
         CvProfile created = service.create(spec("mast-cams"), groupId, actor, scope);
 
@@ -162,7 +164,7 @@ class DefaultCvProfileServiceTest {
     @Test
     void updateRefusesABuiltInProfile() {
         CvProfile builtIn = cache.save(builtIn("people-vehicles"));
-        VisibilityScope scope = VisibilityScope.unbounded();
+        Authority scope = Authority.full();
 
         assertThrows(IllegalStateException.class, () -> service.update(builtIn.id(), spec("renamed"), actor, scope));
         assertEquals("people-vehicles", cache.snapshot().findById(builtIn.id()).orElseThrow().name(),
@@ -173,7 +175,7 @@ class DefaultCvProfileServiceTest {
     void updateDeniedWhenScopeCannotManageOrg() {
         GroupId groupId = GroupId.random();
         CvProfile existing = cache.save(owned("mast-cams", groupId));
-        VisibilityScope scope = VisibilityScope.assignedAssets(Set.of());
+        Authority scope = new Authority(VisibilityScope.assignedAssets(Set.of()), Set.of());
 
         assertThrows(AccessDeniedException.class, () -> service.update(existing.id(), spec("renamed"), actor, scope));
     }
@@ -182,7 +184,7 @@ class DefaultCvProfileServiceTest {
     void updateAppliesTheNewFieldsAndKeepsCreatedAt() {
         GroupId groupId = GroupId.random();
         CvProfile existing = cache.save(owned("mast-cams", groupId));
-        VisibilityScope scope = VisibilityScope.unbounded();
+        Authority scope = Authority.full();
 
         CvProfile updated = service.update(existing.id(), spec("mast-cams-v2"), actor, scope);
 
@@ -195,7 +197,7 @@ class DefaultCvProfileServiceTest {
     @Test
     void deleteRefusesABuiltInProfile() {
         CvProfile builtIn = cache.save(builtIn("wide-search"));
-        VisibilityScope scope = VisibilityScope.unbounded();
+        Authority scope = Authority.full();
 
         assertThrows(IllegalStateException.class, () -> service.delete(builtIn.id(), actor, scope));
         assertTrue(cache.snapshot().findById(builtIn.id()).isPresent());
@@ -206,7 +208,7 @@ class DefaultCvProfileServiceTest {
         GroupId groupId = GroupId.random();
         CvProfile profile = cache.save(owned("mast-cams", groupId));
         cache.saveBinding(new CvProfileBinding(BindingScope.ORGANIZATION, groupId.value().toString(), profile.id(), NOW));
-        VisibilityScope scope = VisibilityScope.unbounded();
+        Authority scope = Authority.full();
 
         assertThrows(IllegalStateException.class, () -> service.delete(profile.id(), actor, scope));
         assertTrue(cache.snapshot().findById(profile.id()).isPresent());
@@ -216,7 +218,7 @@ class DefaultCvProfileServiceTest {
     void deleteSucceedsForAnUnboundNonBuiltInProfile() {
         GroupId groupId = GroupId.random();
         CvProfile profile = cache.save(owned("mast-cams", groupId));
-        VisibilityScope scope = VisibilityScope.unbounded();
+        Authority scope = Authority.full();
 
         service.delete(profile.id(), actor, scope);
 
@@ -229,7 +231,7 @@ class DefaultCvProfileServiceTest {
     void forkCopiesABuiltInIntoANewGroupOwnedProfileLeavingTheSourceUntouched() {
         CvProfile source = cache.save(builtIn("people-vehicles"));
         GroupId groupId = GroupId.random();
-        VisibilityScope scope = VisibilityScope.groups(Set.of(groupId));
+        Authority scope = new Authority(VisibilityScope.groups(Set.of(groupId)), Set.of(Capability.MANAGE_ORG));
 
         CvProfile forked = service.fork(source.id(), "my-people-vehicles", groupId, actor, scope);
 
@@ -244,7 +246,7 @@ class DefaultCvProfileServiceTest {
     void forkRefusesANonBuiltInSource() {
         GroupId groupId = GroupId.random();
         CvProfile own = cache.save(owned("mast-cams", groupId));
-        VisibilityScope scope = VisibilityScope.unbounded();
+        Authority scope = Authority.full();
 
         assertThrows(IllegalArgumentException.class, () -> service.fork(own.id(), "copy", groupId, actor, scope));
     }
@@ -254,7 +256,7 @@ class DefaultCvProfileServiceTest {
     @Test
     void bindRejectsAMalformedScopeIdForEachKind() {
         CvProfile profile = cache.save(builtIn("people-vehicles"));
-        VisibilityScope scope = VisibilityScope.unbounded();
+        Authority scope = Authority.full();
 
         assertThrows(IllegalArgumentException.class,
                 () -> service.bind(BindingScope.ASSET, "not-a-uuid", profile.id(), actor, scope));
@@ -267,7 +269,7 @@ class DefaultCvProfileServiceTest {
     @Test
     void bindAcceptsAWellFormedScopeIdForEachKind() {
         CvProfile profile = cache.save(builtIn("people-vehicles"));
-        VisibilityScope scope = VisibilityScope.unbounded();
+        Authority scope = Authority.full();
 
         CvProfileBinding assetBinding =
                 service.bind(BindingScope.ASSET, AssetId.random().value().toString(), profile.id(), actor, scope);
@@ -284,7 +286,7 @@ class DefaultCvProfileServiceTest {
     @Test
     void bindDeniedWhenScopeCannotManageOrg() {
         CvProfile profile = cache.save(builtIn("people-vehicles"));
-        VisibilityScope scope = VisibilityScope.assignedAssets(Set.of());
+        Authority scope = new Authority(VisibilityScope.assignedAssets(Set.of()), Set.of());
 
         assertThrows(AccessDeniedException.class,
                 () -> service.bind(BindingScope.CATEGORY, "quadcopter", profile.id(), actor, scope));
@@ -292,7 +294,7 @@ class DefaultCvProfileServiceTest {
 
     @Test
     void bindThrowsNoSuchElementForAnUnknownProfile() {
-        VisibilityScope scope = VisibilityScope.unbounded();
+        Authority scope = Authority.full();
 
         assertThrows(NoSuchElementException.class,
                 () -> service.bind(BindingScope.CATEGORY, "quadcopter", CvProfileId.random(), actor, scope));
@@ -300,7 +302,7 @@ class DefaultCvProfileServiceTest {
 
     @Test
     void unbindIsIdempotentForAnAlreadyUnboundScope() {
-        VisibilityScope scope = VisibilityScope.unbounded();
+        Authority scope = Authority.full();
 
         service.unbind(BindingScope.CATEGORY, "quadcopter", actor, scope);
         service.unbind(BindingScope.CATEGORY, "quadcopter", actor, scope);
@@ -311,7 +313,7 @@ class DefaultCvProfileServiceTest {
     @Test
     void unbindRemovesAnExistingBinding() {
         CvProfile profile = cache.save(builtIn("people-vehicles"));
-        VisibilityScope scope = VisibilityScope.unbounded();
+        Authority scope = Authority.full();
         service.bind(BindingScope.CATEGORY, "quadcopter", profile.id(), actor, scope);
 
         service.unbind(BindingScope.CATEGORY, "quadcopter", actor, scope);
@@ -330,7 +332,7 @@ class DefaultCvProfileServiceTest {
         VisibilityScope scope = VisibilityScope.unbounded();
         when(assetService.details(eq(scope), eq(assetId))).thenReturn(detailsOf(asset));
         CvProfile bound = cache.save(owned("mast-cams", groupId));
-        service.bind(BindingScope.ASSET, assetId.value().toString(), bound.id(), actor, scope);
+        service.bind(BindingScope.ASSET, assetId.value().toString(), bound.id(), actor, Authority.full());
 
         EffectiveProfile effective = service.effective(assetId, PipelineConfig.defaults(), actor, scope);
 

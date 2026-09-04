@@ -13,11 +13,13 @@ import java.util.Set;
  *
  * <p>Wraps a {@link VisibilityScope} rather than copying or replacing it — {@link #scope()} is the
  * same value every scoped read already threads through, unchanged. A capability alone is never the
- * whole answer: {@link #mayManageOrg()} and {@link #mayAdminister()} additionally require the wrapped
- * scope's own {@link VisibilityScope#canManageOrg()}/{@link VisibilityScope#canAdminister()}, and
- * {@link #mayManageFleet(Ownership)} additionally requires {@link VisibilityScope#canManage(Ownership)}
- * — a capability says "this role is the kind of role that may do this at all," the scope says
- * "and this specific request's boundary reaches this specific resource." Both must hold.
+ * whole answer: {@link #mayManageOrg()}/{@link #mayAdminister()}/{@link #mayManageFleet(Ownership)}
+ * additionally require the wrapped scope's own {@link VisibilityScope#kind()} to reach that
+ * resource — {@link VisibilityScope}'s three visibility-only predicates that used to answer this
+ * (docs/plans/active/AUTH-ROLES-PLAN.md wave B6) were deleted once every caller moved onto this type,
+ * so the same kind-based logic now lives here instead. A capability says "this role is the kind of
+ * role that may do this at all," the scope says "and this specific request's boundary reaches this
+ * specific resource." Both must hold.
  *
  * <p>Deliberately carries <strong>no per-asset command verb</strong> — "may this caller fly this one
  * aircraft" is {@code AssetAuthority}'s question (docs/plans/active/AUTH-ROLES-PLAN.md §3.9,
@@ -50,35 +52,53 @@ public record Authority(VisibilityScope scope, Set<Capability> capabilities) {
      * the management lists at all.
      *
      * @return {@code true} iff {@link Capability#MANAGE_ORG} is held <strong>and</strong> {@link
-     *         VisibilityScope#canManageOrg()} holds on {@link #scope()}
+     *         #scope()}'s {@link VisibilityScope#kind()} is {@link VisibilityScope.Kind#UNBOUNDED} or
+     *         {@link VisibilityScope.Kind#GROUPS}
      */
     public boolean mayManageOrg() {
-        return capabilities.contains(Capability.MANAGE_ORG) && scope.canManageOrg();
+        VisibilityScope.Kind kind = scope.kind();
+        return capabilities.contains(Capability.MANAGE_ORG)
+                && (kind == VisibilityScope.Kind.UNBOUNDED || kind == VisibilityScope.Kind.GROUPS);
     }
 
     /**
      * Whether this caller may administer (rename, deactivate, delete, reassign the devices of) the
      * asset owned by {@code ownership} — fleet management within scope.
      *
+     * <p>{@code false} for {@link VisibilityScope.Kind#ASSIGNED_ASSETS} regardless of capabilities or
+     * ownership: a PILOT's scope grants no more than seeing (and flying) the aircraft assigned to
+     * them, never management of it — the same distinction {@link VisibilityScope}'s deleted {@code
+     * canManage(Ownership)} predicate used to draw.
+     *
      * @param ownership the asset's ownership
      * @return {@code true} iff {@link Capability#MANAGE_FLEET} is held <strong>and</strong> {@link
-     *         VisibilityScope#canManage(Ownership)} holds on {@link #scope()} for {@code ownership}
+     *         #scope()} reaches {@code ownership}'s group — always for {@link
+     *         VisibilityScope.Kind#UNBOUNDED}, only when the group is in {@link VisibilityScope#groups()}
+     *         for {@link VisibilityScope.Kind#GROUPS}, never for {@link
+     *         VisibilityScope.Kind#ASSIGNED_ASSETS}
      */
     public boolean mayManageFleet(Ownership ownership) {
         Objects.requireNonNull(ownership, "ownership must not be null");
-        return capabilities.contains(Capability.MANAGE_FLEET) && scope.canManage(ownership);
+        if (!capabilities.contains(Capability.MANAGE_FLEET)) {
+            return false;
+        }
+        return switch (scope.kind()) {
+            case UNBOUNDED -> true;
+            case GROUPS -> scope.groups().contains(ownership.groupId());
+            case ASSIGNED_ASSETS -> false;
+        };
     }
 
     /**
      * Whether this caller may take a deployment-global action with no group boundary — promote the
-     * live CV model, start a training job, or anything else {@link VisibilityScope#canAdminister()}
-     * itself gates.
+     * live CV model, start a training job, or anything else with a blast radius wider than one
+     * group's fleet.
      *
      * @return {@code true} iff {@link Capability#MANAGE_ORG} is held <strong>and</strong> {@link
-     *         VisibilityScope#canAdminister()} holds on {@link #scope()}
+     *         #scope()} is {@link VisibilityScope#isUnbounded()}
      */
     public boolean mayAdminister() {
-        return capabilities.contains(Capability.MANAGE_ORG) && scope.canAdminister();
+        return capabilities.contains(Capability.MANAGE_ORG) && scope.isUnbounded();
     }
 
     /**

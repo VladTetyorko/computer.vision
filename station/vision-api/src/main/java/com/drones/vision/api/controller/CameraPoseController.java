@@ -162,7 +162,7 @@ public class CameraPoseController {
      */
     private void requireManageable(AssetId id) {
         AssetDetails details = assetService.details(currentUser.scope(), id);
-        if (!currentUser.scope().canManage(details.summary().asset().ownership())) {
+        if (!currentUser.authority().mayManageFleet(details.summary().asset().ownership())) {
             throw new AccessDeniedException("Asset " + id.value() + " is outside your management authority");
         }
     }

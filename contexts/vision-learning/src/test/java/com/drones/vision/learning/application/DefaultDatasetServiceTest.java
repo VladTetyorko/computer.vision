@@ -28,6 +28,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.platform.Capability;
 import com.drones.vision.platform.VisibilityScope;
 
 class DefaultDatasetServiceTest {
@@ -56,7 +58,7 @@ class DefaultDatasetServiceTest {
 
     @Test
     void createSavesAnOpenDatasetWithTheClockTimestampAndAuditsCreated() {
-        Dataset created = service.create(spec(), ownership, actor, VisibilityScope.unbounded());
+        Dataset created = service.create(spec(), ownership, actor, Authority.full());
 
         assertEquals("Buildings", created.name());
         assertEquals(new CategoryId("building"), created.targetCategory());
@@ -74,7 +76,7 @@ class DefaultDatasetServiceTest {
 
     @Test
     void createDeniedForAPilotScopeAndAuditsTheDenialWithoutSaving() {
-        VisibilityScope pilotScope = VisibilityScope.assignedAssets(Set.of());
+        Authority pilotScope = new Authority(VisibilityScope.assignedAssets(Set.of()), Set.of());
 
         AccessDeniedException ex = assertThrows(AccessDeniedException.class,
                 () -> service.create(spec(), ownership, actor, pilotScope));
@@ -88,7 +90,8 @@ class DefaultDatasetServiceTest {
 
     @Test
     void createAllowedForAManagerGroupScope() {
-        Dataset created = service.create(spec(), ownership, actor, VisibilityScope.groups(Set.of(group)));
+        Dataset created = service.create(spec(), ownership, actor,
+                new Authority(VisibilityScope.groups(Set.of(group)), Set.of(Capability.MANAGE_ORG)));
 
         assertEquals(DatasetStatus.OPEN, created.status());
     }
@@ -97,8 +100,8 @@ class DefaultDatasetServiceTest {
 
     @Test
     void listReturnsEveryDatasetForAnUnboundedScope() {
-        Dataset a = service.create(spec(), ownership, actor, VisibilityScope.unbounded());
-        Dataset b = service.create(spec(), new Ownership(actor, GroupId.random()), actor, VisibilityScope.unbounded());
+        Dataset a = service.create(spec(), ownership, actor, Authority.full());
+        Dataset b = service.create(spec(), new Ownership(actor, GroupId.random()), actor, Authority.full());
 
         List<Dataset> listed = service.list(actor, VisibilityScope.unbounded());
 
@@ -107,8 +110,8 @@ class DefaultDatasetServiceTest {
 
     @Test
     void listFiltersToOnlyTheVisibleGroupForAManagerScope() {
-        Dataset visible = service.create(spec(), ownership, actor, VisibilityScope.unbounded());
-        Dataset other = service.create(spec(), new Ownership(actor, GroupId.random()), actor, VisibilityScope.unbounded());
+        Dataset visible = service.create(spec(), ownership, actor, Authority.full());
+        Dataset other = service.create(spec(), new Ownership(actor, GroupId.random()), actor, Authority.full());
 
         List<Dataset> listed = service.list(actor, VisibilityScope.groups(Set.of(group)));
 
@@ -118,7 +121,7 @@ class DefaultDatasetServiceTest {
 
     @Test
     void listIsEmptyForAPilotScope() {
-        service.create(spec(), ownership, actor, VisibilityScope.unbounded());
+        service.create(spec(), ownership, actor, Authority.full());
 
         assertEquals(List.of(), service.list(actor, VisibilityScope.assignedAssets(Set.of())));
     }
@@ -127,7 +130,7 @@ class DefaultDatasetServiceTest {
 
     @Test
     void getReturnsTheDatasetWhenInScope() {
-        Dataset created = service.create(spec(), ownership, actor, VisibilityScope.unbounded());
+        Dataset created = service.create(spec(), ownership, actor, Authority.full());
 
         assertEquals(created, service.get(created.id(), actor, VisibilityScope.groups(Set.of(group))));
     }
@@ -140,7 +143,7 @@ class DefaultDatasetServiceTest {
 
     @Test
     void getThrowsAccessDeniedNotNoSuchElementForAnOutOfScopeDatasetAndAuditsIt() {
-        Dataset created = service.create(spec(), ownership, actor, VisibilityScope.unbounded());
+        Dataset created = service.create(spec(), ownership, actor, Authority.full());
         auditTrail.entries.clear();
 
         assertThrows(AccessDeniedException.class,
@@ -154,10 +157,10 @@ class DefaultDatasetServiceTest {
 
     @Test
     void deleteRemovesTheDatasetAndAuditsDeleted() {
-        Dataset created = service.create(spec(), ownership, actor, VisibilityScope.unbounded());
+        Dataset created = service.create(spec(), ownership, actor, Authority.full());
         auditTrail.entries.clear();
 
-        service.delete(created.id(), actor, VisibilityScope.unbounded());
+        service.delete(created.id(), actor, Authority.full());
 
         assertEquals(Optional.empty(), datasetRepository.findById(created.id()));
         AuditEntry entry = onlyEntry();
@@ -167,16 +170,17 @@ class DefaultDatasetServiceTest {
     @Test
     void deleteThrowsNoSuchElementForAnUnknownId() {
         assertThrows(NoSuchElementException.class,
-                () -> service.delete(DatasetId.random(), actor, VisibilityScope.unbounded()));
+                () -> service.delete(DatasetId.random(), actor, Authority.full()));
     }
 
     @Test
     void deleteDeniedForAPilotScopeAndAuditsTheDenialWithoutDeleting() {
-        Dataset created = service.create(spec(), ownership, actor, VisibilityScope.unbounded());
+        Dataset created = service.create(spec(), ownership, actor, Authority.full());
         auditTrail.entries.clear();
 
         assertThrows(AccessDeniedException.class,
-                () -> service.delete(created.id(), actor, VisibilityScope.assignedAssets(Set.of())));
+                () -> service.delete(created.id(), actor,
+                        new Authority(VisibilityScope.assignedAssets(Set.of()), Set.of())));
 
         assertTrue(datasetRepository.findById(created.id()).isPresent());
         AuditEntry entry = onlyEntry();

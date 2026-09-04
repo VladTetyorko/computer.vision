@@ -8,6 +8,8 @@ import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.platform.Authority;
+import com.drones.vision.platform.Capability;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.Custody;
@@ -50,8 +52,8 @@ class DefaultAssetCustodyServiceTest {
 
     private final UserId actor = UserId.random();
     private Ownership ownership;
-    private VisibilityScope inScope;
-    private VisibilityScope outOfScope;
+    private Authority inScope;
+    private Authority outOfScope;
 
     @BeforeEach
     void setUp() {
@@ -61,8 +63,8 @@ class DefaultAssetCustodyServiceTest {
         service = new DefaultAssetCustodyService(assetRepository, maintenanceRepository, auditTrail);
 
         ownership = new Ownership(actor, GroupId.random());
-        inScope = VisibilityScope.groups(Set.of(ownership.groupId()));
-        outOfScope = VisibilityScope.groups(Set.of(GroupId.random()));
+        inScope = new Authority(VisibilityScope.groups(Set.of(ownership.groupId())), Set.of(Capability.MANAGE_FLEET));
+        outOfScope = new Authority(VisibilityScope.groups(Set.of(GroupId.random())), Set.of(Capability.MANAGE_FLEET));
 
         // save() round-trips whatever it is given, mirroring an in-memory repository.
         when(assetRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));

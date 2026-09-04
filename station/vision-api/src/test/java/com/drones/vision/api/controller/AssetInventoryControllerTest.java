@@ -9,6 +9,7 @@ import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.warehouse.application.asset.AssetDetails;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
@@ -82,7 +83,7 @@ class AssetInventoryControllerTest {
     @Test
     void custodyIssueCallsTheServiceAndReturnsAssetDetails() throws Exception {
         UserId custodian = UserId.random();
-        when(assetCustodyService.issue(asset.id(), custodian, "Van 3", currentUser.userId(), currentUser.scope()))
+        when(assetCustodyService.issue(asset.id(), custodian, "Van 3", currentUser.userId(), currentUser.authority()))
                 .thenReturn(asset);
 
         mockMvc.perform(post("/api/assets/{id}/custody", asset.id().value())
@@ -95,7 +96,7 @@ class AssetInventoryControllerTest {
 
     @Test
     void custodyReturnCallsTheService() throws Exception {
-        when(assetCustodyService.returnToStock(asset.id(), currentUser.userId(), currentUser.scope()))
+        when(assetCustodyService.returnToStock(asset.id(), currentUser.userId(), currentUser.authority()))
                 .thenReturn(asset);
 
         mockMvc.perform(post("/api/assets/{id}/custody", asset.id().value())
@@ -115,7 +116,7 @@ class AssetInventoryControllerTest {
     @Test
     void inventoryGroundOpensAMaintenanceRecordAndReturnsAssetDetails() throws Exception {
         when(assetCustodyService.ground(asset.id(), MaintenanceKind.GROUNDING, "Propeller crack",
-                currentUser.userId(), currentUser.scope())).thenReturn(asset);
+                currentUser.userId(), currentUser.authority())).thenReturn(asset);
 
         mockMvc.perform(post("/api/assets/{id}/inventory", asset.id().value())
                         .contentType(MediaType.APPLICATION_JSON)
@@ -126,7 +127,7 @@ class AssetInventoryControllerTest {
 
     @Test
     void inventoryReleaseCallsTheService() throws Exception {
-        when(assetCustodyService.release(asset.id(), currentUser.userId(), currentUser.scope())).thenReturn(asset);
+        when(assetCustodyService.release(asset.id(), currentUser.userId(), currentUser.authority())).thenReturn(asset);
 
         mockMvc.perform(post("/api/assets/{id}/inventory", asset.id().value())
                         .contentType(MediaType.APPLICATION_JSON)
@@ -136,7 +137,7 @@ class AssetInventoryControllerTest {
 
     @Test
     void inventoryRetireCallsTheService() throws Exception {
-        when(assetCustodyService.retire(asset.id(), currentUser.userId(), currentUser.scope())).thenReturn(asset);
+        when(assetCustodyService.retire(asset.id(), currentUser.userId(), currentUser.authority())).thenReturn(asset);
 
         mockMvc.perform(post("/api/assets/{id}/inventory", asset.id().value())
                         .contentType(MediaType.APPLICATION_JSON)
@@ -162,7 +163,7 @@ class AssetInventoryControllerTest {
         MaintenanceRecord opened = new MaintenanceRecord(MaintenanceId.random(), asset.id(), MaintenanceKind.NOTE,
                 Instant.now(), null, currentUser.userId(), "Handover note", null);
         when(maintenanceService.open(asset.id(), MaintenanceKind.NOTE, "Handover note", currentUser.userId(),
-                currentUser.scope())).thenReturn(opened);
+                currentUser.authority())).thenReturn(opened);
 
         mockMvc.perform(post("/api/assets/{id}/maintenance", asset.id().value())
                         .contentType(MediaType.APPLICATION_JSON)
@@ -177,7 +178,7 @@ class AssetInventoryControllerTest {
         Instant openedAt = Instant.now().minusSeconds(3600);
         MaintenanceRecord closed = new MaintenanceRecord(recordId, asset.id(), MaintenanceKind.REPAIR, openedAt,
                 Instant.now(), currentUser.userId(), "Swapped motor", null);
-        when(maintenanceService.close(recordId, currentUser.userId(), currentUser.scope())).thenReturn(closed);
+        when(maintenanceService.close(recordId, currentUser.userId(), currentUser.authority())).thenReturn(closed);
 
         mockMvc.perform(post("/api/assets/{id}/maintenance/{recordId}/close", asset.id().value(), recordId.value()))
                 .andExpect(status().isOk())
@@ -186,7 +187,7 @@ class AssetInventoryControllerTest {
 
     @Test
     void custodyPropagatesAccessDeniedAsForbidden() throws Exception {
-        when(assetCustodyService.returnToStock(asset.id(), currentUser.userId(), currentUser.scope()))
+        when(assetCustodyService.returnToStock(asset.id(), currentUser.userId(), currentUser.authority()))
                 .thenThrow(new AccessDeniedException("DENIED:out of scope"));
 
         mockMvc.perform(post("/api/assets/{id}/custody", asset.id().value())

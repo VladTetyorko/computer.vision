@@ -5,8 +5,8 @@ import com.drones.vision.flight.domain.model.FlightPhase;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.UsageId;
 import com.drones.vision.perception.application.pipeline.UsagePhaseObserver;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.PlatformActor;
-import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.domain.model.UsagePhase;
 
 import java.time.Duration;
@@ -140,7 +140,7 @@ public final class PassportCaptureObserver implements UsagePhaseObserver, AutoCl
     private void capture(AssetId assetId, UsageId usageId, FlightPhase phase) {
         try {
             vehicleProfileService.captureSnapshot(assetId, usageId, phase, window, PlatformActor.USER_ID,
-                    VisibilityScope.unbounded());
+                    Authority.full());
         } catch (IllegalStateException e) {
             boolean firstTimeForThisUsage;
             synchronized (disabledSkipLogged) {

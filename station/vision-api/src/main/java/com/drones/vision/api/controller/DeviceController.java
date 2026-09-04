@@ -42,9 +42,11 @@ import com.drones.vision.api.security.CurrentUser;
  * and concluding, wrongly, that this controller was already guarded. It was not: see below.
  *
  * <h2>Authority (docs/plans/done/LIVE-SCOPE-PLAN.md §2.2, W5)</h2>
- * {@link #register}/{@link #delete} require {@link com.drones.vision.platform.VisibilityScope#canManageOrg()
- * scope().canManageOrg()} — the same org-level gate {@code AssetController#create} uses, not the
- * deployment-global {@code canAdminister()}. Both operations act on the device row's existence, not
+ * {@link #register}/{@link #delete} require {@link com.drones.vision.platform.Authority#mayManageOrg()
+ * authority().mayManageOrg()} (docs/plans/active/AUTH-ROLES-PLAN.md wave B6, superseding the bare
+ * {@code VisibilityScope#canManageOrg()} check this used before) — the same org-level gate {@code
+ * AssetController#create} uses, not the deployment-global {@code mayAdminister()}. Both operations
+ * act on the device row's existence, not
  * on any specific asset's group: {@link Device} carries no {@code Ownership} field of its own (only
  * an {@code Asset} does, once a device is assigned to one), so there is no per-group boundary to
  * check against a device that may not even be assigned yet.
@@ -189,7 +191,7 @@ public class DeviceController {
      * ownership (see class javadoc for why a device has no group of its own to check).
      */
     private void requireManageOrg() {
-        if (!currentUser.scope().canManageOrg()) {
+        if (!currentUser.authority().mayManageOrg()) {
             throw new AccessDeniedException("Not permitted to manage devices");
         }
     }

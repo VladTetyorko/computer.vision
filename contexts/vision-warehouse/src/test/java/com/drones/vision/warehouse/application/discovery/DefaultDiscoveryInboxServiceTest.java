@@ -8,6 +8,7 @@ import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetSpec;
@@ -234,7 +235,7 @@ class DefaultDiscoveryInboxServiceTest {
         ArgumentCaptor<AssetSpec> specCaptor = ArgumentCaptor.forClass(AssetSpec.class);
         when(assetService.createFromCandidate(specCaptor.capture(), any(), any())).thenReturn(created);
 
-        Asset result = serviceAt(NOW).register(candidate.id(), command, VisibilityScope.unbounded(), actor);
+        Asset result = serviceAt(NOW).register(candidate.id(), command, Authority.full(), actor);
 
         assertEquals(created, result);
         AssetSpec spec = specCaptor.getValue();
@@ -268,7 +269,7 @@ class DefaultDiscoveryInboxServiceTest {
                 .thenReturn(Asset.register(AssetId.random(), "x", new CategoryId("drone"), command.ownership(),
                         Set.of(), Map.of(), Identity.NONE, Custody.NONE));
 
-        serviceAt(NOW).register(candidate.id(), command, VisibilityScope.unbounded(), actor);
+        serviceAt(NOW).register(candidate.id(), command, Authority.full(), actor);
 
         assertEquals(Set.of(Capability.VIDEO), specCaptor.getValue().devices().get(0).capabilities());
     }
@@ -283,7 +284,7 @@ class DefaultDiscoveryInboxServiceTest {
                 .thenThrow(new IllegalStateException("Candidate mavlink udp://x is already registered to asset y"));
 
         assertThrows(IllegalStateException.class,
-                () -> serviceAt(NOW).register(candidate.id(), command, VisibilityScope.unbounded(), actor));
+                () -> serviceAt(NOW).register(candidate.id(), command, Authority.full(), actor));
 
         verify(candidateRepository, never()).save(any());
     }
@@ -291,7 +292,8 @@ class DefaultDiscoveryInboxServiceTest {
     @Test
     void registerRefusesWhenScopeCannotManageOrg() {
         RegisterFromCandidateCommand command = commandFor(GroupId.random());
-        VisibilityScope pilotScope = VisibilityScope.assignedAssets(Set.of());
+        Authority pilotScope = new Authority(VisibilityScope.assignedAssets(Set.of()),
+                Set.of(com.drones.vision.platform.Capability.MANAGE_ORG));
 
         assertThrows(AccessDeniedException.class,
                 () -> serviceAt(NOW).register(DiscoveryCandidateId.random(), command, pilotScope, actor));
@@ -305,7 +307,8 @@ class DefaultDiscoveryInboxServiceTest {
         GroupId inScopeGroup = GroupId.random();
         GroupId targetGroup = GroupId.random();
         RegisterFromCandidateCommand command = commandFor(targetGroup);
-        VisibilityScope scope = VisibilityScope.groups(Set.of(inScopeGroup));
+        Authority scope = new Authority(VisibilityScope.groups(Set.of(inScopeGroup)),
+                Set.of(com.drones.vision.platform.Capability.MANAGE_ORG));
 
         assertThrows(AccessDeniedException.class,
                 () -> serviceAt(NOW).register(DiscoveryCandidateId.random(), command, scope, actor));
@@ -320,7 +323,7 @@ class DefaultDiscoveryInboxServiceTest {
         when(candidateRepository.findById(unknown)).thenReturn(Optional.empty());
 
         assertThrows(NoSuchElementException.class,
-                () -> serviceAt(NOW).register(unknown, command, VisibilityScope.unbounded(), actor));
+                () -> serviceAt(NOW).register(unknown, command, Authority.full(), actor));
     }
 
     // -- constructor ------------------------------------------------------------------------------

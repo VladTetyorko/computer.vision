@@ -3,7 +3,7 @@ package com.drones.vision.warehouse.application.custody;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AccessDeniedException;
-import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.MaintenanceKind;
 import java.util.NoSuchElementException;
@@ -17,7 +17,7 @@ import java.util.NoSuchElementException;
  *
  * <p>Every verb authorises the same way {@code AssetService}'s command verbs do (mirroring
  * vision-flight's {@code DefaultVehicleProfileService#probe}): the caller's {@link
- * VisibilityScope#canManage(com.drones.vision.kernel.Ownership)} must hold over the asset's
+ * Authority#mayManageFleet(com.drones.vision.kernel.Ownership)} must hold over the asset's
  * ownership, else a denial is audited and {@link AccessDeniedException} is thrown — an honest 403,
  * not a hiding 404, since the caller already knows the asset exists. Every successful verb writes
  * an audit entry and stamps {@link Asset#updatedAt()}.
@@ -48,7 +48,7 @@ public interface AssetCustodyService {
      * @param custodianId the user receiving custody
      * @param location    a free-form note of where it is going, or {@code null}
      * @param actor       the acting user
-     * @param scope       the acting user's visibility scope
+     * @param scope       the acting user's authority
      * @return the updated asset
      * @throws NoSuchElementException   if the asset is unknown (404)
      * @throws AccessDeniedException    if {@code scope} may not manage this asset (403)
@@ -57,20 +57,20 @@ public interface AssetCustodyService {
      *                                  go through {@link #returnToStock} first, even though both
      *                                  states share the same stored {@code IN_STOCK} value
      */
-    Asset issue(AssetId id, UserId custodianId, String location, UserId actor, VisibilityScope scope);
+    Asset issue(AssetId id, UserId custodianId, String location, UserId actor, Authority scope);
 
     /**
      * Returns an issued asset to stock, clearing its custody.
      *
      * @param id    the asset to return
      * @param actor the acting user
-     * @param scope the acting user's visibility scope
+     * @param scope the acting user's authority
      * @return the updated asset
      * @throws NoSuchElementException if the asset is unknown (404)
      * @throws AccessDeniedException  if {@code scope} may not manage this asset (403)
      * @throws IllegalStateException  if the asset is not effectively issued (409)
      */
-    Asset returnToStock(AssetId id, UserId actor, VisibilityScope scope);
+    Asset returnToStock(AssetId id, UserId actor, Authority scope);
 
     /**
      * Grounds an asset: opens a {@link com.drones.vision.warehouse.domain.model.MaintenanceRecord}
@@ -82,13 +82,13 @@ public interface AssetCustodyService {
      * @param kind    what kind of maintenance record to open
      * @param summary a human-readable description; must not be blank
      * @param actor   the acting user
-     * @param scope   the acting user's visibility scope
+     * @param scope   the acting user's authority
      * @return the updated asset
      * @throws NoSuchElementException if the asset is unknown (404)
      * @throws AccessDeniedException  if {@code scope} may not manage this asset (403)
      * @throws IllegalStateException  if the asset is retired (409)
      */
-    Asset ground(AssetId id, MaintenanceKind kind, String summary, UserId actor, VisibilityScope scope);
+    Asset ground(AssetId id, MaintenanceKind kind, String summary, UserId actor, Authority scope);
 
     /**
      * Releases an asset from maintenance: closes every open, flight-blocking maintenance record
@@ -98,13 +98,13 @@ public interface AssetCustodyService {
      *
      * @param id    the asset to release
      * @param actor the acting user
-     * @param scope the acting user's visibility scope
+     * @param scope the acting user's authority
      * @return the updated asset
      * @throws NoSuchElementException if the asset is unknown (404)
      * @throws AccessDeniedException  if {@code scope} may not manage this asset (403)
      * @throws IllegalStateException  if the asset is not stored {@code MAINTENANCE} (409)
      */
-    Asset release(AssetId id, UserId actor, VisibilityScope scope);
+    Asset release(AssetId id, UserId actor, Authority scope);
 
     /**
      * Retires an asset for good. Does not delete it — history stays intact. Idempotent: retiring
@@ -112,11 +112,11 @@ public interface AssetCustodyService {
      *
      * @param id    the asset to retire
      * @param actor the acting user
-     * @param scope the acting user's visibility scope
+     * @param scope the acting user's authority
      * @return the updated asset
      * @throws NoSuchElementException if the asset is unknown (404)
      * @throws AccessDeniedException  if {@code scope} may not manage this asset (403)
      * @throws IllegalStateException  if the asset is still issued (409)
      */
-    Asset retire(AssetId id, UserId actor, VisibilityScope scope);
+    Asset retire(AssetId id, UserId actor, Authority scope);
 }
