@@ -137,6 +137,14 @@ public final class DefaultStreamService implements StreamService {
     private final DetectionDemandPort detectionDemandPort;
 
     /**
+     * Notified on every computed {@link StreamState} transition (docs/plans/active/
+     * SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C6) — never {@code null}, defaults to {@link
+     * StreamStateObserver#NOOP}; see {@link #notifyStreamStateChanged} for where it is invoked and
+     * how a throwing implementation is isolated.
+     */
+    private final StreamStateObserver streamStateObserver;
+
+    /**
      * A video publisher that never emits (D4: when {@link StreamPublisherPort#proxiesSource} is
      * {@code true}, this service does not open a {@link VideoSourcePort} at all). Handed to {@link
      * StreamPipeline} in place of a real source so its video-path half ({@code onNext}, {@code
@@ -211,6 +219,7 @@ public final class DefaultStreamService implements StreamService {
                 serviceSettings.pullDetectionSettings().orElse(null); // nullable: every stream uses push detection when absent
         this.detectionDemandPort =
                 serviceSettings.detectionDemandPort().orElse(null); // nullable: demand-poll task never scheduled when absent
+        this.streamStateObserver = serviceSettings.streamStateObserver();
         if (this.detectionDemandPort != null) {
             long intervalNanos = this.settings.detectionDemandPollInterval().toNanos();
             retryScheduler.scheduleAtFixedRate(this::pollDetectionDemand, intervalNanos, intervalNanos,
@@ -371,7 +380,7 @@ public final class DefaultStreamService implements StreamService {
             // grace period of inference for nobody."
             activeStreams.put(streamId, new RunningStream(deviceId, source, supervisedSource, pulledDetectionPort,
                     supervisedPulledResults, pipeline, Instant.now(), lockSeq,
-                    new AtomicReference<>(Instant.EPOCH)));
+                    new AtomicReference<>(Instant.EPOCH), new AtomicReference<>()));
             pipeline.start();
             eventPublisher.publish(Event.of(streamId, EventType.STREAM_STARTED,
                     "Stream started for device " + device.name()));
@@ -476,7 +485,7 @@ public final class DefaultStreamService implements StreamService {
     public List<ActiveStream> streams() {
         return activeStreams.entrySet().stream()
                 .map(e -> new ActiveStream(e.getKey(), e.getValue().deviceId(), e.getValue().startedAt(),
-                        stateOf(e.getValue()), e.getValue().pipeline().config().detectionEnabled()))
+                        stateOf(e.getKey(), e.getValue()), e.getValue().pipeline().config().detectionEnabled()))
                 .toList();
     }
 
@@ -484,7 +493,7 @@ public final class DefaultStreamService implements StreamService {
     public Optional<StreamState> streamState(StreamId streamId) {
         Objects.requireNonNull(streamId, "streamId must not be null");
         RunningStream active = activeStreams.get(streamId);
-        return active == null ? Optional.empty() : Optional.of(stateOf(active));
+        return active == null ? Optional.empty() : Optional.of(stateOf(streamId, active));
     }
 
     @Override
@@ -511,13 +520,37 @@ public final class DefaultStreamService implements StreamService {
      * {@code SupervisedPublisher} supervises the detection-result stream; folding its outage in here
      * would report a detector fault as a video fault, which is the axis collapse
      * {@link StreamState}'s javadoc forbids.
+     *
+     * <h2>{@link StreamStateObserver} firing (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C6)</h2>
+     * Every call compares the freshly computed state against {@code active.lastKnownState()} and
+     * notifies {@link #streamStateObserver} only on a genuine change — never on the state a stream is
+     * first observed in ({@code lastKnownState} starts {@code null}), and never again for a repeated
+     * read that computed the same value. See {@link #notifyStreamStateChanged} for failure isolation.
      */
-    private StreamState stateOf(RunningStream active) {
+    private StreamState stateOf(StreamId streamId, RunningStream active) {
         SupervisedPublisher<VideoFrame> supervisedSource = active.supervisedSource();
         boolean sourceObservable = supervisedSource != null;
         StreamPipeline pipeline = active.pipeline();
-        return StreamState.resolve(sourceObservable, sourceObservable && supervisedSource.reconnecting(),
+        StreamState computed = StreamState.resolve(sourceObservable, sourceObservable && supervisedSource.reconnecting(),
                 pipeline.framesObserved(), pipeline.nanosSinceLastFrame(), settings.videoStaleAfter().toNanos());
+        StreamState previous = active.lastKnownState().getAndSet(computed);
+        if (previous != null && previous != computed) {
+            notifyStreamStateChanged(streamId, previous, computed);
+        }
+        return computed;
+    }
+
+    /**
+     * Invokes {@link #streamStateObserver}, isolating a misbehaving implementation from the rest of
+     * this service (the {@code UsagePhaseObserver}/O12 rule) — a throwing observer degrades only its
+     * own signal, never the {@link #streams()}/{@link #streamState} read that triggered it.
+     */
+    private void notifyStreamStateChanged(StreamId streamId, StreamState from, StreamState to) {
+        try {
+            streamStateObserver.streamStateChanged(streamId, from, to);
+        } catch (RuntimeException e) {
+            LOG.log(System.Logger.Level.WARNING, "streamStateObserver threw for stream " + streamId.value(), e);
+        }
     }
 
     @Override
@@ -757,11 +790,19 @@ public final class DefaultStreamService implements StreamService {
      *                                 of state that genuinely mutates over a running stream's life,
      *                                 from a different thread (the demand-poll scheduler) than the one
      *                                 that created it
+     * @param lastKnownState          the most recently computed {@link StreamState} for this stream
+     *                                 (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C6),
+     *                                 or {@code null} before {@link #stateOf} has ever been called for
+     *                                 it; seeded {@code null} (not the actual starting state) by
+     *                                 {@link #start} so the first {@link #stateOf} call never fires
+     *                                 {@link #streamStateObserver} &mdash; only a genuine transition
+     *                                 does, never the state a stream is first observed in
      */
     private record RunningStream(DeviceId deviceId, VideoSourcePort source, SupervisedPublisher<VideoFrame> supervisedSource,
                                   PulledDetectionPort pulledDetectionPort,
                                   SupervisedPublisher<DetectionResult> supervisedPulledResults,
                                   StreamPipeline pipeline, Instant startedAt, AtomicLong lockSeq,
-                                  AtomicReference<Instant> lastDemandAt) {
+                                  AtomicReference<Instant> lastDemandAt,
+                                  AtomicReference<StreamState> lastKnownState) {
     }
 }
