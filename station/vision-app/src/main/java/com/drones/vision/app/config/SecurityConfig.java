@@ -62,10 +62,19 @@ import org.springframework.security.web.context.SecurityContextRepository;
  * the {@code /ws/manual-control} WebSocket upgrade rides the same session cookie and must be
  * authenticated before the handshake completes, so {@code ManualControlHandshakeInterceptor}
  * (vision-api) never has to reject an identity-less connection itself when this chain is active —
- * Spring Security answers the upgrade {@code GET} {@code 401} first. This is the only addition
- * this wave makes to this class, and it <em>tightens</em> access (auth-required) rather than
- * loosening it; the disabled/permit-all chain already covered {@code /ws/**} via its own {@code
- * anyRequest().permitAll()}, so behavior there is unchanged.
+ * Spring Security answers the upgrade {@code GET} {@code 401} first. This tightens access
+ * (auth-required) rather than loosening it; the disabled/permit-all chain already covered {@code
+ * /ws/**} via its own {@code anyRequest().permitAll()}, so behavior there is unchanged.
+ *
+ * <p>{@code /hls/**} (docs/plans/active/AUTH-ROLES-PLAN.md D10, wave B4) joins the same rule for the
+ * same reason: before this, it fell all the way through to {@code anyRequest().permitAll()} even on
+ * the secured chain, so an unauthenticated caller could reach {@code HlsProxyController#proxy} —
+ * which fetches upstream mediamtx <em>with this app's own credentialed Basic-auth header
+ * attached</em>. Requiring a session here first closes that half of D10; the other half —
+ * {@code StreamAccess} no-oping (rather than failing closed) for a stream id that is not currently
+ * running, which let even an <em>authenticated</em> caller reach the credentialed proxy for an id
+ * their scope was never actually checked against — is {@link
+ * com.drones.vision.api.security.StreamAccess#requireVisibleForHlsProxy}, in {@code vision-api}.
  *
  * <h2>CSRF decision</h2>
  * CSRF is <strong>disabled for the API</strong>, deliberately, and documented. The endpoints are
@@ -119,7 +128,7 @@ public class SecurityConfig {
                         // protect. Listed explicitly ahead of the /api/** rule below for clarity, even
                         // though /actuator/** would also fall through to anyRequest().permitAll().
                         .requestMatchers("/actuator/health").permitAll()
-                        .requestMatchers("/api/**", "/ws/**").authenticated()
+                        .requestMatchers("/api/**", "/ws/**", "/hls/**").authenticated()
                         .anyRequest().permitAll())
                 .exceptionHandling(handling -> handling
                         .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))

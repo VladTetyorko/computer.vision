@@ -2,10 +2,17 @@ package com.drones.vision.api.ws;
 
 import com.drones.vision.api.dto.ManualControlChannelsRequest;
 import com.drones.vision.api.dto.ManualControlEngageRequest;
+import com.drones.vision.api.security.CapabilityAssetAuthority;
+import com.drones.vision.api.security.CurrentUser;
+import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
+import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.flight.application.ManualControlService;
 import com.drones.vision.flight.application.ManualControlSession;
 import com.drones.vision.flight.application.VehicleUnidentifiedException;
+import com.drones.vision.kernel.GroupId;
+import com.drones.vision.kernel.Ownership;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.flight.application.WatchdogListener;
 import com.drones.vision.kernel.AssetId;
@@ -44,6 +51,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 /**
  * Drives {@link ManualControlWebSocketHandler} through the frozen §4 frame protocol
@@ -58,16 +66,20 @@ class ManualControlWebSocketHandlerTest {
 
     private final JsonMapper jsonMapper = new JsonMapper();
     private FakeManualControlService service;
+    private FakeAssetAuthority assetAuthority;
     private ManualControlWebSocketHandler handler;
     private FakeWebSocketSession session;
 
     @BeforeEach
     void setUp() {
         service = new FakeManualControlService();
-        handler = new ManualControlWebSocketHandler(service, WATCHDOG_TIMEOUT_MS, ENGAGE_SLOW_THRESHOLD_MS);
+        assetAuthority = new FakeAssetAuthority();
+        handler = new ManualControlWebSocketHandler(service, assetAuthority, WATCHDOG_TIMEOUT_MS,
+                ENGAGE_SLOW_THRESHOLD_MS);
         session = new FakeWebSocketSession();
         session.getAttributes().put(ManualControlHandshakeInterceptor.ATTR_USER_ID, UserId.random());
         session.getAttributes().put(ManualControlHandshakeInterceptor.ATTR_SCOPE, VisibilityScope.unbounded());
+        session.getAttributes().put(ManualControlHandshakeInterceptor.ATTR_AUTHORITY, Authority.full());
     }
 
     @Test
@@ -283,7 +295,7 @@ class ManualControlWebSocketHandlerTest {
     @Test
     void engageDurationEscalatesToWarnOnceItReachesTheConfiguredSlowThreshold() throws Exception {
         ManualControlWebSocketHandler zeroThresholdHandler =
-                new ManualControlWebSocketHandler(service, WATCHDOG_TIMEOUT_MS, 0L);
+                new ManualControlWebSocketHandler(service, assetAuthority, WATCHDOG_TIMEOUT_MS, 0L);
         zeroThresholdHandler.afterConnectionEstablished(session);
 
         List<LogRecord> records =
@@ -346,6 +358,52 @@ class ManualControlWebSocketHandlerTest {
         assertEquals("denied", denied.get("type").asString());
         assertEquals("ALREADY_ENGAGED", denied.get("code").asString());
         assertEquals(engageCallsBefore, service.engageCallCount, "a same-connection re-engage must not call the service again");
+    }
+
+    /**
+     * docs/plans/active/AUTH-ROLES-PLAN.md §3.7/§3.8, wave B4: {@code mayFly() == false} denies
+     * {@code OUT_OF_SCOPE} before {@link ManualControlService#engage} is ever called — the same
+     * shape as an {@link AccessDeniedException} from the service itself
+     * ({@link #engageDeniedOutOfScope}), but from the edge gate instead.
+     */
+    @Test
+    void engageDeniedOutOfScopeWhenAssetAuthorityDeniesMayFly() throws Exception {
+        assetAuthority.mayFlyAnswer = false;
+        handler.afterConnectionEstablished(session);
+
+        handler.handleMessage(session, engageFrame(AssetId.random()));
+
+        JsonNode denied = lastFrame();
+        assertEquals("denied", denied.get("type").asString());
+        assertEquals("OUT_OF_SCOPE", denied.get("code").asString());
+        assertEquals(0, service.engageCallCount, "a mayFly denial must never reach the service");
+    }
+
+    /**
+     * The mid-flight rule, clause 1 (docs/plans/active/AUTH-ROLES-PLAN.md §3.7): {@code mayFly} is
+     * asked exactly once, at {@code engage} — never again for the life of the connection. Flips the
+     * fake's answer to {@code false} <em>after</em> a successful engage and proves a subsequent
+     * {@code channels} frame is neither denied nor re-checked: the connection stays engaged and
+     * {@link CapabilityAssetAuthority#mayFly(Authority, UserId, AssetId)} is never called a second
+     * time.
+     */
+    @Test
+    void mayFlyIsAskedOnceAtEngageAndNeverAgainWhileTheConnectionStaysOpen() throws Exception {
+        handler.afterConnectionEstablished(session);
+        handler.handleMessage(session, engageFrame(AssetId.random()));
+        assertEquals(1, assetAuthority.mayFlyCallCount.get());
+        session.sentPayloads.clear();
+
+        assetAuthority.mayFlyAnswer = false; // a revocation mid-session -- must not be observed here
+        handler.handleMessage(session, channelsFrame(1L));
+
+        JsonNode ack = lastFrame();
+        assertEquals("ack", ack.get("type").asString(),
+                "an already-engaged connection must keep accepting channels frames after a mid-session "
+                        + "authority flip -- the control socket is never closed by session state");
+        assertEquals(1, service.lastSession.channelCalls.size());
+        assertEquals(1, assetAuthority.mayFlyCallCount.get(),
+                "mayFly must be asked exactly once, at engage, never again mid-session");
     }
 
     @Test
@@ -487,6 +545,30 @@ class ManualControlWebSocketHandlerTest {
             lastWatchdogListener = onWatchdog;
             lastSession = new FakeManualControlSession();
             return lastSession;
+        }
+    }
+
+    /**
+     * A {@link CapabilityAssetAuthority} with its explicit-actor {@code mayFly} overridden and
+     * counted, rather than a hand-fake of the whole {@link com.drones.vision.api.security.AssetAuthority}
+     * surface — {@link ManualControlWebSocketHandler} depends on the concrete class (see its own
+     * constructor javadoc for why), so this subclass is the fake. The super constructor's {@code
+     * AssetService}/{@code AssignmentRepositoryPort} collaborators are inert placeholders: the
+     * overridden method never calls {@code super}, so they are never touched.
+     */
+    private static final class FakeAssetAuthority extends CapabilityAssetAuthority {
+        private volatile boolean mayFlyAnswer = true;
+        private final AtomicInteger mayFlyCallCount = new AtomicInteger(0);
+
+        FakeAssetAuthority() {
+            super(new CurrentUser(new Ownership(UserId.random(), GroupId.random())),
+                    mock(AssetService.class), mock(AssignmentRepositoryPort.class));
+        }
+
+        @Override
+        public boolean mayFly(Authority authority, UserId actor, AssetId asset) {
+            mayFlyCallCount.incrementAndGet();
+            return mayFlyAnswer;
         }
     }
 

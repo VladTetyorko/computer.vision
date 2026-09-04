@@ -68,14 +68,16 @@ class EndpointAuthorizationTest {
 
     private static final String CURRENT_USER = "com.drones.vision.api.security.CurrentUser";
     /**
-     * The two seams that answer "may they?": {@code scope()} for assets and {@code viewer()} for the
-     * map, which {@code MapAccessPolicy} deliberately keeps separate from {@code VisibilityScope}.
-     * {@code userId()}/{@code ownership()} are excluded on purpose — they answer "who is this?",
-     * attribution for the audit trail, which every write already passes and which reads exactly like
-     * a permission check without being one. Accepting them would have declared device CRUD
-     * authorized when the audit had just proven it is not.
+     * The three seams that answer "may they?": {@code scope()} for assets, {@code viewer()} for the
+     * map (which {@code MapAccessPolicy} deliberately keeps separate from {@code VisibilityScope}),
+     * and {@code authority()} (docs/plans/active/AUTH-ROLES-PLAN.md §3.9, wave B4) for the capability
+     * axis {@link com.drones.vision.api.security.AssetAuthority} tests. {@code userId()}/{@code
+     * ownership()} are excluded on purpose — they answer "who is this?", attribution for the audit
+     * trail, which every write already passes and which reads exactly like a permission check without
+     * being one. Accepting them would have declared device CRUD authorized when the audit had just
+     * proven it is not.
      */
-    private static final Set<String> AUTHORITY_METHODS = Set.of("scope", "viewer");
+    private static final Set<String> AUTHORITY_METHODS = Set.of("scope", "viewer", "authority");
     private static final Set<String> MAPPING_ANNOTATIONS = Set.of(
             "org.springframework.web.bind.annotation.RequestMapping",
             "org.springframework.web.bind.annotation.GetMapping",
@@ -146,8 +148,12 @@ class EndpointAuthorizationTest {
 
     /**
      * Walks the handler's own call graph (breadth-first, staying inside vision-api) looking for a
-     * call to {@code CurrentUser.scope()} or into an {@code *Access} collaborator. Transitive rather
-     * than direct, because a controller may legitimately push the check into a private helper.
+     * call to {@code CurrentUser.scope()}/{@code authority()} or into an {@code *Access}/{@code
+     * *Authority} collaborator ({@code StreamAccess}, {@code LiveAssetAccess}, and — since
+     * docs/plans/active/AUTH-ROLES-PLAN.md wave B4 — {@code AssetAuthority}/{@code
+     * CapabilityAssetAuthority}, the per-asset command-axis seam gating {@code mayFly}/{@code
+     * mayOperateCamera}/{@code mayForceSeat}). Transitive rather than direct, because a controller may
+     * legitimately push the check into a private helper.
      */
     private static boolean reachesAuthorityCheck(JavaMethod handler) {
         Deque<JavaMethod> queue = new ArrayDeque<>();
@@ -161,7 +167,7 @@ class EndpointAuthorizationTest {
             for (JavaMethodCall call : current.getMethodCallsFromSelf()) {
                 String owner = call.getTargetOwner().getName();
                 boolean authority = (CURRENT_USER.equals(owner) && AUTHORITY_METHODS.contains(call.getName()))
-                        || owner.endsWith("Access");
+                        || owner.endsWith("Access") || owner.endsWith("Authority");
                 if (authority) {
                     return true;
                 }

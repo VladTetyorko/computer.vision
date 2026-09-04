@@ -9,6 +9,9 @@ import com.drones.vision.kernel.UsageId;
 import com.drones.vision.kernel.UsageOrigin;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.perception.application.pipeline.UsageTracker;
+import com.drones.vision.platform.AuditEntry;
+import com.drones.vision.platform.AuditTargetType;
+import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.platform.Authority;
 import com.drones.vision.identity.domain.model.Role;
@@ -28,6 +31,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -49,6 +53,7 @@ class AssetSessionControllerTest {
 
     private AssetService assetService;
     private UsageTracker usageTracker;
+    private AuditTrailPort auditTrail;
     private MockMvc mockMvc;
 
     private final UserId ownerId = UserId.random();
@@ -59,9 +64,10 @@ class AssetSessionControllerTest {
     void setUp() {
         assetService = mock(AssetService.class);
         usageTracker = mock(UsageTracker.class);
+        auditTrail = mock(AuditTrailPort.class);
 
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new AssetSessionController(assetService, usageTracker, currentUser))
+                .standaloneSetup(new AssetSessionController(assetService, usageTracker, currentUser, auditTrail))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -105,7 +111,7 @@ class AssetSessionControllerTest {
 
     private MockMvc mockMvcFor(CurrentUser user) {
         return MockMvcBuilders
-                .standaloneSetup(new AssetSessionController(assetService, usageTracker, user))
+                .standaloneSetup(new AssetSessionController(assetService, usageTracker, user, auditTrail))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -276,5 +282,39 @@ class AssetSessionControllerTest {
                 .andExpect(status().isNoContent());
 
         verify(usageTracker).disengage(assetId);
+    }
+
+    /**
+     * docs/plans/active/AUTH-ROLES-PLAN.md D17, wave B4: {@code disengage} takes no actor as far as
+     * {@link UsageTracker} is concerned (out of this module's reach — see the class javadoc's "Who
+     * the change is attributed to"), but the caller is still recorded, via {@link AuditTrailPort},
+     * as who ended the session — attribution, not a new refusal.
+     */
+    @Test
+    void disengageRecordsAnAuditEntryNamingTheCallingUser() throws Exception {
+        AssetId assetId = AssetId.random();
+        when(usageTracker.disengage(assetId)).thenReturn(Optional.of(usage(assetId, UsageOrigin.OPERATOR)));
+
+        mockMvc.perform(delete("/api/assets/{id}/session", assetId.value()))
+                .andExpect(status().isNoContent());
+
+        verify(auditTrail).record(argThat((AuditEntry entry) -> entry.actor().equals(ownerId)
+                && entry.targetType() == AuditTargetType.ASSET
+                && entry.targetId().equals(assetId.value().toString())));
+    }
+
+    /**
+     * A no-op disengage (nothing was operator-engaged) is not an action anyone took, so nothing is
+     * attributed — mirrors {@link #disengageReturns204WhenNothingWasEngaged}'s no-op case.
+     */
+    @Test
+    void disengageWhenNothingWasEngagedRecordsNoAuditEntry() throws Exception {
+        AssetId assetId = AssetId.random();
+        when(usageTracker.disengage(assetId)).thenReturn(Optional.empty());
+
+        mockMvc.perform(delete("/api/assets/{id}/session", assetId.value()))
+                .andExpect(status().isNoContent());
+
+        verifyNoInteractions(auditTrail);
     }
 }

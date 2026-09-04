@@ -10,6 +10,7 @@ import com.drones.vision.flight.application.FlightCommandService;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.flight.domain.model.CommandResult;
 import com.drones.vision.flight.domain.model.FlightCapability;
+import com.drones.vision.platform.AccessDeniedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -19,6 +20,7 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Objects;
+import com.drones.vision.api.security.AssetAuthority;
 import com.drones.vision.api.security.CurrentUser;
 
 /**
@@ -41,25 +43,55 @@ import com.drones.vision.api.security.CurrentUser;
  * one exception type); {@code 400} for an unknown/blank flight mode ({@link
  * IllegalArgumentException}, validated against the vehicle's capabilities before dispatch —
  * deliberately distinct from the not-commandable 409, see {@code DefaultFlightCommandService}); and
- * {@code 403} when the asset exists but is outside the caller's {@link CurrentUser#scope()}
- * ({@link com.drones.vision.platform.AccessDeniedException}, mapped by {@link
- * ApiExceptionHandler} — docs/plans/done/U-SCOPE-PLAN.md, feature 3).
+ * {@code 403} when the asset exists but is outside the caller's {@link CurrentUser#scope()}, or the
+ * caller's {@link AssetAuthority#mayFly(AssetId)} answer is {@code false} — both surface as {@link
+ * AccessDeniedException}, mapped by {@link ApiExceptionHandler} (docs/plans/done/U-SCOPE-PLAN.md,
+ * feature 3; the {@code mayFly} gate is docs/plans/active/AUTH-ROLES-PLAN.md §3.8/§3.9, wave B4).
  *
  * <p>{@code GET /api/assets/{id}/flight-capabilities} is instead a <em>read</em>: {@code 200} with
  * the capability snapshot, and {@code 404} for an unknown <em>or</em> out-of-scope asset (hiding
  * existence, per the scoped-read convention — not the 403 the commands give). With auth off the
- * scope is unbounded, so every endpoint here behaves exactly as before scoping.
+ * scope is unbounded and every capability is held, so every endpoint here behaves exactly as before
+ * scoping/authority existed.
+ *
+ * <h2>Two gates, deliberately redundant (wave B4)</h2>
+ * Every command below calls {@link #requireMayFly(AssetId)} <em>before</em> {@link
+ * #flightCommandService}, which still performs its own {@code scope().includes(...)} check
+ * internally ({@code DefaultFlightCommandService}, {@code contexts/vision-flight} — out of this
+ * module's reach). The edge gate is strictly narrower (it additionally requires the {@code
+ * COMMAND_FLIGHT} capability and, for an {@link com.drones.vision.platform.VisibilityScope.Kind#ASSIGNED_ASSETS}
+ * caller, a {@code PILOT} seat rather than {@code CREW} — see {@link
+ * com.drones.vision.api.security.CapabilityAssetAuthority}), so the application-layer check never
+ * fires once this one has already denied; it stays in place as the pre-existing scope-only backstop
+ * for any caller this edge gate has not yet been asked about (e.g. a future direct caller of the
+ * application service that bypasses this controller).
  */
 @RestController
 public class FlightCommandController {
 
     private final FlightCommandService flightCommandService;
     private final CurrentUser currentUser;
+    private final AssetAuthority assetAuthority;
 
-    public FlightCommandController(FlightCommandService flightCommandService, CurrentUser currentUser) {
+    public FlightCommandController(FlightCommandService flightCommandService, CurrentUser currentUser,
+                                    AssetAuthority assetAuthority) {
         this.flightCommandService =
                 Objects.requireNonNull(flightCommandService, "flightCommandService must not be null");
         this.currentUser = Objects.requireNonNull(currentUser, "currentUser must not be null");
+        this.assetAuthority = Objects.requireNonNull(assetAuthority, "assetAuthority must not be null");
+    }
+
+    /**
+     * The shared flight-command gate (wave B4, §3.8): {@code 403} unless {@link
+     * AssetAuthority#mayFly(AssetId)} holds. Every command method below calls this first.
+     *
+     * @param assetId the asset the caller is about to command
+     * @throws AccessDeniedException if the caller may not fly this asset
+     */
+    private void requireMayFly(AssetId assetId) {
+        if (!assetAuthority.mayFly(assetId)) {
+            throw new AccessDeniedException("Asset " + assetId.value() + " may not be flown by you");
+        }
     }
 
     /**
@@ -73,7 +105,9 @@ public class FlightCommandController {
     @PostMapping("/api/assets/{id}/return-home")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public ReturnHomeResponse returnHome(@PathVariable String id) {
-        CommandResult result = flightCommandService.returnToHome(AssetId.of(id), currentUser.userId(),
+        AssetId assetId = AssetId.of(id);
+        requireMayFly(assetId);
+        CommandResult result = flightCommandService.returnToHome(assetId, currentUser.userId(),
                 currentUser.scope());
         return ReturnHomeResponse.from(result);
     }
@@ -88,7 +122,9 @@ public class FlightCommandController {
     @PostMapping("/api/assets/{id}/mode")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public ReturnHomeResponse setMode(@PathVariable String id, @RequestBody SetModeRequest request) {
-        CommandResult result = flightCommandService.setMode(AssetId.of(id), request.requireMode(),
+        AssetId assetId = AssetId.of(id);
+        requireMayFly(assetId);
+        CommandResult result = flightCommandService.setMode(assetId, request.requireMode(),
                 currentUser.userId(), currentUser.scope());
         return ReturnHomeResponse.from(result);
     }
@@ -105,8 +141,10 @@ public class FlightCommandController {
     @ResponseStatus(HttpStatus.ACCEPTED)
     public ReturnHomeResponse arm(@PathVariable String id,
                                   @RequestBody(required = false) ForceCommandRequest request) {
+        AssetId assetId = AssetId.of(id);
+        requireMayFly(assetId);
         ForceCommandRequest body = request != null ? request : ForceCommandRequest.EMPTY;
-        CommandResult result = flightCommandService.arm(AssetId.of(id), body.forceOrDefault(),
+        CommandResult result = flightCommandService.arm(assetId, body.forceOrDefault(),
                 currentUser.userId(), currentUser.scope());
         return ReturnHomeResponse.from(result);
     }
@@ -123,8 +161,10 @@ public class FlightCommandController {
     @ResponseStatus(HttpStatus.ACCEPTED)
     public ReturnHomeResponse disarm(@PathVariable String id,
                                      @RequestBody(required = false) ForceCommandRequest request) {
+        AssetId assetId = AssetId.of(id);
+        requireMayFly(assetId);
         ForceCommandRequest body = request != null ? request : ForceCommandRequest.EMPTY;
-        CommandResult result = flightCommandService.disarm(AssetId.of(id), body.forceOrDefault(),
+        CommandResult result = flightCommandService.disarm(assetId, body.forceOrDefault(),
                 currentUser.userId(), currentUser.scope());
         return ReturnHomeResponse.from(result);
     }
@@ -144,7 +184,9 @@ public class FlightCommandController {
     @PostMapping("/api/assets/{id}/emergency-stop")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public ReturnHomeResponse emergencyStop(@PathVariable String id) {
-        CommandResult result = flightCommandService.emergencyStop(AssetId.of(id), currentUser.userId(),
+        AssetId assetId = AssetId.of(id);
+        requireMayFly(assetId);
+        CommandResult result = flightCommandService.emergencyStop(assetId, currentUser.userId(),
                 currentUser.scope());
         return ReturnHomeResponse.from(result);
     }
@@ -164,7 +206,9 @@ public class FlightCommandController {
     @PostMapping("/api/assets/{id}/aux-function")
     @ResponseStatus(HttpStatus.ACCEPTED)
     public ReturnHomeResponse auxFunction(@PathVariable String id, @RequestBody AuxFunctionRequest request) {
-        CommandResult result = flightCommandService.auxFunction(AssetId.of(id), request.requireFunction(),
+        AssetId assetId = AssetId.of(id);
+        requireMayFly(assetId);
+        CommandResult result = flightCommandService.auxFunction(assetId, request.requireFunction(),
                 request.requireLevel(), currentUser.userId(), currentUser.scope());
         return ReturnHomeResponse.from(result);
     }

@@ -114,6 +114,40 @@ public final class StreamAccess {
     }
 
     /**
+     * Guards {@code HlsProxyController#proxy} specifically (docs/plans/active/AUTH-ROLES-PLAN.md D10,
+     * wave B4) — <b>fails closed</b> for a {@code streamId} that is unknown or not currently running,
+     * unlike {@link #requireVisible(StreamId)}.
+     *
+     * <h2>Why this is a second method, not a changed {@link #requireVisible(StreamId)}</h2>
+     * {@link StreamController}'s six other handlers deliberately keep the no-op on an
+     * unknown/stopped id — {@code stop}/{@code tracks}/{@code detections} document it as their own
+     * intentional "forgiving idiom" for a polling client (one code path, an empty/idempotent answer
+     * rather than a 404 flapping in and out as a stream starts and stops), and {@code
+     * config}/{@code updateConfig} already 404 downstream via their own service call once the no-op
+     * lets them through — either way, changing the shared no-op would either break documented,
+     * tested behavior or be a no-op itself. {@link HlsProxyController} has neither property: it has
+     * no downstream service call to 404 on its own, and no polling-forgiveness contract — a no-op
+     * here means the request reaches the upstream fetch, which attaches this app's own credentialed
+     * {@code Authorization} header (see that controller's "Upstream mediamtx credentials" javadoc)
+     * for <em>any</em> id, checked or not. That is the leak D10 names: with {@code /hls/**} now also
+     * behind the secured chain's {@code authenticated()} rule ({@code SecurityConfig}), the caller is
+     * at least known — but a known caller with no visibility onto a given stream must still not be
+     * able to walk the credentialed proxy for it, which is exactly what a fail-open no-op would
+     * still allow.
+     *
+     * @param streamId the stream the caller is about to fetch HLS bytes for
+     * @throws NoSuchElementException if the id does not currently name a running stream, or does and
+     *                                 the caller's scope may not reach its device's asset — the same
+     *                                 404, existence hidden either way
+     */
+    public void requireVisibleForHlsProxy(StreamId streamId) {
+        Optional<DeviceId> deviceId = deviceIdOf(streamId);
+        if (deviceId.isEmpty() || !visible(deviceId.get())) {
+            throw new NoSuchElementException("Unknown or stopped stream: " + streamId.value());
+        }
+    }
+
+    /**
      * Filters {@code streams} down to the ones the caller's scope may reach — the read half of
      * {@link StreamController#list}, which must narrow the fleet-wide list rather than all-or-
      * nothing 403 it (docs/plans/done/LIVE-SCOPE-PLAN.md §2.2).

@@ -58,12 +58,16 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * exactly the wire-level behavior a mock would have to reimplement anyway.
  *
  * <p>Every wire-mechanics test below builds its controller with {@link #openStreamAccess()} — a real
- * {@link StreamAccess} backed by a {@link StreamService} stub reporting no running streams at all, so
- * {@link StreamAccess#requireVisible(StreamId)} is a no-op for whatever placeholder {@code streamId}
- * path segment each test uses ("stream-1" etc. — never a real {@link StreamId}), exactly mirroring
- * production's own "not currently running" no-op (see {@link HlsProxyController}'s class javadoc).
- * The scope gate itself is exercised separately, below, against a stream {@link StreamService}
- * actually reports as running.
+ * {@link StreamAccess} backed by a {@link StreamService} stub reporting no running streams at all. In
+ * practice this never even reaches {@link StreamAccess}: every placeholder {@code streamId} path
+ * segment these tests use ("stream-1" etc.) is not a valid UUID, so {@code
+ * HlsProxyController#requireVisibleStream} catches {@link StreamId}'s own parse failure and returns
+ * before calling {@link StreamAccess#requireVisibleForHlsProxy(StreamId)} at all (see {@link
+ * HlsProxyController}'s class javadoc, "A {@code streamId} path segment that is not a valid {@code
+ * StreamId}..."). {@code openStreamAccess()}'s "no running streams" stub exists so that, were a test
+ * ever changed to use a real random {@link StreamId}, the gate would still fail closed (unknown
+ * stream) rather than silently succeed. The scope gate itself is exercised separately, below, against
+ * a stream {@link StreamService} actually reports as running.
  */
 class HlsProxyControllerTest {
 
@@ -78,9 +82,11 @@ class HlsProxyControllerTest {
 
     /**
      * A real {@link StreamAccess} ({@code final}, so not mocked) whose {@link StreamService} stub
-     * reports no running streams — {@link StreamAccess#requireVisible(StreamId)} is then a
-     * documented no-op for any {@code streamId}, matching every wire-mechanics test's placeholder
-     * path segments.
+     * reports no running streams — fails closed ({@link StreamAccess#requireVisibleForHlsProxy}
+     * throws) for any {@code streamId} that actually reaches it. The wire-mechanics tests below never
+     * exercise that path at all (see this class's own javadoc): their placeholder {@code streamId}
+     * segments aren't valid UUIDs, so {@code HlsProxyController} short-circuits before calling in
+     * here.
      */
     private static StreamAccess openStreamAccess() {
         StreamService streamService = mock(StreamService.class);

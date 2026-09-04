@@ -19,12 +19,14 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
 import java.util.List;
 import java.util.NoSuchElementException;
+import com.drones.vision.api.security.AssetAuthority;
 import com.drones.vision.api.security.CurrentUser;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -35,6 +37,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class FlightCommandControllerTest {
 
     private FlightCommandService flightCommandService;
+    private AssetAuthority assetAuthority;
     private MockMvc mockMvc;
 
     private final UserId ownerId = UserId.random();
@@ -44,9 +47,14 @@ class FlightCommandControllerTest {
     @BeforeEach
     void setUp() {
         flightCommandService = mock(FlightCommandService.class);
+        // Permissive by default (docs/plans/active/AUTH-ROLES-PLAN.md §3.9, wave B4) so every
+        // pre-existing test below, none of which cares about the authority gate, keeps its original
+        // meaning; denial is exercised by the dedicated tests further down.
+        assetAuthority = mock(AssetAuthority.class);
+        when(assetAuthority.mayFly(any())).thenReturn(true);
 
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new FlightCommandController(flightCommandService, currentUser))
+                .standaloneSetup(new FlightCommandController(flightCommandService, currentUser, assetAuthority))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -221,6 +229,52 @@ class FlightCommandControllerTest {
         mockMvc.perform(post("/api/assets/{id}/arm", assetId.value()))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+    }
+
+    /**
+     * docs/plans/active/AUTH-ROLES-PLAN.md §3.8/§3.9, wave B4 — a caller {@link AssetAuthority}
+     * denies (a {@code CREW} seat, or no {@code COMMAND_FLIGHT} capability at all) is refused before
+     * {@link FlightCommandService} is ever asked, regardless of what the application-service's own
+     * scope-only gate would have answered.
+     */
+    @Test
+    void armReturns403WhenAssetAuthorityDeniesMayFlyAndNeverTouchesTheService() throws Exception {
+        AssetId assetId = AssetId.random();
+        when(assetAuthority.mayFly(assetId)).thenReturn(false);
+
+        mockMvc.perform(post("/api/assets/{id}/arm", assetId.value()))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+
+        verify(flightCommandService, never()).arm(any(), anyBoolean(), any(), any());
+    }
+
+    /**
+     * Every command family reaches the same {@link AssetAuthority#mayFly(AssetId)} gate — proven
+     * once per family rather than duplicating the full request/assert shape for each, since the gate
+     * itself ({@link #requireMayFly}) is shared code, not per-method logic.
+     */
+    @Test
+    void everyCommandFamilyIsGatedByAssetAuthorityMayFly() throws Exception {
+        AssetId assetId = AssetId.random();
+        when(assetAuthority.mayFly(assetId)).thenReturn(false);
+
+        mockMvc.perform(post("/api/assets/{id}/return-home", assetId.value())).andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/assets/{id}/mode", assetId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"mode\":\"GUIDED\"}"))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/assets/{id}/disarm", assetId.value())).andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/assets/{id}/emergency-stop", assetId.value())).andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/assets/{id}/aux-function", assetId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"function\":9,\"level\":1}"))
+                .andExpect(status().isForbidden());
+
+        verify(flightCommandService, never()).returnToHome(any(), any(), any());
+        verify(flightCommandService, never()).setMode(any(), any(), any(), any());
+        verify(flightCommandService, never()).disarm(any(), anyBoolean(), any(), any());
+        verify(flightCommandService, never()).emergencyStop(any(), any(), any());
+        verify(flightCommandService, never()).auxFunction(any(), org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyInt(), any(), any());
     }
 
     @Test

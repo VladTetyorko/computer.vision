@@ -145,18 +145,25 @@ import java.util.Set;
  * VisionApiProperties.HlsProxy#defaults()}) sends no {@code Authorization} header at all, unchanged
  * from this controller's pre-S6 behaviour.
  *
- * <h2>Authorization (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R7, finding A2)</h2>
- * This endpoint proxies an asset's live video bytes, so it is gated exactly like {@code
- * StreamController}'s other stream reads: {@link #proxy} calls {@link
- * StreamAccess#requireVisible(StreamId)} before ever contacting the upstream, so a caller whose
- * {@code VisibilityScope} does not reach the stream's device gets {@code 404} (existence is never
- * revealed — the same "out-of-scope read answers 404, not 403" rule every other scoped read in this
- * module follows), not a proxied video feed. A {@code streamId} path segment that is not a valid
- * {@link StreamId} (malformed, or simply not a UUID this app minted) is treated exactly like a
- * stream {@link StreamAccess} has never heard of: nothing to check, so the request falls through to
- * the ordinary upstream fetch — production {@code streamId} path segments are always {@link
- * StreamId#value()}'s canonical UUID string (see {@code MediamtxUrls}), so this can only be reached
- * by a request this app never generated itself, which mediamtx has nothing to serve at either way.
+ * <h2>Authorization (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R7, finding A2; hardened by
+ * docs/plans/active/AUTH-ROLES-PLAN.md D10, wave B4)</h2>
+ * This endpoint proxies an asset's live video bytes, gated in two layers now. First, {@code
+ * SecurityConfig}'s secured chain requires a session for {@code /hls/**} just like {@code /api/**}
+ * — an unauthenticated caller never reaches this controller at all. Second, {@link #proxy} calls
+ * {@link StreamAccess#requireVisibleForHlsProxy} before ever contacting the upstream — <b>not</b>
+ * {@link StreamAccess#requireVisible(StreamId)}, the check {@code StreamController}'s other stream
+ * reads use: that one no-ops (lets the caller through unchecked) for a {@code streamId} that is not
+ * currently running, which is exactly wrong here — this controller has no downstream 404 of its own
+ * to catch what the no-op lets past, so a caller whose {@code VisibilityScope} does not reach the
+ * stream, or who names an id that simply isn't running, gets {@code 404} either way (existence is
+ * never revealed), never a proxied fetch carrying this app's own credentialed upstream
+ * {@code Authorization} header. A {@code streamId} path segment that is not a valid {@link StreamId}
+ * at all (malformed, or simply not a UUID this app minted) is still treated as one {@link
+ * StreamAccess} has never heard of: nothing to check, so the request falls through to the ordinary
+ * upstream fetch — production {@code streamId} path segments are always {@link StreamId#value()}'s
+ * canonical UUID string (see {@code MediamtxUrls}), so this can only be reached by a request this
+ * app never generated itself (and, since D10, only by an authenticated caller at all), which
+ * mediamtx has nothing to serve at either way.
  */
 @RestController
 public class HlsProxyController {
@@ -349,12 +356,18 @@ public class HlsProxyController {
 
     /**
      * The scope gate this controller's class javadoc ("Authorization") describes: {@code 404}s
-     * before the upstream is ever contacted when {@code streamId} names a stream this caller's {@link
-     * StreamAccess#requireVisible(StreamId) VisibilityScope} may not reach. A {@code streamId} that
-     * does not parse as a {@link StreamId} is treated the same as one {@link StreamAccess} has never
-     * heard of (see class javadoc) — nothing to check, so this method simply returns rather than
-     * rejecting a request {@link #stampVideoDemand} and every existing wire-level test already
-     * tolerate.
+     * before the upstream is ever contacted when {@code streamId} names a stream this caller's
+     * {@code VisibilityScope} may not reach, <b>or one that is not currently running at
+     * all</b> — {@link StreamAccess#requireVisibleForHlsProxy}, not {@link
+     * StreamAccess#requireVisible(StreamId)}: this controller has no downstream 404 of its own and no
+     * polling-forgiveness contract to preserve for an unknown id, so it fails closed rather than
+     * no-opping (docs/plans/active/AUTH-ROLES-PLAN.md D10, wave B4 — see that method's own javadoc).
+     * A {@code streamId} that does not parse as a {@link StreamId} at all is still treated as one
+     * {@link StreamAccess} has never heard of (see class javadoc) — nothing to check, so this method
+     * simply returns rather than rejecting a request {@link #stampVideoDemand} and every existing
+     * wire-level test already tolerate; {@code /hls/**} now sitting behind {@code SecurityConfig}'s
+     * {@code authenticated()} rule means that path can only be reached by a known caller in the first
+     * place.
      */
     private void requireVisibleStream(String streamId) {
         StreamId id;
@@ -363,7 +376,7 @@ public class HlsProxyController {
         } catch (IllegalArgumentException e) {
             return;
         }
-        streamAccess.requireVisible(id);
+        streamAccess.requireVisibleForHlsProxy(id);
     }
 
     /**

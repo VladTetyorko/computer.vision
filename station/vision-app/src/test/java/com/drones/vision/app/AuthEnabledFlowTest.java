@@ -13,6 +13,8 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
+import java.util.UUID;
+
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -94,5 +96,36 @@ class AuthEnabledFlowTest {
                         .contentType("application/json")
                         .content("{\"username\":\"admin\",\"password\":\"not-the-password\"}"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    /**
+     * {@code /hls/**} joins {@code /api/**}/{@code /ws/**} under the secured chain's {@code
+     * authenticated()} rule (docs/plans/active/AUTH-ROLES-PLAN.md D10, wave B4) — half of the fix
+     * {@code SecurityConfig}'s own javadoc describes. Proven here rather than in {@code
+     * HlsProxyControllerTest} (a {@code standaloneSetup} test with no security filter at all) since
+     * this is specifically the filter-chain half, not {@code StreamAccess}'s own gate.
+     */
+    @Test
+    void unauthenticatedHlsPathIsRejected() throws Exception {
+        mockMvc.perform(get("/hls/" + UUID.randomUUID() + "/index.m3u8")).andExpect(status().isUnauthorized());
+    }
+
+    /**
+     * The other half of D10: an authenticated caller naming a {@code streamId} that is not currently
+     * running is {@code 404}, not a proxied fetch — {@code StreamAccess#requireVisibleForHlsProxy}
+     * fails closed before {@code HlsProxyController#proxy} ever contacts the upstream, so this never
+     * risks a real network call to an unconfigured mediamtx.
+     */
+    @Test
+    void authenticatedCallerGetsA404ForAStreamIdThatIsNotCurrentlyRunning() throws Exception {
+        MvcResult login = mockMvc.perform(post("/api/auth/login")
+                        .contentType("application/json")
+                        .content("{\"username\":\"admin\",\"password\":\"admin\"}"))
+                .andExpect(status().isOk())
+                .andReturn();
+        MockHttpSession session = (MockHttpSession) login.getRequest().getSession(false);
+
+        mockMvc.perform(get("/hls/" + UUID.randomUUID() + "/index.m3u8").session(session))
+                .andExpect(status().isNotFound());
     }
 }

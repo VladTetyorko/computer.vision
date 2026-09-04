@@ -18,7 +18,8 @@ vision-app depends on — see Gotchas)
 `DiscoveryInboxController` — ZERO-CONFIG-ONBOARDING Z2c) · `dto/` (wire
 records only, ~187 — house rule "zero DTO leakage": no domain type is ever serialized directly) ·
 `security/` (`CurrentUser`/
-`PrincipalResolver`/`StreamAccess`/`OpenByDesign` — the authorization seam, see Conventions) ·
+`PrincipalResolver`/`StreamAccess`/`OpenByDesign`/`AssetAuthority`/`CapabilityAssetAuthority` — the
+authorization seam, see Conventions) ·
 `live/` (SSE connection registry, per-topic ring buffers, per-connection visibility filtering) ·
 `ws/` (`/ws/manual-control` raw `WebSocketHandler`) · `proxy/` (`HlsProxyController` — a pass-through
 edge owning no application service) · `ratelimit/` (`RateLimitFilter`/`TokenBucket`, per-principal
@@ -73,7 +74,7 @@ the full mechanism.
 | AssetStreamController | POST | `/api/assets/{id}/stream` | Start the asset's video stream | scope |
 | AssetStreamController | DELETE | `/api/assets/{id}/stream` | Stop it (idempotent) | scope |
 | AssetSessionController | POST | `/api/assets/{id}/session` | Operator "engage" — opens/promotes a usage, no video, no device traffic; the response's `pilotId` is now `CurrentUser#userId()` (ASSET-FLOWS-PLAN §2 D1p, wave BK4 — passed straight through to `UsageTracker#engage`, the caller's own identity, never a request body field) | scope |
-| AssetSessionController | DELETE | `/api/assets/{id}/session` | Operator "disengage" (idempotent; demotes rather than closes if a stream is still running) | scope |
+| AssetSessionController | DELETE | `/api/assets/{id}/session` | Operator "disengage" (idempotent; demotes rather than closes if a stream is still running); records an `AuditTrailPort` entry (`AuditAction.UPDATED`/`AuditTargetType.ASSET`) naming the calling `CurrentUser#userId()` when something was actually engaged — no entry when nothing was (AUTH-ROLES-PLAN.md D17, wave B4; attribution only, no seat/arbitration logic — CREW-CONTROL's concern) | scope |
 | AssetStatsController | GET | `/api/assets/{id}/stats` | KPI tile row (flight time/count, last battery, …) | scope |
 | AssetImageController | PUT | `/api/assets/{id}/image` | Upload cover image (≤2 MB, `AssetImageRepositoryPort` called directly) | scope |
 | AssetImageController | GET | `/api/assets/{id}/image` | Fetch it | scope |
@@ -94,7 +95,7 @@ the full mechanism.
 | StreamController | GET | `/api/streams/{streamId}/snapshot` | Latest frame as downscaled JPEG (only binary, non-JSON response besides the HLS proxy) | scope |
 | StreamController | PATCH | `/api/streams/{streamId}/config` | Hot-patch confidence/fps/labelFilter/model/tracking — never interrupts video | scope |
 | StreamController | GET | `/api/streams/{streamId}/tracks` | Track book + duty-cycle stats; never errors on unknown stream (empty `tracks`) | scope |
-| HlsProxyController | GET | `/hls/{streamId}/**` | Reverse-proxy this asset's live HLS bytes to the mediamtx sidecar | scope (`StreamAccess`, checked **before** the upstream is ever contacted) |
+| HlsProxyController | GET | `/hls/{streamId}/**` | Reverse-proxy this asset's live HLS bytes to the mediamtx sidecar | scope (`StreamAccess#requireVisibleForHlsProxy`, checked **before** the upstream is ever contacted; fails closed on an unknown/stopped id — AUTH-ROLES-PLAN.md D10, wave B4 — unlike the other `StreamAccess`-gated rows above, which keep `requireVisible`'s no-op) — also now behind `SecurityConfig`'s secured chain's `authenticated()` rule (`/hls/**` joined `/api/**`/`/ws/**`) |
 | CvModelsController | GET | `/api/cv/models` | Detection-model roster — widened (CV-SETTINGS-PLAN §5.2) to serve the registry's live roster (`registrySource: true`) when `vision.cv.registry.enabled`, else the static config catalogue; never errors | open |
 | CvTrackersController | GET | `/api/cv/trackers` | Static tracker-engine roster | open |
 | OpsThresholdsController | GET | `/api/ops/thresholds` | Battery urgency thresholds (ASSET-FLOWS-PLAN §2 D6) + RC neutral-stick tolerance (FLY-CONTROL-UX-PLAN §2/BK1) — `{"battery":{"warningPercent":25,"criticalPercent":10},"rc":{"neutralTolerancePercent":5}}`, frozen wire shape, values from `vision.ops.battery.*`/`vision.ops.rc.*` | open |
@@ -112,12 +113,12 @@ the full mechanism.
 | FleetController | GET | `/api/fleet/summary?includeArchived=` | Per-category counts + attention list | scope |
 | ReadinessController | GET | `/api/assets/{assetId}/readiness` | One asset's onboarding-readiness report | scope |
 | ReadinessController | GET | `/api/fleet/readiness` | Readiness row per visible asset | scope |
-| FlightCommandController | POST | `/api/assets/{id}/return-home` | RTL | scope |
-| FlightCommandController | POST | `/api/assets/{id}/mode` | Flight-mode change | scope |
-| FlightCommandController | POST | `/api/assets/{id}/arm` | Arm (optional `force`) | scope |
-| FlightCommandController | POST | `/api/assets/{id}/disarm` | Disarm (optional `force`) | scope |
-| FlightCommandController | POST | `/api/assets/{id}/emergency-stop` | Forced disarm, kept separate from `disarm{force}` for audit-trail clarity | scope |
-| FlightCommandController | POST | `/api/assets/{id}/aux-function` | `MAV_CMD_DO_AUX_FUNCTION` | scope |
+| FlightCommandController | POST | `/api/assets/{id}/return-home` | RTL | scope + `AssetAuthority#mayFly` (AUTH-ROLES-PLAN.md §3.8, wave B4) |
+| FlightCommandController | POST | `/api/assets/{id}/mode` | Flight-mode change | scope + `mayFly` |
+| FlightCommandController | POST | `/api/assets/{id}/arm` | Arm (optional `force`) | scope + `mayFly` |
+| FlightCommandController | POST | `/api/assets/{id}/disarm` | Disarm (optional `force`) | scope + `mayFly` |
+| FlightCommandController | POST | `/api/assets/{id}/emergency-stop` | Forced disarm, kept separate from `disarm{force}` for audit-trail clarity | scope + `mayFly` |
+| FlightCommandController | POST | `/api/assets/{id}/aux-function` | `MAV_CMD_DO_AUX_FUNCTION` | scope + `mayFly` |
 | FlightCommandController | GET | `/api/assets/{id}/flight-capabilities` | What this asset supports commanding | scope |
 | ControlProfileController | GET | `/api/control-profiles` | Caller's saved layouts + built-ins; every row now also carries `stickMode`/`forwardIsUp` (C15), a built-in reporting `TransmitterView.DEFAULT` | own profile |
 | ControlProfileController | GET | `/api/control-profiles/catalog` | Every enumerable setup choice (vehicle kinds, input kinds, functions, …) | own profile |
@@ -221,7 +222,35 @@ the full mechanism.
 transport, outside the table above since it isn't a `@RestController` route. Its handshake resolves
 `CurrentUser` the same way every REST call does (`ManualControlHandshakeInterceptor`, 401 if it
 can't) and every `engage` frame re-derives scope from that handshake — see the class javadoc for the
-full frame protocol. **FLEET-RADIO R2** added one additive `denied` reason code, `VEHICLE_UNIDENTIFIED`
+full frame protocol.
+
+**AUTH-ROLES-PLAN wave B4 — the per-asset `mayFly` gate on `engage`.** `ManualControlHandshakeInterceptor`
+now also stashes `Authority` (`ATTR_AUTHORITY`) into the session's attribute map at handshake time,
+alongside the pre-existing `userId`/`scope` — the one point where the HTTP thread's `SecurityContext`
+is actually valid; a WebSocket message frame (`engage` included) is dispatched later on the
+container's own message thread, which carries none. `handleEngage` now checks
+`CapabilityAssetAuthority#mayFly(Authority, UserId, AssetId)` — the interface's `mayFly(AssetId)`
+overload cannot be used here since it reads the ambient `CurrentUser`, which would throw once auth is
+enabled — **exactly once, at engage**, denying `OUT_OF_SCOPE` before `ManualControlService#engage` is
+ever called; a revocation mid-session is never re-checked (the mid-flight rule, §3.7 clause 1). The
+handler's constructor is now 4-arg: `(ManualControlService, CapabilityAssetAuthority,
+watchdogTimeoutMillis, engageSlowThresholdMillis)` — depends on the *concrete* class, not the
+`AssetAuthority` interface, specifically to reach this explicit-actor overload (a second public method
+on `CapabilityAssetAuthority`, not part of the frozen 3-method `AssetAuthority` interface).
+
+**AUTH-ROLES-PLAN wave B4 — the same `mayFly` gate on `FlightCommandController`'s six REST commands.**
+Unlike the WebSocket handler, this controller *can* reach the ambient `CurrentUser`, so it injects
+the plain `AssetAuthority` interface (not the concrete class) and calls the interface's
+`mayFly(AssetId)` overload. A new private `requireMayFly(AssetId)` throws `AccessDeniedException`
+(→403 via `ApiExceptionHandler`, unchanged mapping) before any of `returnHome`/`setMode`/`arm`/
+`disarm`/`emergencyStop`/`auxFunction` ever calls `FlightCommandService` — deliberately redundant
+with that service's own pre-existing `scope().includes(...)` check in `contexts/vision-flight`
+(`DefaultFlightCommandService`, out of this module's reach): the edge gate is strictly narrower (adds
+the `COMMAND_FLIGHT` capability and, for an `ASSIGNED_ASSETS` caller, the `PILOT`-not-`CREW` seat
+narrowing), so the service's own check never actually fires once this one has denied — it stays as
+the scope-only backstop for any future caller that reaches the service directly. `GET
+/api/assets/{id}/flight-capabilities` (a read) is untouched — it keeps its existing 404-on-out-of-scope
+convention, not this 403 gate. **FLEET-RADIO R2** added one additive `denied` reason code, `VEHICLE_UNIDENTIFIED`
 — no frame added/removed, no field renamed: `engage` now catches `vision-flight`'s
 `VehicleUnidentifiedException` (a subtype of, and ahead of, the existing `IllegalStateException`
 clause) and maps it straight to `new ManualControlDeniedFrame(CODE_VEHICLE_UNIDENTIFIED, e.getMessage())`
@@ -533,6 +562,15 @@ auto-wiring by type).
   Cookie/Range forwarding — mediamtx's own read-auth check runs on the redirect target, not the first
   hop, so a header that only rode the initial request would silently 401 after the very first request
   established the pinning cookie.
+- **`HlsProxyController` is the one `StreamAccess` caller that fails closed on an unknown/stopped
+  stream id** (`requireVisibleForHlsProxy`, AUTH-ROLES-PLAN.md D10, wave B4) — every other caller
+  (`StreamController#stop`/`tracks`/`detections`, `EventController`, both above) deliberately keeps
+  `requireVisible`'s no-op, a documented "forgiving idiom" for a polling client. Changing the *shared*
+  method instead of adding this one would have silently broken those tests; the two methods read
+  identically for a *present-but-invisible* device (both throw) and differ only for an *absent* one.
+  `requireVisibleStream`'s own malformed-`streamId` short-circuit (a non-UUID path segment, e.g. a
+  test's placeholder `"stream-1"`) is unchanged and runs first — it never reaches `StreamAccess` at
+  all, so none of `HlsProxyControllerTest`'s wire-mechanics fixtures needed updating for this wave.
 - **`ControlProfileController`'s catalogue is served, not hardcoded in the SPA** (decision C8, and
   CLAUDE.md rule 1). `ControlCatalogResponse.of(...)` is derived from the domain enums themselves —
   `ControlInputKind#allows` decides which sources each kind lists, `SwitchPosition#auxFunctionLevel()`
@@ -820,3 +858,28 @@ signatures, not new tests). Docker ran (not skipped — Testcontainers started a
 Flyway migrated through `V33`). Waves B4 (per-asset command authority)/B5 (Spring Session JDBC)/B6
 (migrate the ~34 `canManageOrg`/`canManage`/`canAdminister` call sites + the VIEWER-precedence flip)/
 B0b (flip `vision.auth.enabled`'s default) are open — see `docs/plans/active/AUTH-ROLES-PLAN.md`.
+
+**AUTH-ROLES-PLAN wave B4 done.** New `security.AssetAuthority` (interface, frozen 3-method shape
+per §3.9 — a join point shared with CREW-CONTROL-PLAN §3.7) + `CapabilityAssetAuthority` (the one
+implementation) — see "API surface"/"Live updates" above for every gated call site
+(`ManualControlWebSocketHandler#handleEngage`, `FlightCommandController`'s six commands,
+`HlsProxyController#proxy` via the new `StreamAccess#requireVisibleForHlsProxy`) and "Gotchas" for why
+the HLS gate is a second `StreamAccess` method rather than a change to the shared
+`requireVisible(StreamId)`. `AssetSessionController#disengage` now records an `AuditTrailPort` entry
+naming the calling user (D17) — attribution only; no seat/arbitration logic, which stays
+CREW-CONTROL's to add. `SecurityConfig`'s secured-chain matcher gained `/hls/**` (D10, `vision-app`).
+Deviations, each one-line: (1) `CapabilityAssetAuthority` gained a second public method,
+`mayFly(Authority, UserId, AssetId)`, not on the frozen interface — the WebSocket message thread has
+no `SecurityContext`, so the interface's ambient-`CurrentUser` `mayFly(AssetId)` cannot be called
+from `ManualControlWebSocketHandler` at all once auth is enabled; (2) D17 (actor attribution on
+disengage) was solved via the already-vision-api-reachable `AuditTrailPort` rather than widening
+`UsageTracker#disengage`'s signature or adding a field to `AssetUsage` — both of those modules were
+reserved for a concurrent agent's own wave; (3) `contexts/vision-flight`/`contexts/vision-identity`
+were not touched despite being named in the plan's literal B4 file list — every call site this wave
+actually needed lives in `vision-api`. `./mvnw -B -pl storage/persistence,station/vision-api,station/vision-app
+test -DskipWeb` — vision-api **979** (961 → 979, +18: 12 `CapabilityAssetAuthorityTest` + 2
+`ManualControlWebSocketHandlerTest` + 2 `AssetSessionControllerTest` + 2 `FlightCommandControllerTest`),
+`storage/persistence` unaffected at **276**, `station/vision-app` **328** (326 → 328, +2 — see that
+module's own MODULE.md). Docker ran for real (Testcontainers `postgres:16`, Flyway unchanged at
+`V33` — this wave added no migration). `vision.auth.enabled` stays `false` by default, unchanged;
+the default-config auth-off suites stayed green throughout. Waves B5/B6/B0b open.

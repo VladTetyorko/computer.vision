@@ -7,10 +7,12 @@ import com.drones.vision.api.dto.ManualControlDeniedFrame;
 import com.drones.vision.api.dto.ManualControlEngagedFrame;
 import com.drones.vision.api.dto.ManualControlReleasedFrame;
 import com.drones.vision.api.dto.ManualControlWatchdogFrame;
+import com.drones.vision.api.security.CapabilityAssetAuthority;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.flight.application.ManualControlService;
 import com.drones.vision.flight.application.ManualControlSession;
 import com.drones.vision.flight.application.VehicleUnidentifiedException;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.flight.application.WatchdogListener;
 import com.drones.vision.kernel.AssetId;
@@ -47,6 +49,20 @@ import java.util.concurrent.ConcurrentHashMap;
  * DefaultManualControlService}'s own one-session-per-handle guard — surfacing as an {@link
  * IllegalStateException} this handler also maps to {@code ALREADY_ENGAGED} (see {@link
  * #mapIllegalState}).
+ *
+ * <h2>The {@code mayFly} gate is asked once, at {@code engage} (wave B4)</h2>
+ * {@link #handleEngage} checks {@link CapabilityAssetAuthority#mayFly(Authority, UserId, AssetId)}
+ * before calling {@link #manualControlService}, denying {@code OUT_OF_SCOPE} on {@code false} —
+ * the same code {@link AccessDeniedException} from the service itself already maps to, so a denial
+ * looks identical to the client whichever gate produced it. This is strictly additive to {@link
+ * ManualControlService#engage}'s own {@code scope().includes(...)} check (unreachable from here —
+ * {@code contexts/vision-flight}): the edge gate is narrower (capability + seat), so it denies
+ * first whenever it would deny. Per docs/plans/active/AUTH-ROLES-PLAN.md §3.7 clause 1, this is the
+ * <em>only</em> place authority is checked for a manual-control session — never again afterward,
+ * regardless of what changes about the caller's authority while the connection is open. See {@link
+ * ManualControlHandshakeInterceptor}'s class javadoc for the full mid-flight rule and why this
+ * gate reads its actor/authority from session attributes rather than the ambient {@link
+ * com.drones.vision.api.security.CurrentUser}.
  *
  * <h2>Exception&rarr;{@code denied} mapping (best-effort, documented rough edge)</h2>
  * {@link ManualControlService#engage} throws three <em>documented</em> types: {@link
@@ -129,6 +145,7 @@ public class ManualControlWebSocketHandler extends TextWebSocketHandler {
     private static final String CODE_INTERNAL_ERROR = "INTERNAL_ERROR";
 
     private final ManualControlService manualControlService;
+    private final CapabilityAssetAuthority assetAuthority;
     private final long watchdogTimeoutMillis;
     private final long engageSlowThresholdMillis;
     private final JsonMapper jsonMapper = new JsonMapper();
@@ -137,6 +154,13 @@ public class ManualControlWebSocketHandler extends TextWebSocketHandler {
     /**
      * @param manualControlService      the shared relay-session service (see class javadoc for the
      *                                   "one connection, one app-wide singleton" split)
+     * @param assetAuthority            the {@code mayFly} gate (docs/plans/active/AUTH-ROLES-PLAN.md
+     *                                  §3.7/§3.8, wave B4) — the concrete {@link
+     *                                  CapabilityAssetAuthority} type, not the {@code AssetAuthority}
+     *                                  interface, because {@link #handleEngage} calls its
+     *                                  explicit-actor overload; see that class's own javadoc for why
+     *                                  the ambient-{@code CurrentUser} interface method cannot be
+     *                                  used here
      * @param watchdogTimeoutMillis     {@code vision.rc.watchdog-timeout-ms} — read independently
      *                                  here (rather than asked of {@code manualControlService},
      *                                  which has no getter for it) purely to echo it on the {@code
@@ -150,10 +174,12 @@ public class ManualControlWebSocketHandler extends TextWebSocketHandler {
      *                                  the class javadoc's "Engage duration is measured" section
      */
     public ManualControlWebSocketHandler(ManualControlService manualControlService,
+                                          CapabilityAssetAuthority assetAuthority,
                                           @Value("${vision.rc.watchdog-timeout-ms:300}") long watchdogTimeoutMillis,
                                           @Value("${vision.rc.engage-slow-threshold-ms:2000}") long engageSlowThresholdMillis) {
         this.manualControlService =
                 Objects.requireNonNull(manualControlService, "manualControlService must not be null");
+        this.assetAuthority = Objects.requireNonNull(assetAuthority, "assetAuthority must not be null");
         this.watchdogTimeoutMillis = watchdogTimeoutMillis;
         this.engageSlowThresholdMillis = engageSlowThresholdMillis;
     }
@@ -221,11 +247,28 @@ public class ManualControlWebSocketHandler extends TextWebSocketHandler {
         UserId actor = (UserId) session.getAttributes().get(ManualControlHandshakeInterceptor.ATTR_USER_ID);
         VisibilityScope scope =
                 (VisibilityScope) session.getAttributes().get(ManualControlHandshakeInterceptor.ATTR_SCOPE);
-        if (actor == null || scope == null) {
-            // The handshake interceptor stashes both, and an unauthenticated handshake is already
-            // rejected before upgrade -- defensive only, never expected in practice.
+        Authority authority =
+                (Authority) session.getAttributes().get(ManualControlHandshakeInterceptor.ATTR_AUTHORITY);
+        if (actor == null || scope == null || authority == null) {
+            // The handshake interceptor stashes all three, and an unauthenticated handshake is
+            // already rejected before upgrade -- defensive only, never expected in practice.
             sendFrame(session, state,
                     new ManualControlDeniedFrame(CODE_OUT_OF_SCOPE, "no acting identity on this connection"));
+            return;
+        }
+
+        long engageStartNanos = System.nanoTime();
+
+        // The mayFly gate (docs/plans/active/AUTH-ROLES-PLAN.md §3.7/§3.8, wave B4) -- asked exactly
+        // once, here, at engage. Never re-asked for the life of this connection: see the mid-flight
+        // rule in ManualControlHandshakeInterceptor's class javadoc. Uses the explicit-actor overload
+        // against what the handshake interceptor captured, not AssetAuthority#mayFly(AssetId) --
+        // CapabilityAssetAuthority's own javadoc explains why the ambient-CurrentUser path cannot
+        // resolve on this (message-handling) thread.
+        if (!assetAuthority.mayFly(authority, actor, assetId)) {
+            logEngageDuration(engageStartNanos, assetId, "denied:" + CODE_OUT_OF_SCOPE);
+            sendFrame(session, state, new ManualControlDeniedFrame(CODE_OUT_OF_SCOPE,
+                    "Asset " + assetId.value() + " may not be flown by you"));
             return;
         }
 
@@ -234,7 +277,6 @@ public class ManualControlWebSocketHandler extends TextWebSocketHandler {
             sendFrame(session, state, new ManualControlWatchdogFrame(watchdogTimeoutMillis));
         };
 
-        long engageStartNanos = System.nanoTime();
         try {
             ManualControlSession mcSession = manualControlService.engage(assetId, actor, scope, onWatchdog);
             // Built before state.session is set: if composing the response somehow throws, the

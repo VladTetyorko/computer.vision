@@ -706,3 +706,59 @@ green in the same run: `storage/persistence` **276** (274 → 276, +2) and `stat
 (unchanged this wave — B0b flips it); `AuthDisabledSecurityTest`/`ManualControlSecurityDisabledTest`
 (the default-config auth-off suites) both still green, proving the opt-in guardrail. Waves B4/B5/B6/B0b
 open — see `docs/plans/active/AUTH-ROLES-PLAN.md`.
+
+**AUTH-ROLES-PLAN wave B4 done.** Per-asset command authority — `AssetAuthority`/
+`CapabilityAssetAuthority`, both new types in `vision-api`'s `security` package (see that module's own
+MODULE.md for the interface/implementation split and its two-entry-point design). **This module
+required no wiring code at all**: `CapabilityAssetAuthority` is `@Component`-annotated and
+constructor-injects only pre-existing beans (`CurrentUser`, `AssetService`, `AssignmentRepositoryPort`)
+that were already in the context, so component scanning resolves it with zero `vision-app` involvement
+— the same is true of `ManualControlWebSocketHandler`'s widened (now 4-arg) constructor and
+`AssetSessionController`'s widened (now 4-arg) constructor: neither is built by an explicit `@Bean`
+factory method anywhere in this module, so both simply pick up their new collaborator
+(`CapabilityAssetAuthority`, `AuditTrailPort` respectively) through the same autowiring that already
+worked. `SecurityConfig`'s secured-chain matcher list gained `/hls/**` alongside the pre-existing
+`/api/**`/`/ws/**` (D10) — the only production-code line this module actually touched this wave; its
+class javadoc gained a matching `/hls/**` section explaining the two-part fix (the other half,
+`StreamAccess#requireVisibleForHlsProxy` failing closed instead of no-opping, lives in `vision-api`).
+
+`EndpointAuthorizationTest` (ArchUnit-adjacent BFS over `@RestController` call graphs, see "Gotchas")
+needed two small widenings so it recognizes the new authority axis: `AUTHORITY_METHODS` gained
+`"authority"` (alongside the pre-existing `"scope"`/`"viewer"`), and `reachesAuthorityCheck`'s
+owner-name test widened from `owner.endsWith("Access")` to `owner.endsWith("Access") ||
+owner.endsWith("Authority")` — without this, any future `@RestController` handler reaching only
+`CurrentUser#authority()` or `AssetAuthority`/`CapabilityAssetAuthority` (never `StreamAccess` or
+`CurrentUser#scope()`) would have false-positived as unscoped. No handler in this wave actually needed
+the widening to pass (B4 added no new `@RestController` handler and touched no existing one's
+authority path), so this is forward cover for B6's migration, not a fix for an observed failure.
+
+New test coverage, all in `vision-api`: `CapabilityAssetAuthorityTest` (new file, 12 cases) — the
+CREW/PILOT/VIEWER/MANAGER matrix against both `mayFly(AssetId)` (ambient `CurrentUser`) and
+`mayFly(Authority, UserId, AssetId)` (the explicit-actor overload `ManualControlWebSocketHandler`
+uses), plus `mayOperateCamera`/`mayForceSeat`. `ManualControlWebSocketHandlerTest` gained 2 cases
+(mayFly-denied → `OUT_OF_SCOPE`; mayFly asked exactly once at engage, never re-checked on a later
+`channels` frame even after the test flips the fake's answer mid-session — the mid-flight rule, §3.7
+clause 1, proven directly). `AssetSessionControllerTest` gained 2 cases (an audit entry is recorded
+naming the caller on a real disengage; none is recorded when nothing was engaged).
+`FlightCommandControllerTest` gained 2 cases (`arm` denied 403 without ever touching
+`FlightCommandService` when `AssetAuthority#mayFly` denies; all six command handlers alike are gated,
+proven once per family). In `vision-app`:
+`AuthEnabledFlowTest` gained 2 cases — an unauthenticated `/hls/**` request is `401` (the filter-chain
+half of D10, provable only here since `HlsProxyControllerTest` is a `standaloneSetup` test with no
+security filter at all), and an authenticated caller naming a syntactically-valid but not-currently-running
+`streamId` gets `404` before any upstream contact is attempted (the `StreamAccess` half).
+
+`./mvnw -B -pl storage/persistence,station/vision-api,station/vision-app test -DskipWeb` —
+vision-api **979** (961 → 979, +18: 12 new `CapabilityAssetAuthorityTest` cases + 2
+`ManualControlWebSocketHandlerTest` + 2 `AssetSessionControllerTest` + 2 `FlightCommandControllerTest`),
+vision-app (this module) **328** (326 → 328, +2: `AuthEnabledFlowTest`'s two new cases above),
+`storage/persistence` unaffected at **276** (no file touched this wave). Docker ran for real
+(Testcontainers `postgres:16`, Flyway migrated through `V33` — unchanged this wave, no new migration).
+`vision.auth.enabled` stays `false` by default, unchanged this wave — the default-config auth-off
+suites (`AuthDisabledSecurityTest`/`ManualControlSecurityDisabledTest`) stayed green throughout,
+proving the opt-in guardrail. Deferred: `contexts/vision-flight` and `contexts/vision-identity` were
+left untouched even though AUTH-ROLES-PLAN.md's literal B4 file list names them — no call site in
+either module needed to change for this wave's actual scope (the `AssetAuthority` interface and its
+one implementation live entirely in `vision-api`; `AssignmentRepositoryPort` was already reachable
+from there, and `FlightCommandController`'s new edge gate sits strictly in front of
+`DefaultFlightCommandService`'s own pre-existing scope check, not inside it). Waves B5/B6/B0b open.
