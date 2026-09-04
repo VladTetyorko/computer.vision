@@ -26,15 +26,14 @@ import java.util.concurrent.TimeUnit;
  * <p>{@link #save} always {@code persist}s a brand-new row (never {@code merge}s) — samples are
  * immutable historical records per the port's contract, so there is never an existing row to
  * update, and {@code Telemetry} itself carries no id to merge by (see {@code TelemetrySampleEntity}'s
- * javadoc for the synthetic-id rationale). {@link #findByUsage} mirrors {@code
- * InMemoryTelemetryRepository}'s exact (if slightly surprising) semantics: {@code limit} selects
- * the <strong>earliest</strong> {@code limit} samples for the usage, not the most recent — the
- * in-memory reference implementation's {@code list.stream().limit(n)} takes the first {@code n} of
- * an append-ordered list, i.e. the oldest first, and this class reproduces that with {@code order
- * by at asc} rather than "fixing" it to newest-first, per this task's "match the in-memory
- * semantics exactly" brief. (Worth flagging for a future task: this is arguably not what {@code
- * AssetController}'s {@code GET /api/usages/{id}/telemetry?limit=100} actually wants for a
- * long-running flight — see MODULE.md.)
+ * javadoc for the synthetic-id rationale). {@link #findByUsage} selects the <strong>earliest</strong>
+ * {@code limit} samples for the usage via {@code order by at asc} — exactly what a windowed replay
+ * from the start of a flight wants ({@code DefaultReplayService}), and left unchanged by
+ * COMMAND-MAP-FLOW-PLAN.md B1. {@link #findLatestByUsage} answers the different "where is this
+ * flight right now" question B1 adds: {@code order by at desc} + {@code setMaxResults}, then
+ * reversed in Java before returning, so the result stays ascending like every other read from this
+ * port — the existing {@code idx_telemetry_samples_usage_id_at} index already has the right shape
+ * for a {@code desc} scan, so no migration was needed.
  *
  * <h2>Retention</h2>
  * docs/plans/done/MVP2-PLAN.md P-b's retention guard: every write that actually reaches Postgres prunes the
@@ -159,6 +158,21 @@ public final class JpaTelemetryRepository implements TelemetryRepositoryPort {
                 .stream()
                 .map(TelemetryMapper::toDomain)
                 .toList();
+    }
+
+    @Override
+    public List<Telemetry> findLatestByUsage(UsageId usageId, int limit) {
+        List<TelemetrySampleEntity> latestFirst = jpa.read(em -> em.createQuery(
+                        "select t from TelemetrySampleEntity t where t.usageId = :usageId order by t.at desc",
+                        TelemetrySampleEntity.class)
+                        .setParameter("usageId", usageId.value())
+                        .setMaxResults(limit)
+                        .getResultList());
+        List<Telemetry> ascending = new ArrayList<>(latestFirst.size());
+        for (int i = latestFirst.size() - 1; i >= 0; i--) {
+            ascending.add(TelemetryMapper.toDomain(latestFirst.get(i)));
+        }
+        return List.copyOf(ascending);
     }
 
     /**

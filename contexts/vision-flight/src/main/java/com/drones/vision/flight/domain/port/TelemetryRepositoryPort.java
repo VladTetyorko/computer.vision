@@ -22,7 +22,14 @@ import java.util.List;
  *   <li>{@link #findByUsage(UsageId, int)} returns samples for the given
  *       usage, bounded to at most {@code limit}; a snapshot, not a live
  *       view. Ordering is implementation-defined but must be consistent
- *       (typically chronological).</li>
+ *       (typically chronological). It answers "the start of this flight,
+ *       windowed" — {@code DefaultReplayService} relies on exactly that
+ *       for its own windowing, so this method's semantics do not change.</li>
+ *   <li>{@link #findLatestByUsage(UsageId, int)} answers a different
+ *       question — "where is this flight right now" — the most recent
+ *       {@code limit} samples, always returned in ascending {@code at}
+ *       order (oldest of the window first) so every caller's chronological
+ *       ordering assumption holds regardless of which method it called.</li>
  * </ul>
  *
  * <h2>Threading</h2>
@@ -42,11 +49,25 @@ public interface TelemetryRepositoryPort {
     void save(UsageId usageId, Telemetry telemetry);
 
     /**
-     * Lists telemetry samples recorded for a usage.
+     * Lists telemetry samples recorded for a usage, earliest first.
      *
      * @param usageId the usage id
      * @param limit   maximum number of samples to return; must be positive
      * @return an immutable snapshot of samples for the usage
      */
     List<Telemetry> findByUsage(UsageId usageId, int limit);
+
+    /**
+     * Lists the most recently recorded telemetry samples for a usage — the
+     * live-tail read a map/trail view actually wants for a long-running
+     * flight, as opposed to {@link #findByUsage(UsageId, int)}'s
+     * earliest-first window.
+     *
+     * @param usageId the usage id
+     * @param limit   maximum number of samples to return; must be positive
+     * @return an immutable snapshot of the latest {@code limit} samples for
+     * the usage, in ascending {@code at} order (oldest of the window first,
+     * most recent last)
+     */
+    List<Telemetry> findLatestByUsage(UsageId usageId, int limit);
 }
