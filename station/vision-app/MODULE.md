@@ -649,3 +649,26 @@ window is the pre-existing async race already known from prior waves, not a new 
 caught-and-logged warning, not a test failure). Also green in the same session: `station/vision-api`
 **951** (0 new test methods this wave — see that module's own MODULE.md entry for the widened-assertion
 detail). Nothing deferred.
+
+**AUTH-ROLES-PLAN wave B0a done** (docs/plans/active/AUTH-ROLES-PLAN.md, D1) — config honesty only, no
+behavior change and the value stays `false`. `application.yaml`'s `vision.auth.enabled` comment block no
+longer claims `true` is "the default, set explicitly" while the line beneath it sets `false` — the
+self-contradiction D1 named, introduced by an unrelated commit (`23d13895`) undoing R7's flip. The
+rewritten comment says plainly what the shipped file actually boots into (permit-all, dev principal,
+`authEnabled=false`), names `SecurityConfig`'s own compiled default (`matchIfMissing = true`, i.e. true
+is the *code's* default, not this *file's*), and points at why flipping it alone is unsafe (D3 — no
+bootstrap path exists yet; that is AUTH-ROLES-PLAN wave B3/B0b, not this one). `SecurityConfig`'s class
+javadoc gained a parallel "Honesty note" so a reader of only the Java doc doesn't come away believing a
+fresh clone is secured by default. `permitAllFilterChain` now logs one boot `WARN` on every activation,
+naming the setting (`vision.auth.enabled=false`) and pointing at the web UI's own red banner — visible in
+the test log above (`c.d.vision.app.config.SecurityConfig : vision.auth.enabled=false -- this station is
+UNSECURED...`), confirming it fires under the same `application.yaml` every other test in this module
+already runs against. No new dependency, no new bean, no `@ConfigurationProperties` record yet (D2's
+three-defaults problem is wave B3's `VisionAuthProperties`, out of this wave's scope).
+
+`./mvnw -B -pl station/vision-app test -DskipWeb` (no `-am` — this wave touches only files inside this
+module, no upstream dependency changed) — **326/326** green, unchanged from the pre-wave baseline above
+(no new test file; a log statement and two comment blocks have nothing to unit-test beyond "the app still
+boots," which every existing `@SpringBootTest` already proves each run). `ArchitectureTest`/
+`ContextArchitectureTest`/`EndpointAuthorizationTest` unaffected (no new bean, no new `@RestController`,
+no new ArchUnit-relevant type).

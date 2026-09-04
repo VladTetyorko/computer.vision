@@ -1,5 +1,7 @@
 package com.drones.vision.app.config;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -38,7 +40,20 @@ import org.springframework.security.web.context.SecurityContextRepository;
  * (docs/plans/done/U-AUTH-PLAN.md's prime directive, now opt-in rather than the default). CSRF is
  * disabled here too — not just in the secured chain — because the real running app <em>does</em>
  * route through this filter when the flag is off, and a default-on CSRF filter would 403 the SPA's
- * own {@code POST /api/*} calls that worked fine pre-auth.
+ * own {@code POST /api/*} calls that worked fine pre-auth. Every activation of this bean logs a
+ * boot {@code WARN} naming the setting responsible (see {@link #permitAllFilterChain}) — the
+ * vision-web SPA shows the human-facing half of the same warning as a red banner
+ * ({@code station/vision-web/src/app/app.html}).
+ *
+ * <p><strong>Honesty note (docs/plans/active/AUTH-ROLES-PLAN.md D1, wave B0a):</strong> the sentence
+ * above — "a deployment that never sets {@code vision.auth.enabled} gets real access control" — is
+ * true of this class's own compiled default ({@code matchIfMissing = true} on {@link
+ * #securedFilterChain}), but it does <em>not</em> describe what a fresh clone of this repo actually
+ * boots into: the shipped {@code application.yaml} sets the key explicitly to {@code false},
+ * overriding that compiled default, so {@link #permitAllFilterChain} is what activates today. That
+ * override is deliberate — see this repo's {@code application.yaml} for why it is not yet safe to
+ * flip — but a reader of only this class's javadoc must not come away believing the shipped station
+ * is secured by default when it is not.
  *
  * <p>{@code /ws/**} (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md §4, R4) is matched alongside {@code /api/**}:
  * the {@code /ws/manual-control} WebSocket upgrade rides the same session cookie and must be
@@ -62,10 +77,22 @@ import org.springframework.security.web.context.SecurityContextRepository;
 @EnableWebSecurity
 public class SecurityConfig {
 
-    /** Active when {@code vision.auth.enabled} is {@code false} — the explicit dev/demo opt-out; permits everything. */
+    private static final Logger log = LoggerFactory.getLogger(SecurityConfig.class);
+
+    /**
+     * Active when {@code vision.auth.enabled} is {@code false} — the explicit dev/demo opt-out;
+     * permits everything. Logs a boot {@code WARN} on every activation (docs/plans/active/AUTH-ROLES-PLAN.md
+     * D1, wave B0a) so this station's own log names the setting an operator would need to flip,
+     * rather than only the web UI's red banner saying so with no actionable next step.
+     */
     @Bean
     @ConditionalOnProperty(prefix = "vision.auth", name = "enabled", havingValue = "false")
     public SecurityFilterChain permitAllFilterChain(HttpSecurity http) throws Exception {
+        log.warn("vision.auth.enabled=false -- this station is UNSECURED. Every request resolves to a "
+                + "fixed dev administrator with an unbounded VisibilityScope; the web UI shows this as a "
+                + "red \"this station is unsecured\" banner. Set vision.auth.enabled=true "
+                + "(VISION_AUTH_ENABLED=true) before this station is reachable by anyone not already "
+                + "trusted with the whole fleet.");
         http
                 .csrf(csrf -> csrf.disable())
                 .authorizeHttpRequests(auth -> auth.anyRequest().permitAll());

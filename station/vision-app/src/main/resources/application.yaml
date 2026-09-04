@@ -148,21 +148,33 @@ vision:
     sweep-period: 60s
 
   # --- Session auth (docs/plans/done/U-AUTH-PLAN.md wave 3; default flipped by
-  # docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R7) ---
+  # docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R7, then flipped back to
+  # false here by an unrelated commit -- corrected for honesty by
+  # docs/plans/active/AUTH-ROLES-PLAN.md B0a; see that plan's D1/D2/D3) ---
   auth:
-    # true (default, set explicitly): a session is required for /api/** and /ws/**
-    # except /api/auth/login|logout and static/SPA routes -- but a session only has
-    # someone to log in as if vision.persistence.seed-dev-users is also true (see
-    # above), or real users were created through UserService. This is the safe
-    # default for a platform deployed onto operator-controlled servers (CLAUDE.md,
-    # "Deployment maintenance") -- a deployment that never touches this key still
-    # gets access control.
-    # false: the dev/demo escape hatch. NOTHING is secured -- the Spring Security
-    # filter chain becomes permit-all + CSRF-off, CurrentUser returns the fixed dev
-    # principal (auto-admin, unbounded VisibilityScope) for every request, and
-    # /api/auth/* report that dev admin with authEnabled=false. Turn this on for a
-    # local run or a demo stack with no login flow set up -- never for anything
-    # reachable by someone who isn't already trusted with the whole fleet.
+    # false (the value this file actually sets, below): the dev/demo escape
+    # hatch, and what a fresh clone of this repo actually boots into. NOTHING is
+    # secured -- the Spring Security filter chain becomes permit-all + CSRF-off,
+    # CurrentUser returns the fixed dev principal (auto-admin, unbounded
+    # VisibilityScope) for every request, and /api/auth/* report that dev admin
+    # with authEnabled=false. SecurityConfig logs a boot WARN naming this
+    # setting whenever this value is in effect, matching the web UI's own red
+    # "this station is unsecured" banner (station/vision-web/src/app/app.html).
+    # Appropriate for a local run or a demo stack with no login flow set up --
+    # never for anything reachable by someone who isn't already trusted with
+    # the whole fleet.
+    #
+    # true: a session is required for /api/** and /ws/** except
+    # /api/auth/login|logout and static/SPA routes -- but a session only has
+    # someone to log in as if vision.persistence.seed-dev-users is also true
+    # (see above), or real users were created through UserService. This *is*
+    # SecurityConfig's own compiled default (matchIfMissing = true) -- a
+    # deployment that omits this key entirely gets access control -- but this
+    # file overrides that compiled default to false, explicitly, below. Do not
+    # flip this value on its own: AUTH-ROLES-PLAN.md D3 documents that with
+    # auth on and no bootstrap path (that plan's wave B3), an empty `users`
+    # table locks every deployment out permanently. Flipping this key is that
+    # plan's wave B0b, gated on B3 landing first.
     enabled: false
 
   # --- adapter-publish-hls: stream egress (Phase 1, see docs/plans/done/PHASE1-PLAN.md Task U5) ---
