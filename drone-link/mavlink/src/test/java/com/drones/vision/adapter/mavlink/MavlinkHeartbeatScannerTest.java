@@ -5,6 +5,7 @@ import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
+import com.drones.vision.warehouse.domain.model.SourceStatus;
 import com.drones.vision.perception.domain.model.FeedId;
 import com.drones.vision.perception.domain.model.FeedSpec;
 import com.drones.vision.kernel.StreamDescriptor;
@@ -146,6 +147,58 @@ class MavlinkHeartbeatScannerTest {
                 "scan returned too early: " + elapsedMillis + "ms for a " + timeout.toMillis() + "ms timeout");
         assertTrue(elapsedMillis <= timeout.toMillis() + 2_000,
                 "scan overshot its self-time-box: " + elapsedMillis + "ms for a " + timeout.toMillis() + "ms timeout");
+    }
+
+    @Test
+    @Timeout(value = 15, unit = TimeUnit.SECONDS)
+    void lastStatusStartsOkAndStaysOkAfterASuccessfulSelfBindScanWithNothingHeard() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkHeartbeatScanner scanner = new MavlinkHeartbeatScanner(telemetrySource, port);
+
+        assertEquals(SourceStatus.OK, scanner.lastStatus(), "nothing has scanned yet -- the default must be OK, not a fabricated failure");
+
+        scanner.scan(Duration.ofMillis(300));
+
+        assertEquals(SourceStatus.OK, scanner.lastStatus(), "a self-bind scan that finds nothing is still a reachable port -- empty is not down");
+    }
+
+    @Test
+    @Timeout(value = 15, unit = TimeUnit.SECONDS)
+    void lastStatusReportsUnreachableOnASelfBindConflictAndRecoversOnceThePortFreesUp() throws Exception {
+        int port = freePort();
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        MavlinkHeartbeatScanner scanner = new MavlinkHeartbeatScanner(telemetrySource, port);
+
+        try (DatagramSocket blocker = new DatagramSocket(new InetSocketAddress("0.0.0.0", port))) {
+            scanner.scan(Duration.ofMillis(300));
+            assertEquals(SourceStatus.UNREACHABLE, scanner.lastStatus(),
+                    "the scanner's own bind attempt genuinely failed -- U8 says report that honestly");
+        }
+
+        scanner.scan(Duration.ofMillis(300));
+        assertEquals(SourceStatus.OK, scanner.lastStatus(), "once the port is free again the very next scan must self-heal the status");
+    }
+
+    @Test
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    void lastStatusIsOkOnTheActiveHubPathWhichPerformsNoIoOfItsOwn() throws Exception {
+        MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
+        int port = freePort();
+        DeviceId deviceId = DeviceId.random();
+        Device device = new Device(deviceId, "onboard-fc", Set.of(Capability.TELEMETRY),
+                new StreamDescriptor("mavlink", URI.create("udp://0.0.0.0:" + port), Map.of("sysid", "81")));
+        MavlinkHeartbeatScanner scanner = new MavlinkHeartbeatScanner(telemetrySource, port);
+
+        try {
+            telemetrySource.open(device); // starts the hub -- scan() must now take the hub-borrow path
+            scanner.scan(Duration.ofSeconds(2));
+
+            assertEquals(SourceStatus.OK, scanner.lastStatus(),
+                    "the hub-borrow path performs no socket I/O of its own -- an active hub is reachable by definition");
+        } finally {
+            telemetrySource.close(deviceId);
+        }
     }
 
     private static Optional<DiscoveredDevice> findBySysid(List<DiscoveredDevice> devices, int sysid) {

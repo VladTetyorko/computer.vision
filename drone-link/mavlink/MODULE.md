@@ -53,7 +53,11 @@ there is nothing to structurally prevent here the way Mechanism A's opt-in remed
   `SystemStatusWiring` takes it as a method reference for `MavlinkLinkStatusProvider`, which now
   aggregates per-vehicle instead of averaging a fleet-wide list). **(ZERO-CONFIG-ONBOARDING Z2b, new)**
   `public void holdLobby(int port)` / `public void releaseLobby(int port)` — the claim-free standing
-  lobby (see its own Gotchas entry below). Package-private: `static bindKey(host, port)`, `bindKeyFor(Device)`,
+  lobby (see its own Gotchas entry below). **(SOURCE-ONBOARDING-2 A2, new)** `public MavlinkIntakeStatus
+  intakeStatus(int port)` — the P1/P2 diagnostic read (own Gotchas entry below); always resolves
+  against `DEFAULT_BIND_HOST`, so it takes a bare port, mirroring `holdLobby`/`releaseLobby`; throws
+  `IllegalArgumentException` outside `[1,65535]`; never throws for a port nothing has ever bound —
+  returns `MavlinkIntakeStatus.unbound(bindAddress)` instead. Package-private: `static bindKey(host, port)`, `bindKeyFor(Device)`,
   `hasActiveHub(bindKey)`, `unclaimedVehicles(bindKey)`, `claimedVehicles(bindKey)`,
   `commandTarget(bindKey, DeviceId)`, `gateway(bindKey)`. `StreamDescriptor.options["sysid"]`
   (lenient int 1–255) pins a device to one sysid; missing/invalid → unpinned. Constructors: `()`,
@@ -78,7 +82,15 @@ there is nothing to structurally prevent here the way Mechanism A's opt-in remed
   to build a mavlink-core service on), `messageInventory()`, `Map<DeviceId, LinkHealth.Health>
   claimedVehicleHealth()` (**FLEET-RADIO R4/D4** — was `List<LinkHealth.Health>`; keyed by the
   claiming device, resolving each `ClaimedVehicle`'s `PeerId` and querying `session.health().of(...)`
-  per vehicle rather than returning one undifferentiated list), `close()` (package-private —
+  per vehicle rather than returning one undifferentiated list). **(SOURCE-ONBOARDING-2 A2, new)**
+  `MavlinkIntakeStatus intakeStatus(String bindAddress)` (package-private) — composes `link instanceof
+  UdpListenLink listen ? listen.intake() : NO_INTAKE` (mavlink-core's pre-parse `LinkIntake` — all-zero
+  for the `MavlinkLink`-only test-seam constructor, since a hand-built double has no socket to count)
+  with this gateway's own `framesDecoded` counter and the current unclaimed/claimed sysid lists. A
+  private `AtomicLong framesDecoded` is incremented as the very first statement of `onFrame(MavFrame)`
+  — every frame `mavlink-core` has already resynced/decoded and dispatched, regardless of whether
+  `VehicleClaimPolicy` finds a claiming registration; this is what makes `intakeStatus` able to answer
+  P2 ("bytes arrive, nothing decodes") independent of claim status. `close()` (package-private —
   besides `unregister`, only `MavlinkVehicleConfigurator` calls it, for a self-bound probe gateway
   it opened itself). **(ZERO-CONFIG-ONBOARDING Z2b, new)** `void holdLobby()` / `void releaseLobby()`
   / `boolean isLobbyHeld()` — the claim-free hold and its GCS heartbeat TX (own Gotchas entry below).
@@ -113,6 +125,15 @@ there is nothing to structurally prevent here the way Mechanism A's opt-in remed
 - `final class VehicleRegistration` (package-private) — mutable struct: `deviceId`, `pinnedSysid`,
   `publisher` (final), mutable `claimedSysid`/`decoder`. No accessors — two collaborators only,
   both in-package.
+- `public record MavlinkIntakeStatus(boolean bound, String bindAddress, boolean lobbyHeld, long
+  datagramsReceived, long bytesReceived, Instant lastDatagramAt, long framesDecoded, List<Integer>
+  unclaimedSysids, List<Integer> claimedSysids)` — **(SOURCE-ONBOARDING-2 A2/C2, new)** the P1/P2
+  diagnostic snapshot `MavlinkTelemetrySource.intakeStatus(int)` returns; field names match `GET
+  /api/discovery/status`'s future `telemetryIntake` shape (C2) field-for-field so that wave's DTO
+  mapping is trivial. Compact-constructor validated (`bindAddress` non-blank, the three counters
+  `>= 0`, both sysid lists defensively `List.copyOf`'d). `static unbound(String bindAddress)` — the
+  honest answer for a bind address nothing has ever opened or held: `bound=false`, every other field
+  zeroed/empty, not merely a zeroed status with `bound=true`.
 - `final class MavlinkMessageInventory` (package-private) — passive per-peer message inventory via
   its own `Dispatcher.subscribe(MessageFilter.any(), ...)`; independent of `VehicleClaimPolicy` —
   observes every sysid, claimed or not. `observedPeers(): List<Integer>`, `snapshot(int sysid):
@@ -189,6 +210,13 @@ there is nothing to structurally prevent here the way Mechanism A's opt-in remed
   is `"drone"` only for an airborne `VehicleClass` (`COPTER`/`PLANE`), not merely a recognized one —
   a rover, a submarine, an unsupported airframe or a not-a-vehicle instrument all get no category.
   Constructors `(MavlinkTelemetrySource, int port)`, `(..., MavlinkSettings.Scan)`.
+  **(SOURCE-ONBOARDING-2 A2, U8, new)** `@Override public SourceStatus lastStatus()` — a `volatile
+  SourceStatus`, defaulting to `OK`. The hub-borrow path performs no socket I/O of its own (an active
+  hub is reachable by definition), so it always sets `OK`. The self-bind path sets `UNREACHABLE` only
+  on a genuine bind-conflict `IOException` (the scanner's own I/O actually failed) and `OK` on a
+  successful bind, **before** the read loop — so an empty result from a successful bind (nothing
+  transmitting) reads `OK`, distinct from a bind conflict, exactly mirroring `MediamtxPathScanner`'s
+  established `SourceStatus` idiom in `device-discovery/onvif-mdns-v4l2` (own Gotchas entry below).
 - `public final class MavlinkFeedTransmitter implements FeedTransmitterPort` — synthetic MAVLink TX:
   `HEARTBEAT`+`SYS_STATUS`+`GPS_RAW_INT` at 1 Hz, `GLOBAL_POSITION_INT` at `positionRateHz`, driven
   by a looping `MavlinkRoute`. `FeedSpec.source()` is repurposed as the `udp://host:port`
@@ -522,6 +550,16 @@ one `FlightState`-contributing row above has fired at least once.
   dropout gets re-remediated for free (cheap — ArduPilot just re-confirms a rate it already honours);
   the alternative risks silently leaving a rebooted aircraft in the starved state this mechanism
   exists to fix.
+- **(SOURCE-ONBOARDING-2 A2, U8) `MavlinkHeartbeatScanner.lastStatus()` distinguishes "down" from
+  "empty".** Before this wave, `DeviceDiscoveryPort#lastStatus()`'s inherited default (`OK`,
+  unconditionally) meant a genuine self-bind conflict on this scanner's port read identically to
+  "nothing is transmitting right now" — both an empty `scan()` result with no other machine-readable
+  signal. Fixed the same way `MediamtxPathScanner` (`device-discovery/onvif-mdns-v4l2`) already fixed
+  the identical gap for its own scanner: a `volatile SourceStatus lastStatus` field, `UNREACHABLE` set
+  only in `scanBySelfBinding`'s bind-conflict `catch (IOException e)`, `OK` set right after a
+  successful bind and unconditionally in `scanActiveHub` (which performs no I/O of its own — an
+  active hub is reachable by definition). Self-healing: the very next successful scan after a
+  transient bind conflict flips the status back to `OK`, never sticky.
 - **This adapter keeps no table of RC aux functions (`MavlinkFlightCommander.auxFunction`), on
   purpose.** A stale copy of the firmware's own `RCx_OPTION` list is worse than none — what a
   function number does is the vehicle's business, and whether it acted shows up as the ack.
@@ -530,6 +568,26 @@ one `FlightState`-contributing row above has fired at least once.
   ArduRover's `Hold`, never a disarm; see FLEET-RADIO R4b Gotchas below for the full per-kind
   rationale. Kept as a separate method purely so the log line and audit trail record which of the
   (now two, per kind) underlying wire commands an operator actually triggered.
+- **(SOURCE-ONBOARDING-2 A2) `intakeStatus`'s two counters answer different questions, and only
+  comparing them is diagnostic.** `datagramsReceived`/`bytesReceived`/`lastDatagramAt` are counted
+  pre-parse, at the socket (`mavlink-core`'s `LinkIntake`, deliberately dumb — see that record's own
+  javadoc/Gotchas in `drone-link/mavlink-core`'s MODULE.md); `framesDecoded` is counted one layer up,
+  in `MavlinkGateway.onFrame`, only once `mavlink-core` has actually resynced and decoded a frame.
+  Zero datagrams means nothing is reaching the socket at all (P1: wrong network/port/firewall);
+  datagrams arriving with zero frames decoded means something is reaching the port that is not a
+  valid MAVLink 2 frame (P2: wrong protocol, MAVLink 1, garbage) — neither counter alone can tell
+  those apart, which is why `MavlinkIntakeStatus` carries both rather than one derived verdict.
+- **`intakeStatus` only ever resolves against `DEFAULT_BIND_HOST` ("0.0.0.0").** A test that opens a
+  device or holds a lobby against a bare `127.0.0.1` URI (the older convention some pre-A2 tests use)
+  is invisible to `intakeStatus(port)` — it looks up `gateways.get(bindKey(DEFAULT_BIND_HOST, port))`
+  only, never a loopback-specific key. `MavlinkIntakeStatusTest` uses `holdLobby(port)` (always
+  wildcard) for exactly this reason, matching `MavlinkLobbyHoldTest`'s own convention.
+- **A hand-built `MavlinkLink` test double reports an honestly all-zero `LinkIntake`, never a fabricated
+  one.** `MavlinkGateway`'s `(MavlinkLink, MavlinkSettings)` test-seam constructor (FLEET-RADIO R4)
+  accepts any `MavlinkLink`, not just the production `UdpListenLink`; `intakeStatus`'s `instanceof
+  UdpListenLink` pattern match falls back to a shared `NO_INTAKE` constant rather than throwing or
+  guessing, so a `FailingLink`-style test double never crashes a status read, it just correctly has
+  nothing pre-parse to report.
 
 ### FLEET-RADIO R1 Gotchas
 
@@ -1122,3 +1180,23 @@ file:line citations: `docs/plans/active/fly-control-ux/R3-handshake-denial.md`'s
 note".
 `./mvnw -B -pl drone-link/mavlink -am test` — **266 tests**, all green, foreground/blocking run
 (2026-09-02).
+
+**`docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md` A2 done.** `MavlinkTelemetrySource` gained
+`intakeStatus(int port)`, `MavlinkGateway` gained a package-private `intakeStatus(String
+bindAddress)` plus an `AtomicLong framesDecoded` counted from `onFrame`, and a new public record
+`MavlinkIntakeStatus` composes both together with mavlink-core's own A1 `LinkIntake` (pre-parse
+datagram/byte counters, `drone-link/mavlink-core`) and the gateway's unclaimed/claimed sysid lists —
+the P1/P2 diagnostic: zero datagrams means nothing reaches the socket, datagrams with zero frames
+decoded means garbage/wrong-protocol is arriving. `MavlinkHeartbeatScanner` also gained
+`lastStatus()` (U8), mirroring `MediamtxPathScanner`'s established `SourceStatus` idiom. See the new
+Gotchas entries above for the exact semantics, the `DEFAULT_BIND_HOST`-only resolution caveat, and
+the test-seam `MavlinkLink` double's honest all-zero `LinkIntake`. New tests: `MavlinkIntakeStatusTest`
+(4, real UDP loopback — a raw garbage datagram proves `datagramsReceived` advances while
+`framesDecoded` stays 0; a real `HEARTBEAT` via `UdpTargetLink`/`FrameWriter` proves both advance);
+3 new `lastStatus()` cases in `MavlinkHeartbeatScannerTest` (self-bind success stays `OK`, a genuine
+bind conflict flips to `UNREACHABLE` and self-heals on the next scan, the hub-borrow path stays `OK`).
+No port interface changed, no call site outside this module needed a change — both are new,
+additive read surfaces, consistent with this wave's accepted decision that new emitters ship on by
+default. `./mvnw -B -pl drone-link/mavlink test` (after `-pl drone-link/mavlink-core install
+-DskipTests` to pick up A1's `LinkIntake` from a stale `~/.m2` jar) — **273 tests**, all green,
+foreground/blocking run (2026-09-04).
