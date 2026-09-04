@@ -58,7 +58,7 @@ class DefaultScopeResolverTest {
     }
 
     private static User user(Membership... memberships) {
-        return new User(UserId.random(), "u", "U", "u@x", "hash", true, List.of(memberships));
+        return new User(UserId.random(), "u", "U", "u@x", "hash", true, false, List.of(memberships));
     }
 
     @Test
@@ -231,7 +231,10 @@ class DefaultScopeResolverTest {
 
         @Override
         public void unassign(UserId pilot, AssetId asset) {
-            byPilot.getOrDefault(pilot, Map.of()).remove(asset);
+            Map<AssetId, AssignmentRole> assets = byPilot.get(pilot);
+            if (assets != null) {
+                assets.remove(asset);
+            }
         }
 
         @Override

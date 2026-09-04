@@ -50,4 +50,32 @@ public interface AuthService {
      * @return the user, or {@link Optional#empty()} if none exists
      */
     Optional<User> loadByUsername(String username);
+
+    /**
+     * Self-service password change (docs/plans/active/AUTH-ROLES-PLAN.md §3.5, wave B2) — the caller
+     * is already an authenticated session and is re-confirming their own current password, not
+     * attempting a login, so unlike {@link #authenticate(String, String)} this need not (and does
+     * not) hide <em>why</em> it failed.
+     *
+     * <p>On success, clears {@link User#mustChangePassword()} and records an
+     * {@link com.drones.vision.platform.AuditAction#UPDATED} entry
+     * ({@link com.drones.vision.platform.AuditTargetType#USER}).
+     *
+     * @param id              the user changing their own password
+     * @param currentPassword the password they claim to currently have
+     * @param newPassword     the new plaintext password to hash and store
+     * @return the updated user, or {@link Optional#empty()} if {@code id} is unknown, the account is
+     *         disabled, or {@code currentPassword} does not match
+     */
+    Optional<User> changePassword(UserId id, String currentPassword, String newPassword);
+
+    /**
+     * Whether any enabled user currently holds an {@link com.drones.vision.identity.domain.model.Role#ADMIN}
+     * membership — the one-way latch behind {@code GET /api/auth/bootstrap}'s {@code required} flag
+     * (docs/plans/active/AUTH-ROLES-PLAN.md §3.5, wave B2): once true, it is true forever (no path in
+     * this application removes every admin).
+     *
+     * @return {@code true} iff at least one enabled user's {@link User#topRole()} is {@code ADMIN}
+     */
+    boolean adminExists();
 }

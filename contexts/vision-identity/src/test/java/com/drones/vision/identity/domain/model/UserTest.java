@@ -16,7 +16,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class UserTest {
 
     private static User user(String username, String email, String passwordHash, List<Membership> memberships) {
-        return new User(UserId.random(), username, "Ada Lovelace", email, passwordHash, true, memberships);
+        return new User(UserId.random(), username, "Ada Lovelace", email, passwordHash, true, false, memberships);
     }
 
     private static User user(List<Membership> memberships) {
@@ -26,7 +26,7 @@ class UserTest {
     @Test
     void rejectsNullId() {
         assertThrows(IllegalArgumentException.class,
-                () -> new User(null, "ada", "Ada", "ada@example.com", "hash", true, List.of()));
+                () -> new User(null, "ada", "Ada", "ada@example.com", "hash", true, false, List.of()));
     }
 
     @Test
@@ -44,13 +44,13 @@ class UserTest {
     @Test
     void rejectsNullDisplayName() {
         assertThrows(IllegalArgumentException.class,
-                () -> new User(UserId.random(), "ada", null, "ada@example.com", "hash", true, List.of()));
+                () -> new User(UserId.random(), "ada", null, "ada@example.com", "hash", true, false, List.of()));
     }
 
     @Test
     void rejectsBlankDisplayName() {
         assertThrows(IllegalArgumentException.class,
-                () -> new User(UserId.random(), "ada", " ", "ada@example.com", "hash", true, List.of()));
+                () -> new User(UserId.random(), "ada", " ", "ada@example.com", "hash", true, false, List.of()));
     }
 
     @Test
@@ -86,7 +86,7 @@ class UserTest {
     @Test
     void rejectsNullMemberships() {
         assertThrows(IllegalArgumentException.class,
-                () -> new User(UserId.random(), "ada", "Ada", "ada@example.com", "hash", true, null));
+                () -> new User(UserId.random(), "ada", "Ada", "ada@example.com", "hash", true, false, null));
     }
 
     @Test

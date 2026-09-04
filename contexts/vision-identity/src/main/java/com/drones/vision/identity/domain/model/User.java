@@ -29,16 +29,25 @@ import java.util.Optional;
  * with no membership is a valid, if inert, state (they exist but belong to no group yet), so
  * {@link #topRole()} returns {@link Optional#empty()} rather than throwing.
  *
- * @param id           typed user identity
- * @param username     login handle; must not be blank; normalized to lower-case (trimmed)
- * @param displayName  human-readable name; must not be blank
- * @param email        contact address; must not be blank and must contain {@code '@'} (shape check only)
- * @param passwordHash the already-hashed password; must not be blank; never hashed or interpreted here
- * @param enabled      whether this account may currently authenticate
- * @param memberships  the groups this user belongs to and their role in each; defensively copied; may be empty
+ * <p>{@code mustChangePassword} (docs/plans/active/AUTH-ROLES-PLAN.md D13, wave B2) closes the
+ * credential loop: an admin-chosen password ({@code UserService#create}) or an admin reset
+ * ({@code UserService#setPassword}) sets it {@code true}, forcing a change at next login; a
+ * self-service change ({@code AuthService#changePassword}) clears it; the very first admin's own
+ * bootstrap-chosen password ({@code UserService#createFirstAdmin}) never sets it, since nobody
+ * handed that password to them.
+ *
+ * @param id                  typed user identity
+ * @param username            login handle; must not be blank; normalized to lower-case (trimmed)
+ * @param displayName         human-readable name; must not be blank
+ * @param email               contact address; must not be blank and must contain {@code '@'} (shape check only)
+ * @param passwordHash        the already-hashed password; must not be blank; never hashed or interpreted here
+ * @param enabled             whether this account may currently authenticate
+ * @param mustChangePassword  whether the next successful login must be followed by a forced
+ *                            password change before anything else is permitted
+ * @param memberships         the groups this user belongs to and their role in each; defensively copied; may be empty
  */
 public record User(UserId id, String username, String displayName, String email, String passwordHash,
-                    boolean enabled, List<Membership> memberships) {
+                    boolean enabled, boolean mustChangePassword, List<Membership> memberships) {
 
     public User {
         if (id == null) {
@@ -64,14 +73,14 @@ public record User(UserId id, String username, String displayName, String email,
     }
 
     /**
-     * Creates a user with no group memberships yet.
+     * Creates a user with no group memberships yet and no forced password change pending.
      *
      * <p>There is deliberately no convenience constructor that omits {@code passwordHash}: a
      * user without one can never authenticate, so it is kept required rather than defaulted.
      */
     public User(UserId id, String username, String displayName, String email, String passwordHash,
                 boolean enabled) {
-        this(id, username, displayName, email, passwordHash, enabled, List.of());
+        this(id, username, displayName, email, passwordHash, enabled, false, List.of());
     }
 
     /**
@@ -107,6 +116,7 @@ public record User(UserId id, String username, String displayName, String email,
                 + ", email=" + email
                 + ", passwordHash=***"
                 + ", enabled=" + enabled
+                + ", mustChangePassword=" + mustChangePassword
                 + ", memberships=" + memberships
                 + "]";
     }

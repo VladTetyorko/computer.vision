@@ -8,8 +8,13 @@ import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import com.drones.vision.warehouse.application.asset.AssetService;
 
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import com.drones.vision.platform.AccessDeniedException;
+import com.drones.vision.platform.AuditAction;
+import com.drones.vision.platform.AuditEntry;
+import com.drones.vision.platform.AuditTargetType;
+import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.platform.VisibilityScope;
 
 /**
@@ -23,8 +28,9 @@ import com.drones.vision.platform.VisibilityScope;
  * owning context's service, not its repository port). {@code details(AssetId)} does more work than
  * the old direct repository lookup (it also resolves devices and recent usages), but assign/revoke
  * is roster management, not a hot path, and this is the only published, per-id read
- * {@code AssetService} offers — see this module's MODULE.md Gotchas. Two dependencies, well under
- * the cap.
+ * {@code AssetService} offers — see this module's MODULE.md Gotchas. Three dependencies (the third,
+ * {@link AuditTrailPort}, added for D15's grant/revoke trail — docs/plans/active/AUTH-ROLES-PLAN.md,
+ * wave B2), still well under the cap.
  *
  * <h2>Authority, not visibility (docs/plans/done/OPS-UX-PLAN.md §1)</h2>
  * A grant/revoke changes who may fly an asset — that is a management action on the asset, not a
@@ -42,32 +48,62 @@ public final class DefaultAssignmentService implements AssignmentService {
 
     private final AssignmentRepositoryPort assignmentRepository;
     private final AssetService assetService;
+    private final AuditTrailPort auditTrail;
 
-    public DefaultAssignmentService(AssignmentRepositoryPort assignmentRepository, AssetService assetService) {
+    public DefaultAssignmentService(AssignmentRepositoryPort assignmentRepository, AssetService assetService,
+                                     AuditTrailPort auditTrail) {
         this.assignmentRepository =
                 Objects.requireNonNull(assignmentRepository, "assignmentRepository must not be null");
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
+        this.auditTrail = Objects.requireNonNull(auditTrail, "auditTrail must not be null");
     }
 
     @Override
-    public void assign(UserId pilot, AssetId asset, VisibilityScope granterScope) {
+    public void assign(UserId pilot, AssetId asset, AssignmentRole role, UserId actor, VisibilityScope granterScope) {
+        Objects.requireNonNull(role, "role must not be null");
+        Objects.requireNonNull(actor, "actor must not be null");
         requireGrantable(pilot, asset, granterScope);
-        // AssignmentRole.PILOT is a temporary literal: this wave (AUTH-ROLES-PLAN.md B1) only widens
-        // the port to carry a seat; AssignmentService itself gains the AssignmentRole parameter (and
-        // stops hardcoding PILOT here) in wave B2, landing next in this same module.
-        assignmentRepository.assign(pilot, asset, AssignmentRole.PILOT);
+        Optional<AssignmentRole> previousRole = assignmentRepository.roleFor(pilot, asset);
+        assignmentRepository.assign(pilot, asset, role);
+        if (previousRole.isEmpty()) {
+            audit(actor, AuditAction.GRANTED, pilot, asset,
+                    "assigned " + pilot.value() + " to asset " + asset.value() + " as " + role);
+        } else if (previousRole.get() != role) {
+            audit(actor, AuditAction.GRANTED, pilot, asset,
+                    "changed " + pilot.value() + "'s seat on asset " + asset.value()
+                            + " from " + previousRole.get() + " to " + role);
+        }
+        // else: identical re-assign is a true no-op -- nothing to record.
     }
 
     @Override
-    public void unassign(UserId pilot, AssetId asset, VisibilityScope granterScope) {
+    public void unassign(UserId pilot, AssetId asset, UserId actor, VisibilityScope granterScope) {
+        Objects.requireNonNull(actor, "actor must not be null");
         requireGrantable(pilot, asset, granterScope);
+        Optional<AssignmentRole> previousRole = assignmentRepository.roleFor(pilot, asset);
         assignmentRepository.unassign(pilot, asset);
+        previousRole.ifPresent(role -> audit(actor, AuditAction.REVOKED, pilot, asset,
+                "unassigned " + pilot.value() + " (was " + role + ") from asset " + asset.value()));
     }
 
     @Override
     public Set<AssetId> assignmentsFor(UserId pilot) {
         Objects.requireNonNull(pilot, "pilot must not be null");
         return assignmentRepository.assetsForPilot(pilot);
+    }
+
+    @Override
+    public Optional<AssignmentRole> roleFor(UserId pilot, AssetId asset) {
+        Objects.requireNonNull(pilot, "pilot must not be null");
+        Objects.requireNonNull(asset, "asset must not be null");
+        return assignmentRepository.roleFor(pilot, asset);
+    }
+
+    /** {@code targetId} is the composite {@code "<pilot>:<asset>"} string — an assignment link has
+     *  no typed id of its own to key {@link AuditTargetType#ASSIGNMENT} by. */
+    private void audit(UserId actor, AuditAction action, UserId pilot, AssetId asset, String summary) {
+        auditTrail.record(AuditEntry.of(actor, action, AuditTargetType.ASSIGNMENT,
+                pilot.value() + ":" + asset.value(), summary));
     }
 
     /** The asset must exist and the granter must administer it; otherwise this refuses. */
