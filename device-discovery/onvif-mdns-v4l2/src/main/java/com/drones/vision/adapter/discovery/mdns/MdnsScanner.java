@@ -32,9 +32,11 @@ import java.util.regex.Pattern;
  *   <li>{@code _http} hits whose service name or host hints at an ESP32-CAM
  *       ({@code esp32}, {@code espressif}, {@code esp-cam} -- case
  *       insensitive) become {@code "esp32-cam"} {@link CategoryId} candidates
- *       with an {@code mjpeg} {@code http://host:port/} suggested stream and a
- *       {@code details} note that the camera's actual MJPEG path is
- *       conventionally {@code :81/stream}, not the advertised port.</li>
+ *       whose {@code mjpeg} suggested stream URI is the camera's actual
+ *       conventional MJPEG path, {@code http://host:81/stream} (docs/plans/
+ *       active/SOURCE-ONBOARDING-2-PLAN.md U9) -- {@code address()} still
+ *       carries the advertised {@code _http._tcp} port (the plain control
+ *       page), only the suggested stream is corrected.</li>
  *   <li>Every other {@code _http} hit is still returned, as a candidate with
  *       no suggested type or stream -- the user can still see and register
  *       it manually.</li>
@@ -66,6 +68,12 @@ public final class MdnsScanner implements DeviceDiscoveryPort {
     private static final String HTTP_SERVICE_TYPE = "_http._tcp.local.";
 
     private static final Pattern ESP32_HINT = Pattern.compile("esp32|espressif|esp-cam", Pattern.CASE_INSENSITIVE);
+
+    /** ESP32-CAM's conventional MJPEG stream port/path (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md
+     *  U9) -- distinct from the advertised {@code _http._tcp} port, which is the camera's plain HTTP
+     *  control page, not the video stream. */
+    private static final int ESP32_CAM_MJPEG_PORT = 81;
+    private static final String ESP32_CAM_MJPEG_PATH = "/stream";
 
     private final InetAddress bindAddress;
     private final ScanBudget budget;
@@ -272,10 +280,13 @@ public final class MdnsScanner implements DeviceDiscoveryPort {
     static DiscoveredDevice mapHttpHit(String name, String host, int port) {
         URI uri = buildUri("http", host, port);
         if (looksLikeEsp32(name, host)) {
-            Map<String, String> details = Map.of("note",
-                    "Standard ESP32-CAM MJPEG stream path is :81/stream, not reflected in this URI.");
-            StreamDescriptor stream = new StreamDescriptor("mjpeg", uri, Map.of());
-            return new DiscoveredDevice(METHOD, name, uri, new CategoryId("esp32-cam"), stream, details);
+            // (SOURCE-ONBOARDING-2 U9) The suggested stream URI itself now carries ESP32-CAM's real
+            // MJPEG port/path, rather than the advertised _http._tcp port plus a human-readable note
+            // explaining the mismatch -- a candidate an operator (or an auto-add flow) accepts is
+            // immediately playable instead of failing to stream until someone reads the note.
+            URI streamUri = buildUri("http", host, ESP32_CAM_MJPEG_PORT, ESP32_CAM_MJPEG_PATH);
+            StreamDescriptor stream = new StreamDescriptor("mjpeg", streamUri, Map.of());
+            return new DiscoveredDevice(METHOD, name, uri, new CategoryId("esp32-cam"), stream, Map.of());
         }
         return new DiscoveredDevice(METHOD, name, uri, null, null, Map.of());
     }
@@ -286,5 +297,9 @@ public final class MdnsScanner implements DeviceDiscoveryPort {
 
     private static URI buildUri(String scheme, String host, int port) {
         return URI.create(scheme + "://" + host + ":" + port + "/");
+    }
+
+    private static URI buildUri(String scheme, String host, int port, String path) {
+        return URI.create(scheme + "://" + host + ":" + port + path);
     }
 }

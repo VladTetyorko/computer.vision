@@ -36,8 +36,11 @@ class MdnsScannerTest {
 
         assertEquals(new CategoryId("esp32-cam"), device.suggestedCategory());
         assertEquals("mjpeg", device.suggestedStream().protocol());
-        assertEquals(URI.create("http://192.168.1.30:80/"), device.suggestedStream().uri());
-        assertTrue(device.details().get("note").contains(":81/stream"));
+        assertEquals(URI.create("http://192.168.1.30:80/"), device.address(),
+                "address() still carries the advertised _http._tcp port -- the camera's plain control page");
+        assertEquals(URI.create("http://192.168.1.30:81/stream"), device.suggestedStream().uri(),
+                "(SOURCE-ONBOARDING-2 U9) the suggested stream URI itself now carries ESP32-CAM's real MJPEG path");
+        assertTrue(device.details().isEmpty(), "no note needed once the URI itself is correct");
     }
 
     @Test
@@ -45,6 +48,7 @@ class MdnsScannerTest {
         DiscoveredDevice device = MdnsScanner.mapHttpHit("camera-1", "espressif-a1b2c3.local", 80);
 
         assertEquals(new CategoryId("esp32-cam"), device.suggestedCategory());
+        assertEquals(URI.create("http://espressif-a1b2c3.local:81/stream"), device.suggestedStream().uri());
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.drones.vision.adapter.discovery.v4l2;
 
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
+import com.drones.vision.warehouse.domain.model.SourceStatus;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -79,6 +80,8 @@ class V4l2ScannerTest {
         List<DiscoveredDevice> found = assertDoesNotThrow(() -> scanner.scan(Duration.ofSeconds(1)));
 
         assertTrue(found.isEmpty());
+        assertEquals(SourceStatus.OK, scanner.lastStatus(),
+                "a devBase that simply does not exist is a normal topology fact (any non-Linux host), not a failure");
     }
 
     @Test
@@ -91,10 +94,45 @@ class V4l2ScannerTest {
         List<DiscoveredDevice> found = assertDoesNotThrow(() -> scanner.scan(Duration.ofSeconds(1)));
 
         assertTrue(found.isEmpty());
+        assertEquals(SourceStatus.UNREACHABLE, scanner.lastStatus(),
+                "(SOURCE-ONBOARDING-2 U8) devBase exists but genuinely cannot be listed -- a real failure, not an empty result");
     }
 
     @Test
     void methodKeyIsV4l2() {
         assertEquals("v4l2", new V4l2Scanner().method());
+    }
+
+    @Test
+    void lastStatusDefaultsToOkBeforeAnyScanHasRun() {
+        assertEquals(SourceStatus.OK, new V4l2Scanner().lastStatus());
+    }
+
+    @Test
+    void aSuccessfulScanWithNoVideoNodesStillReportsOk(@TempDir Path tempDir) throws Exception {
+        Path devBase = Files.createDirectory(tempDir.resolve("dev"));
+        Path sysBase = Files.createDirectory(tempDir.resolve("sys"));
+        V4l2Scanner scanner = new V4l2Scanner(devBase, sysBase);
+
+        List<DiscoveredDevice> found = scanner.scan(Duration.ofSeconds(1));
+
+        assertTrue(found.isEmpty(), "an empty, reachable devBase is a legitimate empty result, not a failure");
+        assertEquals(SourceStatus.OK, scanner.lastStatus());
+    }
+
+    @Test
+    void lastStatusSelfHealsOnceDevBaseBecomesListableAgain(@TempDir Path tempDir) throws Exception {
+        Path notADirectory = Files.createFile(tempDir.resolve("dev-as-a-plain-file"));
+        Path sysBase = tempDir.resolve("sys");
+        V4l2Scanner scanner = new V4l2Scanner(notADirectory, sysBase);
+        scanner.scan(Duration.ofSeconds(1));
+        assertEquals(SourceStatus.UNREACHABLE, scanner.lastStatus(), "precondition: the first scan genuinely failed to list");
+
+        Files.delete(notADirectory);
+        Path devBase = Files.createDirectory(notADirectory);
+        scanner.scan(Duration.ofSeconds(1));
+
+        assertEquals(SourceStatus.OK, scanner.lastStatus(),
+                "the very next successful scan must self-heal the status, never stay stuck UNREACHABLE");
     }
 }
