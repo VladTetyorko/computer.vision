@@ -243,7 +243,8 @@ class DefaultStreamServiceProxyAndPullModeTest {
         StreamService service = new DefaultStreamService(assetDirectory, videoSourceRegistry, detectionPort,
                 streamPublisherPort, detectionRepositoryPort, eventPublisher,
                 new DefaultStreamServiceSettings(Optional.empty(), Optional.empty(), Optional.empty(),
-                        StreamPipelineSettings.defaults(), Optional.of(pullDetectionSettings), Optional.empty()), cvProfileResolver());
+                        StreamPipelineSettings.defaults(), Optional.of(pullDetectionSettings), Optional.empty(),
+                        StreamStateObserver.NOOP), cvProfileResolver());
 
         StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
 
@@ -260,7 +261,8 @@ class DefaultStreamServiceProxyAndPullModeTest {
         StreamService service = new DefaultStreamService(assetDirectory, videoSourceRegistry, detectionPort,
                 streamPublisherPort, detectionRepositoryPort, eventPublisher,
                 new DefaultStreamServiceSettings(Optional.empty(), Optional.empty(), Optional.empty(),
-                        StreamPipelineSettings.defaults(), Optional.of(pullDetectionSettings), Optional.empty()), cvProfileResolver());
+                        StreamPipelineSettings.defaults(), Optional.of(pullDetectionSettings), Optional.empty(),
+                        StreamStateObserver.NOOP), cvProfileResolver());
         StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
 
         service.stop(streamId);

@@ -114,6 +114,6 @@ public record Device(DeviceId id, String name, Set<Capability> capabilities, Str
      * @return a new {@code Device} with {@code state} replaced
      */
     public Device withState(LifecycleState state) {
-        return new Device(id, name, capabilities, stream, state);
+        return new Device(id, name, capabilities, stream, state, origin);
     }
 }

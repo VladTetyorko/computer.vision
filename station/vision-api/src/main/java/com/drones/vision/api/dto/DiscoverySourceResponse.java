@@ -1,6 +1,9 @@
 package com.drones.vision.api.dto;
 
 import com.drones.vision.warehouse.application.discovery.SourceHealth;
+import com.fasterxml.jackson.annotation.JsonInclude;
+
+import java.time.Instant;
 
 /**
  * One entry of {@link DiscoveryInboxResponse#sources()} (docs/plans/active/ASSET-FLOWS-PLAN.md
@@ -8,11 +11,14 @@ import com.drones.vision.warehouse.application.discovery.SourceHealth;
  * a client can tell "this source is unreachable" apart from "reachable, nothing found" instead of
  * both collapsing into an empty candidate list.
  *
- * @param id     the discovery mechanism's key (e.g. {@code "mediamtx"}, {@code "mdns"}, {@code
- *               "onvif"}, {@code "v4l2"}, {@code "mavlink"})
- * @param status {@code "OK"} or {@code "UNREACHABLE"}
+ * @param id         the discovery mechanism's key (e.g. {@code "mediamtx"}, {@code "mdns"}, {@code
+ *                   "onvif"}, {@code "v4l2"}, {@code "mavlink"})
+ * @param status     {@code "OK"}, {@code "UNREACHABLE"}, or {@code "NEVER_SCANNED"}
+ * @param lastScanAt when this mechanism was last scanned; absent when {@code status} is {@code
+ *                   "NEVER_SCANNED"} (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C2)
  */
-public record DiscoverySourceResponse(String id, String status) {
+@JsonInclude(JsonInclude.Include.NON_NULL)
+public record DiscoverySourceResponse(String id, String status, Instant lastScanAt) {
 
     /**
      * Maps a domain {@link SourceHealth} to its wire representation.
@@ -21,6 +27,6 @@ public record DiscoverySourceResponse(String id, String status) {
      * @return the response body element for {@code health}
      */
     public static DiscoverySourceResponse from(SourceHealth health) {
-        return new DiscoverySourceResponse(health.id(), health.status().name());
+        return new DiscoverySourceResponse(health.id(), health.status().name(), health.lastScanAt());
     }
 }

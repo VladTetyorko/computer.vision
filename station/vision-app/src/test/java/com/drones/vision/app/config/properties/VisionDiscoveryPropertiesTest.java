@@ -70,7 +70,8 @@ class VisionDiscoveryPropertiesTest {
     @Test
     void explicitLobbyAndInboxAreCarriedThrough() {
         VisionDiscoveryProperties properties = new VisionDiscoveryProperties(14550, null, null,
-                new VisionDiscoveryProperties.Lobby(false), new VisionDiscoveryProperties.Inbox(false, 60, 10), null);
+                new VisionDiscoveryProperties.Lobby(false), new VisionDiscoveryProperties.Inbox(false, 60, 10), null,
+                null);
 
         assertFalse(properties.lobby().enabled());
         assertFalse(properties.inbox().enabled());
@@ -93,7 +94,7 @@ class VisionDiscoveryPropertiesTest {
     @Test
     void explicitMediamtxIsCarriedThrough() {
         VisionDiscoveryProperties properties = new VisionDiscoveryProperties(14550, null, null, null, null,
-                new VisionDiscoveryProperties.Mediamtx(false, "custom/"));
+                new VisionDiscoveryProperties.Mediamtx(false, "custom/"), null);
 
         assertFalse(properties.mediamtx().enabled());
         assertEquals("custom/", properties.mediamtx().pathPrefix());

@@ -227,6 +227,28 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
     }
 
     /**
+     * A snapshot of {@value #DEFAULT_BIND_HOST}{@code :port}'s telemetry intake (docs/plans/active/
+     * SOURCE-ONBOARDING-2-PLAN.md A2/C2) — the answer to P1 ("nothing arrives") and P2 ("bytes
+     * arrive, nothing decodes"). Always resolves against {@value #DEFAULT_BIND_HOST}, the only host
+     * the standing lobby ({@link #holdLobby(int)}) and every production deployment actually bind, so
+     * this method takes a bare port rather than a full bind key. Never throws for a port nothing has
+     * ever bound — {@link MavlinkIntakeStatus#unbound(String)} is exactly the honest P1 answer.
+     *
+     * @throws IllegalArgumentException if {@code port} is outside {@code [1,65535]}
+     */
+    public MavlinkIntakeStatus intakeStatus(int port) {
+        if (port <= 0 || port > 65_535) {
+            throw new IllegalArgumentException("port must be in [1,65535], got " + port);
+        }
+        String bindKey = bindKey(DEFAULT_BIND_HOST, port);
+        String bindAddress = DEFAULT_BIND_HOST + ":" + port;
+        MavlinkGateway gateway = gateways.get(bindKey);
+        return gateway == null || gateway.isClosed()
+                ? MavlinkIntakeStatus.unbound(bindAddress)
+                : gateway.intakeStatus(bindAddress);
+    }
+
+    /**
      * The bind key ({@code host:port}) a supported device's {@code udp://host:port} stream
      * resolves to — the same key {@link #open}/{@link #close} use internally to find/create a
      * {@link MavlinkGateway}. Lets {@code MavlinkFlightCommander}/{@code

@@ -15,6 +15,7 @@ import com.drones.mavlink.session.MavlinkSession;
 import com.drones.mavlink.session.MessageFilter;
 import com.drones.mavlink.session.PeerDirectory;
 import com.drones.mavlink.session.Subscription;
+import com.drones.mavlink.transport.LinkIntake;
 import com.drones.mavlink.transport.MavlinkLink;
 import com.drones.mavlink.transport.UdpListenLink;
 
@@ -30,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.SubmissionPublisher;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -134,6 +136,8 @@ import java.util.concurrent.atomic.AtomicReference;
 final class MavlinkGateway {
 
     private static final System.Logger LOG = System.getLogger(MavlinkGateway.class.getName());
+    /** Reported for the {@code MavlinkLink}-only test seam constructor, which is never a {@link UdpListenLink}. */
+    private static final LinkIntake NO_INTAKE = new LinkIntake(0, 0, null);
 
     private final MavlinkLink link;
     private final MavlinkCoreSettings coreSettings;
@@ -145,6 +149,10 @@ final class MavlinkGateway {
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final AtomicBoolean lobbyHeld = new AtomicBoolean(false);
     private final AtomicReference<LobbyHeartbeat> lobbyHeartbeat = new AtomicReference<>();
+    // SOURCE-ONBOARDING-2 A2: every frame reaching onFrame has already resynced and decoded
+    // successfully through mavlink-core -- counted regardless of whether a registration claims it,
+    // so it answers "did anything decode" independently of "did anything I registered decode".
+    private final AtomicLong framesDecoded = new AtomicLong();
 
     /**
      * Binds {@code bindHost:port} immediately (throws {@link IOException} on a bind conflict --
@@ -395,7 +403,26 @@ final class MavlinkGateway {
         return messageInventory;
     }
 
+    /**
+     * A snapshot of this gateway's telemetry intake (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md
+     * A2/C2) — pre-parse socket counters ({@link LinkIntake}, only meaningful for the production
+     * {@link UdpListenLink} link; a hand-built test-seam {@link MavlinkLink} reports all-zero), how
+     * many of those bytes actually decoded ({@link #framesDecoded}), the lobby hold flag, and who is
+     * heard/claimed right now. {@code bindAddress} is supplied by the caller rather than derived
+     * from {@link MavlinkLink#id()}, which embeds this module's own {@code "udp-listen:"} plumbing
+     * this status's field should not leak.
+     */
+    MavlinkIntakeStatus intakeStatus(String bindAddress) {
+        LinkIntake intake = link instanceof UdpListenLink listen ? listen.intake() : NO_INTAKE;
+        List<Integer> unclaimed = unclaimedVehicles().stream().map(UnclaimedVehicle::sysid).toList();
+        List<Integer> claimed = claimedVehicles().stream().map(ClaimedVehicle::sysid).toList();
+        return new MavlinkIntakeStatus(true, bindAddress, lobbyHeld.get(),
+                intake.datagramsReceived(), intake.bytesReceived(), intake.lastDatagramAt(),
+                framesDecoded.get(), unclaimed, claimed);
+    }
+
     private void onFrame(MavFrame frame) {
+        framesDecoded.incrementAndGet();
         int sysid = frame.header().system().value();
         VehicleRegistration owner = claimPolicy.resolve(sysid);
         if (owner != null) {

@@ -69,9 +69,11 @@ public interface DeviceDiscoveryPort {
      * eventual visibility of the last completed attempt — the same "correctness over throughput for
      * an infrequent call pattern" tradeoff this port's implementations already accept elsewhere.
      *
-     * @return the last scan's reachability; {@link SourceStatus#OK} before any scan has run
+     * @return the last scan's reachability; {@link SourceStatus#NEVER_SCANNED} before any scan has
+     *         run — reporting {@link SourceStatus#OK} before ever asking would be a fabricated fact
+     *         (CLAUDE.md &sect;9)
      */
     default SourceStatus lastStatus() {
-        return SourceStatus.OK;
+        return SourceStatus.NEVER_SCANNED;
     }
 }

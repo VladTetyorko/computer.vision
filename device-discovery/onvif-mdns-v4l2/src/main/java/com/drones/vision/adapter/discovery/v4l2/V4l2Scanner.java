@@ -2,12 +2,14 @@ package com.drones.vision.adapter.discovery.v4l2;
 
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
+import com.drones.vision.warehouse.domain.model.SourceStatus;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.warehouse.domain.port.DeviceDiscoveryPort;
 
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -26,9 +28,13 @@ import java.util.stream.Stream;
  * (default {@code /dev}), a best-effort friendly name is read from {@code
  * <sysBase>/class/video4linux/videoN/name} (default {@code sysBase} is
  * {@code /sys}) when that file exists and is readable; otherwise the node
- * name itself ({@code videoN}) is used. A missing/unreadable {@code devBase}
- * (including simply not being Linux) yields an empty list rather than an
- * exception -- there is nothing to enumerate.
+ * name itself ({@code videoN}) is used. A missing {@code devBase} (including
+ * simply not being Linux) yields an empty list rather than an exception --
+ * there is nothing to enumerate, and {@link #lastStatus()} stays {@code OK}
+ * since this is a normal topology fact, not a failure. A {@code devBase} that
+ * exists but genuinely cannot be listed (permission denied, not a directory,
+ * ...) also yields an empty list, but {@link #lastStatus()} reports {@code
+ * UNREACHABLE} instead (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md U8).
  *
  * <p>Every candidate is a {@code "usb-camera"} {@link CategoryId} with a {@code "v4l2"}
  * {@link DiscoveredDevice#suggestedStream()} whose URI is always the real
@@ -60,6 +66,19 @@ public final class V4l2Scanner implements DeviceDiscoveryPort {
     private final Path devBase;
     private final Path sysBase;
 
+    /**
+     * (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md U8) Defaults to {@link SourceStatus#OK} per
+     * {@link DeviceDiscoveryPort#lastStatus()}'s own contract. Unlike {@code MdnsScanner}/{@code
+     * OnvifWsDiscoveryScanner} -- which that contract explicitly exempts, since a genuine setup
+     * failure there is thrown, never swallowed -- {@link #scan(Duration)} below genuinely does
+     * collapse one real failure into an empty list: {@code devBase} existing but not actually being
+     * listable (permission denied, not a directory, ...). A missing {@code devBase} entirely (no
+     * V4L2 subsystem at all -- any non-Linux host) is a normal topology fact, not a failure, and is
+     * deliberately excluded from flipping this to {@link SourceStatus#UNREACHABLE} -- see {@link
+     * #scan(Duration)}'s own comment.
+     */
+    private volatile SourceStatus lastStatus = SourceStatus.OK;
+
     /** Enumerates the real {@code /dev} and {@code /sys} trees. */
     public V4l2Scanner() {
         this(DEFAULT_DEV_BASE, DEFAULT_SYS_BASE);
@@ -83,6 +102,11 @@ public final class V4l2Scanner implements DeviceDiscoveryPort {
     }
 
     @Override
+    public SourceStatus lastStatus() {
+        return lastStatus;
+    }
+
+    @Override
     public List<DiscoveredDevice> scan(Duration timeout) {
         Objects.requireNonNull(timeout, "timeout must not be null");
         // Enumeration is local filesystem I/O and normally finishes almost
@@ -94,9 +118,19 @@ public final class V4l2Scanner implements DeviceDiscoveryPort {
         List<Path> entries;
         try (Stream<Path> listing = Files.list(devBase)) {
             entries = listing.sorted().toList();
+            lastStatus = SourceStatus.OK;
+        } catch (NoSuchFileException e) {
+            // devBase genuinely does not exist -- no V4L2 subsystem at all (any non-Linux host,
+            // or a container with no /dev passthrough). This is a normal topology fact, not a
+            // failure (see class javadoc), so lastStatus is left exactly as it already was
+            // (default OK) rather than flagging every such host as "unreachable".
+            LOG.log(System.Logger.Level.DEBUG, () -> "V4L2 enumeration of " + devBase + " yielded nothing: " + e);
+            return List.of();
         } catch (IOException | RuntimeException e) {
-            // Missing devBase, permission denied, not-a-directory, non-Linux
-            // layout, ... -- nothing found, never a scan failure.
+            // devBase exists but genuinely could not be listed -- permission denied, not a
+            // directory, or another real I/O fault: this is worth surfacing (SOURCE-ONBOARDING-2
+            // U8), unlike the "not present at all" case above.
+            lastStatus = SourceStatus.UNREACHABLE;
             LOG.log(System.Logger.Level.DEBUG, () -> "V4L2 enumeration of " + devBase + " yielded nothing: " + e);
             return List.of();
         }

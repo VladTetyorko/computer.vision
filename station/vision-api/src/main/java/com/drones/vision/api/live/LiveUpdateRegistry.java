@@ -6,6 +6,8 @@ import com.drones.vision.api.dto.DetectionEventResponse;
 import com.drones.vision.api.dto.DetectionResultResponse;
 import com.drones.vision.api.dto.DeviceResponse;
 import com.drones.vision.api.dto.DevicesSnapshotResponse;
+import com.drones.vision.api.dto.DiscoveryCandidateResponse;
+import com.drones.vision.api.dto.DiscoveryEventPayload;
 import com.drones.vision.api.dto.CorrectionResponse;
 import com.drones.vision.api.dto.EventResponse;
 import com.drones.vision.api.dto.LiveConnectedResponse;
@@ -34,6 +36,7 @@ import com.drones.vision.flight.domain.port.TelemetryLiveUpdatePort;
 import com.drones.vision.flight.domain.port.TrackCorrectionLiveUpdatePort;
 import com.drones.vision.flight.domain.model.TrackCorrection;
 import com.drones.vision.warehouse.domain.port.FleetLiveUpdatePort;
+import com.drones.vision.warehouse.domain.model.DiscoveryCandidate;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -80,7 +83,8 @@ import com.drones.vision.api.controller.StreamController;
  *
  * <h2>Topics</h2>
  * {@link LiveTopic#FLEET}/{@link LiveTopic#EVENT}/{@link LiveTopic#DEVICES}/{@link
- * LiveTopic#DETECTION_EVENTS}/{@link LiveTopic#MAP} are implicit and on for every connection;
+ * LiveTopic#DETECTION_EVENTS}/{@link LiveTopic#MAP}/{@link LiveTopic#DISCOVERY} are implicit and
+ * on for every connection;
  * {@code telemetry:<assetId>}/{@code detections:<assetId>} are opt-in (requested via the {@code
  * topics} query parameter at connect time, or added/removed later via {@link #updateTopics(String,
  * UpdateLiveTopicsRequest)}). {@code devices}/{@code detection-events} extend this channel beyond
@@ -285,6 +289,13 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
     private final LiveRingBuffer devicesBuffer = new LiveRingBuffer(1, true);
     private final LiveRingBuffer detectionEventsBuffer;
     private final LiveRingBuffer mapBuffer;
+    /**
+     * Shares {@link #eventBufferCapacity} rather than a dedicated property (docs/plans/active/
+     * SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C4) — a discovery-inbox delta is exactly as infrequent
+     * as a generic domain {@code Event}, so a second buffer-capacity knob would only duplicate the
+     * existing one.
+     */
+    private final LiveRingBuffer discoveryBuffer;
 
     /**
      * Per-asset buffers for {@code telemetry:<assetId>}/{@code detections:<assetId>} — {@link
@@ -437,6 +448,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
         this.eventBuffer = new LiveRingBuffer(eventBufferCapacity, false);
         this.detectionEventsBuffer = new LiveRingBuffer(detectionEventBufferCapacity, false);
         this.mapBuffer = new LiveRingBuffer(mapBufferCapacity, false);
+        this.discoveryBuffer = new LiveRingBuffer(eventBufferCapacity, false);
         this.fleetCoalesceWindowNanos = TimeUnit.MILLISECONDS.toNanos(coalesceMillis);
         this.scheduler.scheduleAtFixedRate(this::flushPending, coalesceMillis, coalesceMillis, TimeUnit.MILLISECONDS);
         this.scheduler.scheduleAtFixedRate(this::heartbeatAll, heartbeatMillis, heartbeatMillis, TimeUnit.MILLISECONDS);
@@ -500,6 +512,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
         connection.topics().add(LiveTopic.DEVICES);
         connection.topics().add(LiveTopic.DETECTION_EVENTS);
         connection.topics().add(LiveTopic.MAP);
+        connection.topics().add(LiveTopic.DISCOVERY);
         connection.topics().addAll(requestedTopics);
         connections.put(connectionId, connection);
 
@@ -651,7 +664,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      */
     boolean anyBufferEverDropped() {
         if (fleetBuffer.everDropped() || eventBuffer.everDropped() || devicesBuffer.everDropped()
-                || detectionEventsBuffer.everDropped() || mapBuffer.everDropped()) {
+                || detectionEventsBuffer.everDropped() || mapBuffer.everDropped() || discoveryBuffer.everDropped()) {
             return true;
         }
         return telemetryBuffers.values().stream().anyMatch(LiveRingBuffer::everDropped)
@@ -768,6 +781,45 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
                     LiveTopicKind.MAP.wire(), MapEventPayload.from(event));
             mapBuffer.append(envelope);
             broadcast(LiveTopic.MAP, envelope);
+        });
+    }
+
+    /**
+     * Announces one discovery-inbox delta (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2
+     * C4) — {@code action} is one of {@code "REPORTED"}/{@code "REGISTERED"}/{@code "DISMISSED"}/
+     * {@code "RESTORED"}. Called by {@code vision-app}'s {@code LiveUpdateDiscoveryInboxService}
+     * decorator, never directly by anything in this module, exactly like every other {@code
+     * publish*} method here is called by a decorator or a context port implementation elsewhere.
+     * Delta-only by construction: the caller decides when this is worth calling (a changed sweep
+     * report, or an operator verb) — this method itself has no notion of "changed".
+     *
+     * @param action    what happened to {@code candidate}
+     * @param candidate the candidate as it now stands
+     */
+    public void publishDiscoveryEvent(String action, DiscoveryCandidate candidate) {
+        Objects.requireNonNull(action, "action must not be null");
+        Objects.requireNonNull(candidate, "candidate must not be null");
+        scheduler.execute(() -> {
+            LiveEnvelopeResponse envelope = new LiveEnvelopeResponse(sequencer.incrementAndGet(), null,
+                    LiveTopicKind.DISCOVERY.wire(), new DiscoveryEventPayload(action, DiscoveryCandidateResponse.from(candidate)));
+            discoveryBuffer.append(envelope);
+            broadcast(LiveTopic.DISCOVERY, envelope);
+        });
+    }
+
+    /**
+     * Publishes a fresh {@code devices} snapshot on its own, without also recomputing/broadcasting
+     * {@code fleet} the way {@link #publishFleetChanged()}'s coalesced {@link
+     * #recomputeFleetAndDevices()} does (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C6)
+     * — called by {@code vision-app}'s {@code StreamStateObserver} wiring on every computed {@code
+     * StreamState} transition, where only the device/stream list changed, not asset-level fleet
+     * state.
+     */
+    public void publishDevicesSnapshot() {
+        scheduler.execute(() -> {
+            LiveEnvelopeResponse devicesEnvelope = freshDevicesEnvelope();
+            devicesBuffer.append(devicesEnvelope);
+            broadcast(LiveTopic.DEVICES, devicesEnvelope);
         });
     }
 
@@ -949,7 +1001,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
             case FLEET -> buffer.append(freshFleetEnvelope());
             case DEVICES -> buffer.append(freshDevicesEnvelope());
             case DETECTION_EVENTS -> seedDetectionEventsIfEmpty(buffer);
-            default -> { } // EVENT/TELEMETRY/DETECTIONS/MAP: honestly-limited, nothing to seed -- see class javadoc's "Snapshot-on-connect" section for why MAP specifically stays in this bucket
+            default -> { } // EVENT/TELEMETRY/DETECTIONS/MAP/DISCOVERY: honestly-limited, nothing to seed -- see class javadoc's "Snapshot-on-connect" section for why MAP specifically stays in this bucket
         }
     }
 
@@ -961,6 +1013,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
             case DEVICES -> devicesBuffer;
             case DETECTION_EVENTS -> detectionEventsBuffer;
             case MAP -> mapBuffer;
+            case DISCOVERY -> discoveryBuffer;
             case TELEMETRY -> telemetryBuffers.computeIfAbsent(topic.assetId(),
                     id -> new LiveRingBuffer(telemetryBufferCapacity, false));
             case DETECTIONS -> detectionBuffers.computeIfAbsent(topic.assetId(), id -> new LiveRingBuffer(1, true));

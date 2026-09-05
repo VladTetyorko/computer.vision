@@ -21,5 +21,12 @@ public enum SourceStatus {
      * this station cannot trust, on its most recent scan attempt — distinct from "reached fine,
      * nothing found".
      */
-    UNREACHABLE
+    UNREACHABLE,
+
+    /**
+     * No scan has been attempted for this mechanism yet, through the service instance reporting
+     * this status. Distinct from {@link #OK}: reporting {@code OK} before any scan ran would be a
+     * fabricated fact (CLAUDE.md &sect;9) — "reachable" is not yet known, only "not yet asked".
+     */
+    NEVER_SCANNED
 }

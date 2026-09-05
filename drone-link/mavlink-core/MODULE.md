@@ -19,7 +19,7 @@ reader thread just returned, telling nobody) and D4 ("lost identity": `LinkHealt
 the FLEET-RADIO R4 Gotchas below.
 
 **Depends on:** nothing internal · `io.dronefleet.mavlink:mavlink` · **Used by:** `adapter-mavlink` (`drone-link/mavlink`, since W4 — 7 source files import `com.drones.mavlink.*`)
-**Build/test:** `./mvnw -B -pl drone-link/mavlink-core test` — **147 tests**, all green (re-measured 2026-08-27 after FLEET-RADIO R4; see Status for the breakdown).
+**Build/test:** `./mvnw -B -pl drone-link/mavlink-core test` — **154 tests**, all green (re-measured 2026-09-04 after SOURCE-ONBOARDING-2 A1; see Status for the breakdown).
 
 ## API surface
 
@@ -32,7 +32,8 @@ the FLEET-RADIO R4 Gotchas below.
 ### `com.drones.mavlink.transport` (L1)
 - `record LinkId(String value)` · `record LinkPeer(String host, int port)` (+ `LinkPeer.NONE` sentinel) · `record ByteChunk(byte[] data, int length, LinkPeer source, Instant receivedAt)`
 - `interface MavlinkLink extends AutoCloseable` — `LinkId id()` · `boolean preservesMessageBoundaries()` · `ByteChunk poll(Duration timeout) throws IOException` (null on timeout **or** close, never throws for either) · `void send(byte[], int, int, LinkPeer) throws IOException` · `LinkPeer defaultTarget()` · `void close()` (idempotent, no throws)
-- `final class UdpListenLink implements MavlinkLink` — **listens**: `UdpListenLink(String bindHost, int bindPort)`, binds immediately. `defaultTarget()` = most recently learned sender, `LinkPeer.NONE` before anything heard.
+- `final class UdpListenLink implements MavlinkLink` — **listens**: `UdpListenLink(String bindHost, int bindPort)`, binds immediately. `defaultTarget()` = most recently learned sender, `LinkPeer.NONE` before anything heard. **(SOURCE-ONBOARDING-2 A1, new)** `public LinkIntake intake()` — pre-parse datagram/byte counters + last-arrival timestamp off this link's socket; safe from any thread. See `LinkIntake` below.
+- `record LinkIntake(long datagramsReceived, long bytesReceived, Instant lastDatagramAt)` **(SOURCE-ONBOARDING-2 A1, new)** — `lastDatagramAt` is `null` until the first datagram; both counters are monotonic, never reset. Counted in package-private `UdpSocketIo` (shared by `UdpListenLink`/`UdpTargetLink`) on every successful `socket.receive`, **before** anything above L1 (resync, framing, decode) ever sees the bytes — this is the honest "did anything reach the socket at all" signal a dead port cannot otherwise produce (see Gotchas). Only `UdpListenLink` exposes it publicly; `UdpTargetLink`/`TcpClientLink` gained no new method.
 - `final class UdpTargetLink implements MavlinkLink` — **dials**: `UdpTargetLink(String destinationHost, int destinationPort)`, ephemeral local socket, `defaultTarget()` = the fixed configured destination. Still fully bidirectional (can `poll()` replies).
 - `final class TcpClientLink implements MavlinkLink` — **dials**: `TcpClientLink(String host, int port, Duration connectTimeout)`. `preservesMessageBoundaries()` = `false`. `send`'s `target` param is accepted but unused (one connected peer only).
 - package-private helpers (not part of the seam): `UdpSocketIo` (shared UDP poll/send plumbing for the two UDP links), `LinkPeers` (send-target validation), `Timeouts` (`Duration`→millis, clamped ≥1 so `Duration.ZERO`/negative never becomes `setSoTimeout(0)`'s "block forever")
@@ -93,6 +94,19 @@ the FLEET-RADIO R4 Gotchas below.
 - Records validate in compact constructors, `IllegalArgumentException` naming the bad value.
 
 ## Gotchas
+- **(SOURCE-ONBOARDING-2 A1) `LinkIntake` counts are deliberately pre-parse and deliberately dumb.**
+  A UDP port nothing is transmitting to blocks forever in `DatagramSocket#receive` with no error, no
+  timeout distinct from "nothing yet," and no log — this is the actual mechanism behind
+  `SOURCE-ONBOARDING-2` §2.4 S1 ("a MAVLink device pointed at a dead port never errors"), and this
+  module cannot fix it at the socket, only report around it honestly. `LinkIntake` is that report:
+  `datagramsReceived`/`bytesReceived` increment on every successful `receive`, before `FrameReader`
+  attempts any resync — a garbage datagram (wrong protocol, MAVLink 1, random bytes) counts exactly
+  like a valid frame does. This is intentional, not a gap: the diagnostic value is entirely in the
+  *comparison* between this count and a higher layer's `framesDecoded` — zero datagrams means nothing
+  is reaching the socket; datagrams arriving with nothing decoding means the wrong thing is. Neither
+  number alone can tell those apart, and this module has no framesDecoded of its own to compare
+  against (that lives one layer up, at the codec/session boundary — `adapter-mavlink`'s own
+  `intakeStatus`, SOURCE-ONBOARDING-2 A2).
 - **`FrameReader` never re-implements CRC/resync/dialect layout** — every parse attempt hands the current pending buffer to a fresh `io.dronefleet.mavlink.MavlinkConnection` over a `ByteArrayInputStream`. This is deliberate, not an oversight: `MavlinkConnection#next()` is built around a *genuinely blocking* `InputStream` (real end-of-stream only), and reusing one persistent connection while feeding it bytes incrementally corrupts its internal `TransactionalInputStream` bookkeeping the moment a read attempt fails mid-frame — a retried `next()` would misread the tail of an unfinished frame as a fresh version-marker search. A `CountingInputStream` wrapper tracks exactly how many bytes (resync-skipped garbage included) a successful attempt consumed, so the pending buffer trims correctly; a failed attempt (`EOFException`, not a real error) trims nothing and retries the *whole* buffer once more bytes arrive — cheap, since frames are ≤280 bytes.
 - **Dialect persistence is a per-buffer approximation, not the library's own per-sysid map.** Rebuilding the connection per attempt loses `MavlinkConnection`'s internal `systemDialects` cache, so `ResyncBuffer` asks the about-to-be-discarded connection for `getDialect(originSystemId)` after every successful decode and primes the next attempt's connection with it as the default dialect — reusing the library's own resolution rather than re-declaring an autopilot→dialect table. This is last-heartbeat-wins per resync buffer, not truly per-sysid: one physical source relaying two vehicles of *different* firmware families (rare, but the plan explicitly allows for a companion computer relaying several) could see the wrong default briefly applied to the second vehicle's ardupilotmega-only messages until its own heartbeat arrives. Full per-sysid tracking belongs to L3 (`PeerDirectory`, W2), not this layer.
 - **One resync buffer per source, LRU-evicted at `maxResyncBuffers`.** Boundary-preserving links (UDP) key by `LinkPeer`; stream links (TCP) use one fixed sentinel key regardless of `ByteChunk.source()`. This is the fix for `adapter-mavlink`'s `MavlinkUdpInputStream`, which concatenates every sender into one byte stream — proven by `PerSourceResyncIsolationTest`.
@@ -165,6 +179,18 @@ W1 (L0 + L1 + L2 + config + ArchUnit) done. W2 (L3 `session`) done. W3 (L4 `serv
 - FLEET-RADIO R1: `VehicleClassTest` (8, new file, pure unit) — every copter number including the three no prior table knew (dodecarotor 29, decarotor 35, generic multirotor 43); fixed-wing plus every VTOL subtype (19–25) as plane; a ground rover and a surface boat both as rover, named identically; the submarine slot (12) is its own outcome, folded into nothing else; a recognized-but-unsupported airframe (7, 8, 9, 16, 17, 28) is `UNSUPPORTED_VEHICLE`, not `UNKNOWN`; a not-a-vehicle instrument (5, 6, 18, 26, 27, 30–34, 36–42, 44, 45) is `NOT_A_VEHICLE`, distinct from `UNKNOWN`; a genuinely unrecognized number is `UNKNOWN` with `label()` returning `null`; `UNKNOWN` and `NOT_A_VEHICLE` are proven distinct outcomes, not the same fallback under two names.
 - FLEET-RADIO R4: `MavlinkSessionLinkFailureTest` (2, new file, hand-built `MavlinkLink` test double) — a genuine `poll()` `IOException` fires `onLinkFailure` with the correct `LinkId` and the exact `IOException` instance (`aGenuinePollFailureFiresTheListenerWithTheLinkIdAndCause`); a poll failure racing with `removeLink()`-driven shutdown (the reader thread's own `running` flag flipped first, then the parked `poll()` released to throw) never fires the listener (`aPollFailureRacingWithShutdownDoesNotFireTheListener`) — this second test fails against the pre-R4 code, since before this wave nothing distinguished a failure from a shutdown at all; both instead just returned silently.
 - All green, **147 tests total** (145 pre-R4, measured, + 2 new `MavlinkSessionLinkFailureTest`), verified via `./mvnw -B -pl drone-link/mavlink-core test`.
+
+**`docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md` A1 done.** `UdpListenLink` gained `intake():
+LinkIntake` — pre-parse datagram/byte counters + last-arrival instant, read off the shared
+package-private `UdpSocketIo` (so `UdpTargetLink` gets the same counting for free but exposes no new
+public method, per the plan's exact scope). No behavior change to `poll()`/`send()`/`defaultTarget()`
+— pure bookkeeping added at the one point that is true regardless of whether the bytes ever decode.
+New `LinkIntakeTest` (4, pure unit — record validation) and 3 new tests in `UdpLoopbackTest` (real
+loopback: starts at zero/`null`; counts a non-MAVLink garbage datagram and a second one, bytes and
+count both accumulate, `lastDatagramAt` advances; a bare timeout leaves the counters untouched).
+`API.md` updated additively (new `LinkIntake` row + prose note, same precedent as `VehicleClass`/
+`LinkHealth.Health.peerId`). `./mvnw -B -pl drone-link/mavlink-core test` — **154 tests**, all green
+(2026-09-04).
 
 `ArchitectureTest` (vision-app) gained 4 rules scoped to this module in W1 (see that wave's own notes), each skipping cleanly via `Assumptions` if `drone-link/mavlink-core` hasn't been built in the working tree (no Maven dependency wires it onto `vision-app`'s classpath by design). `vision-app`/its `ArchitectureTest` are out of this wave's file scope (per the task brief) and were not touched or re-run — a `service`/`api`-scoped rule addition (mirroring the existing transport/codec ones) is left for whichever wave next touches `vision-app`, most naturally W4. `adapter-mavlink` is untouched (W4).
 

@@ -10,6 +10,7 @@ import org.junit.jupiter.api.Timeout;
 
 import java.net.URI;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -19,6 +20,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -234,25 +236,58 @@ class DefaultDiscoveryServiceTest {
     }
 
     // -- A3: source health (docs/plans/active/ASSET-FLOWS-PLAN.md &sect;2) --------------------
+    // -- B1: NEVER_SCANNED + lastScanAt (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C2) --
 
     @Test
-    void healthReportsOneEntryPerRegisteredPort() {
+    void healthReportsOneEntryPerRegisteredPortOnceScanned() {
         FakePort onvif = FakePort.returning("onvif", List.of());
         FakePort mdns = FakePort.returning("mdns", List.of());
         mdns.status(SourceStatus.UNREACHABLE);
-        DiscoveryService service = new DefaultDiscoveryService(List.of(onvif, mdns));
+        Instant now = Instant.parse("2026-01-01T00:00:00Z");
+        DiscoveryService service =
+                new DefaultDiscoveryService(List.of(onvif, mdns), DefaultDiscoveryService.GRACE_PERIOD, () -> now);
+
+        service.scan(new DiscoveryScanSpec(Duration.ofSeconds(1), Set.of()));
 
         // order is not guaranteed (backed by Map.copyOf) -- compare as a set
-        assertEquals(Set.of(new SourceHealth("onvif", SourceStatus.OK),
-                new SourceHealth("mdns", SourceStatus.UNREACHABLE)), Set.copyOf(service.health()));
+        assertEquals(Set.of(new SourceHealth("onvif", SourceStatus.OK, now),
+                new SourceHealth("mdns", SourceStatus.UNREACHABLE, now)), Set.copyOf(service.health()));
     }
 
     @Test
-    void healthDefaultsToOkForAPortThatNeverOverridesLastStatus() {
+    void healthReportsNeverScannedBeforeAnyScanRegardlessOfThePortsOwnLastStatus() {
+        // FakePort itself defaults lastStatus() to OK -- reporting OK before this service has ever
+        // scanned it would be the fabricated fact U8 closes; NEVER_SCANNED must win regardless.
         FakePort mdns = FakePort.returning("mdns", List.of());
         DiscoveryService service = new DefaultDiscoveryService(List.of(mdns));
 
-        assertEquals(List.of(new SourceHealth("mdns", SourceStatus.OK)), service.health());
+        assertEquals(List.of(new SourceHealth("mdns")), service.health());
+    }
+
+    @Test
+    void healthReportsNeverScannedForAMethodNotIncludedInARequestedScan() {
+        FakePort onvif = FakePort.returning("onvif", List.of());
+        FakePort mdns = FakePort.returning("mdns", List.of());
+        DiscoveryService service = new DefaultDiscoveryService(List.of(onvif, mdns));
+
+        service.scan(new DiscoveryScanSpec(Duration.ofSeconds(1), Set.of("mdns")));
+
+        SourceHealth onvifHealth = service.health().stream()
+                .filter(h -> h.id().equals("onvif")).findFirst().orElseThrow();
+        assertEquals(SourceStatus.NEVER_SCANNED, onvifHealth.status());
+        assertNull(onvifHealth.lastScanAt());
+    }
+
+    @Test
+    void healthStampsLastScanAtEvenWhenTheScanFails() {
+        FakePort broken = FakePort.throwing("onvif", new RuntimeException("socket bind failed"));
+        Instant now = Instant.parse("2026-01-01T00:00:00Z");
+        DiscoveryService service =
+                new DefaultDiscoveryService(List.of(broken), DefaultDiscoveryService.GRACE_PERIOD, () -> now);
+
+        service.scan(new DiscoveryScanSpec(Duration.ofSeconds(1), Set.of()));
+
+        assertEquals(now, service.health().get(0).lastScanAt(), "a failed scan attempt still counts as \"asked\"");
     }
 
     @Test

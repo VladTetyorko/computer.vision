@@ -9,6 +9,8 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Shared receive/send plumbing for {@link UdpListenLink} and {@link UdpTargetLink} — the two
@@ -30,6 +32,13 @@ final class UdpSocketIo {
     private final byte[] buffer = new byte[MAX_DATAGRAM_BYTES];
     private final AtomicBoolean closed = new AtomicBoolean(false);
 
+    // Intake counters -- deliberately updated on every successful receive, pre-parse (see
+    // LinkIntake's own javadoc). Atomics because intake() may be read from any thread (e.g. a
+    // status endpoint) while poll() is driven exclusively by this link's one reader thread.
+    private final AtomicLong datagramsReceived = new AtomicLong();
+    private final AtomicLong bytesReceived = new AtomicLong();
+    private final AtomicReference<Instant> lastDatagramAt = new AtomicReference<>();
+
     UdpSocketIo(DatagramSocket socket) {
         this.socket = socket;
     }
@@ -43,9 +52,13 @@ final class UdpSocketIo {
             socket.setSoTimeout(Timeouts.clampMillis(timeout));
             DatagramPacket packet = new DatagramPacket(buffer, buffer.length);
             socket.receive(packet);
+            Instant receivedAt = Instant.now();
+            datagramsReceived.incrementAndGet();
+            bytesReceived.addAndGet(packet.getLength());
+            lastDatagramAt.set(receivedAt);
             LinkPeer source = new LinkPeer(packet.getAddress().getHostAddress(), packet.getPort());
             byte[] data = Arrays.copyOf(buffer, packet.getLength());
-            return new ByteChunk(data, packet.getLength(), source, Instant.now());
+            return new ByteChunk(data, packet.getLength(), source, receivedAt);
         } catch (SocketTimeoutException e) {
             return null;
         } catch (IOException e) {
@@ -54,6 +67,11 @@ final class UdpSocketIo {
             }
             throw e;
         }
+    }
+
+    /** Safe to call from any thread. Counted pre-parse, at the socket -- see {@link LinkIntake}. */
+    LinkIntake intake() {
+        return new LinkIntake(datagramsReceived.get(), bytesReceived.get(), lastDatagramAt.get());
     }
 
     /** {@code DatagramSocket#send} is already thread-safe, so this needs no extra locking. */

@@ -1,5 +1,6 @@
 package com.drones.vision.warehouse.application.discovery;
 
+import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.Authority;
@@ -49,10 +50,18 @@ public interface DiscoveryInboxService {
      * status is carried over unchanged unless the same already-registered check now matches (an
      * operator's dismissal never suppresses an objective "this is already in the fleet" fact).
      *
+     * <p><b>Auto-reopen (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C5):</b> symmetric
+     * with the rule above, a {@link com.drones.vision.warehouse.domain.model.CandidateStatus#REGISTERED}
+     * candidate whose match no longer resolves — its registered device or the asset owning it was
+     * since deleted — is reopened to {@link com.drones.vision.warehouse.domain.model.CandidateStatus#NEW}
+     * on the next report, exactly as {@link #restore} would. A candidate an operator dismissed stays
+     * dismissed even if its match disappears; only a {@code REGISTERED} one auto-reopens.
+     *
      * @param discovered the scan result to record
-     * @return the upserted candidate
+     * @return the upserted candidate, and whether this report is worth telling a caller about (see
+     *         {@link ReportOutcome})
      */
-    DiscoveryCandidate report(DiscoveredDevice discovered);
+    ReportOutcome report(DiscoveredDevice discovered);
 
     /**
      * Lists every candidate, in no particular guaranteed order — the inbox's full contents.
@@ -106,4 +115,60 @@ public interface DiscoveryInboxService {
      */
     Asset register(DiscoveryCandidateId id, RegisterFromCandidateCommand command, Authority scope,
                     UserId actor);
+
+    /**
+     * An operator attaches a candidate onto an <em>existing</em> asset — the atomic server-side twin
+     * of {@link #register}, for the case an operator already has an asset in mind rather than
+     * wanting a new one (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C1, closing U7's
+     * two-call web sequence). Registers a new device from {@code
+     * candidate.discovered().suggestedStream()}, assigns it via the existing {@link
+     * com.drones.vision.warehouse.application.asset.AssetService#assignDevice}, then flips the
+     * candidate to {@link com.drones.vision.warehouse.domain.model.CandidateStatus#REGISTERED} with
+     * {@code assetId} — all under this service's existing coarse lock, and all validated before the
+     * device is registered, so a failure never leaves an orphan device behind.
+     *
+     * <p>Authorization mirrors {@link #register}'s {@code canManageOrg} gate. The target asset's
+     * visibility is checked the same way any scoped read is: an asset outside {@code scope} throws
+     * {@link java.util.NoSuchElementException}, the same 404 an unknown asset id gives — deliberately
+     * never {@link AccessDeniedException} here, so this one check never reveals whether an
+     * out-of-scope asset exists.
+     *
+     * @param id      the candidate to attach
+     * @param assetId the existing asset to attach it to
+     * @param scope   the acting user's visibility, checked against {@code assetId}
+     * @param actor   the user performing the attach
+     * @return the attached candidate, now {@code REGISTERED} to {@code assetId}
+     * @throws java.util.NoSuchElementException                 if no candidate has that id, or
+     *                                                           {@code assetId} is unknown or
+     *                                                           outside {@code scope}
+     * @throws AccessDeniedException                            if {@code !scope.canManageOrg()}
+     * @throws DiscoveryCandidateAlreadyRegisteredException      if the candidate is already {@code
+     *                                                           REGISTERED} to a different asset
+     * @throws IllegalStateException                            if the candidate has no {@code
+     *                                                           suggestedStream}, or its stream
+     *                                                           duplicates an already-registered
+     *                                                           device (naming the owner, exactly
+     *                                                           like {@link
+     *                                                           com.drones.vision.warehouse.application.asset.AssetService#createFromCandidate}'s
+     *                                                           throw)
+     */
+    DiscoveryCandidate attach(DiscoveryCandidateId id, AssetId assetId, VisibilityScope scope, UserId actor);
+
+    /**
+     * An operator reopens a candidate — undoes a {@link #dismiss}, or manually recovers a stale
+     * {@link com.drones.vision.warehouse.domain.model.CandidateStatus#REGISTERED} candidate without
+     * waiting for the next report's auto-reopen (see {@link #report}'s own javadoc for that rule).
+     * Either way the result is the same: {@link com.drones.vision.warehouse.domain.model.CandidateStatus#NEW},
+     * {@link DiscoveryCandidate#registeredAsset()} cleared.
+     *
+     * <p>No {@code VisibilityScope} parameter, mirroring {@link #dismiss}: a candidate carries no
+     * {@code Ownership} for a per-instance check to authorise against; {@code vision-api} gates the
+     * endpoint on {@code VisibilityScope#canManageOrg()} itself.
+     *
+     * @param id    the candidate to restore
+     * @param actor the user performing the restore
+     * @return the restored candidate
+     * @throws java.util.NoSuchElementException if no candidate has that id
+     */
+    DiscoveryCandidate restore(DiscoveryCandidateId id, UserId actor);
 }

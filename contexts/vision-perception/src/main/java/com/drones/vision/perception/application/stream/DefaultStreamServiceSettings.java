@@ -38,13 +38,19 @@ import java.util.Optional;
  *                                      detection (docs/plans/done/MEDIA-SOT-PLAN.md wave M5, switch B)
  * @param detectionDemandPort          empty means the demand-poll task is never scheduled, so every
  *                                      stream is fail-open on demand (docs/plans/done/CV-DEMAND-PLAN.md §3.3)
+ * @param streamStateObserver           notified on every computed {@code StreamState} transition
+ *                                      (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.2 C6);
+ *                                      never {@code null} — {@link StreamStateObserver#NOOP} is the
+ *                                      "nothing to do" value, not a nullable parameter (CLAUDE.md
+ *                                      rule 10 / java-clean-code §3: no "null means off")
  */
 public record DefaultStreamServiceSettings(Optional<UsageTracker> usageTracker,
                                             Optional<DetectionEventRepositoryPort> detectionEventRepositoryPort,
                                             Optional<DetectionLiveUpdatePort> liveUpdatePublisherPort,
                                             StreamPipelineSettings pipelineSettings,
                                             Optional<PullDetectionSettings> pullDetectionSettings,
-                                            Optional<DetectionDemandPort> detectionDemandPort) {
+                                            Optional<DetectionDemandPort> detectionDemandPort,
+                                            StreamStateObserver streamStateObserver) {
 
     public DefaultStreamServiceSettings {
         Objects.requireNonNull(usageTracker, "usageTracker must not be null");
@@ -53,14 +59,15 @@ public record DefaultStreamServiceSettings(Optional<UsageTracker> usageTracker,
         Objects.requireNonNull(pipelineSettings, "pipelineSettings must not be null");
         Objects.requireNonNull(pullDetectionSettings, "pullDetectionSettings must not be null");
         Objects.requireNonNull(detectionDemandPort, "detectionDemandPort must not be null");
+        Objects.requireNonNull(streamStateObserver, "streamStateObserver must not be null");
     }
 
     /**
      * Reproduces the pre-R1 shortest (6-argument) constructor's behavior exactly: every optional
-     * collaborator absent, default {@link StreamPipelineSettings}.
+     * collaborator absent, default {@link StreamPipelineSettings}, {@link StreamStateObserver#NOOP}.
      */
     public static DefaultStreamServiceSettings defaults() {
         return new DefaultStreamServiceSettings(Optional.empty(), Optional.empty(), Optional.empty(),
-                StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty());
+                StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty(), StreamStateObserver.NOOP);
     }
 }

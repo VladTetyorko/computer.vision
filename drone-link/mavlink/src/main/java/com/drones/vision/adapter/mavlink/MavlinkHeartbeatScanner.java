@@ -9,6 +9,7 @@ import com.drones.mavlink.transport.UdpListenLink;
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
+import com.drones.vision.warehouse.domain.model.SourceStatus;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.warehouse.domain.port.DeviceDiscoveryPort;
 
@@ -57,6 +58,15 @@ import java.util.Objects;
  *       process) is reported as one WARN log and an empty result, never an exception: discovery
  *       must never break the scan-all flow over one mechanism's bind conflict.</li>
  * </ul>
+ *
+ * <h2>{@link #lastStatus()} distinguishes "down" from "empty" (SOURCE-ONBOARDING-2 A2, U8)</h2>
+ * Before this wave, a self-bind conflict and a genuinely empty scan both surfaced identically —
+ * an empty {@link #scan(Duration)} result and the port's own {@link DeviceDiscoveryPort#lastStatus()}
+ * default ({@link SourceStatus#OK}) — indistinguishable from each other to any caller. A bind
+ * conflict now sets {@link SourceStatus#UNREACHABLE}, mirroring {@code MediamtxPathScanner}'s own
+ * precedent for the same interface method. The hub-borrow path never fails to reach anything (it
+ * makes no I/O call of its own — it only reads registries {@link MavlinkGateway} already
+ * maintains), so it always reports {@link SourceStatus#OK}.
  *
  * <p>Both paths use the fixed wildcard bind host ({@value MavlinkTelemetrySource#DEFAULT_BIND_HOST})
  * — only the port varies, per the constructor argument — matching how a device's own {@code
@@ -107,6 +117,7 @@ public final class MavlinkHeartbeatScanner implements DeviceDiscoveryPort {
     private final long activeHubMinPollIntervalMillis;
     private final long selfBindMinReadTimeoutMillis;
     private final long selfBindMaxReadTimeoutMillis;
+    private volatile SourceStatus lastStatus = SourceStatus.OK;
 
     /**
      * @param telemetrySource the same instance {@code vision-app} wires as the real {@code
@@ -152,6 +163,16 @@ public final class MavlinkHeartbeatScanner implements DeviceDiscoveryPort {
     }
 
     /**
+     * {@link SourceStatus#UNREACHABLE} for a self-bind scan that could not even bind the port
+     * (SOURCE-ONBOARDING-2 A2, U8); {@link SourceStatus#OK} otherwise, including every hub-borrow
+     * scan (it performs no I/O of its own to fail).
+     */
+    @Override
+    public SourceStatus lastStatus() {
+        return lastStatus;
+    }
+
+    /**
      * Borrows an already-running gateway's socket: no bind of its own, just repeated reads of the
      * claimed/unclaimed registries {@link MavlinkGateway} already maintains, spread across the
      * timeout window so a vehicle whose first {@code HEARTBEAT} (and therefore firmware/mavType
@@ -178,6 +199,7 @@ public final class MavlinkHeartbeatScanner implements DeviceDiscoveryPort {
             sleepQuietly(Math.min(intervalMillis, remainingNanos / 1_000_000L + 1));
         }
         unclaimed.keySet().removeAll(claimed.keySet()); // a claimed vehicle is never also reported unclaimed
+        lastStatus = SourceStatus.OK; // no I/O of our own on this path -- an active hub is reachable by definition
 
         List<DiscoveredDevice> devices = new ArrayList<>();
         for (MavlinkGateway.ClaimedVehicle vehicle : claimed.values()) {
@@ -202,11 +224,13 @@ public final class MavlinkHeartbeatScanner implements DeviceDiscoveryPort {
         try {
             link = new UdpListenLink(MavlinkTelemetrySource.DEFAULT_BIND_HOST, port);
         } catch (IOException e) {
+            lastStatus = SourceStatus.UNREACHABLE;
             LOG.log(System.Logger.Level.WARNING, () -> "MAVLink heartbeat scan could not bind udp://"
                     + MavlinkTelemetrySource.DEFAULT_BIND_HOST + ":" + port
                     + " -- likely already bound by something other than this app's own MAVLink gateway: " + e);
             return List.of();
         }
+        lastStatus = SourceStatus.OK; // the bind itself is the reachability signal on this path
         try {
             FrameReader reader = new FrameReader(link);
             long readTimeoutMillis = Math.max(selfBindMinReadTimeoutMillis,

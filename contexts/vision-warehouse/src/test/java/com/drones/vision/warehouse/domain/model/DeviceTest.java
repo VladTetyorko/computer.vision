@@ -74,4 +74,22 @@ class DeviceTest {
         assertEquals(device.id(), updated.id());
         assertEquals(device.state(), updated.state());
     }
+
+    /**
+     * Regression for U2 (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 B1): {@link
+     * Device#withState} used to route through the 5-argument convenience constructor, which
+     * silently defaults {@code origin} to {@link DeviceOrigin#LIVE} — so setting a simulated
+     * device's lifecycle state, e.g. deactivating it, would flip it to a real one as a side effect.
+     */
+    @Test
+    void withStatePreservesOrigin() {
+        Device simulated = new Device(DeviceId.random(), "cam-1", Set.of(Capability.VIDEO), descriptor(),
+                LifecycleState.ACTIVE, DeviceOrigin.SIMULATED);
+
+        Device deactivated = simulated.withState(LifecycleState.DEACTIVATED);
+
+        assertEquals(DeviceOrigin.SIMULATED, deactivated.origin(),
+                "withState must not silently reset a simulated device's origin to LIVE");
+        assertEquals(LifecycleState.DEACTIVATED, deactivated.state());
+    }
 }

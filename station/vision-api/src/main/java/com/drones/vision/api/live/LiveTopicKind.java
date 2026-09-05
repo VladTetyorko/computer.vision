@@ -61,7 +61,15 @@ enum LiveTopicKind {
      * {@code CorrectionResponse} is the only one that matters (CLAUDE.md rule 9); replay after
      * reconnect comes from {@code GET /api/geo/corrections}, not this buffer.
      */
-    GEO("geo");
+    GEO("geo"),
+    /**
+     * Discovery-inbox deltas — an operator's found-devices list changing (docs/plans/active/
+     * SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C4). Always-on, like {@link #FLEET}/{@link #EVENT}/{@link
+     * #DEVICES}/{@link #DETECTION_EVENTS}/{@link #MAP}. Delta-only: published only when a sweep's
+     * {@code ReportOutcome.changed()} is {@code true}, or on an operator verb (attach/register/
+     * dismiss/restore) — never once per sweep regardless of content.
+     */
+    DISCOVERY("discovery");
 
     private final String wire;
 

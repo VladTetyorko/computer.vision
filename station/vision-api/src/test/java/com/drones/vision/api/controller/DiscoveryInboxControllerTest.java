@@ -15,6 +15,7 @@ import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.Capability;
+import com.drones.vision.warehouse.application.discovery.DiscoveryCandidateAlreadyRegisteredException;
 import com.drones.vision.warehouse.application.discovery.DiscoveryInboxService;
 import com.drones.vision.warehouse.application.discovery.DiscoveryService;
 import com.drones.vision.warehouse.application.discovery.RegisterFromCandidateCommand;
@@ -140,8 +141,8 @@ class DiscoveryInboxControllerTest {
     void listCarriesSourceHealthAlongsideTheCandidateList() throws Exception {
         when(discoveryInboxService.candidates()).thenReturn(List.of());
         when(discoveryService.health()).thenReturn(List.of(
-                new SourceHealth("mediamtx", SourceStatus.UNREACHABLE),
-                new SourceHealth("mdns", SourceStatus.OK)));
+                new SourceHealth("mediamtx", SourceStatus.UNREACHABLE, Instant.now()),
+                new SourceHealth("mdns", SourceStatus.OK, Instant.now())));
         MockMvc mockMvc = mockMvcFor(currentUserWithScope(VisibilityScope.unbounded()), discoveryInboxService, discoveryService);
 
         mockMvc.perform(get("/api/discovery/inbox"))
@@ -259,5 +260,94 @@ class DiscoveryInboxControllerTest {
                 .andExpect(status().isOk());
 
         org.junit.jupiter.api.Assertions.assertEquals(currentUser.ownership(), captor.getValue().ownership());
+    }
+
+    // --- attach ---
+
+    @Test
+    void attachSucceedsAndReturnsTheAttachedCandidate() throws Exception {
+        DiscoveryCandidate attached = candidate().registeredTo(AssetId.random());
+        when(discoveryInboxService.attach(any(), any(), any(), any())).thenReturn(attached);
+        MockMvc mockMvc = mockMvcFor(currentUserWithScope(VisibilityScope.unbounded()), discoveryInboxService, discoveryService);
+
+        String body = "{\"assetId\":\"" + AssetId.random().value() + "\"}";
+        mockMvc.perform(post("/api/discovery/inbox/" + attached.id().value() + "/attach")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REGISTERED"));
+    }
+
+    @Test
+    void attachReturns404WhenServiceReportsAnUnknownOrOutOfScopeAsset() throws Exception {
+        when(discoveryInboxService.attach(any(), any(), any(), any()))
+                .thenThrow(new NoSuchElementException("Unknown or out-of-scope asset"));
+        MockMvc mockMvc = mockMvcFor(currentUserWithScope(VisibilityScope.unbounded()), discoveryInboxService, discoveryService);
+
+        String body = "{\"assetId\":\"" + AssetId.random().value() + "\"}";
+        mockMvc.perform(post("/api/discovery/inbox/" + DiscoveryCandidateId.random().value() + "/attach")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void attachReturns422WhenTheCandidateIsAlreadyRegisteredToADifferentAsset() throws Exception {
+        DiscoveryCandidateId id = DiscoveryCandidateId.random();
+        when(discoveryInboxService.attach(any(), any(), any(), any()))
+                .thenThrow(new DiscoveryCandidateAlreadyRegisteredException(id, AssetId.random()));
+        MockMvc mockMvc = mockMvcFor(currentUserWithScope(VisibilityScope.unbounded()), discoveryInboxService, discoveryService);
+
+        String body = "{\"assetId\":\"" + AssetId.random().value() + "\"}";
+        mockMvc.perform(post("/api/discovery/inbox/" + id.value() + "/attach")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error").value("UNPROCESSABLE_ENTITY"));
+    }
+
+    @Test
+    void attachReturns409WhenTheCandidateHasNoSuggestedStream() throws Exception {
+        when(discoveryInboxService.attach(any(), any(), any(), any()))
+                .thenThrow(new IllegalStateException("Discovery candidate has no usable stream to attach"));
+        MockMvc mockMvc = mockMvcFor(currentUserWithScope(VisibilityScope.unbounded()), discoveryInboxService, discoveryService);
+
+        String body = "{\"assetId\":\"" + AssetId.random().value() + "\"}";
+        mockMvc.perform(post("/api/discovery/inbox/" + DiscoveryCandidateId.random().value() + "/attach")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isConflict());
+    }
+
+    // --- restore ---
+
+    @Test
+    void restoreSucceedsForAManagerGroupsScope() throws Exception {
+        DiscoveryCandidate restored = candidate();
+        when(discoveryInboxService.restore(any(), any())).thenReturn(restored);
+        MockMvc mockMvc = mockMvcFor(
+                currentUserWithScope(VisibilityScope.groups(Set.of(GroupId.random()))), discoveryInboxService, discoveryService);
+
+        mockMvc.perform(post("/api/discovery/inbox/" + restored.id().value() + "/restore"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("NEW"));
+    }
+
+    @Test
+    void restoreReturns403ForAnUnaffiliatedEmptyScope() throws Exception {
+        MockMvc mockMvc = mockMvcFor(
+                currentUserWithScope(VisibilityScope.assignedAssets(Set.of())), discoveryInboxService, discoveryService);
+
+        mockMvc.perform(post("/api/discovery/inbox/" + DiscoveryCandidateId.random().value() + "/restore"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error").value("FORBIDDEN"));
+
+        verifyNoInteractions(discoveryInboxService);
+    }
+
+    @Test
+    void restoreReturns404WhenTheServiceReportsAnUnknownCandidate() throws Exception {
+        when(discoveryInboxService.restore(any(), any()))
+                .thenThrow(new NoSuchElementException("Unknown discovery candidate"));
+        MockMvc mockMvc = mockMvcFor(currentUserWithScope(VisibilityScope.unbounded()), discoveryInboxService, discoveryService);
+
+        mockMvc.perform(post("/api/discovery/inbox/" + DiscoveryCandidateId.random().value() + "/restore"))
+                .andExpect(status().isNotFound());
     }
 }

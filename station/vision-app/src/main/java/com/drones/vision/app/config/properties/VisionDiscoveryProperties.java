@@ -58,6 +58,9 @@ import java.time.Duration;
  *                    a whole when absent
  * @param mediamtx    {@code MediamtxPathScanner}'s enable flag and ingest path-name prefix;
  *                    defaulted as a whole when absent
+ * @param live        whether {@code DiscoveryInboxService} is decorated to publish {@code
+ *                    discovery} live-update deltas (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md
+ *                    &sect;3.2 C4); defaulted as a whole when absent
  */
 @ConfigurationProperties(prefix = "vision.discovery")
 public record VisionDiscoveryProperties(
@@ -66,7 +69,8 @@ public record VisionDiscoveryProperties(
         V4l2 v4l2,
         Lobby lobby,
         Inbox inbox,
-        Mediamtx mediamtx) {
+        Mediamtx mediamtx,
+        Live live) {
 
     static final String DEFAULT_MAVLINK_PORT = "14550";
     private static final int MIN_PORT = 1;
@@ -95,16 +99,19 @@ public record VisionDiscoveryProperties(
         if (mediamtx == null) {
             mediamtx = new Mediamtx(Mediamtx.DEFAULT_ENABLED, Mediamtx.DEFAULT_PATH_PREFIX);
         }
+        if (live == null) {
+            live = new Live(Live.DEFAULT_ENABLED);
+        }
     }
 
     /**
      * Convenience constructor covering just the original {@code vision.discovery.mavlink-port}
      * field (predating wave F4's {@code mdns}/{@code v4l2} extension, Z2c's {@code lobby}/{@code
-     * inbox} one, and Z3's {@code mediamtx} one) — every nested record defaults exactly as it would
-     * from an absent binding.
+     * inbox} one, Z3's {@code mediamtx} one, and C4's {@code live} one) — every nested record
+     * defaults exactly as it would from an absent binding.
      */
     public VisionDiscoveryProperties(int mavlinkPort) {
-        this(mavlinkPort, null, null, null, null, null);
+        this(mavlinkPort, null, null, null, null, null, null);
     }
 
     /**
@@ -188,5 +195,14 @@ public record VisionDiscoveryProperties(
                 throw new IllegalArgumentException("vision.discovery.mediamtx.path-prefix must not be blank");
             }
         }
+    }
+
+    /**
+     * @param enabled whether {@code DiscoveryInboxWiringConfiguration} decorates {@code
+     *                DiscoveryInboxService} with a live-update-publishing wrapper; default {@code
+     *                true} (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C4, D8: ships on)
+     */
+    public record Live(@DefaultValue("true") boolean enabled) {
+        static final boolean DEFAULT_ENABLED = true;
     }
 }

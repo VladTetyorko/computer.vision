@@ -1,6 +1,7 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.dto.SystemNetworkResponse;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -11,7 +12,8 @@ import com.drones.vision.api.support.LocalNetworkAddresses;
 
 /**
  * Driving REST adapter for host-environment introspection the guided drone-onboarding wizard
- * needs (docs/plans/active/DRONE-INFRA-PLAN.md I-g).
+ * needs (docs/plans/active/DRONE-INFRA-PLAN.md I-g, extended by docs/plans/active/
+ * SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C3 with mediamtx push facts).
  *
  * <p><b>Why this lives in vision-api, not vision-application</b>: {@code GET
  * /api/system/network} answers "what network interfaces does the machine this JVM happens to be
@@ -38,34 +40,53 @@ public class SystemNetworkController {
 
     private final LocalNetworkAddresses localNetworkAddresses;
     private final int mavlinkPort;
+    private final Integer videoPushPort;
+    private final String videoPushPathPrefix;
 
     /**
-     * @param mavlinkPort the MAVLink heartbeat port, supplied as a raw {@code int} bean by
-     *                    {@code vision-app}'s {@code DiscoveryWiringConfiguration#mavlinkPort}
-     *                    — {@code vision-api} may not depend on {@code vision-app} to read the
-     *                    backing property itself (the dependency rule runs the other way), so
-     *                    the value crosses the module boundary as a plain constructor argument,
-     *                    mirroring how {@link HlsProxyController} receives its {@code URI}
-     *                    collaborator. See {@link #network()}'s own javadoc for why this is
-     *                    always the same value {@code MavlinkHeartbeatScanner} listens on.
+     * @param mavlinkPort         the MAVLink heartbeat port, supplied as a raw {@code int} bean by
+     *                            {@code vision-app}'s {@code DiscoveryWiringConfiguration#mavlinkPort}
+     *                            — {@code vision-api} may not depend on {@code vision-app} to read
+     *                            the backing property itself (the dependency rule runs the other
+     *                            way), so the value crosses the module boundary as a plain
+     *                            constructor argument, mirroring how {@link HlsProxyController}
+     *                            receives its {@code URI} collaborator. See {@link #network()}'s
+     *                            own javadoc for why this is always the same value {@code
+     *                            MavlinkHeartbeatScanner} listens on.
+     * @param videoPushPort       provides the mediamtx RTSP publish port, from {@code
+     *                            DiscoveryWiringConfiguration#videoPushPort} — an {@link
+     *                            ObjectProvider}, not a plain {@code Integer}, because that bean is
+     *                            conditionally absent (not merely null-valued) when mediamtx publish
+     *                            is unconfigured, and a required constructor parameter cannot accept
+     *                            a genuinely missing bean
+     * @param videoPushPathPrefix provides the mediamtx ingest path-name prefix, from {@code
+     *                            DiscoveryWiringConfiguration#videoPushPathPrefix} — see {@code
+     *                            videoPushPort} for why this is an {@link ObjectProvider}
      */
     @Autowired
-    public SystemNetworkController(int mavlinkPort) {
-        this(mavlinkPort, new LocalNetworkAddresses());
+    public SystemNetworkController(int mavlinkPort, ObjectProvider<Integer> videoPushPort,
+                                    ObjectProvider<String> videoPushPathPrefix) {
+        this(mavlinkPort, videoPushPort.getIfAvailable(), videoPushPathPrefix.getIfAvailable(),
+                new LocalNetworkAddresses());
     }
 
     /** Package-private test seam — see class javadoc. */
-    SystemNetworkController(int mavlinkPort, LocalNetworkAddresses localNetworkAddresses) {
+    SystemNetworkController(int mavlinkPort, Integer videoPushPort, String videoPushPathPrefix,
+                             LocalNetworkAddresses localNetworkAddresses) {
         this.mavlinkPort = mavlinkPort;
+        this.videoPushPort = videoPushPort;
+        this.videoPushPathPrefix = videoPushPathPrefix;
         this.localNetworkAddresses =
                 Objects.requireNonNull(localNetworkAddresses, "localNetworkAddresses must not be null");
     }
 
     /**
-     * Reports this host's site-local IPv4 addresses plus the MAVLink heartbeat port, so the
-     * onboarding wizard can pre-fill copy-paste FC/companion-computer configuration with this
-     * app's own reachable address and port instead of asking the operator to type them in
-     * (docs/plans/active/DRONE-INFRA-PLAN.md I-g's frozen wire contract).
+     * Reports this host's site-local IPv4 addresses plus the MAVLink heartbeat port and mediamtx
+     * push facts, so the onboarding wizard can pre-fill copy-paste FC/companion-computer
+     * configuration — and a client can compose a camera's push URL — with this app's own reachable
+     * address and ports instead of asking the operator to type them in (docs/plans/active/
+     * DRONE-INFRA-PLAN.md I-g's frozen wire contract; docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md
+     * &sect;3.2 C3).
      *
      * <p>{@code mavlinkPort} is always the exact value {@code MavlinkHeartbeatScanner} (wired in
      * {@code vision-app}'s {@code DiscoveryWiringConfiguration}) listens on — both this
@@ -74,10 +95,12 @@ public class SystemNetworkController {
      * generated onboarding snippet and the running scanner can never target different ports.
      *
      * @return every site-local, up, non-loopback IPv4 address this host has (possibly empty —
-     *         never an error, per the frozen contract), plus the configured MAVLink port
+     *         never an error, per the frozen contract), plus the configured MAVLink port and
+     *         mediamtx push facts (absent when mediamtx publish is unconfigured)
      */
     @GetMapping("/api/system/network")
     public SystemNetworkResponse network() {
-        return new SystemNetworkResponse(localNetworkAddresses.list(), mavlinkPort);
+        return new SystemNetworkResponse(localNetworkAddresses.list(), mavlinkPort, videoPushPort,
+                videoPushPathPrefix);
     }
 }
