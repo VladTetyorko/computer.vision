@@ -42,3 +42,13 @@
   color: var(--text-muted);
   white-space: nowrap;
 }
+
+/* F2's own "Zoom ×2" toggle (wave W6) — a plain `.btn.secondary.small` that fills solid
+   `--color-info` once active, the same recipe `tactical-map.css`'s own standalone (non-`.segmented`)
+   toggle buttons use; Angular's emulated encapsulation means the rule can't be shared across component
+   stylesheets, so it's re-declared here. */
+.follow-hud .btn.active {
+  background: var(--color-info);
+  color: var(--color-on-info);
+  border-color: var(--color-info);
+}

@@ -78,6 +78,21 @@ describe('followPresentation', () => {
     });
   });
 
+  // ---- showCropToggle (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1 item 4, wave W6) --------------
+  describe('showCropToggle', () => {
+    it('shows the Zoom ×2 toggle for every state except LOST', () => {
+      expect(followPresentation(follow({ state: 'REQUESTING' }), NOW).showCropToggle).toBe(true);
+      expect(followPresentation(follow({ state: 'HOLDING' }), NOW).showCropToggle).toBe(true);
+      expect(followPresentation(follow({ state: 'COASTING' }), NOW).showCropToggle).toBe(true);
+      expect(followPresentation(follow({ state: 'RELEASED' }), NOW).showCropToggle).toBe(true);
+    });
+
+    it('hides the Zoom ×2 toggle during LOST — re-framing on a frozen box is a lie', () => {
+      expect(followPresentation(follow({ state: 'LOST' }), NOW).showCropToggle).toBe(false);
+      expect(followPresentation(follow({ state: 'LOST', reacquirable: true }), NOW).showCropToggle).toBe(false);
+    });
+  });
+
   describe('title', () => {
     it('falls back to "#<trackId>" when label is ""', () => {
       const p = followPresentation(follow({ label: '', trackId: 7 }), NOW);

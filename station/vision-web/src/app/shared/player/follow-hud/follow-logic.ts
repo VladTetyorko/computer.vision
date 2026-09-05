@@ -30,6 +30,16 @@ export interface FollowPresentation {
   /** Gates the HUD's Re-acquire action — `true` only for `state === 'LOST' && reacquirable`
    *  (§3.2: "rendered only when state == 'LOST' && reacquirable"). */
   readonly showReacquire: boolean;
+  /**
+   * Gates F2's own "Zoom ×2" toggle (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1 item 4, wave W6) —
+   * `true` for every state except `LOST`. Crop-follow is meaningless without *some* lock (hence the
+   * whole HUD's own top-level `follow !== null` gate already keeps it off the glass entirely when
+   * there is none), but during `LOST` specifically the toggle must vanish rather than merely gray
+   * out: re-framing on the frozen `lastBox` — the only box left to zoom toward — would be a lie about
+   * where the camera is actually looking, the same honesty rule `player.ts`'s own crop-follow step
+   * enforces one layer down (it drops to identity in the same states, `null` target box included).
+   */
+  readonly showCropToggle: boolean;
 }
 
 function followTitle(follow: FollowStatus): string {
@@ -82,5 +92,6 @@ export function followPresentation(follow: FollowStatus, nowMs: number): FollowP
     detail: followDetail(follow, nowMs),
     tone: followTone(follow.state),
     showReacquire: follow.state === 'LOST' && follow.reacquirable,
+    showCropToggle: follow.state !== 'LOST',
   };
 }

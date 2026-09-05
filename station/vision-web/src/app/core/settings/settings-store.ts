@@ -25,6 +25,7 @@ interface PersistedSettings {
   eventNotifications: boolean;
   flyAssetId: string | null;
   declutterLevel: BoxesMode;
+  cropFollowEnabled: boolean;
 }
 
 const STORAGE_KEY = 'vision.settings.v1';
@@ -101,6 +102,16 @@ export class SettingsStore {
    */
   readonly declutterLevel = signal<BoxesMode>(DEFAULT_DECLUTTER_LEVEL);
 
+  /**
+   * F2 digital crop-follow's own per-viewer preference (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1
+   * item 4, wave W6) — off by default, exactly like {@link eventNotifications}: a deliberate opt-in
+   * rather than a surprise the moment a lock first appears. Purely a client-side rendering choice with
+   * no wire counterpart (the same boundary {@link declutterLevel}'s own doc comment draws) — `Player`
+   * degrades to the plain, un-cropped view whenever this reads `false`, and `<vision-follow-hud>`'s own
+   * "Zoom ×2" toggle (which every host wires to this signal) is what flips it.
+   */
+  readonly cropFollowEnabled = signal(false);
+
   constructor() {
     this.restore();
     effect(() => this.persist());
@@ -131,6 +142,9 @@ export class SettingsStore {
       if (isBoxesMode(parsed.declutterLevel)) {
         this.declutterLevel.set(parsed.declutterLevel);
       }
+      if (typeof parsed.cropFollowEnabled === 'boolean') {
+        this.cropFollowEnabled.set(parsed.cropFollowEnabled);
+      }
     } catch {
       // Corrupt or stale settings must never keep the app from starting.
       localStorage.removeItem(STORAGE_KEY);
@@ -145,6 +159,7 @@ export class SettingsStore {
       eventNotifications: this.eventNotifications(),
       flyAssetId: this.flyAssetId(),
       declutterLevel: this.declutterLevel(),
+      cropFollowEnabled: this.cropFollowEnabled(),
     };
     localStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
   }

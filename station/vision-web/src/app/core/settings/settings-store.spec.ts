@@ -100,6 +100,31 @@ describe('SettingsStore', () => {
     expect(reloaded.declutterLevel()).toBe(DEFAULT_DECLUTTER_LEVEL);
   });
 
+  // ---- Crop-follow (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1 item 4, wave W6) ----------------
+  // Off by default — a deliberate per-viewer opt-in for the "Zoom ×2" digital crop, same category
+  // as `declutterLevel`: a client-side rendering preference with no wire counterpart.
+
+  it('defaults cropFollowEnabled to false and persists a change across reload', () => {
+    expect(store.cropFollowEnabled()).toBe(false);
+
+    store.cropFollowEnabled.set(true);
+    TestBed.tick();
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({});
+    const reloaded = TestBed.inject(SettingsStore);
+
+    expect(reloaded.cropFollowEnabled()).toBe(true);
+  });
+
+  it('ignores a corrupt persisted cropFollowEnabled value rather than adopting it', () => {
+    localStorage.setItem('vision.settings.v1', JSON.stringify({ cropFollowEnabled: 'yes' }));
+    TestBed.resetTestingModule();
+    TestBed.configureTestingModule({});
+    const reloaded = TestBed.inject(SettingsStore);
+
+    expect(reloaded.cropFollowEnabled()).toBe(false);
+  });
+
   it('survives corrupt persisted settings', () => {
     localStorage.setItem('vision.settings.v1', '{not json');
     TestBed.resetTestingModule();

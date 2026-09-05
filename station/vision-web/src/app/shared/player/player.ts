@@ -96,6 +96,13 @@ import {
   transportLatencyLabel,
   type SnapToLiveReason,
 } from './live-edge-logic';
+import {
+  IDENTITY_CROP_FOLLOW_STATE,
+  applyCropFollowToContentRect,
+  cropFollowTransform,
+  stepCropFollow,
+  type CropFollowState,
+} from './crop-follow-logic';
 
 export type { PlayerPhase, Transport } from './player-recovery';
 export type { BoxesMode } from './detection-overlay-logic';
@@ -200,6 +207,18 @@ const HLS_BACK_BUFFER_LENGTH_SECONDS = 5;
 /** `document.hidden`, guarded for an environment with no `document` (none this app ships to, today). */
 function isDocumentHidden(): boolean {
   return typeof document !== 'undefined' && document.hidden;
+}
+
+/** `prefers-reduced-motion: reduce`, guarded for an environment with no `matchMedia` (none this app
+ *  ships to, today — mirrors {@link isDocumentHidden}'s own guard shape). Read fresh on every redraw
+ *  (`redrawOverlay`'s own crop-follow step) rather than cached/listened-to: cheap enough to call at
+ *  the existing redraw cadence, and a mid-session OS toggle takes effect on the very next frame
+ *  instead of needing a `matchMedia` change listener this file has no other precedent for (every
+ *  other `prefers-reduced-motion` read in this codebase is pure CSS — frontend-style §9). */
+function prefersReducedMotion(): boolean {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    : false;
 }
 
 interface DrawnBox {
@@ -320,6 +339,18 @@ interface TierLabelCandidate {
  * anything older than `DETECTION_STALE_CUTOFF_SECONDS` is not drawn at all (staleness honesty,
  * docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.4 — a paused feed must never look like a live one).
  *
+ * **F2 digital crop-follow** (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1 item 4/D10, wave W6, off by
+ * default via {@link cropFollowEnabled}): a client-side-only re-frame of the *view* toward whichever
+ * box {@link lockedTrackId} is bound to — the same pixels, cropped and CSS-scaled, no camera moves and
+ * no extra detail created. `crop-follow-logic.ts` owns the pure box→transform math (deadband, eased
+ * pan/zoom, edge clamping); `redrawOverlay` threads the resulting transform through every per-box
+ * CSS-pixel computation (D10's four named sites) by substituting an *effective*, already-transformed
+ * content rect for `letterboxRect`'s plain one everywhere box math reads it — including `drawnBoxes`,
+ * which is why the click hit-test (`onOverlayClick`) still lands on the right box at ×2 with no
+ * coordinate-inversion code of its own. Drops to the identity transform the instant there's no
+ * confirmed box for the locked track (no lock, `REQUESTING`, or `LOST`) — re-framing on a stale/frozen
+ * box would misstate where the camera is actually looking.
+ *
  * **Always a dark video surface, wherever it's mounted** (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/W4): the
  * `.frame` host carries `.surface-dark` itself rather than depending on an ambient enclave, because
  * this component is reused far outside the three pages that own their own enclave root (`Fly`
@@ -409,6 +440,20 @@ export class Player {
    * in this file's tier code needed to change for that.
    */
   readonly lostBox = input<BoundingBox | null>(null);
+
+  /**
+   * F2 digital crop-follow's own per-viewer toggle (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1 item
+   * 4, wave W6) — `SettingsStore.cropFollowEnabled`, passed straight through, host-owned like every
+   * other input on this component. Defaults `false`: a host that never binds this (asset-detail,
+   * Command's asset panel, replay, or any Fly/Live/Wall build predating this wave's own host wiring)
+   * gets the exact identity behavior this file had before crop-follow existed — no visual change, not
+   * a degraded one. Only ever has an effect while {@link lockedTrackId} is non-zero and this redraw's
+   * detections actually contain that track's box (`redrawOverlay`'s own crop-follow step) — enabling
+   * the setting with no lock held, or during `REQUESTING`/`LOST` (no confirmed box yet/any more),
+   * quietly does nothing rather than zooming into empty video, per `crop-follow-logic.ts#stepCropFollow`'s
+   * own `targetBox === null` rule.
+   */
+  readonly cropFollowEnabled = input<boolean>(false);
 
   /**
    * The label currently hovered on the detections strip's remote-control chips
@@ -593,6 +638,16 @@ export class Player {
    * `drawnBoxes`'s own "redraw-loop-private bookkeeping" posture.
    */
   private labelSlotByKey: ReadonlyMap<string, LabelSlot> = new Map();
+
+  /** F2 crop-follow's own eased pan/zoom state (wave W6) — a plain mutable field, not a signal,
+   *  same "redraw-loop-private bookkeeping" posture as {@link labelSlotByKey}/{@link drawnBoxes};
+   *  nothing in the template reads it, only `redrawOverlay`'s own step. Reset to identity in
+   *  {@link teardown} so a fresh `src`/`whepUrl` (a genuinely different stream) never carries over a
+   *  previous stream's pan/zoom. */
+  private cropFollowState: CropFollowState = IDENTITY_CROP_FOLLOW_STATE;
+  /** Wall-clock instant of the previous crop-follow step, for `stepCropFollow`'s own `dtMs` — `null`
+   *  until the first step this attach, matching that step's own "no ease on the first call" rule. */
+  private lastCropFollowStepAt: number | null = null;
 
   protected readonly overlayInteractive = computed(
     () =>
@@ -2170,18 +2225,48 @@ export class Player {
     const content = this.letterboxRect(width, height, video.videoWidth, video.videoHeight);
 
     const results = this.detections();
-    if (shouldDrawOverlay(this.boxesMode(), results.length > 0)) {
-      const result = selectDetectionResult(results, Date.now(), this.overlaySyncLatency(), DEFAULT_SLACK_BATCHES);
-      if (result) {
-        this.drawDetections(ctx, content, results, result);
-      }
+    const now = Date.now();
+    const result = selectDetectionResult(results, now, this.overlaySyncLatency(), DEFAULT_SLACK_BATCHES);
+
+    // F2 crop-follow's own step (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1 item 4/D10, wave W6) —
+    // deliberately independent of `shouldDrawOverlay`'s declutter gate below, for the identical reason
+    // the lost-box pass above it is: hiding the box overlay must not also blind the crop to the lock
+    // it's tracking. Reads the un-projected `result` (the same batch `drawDetections` will itself
+    // re-select) rather than that method's own sticky-labeled/extrapolated `displayed` list — a raw
+    // box is good enough to aim a damped crop at, and it lets this step run *before* `drawDetections`
+    // needs the already-transformed content rect it produces. `lockedTrackId` reads `0` in `LOST` too
+    // (the same per-frame fact `tierAlphaPercent`'s lock-dims-rest rule already relies on), so
+    // `followedBox` is naturally `null` in exactly the states `cropFollowEnabled`'s own doc comment
+    // names (no lock, `REQUESTING`, `LOST`) — no separate `follow.state` read needed here.
+    const lockedTrackId = this.lockedTrackId();
+    const followedBox =
+      lockedTrackId !== 0 ? (result?.detections.find((d) => d.track?.id === lockedTrackId)?.box ?? null) : null;
+    const dtMs = this.lastCropFollowStepAt === null ? 0 : now - this.lastCropFollowStepAt;
+    this.lastCropFollowStepAt = now;
+    this.cropFollowState = stepCropFollow(this.cropFollowState, {
+      enabled: this.cropFollowEnabled(),
+      targetBox: followedBox,
+      dtMs,
+      reducedMotion: prefersReducedMotion(),
+    });
+    // D10 — every per-box CSS-pixel computation below (`drawDetections`'s own box-rect loop and
+    // `drawTrails`, `drawLostBox`) reads `content` **through this transform**, never the plain
+    // `letterboxRect` output directly, so a click's hit-test (`onOverlayMouseMove`/`onOverlayClick`,
+    // both reading back `drawnBoxes`) lands on the same box the eye sees at ×2 with no separate
+    // coordinate inversion of its own — see `crop-follow-logic.ts`'s own doc comment for why that's
+    // the entire integration. At the identity transform (no lock, or the setting is off) this equals
+    // `content` in value, so every existing caller/test is unaffected.
+    const effectiveContent = applyCropFollowToContentRect(content, cropFollowTransform(this.cropFollowState));
+
+    if (shouldDrawOverlay(this.boxesMode(), results.length > 0) && result) {
+      this.drawDetections(ctx, effectiveContent, results, result);
     }
 
     // D3's own draw pass — independent of the block above (see this method's own comment on why),
     // so a `LOST` placeholder still appears even while `shouldDrawOverlay` says "nothing to draw".
     const lostBox = this.lostBox();
     if (lostBox !== null) {
-      this.drawLostBox(ctx, content, lostBox);
+      this.drawLostBox(ctx, effectiveContent, lostBox);
     }
   }
 
@@ -2626,5 +2711,9 @@ export class Player {
     this.message.set(null);
     this.hoveredDetection.set(null);
     this.drawnBoxes = [];
+    // A genuinely different stream (fresh `src`/`whepUrl`) must never inherit a previous stream's
+    // pan/zoom — see this field's own doc comment.
+    this.cropFollowState = IDENTITY_CROP_FOLLOW_STATE;
+    this.lastCropFollowStepAt = null;
   }
 }
