@@ -1,6 +1,6 @@
 # TRACK-FOLLOW — the operator picks a target, and the system says what it is doing with it
 
-Status: **ACTIVE, nothing built.** Branch `feat/track-follow`, sub-branch per wave.
+Status: **BUILT + verified 2026-09-05** (close-out §6). Branch `feat/track-follow`, unmerged.
 Owner ask (2026-09-04): *"an operator clicks a detected object and the system follows it"* — thought
 through as a whole flow from the user's seat before any implementation.
 

@@ -1,6 +1,6 @@
 # CREW-CONTROL — two seats on one aircraft: the pilot flies, the crew works the camera
 
-Status: **ACTIVE, nothing built.** Branch `feat/crew-control`, sub-branch per wave · owner request
+Status: **BUILT + live-verified 2026-09-05** (close-out §7). Branch `feat/crew-control`, unmerged · owner request
 2026-09-04: *"two people operating one drone — the pilot flies, a crew member owns the camera/CV.
 Think the whole flow from the user's perspective before any implementation."*
 
