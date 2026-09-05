@@ -597,8 +597,8 @@ describe('cv-control-panel-logic', () => {
       expect(buildFollowLockPatch(7)).toEqual({ tracking: { mode: 'FOLLOW', lock: { trackId: 7 } } });
     });
 
-    it('buildReleaseLockPatch leaves mode untouched', () => {
-      expect(buildReleaseLockPatch()).toEqual({ tracking: { lock: { release: true } } });
+    it('buildReleaseLockPatch returns the stream to ASSOCIATE with the release (W7 live find: FOLLOW without a lock has no track identities, stranding every re-lock gesture)', () => {
+      expect(buildReleaseLockPatch()).toEqual({ tracking: { mode: 'ASSOCIATE', lock: { release: true } } });
     });
   });
 

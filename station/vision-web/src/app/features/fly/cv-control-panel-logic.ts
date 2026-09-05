@@ -648,10 +648,15 @@ export function buildFollowLockPatch(trackId: number): UpdateStreamConfigRequest
   return { tracking: { mode: 'FOLLOW', lock: { trackId } } };
 }
 
-/** The "release" chip's own patch body — drops the current lock, falling back to the mode's own
- *  policy (docs/plans/done/TRACKING-PLAN.md §4.A's `TargetLock#release`). Leaves `mode` untouched. */
+/** The "release" chip's own patch body — drops the current lock AND returns the stream to
+ *  `ASSOCIATE`. Leaving `mode: FOLLOW` after a release (the pre-TRACK-FOLLOW behavior) strands the
+ *  operator: cv-service's FOLLOW session without a lock emits detections with no track identities
+ *  and an empty tracks list, so the click-to-follow hit test (which needs `track.id`) and the
+ *  target list both go permanently dead — found live in TRACK-FOLLOW wave W7, where the only way
+ *  back to a lock was an API-level mode flip no UI offers. `ASSOCIATE` is the mode every stream
+ *  that could ever produce a lock was in before `buildFollowLockPatch` flipped it. */
 export function buildReleaseLockPatch(): UpdateStreamConfigRequest {
-  return { tracking: { lock: { release: true } } };
+  return { tracking: { mode: 'ASSOCIATE', lock: { release: true } } };
 }
 
 // --- Capability ladder (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md, wave J4) ---------------------------
