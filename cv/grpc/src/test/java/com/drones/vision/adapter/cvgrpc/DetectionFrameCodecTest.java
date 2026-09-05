@@ -280,6 +280,43 @@ class DetectionFrameCodecTest {
     }
 
     @Test
+    void aRecoveredDetectionRoundTripsIdentityConfidenceAndDormantMillis() {
+        // docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1/W1, D11: identity_confidence (field 10) and
+        // dormant_millis (field 11) are cv-service's own statement that this bind came back from
+        // follow memory -- decoded verbatim, never re-derived from lockedTrackId bouncing.
+        com.drones.vision.proto.v1.Detection wireDetection = detectionBuilder()
+                .setTrackId(3)
+                .setTrackState(com.drones.vision.proto.v1.TrackState.TRACK_STATE_CONFIRMED)
+                .setSource(com.drones.vision.proto.v1.DetectionSource.DETECTION_SOURCE_TRACKER)
+                .setIdentityConfidence(0.71f)
+                .setDormantMillis(8200)
+                .build();
+        DetectionResponse response = responseBuilder().addDetections(wireDetection).build();
+
+        TrackRef track = DetectionFrameCodec.decode(STREAM_ID, response).detections().get(0).track();
+
+        assertEquals(0.71, track.identityConfidence(), 1e-6);
+        assertEquals(8200L, track.dormantMillis());
+    }
+
+    @Test
+    void aNonRecoveredDetectionDecodesIdentityConfidenceAndDormantMillisAsZero() {
+        // The common case, and a pre-L4 server's only possible shape: fields 10/11 never touched on
+        // the wire, so the honest answer is "not a recovery" -- 0/0.0, never guessed otherwise.
+        com.drones.vision.proto.v1.Detection wireDetection = detectionBuilder()
+                .setTrackId(3)
+                .setTrackState(com.drones.vision.proto.v1.TrackState.TRACK_STATE_CONFIRMED)
+                .setSource(com.drones.vision.proto.v1.DetectionSource.DETECTION_SOURCE_DETECTOR)
+                .build();
+        DetectionResponse response = responseBuilder().addDetections(wireDetection).build();
+
+        TrackRef track = DetectionFrameCodec.decode(STREAM_ID, response).detections().get(0).track();
+
+        assertEquals(0.0, track.identityConfidence());
+        assertEquals(0L, track.dormantMillis());
+    }
+
+    @Test
     void unspecifiedTrackStateOnATrackedDetectionYieldsNoTrackRefRatherThanAGuess() {
         com.drones.vision.proto.v1.Detection wireDetection = detectionBuilder()
                 .setTrackId(9)

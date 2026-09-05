@@ -82,8 +82,48 @@ class TrackRefTest {
 
     @Test
     void acceptsAnExplicitlyReupdatedTrack() {
-        TrackRef ref = new TrackRef(7L, TrackState.CONFIRMED, DetectionSource.TRACKER, 0.0, 0.0, 5, true);
+        TrackRef ref = new TrackRef(7L, TrackState.CONFIRMED, DetectionSource.TRACKER, 0.0, 0.0, 5, true, 0.0, 0L);
 
         assertTrue(ref.reupdated());
+    }
+
+    @Test
+    void sixArgConvenienceConstructorDefaultsRecoveryFactsToZero() {
+        TrackRef ref = new TrackRef(7L, TrackState.COASTING, DetectionSource.TRACKER, 0.012, -0.001, 143);
+
+        assertEquals(0.0, ref.identityConfidence());
+        assertEquals(0L, ref.dormantMillis());
+    }
+
+    @Test
+    void threeArgConvenienceConstructorDefaultsRecoveryFactsToZero() {
+        TrackRef ref = new TrackRef(1L, TrackState.TENTATIVE, DetectionSource.TRACKER);
+
+        assertEquals(0.0, ref.identityConfidence());
+        assertEquals(0L, ref.dormantMillis());
+    }
+
+    @Test
+    void acceptsARecoveredTrackWithIdentityConfidenceAndDormantMillis() {
+        TrackRef ref = new TrackRef(7L, TrackState.CONFIRMED, DetectionSource.TRACKER, 0.0, 0.0, 5, true, 0.71, 8200L);
+
+        assertEquals(0.71, ref.identityConfidence());
+        assertEquals(8200L, ref.dormantMillis());
+    }
+
+    @Test
+    void rejectsIdentityConfidenceOutsideZeroToOne() {
+        assertThrows(IllegalArgumentException.class, () -> new TrackRef(
+                1L, TrackState.CONFIRMED, DetectionSource.DETECTOR, 0.0, 0.0, 0, false, -0.01, 0L));
+        assertThrows(IllegalArgumentException.class, () -> new TrackRef(
+                1L, TrackState.CONFIRMED, DetectionSource.DETECTOR, 0.0, 0.0, 0, false, 1.01, 0L));
+        assertThrows(IllegalArgumentException.class, () -> new TrackRef(
+                1L, TrackState.CONFIRMED, DetectionSource.DETECTOR, 0.0, 0.0, 0, false, Double.NaN, 0L));
+    }
+
+    @Test
+    void rejectsNegativeDormantMillis() {
+        assertThrows(IllegalArgumentException.class, () -> new TrackRef(
+                1L, TrackState.CONFIRMED, DetectionSource.DETECTOR, 0.0, 0.0, 0, false, 0.0, -1L));
     }
 }

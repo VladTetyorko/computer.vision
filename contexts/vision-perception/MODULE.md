@@ -92,7 +92,7 @@ implementation; commands/read-models are top-level records (`.claude/skills/java
 - `TrackingCapability(int levelServed, String reason)` — what the capability ladder **actually served** vs. `capabilityLevel`'s requested ceiling; `levelServed` [1,5], never the `0` sentinel; `reason` never null, `""`=served as requested; `levelServed` always ≤ requested
 - `TrackingMode` enum — `OFF | ASSOCIATE | FOLLOW`
 - `TrackingTelemetry(boolean detectorRan, DetectorReason reason, Duration trackerLatency, String engineId, long lockedTrackId, Duration detectionLag, Duration reupdateLatency, int reupdatedTracks, TrackingCapability capability)` — per-**frame** tracking facts; `reason` non-null iff `detectorRan`; `lockedTrackId`≥0 (0=none); `detectionLag`/`reupdateLatency` non-null `Duration`s, `ZERO`=unknown; `capability` nullable = pre-V3 server reported no level; 5-arg convenience ctor defaults the last four
-- `TrackRef(long trackId, TrackState state, DetectionSource source, double velocityX, double velocityY, int ageFrames, boolean reupdated)` — per-detection track facts; `trackId`≥1 (0 is the wire's untracked sentinel — an untracked `Detection` carries `track=null`); `velocityX`/`velocityY` finite, normalized frame-widths/heights per second; `reupdated` = this track's gap was ORU-reconstructed this frame; 3-/6-arg convenience ctors
+- `TrackRef(long trackId, TrackState state, DetectionSource source, double velocityX, double velocityY, int ageFrames, boolean reupdated, double identityConfidence, long dormantMillis)` — per-detection track facts; `trackId`≥1 (0 is the wire's untracked sentinel — an untracked `Detection` carries `track=null`); `velocityX`/`velocityY` finite, normalized frame-widths/heights per second; `reupdated` = this track's gap was ORU-reconstructed this frame; `identityConfidence` [0,1], `>0` ⟺ this bind was recovered from cv-service's L4 follow memory at that score, `0` = a fresh acquisition (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1/W1 — D11); `dormantMillis`≥0, how long the identity was dormant before recovery, `0` = not a recovery; 3-/6-arg convenience ctors, both defaulting `reupdated=false` and the two recovery fields to `0`/`0.0` (a fresh, unrecovered track — the honest answer, not a guess)
 - `TrackState` enum — `TENTATIVE | CONFIRMED | COASTING | LOST`
 - `VideoFrame(StreamId streamId, long sequence, Instant capturedAt, int width, int height, PixelFormat format, ByteBuffer data)` — `sequence`≥0, width/height>0; ctor stores `data.asReadOnlyBuffer()`; `data()` returns a fresh `duplicate()` each call
 
@@ -286,6 +286,7 @@ implementation; commands/read-models are top-level records (`.claude/skills/java
 - **`DefaultCvProfileService#effective`/`#coverage` take `platformDefault` as an explicit parameter, not a wire field** — this module's application layer cannot read `@ConfigurationProperties`; the caller (controller/wiring layer) must assemble it exactly as `StreamDetectionSupport` does for `start` today. A W5 controller that forgets this will NPE on `Objects.requireNonNull`, not silently invent a default.
 - **`CvProfileService#fork` has no dedicated endpoint in the frozen §5.2 wire contract** — built because the W2 task brief asked for it explicitly as a service method; W5 must decide whether to add `POST /api/cv/profiles/fork` or have the client do a plain copy-then-`POST /api/cv/profiles`.
 - **`CvProfile#groupId` is `null` if and only if `builtIn` is `true`** — the compact constructor enforces both directions. A future "seed a built-in scoped to one group" feature is not representable with this record as-is; it would need a deliberate model change, not a validation relaxation.
+- **`TrackRef#identityConfidence`/`#dormantMillis` (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1/W1) have no reader in this module yet** — `cv/grpc`'s `DetectionFrameCodec` decodes them from the wire (W1), but nothing in `application.pipeline` consults them yet; `TrackBook`/`TrackingStatsWindow` still only read the fields they read before this wave. The follow state machine that turns "a bind's `identityConfidence > 0`" into "this is a re-acquisition, not a loss" is `FollowTracker`, wave W2 — do not assume a recovery is visible anywhere above `Detection.track()` until that wave lands.
 
 ## Status
 `docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md` wave Z1 (`engage` opens telemetry
@@ -400,3 +401,28 @@ trailing `StreamStateObserver.NOOP` argument — no behavior change for any of t
 `ApplicationServiceWiring`, which constructs `DefaultStreamServiceSettings` directly, will not compile
 until a later wave supplies a `StreamStateObserver` argument (`NOOP` is the correct value until a real
 consumer exists) — out of this wave's scope.**
+
+`docs/plans/active/TRACK-FOLLOW-PLAN.md` wave W1 (2026-09-05) is **done here**: `TrackRef`'s
+canonical constructor grew from 7 to 9 args, appending `double identityConfidence`/
+`long dormantMillis` (D11 — the two wire facts that prove a bound track was recovered from
+cv-service's L4 follow memory rather than freshly acquired; see the API-surface entry and the new
+Gotchas entry above). Both existing convenience constructors (3-/6-arg) keep their arity and now
+default the two new fields to `0.0`/`0` — every pre-existing call site in this module compiles and
+behaves unchanged. `cv/grpc`'s `DetectionFrameCodec#toTrackRef` (this plan's own W1 scope, not this
+module's) is the only production reader; nothing in `application.pipeline` consults the two new
+fields yet (see Gotchas) — that is wave W2's `FollowTracker`. `./mvnw -B -pl contexts/vision-perception
+test` — 665 tests, all green (`TrackRefTest` +6: `sixArgConvenienceConstructorDefaultsRecoveryFactsToZero`,
+`threeArgConvenienceConstructorDefaultsRecoveryFactsToZero`,
+`acceptsARecoveredTrackWithIdentityConfidenceAndDormantMillis`,
+`rejectsIdentityConfidenceOutsideZeroToOne`, `rejectsNegativeDormantMillis`, plus the existing
+`acceptsAnExplicitlyReupdatedTrack` widened to the new 9-arg canonical form). **Blast radius, as
+surveyed by the plan and confirmed here**: of the ten `new TrackRef(...)` call sites across
+`vision-perception`/`cv/grpc`/`station/vision-api`/`storage/persistence`, exactly **two** used the
+old 7-arg canonical form — `DetectionFrameCodec.java:419` (updated as part of this wave, see
+`cv/grpc/MODULE.md`) and, inside `StreamControllerTest.java`, **two** call sites (lines ~1176 and
+~1381 as the file stands today), both widened to 9-arg here. The plan's own grounding sweep named
+only one `StreamControllerTest` line (`:1164`, since drifted to `:1176` by unrelated edits) and
+missed the second (`:1381`) — flagged here since a build relying on the plan's count alone would
+have gone red on that second site. Every other call site (3-/6-arg convenience) was left untouched,
+including `StreamControllerTest.java:1343` and `storage/persistence`'s
+`PostgresDockerIntegrationTest.java:1454`.

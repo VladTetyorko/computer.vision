@@ -1173,7 +1173,7 @@ class StreamControllerTest {
         StreamId streamId = StreamId.random();
         Detection detection = new Detection("car", 0.82, new BoundingBox(0.31, 0.44, 0.09, 0.07),
                 new ModelRef("yolo26n.pt", "latest"),
-                new TrackRef(7L, TrackState.CONFIRMED, DetectionSource.TRACKER, 0.012, -0.001, 143, true));
+                new TrackRef(7L, TrackState.CONFIRMED, DetectionSource.TRACKER, 0.012, -0.001, 143, true, 0.0, 0L));
         Instant firstSeen = Instant.parse("2026-08-11T10:22:31.104Z");
         Instant lastSeen = Instant.parse("2026-08-11T10:22:40.671Z");
         when(streamService.tracks(streamId))
@@ -1378,7 +1378,7 @@ class StreamControllerTest {
         StreamId streamId = StreamId.random();
         Detection tracked = new Detection("person", 0.9, new BoundingBox(0.1, 0.2, 0.3, 0.4),
                 new ModelRef("yolo26n.pt", "latest"),
-                new TrackRef(3L, TrackState.COASTING, DetectionSource.TRACKER, 0.01, -0.02, 12, true));
+                new TrackRef(3L, TrackState.COASTING, DetectionSource.TRACKER, 0.01, -0.02, 12, true, 0.0, 0L));
         DetectionResult result = new DetectionResult(streamId, 44, Instant.parse("2026-08-11T10:00:02Z"),
                 List.of(tracked), Duration.ofMillis(7),
                 new TrackingTelemetry(true, DetectorReason.CADENCE, Duration.ofNanos(400_000), "lk", 3L,

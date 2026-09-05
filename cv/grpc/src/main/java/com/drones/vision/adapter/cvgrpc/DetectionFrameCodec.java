@@ -72,7 +72,7 @@ import java.util.List;
  * {@code redetectIouPercent} (an {@code int} percent) converts to the wire's {@code float} ratio via
  * {@code / 100f}; a present {@link TrackingConfig#lock()} maps to a wire {@code TargetLock}, absent
  * leaves the wire {@code lock} field unset. {@link #decode} maps the wire's per-detection track fields
- * (4-9) onto {@link Detection#track()} and — the headline requirement of this class, not an
+ * (4-11, plus {@code reupdated} field 14) onto {@link Detection#track()} and — the headline requirement of this class, not an
  * afterthought (TRACKING-ORCHESTRATION.md &sect;5.2) — the response's per-<em>frame</em> fields
  * ({@code detector_ran}/{@code detector_reason}/{@code tracker_millis}/{@code tracker_engine_id}/
  * {@code locked_track_id}) onto {@link DetectionResult#tracking()} as a {@link TrackingTelemetry}.
@@ -393,13 +393,16 @@ final class DetectionFrameCodec {
     }
 
     /**
-     * Maps a wire {@code Detection}'s track fields (4-9, plus {@code reupdated} field 14,
-     * docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md &sect;2) onto a {@link TrackRef}, or {@code null} if
+     * Maps a wire {@code Detection}'s track fields (4-9, {@code identity_confidence}/
+     * {@code dormant_millis} fields 10-11, plus {@code reupdated} field 14,
+     * docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1/W1) onto a {@link TrackRef}, or {@code null} if
      * untracked. {@code track_id == 0} is the wire's untracked sentinel and short-circuits everything
      * else — it never reaches {@link TrackRef}'s constructor as a guessed {@code trackId}, regardless
      * of what the other track fields say (docs/extracts/TRACKING-ORCHESTRATION.md §6 rule 2). An {@code
      * UNSPECIFIED}/unrecognized {@code TrackState} or {@code DetectionSource} on an otherwise-tracked
-     * detection decodes defensively to {@code null} too — never a guessed state/source.
+     * detection decodes defensively to {@code null} too — never a guessed state/source. A pre-L4
+     * server (or any response that never populates fields 10/11) sends proto zeros for both, which
+     * decode honestly as "not a recovery" — never fabricated.
      */
     private static TrackRef toTrackRef(com.drones.vision.proto.v1.Detection wire) {
         if (wire.getTrackId() == 0) {
@@ -414,7 +417,7 @@ final class DetectionFrameCodec {
             return null;
         }
         return new TrackRef(wire.getTrackId(), state, source, wire.getVelocityX(), wire.getVelocityY(),
-                wire.getTrackAgeFrames(), wire.getReupdated());
+                wire.getTrackAgeFrames(), wire.getReupdated(), wire.getIdentityConfidence(), wire.getDormantMillis());
     }
 
     private static ImageEncoding toImageEncoding(PixelFormat format) {
