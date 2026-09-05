@@ -97,7 +97,16 @@ Ranked by [`PLATFORM-AUDIT-FINDINGS.md`](active/PLATFORM-AUDIT-FINDINGS.md), the
 [`ARCHITECTURE-AUDIT-2026-08-26.md`](active/ARCHITECTURE-AUDIT-2026-08-26.md) — domain, module
 structure, user↔asset access, session flow and service topology, with recommendations R1–R10. It
 ranks *how the system is built*, where PLATFORM-AUDIT ranks *what it can do*; the two queues are
-independent. Its R1 (delete the N-1 constructor convention), R2 (`engage`/`disengage` — the same
+independent.
+
+**A third, flow-first survey joins them (2026-09-05):**
+[`E2E-FLOW-AUDIT-2026-09-05.md`](active/E2E-FLOW-AUDIT-2026-09-05.md) — five end-to-end flows walked
+across all 26 modules (add-a-camera→video · controller→drone · frame→detection→follow→trained model ·
+who-may-do-what · session→telemetry→map→replay), with a domain map and 12 ranked proposals. Where the
+other two rank structure and capability, this one ranks **what a user can actually reach**. Its headline
+findings: seven built features ship dark in the deployed config; manual control is capped at **one RC
+session per JVM fleet-wide** (verified — a single field on a singleton, named unfixed by four prior
+plans); and `ARCHITECTURE.md` §2/§3/§6 have drifted from what shipped. Recommended first cycle: U1+S1+N2. Its R1 (delete the N-1 constructor convention), R2 (`engage`/`disengage` — the same
 work as row **S** below, **DONE 2026-08-26**, wave R2, see the R2 row in that doc's own §9 table and
 `SOURCE-ONBOARDING-CONTEXT.md` §12) and R5 (no cross-context repository-port reads, a precondition
 for DOMAIN-SEPARATION W2) are the three that gate other work.
