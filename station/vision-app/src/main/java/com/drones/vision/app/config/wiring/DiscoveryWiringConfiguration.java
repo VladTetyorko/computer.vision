@@ -7,15 +7,21 @@ import com.drones.vision.adapter.discovery.mediamtx.MediamtxScannerSettings;
 import com.drones.vision.adapter.discovery.onvif.OnvifWsDiscoveryScanner;
 import com.drones.vision.adapter.discovery.v4l2.V4l2Scanner;
 import com.drones.vision.adapter.mavlink.MavlinkHeartbeatScanner;
+import com.drones.vision.adapter.mavlink.MavlinkIntakeStatus;
 import com.drones.vision.adapter.mavlink.MavlinkSettings;
 import com.drones.vision.adapter.mavlink.MavlinkTelemetrySource;
+import com.drones.vision.api.dto.TelemetryIntakeResponse;
+import com.drones.vision.api.dto.VideoIntakeResponse;
+import com.drones.vision.api.support.DiscoveryStatusFacts;
 import com.drones.vision.app.config.properties.VisionApplicationProperties;
 import com.drones.vision.app.config.properties.VisionDiscoveryProperties;
 import com.drones.vision.app.config.properties.VisionMavlinkProperties;
 import com.drones.vision.app.config.properties.VisionPublishProperties;
+import com.drones.vision.app.discovery.DiscoveryInboxRunner;
 import com.drones.vision.warehouse.application.discovery.DefaultDiscoveryService;
 import com.drones.vision.warehouse.application.discovery.DiscoveryService;
 import com.drones.vision.warehouse.domain.port.DeviceDiscoveryPort;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -23,7 +29,9 @@ import org.springframework.context.annotation.Configuration;
 
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
+import java.util.function.Supplier;
 
 /**
  * Wires {@code adapter-discovery}'s scanners and the {@link
@@ -184,5 +192,84 @@ public class DiscoveryWiringConfiguration {
     @Bean
     public int mavlinkPort(VisionDiscoveryProperties properties) {
         return properties.mavlinkPort();
+    }
+
+    /**
+     * The mediamtx RTSP publish port {@code vision-api}'s {@code SystemNetworkController} needs for
+     * {@code GET /api/system/network}'s {@code videoPushPort} field (docs/plans/active/
+     * SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C3) — the same plain-bean crossing {@link #mavlinkPort}
+     * establishes, boxed ({@code Integer}, not {@code int}) since it is absent, not a fabricated
+     * {@code 0}, when mediamtx publish is unconfigured. Gated by the same {@code
+     * vision.publish.enabled} flag {@link VisionPublishProperties#enabled()} reads, so the bean is
+     * genuinely absent (not present-with-a-null-value, which a required {@code @Autowired}
+     * constructor parameter elsewhere cannot accept) rather than returning {@code null} from an
+     * always-registered bean method — {@code SystemNetworkController} takes this through an {@link
+     * org.springframework.beans.factory.ObjectProvider} for exactly that reason.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "vision.publish", name = "enabled", havingValue = "true", matchIfMissing = true)
+    public Integer videoPushPort(VisionPublishProperties publishProperties) {
+        return publishProperties.mediamtx().rtspBase().getPort();
+    }
+
+    /**
+     * The mediamtx ingest path-name prefix {@code SystemNetworkController} needs for {@code GET
+     * /api/system/network}'s {@code videoPushPathPrefix} field — see {@link #videoPushPort} for why
+     * this bean is conditionally absent, not null-valued, when mediamtx publish is unconfigured.
+     */
+    @Bean
+    @ConditionalOnProperty(prefix = "vision.publish", name = "enabled", havingValue = "true", matchIfMissing = true)
+    public String videoPushPathPrefix(VisionDiscoveryProperties discoveryProperties) {
+        return discoveryProperties.mediamtx().pathPrefix();
+    }
+
+    /**
+     * The facts {@code vision-api}'s {@code DiscoveryStatusController} needs for {@code GET
+     * /api/discovery/status} (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C2) that
+     * module cannot compute itself — see {@link DiscoveryStatusFacts}'s own javadoc for why this
+     * crosses as a plain {@code Supplier} bean rather than a constructor dependency on {@code
+     * adapter-mavlink}/{@code adapter-discovery} directly.
+     *
+     * <p>{@code discoveryInboxRunner}/{@code mediamtxPathScanner} are both {@link ObjectProvider}
+     * because either bean may be conditionally absent ({@link VisionDiscoveryProperties.Inbox#enabled()}
+     * {@code false}, or {@code vision.discovery.enabled}/{@code vision.discovery.mediamtx.enabled}
+     * {@code false}) — an absent runner reports {@code lastSweepAt} as {@code null} (honestly: no
+     * sweep is running to have completed one); an absent scanner reports {@code readyPaths} as
+     * empty rather than fabricating a value the disabled scanner never produced.
+     */
+    @Bean
+    public Supplier<DiscoveryStatusFacts> discoveryStatusFacts(MavlinkTelemetrySource mavlinkTelemetrySource,
+                                                                VisionDiscoveryProperties properties,
+                                                                VisionPublishProperties publishProperties,
+                                                                ObjectProvider<DiscoveryInboxRunner> discoveryInboxRunner,
+                                                                ObjectProvider<MediamtxPathScanner> mediamtxPathScanner) {
+        return () -> {
+            DiscoveryInboxRunner runner = discoveryInboxRunner.getIfAvailable();
+            Instant lastSweepAt = runner == null ? null : runner.lastSweepAt();
+            MavlinkIntakeStatus intake = mavlinkTelemetrySource.intakeStatus(properties.mavlinkPort());
+            TelemetryIntakeResponse telemetryIntake = new TelemetryIntakeResponse(intake.bound(),
+                    intake.bindAddress(), intake.lobbyHeld(), intake.datagramsReceived(), intake.bytesReceived(),
+                    intake.lastDatagramAt(), intake.framesDecoded(), intake.unclaimedSysids(),
+                    intake.claimedSysids());
+            VideoIntakeResponse videoIntake = videoIntakeFacts(publishProperties, properties, mediamtxPathScanner);
+            return new DiscoveryStatusFacts(properties.inbox().sweepSeconds(), lastSweepAt, telemetryIntake,
+                    videoIntake);
+        };
+    }
+
+    private static VideoIntakeResponse videoIntakeFacts(VisionPublishProperties publishProperties,
+                                                          VisionDiscoveryProperties properties,
+                                                          ObjectProvider<MediamtxPathScanner> mediamtxPathScanner) {
+        if (!publishProperties.enabled()) {
+            return null;
+        }
+        int pushPort = publishProperties.mediamtx().rtspBase().getPort();
+        String pathPrefix = properties.mediamtx().pathPrefix();
+        MediamtxPathScanner scanner = mediamtxPathScanner.getIfAvailable();
+        List<String> readyPaths = scanner == null
+                ? List.of()
+                : scanner.scan(Duration.ofSeconds(properties.inbox().scanTimeoutSeconds())).stream()
+                        .map(device -> pathPrefix + device.name()).toList();
+        return new VideoIntakeResponse(pushPort, pathPrefix, readyPaths);
     }
 }

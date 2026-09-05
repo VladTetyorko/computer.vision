@@ -7,6 +7,7 @@ import com.drones.vision.api.dto.ErrorResponse;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.perception.application.device.ProbeFailedException;
 import com.drones.vision.perception.application.stream.UnsupportedProtocolException;
+import com.drones.vision.warehouse.application.discovery.DiscoveryCandidateAlreadyRegisteredException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -49,6 +50,10 @@ import java.util.NoSuchElementException;
  *       request, not a probe failure).</li>
  *   <li>{@link AssetImageController} throws {@link PayloadTooLargeException} when an uploaded
  *       image body exceeds the configured maximum — mapped to {@code 413}.</li>
+ *   <li>{@code DiscoveryInboxService.attach} throws {@link DiscoveryCandidateAlreadyRegisteredException}
+ *       when the candidate is already {@code REGISTERED} to a different asset — mapped to {@code
+ *       422}, sharing {@link ProbeFailedException}'s status (docs/plans/active/
+ *       SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C1).</li>
  * </ul>
  * {@code StreamService.stop} never throws — stopping an unknown/already
  * stopped stream is a documented no-op — so there is no 404 mapping for the
@@ -91,8 +96,14 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(new ErrorResponse("BAD_GATEWAY", ex.getMessage()));
     }
 
-    @ExceptionHandler(ProbeFailedException.class)
-    public ResponseEntity<ErrorResponse> handleProbeFailed(ProbeFailedException ex) {
+    /**
+     * {@link DiscoveryCandidateAlreadyRegisteredException} (docs/plans/active/
+     * SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C1) shares {@link ProbeFailedException}'s {@code 422}:
+     * a stale request against a candidate already resolved, not a malformed request or an ordinary
+     * conflict.
+     */
+    @ExceptionHandler({ProbeFailedException.class, DiscoveryCandidateAlreadyRegisteredException.class})
+    public ResponseEntity<ErrorResponse> handleProbeFailed(RuntimeException ex) {
         // UNPROCESSABLE_CONTENT, not the deprecated UNPROCESSABLE_ENTITY alias (Spring Framework 7) — same 422.
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_CONTENT)
                 .body(new ErrorResponse("UNPROCESSABLE_ENTITY", ex.getMessage()));

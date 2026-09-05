@@ -34,7 +34,7 @@ class LocalNetworkAddressesTest {
 
         List<NetworkAddressResponse> addresses = list(eth0);
 
-        assertEquals(List.of(new NetworkAddressResponse("192.168.1.42", "eth0")), addresses);
+        assertEquals(List.of(new NetworkAddressResponse("192.168.1.42", "eth0", "LAN")), addresses);
     }
 
     @Test
@@ -83,16 +83,46 @@ class LocalNetworkAddressesTest {
     }
 
     @Test
-    void listSortsByInterfaceNameThenAddress() throws Exception {
+    void listSortsByInterfaceNameThenAddressWithinTheSameKind() throws Exception {
         NetworkInterface wlan0 = interfaceNamed("wlan0", true, false, ipv4("192.168.0.10"));
         NetworkInterface eth0 = interfaceNamed("eth0", true, false, ipv4("192.168.0.30"), ipv4("192.168.0.20"));
 
         List<NetworkAddressResponse> addresses = list(wlan0, eth0);
 
         assertEquals(List.of(
-                new NetworkAddressResponse("192.168.0.20", "eth0"),
-                new NetworkAddressResponse("192.168.0.30", "eth0"),
-                new NetworkAddressResponse("192.168.0.10", "wlan0")), addresses);
+                new NetworkAddressResponse("192.168.0.20", "eth0", "LAN"),
+                new NetworkAddressResponse("192.168.0.30", "eth0", "LAN"),
+                new NetworkAddressResponse("192.168.0.10", "wlan0", "LAN")), addresses);
+    }
+
+    /**
+     * docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C3, D5: a virtual interface's
+     * (docker/br-/veth/virbr/tun/tap-prefixed) address is classified {@code "VIRTUAL"}.
+     */
+    @Test
+    void listClassifiesAKnownVirtualInterfacePrefixAsVirtual() throws Exception {
+        NetworkInterface docker0 = interfaceNamed("docker0", true, false, ipv4("172.17.0.1"));
+
+        List<NetworkAddressResponse> addresses = list(docker0);
+
+        assertEquals(List.of(new NetworkAddressResponse("172.17.0.1", "docker0", "VIRTUAL")), addresses);
+    }
+
+    /**
+     * docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C3, D5: sort order changed to
+     * kind (LAN first) &rarr; interfaceName &rarr; address — {@code "br-1234"} would sort before
+     * {@code "wlan0"} alphabetically, but LAN-before-VIRTUAL must win regardless.
+     */
+    @Test
+    void listSortsLanAddressesBeforeVirtualAddressesRegardlessOfInterfaceNameAlphabetically() throws Exception {
+        NetworkInterface bridge = interfaceNamed("br-1234", true, false, ipv4("172.18.0.1"));
+        NetworkInterface wlan0 = interfaceNamed("wlan0", true, false, ipv4("192.168.0.10"));
+
+        List<NetworkAddressResponse> addresses = list(bridge, wlan0);
+
+        assertEquals(List.of(
+                new NetworkAddressResponse("192.168.0.10", "wlan0", "LAN"),
+                new NetworkAddressResponse("172.18.0.1", "br-1234", "VIRTUAL")), addresses);
     }
 
     @Test
@@ -113,7 +143,7 @@ class LocalNetworkAddressesTest {
 
         List<NetworkAddressResponse> addresses = list(flaky, eth0);
 
-        assertEquals(List.of(new NetworkAddressResponse("192.168.1.1", "eth0")), addresses);
+        assertEquals(List.of(new NetworkAddressResponse("192.168.1.1", "eth0", "LAN")), addresses);
     }
 
     @Test

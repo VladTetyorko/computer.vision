@@ -9,12 +9,14 @@ import com.drones.vision.warehouse.application.discovery.DiscoveryService;
 import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * Turns discovery from "a scan button feeding a form" into a standing background sweep (docs/plans/active/
@@ -61,6 +63,7 @@ public final class DiscoveryInboxRunner implements AutoCloseable {
 
     private final AtomicBoolean started = new AtomicBoolean(false);
     private final AtomicBoolean closed = new AtomicBoolean(false);
+    private final AtomicReference<Instant> lastSweepAt = new AtomicReference<>();
 
     public DiscoveryInboxRunner(DiscoveryInboxService discoveryInboxService, DiscoveryService discoveryService,
                                  MavlinkTelemetrySource mavlinkTelemetrySource, VisionDiscoveryProperties properties) {
@@ -103,9 +106,25 @@ public final class DiscoveryInboxRunner implements AutoCloseable {
                 LOG.log(System.Logger.Level.INFO,
                         () -> "discovery-inbox sweep reported " + result.devices().size() + " candidate(s)");
             }
+            lastSweepAt.set(Instant.now());
         } catch (RuntimeException e) {
             LOG.log(System.Logger.Level.WARNING, "discovery-inbox sweep failed; will retry next cycle", e);
         }
+    }
+
+    /**
+     * When this runner last completed a sweep (the standing-lobby re-assert, the scan, and every
+     * {@link DiscoveryInboxService#report} call all finished without throwing) — {@code null} if
+     * none has completed yet, the {@code GET /api/discovery/status} shape's own {@code lastSweepAt}
+     * (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C2) absent-before-first-sweep
+     * contract. Deliberately not updated for a sweep that threw partway through — {@link
+     * #sweepSafely()}'s catch swallows the exception so the schedule keeps running, but this
+     * timestamp only ever reports a sweep that genuinely finished.
+     *
+     * @return the instant of the last completed sweep, or {@code null}
+     */
+    public Instant lastSweepAt() {
+        return lastSweepAt.get();
     }
 
     /** Idempotent. Stops the sweep loop. */

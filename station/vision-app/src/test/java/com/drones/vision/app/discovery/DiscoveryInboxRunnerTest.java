@@ -7,6 +7,7 @@ import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.warehouse.application.discovery.DiscoveryInboxService;
 import com.drones.vision.warehouse.application.discovery.DiscoveryScanResult;
 import com.drones.vision.warehouse.application.discovery.DiscoveryService;
+import com.drones.vision.warehouse.application.discovery.ReportOutcome;
 import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
 import com.drones.vision.warehouse.domain.model.DiscoveryCandidate;
 import com.drones.vision.warehouse.domain.model.DiscoveryCandidateId;
@@ -63,7 +64,7 @@ class DiscoveryInboxRunnerTest {
 
     private static VisionDiscoveryProperties properties(boolean lobbyEnabled) {
         return new VisionDiscoveryProperties(14_550, null, null, new VisionDiscoveryProperties.Lobby(lobbyEnabled),
-                new VisionDiscoveryProperties.Inbox(true, FAST_SWEEP_SECONDS, FAST_SWEEP_SECONDS), null);
+                new VisionDiscoveryProperties.Inbox(true, FAST_SWEEP_SECONDS, FAST_SWEEP_SECONDS), null, null);
     }
 
     private static DiscoveredDevice discoveredDevice() {
@@ -157,7 +158,9 @@ class DiscoveryInboxRunnerTest {
         DiscoveredDevice discovered = discoveredDevice();
         when(discoveryService.scan(any())).thenReturn(new DiscoveryScanResult(List.of(discovered), Set.of()));
         when(discoveryInboxService.report(discovered)).thenReturn(
-                DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(), discovered, Instant.now()));
+                new ReportOutcome(
+                        DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(), discovered, Instant.now()),
+                        true));
 
         DiscoveryInboxRunner runner = newRunner(discoveryInboxService, discoveryService, mavlinkTelemetrySource, true);
         runner.start();

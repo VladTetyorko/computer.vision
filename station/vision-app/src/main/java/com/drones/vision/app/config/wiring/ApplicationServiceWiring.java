@@ -237,6 +237,28 @@ public class ApplicationServiceWiring {
     }
 
     /**
+     * Selects the {@link StreamStateObserver} threaded into {@link DefaultStreamServiceSettings}
+     * (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C6) — not a seventh {@code
+     * *LiveUpdatePort} selector, since {@link LiveUpdateRegistry} implements no such port for this;
+     * it republishes the same {@code devices} snapshot {@link #fleetLiveUpdatePort}'s sibling
+     * {@code LiveUpdateRegistry#publishFleetChanged} already coalesces into on every asset/device/
+     * stream lifecycle change, here fired directly on a computed {@code StreamState} transition
+     * instead. Gated on both {@link VisionLiveProperties#enabled()} and {@link
+     * VisionLiveProperties.StreamStatePush#enabled()} (both default {@code true}) — with either
+     * off, {@link StreamStateObserver#NOOP} is used, exactly as every other disabled selector here
+     * falls back to a no-op rather than a {@code null} collaborator (CLAUDE.md rule 10).
+     */
+    @Bean
+    public StreamStateObserver streamStateObserver(VisionLiveProperties properties,
+                                                    @Qualifier("liveUpdateRegistry") ObjectProvider<LiveUpdateRegistry> registry) {
+        if (properties.enabled() && properties.streamStatePush().enabled()) {
+            LiveUpdateRegistry liveUpdateRegistry = registry.getObject();
+            return (streamId, from, to) -> liveUpdateRegistry.publishDevicesSnapshot();
+        }
+        return StreamStateObserver.NOOP;
+    }
+
+    /**
      * The stateful, watchdog-supervised RC-relay session service (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md
      * §2, R2) behind {@code ManualControlWebSocketHandler} (vision-api, component-scanned). {@code
      * manualControlPort} resolves to {@code TelemetryWiring#mavlinkManualControlSender}, the one
@@ -597,7 +619,8 @@ public class ApplicationServiceWiring {
                                         ObjectProvider<PulledDetectionPort> pulledDetectionPort,
                                         MediamtxLiveFrameGrabber mediamtxLiveFrameGrabber,
                                         ObjectProvider<DetectionDemandPort> detectionDemandPort,
-                                        CvProfileResolver cvProfileResolver) {
+                                        CvProfileResolver cvProfileResolver,
+                                        StreamStateObserver streamStateObserver) {
         Optional<PullDetectionSettings> pullDetectionSettings = cvProperties.pullEnabled()
                 ? Optional.of(new PullDetectionSettings(pulledDetectionPort.getObject(), cvProperties.pull().rtspBase()))
                 : Optional.empty();
@@ -606,7 +629,8 @@ public class ApplicationServiceWiring {
                 new DefaultStreamServiceSettings(Optional.of(usageTracker), Optional.of(detectionEventRepositoryPort),
                         Optional.of(detectionLiveUpdatePort),
                         streamPipelineSettings(applicationProperties, trackingProperties, cvProperties),
-                        pullDetectionSettings, Optional.ofNullable(detectionDemandPort.getIfAvailable())),
+                        pullDetectionSettings, Optional.ofNullable(detectionDemandPort.getIfAvailable()),
+                        streamStateObserver),
                 cvProfileResolver);
         if (publishProperties.sourceProxy().enabled()) {
             return new LiveFrameFallbackStreamService(defaultStreamService, mediamtxLiveFrameGrabber);

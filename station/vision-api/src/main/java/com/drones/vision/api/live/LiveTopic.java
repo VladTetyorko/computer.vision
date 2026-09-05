@@ -33,6 +33,9 @@ record LiveTopic(LiveTopicKind kind, AssetId assetId) {
     /** The always-on common-operational-picture topic (docs/plans/done/MAP-REWORK-PLAN.md §4.3 — see {@link LiveTopicKind#MAP}); the only topic whose delivery is filtered per connection. */
     static final LiveTopic MAP = new LiveTopic(LiveTopicKind.MAP, null);
 
+    /** The always-on discovery-inbox delta topic (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.2 C4 — see {@link LiveTopicKind#DISCOVERY}). */
+    static final LiveTopic DISCOVERY = new LiveTopic(LiveTopicKind.DISCOVERY, null);
+
     static LiveTopic telemetry(AssetId assetId) {
         return new LiveTopic(LiveTopicKind.TELEMETRY, assetId);
     }
@@ -79,6 +82,7 @@ record LiveTopic(LiveTopicKind kind, AssetId assetId) {
             case DEVICES -> DEVICES;
             case DETECTION_EVENTS -> DETECTION_EVENTS;
             case MAP -> MAP;
+            case DISCOVERY -> DISCOVERY;
             case TELEMETRY -> telemetry(requireAssetId(idPart, "telemetry"));
             case DETECTIONS -> detections(requireAssetId(idPart, "detections"));
             case GEO -> geo(requireAssetId(idPart, "geo"));

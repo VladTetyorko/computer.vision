@@ -9,6 +9,7 @@ import java.net.SocketException;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.stream.Stream;
 import com.drones.vision.api.controller.SystemNetworkController;
@@ -46,12 +47,14 @@ public final class LocalNetworkAddresses {
     }
 
     /**
-     * @return every site-local IPv4 address of an up, non-loopback interface on this host,
-     *         sorted by {@link NetworkAddressResponse#interfaceName()} then {@link
-     *         NetworkAddressResponse#address()}; empty — never throws — when nothing qualifies,
-     *         enumeration itself fails, or a single interface's own up/loopback status can't be
-     *         queried (per docs/plans/active/DRONE-INFRA-PLAN.md I-g's frozen contract: "no addresses" is a
-     *         valid, non-error result)
+     * @return every site-local IPv4 address of an up, non-loopback interface on this host, sorted
+     *         by {@link NetworkAddressResponse#kind()} (LAN before VIRTUAL — docs/plans/active/
+     *         SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C3, D5: a deliberate, un-flagged sort-order
+     *         change from the original interface-name-then-address order) then {@link
+     *         NetworkAddressResponse#interfaceName()} then {@link NetworkAddressResponse#address()};
+     *         empty — never throws — when nothing qualifies, enumeration itself fails, or a single
+     *         interface's own up/loopback status can't be queried (per docs/plans/active/
+     *         DRONE-INFRA-PLAN.md I-g's frozen contract: "no addresses" is a valid, non-error result)
      */
     public List<NetworkAddressResponse> list() {
         List<NetworkInterface> interfaces;
@@ -65,7 +68,8 @@ public final class LocalNetworkAddresses {
         return interfaces.stream()
                 .filter(LocalNetworkAddresses::isUpAndNotLoopback)
                 .flatMap(LocalNetworkAddresses::siteLocalIpv4Addresses)
-                .sorted(Comparator.comparing(NetworkAddressResponse::interfaceName)
+                .sorted(Comparator.comparing((NetworkAddressResponse r) -> Kind.valueOf(r.kind()))
+                        .thenComparing(NetworkAddressResponse::interfaceName)
                         .thenComparing(NetworkAddressResponse::address))
                 .toList();
     }
@@ -83,10 +87,46 @@ public final class LocalNetworkAddresses {
     }
 
     private static Stream<NetworkAddressResponse> siteLocalIpv4Addresses(NetworkInterface networkInterface) {
+        String kind = classify(networkInterface.getName()).name();
         return Collections.list(networkInterface.getInetAddresses()).stream()
                 .filter(Inet4Address.class::isInstance)
                 .filter(InetAddress::isSiteLocalAddress)
-                .map(address -> new NetworkAddressResponse(address.getHostAddress(), networkInterface.getName()));
+                .map(address -> new NetworkAddressResponse(address.getHostAddress(), networkInterface.getName(), kind));
+    }
+
+    /**
+     * Classifies purely from {@code interfaceName}'s prefix (docs/plans/active/
+     * SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C3) — no further heuristics (no MAC vendor lookup, no
+     * carrier/link-type inspection): a name starting with a known virtualization/container/tunnel
+     * prefix is {@link Kind#VIRTUAL}, everything else is {@link Kind#LAN}. {@link Kind#UNKNOWN} is
+     * reserved for a future ambiguous case; this classifier never returns it.
+     *
+     * @param interfaceName the OS-reported interface name to classify
+     * @return the classified kind
+     */
+    private static Kind classify(String interfaceName) {
+        String lower = interfaceName.toLowerCase(Locale.ROOT);
+        for (String prefix : VIRTUAL_PREFIXES) {
+            if (lower.startsWith(prefix)) {
+                return Kind.VIRTUAL;
+            }
+        }
+        return Kind.LAN;
+    }
+
+    /** Interface-name prefixes classified {@link Kind#VIRTUAL} — see {@link #classify(String)}. */
+    private static final List<String> VIRTUAL_PREFIXES = List.of("docker", "br-", "veth", "virbr", "tun", "tap");
+
+    /**
+     * {@link NetworkAddressResponse#kind()}'s parsed form, ordered LAN-before-VIRTUAL-before-UNKNOWN
+     * so {@link #list()}'s sort can key off {@link Enum#ordinal()} rather than string comparison
+     * (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C3, D5).
+     */
+    private enum Kind {
+        LAN,
+        VIRTUAL,
+        /** Reserved; {@link #classify(String)} never assigns this today. */
+        UNKNOWN
     }
 
     /** Throwing supplier of the raw candidate interface list — see class javadoc. */

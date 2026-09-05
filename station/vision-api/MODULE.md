@@ -15,7 +15,8 @@ vision-app depends on — see Gotchas)
 
 `controller/` (every `@RestController`, now including `AssetInventoryController`/
 `InventoryExportController` — WAREHOUSE-UX W3, `CvProfileController` — CV-SETTINGS W5,
-`DiscoveryInboxController` — ZERO-CONFIG-ONBOARDING Z2c) · `dto/` (wire
+`DiscoveryInboxController` — ZERO-CONFIG-ONBOARDING Z2c, `DiscoveryStatusController` —
+SOURCE-ONBOARDING-2 wave C) · `dto/` (wire
 records only, ~187 — house rule "zero DTO leakage": no domain type is ever serialized directly) ·
 `security/` (`CurrentUser`/
 `PrincipalResolver`/`StreamAccess`/`OpenByDesign` — the authorization seam, see Conventions) ·
@@ -23,7 +24,8 @@ records only, ~187 — house rule "zero DTO leakage": no domain type is ever ser
 `ws/` (`/ws/manual-control` raw `WebSocketHandler`) · `proxy/` (`HlsProxyController` — a pass-through
 edge owning no application service) · `ratelimit/` (`RateLimitFilter`/`TokenBucket`, per-principal
 `/api/**` token bucket) · `support/` (edge-local helpers: `SnapshotJpegEncoder`, `CapabilityParsing`,
-`DeviceOriginParsing`, `RemediationOrchestrator`, `VisionApiProperties`, `InventoryExportService` —
+`DeviceOriginParsing`, `RemediationOrchestrator`, `VisionApiProperties`, `DiscoveryStatusFacts` — the
+plain (non-DTO) crossing-seam payload behind `GET /api/discovery/status`, `InventoryExportService` —
 WAREHOUSE-UX W3, the hand-rolled CSV behind `GET /api/inventory/export`; `AssetRowFacts` — WAREHOUSE-UX
 W8, bundles the `firmware`/`totalFlightSeconds` cross-context joins `AssetController` needs, see
 Conventions) · `demo/` (property-gated
@@ -183,6 +185,9 @@ the full mechanism.
 | DiscoveryInboxController | GET | `/api/discovery/inbox` | `{candidates, sources}` envelope — every reported discovery candidate (newest-reported first) plus one health row per discovery mechanism (BK6/A3) | manageOrg |
 | DiscoveryInboxController | POST | `/api/discovery/inbox/{id}/register` | Register a candidate as a new asset | manageOrg (checked inside `DiscoveryInboxService#register`, ownership from `CurrentUser`, never the body — see Conventions) |
 | DiscoveryInboxController | POST | `/api/discovery/inbox/{id}/dismiss` | Dismiss a candidate (idempotent-in-effect: dismissing an already-dismissed candidate just re-stamps status) | manageOrg |
+| DiscoveryInboxController | POST | `/api/discovery/inbox/{id}/attach` | Atomically attach a candidate's suggested stream to an **existing** asset (`{"assetId":"..."}`) — 404 unknown candidate/out-of-scope asset, 409 no suggested stream or a duplicate stream, 422 candidate already `REGISTERED` to a different asset (SOURCE-ONBOARDING-2-PLAN.md §3.2 C1) | manageOrg |
+| DiscoveryInboxController | POST | `/api/discovery/inbox/{id}/restore` | Undo a dismiss — status back to `NEW`, `registeredAssetId` cleared (SOURCE-ONBOARDING-2-PLAN.md §3.2 C5) | manageOrg |
+| DiscoveryStatusController | GET | `/api/discovery/status` | Sweep cadence + telemetry/video intake facts + per-source health, for a live onboarding status panel (SOURCE-ONBOARDING-2-PLAN.md §3.2 C2 — "the most important endpoint in the plan") | manageOrg |
 | SimulationController | POST | `/api/simulations` | Start a synthetic (or video-fed) simulated asset | manageOrg |
 | SimulationController | DELETE | `/api/simulations/{assetId}` | Stop it (idempotent) | scope |
 | AuthController | POST | `/api/auth/login` | Session login (always-200 dev admin when auth disabled) | open |
@@ -208,7 +213,7 @@ the full mechanism.
 | AfterActionController | GET | `/api/assets/{assetId}/usages/{usageId}/after-action` | JSON manifest of the evidence package | scope + export authority (`AccessDeniedException`→403 if visible but not exportable) |
 | AfterActionController | GET | `/api/assets/{assetId}/usages/{usageId}/after-action/archive` | The ZIP archive, streamed (never buffered whole) | scope + export authority |
 | SystemStatusController | GET | `/api/system/status` | Subsystem health rollup; never errors | **unscoped** (ledger — deliberately: no secrets exposed) |
-| SystemNetworkController | GET | `/api/system/network` | Host's site-local IPv4 addresses | **unscoped** (ledger) |
+| SystemNetworkController | GET | `/api/system/network` | Host's site-local IPv4 addresses (each now carrying a `kind` — `LAN`/`VIRTUAL`/`UNKNOWN`, sorted kind-first) plus `mavlinkPort` and, when mediamtx publish is configured, `videoPushPort`/`videoPushPathPrefix` (SOURCE-ONBOARDING-2-PLAN.md §3.2 C3) | **unscoped** (ledger) |
 | DemoController | GET | `/api/demo` | Demo-button availability probe | **unscoped** (ledger); gated by `vision.demo.enabled` (default on) |
 | DemoController | POST | `/api/demo/seed` | Seed demo assets/users/streams/zones/marks; fault-tolerant (failures land in `problems`, never an error status) | scope (`DemoScenario` resolves the acting user itself) |
 
@@ -261,7 +266,7 @@ because none was needed.
 | `AccessDeniedException` (platform) | 403 | `FORBIDDEN` — a scoped **command** against something the caller cannot see; never used for a scoped *read*, which 404s instead (see Conventions) |
 | `IllegalStateException` | 409 | `CONFLICT` |
 | `HlsUpstreamUnavailableException` | 502 | `BAD_GATEWAY` — upstream unreachable; a normal non-2xx *received* from upstream passes through verbatim instead |
-| `ProbeFailedException` | 422 | `UNPROCESSABLE_ENTITY` |
+| `ProbeFailedException`, `DiscoveryCandidateAlreadyRegisteredException` | 422 | `UNPROCESSABLE_ENTITY` — the latter shares this status for `POST /api/discovery/inbox/{id}/attach` against a candidate already `REGISTERED` to a different asset (SOURCE-ONBOARDING-2-PLAN.md §3.2 C1) |
 | `PayloadTooLargeException` | 413 | `PAYLOAD_TOO_LARGE` |
 | `GeoServiceUnavailableException` | 503 | `SERVICE_UNAVAILABLE` — request was well-formed/authorized, the collaborator it proxies to (cv-service) is down |
 
@@ -270,23 +275,39 @@ because none was needed.
 One `LiveUpdateRegistry` implements all five per-context live-update ports (`FleetLiveUpdatePort`,
 `TelemetryLiveUpdatePort`, `DetectionLiveUpdatePort`, `MapLiveUpdatePort`, `EventLiveUpdatePort`) and
 owns every SSE connection, process-local/single-instance only. Topics: `fleet`, `event`, `devices`,
-`detection-events` (always-on, no auth needed beyond the connection itself), `map` and per-asset
+`detection-events`, `discovery` (all always-on, no auth needed beyond the connection itself — see
+below for `discovery`'s own delta-only semantics), `map` and per-asset
 `telemetry:<id>`/`detections:<id>`/`geo:<id>` (individually authorized — see below). Delivery is
 coalesced (leading+trailing, ~150ms default) per topic, not per connection, so exactly one resumable
 `seq` exists per topic; `Last-Event-ID` resumes from a per-topic ring buffer (FIFO or latest-only
 depending on topic). Tunables live in `VisionApiProperties.Live` (coalesce/heartbeat/buffer
 sizes/send-timeout/buffer-eviction), bound from `vision.api.live.*`.
 
-**Discovery inbox is poll-only, not SSE (ZERO-CONFIG-ONBOARDING Z2c, deliberate v1 scope call).**
-`GET /api/discovery/inbox` is a cheap, indexed (`identity_key`/`last_seen`), idempotent read a client
-can poll on its own cadence — the background sweep that populates it already runs on a fixed period
-(`vision.discovery.inbox.sweep-seconds`, default 30s in `vision-app`), so there is no sub-second event
-to push and a poll interval matched to the sweep period loses nothing a live topic would have delivered
-sooner. No `DiscoveryLiveUpdatePort`/topic was added to `LiveUpdateRegistry` this wave: doing so would
-mean a sixth `@Qualifier("liveUpdateRegistry")` selector bean in `ApplicationServiceWiring`
-(`vision-app`, out of this wave's write scope) and a consuming panel in `vision-web` (owned by a
-concurrent agent in the same task), neither of which exists yet to justify the wiring. Revisit if/when
-a UI wave wants sub-30s latency on new-candidate appearance.
+**Discovery now also has a `discovery` SSE topic, added on top of the still-pollable inbox
+(SOURCE-ONBOARDING-2-PLAN.md §3.2 C4 — supersedes the Z2c "poll-only" call below for the delta
+case).** `LiveTopicKind.DISCOVERY`/`LiveTopic.DISCOVERY` is a ninth always-on topic (no
+per-connection authorization beyond the connection itself, same posture as `fleet`/`event`/
+`devices`/`detection-events`). The envelope is `DiscoveryEventPayload{action, candidate}` —
+`action` one of `"REPORTED"`/`"REGISTERED"`/`"DISMISSED"`/`"RESTORED"`, `candidate` the same
+`DiscoveryCandidateResponse` shape `GET /api/discovery/inbox` already returns. **Delta-only, never
+per-sweep**: `vision-app`'s `LiveUpdateDiscoveryInboxService` decorator only calls
+`LiveUpdateRegistry#publishDiscoveryEvent` when a sweep's `ReportOutcome#changed()` is `true` (a
+genuinely new candidate, or a status/discovered-vs-not change — not a routine last-seen refresh) or
+on an operator verb (`register`/`dismiss`/`attach`/`restore`), so a client watching this topic sees
+exactly the events an operator would call "something happened," never the sweep's own cadence.
+Gated by `vision.discovery.live.enabled` (default **true** — see `vision-app`'s MODULE.md for the
+wiring). The original Z2c reasoning for keeping `GET /api/discovery/inbox` itself pollable, not SSE,
+is unchanged: a client without an open SSE connection still has a correct, if latent, view from
+polling; the two are complementary, not a replacement.
+
+**`devices` now also fires on a real stream-state transition (SOURCE-ONBOARDING-2-PLAN.md §3.2 C6).**
+`LiveUpdateRegistry#publishDevicesSnapshot()` (a plain, no-arg re-broadcast of the current device
+list, pre-existing) is now additionally invoked by a real `StreamStateObserver` — wired in
+`vision-app`'s `ApplicationServiceWiring` — every time `DefaultStreamService` computes a stream-state
+transition (start/stop/error), not only on the triggers that already called it. Gated by
+`vision.live.stream-state-push.enabled` (default **true**); the observer itself is edge-triggered and
+fires synchronously, isolated from a throwing implementation by `DefaultStreamService` — see
+`vision-app`'s MODULE.md for the wiring.
 
 **Scoped delivery**: `MapVisibility` gates the `map` topic by `MapAccessPolicy.canView`; `LiveAssetAccess`
 gates per-asset `telemetry`/`detections`/`geo` by `StreamAccess.visibleAsset`. Both filter at
@@ -389,6 +410,32 @@ module's scope. `DiscoveryInboxController`'s constructor gained a third paramete
 wiring change needed, since this controller has no explicit `@Bean` method (pure component-scan
 auto-wiring by type).
 
+**SOURCE-ONBOARDING-2 wave C additions** — `AttachDiscoveryCandidateRequest(String assetId)` backs
+`POST /api/discovery/inbox/{id}/attach`; `DiscoveryEventPayload(String action,
+DiscoveryCandidateResponse candidate)` is the `discovery` SSE topic's envelope (see "Live updates"
+above). `DiscoverySourceResponse` gained a trailing `lastScanAt` (`@JsonInclude(NON_NULL)`,
+`Instant`, absent for `SourceStatus.NEVER_SCANNED`). Three new records back `GET
+/api/discovery/status` (`@JsonInclude(NON_NULL)` throughout): `TelemetryIntakeResponse(bound,
+bindAddress, lobbyHeld, datagramsReceived, bytesReceived, lastDatagramAt, framesDecoded,
+unclaimedSysids, claimedSysids)` mirrors `adapter-mavlink`'s `MavlinkIntakeStatus` field-for-field;
+`VideoIntakeResponse(pushPort, pathPrefix, readyPaths)` (no `@JsonInclude` on itself — the whole
+object is either present or the enclosing `videoIntake` field is absent, per
+`DiscoveryStatusResponse`'s own contract, not a per-field omission); `DiscoveryStatusResponse(int
+sweepSeconds, Instant lastSweepAt, TelemetryIntakeResponse telemetryIntake, VideoIntakeResponse
+videoIntake, List<DiscoverySourceResponse> sources)` is the endpoint's top-level shape —
+`lastSweepAt`/`videoIntake` both omitted (not `null`) before the first sweep completes / when
+mediamtx publish is unconfigured, respectively. `support/DiscoveryStatusFacts` is a **plain, non-DTO**
+record (no Jackson annotations) — the crossing-seam payload a `vision-app`-supplied
+`Supplier<DiscoveryStatusFacts>` bean hands `DiscoveryStatusController`, kept deliberately separate
+from the wire DTOs above so this module's own `dto` package still contains only what actually
+serializes; see that record's own javadoc for why it crosses as a plain `Supplier` rather than a new
+port interface (`vision-api` has zero dependency on `adapter-mavlink`/`adapter-discovery`, and one
+implementation/one caller doesn't earn a new interface per `.claude/skills/java-clean-code/SKILL.md`
+§1). `NetworkAddressResponse` gained a trailing `kind` (`"LAN"`/`"VIRTUAL"`/`"UNKNOWN"` — see
+`LocalNetworkAddresses`'s own classification); `SystemNetworkResponse` gained trailing
+`videoPushPort`/`videoPushPathPrefix` (`@JsonInclude(NON_NULL)`, both absent together when mediamtx
+publish is unconfigured).
+
 ## Conventions
 
 - **Out-of-scope single-resource reads answer 404, not 403.** A caller must never be able to prove a
@@ -453,6 +500,20 @@ auto-wiring by type).
   delegating to `GroupService`. All three still reach `CurrentUser.scope()` directly inside the
   controller method body, so `EndpointAuthorizationTest`'s call-graph walk is satisfied without an
   `@OpenByDesign`/ledger entry either way.
+- **`DiscoveryInboxController#attach`/`#restore` (SOURCE-ONBOARDING-2 wave C) gate the same way
+  `list`/`dismiss` already do** — explicit in-controller `currentUser.scope().canManageOrg()`
+  (`AccessDeniedException` on failure), since `DiscoveryInboxService#attach`/`#restore` carry no
+  scope parameter of their own to check against (same reasoning as the note above for `list`/
+  `dismiss`). `DiscoveryStatusController#status` gates the same way as its own single handler.
+- **A conditionally-absent plain-value bean crossing the `vision-app`→`vision-api` boundary is taken
+  through `ObjectProvider<T>`, never a plain, possibly-`null`-valued `T`.** `SystemNetworkController`'s
+  `videoPushPort`/`videoPushPathPrefix` constructor parameters are `ObjectProvider<Integer>`/
+  `ObjectProvider<String>` — Spring's `@Bean` "null-bean" mechanism (a factory method returning
+  `null`) only satisfies `Optional`/`ObjectProvider`/explicitly-`@Nullable` injection points, not a
+  plain required constructor parameter; the corresponding `vision-app` bean methods are instead
+  genuinely conditionally-registered (`@ConditionalOnProperty`), never present-with-a-null-value —
+  see that module's MODULE.md for the wiring side. `mavlinkPort` stays a plain `int` (unconditional,
+  never absent), unaffected.
 - Rationale for any of the above beyond what's stated here lives in the plan doc cited inline, under
   `docs/plans/`.
 
@@ -782,3 +843,42 @@ javadoc rewrite, not a new test). Docker not needed for this module. Also green 
 those modules' own MODULE.md entries). Nothing deferred; `vision-events`/`DefaultReplayService` and
 `UsageTimelineController` untouched by design (they own the earliest-first replay window, a
 different question — see plan §3.7/§5).
+
+**SOURCE-ONBOARDING-2-PLAN.md §3.2 wave C done (2026-09-05, uncommitted at time of writing).** C1
+(`POST /api/discovery/inbox/{id}/attach`), C2 (new `DiscoveryStatusController`, `GET
+/api/discovery/status`), C3 (`SystemNetworkController`/`NetworkAddressResponse`/
+`SystemNetworkResponse` widened for `kind` + mediamtx push facts), C4 (new `discovery` SSE topic),
+C5 (`POST /api/discovery/inbox/{id}/restore`) — see the endpoint table, exception-mapping table, DTO
+conventions, and "Live updates" section above for the full shapes; C6 (a real `StreamStateObserver`
+wired to `devices`) is wholly a `vision-app` change, noted in "Live updates" above and detailed in
+that module's own MODULE.md. Also fixed two pre-existing test compile breaks found while wiring this
+wave, unrelated to discovery/network but blocking this module's test compile either way: `git
+blame`-confirmed leftovers from an earlier, already-merged wave that widened `SourceHealth` to a
+3-arg canonical constructor (`id, status, lastScanAt`) without updating
+`DiscoveryInboxControllerTest`'s two `new SourceHealth("mediamtx", SourceStatus.UNREACHABLE)`
+2-arg call sites (fixed by adding `Instant.now()` as the third argument).
+
+**Deliberate deviation, documented in place**: `LiveUpdateDiscoveryInboxService` (the decorator that
+turns a `ReportOutcome#changed()` into a `discovery` SSE publish) lives in `vision-app` and depends
+directly on the **concrete** `LiveUpdateRegistry` class, not a new per-context `*LiveUpdatePort`
+interface — every other such decorator in this codebase depends on a narrow port instead. Adding a
+`DiscoveryLiveUpdatePort` to `contexts/vision-warehouse` would have meant writing outside this
+wave's file scope (that context belonged to earlier waves A/B); see that class's own javadoc in
+`vision-app` for the full reasoning.
+
+`./mvnw -B -pl core/vision-kernel,core/vision-platform,contexts/vision-warehouse,contexts/vision-identity,contexts/vision-flight,contexts/vision-perception,contexts/vision-map,contexts/vision-events,contexts/vision-learning,contexts/vision-simulation
+install -DskipTests` (this worktree's own source — the shared `~/.m2` local repo had been
+concurrently overwritten by another agent's build of the main checkout's identity module mid-task,
+surfacing as `VisibilityScope`-vs-`Authority` and `AssignmentService`/`UserService` signature
+mismatches with no relation to this wave's own edits; reinstalling from this worktree's source
+resolved it — see `station/vision-app/MODULE.md`'s own entry for the parallel adapter-module
+reinstall this same contamination required) then `./mvnw -B -pl
+storage/persistence,station/vision-api,station/vision-app test -DskipWeb` — `storage/persistence`
+**274** (unchanged, read-only this wave; docker ran, not skipped), `station/vision-api` **965**
+(+11 over 954: 7 new `DiscoveryInboxControllerTest` cases for `attach`/`restore`, 2 new
+`SystemNetworkControllerTest` cases for the video-push-facts present/absent cases, 2 new
+`LocalNetworkAddressesTest` cases for `VIRTUAL` classification + LAN-before-VIRTUAL sort order),
+`station/vision-app` **326** (unchanged in count from the prior B1 entry above — see that module's
+own MODULE.md for wave C's actual test-count delta there) — all green, default-config bar held
+throughout (`vision.discovery.live.enabled`/`vision.live.stream-state-push.enabled` both default
+**true**, proven by this same green run rather than a separate flag-off suite). Nothing deferred.

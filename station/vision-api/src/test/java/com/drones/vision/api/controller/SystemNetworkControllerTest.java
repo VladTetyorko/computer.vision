@@ -18,11 +18,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * MockMvc tests for {@link SystemNetworkController} (docs/plans/active/DRONE-INFRA-PLAN.md I-g's frozen wire
- * contract), same {@code standaloneSetup} style as {@link CategoryControllerTest}. {@link
+ * contract, extended by docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C3). {@link
  * LocalNetworkAddresses} — this controller's one collaborator — is a mocked test double here
  * (its own filtering/sorting behavior is {@link LocalNetworkAddressesTest}'s job); these tests
- * exist to prove the JSON shape, the empty-addresses case, and that {@code mavlinkPort} is
- * whatever value the controller was constructed with, not a hardcoded literal.
+ * exist to prove the JSON shape, the empty-addresses case, and that {@code mavlinkPort}/{@code
+ * videoPushPort}/{@code videoPushPathPrefix} are whatever values the controller was constructed
+ * with, not hardcoded literals.
  */
 class SystemNetworkControllerTest {
 
@@ -32,8 +33,14 @@ class SystemNetworkControllerTest {
     private MockMvc mockMvc;
 
     private void setUp(int mavlinkPort) {
+        setUp(mavlinkPort, null, null);
+    }
+
+    private void setUp(int mavlinkPort, Integer videoPushPort, String videoPushPathPrefix) {
         localNetworkAddresses = mock(LocalNetworkAddresses.class);
-        mockMvc = MockMvcBuilders.standaloneSetup(new SystemNetworkController(mavlinkPort, localNetworkAddresses))
+        mockMvc = MockMvcBuilders.standaloneSetup(
+                        new SystemNetworkController(mavlinkPort, videoPushPort, videoPushPathPrefix,
+                                localNetworkAddresses))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -42,13 +49,14 @@ class SystemNetworkControllerTest {
     void networkReturns200WithAddressesAndTheConfiguredMavlinkPort() throws Exception {
         setUp(MAVLINK_PORT);
         when(localNetworkAddresses.list()).thenReturn(
-                List.of(new NetworkAddressResponse("192.168.0.104", "wlp2s0")));
+                List.of(new NetworkAddressResponse("192.168.0.104", "wlp2s0", "LAN")));
 
         mockMvc.perform(get("/api/system/network"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.addresses", hasSize(1)))
                 .andExpect(jsonPath("$.addresses[0].address").value("192.168.0.104"))
                 .andExpect(jsonPath("$.addresses[0].interfaceName").value("wlp2s0"))
+                .andExpect(jsonPath("$.addresses[0].kind").value("LAN"))
                 .andExpect(jsonPath("$.mavlinkPort").value(MAVLINK_PORT));
     }
 
@@ -72,5 +80,36 @@ class SystemNetworkControllerTest {
         mockMvc.perform(get("/api/system/network"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.mavlinkPort").value(nonDefaultPort));
+    }
+
+    /**
+     * docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C3: mediamtx push facts are reported
+     * when configured.
+     */
+    @Test
+    void networkReportsVideoPushFactsWhenMediamtxPublishIsConfigured() throws Exception {
+        setUp(MAVLINK_PORT, 8554, "ingest/");
+        when(localNetworkAddresses.list()).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/system/network"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.videoPushPort").value(8554))
+                .andExpect(jsonPath("$.videoPushPathPrefix").value("ingest/"));
+    }
+
+    /**
+     * docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C3: {@code videoPushPort}/{@code
+     * videoPushPathPrefix} are absent from the JSON entirely (not {@code null}) when mediamtx
+     * publish is unconfigured.
+     */
+    @Test
+    void networkOmitsVideoPushFactsWhenMediamtxPublishIsUnconfigured() throws Exception {
+        setUp(MAVLINK_PORT, null, null);
+        when(localNetworkAddresses.list()).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/system/network"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.videoPushPort").doesNotExist())
+                .andExpect(jsonPath("$.videoPushPathPrefix").doesNotExist());
     }
 }

@@ -1,5 +1,6 @@
 package com.drones.vision.api.controller;
 
+import com.drones.vision.api.dto.AttachDiscoveryCandidateRequest;
 import com.drones.vision.api.dto.DiscoveryCandidateResponse;
 import com.drones.vision.api.dto.DiscoveryInboxResponse;
 import com.drones.vision.api.dto.DiscoverySourceResponse;
@@ -7,6 +8,7 @@ import com.drones.vision.api.dto.RegisterDiscoveryCandidateRequest;
 import com.drones.vision.api.dto.RegisterDiscoveryCandidateResponse;
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.api.security.CurrentUser;
+import com.drones.vision.kernel.AssetId;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.warehouse.application.discovery.DiscoveryInboxService;
 import com.drones.vision.warehouse.application.discovery.DiscoveryService;
@@ -49,9 +51,13 @@ import java.util.Objects;
  * every gate below passes and behavior is unchanged.
  *
  * <h2>Live updates</h2>
- * No SSE topic yet — {@link #list} is a cheap, indexed, idempotent full-list read a client polls
- * (see this module's own {@code MODULE.md} for why this wave shipped poll-only rather than wiring a
- * new {@code LiveUpdateRegistry} topic with no consumer yet in scope).
+ * Every mutating verb here (report/dismiss/register/attach/restore) also announces a {@code
+ * discovery} SSE delta (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C4) — transparently,
+ * via {@code vision-app}'s {@code LiveUpdateDiscoveryInboxService} decorator around {@link
+ * #discoveryInboxService} when {@code vision.live.enabled}/{@code vision.discovery.live.enabled}
+ * are both on (both default {@code true}); this controller itself has no notion of the topic.
+ * {@link #list} stays a cheap, indexed, idempotent full-list read a client polls or seeds its state
+ * from on first load.
  */
 @RestController
 public class DiscoveryInboxController {
@@ -127,5 +133,55 @@ public class DiscoveryInboxController {
         }
         return DiscoveryCandidateResponse.from(
                 discoveryInboxService.dismiss(DiscoveryCandidateId.of(id), currentUser.userId()));
+    }
+
+    /**
+     * Attaches a candidate onto an existing asset — the atomic twin of {@link #register}, for the
+     * case an operator already has an asset in mind (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md
+     * &sect;3.2 C1). No explicit gate here: {@link DiscoveryInboxService#attach} performs its own
+     * {@code canManageOrg()} check and its own scoped 404 (never 403) for an unknown-or-out-of-scope
+     * {@code assetId} — the same "service throws, controller does not duplicate the check" shape
+     * {@link #register} already follows.
+     *
+     * @param id      the candidate to attach, as a canonical UUID string
+     * @param request the existing asset to attach it to
+     * @return the attached candidate, now {@code REGISTERED} to {@code request.assetId()}
+     * @throws java.util.NoSuchElementException                                              if no
+     *         candidate has that id, or {@code assetId} is unknown or outside scope (404)
+     * @throws AccessDeniedException                                                         if the
+     *         caller's scope may not manage the organization (403)
+     * @throws com.drones.vision.warehouse.application.discovery.DiscoveryCandidateAlreadyRegisteredException
+     *         if the candidate is already {@code REGISTERED} to a different asset (422 via {@link
+     *         ApiExceptionHandler})
+     * @throws IllegalStateException                                                         if the
+     *         candidate has no suggested stream, or its stream duplicates an already-registered
+     *         device (409)
+     */
+    @PostMapping("/api/discovery/inbox/{id}/attach")
+    public DiscoveryCandidateResponse attach(@PathVariable String id,
+                                              @RequestBody AttachDiscoveryCandidateRequest request) {
+        return DiscoveryCandidateResponse.from(discoveryInboxService.attach(DiscoveryCandidateId.of(id),
+                AssetId.of(request.assetId()), currentUser.scope(), currentUser.userId()));
+    }
+
+    /**
+     * Reopens a candidate — undoes a {@link #dismiss}, or manually recovers a stale {@code
+     * REGISTERED} candidate without waiting for the next sweep's auto-reopen (docs/plans/active/
+     * SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C5). Gated explicitly, mirroring {@link #dismiss}: {@link
+     * DiscoveryInboxService#restore} takes no {@code VisibilityScope} (a candidate carries no
+     * {@code Ownership} for a per-instance check to authorise against).
+     *
+     * @param id the candidate to restore, as a canonical UUID string
+     * @return the restored candidate — status {@code NEW}, {@code registeredAssetId} cleared
+     * @throws java.util.NoSuchElementException if no candidate has that id (404 via {@link ApiExceptionHandler})
+     * @throws AccessDeniedException            if the caller's scope may not manage the organization (403)
+     */
+    @PostMapping("/api/discovery/inbox/{id}/restore")
+    public DiscoveryCandidateResponse restore(@PathVariable String id) {
+        if (!currentUser.scope().canManageOrg()) {
+            throw new AccessDeniedException("Not permitted to restore a discovery candidate");
+        }
+        return DiscoveryCandidateResponse.from(
+                discoveryInboxService.restore(DiscoveryCandidateId.of(id), currentUser.userId()));
     }
 }
