@@ -2,6 +2,7 @@ package com.drones.vision.perception.application.stream;
 
 import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionState;
+import com.drones.vision.perception.domain.model.FollowStatus;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.model.StopReason;
@@ -165,6 +166,23 @@ public interface StreamService {
      * @return the booked tracks, ordered by {@code trackId} ascending, or an empty list
      */
     List<TrackedObject> tracks(StreamId streamId);
+
+    /**
+     * A running stream's {@code FOLLOW}-lock lifecycle (docs/plans/active/TRACK-FOLLOW-PLAN.md
+     * &sect;3.1) — exactly {@link StreamPipeline#followStatus()}: whether an operator-issued lock is
+     * being acquired, held, coasting, lost, or was just released, plus the elected label and the
+     * frozen last-seen box while lost.
+     *
+     * <p>Forgiving, the same idiom {@link #trackingStats(StreamId)} already uses: an unknown or
+     * stopped stream reads empty, and so does a stream on which no lock has ever been issued, or
+     * whose most recent lock action was a release — none of those is false the way a zeroed {@link
+     * FollowStatus} would be.
+     *
+     * @param streamId the stream to inspect
+     * @return the current follow status, or {@link Optional#empty()} if {@code streamId} is unknown
+     *         or not running on this instance, or no lock is currently in effect
+     */
+    Optional<FollowStatus> followStatus(StreamId streamId);
 
     /**
      * A running stream's tracking-flow counters over the stats window (docs/plans/done/TRACKING-PLAN.md

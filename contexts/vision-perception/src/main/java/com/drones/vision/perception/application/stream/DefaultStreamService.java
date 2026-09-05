@@ -5,6 +5,7 @@ import com.drones.vision.perception.application.profile.CvProfileResolver;
 import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.perception.domain.model.DetectionState;
+import com.drones.vision.perception.domain.model.FollowStatus;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
@@ -584,6 +585,13 @@ public final class DefaultStreamService implements StreamService {
         Objects.requireNonNull(streamId, "streamId must not be null");
         RunningStream active = activeStreams.get(streamId);
         return active == null ? List.of() : active.pipeline().tracks();
+    }
+
+    @Override
+    public Optional<FollowStatus> followStatus(StreamId streamId) {
+        Objects.requireNonNull(streamId, "streamId must not be null");
+        RunningStream active = activeStreams.get(streamId);
+        return active == null ? Optional.empty() : active.pipeline().followStatus();
     }
 
     @Override

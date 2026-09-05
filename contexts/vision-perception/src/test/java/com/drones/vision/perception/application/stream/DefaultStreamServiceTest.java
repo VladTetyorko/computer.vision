@@ -19,6 +19,9 @@ import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.CameraAttitude;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.perception.domain.model.DetectionState;
+import com.drones.vision.perception.domain.model.DetectorReason;
+import com.drones.vision.perception.domain.model.FollowState;
+import com.drones.vision.perception.domain.model.FollowStatus;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.Custody;
 import com.drones.vision.warehouse.domain.model.Device;
@@ -39,6 +42,7 @@ import com.drones.vision.perception.domain.model.TargetLock;
 import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.perception.domain.model.TrackingConfig;
 import com.drones.vision.perception.domain.model.TrackingMode;
+import com.drones.vision.perception.domain.model.TrackingTelemetry;
 import com.drones.vision.perception.domain.model.VideoFrame;
 import com.drones.vision.perception.domain.port.DetectionDemandPort;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
@@ -857,6 +861,12 @@ class DefaultStreamServiceTest {
         return new DetectionResult(streamId, 0, Instant.now(), List.of(), Duration.ZERO);
     }
 
+    /** Carries tracking telemetry (unlike {@link #emptyResultOn}) but no bound track — {@code lockedTrackId == 0}. */
+    private static DetectionResult noLockResultOn(StreamId streamId) {
+        return new DetectionResult(streamId, 0, Instant.now(), List.of(), Duration.ZERO,
+                new TrackingTelemetry(false, DetectorReason.NO_LOCK, Duration.ZERO, "lk", 0L));
+    }
+
     @Test
     void updateConfigThrowsForAnUnknownStream() {
         assertThrows(NoSuchElementException.class,
@@ -1274,6 +1284,64 @@ class DefaultStreamServiceTest {
         service.stop(streamId);
         assertEquals(List.of(), service.tracks(streamId));
         assertEquals(Optional.empty(), service.trackingStats(streamId));
+    }
+
+    // --- docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1/W2: the FOLLOW-lock lifecycle read ---
+
+    @Test
+    void followStatusIsEmptyForAnUnknownOrStoppedStreamOrWhenNoLockHasEverBeenIssued() {
+        StreamId unknown = StreamId.random();
+        assertEquals(Optional.empty(), service.followStatus(unknown));
+
+        StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
+        assertEquals(Optional.empty(), service.followStatus(streamId),
+                "a running stream on which no lock was ever issued reads empty");
+
+        service.stop(streamId);
+        assertEquals(Optional.empty(), service.followStatus(streamId));
+    }
+
+    @Test
+    void followStatusReflectsALockAlreadyPresentAtStartTime() {
+        ControllableFramePublisher publisher = new ControllableFramePublisher();
+        when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(publisher);
+        when(detectionPort.detect(any(), any())).thenAnswer(
+                inv -> CompletableFuture.completedFuture(noLockResultOn(((VideoFrame) inv.getArgument(0)).streamId())));
+        StreamId streamId = service.start(device.id(),
+                startedWith(tracking(TrackingMode.FOLLOW, new TargetLock(4, 7L, null, null, false))));
+
+        publisher.push(frameOn(streamId, 0));
+
+        FollowStatus status = service.followStatus(streamId).orElseThrow();
+        assertEquals(FollowState.REQUESTING, status.state(),
+                "start() folded the lock before this pipeline existed -- the pipeline's own constructor must seed it");
+    }
+
+    @Test
+    void followStatusReflectsALockIssuedThroughUpdateConfig() {
+        ControllableFramePublisher publisher = new ControllableFramePublisher();
+        when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(publisher);
+        when(detectionPort.detect(any(), any())).thenAnswer(
+                inv -> CompletableFuture.completedFuture(noLockResultOn(((VideoFrame) inv.getArgument(0)).streamId())));
+        StreamId streamId = service.start(device.id(), startedWith(TrackingConfig.off()));
+        assertEquals(Optional.empty(), service.followStatus(streamId));
+
+        service.updateConfig(streamId,
+                trackingPatch(tracking(TrackingMode.FOLLOW, new TargetLock(0, 7L, null, null, false))));
+        publisher.push(frameOn(streamId, 0));
+
+        assertEquals(FollowState.REQUESTING, service.followStatus(streamId).orElseThrow().state());
+    }
+
+    @Test
+    void followStatusEmptyAfterAReleaseAppliedThroughUpdateConfig() {
+        StreamId streamId = service.start(device.id(),
+                startedWith(tracking(TrackingMode.FOLLOW, new TargetLock(4, 7L, null, null, false))));
+
+        service.updateConfig(streamId,
+                trackingPatch(tracking(TrackingMode.FOLLOW, new TargetLock(0, null, null, null, true))));
+
+        assertEquals(Optional.empty(), service.followStatus(streamId));
     }
 
     // --- docs/plans/done/CV-DEMAND-PLAN.md §2, §3.3-3.4: detection-demand grace period and scheduler resilience ---

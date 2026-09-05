@@ -13,12 +13,14 @@ import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.platform.Event;
 import com.drones.vision.perception.domain.model.EventRuleConfig;
 import com.drones.vision.platform.EventType;
+import com.drones.vision.perception.domain.model.FollowState;
 import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.model.PixelFormat;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.Telemetry;
+import com.drones.vision.perception.domain.model.TargetLock;
 import com.drones.vision.perception.domain.model.TrackRef;
 import com.drones.vision.perception.domain.model.TrackState;
 import com.drones.vision.perception.domain.model.TrackingConfig;
@@ -1455,6 +1457,29 @@ class StreamPipelineTest {
                 new TrackingTelemetry(false, null, Duration.ofNanos(400_000), "lk", trackId));
     }
 
+    /** @see #trackedResult(long, long, TrackState) — same shape, but the box comes from a detector pass. */
+    private DetectionResult detectorSourcedResult(long sequence, long trackId, TrackState state) {
+        Detection detection = new Detection("car", 0.9, new BoundingBox(0.3, 0.4, 0.1, 0.1),
+                new ModelRef("yolo", "latest"), new TrackRef(trackId, state, DetectionSource.DETECTOR));
+        return new DetectionResult(streamId, sequence, Instant.parse("2026-08-11T10:00:00Z").plusMillis(sequence * 100),
+                List.of(detection), Duration.ofMillis(5),
+                new TrackingTelemetry(true, com.drones.vision.perception.domain.model.DetectorReason.ALWAYS,
+                        Duration.ofNanos(400_000), "lk", trackId));
+    }
+
+    /** A result carrying tracking telemetry but no detections — for exercising the unbound branch. */
+    private DetectionResult trackingTelemetryOnlyResult(long sequence, long lockedTrackId) {
+        return new DetectionResult(streamId, sequence, Instant.parse("2026-08-11T10:00:00Z").plusMillis(sequence * 100),
+                List.of(), Duration.ofMillis(5),
+                new TrackingTelemetry(false, com.drones.vision.perception.domain.model.DetectorReason.NO_LOCK,
+                        Duration.ofNanos(400_000), "lk", lockedTrackId));
+    }
+
+    /** @see #mode(TrackingMode, int) — same shape, plus an explicit lock. */
+    private static TrackingConfig withLock(TrackingMode trackingMode, int followFps, TargetLock lock) {
+        return new TrackingConfig(trackingMode, "lk", 2000, followFps, 30, 30, 3, lock);
+    }
+
     @Test
     void followRaisesTheEffectiveSampleRateWhileOffAndAssociateDoNot() {
         ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of());
@@ -1588,6 +1613,102 @@ class StreamPipelineTest {
         assertTrue(pipeline.tracks().isEmpty(), "and therefore never booked");
         assertEquals(1L, pipeline.trackingStats().trackerFrames(), "but the frame still counted");
         assertEquals(7L, pipeline.trackingStats().lockedTrackId());
+    }
+
+    @Test
+    void followStatusReadsEmptyBeforeAnyLockIsIssued() {
+        StreamPipeline pipeline = manualPipeline(trackingConfig(1000, mode(TrackingMode.FOLLOW, 15)), () -> 0L);
+
+        assertTrue(pipeline.followStatus().isEmpty());
+    }
+
+    @Test
+    void updateConfigWithAFreshLockArmsFollowStatusAsRequesting() {
+        when(detectionPort.detect(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(trackingTelemetryOnlyResult(0, 0L)));
+        StreamPipeline pipeline = manualPipeline(trackingConfig(1000, mode(TrackingMode.FOLLOW, 15)), () -> 0L);
+
+        pipeline.updateConfig(trackingConfig(1000,
+                withLock(TrackingMode.FOLLOW, 15, new TargetLock(1, 7L, null, null, false))));
+        pipeline.onNext(frame(0));
+
+        assertEquals(FollowState.REQUESTING, pipeline.followStatus().orElseThrow().state());
+    }
+
+    @Test
+    void aDetectorSourcedBoundResultTransitionsFollowStatusToHolding() {
+        when(detectionPort.detect(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(detectorSourcedResult(0, 7, TrackState.CONFIRMED)));
+        StreamPipeline pipeline = manualPipeline(trackingConfig(1000,
+                withLock(TrackingMode.FOLLOW, 15, new TargetLock(1, 7L, null, null, false))), () -> 0L);
+
+        pipeline.onNext(frame(0));
+
+        assertEquals(FollowState.HOLDING, pipeline.followStatus().orElseThrow().state());
+        assertEquals(7L, pipeline.followStatus().orElseThrow().trackId());
+        assertEquals("car", pipeline.followStatus().orElseThrow().label());
+    }
+
+    @Test
+    void aReleasePatchDropsFollowStatusToEmpty() {
+        when(detectionPort.detect(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(detectorSourcedResult(0, 7, TrackState.CONFIRMED)));
+        StreamPipeline pipeline = manualPipeline(trackingConfig(1000,
+                withLock(TrackingMode.FOLLOW, 15, new TargetLock(1, 7L, null, null, false))), () -> 0L);
+        pipeline.onNext(frame(0));
+        assertEquals(FollowState.HOLDING, pipeline.followStatus().orElseThrow().state());
+
+        pipeline.updateConfig(trackingConfig(1000,
+                withLock(TrackingMode.FOLLOW, 15, new TargetLock(2, null, null, null, true))));
+
+        assertTrue(pipeline.followStatus().isEmpty());
+    }
+
+    @Test
+    void aModelReArmClearsFollowStatusJustAsItClearsTheTrackBook() {
+        when(detectionPort.detect(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(detectorSourcedResult(0, 7, TrackState.CONFIRMED)));
+        StreamPipeline pipeline = manualPipeline(trackingConfig(1000,
+                withLock(TrackingMode.FOLLOW, 15, new TargetLock(1, 7L, null, null, false))), () -> 0L);
+        pipeline.onNext(frame(0));
+        assertEquals(FollowState.HOLDING, pipeline.followStatus().orElseThrow().state());
+
+        pipeline.updateConfig(new PipelineConfig(new ModelRef("orion12l", "latest"), 0.4, 1000, 5, Set.of(),
+                EventRuleConfig.defaults(), true, mode(TrackingMode.FOLLOW, 15)));
+
+        assertTrue(pipeline.followStatus().isEmpty(), "a held lock's trackId is bound to the model that produced it");
+    }
+
+    @Test
+    void aTrackingOnlyConfigChangeThatDoesNotTouchTheLockLeavesFollowStatusAlone() {
+        when(detectionPort.detect(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(detectorSourcedResult(0, 7, TrackState.CONFIRMED)));
+        StreamPipeline pipeline = manualPipeline(trackingConfig(1000,
+                withLock(TrackingMode.FOLLOW, 15, new TargetLock(1, 7L, null, null, false))), () -> 0L);
+        pipeline.onNext(frame(0));
+        FollowState before = pipeline.followStatus().orElseThrow().state();
+
+        // Same lock, only followFps changes -- TrackingConfigPatch.foldOnto keeps the lock component
+        // (and its lockSeq) untouched when the patch itself carries no lock.
+        pipeline.updateConfig(trackingConfig(1000,
+                withLock(TrackingMode.FOLLOW, 20, new TargetLock(1, 7L, null, null, false))));
+
+        assertEquals(before, pipeline.followStatus().orElseThrow().state());
+    }
+
+    @Test
+    void aLockPresentAtConstructionIsHonoredWithoutAnUpdateConfigCall() {
+        // DefaultStreamService.start() can fold a requested lock into the very first PipelineConfig
+        // handed to this constructor -- updateConfig's own lock-change detection never runs for it,
+        // so the constructor itself must seed FollowTracker.
+        when(detectionPort.detect(any(), any()))
+                .thenReturn(CompletableFuture.completedFuture(trackingTelemetryOnlyResult(0, 0L)));
+        StreamPipeline pipeline = manualPipeline(trackingConfig(1000,
+                withLock(TrackingMode.FOLLOW, 15, new TargetLock(1, 7L, null, null, false))), () -> 0L);
+
+        pipeline.onNext(frame(0));
+
+        assertEquals(FollowState.REQUESTING, pipeline.followStatus().orElseThrow().state());
     }
 
     /**

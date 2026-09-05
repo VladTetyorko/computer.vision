@@ -5,6 +5,7 @@ import com.drones.vision.perception.domain.model.CameraAttitude;
 import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.perception.domain.model.DetectionState;
+import com.drones.vision.perception.domain.model.FollowStatus;
 import com.drones.vision.perception.domain.model.StreamState;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.platform.Event;
@@ -13,6 +14,7 @@ import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.model.PullTelemetry;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.Telemetry;
+import com.drones.vision.perception.domain.model.TargetLock;
 import com.drones.vision.perception.domain.model.TrackedObject;
 import com.drones.vision.perception.domain.model.TrackingConfig;
 import com.drones.vision.perception.domain.model.TrackingMode;
@@ -119,14 +121,17 @@ import com.drones.vision.perception.application.stream.StreamService;
  * is a separate concern from {@link #latestDetections()}: the engine only ever reads results, it
  * never influences what gets published or returned from this class.
  *
- * <p><b>Tracking</b> (docs/plans/done/TRACKING-PLAN.md &sect;5.D/&sect;5.E): two further consumers on that same
+ * <p><b>Tracking</b> (docs/plans/done/TRACKING-PLAN.md &sect;5.D/&sect;5.E): three further consumers on that same
  * fan-out. {@link TrackBook} keeps this stream's tracks by id with their lifetimes ({@link
  * #tracks()}); {@link TrackingStatsWindow} keeps rolling duty-cycle counters over the {@link
- * com.drones.vision.perception.domain.model.TrackingTelemetry} riding each result ({@link #trackingStats()}).
- * Both are cleared on a model re-arm, exactly as {@link #extrapolator} is. Tracking also reaches the
- * sampling logic above through one value: {@link #effectiveInferenceFps()}, which raises the sample
- * rate to {@code followFps} while the stream is in {@link TrackingMode#FOLLOW}. Nothing else in this
- * class knows tracking exists — no branch in the publish path, none in {@link #maybeDetect}.
+ * com.drones.vision.perception.domain.model.TrackingTelemetry} riding each result ({@link #trackingStats()});
+ * {@link FollowTracker} (docs/plans/active/TRACK-FOLLOW-PLAN.md &sect;3.1/W2) turns the same telemetry's
+ * {@code lockedTrackId} bounces into an honest {@link FollowStatus} lifecycle for whichever {@code
+ * FOLLOW} lock is currently held ({@link #followStatus()}). All three are cleared on a model re-arm,
+ * exactly as {@link #extrapolator} is. Tracking also reaches the sampling logic above through one
+ * value: {@link #effectiveInferenceFps()}, which raises the sample rate to {@code followFps} while
+ * the stream is in {@link TrackingMode#FOLLOW}. Nothing else in this class knows tracking exists —
+ * no branch in the publish path, none in {@link #maybeDetect}.
  *
  * <h2>Error handling &amp; lifecycle</h2>
  * Two failure classes are handled very differently, on purpose: a CV service
@@ -264,6 +269,9 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /** @see #trackBook */
     private final TrackingStatsWindow trackingStats;
+
+    /** @see #trackBook */
+    private final FollowTracker followTracker;
 
     /**
      * Wall-clock cost of the detection round trip, as opposed to the compute cost cv-service
@@ -405,6 +413,14 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                 new DetectionExtrapolator(settings.extrapolationMaxMillis(), settings.extrapolationMatchGate());
         this.trackBook = new TrackBook(settings.trackRetention());
         this.trackingStats = new TrackingStatsWindow(settings.trackingStatsWindow());
+        this.followTracker = new FollowTracker();
+        // A lock can already be present in `config` at construction time -- DefaultStreamService.start()
+        // folds a requested TrackingConfigPatch (which may itself carry a lock) before this pipeline
+        // ever exists, so updateConfig's own lock-change detection never runs for it. Seeding here
+        // closes that gap the same way updateConfig would have, had this pipeline already existed.
+        if (this.config.tracking().lock() != null) {
+            this.followTracker.lockRequested(this.config.tracking().lock());
+        }
         this.pipelineLatency = new PipelineLatencyWindow(settings.trackingStatsWindow());
         this.detectionRate = new DetectionRateWindow(settings.trackingStatsWindow(),
                 this.pullDetection == null ? DetectionRateWindow.Transport.PUSH : DetectionRateWindow.Transport.PULL);
@@ -483,11 +499,23 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * method added to {@link DetectionPort} itself — a {@code vision-domain} change, out of this
      * class's file scope.
      *
+     * <p><b>{@code FOLLOW} lock changes</b> (docs/plans/active/TRACK-FOLLOW-PLAN.md &sect;3.1/W2) are
+     * detected independently of the model-change branch above, by comparing {@code
+     * config.tracking().lock()} before and after this call reassigns {@link #config} — {@code
+     * TrackingConfigPatch.foldOnto} stamps a freshly allocated {@code lockSeq} on every genuine lock
+     * action (including a same-{@code trackId} re-acquire), so object-inequality is exactly "a lock
+     * action genuinely occurred", never re-derived here. Reusing the fold's own output rather than
+     * reimplementing it is deliberate: this class does not know (and must not need to know) how
+     * {@code lockSeq} is allocated. Detected independently of {@code modelChanged} because a single
+     * patch may legitimately carry both a model swap and a fresh lock at once — {@link
+     * #followTracker} must see the lock either way.
+     *
      * @param next the config to switch to
      */
     public void updateConfig(PipelineConfig next) {
         Objects.requireNonNull(next, "next must not be null");
         boolean modelChanged = !config.model().id().equals(next.model().id());
+        TargetLock previousLock = config.tracking().lock();
         config = next;
         if (modelChanged) {
             // Track ids and duty-cycle counters describe the model that produced them, so carrying
@@ -495,6 +523,10 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
             // tracking-config change (mode, engine, cadences, lock) deliberately clears nothing --
             // tracking is a hot knob like confidence and fps.
             clearDetectionDerivedState();
+        }
+        TargetLock nextLock = next.tracking().lock();
+        if (nextLock != null && !nextLock.equals(previousLock)) {
+            followTracker.lockRequested(nextLock);
         }
         handleDetectionGateTransition();
         // docs/plans/done/MEDIA-SOT-PLAN.md wave M5, item 7: PATCH .../config keeps working in pull mode -- its
@@ -607,6 +639,16 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      */
     public List<TrackedObject> tracks() {
         return trackBook.tracks();
+    }
+
+    /**
+     * @return the current state of whichever {@code FOLLOW} lock this stream's operator holds
+     *         (docs/plans/active/TRACK-FOLLOW-PLAN.md &sect;3.1), or {@link Optional#empty()} if no
+     *         lock has ever been issued, or the most recent lock action was a release. See {@link
+     *         FollowTracker} for the state machine that computes it.
+     */
+    public Optional<FollowStatus> followStatus() {
+        return followTracker.status();
     }
 
     /**
@@ -934,17 +976,20 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     /**
      * Clears every piece of detection-derived state a consumer could otherwise read as fresh: the
      * raw result ({@link #latestDetections}), the extrapolator's own bookkeeping ({@link
-     * #extrapolator}), the track book/stats, and the rate/latency windows. Shared by two call sites
-     * that reach it for
+     * #extrapolator}), the track book/stats, the follow tracker, and the rate/latency windows.
+     * Shared by two call sites that reach it for
      * different reasons — {@link #updateConfig}'s model-id re-arm and {@link
      * #handleDetectionGateTransition}'s gate close — both boiling down to the same fact: nothing
-     * already held describes what this pipeline is about to (or will never again) produce.
+     * already held describes what this pipeline is about to (or will never again) produce. A held
+     * {@code FOLLOW} lock is no exception: its bound {@code trackId} was allocated by whatever the
+     * detector was feeding before the re-arm/close, so it means nothing after.
      */
     private void clearDetectionDerivedState() {
         extrapolator.reset();
         latestDetections = List.of();
         trackBook.clear();
         trackingStats.clear();
+        followTracker.clear();
         pipelineLatency.clear();
         detectionRate.clear();
         rateController.clear();
@@ -1127,8 +1172,9 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * PipelineConfig#labelDenyFilter()} exactly once, centrally, here (docs/plans/done/CV-CONTROL-PLAN.md
      * &sect;A, the dormant-field fix; deny-list joined docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2) —
      * to every downstream consumer: {@link #latestDetections()}, {@link #extrapolator}, {@link
-     * #trackBook}, {@link #trackingStats}, {@link #eventEngine}, {@link #liveUpdatePublisherPort},
-     * and persistence/the {@code DETECTION} event. Filtering once here, before any of those, is what
+     * #trackBook}, {@link #trackingStats}, {@link #followTracker}, {@link #eventEngine}, {@link
+     * #liveUpdatePublisherPort}, and persistence/the {@code DETECTION} event. Filtering once here,
+     * before any of those, is what
      * makes every consumer see the same filtered set uniformly instead of each having to know about
      * {@code labelFilter}/{@code labelDenyFilter} itself — screen, alerts and recording all stay
      * consistent because there is exactly one drop site.
@@ -1160,6 +1206,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         extrapolator.accept(filtered);
         trackBook.accept(filtered);
         trackingStats.accept(filtered);
+        followTracker.accept(filtered);
         rateController.observeDetections(filtered.detections(), config.tracking().redetectIouPercent());
         if (eventEngine != null) {
             eventEngine.accept(filtered);
