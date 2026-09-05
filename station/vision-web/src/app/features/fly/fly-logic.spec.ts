@@ -1,9 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import type { AssetSummary, AssetUsage, AuthCapability, GeoPosition, Membership, ScopeKind } from '../../core/api/models';
+import type { AssetSummary, AssetUsage, AuthCapability, GeoPosition, Membership, ScopeKind, SeatHolderResponse } from '../../core/api/models';
 import type { PreflightSummary } from '../../core/telemetry/flight-state-logic';
 import {
   ALL_DRONES_OPTION_VALUE,
   REPLAY_PICKER_MAX_USAGES,
+  cameraHeldByOther,
+  cameraHolderLabel,
+  commandSurfaceVisible,
+  crewCameraDockLine,
   dockPreflightSummaryLabel,
   earlierReplayableUsages,
   flyStage,
@@ -24,6 +28,25 @@ import {
   streamStateLabel,
   type FlyStageInput,
 } from './fly-logic';
+
+const FREE_CAMERA_SEAT: SeatHolderResponse = {
+  holderUserId: null,
+  holderDisplayName: null,
+  acquiredAt: null,
+  expiresAt: null,
+  mine: false,
+};
+
+function heldCameraSeat(partial: Partial<SeatHolderResponse> = {}): SeatHolderResponse {
+  return {
+    holderUserId: 'user-crew-1',
+    holderDisplayName: 'Anna',
+    acquiredAt: '2026-09-05T10:00:00Z',
+    expiresAt: '2026-09-05T10:00:15Z',
+    mine: false,
+    ...partial,
+  };
+}
 
 function asset(partial: Partial<AssetSummary>): AssetSummary {
   return {
@@ -434,5 +457,62 @@ describe('migratedPanelId (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C10 —
 
   it('keeps "nothing was open" meaning nothing is open', () => {
     expect(migratedPanelId(null)).toBeNull();
+  });
+});
+
+describe('cameraHeldByOther (docs/plans/active/CREW-CONTROL-PLAN.md §3.2 rule 2, wave W4)', () => {
+  it('is false for a genuinely free seat, even though `mine` is also false', () => {
+    expect(cameraHeldByOther(FREE_CAMERA_SEAT)).toBe(false);
+  });
+
+  it('is false for a seat this pilot themself holds', () => {
+    expect(cameraHeldByOther(heldCameraSeat({ mine: true }))).toBe(false);
+  });
+
+  it('is true for a seat a crew member holds', () => {
+    expect(cameraHeldByOther(heldCameraSeat())).toBe(true);
+  });
+});
+
+describe('cameraHolderLabel', () => {
+  it('reads the held seat’s display name', () => {
+    expect(cameraHolderLabel(heldCameraSeat({ holderDisplayName: 'Anna Kovalenko' }))).toBe('Anna Kovalenko');
+  });
+
+  it('degrades honestly to a generic phrase if the wire ever violated its own non-null contract', () => {
+    expect(cameraHolderLabel(heldCameraSeat({ holderDisplayName: null }))).toBe('another operator');
+  });
+});
+
+describe('crewCameraDockLine (docs/plans/active/CREW-CONTROL-PLAN.md §3.5 — the dock’s one crew-presence line)', () => {
+  it('is null at rest — a free camera seat renders zero pixels', () => {
+    expect(crewCameraDockLine(FREE_CAMERA_SEAT)).toBeNull();
+  });
+
+  it('is null while this pilot themself holds the camera', () => {
+    expect(crewCameraDockLine(heldCameraSeat({ mine: true }))).toBeNull();
+  });
+
+  it('names the crew member exactly as §3.5’s own worked example — "Crew · Anna on camera"', () => {
+    expect(crewCameraDockLine(heldCameraSeat({ holderDisplayName: 'Anna' }))).toBe('Crew · Anna on camera');
+  });
+
+  it('falls back to the generic label rather than fabricating a name', () => {
+    expect(crewCameraDockLine(heldCameraSeat({ holderDisplayName: null }))).toBe('Crew · another operator on camera');
+  });
+});
+
+describe('commandSurfaceVisible (docs/plans/active/CREW-CONTROL-PLAN.md §2.3 D1, wave W4 — the fix for the fly-hud gate that used to ignore watch mode entirely)', () => {
+  it('mounts the command surface when commandable and not watching', () => {
+    expect(commandSurfaceVisible(true, false)).toBe(true);
+  });
+
+  it('hides the command surface in watch mode even on an otherwise-commandable vehicle — the D1 fix itself', () => {
+    expect(commandSurfaceVisible(true, true)).toBe(false);
+  });
+
+  it('stays hidden when not commandable, watch mode or not', () => {
+    expect(commandSurfaceVisible(false, false)).toBe(false);
+    expect(commandSurfaceVisible(false, true)).toBe(false);
   });
 });

@@ -1,4 +1,14 @@
-import type { AssetStatus, AssetSummary, AssetUsage, AuthCapability, GeoPosition, Membership, ScopeKind, StreamState } from '../../core/api/models';
+import type {
+  AssetStatus,
+  AssetSummary,
+  AssetUsage,
+  AuthCapability,
+  GeoPosition,
+  Membership,
+  ScopeKind,
+  SeatHolderResponse,
+  StreamState,
+} from '../../core/api/models';
 import { hasCapability } from '../../core/auth/auth-logic';
 import { hasFix } from '../../core/geo/geo-logic';
 import { humanAge } from '../../core/telemetry/telemetry-logic';
@@ -524,4 +534,68 @@ export function pickerEmptyStateCopy(
     message: 'Add a source from the Devices tab — the synthetic test drone flies a route with no hardware at all.',
     showAddSource: hasCapability(capabilities, 'MANAGE_ORG'),
   };
+}
+
+// --- Crew seat awareness (docs/plans/active/CREW-CONTROL-PLAN.md §3.4/§3.5/§3.6, wave W4) — the
+// pilot's own cockpit reads the camera seat purely as a signal fed into the *existing* dock/Vision-
+// drawer templates: `FlyStage` above is untouched (§3.5's own frozen table — "no third stage/posture
+// in fly-logic.ts"), and there is no new tool-rail panel or CTA anywhere in this file. `SeatStore`
+// (`core/seat/seat-store.ts`, W3) is the one source of truth this reads from — a lone-operator/
+// feature-off session (§3.8) reports `singleOperatorSeats`, whose camera holder is always the same
+// explicit-null "free" shape {@link cameraHeldByOther} already treats as "not held by anyone else",
+// so this cockpit renders identically to before this wave with the flag off, by construction.
+//
+// **Deliberately re-derived here, not imported from `features/crew/crew-logic.ts`** — that file's
+// `cameraHeldByOther`/`cameraHolderLabel` are byte-identical in intent, but `features/crew/**` is a
+// disjoint feature this wave's own file scope excludes; duplicating two one-line pure functions costs
+// less than a cross-feature coupling neither page's own review would expect (the one cross-feature
+// import that already exists in this app runs the other way — `features/crew/crew-facade.ts` reusing
+// *this* file's `cv-control-panel-logic.ts` helpers).
+
+/** Whether the camera seat is held by somebody other than this caller — mirrors
+ * `features/crew/crew-logic.ts#cameraHeldByOther`'s identical §3.2 rule 2 rationale: a *free* seat
+ * also reads `mine: false` (§3.6's wire contract — free is four explicit nulls, `mine` included), so
+ * gating on `!camera.mine` alone would misread "nobody holds this" as "someone else holds this".
+ * `holderUserId !== null` is the actual "somebody holds this" fact; `!mine` narrows it to "and it
+ * isn't me". */
+export function cameraHeldByOther(camera: SeatHolderResponse): boolean {
+  return camera.holderUserId !== null && !camera.mine;
+}
+
+/** The held camera's display name, falling back to a generic phrase if the wire ever violated its own
+ * contract (§3.6: `holderDisplayName` should already resolve to a string, id-string fallback
+ * included, whenever `holderUserId` is non-null) — degrades honestly rather than rendering `null`. */
+export function cameraHolderLabel(camera: SeatHolderResponse): string {
+  return camera.holderDisplayName ?? 'another operator';
+}
+
+/**
+ * The cockpit dock's one crew-presence line (§3.5's own worked example, verbatim: `"Crew · Anna on
+ * camera"`) — `null` at rest (camera free, or held by this pilot themself), so the dock renders
+ * **zero pixels** for it exactly as §0.2/§3.5 require ("Not a button. Not a badge cluster. Not a
+ * notification."). Unlike `features/crew/crew-logic.ts#crewDock`'s own fixed "Pilot has the camera"
+ * phrase (deliberately unnamed, in that direction), the pilot's own line *does* name the crew member —
+ * §3.5's own example string interpolates the name.
+ */
+export function crewCameraDockLine(camera: SeatHolderResponse): string | null {
+  return cameraHeldByOther(camera) ? `Crew · ${cameraHolderLabel(camera)} on camera` : null;
+}
+
+// --- D1 fix (docs/plans/active/CREW-CONTROL-PLAN.md §2.3 D1, wave W4) --------------------------
+
+/**
+ * Whether `cockpit.html`'s `<vision-fly-hud>` mount should receive `[canCommand]="true"`. Before this
+ * wave, that binding was `facade.canShowCommands()` alone (capability + firmware + telemetry-
+ * freshness) — never a role or a mode — so a `?watch=1` viewer on an otherwise-commandable vehicle was
+ * handed a fully-functional Take-control pill *and* the Arm/Disarm zone: `<vision-flight-command-
+ * panel>` hides its whole panel unless `canCommand()` is true (`flight-command-panel.html:1`, `@if
+ * (canCommand())`), and `<vision-mode-picker>` inside the Controller drawer gates the same way, so
+ * ANDing "not a watcher" into this one input closes both surfaces named in the plan's own D1 evidence.
+ * This does **not** hide `<vision-fly-hud>`'s own informational content (the at-rest badge, the
+ * engaged widget, `<vision-rc-monitor>`'s state strip/transmitter picture/diagnostics) — none of that
+ * is gated on `canCommand` at all, so a watcher still *sees* everything this HUD knows, just cannot
+ * command from it (§0.2: "it loses command affordances, not information").
+ */
+export function commandSurfaceVisible(canShowCommands: boolean, watchMode: boolean): boolean {
+  return canShowCommands && !watchMode;
 }

@@ -778,3 +778,35 @@ dd {
    `<vision-map-tools>` (`map-tools.css`) owns its own section spacing now — nothing left to style
    here. See `cockpit.html`'s own comment at those two doors for why they render one shared component
    with disjoint capabilities rather than each keeping a bespoke drawer body. */
+
+/* ---- Vision drawer's camera-held read-state (docs/plans/active/CREW-CONTROL-PLAN.md §3.5, wave
+   W4) — mirrors `features/crew/crew.css`'s identical `.panel-inert`/`.panel-inert-reason` pair
+   byte-for-byte (that page's own C2 posture): dimmed, `pointer-events: none`, the reason stated
+   above it rather than the body simply vanishing. `<vision-cv-control-panel>` has no `disabled`/
+   `readOnly` input of its own (body-only by design, CV-PANEL-SPLIT-PLAN.md P1, out of this wave's
+   file scope regardless), so this cockpit's own stylesheet achieves the same effect, same as that
+   page's does from its own. */
+.panel-inert {
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.panel-inert-reason {
+  margin: 0 0 var(--space-8);
+}
+
+/* The reason line + its one `Take camera` button (§3.5's own "one Take camera button") — a column,
+   not a row, mirroring `rc-monitor.css#.session-link`'s identical shape for the same kind of
+   "sentence, then one action" block elsewhere in this cockpit. Sits *outside* `.panel-inert` above
+   (a sibling, not a child) so the button itself stays reachable while the panel it re-enables does
+   not. */
+.camera-seat-notice {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+  margin-bottom: var(--space-8);
+}
+
+.camera-seat-notice .btn {
+  align-self: flex-start;
+}

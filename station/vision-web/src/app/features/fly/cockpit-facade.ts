@@ -6,6 +6,7 @@ import { SettingsStore } from '../../core/settings/settings-store';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
+import { SeatStore } from '../../core/seat/seat-store';
 import { EventsStore } from '../../core/events/events-store';
 import { GeofenceStore } from '../../core/geofence/geofence-store';
 import { GeoStore } from '../../core/geo/geo-store';
@@ -35,6 +36,10 @@ import { resolveDetectionEnabled, videoNotice } from './stream-state-logic';
 import {
   ALL_DRONES_OPTION_VALUE,
   TICKER_MAX_EVENTS,
+  cameraHeldByOther,
+  cameraHolderLabel,
+  commandSurfaceVisible,
+  crewCameraDockLine,
   dockPreflightSummaryLabel,
   earlierReplayableUsages,
   flyStage,
@@ -134,6 +139,12 @@ export class CockpitFacade {
   readonly settings = inject(SettingsStore);
   readonly telemetry = inject(TelemetryStore);
   readonly detections = inject(DetectionsStore);
+  /** The asset's two seats (docs/plans/active/CREW-CONTROL-PLAN.md §3.1/§3.6, wave W4) — page-provided
+   * like every other store here (`CockpitPage`'s own `providers` array), mirroring `features/crew/
+   * crew-facade.ts`'s identical injection. The pilot's cockpit only ever reads the *camera* seat
+   * (`cameraSeatHeldByOther`/`cameraSeatHolderLabel` below); the flight seat is this pilot's own by
+   * construction of being on this page at all and has no reader here. */
+  readonly seats = inject(SeatStore);
   readonly events = inject(EventsStore);
   readonly geofence = inject(GeofenceStore);
   /** Visual-geolocation corrections (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3/§3.4/§3.8, wave H6) — the
@@ -431,6 +442,37 @@ export class CockpitFacade {
     const sample = this.telemetry.latest();
     return canShowCommandPanel(this.capabilities(), sample?.flightState?.firmware, ageSeconds(sample?.at, Date.now()));
   });
+
+  /** D1 fix (docs/plans/active/CREW-CONTROL-PLAN.md §2.3 D1, wave W4) — the single `[canCommand]`
+   * input `cockpit.html` feeds `<vision-fly-hud>`. See `fly-logic.ts#commandSurfaceVisible`'s own doc
+   * comment for why ANDing `!watchMode` in here (rather than gating the whole HUD mount) is the fix:
+   * it closes the Arm/Disarm zone and the mode picker, which both already hide on `canCommand()`
+   * alone, without touching this HUD's informational content. */
+  readonly flyHudCanCommand = computed(() => commandSurfaceVisible(this.canShowCommands(), this.watchMode()));
+
+  // --- Camera seat (docs/plans/active/CREW-CONTROL-PLAN.md §3.4/§3.5/§3.6, wave W4) ---------------
+  // The pilot never faces a refusal on their own aircraft (§0.2/§3.2 rule 3) — a camera write from
+  // this page always succeeds and preempts whoever held it, so {@link takeCameraSeat} below is
+  // legibility, not a requirement. These two computeds are the only seat-derived facts the cockpit
+  // renders: the dock's one crew-presence line (`cockpit.html`'s own S3/S4 dock template) and the
+  // Vision drawer's read-state reason.
+
+  /** §3.2 rule 2's honest discriminator — see `fly-logic.ts#cameraHeldByOther`'s own doc comment for
+   * why this is not simply `!camera.mine`. */
+  readonly cameraSeatHeldByOther = computed(() => cameraHeldByOther(this.seats.camera()));
+
+  /** The dock's one crew-presence line (`fly-logic.ts#crewCameraDockLine`, §3.5) — `null` at rest, so
+   * `cockpit.html` renders zero pixels for it exactly as that section requires. */
+  readonly crewCameraLine = computed(() => crewCameraDockLine(this.seats.camera()));
+
+  /** The Vision drawer's own read-state reason — see `fly-logic.ts#cameraHolderLabel`'s own doc
+   * comment for the honest fallback. */
+  readonly cameraSeatHolderLabel = computed(() => cameraHolderLabel(this.seats.camera()));
+
+  /** `cockpit.html`'s own "Take camera" button — disables itself and swaps its label while the
+   * request is in flight, mirroring every other one-shot command button on this page
+   * (`busy`/`sessionBusy`/`detectionPending`). */
+  readonly cameraSeatPending = signal(false);
 
   // --- Weather go/no-go chip (docs/plans/done/OPS-CORE-PLAN.md §W) --------------------------------------
   /** The live telemetry fix when one exists, else the asset's own last-known position — "best position we have right now". */
@@ -776,6 +818,18 @@ export class CockpitFacade {
       }
     });
 
+    // Seats (docs/plans/active/CREW-CONTROL-PLAN.md §3.1/§3.6, wave W4) — keyed on `activeAssetId()`
+    // alone, mirroring `geo.track()`/`grounding.track()` immediately above: `SeatStore.track()` is
+    // already a no-op for an unchanged assetId, so no derived-primitive guard needed here either.
+    effect(() => {
+      const assetId = this.activeAssetId();
+      if (assetId) {
+        this.seats.track(assetId);
+      } else {
+        this.seats.reset();
+      }
+    });
+
     // The asset's own effective CV profile (docs/plans/active/CV-SETTINGS-PLAN.md §3, wave W7) —
     // keyed on `activeAssetId()` alone, like `geo.track()` above: independent of whether a stream is
     // running, since §3.1's hierarchy always resolves to *some* profile.
@@ -1093,7 +1147,11 @@ export class CockpitFacade {
     if (!streamId) {
       return;
     }
-    void this.fleet.patchStreamConfig(streamId, buildFollowLockPatch(trackId));
+    // A CAMERA-guarded write (§3.3, wave W4) — always succeeds for this pilot (§3.2 rule 3) and
+    // takes the seat back if a crew member held it; `seats.refreshNow()` mirrors `features/crew/
+    // crew-facade.ts#followTrack`'s identical choke point so the dock's crew-presence line/Vision
+    // drawer's read-state catch up on the next tick rather than the ordinary ~3s seat-poll cadence.
+    void this.fleet.patchStreamConfig(streamId, buildFollowLockPatch(trackId)).then(() => this.seats.refreshNow());
   }
 
   /**
@@ -1108,7 +1166,8 @@ export class CockpitFacade {
     if (!streamId) {
       return;
     }
-    void this.fleet.patchStreamConfig(streamId, buildReleaseLockPatch());
+    // See {@link followTrack}'s own doc comment on the identical seat-refresh choke point.
+    void this.fleet.patchStreamConfig(streamId, buildReleaseLockPatch()).then(() => this.seats.refreshNow());
   }
 
   /**
@@ -1160,6 +1219,9 @@ export class CockpitFacade {
     try {
       await this.fleet.patchStreamConfig(streamId, buildHotKnobPatch({ ...current, detectionEnabled: enabled }));
       await Promise.all([this.fleet.refresh({ quiet: true }), this.loadStreamConfig(streamId)]);
+      // A CAMERA-guarded write (§3.3, wave W4) — see {@link followTrack}'s own doc comment on the
+      // identical seat-refresh choke point.
+      this.seats.refreshNow();
     } finally {
       this.detectionPending.set(false);
     }
@@ -1339,11 +1401,45 @@ export class CockpitFacade {
     }
   }
 
-  /** `(configChanged)` from any CV control that just PATCHed the stream — the H6 readback after a write. */
+  /** `(configChanged)` from any CV control that just PATCHed the stream — the H6 readback after a
+   * write. Also the one choke point every CV write path funnels through (`<vision-cv-control-panel>`/
+   * `<vision-detections-strip>`/`<vision-cv-setup-modal>` alike), so `seats.refreshNow()` here
+   * (docs/plans/active/CREW-CONTROL-PLAN.md §3.3, wave W4) covers every write those components make
+   * themselves without this facade needing its own copy of each one — mirrors `features/crew/
+   * crew-facade.ts#refreshStreamConfig`'s identical reasoning. A write that 409'd because the camera
+   * seat was preempted between two polls (should never happen to this pilot per §3.2 rule 3, but a
+   * 409 on *any other* cause still deserves a fresh seat read rather than a stale "mine") flips the
+   * dock/drawer to the correct posture on the very next tick rather than the ordinary ~3s cadence. */
   refreshStreamConfig(): void {
     const streamId = this.stream()?.streamId;
     if (streamId) {
       void this.loadStreamConfig(streamId);
+    }
+    this.seats.refreshNow();
+  }
+
+  /**
+   * `cockpit.html`'s own "Take camera" button (docs/plans/active/CREW-CONTROL-PLAN.md §3.5, wave W4)
+   * — legibility, not a requirement: any CV write this pilot makes already preempts a crew member's
+   * camera seat server-side (§3.2 rule 3), so this button exists purely so the state is visible and
+   * actionable without first touching an unrelated control. `POST .../seats/camera` by the
+   * flight-seat holder never 409s (§3.6), so the `catch` below is defense-in-depth, not an expected
+   * path — either way, `seats.refreshNow()` re-reads the truth rather than assuming the request's own
+   * outcome, the same posture every other seat-observing call in this file takes.
+   */
+  async takeCameraSeat(): Promise<void> {
+    const assetId = this.activeAssetId();
+    if (!assetId) {
+      return;
+    }
+    this.cameraSeatPending.set(true);
+    try {
+      await this.api.takeAssetSeat(assetId, 'CAMERA');
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} could not take the camera seat for ${assetId}`, { error });
+    } finally {
+      this.seats.refreshNow();
+      this.cameraSeatPending.set(false);
     }
   }
 }
