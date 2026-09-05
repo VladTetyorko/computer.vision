@@ -2,6 +2,7 @@ package com.drones.vision.warehouse.application.discovery;
 
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
+import com.drones.vision.warehouse.domain.model.DiscoveryCandidate;
 import com.drones.vision.warehouse.domain.model.SourceStatus;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.warehouse.domain.port.DeviceDiscoveryPort;
@@ -50,9 +51,10 @@ import java.util.stream.Collectors;
  * same way — {@link #scan(DiscoveryScanSpec)} itself never throws for adapter
  * trouble, only for a caller error (an unknown requested method).
  *
- * <p>Results are first deduplicated on the exact {@code (method, address)}
- * pair within one scan (a single mechanism reporting the identical candidate
- * twice), then a second pass merges <b>cross-method</b> duplicates — the same
+ * <p>Results are first deduplicated on {@link DiscoveryCandidate#identityKeyFor} —
+ * {@code method|address|sysid} — within one scan (a single mechanism reporting the
+ * identical candidate twice; the sysid component keeps two vehicles that share one
+ * MAVLink lobby address distinct), then a second pass merges <b>cross-method</b> duplicates — the same
  * physical device found by two or more different mechanisms — into one
  * {@link DiscoveredDevice}. Candidates are grouped by network identity: the
  * {@link URI#getHost()} of {@link DiscoveredDevice#address()}, case-insensitive,
@@ -145,14 +147,19 @@ public final class DefaultDiscoveryService implements DiscoveryService {
 
         List<DiscoveredDevice> rawDevices = new ArrayList<>();
         Set<String> failedMethods = new LinkedHashSet<>();
-        Set<DedupKey> seen = new HashSet<>();
+        Set<String> seen = new HashSet<>();
 
         for (Map.Entry<String, CompletableFuture<List<DiscoveredDevice>>> entry : pending.entrySet()) {
             long remainingNanos = Math.max(0L, deadlineNanos - System.nanoTime());
             try {
                 List<DiscoveredDevice> found = entry.getValue().get(remainingNanos, TimeUnit.NANOSECONDS);
                 for (DiscoveredDevice device : found) {
-                    if (seen.add(new DedupKey(device.method(), device.address()))) {
+                    // The candidate identity key, not (method, address): two unclaimed MAVLink
+                    // vehicles share one lobby address and differ only by sysid — a plain
+                    // (method, address) key silently swallowed every vehicle after the first,
+                    // so a second drone plugged into the zero-config lobby could never be
+                    // onboarded (found live, 2026-09-05).
+                    if (seen.add(DiscoveryCandidate.identityKeyFor(device))) {
                         rawDevices.add(device);
                     }
                 }
@@ -373,6 +380,4 @@ public final class DefaultDiscoveryService implements DiscoveryService {
         return future;
     }
 
-    private record DedupKey(String method, URI address) {
-    }
 }

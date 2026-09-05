@@ -79,7 +79,13 @@ function senseIntake(
   // means this counter is the only proof available in that narrow window).
   if (telemetry.unclaimedSysids.length > 0) {
     const ageMs = telemetry.lastDatagramAt ? Math.max(0, nowMs - Date.parse(telemetry.lastDatagramAt)) : 0;
-    return { kind: 'heard', what: `Heartbeat from sysid ${telemetry.unclaimedSysids[0]}`, ageMs };
+    // Name every unclaimed sysid, not [0]: the wire doesn't say which sysid the freshest datagram
+    // came from, so pairing one arbitrary sysid with the newest age fabricates "sysid 7, 0s ago"
+    // while 7 is long dead and 42 is the one transmitting (seen live, 2026-09-05).
+    const sysids = telemetry.unclaimedSysids.join(', ');
+    const what =
+      telemetry.unclaimedSysids.length === 1 ? `Heartbeat from sysid ${sysids}` : `Heartbeats from sysids ${sysids}`;
+    return { kind: 'heard', what, ageMs };
   }
 
   // P2's own diagnostic — bytes arriving, nothing decoding, is a wrong-protocol/garbage answer no

@@ -291,6 +291,25 @@ class DefaultDiscoveryServiceTest {
     }
 
     @Test
+    void twoVehiclesSharingOneLobbyAddressBothSurviveTheExactDedupPass() {
+        // Two unclaimed MAVLink vehicles differ only by the sysid in their suggested stream —
+        // same method, same address. The old (method, address) dedup key silently swallowed
+        // every vehicle after the first, so a second drone plugged into the zero-config lobby
+        // could never be onboarded (found live, 2026-09-05).
+        URI lobby = URI.create("udp://0.0.0.0:14550");
+        DiscoveredDevice sysid7 = new DiscoveredDevice("mavlink", "rover (sysid 7)", lobby, null,
+                new StreamDescriptor("mavlink", lobby, Map.of("sysid", "7")), Map.of());
+        DiscoveredDevice sysid42 = new DiscoveredDevice("mavlink", "rover (sysid 42)", lobby, null,
+                new StreamDescriptor("mavlink", lobby, Map.of("sysid", "42")), Map.of());
+        DiscoveryService service =
+                new DefaultDiscoveryService(List.of(FakePort.returning("mavlink", List.of(sysid7, sysid42))));
+
+        DiscoveryScanResult result = service.scan(new DiscoveryScanSpec(Duration.ofSeconds(1), Set.of()));
+
+        assertEquals(List.of(sysid7, sysid42), result.devices());
+    }
+
+    @Test
     void healthDegradesAContractBreakingPortToNeverScannedInsteadOfThrowing() {
         // A real adapter that never overrides lastStatus() answers NEVER_SCANNED even after a
         // scan (the port default). Pairing that with the recorded lastScanAt would trip

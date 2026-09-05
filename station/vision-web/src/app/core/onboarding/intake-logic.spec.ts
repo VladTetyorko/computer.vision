@@ -88,6 +88,30 @@ describe('intakeState', () => {
     });
   });
 
+  it('names every unclaimed sysid instead of pairing one with the freshest age', () => {
+    // Sysid 7 may be long dead while 42 is the one transmitting -- the wire doesn't say which
+    // sysid the last datagram came from, so the honest headline lists them all.
+    const result = intakeState(
+      findRow('sense'),
+      status({
+        telemetryIntake: {
+          bound: true,
+          bindAddress: '0.0.0.0:14550',
+          lobbyHeld: true,
+          datagramsReceived: 20,
+          bytesReceived: 900,
+          framesDecoded: 20,
+          unclaimedSysids: [7, 42],
+          claimedSysids: [],
+          lastDatagramAt: new Date(NOW - 1_000).toISOString(),
+        },
+      }),
+      [],
+      NOW,
+    );
+    expect(result).toEqual({ kind: 'heard', what: 'Heartbeats from sysids 7, 42', ageMs: 1_000 });
+  });
+
   it('prefers a named NEW candidate over the raw unclaimed-sysid counter', () => {
     const result = intakeState(
       findRow('sense'),
