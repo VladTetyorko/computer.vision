@@ -11,10 +11,18 @@ import { isPilot } from '../roster/roster-pivot-logic';
  */
 
 /**
- * The three dev-only accounts `AuthSeedRunner` (`station/vision-app/.../bootstrap/AuthSeedRunner.java`)
- * creates on first boot — the literal definition of "nobody has touched user management yet".
- * `AuthSeedRunner` is a strict no-op once any user exists, so these three usernames only remain the
- * *complete* user list until the first real account is created; from then on `hasOnlySeededUsers`
+ * The three dev-only accounts the `db/seed/dev/V90001__dev_accounts.sql` Flyway migration creates
+ * — **only** when `vision.persistence.seed-dev-users` is `true` (the friends-demo stack's own
+ * `docker-compose.yml` setting; `false` everywhere else, including a real deployment, per
+ * `VisionPersistenceProperties`) — the literal definition of "nobody has touched user management
+ * yet". (Citation fixed docs/plans/active/AUTH-ROLES-PLAN.md wave W3 — the class this used to name,
+ * `AuthSeedRunner`, was deleted in `docs/plans/active/POSTGRES-ONLY-CONTEXT.md` W1; this migration is its
+ * replacement, same three usernames, same "no-op once any real user exists" shape via Flyway's own
+ * "runs exactly once" contract.) Since the flag now defaults `false`, a real fresh station has
+ * **zero** users at all, not these three — `hasOnlySeededUsers([])` is vacuously `true` either way
+ * (`Array#every` on an empty array), so `isFreshStation` below reads correctly in both cases without
+ * needing to special-case an empty list. These three usernames only remain the *complete* user list
+ * (when the flag is on) until the first real account is created; from then on `hasOnlySeededUsers`
  * below is false for good (nothing un-creates a user for this purpose, matching the plan's own "ticks
  * off, never back on" rule — see `isFreshStation`'s doc comment).
  */
@@ -47,7 +55,7 @@ export function isFreshStation(users: readonly UserSummary[], totalAssets: numbe
 
 /** One row of the checklist — `to` is where the row's own action already lives; nothing new. */
 export interface SetupChecklistRow {
-  readonly id: 'create-group' | 'add-pilots' | 'add-aircraft' | 'assign-pilot';
+  readonly id: 'create-group' | 'add-pilots' | 'add-aircraft' | 'assign-pilot' | 'secure-station';
   readonly label: string;
   readonly done: boolean;
   readonly to: string;
@@ -70,12 +78,19 @@ export interface SetupChecklistRow {
  *   one pilot assigned (`CommandFacade` derives this best-effort, the same per-asset
  *   `listAssetPilots` shape `RosterFacade` already uses). Links to `/manage/roster`, the one page
  *   that can actually make the assignment.
+ * - **Secure this station** (docs/plans/active/AUTH-ROLES-PLAN.md wave W3, new): `authEnabled` — the same
+ *   flag the unsecured shell banner itself gates on (`app.ts#unsecured`). Unlike the other four rows,
+ *   there is no in-app action that flips this (`vision.auth.enabled` is static server config,
+ *   requiring a restart) — links to `/settings`, where the Security section explains why and how,
+ *   the one canonical place this app writes that explanation (kept out of both the banner and this
+ *   checklist to avoid two copies drifting apart).
  */
 export function buildSetupChecklist(
   users: readonly UserSummary[],
   groups: readonly GroupSummary[],
   totalAssets: number,
   hasAnyPilotAssignment: boolean,
+  authEnabled: boolean,
 ): readonly SetupChecklistRow[] {
   const pilotUserCount = users.filter(isPilot).length;
   return [
@@ -83,5 +98,6 @@ export function buildSetupChecklist(
     { id: 'add-pilots', label: 'Add pilots', done: pilotUserCount > 1, to: '/org' },
     { id: 'add-aircraft', label: 'Add your first aircraft', done: totalAssets > 0, to: '/add-source' },
     { id: 'assign-pilot', label: 'Assign a pilot', done: hasAnyPilotAssignment, to: '/manage/roster' },
+    { id: 'secure-station', label: 'Secure this station', done: authEnabled, to: '/settings' },
   ];
 }

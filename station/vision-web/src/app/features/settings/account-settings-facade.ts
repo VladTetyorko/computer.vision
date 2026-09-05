@@ -1,4 +1,4 @@
-import { Injectable, computed, inject } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
 import { AuthStore } from '../../core/auth/auth-store';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { canManageOrg } from '../../core/org/org-logic';
@@ -42,6 +42,15 @@ export class AccountSettingsFacade {
   readonly theme = inject(ThemeStore);
   private readonly auth = inject(AuthStore);
   private readonly toasts = inject(ToastService);
+
+  /**
+   * Whether this station has real auth turned on at all (docs/plans/active/AUTH-ROLES-PLAN.md wave W3) —
+   * a direct passthrough (`facade.authEnabled()`), same idiom as `theme`/`settings`/`fleet` above
+   * rather than a wrapper method, gating the new Security section below between "change your own
+   * password" (a real, secured session) and a dev-parity explanation (`vision.auth.enabled=false`,
+   * this station's own default — see that section's own template comment for the exact copy).
+   */
+  readonly authEnabled = this.auth.authEnabled;
 
   /**
    * Backs the new "Settings" link list this page grew in docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1 wave
@@ -99,6 +108,49 @@ export class AccountSettingsFacade {
       this.settings.eventNotifications.set(true);
     } else {
       this.toasts.error('Notifications are blocked for this site — allow them in your browser settings first.');
+    }
+  }
+
+  // --- Security: self-service password change (docs/plans/active/AUTH-ROLES-PLAN.md wave W3) --------
+  // Only ever reachable while `authEnabled()` — the template gates the whole form on it; the fields
+  // below exist unconditionally so `canChangePassword`/`submitPasswordChange` don't need their own
+  // separate dev-parity guard on top of the template's.
+
+  readonly currentPassword = signal('');
+  readonly newPassword = signal('');
+  readonly confirmPassword = signal('');
+  readonly changingPassword = signal(false);
+  readonly passwordChangeError = signal<string | null>(null);
+
+  readonly passwordsMatch = computed(() => this.newPassword() === this.confirmPassword());
+
+  canChangePassword(): boolean {
+    return (
+      !this.changingPassword() &&
+      this.currentPassword().length > 0 &&
+      this.newPassword().length > 0 &&
+      this.passwordsMatch()
+    );
+  }
+
+  async submitPasswordChange(): Promise<void> {
+    if (!this.canChangePassword()) {
+      return;
+    }
+    this.passwordChangeError.set(null);
+    this.changingPassword.set(true);
+    try {
+      const error = await this.auth.changePassword(this.currentPassword(), this.newPassword());
+      if (error) {
+        this.passwordChangeError.set(error);
+        return;
+      }
+      this.currentPassword.set('');
+      this.newPassword.set('');
+      this.confirmPassword.set('');
+      this.toasts.ok('Password changed.');
+    } finally {
+      this.changingPassword.set(false);
     }
   }
 }

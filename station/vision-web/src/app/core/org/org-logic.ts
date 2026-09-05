@@ -40,9 +40,14 @@ export interface RoleOption {
  * app-wide. The ≤-own-scope rule (a MANAGER can't mint an ADMIN) is enforced server-side and
  * surfaced as a `403`; this list is deliberately the full set, so the UI never silently pretends a
  * role doesn't exist — it lets the backend be the single authority on what a given inviter may grant.
+ *
+ * **Includes `VIEWER`** (docs/plans/active/AUTH-ROLES-PLAN.md wave W3, added — the create-user/edit-
+ * memberships forms previously offered only `PILOT`/`MANAGER`/`ADMIN`, which meant this UI had no
+ * way to actually grant the plan's own Wall/kiosk persona a real membership at all; `VIEWER` grants
+ * no capability (§3.2's own policy table), so it's the safest possible role to add, not the riskiest.
  */
 export function roleOptions(): readonly RoleOption[] {
-  return (['PILOT', 'MANAGER', 'ADMIN'] as const).map((value) => ({ value, label: roleLabel(value) }));
+  return (['VIEWER', 'PILOT', 'MANAGER', 'ADMIN'] as const).map((value) => ({ value, label: roleLabel(value) }));
 }
 
 /** One node of the group hierarchy — `depth` is 0 for a root, +1 per level, so the template indents without recomputing it. */

@@ -113,6 +113,17 @@ vision-undo-toast {
   color: var(--color-danger-text);
 }
 
+/* The unsecured banner's own action (docs/plans/active/AUTH-ROLES-PLAN.md wave W3) — deliberately not a
+   dismiss button (the banner itself stays non-dismissable by design, see its own comment above);
+   this just routes to where the "how do I turn auth on" explanation actually lives
+   (`account-settings.html`'s Security section), rather than duplicating that copy here. */
+.shell-banner-action {
+  margin-left: var(--space-8);
+  color: inherit;
+  text-decoration: underline;
+  font-weight: 600;
+}
+
 /* Reachability is a transient, self-resolving condition and its copy carries a shell command, so it
    reads at the body size and left-aligned rather than as a centred one-line stamp like the danger
    row above — the same two registers `shared/ui/notice.ts` already distinguishes. */

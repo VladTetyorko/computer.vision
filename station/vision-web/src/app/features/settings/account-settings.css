@@ -54,6 +54,35 @@ dd {
     margin: 0;
 }
 
+/* Security section (docs/plans/active/AUTH-ROLES-PLAN.md wave W3) — mirrors `org-settings.css`'s own
+   `.org-field` shape (label + input column) rather than inventing a third form pattern. */
+.security-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-16);
+    max-width: 24rem;
+}
+
+.security-field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+.security-field input {
+    min-height: 40px;
+}
+
+.security-field-hint {
+    font-size: 0.8rem;
+    color: var(--color-danger-text);
+}
+
+.security-form .btn {
+    align-self: flex-start;
+    min-height: 40px;
+}
+
 /* Settings link list (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1, wave W1) — plain stacked rows, no
    bullets; `a` itself already carries the app-wide link color (styles.css). */
 .link-list {

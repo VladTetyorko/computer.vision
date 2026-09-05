@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { canAdminister, hasCapability, initialsFor, needsLogin, roleLabel, topRoleLabel, type AuthStatus } from './auth-logic';
+import {
+  anonymousDestination,
+  canAdminister,
+  hasCapability,
+  initialsFor,
+  needsLogin,
+  roleLabel,
+  topRoleLabel,
+  type AuthStatus,
+} from './auth-logic';
 import type { AuthCapability, MeResponse, Role, ScopeKind } from '../api/models';
 
 /** Mirrors the real `RoleAuthority`/`DefaultScopeResolver` policy table (docs/plans/active/AUTH-ROLES-PLAN.md
@@ -143,5 +152,15 @@ describe('canAdminister', () => {
   it('is false (never throws) for null/undefined', () => {
     expect(canAdminister(null)).toBe(false);
     expect(canAdminister(undefined)).toBe(false);
+  });
+});
+
+describe('anonymousDestination', () => {
+  it('sends a fresh, nobody-to-sign-in-as station to /setup', () => {
+    expect(anonymousDestination(true)).toBe('/setup');
+  });
+
+  it('sends every other station to /login', () => {
+    expect(anonymousDestination(false)).toBe('/login');
   });
 });

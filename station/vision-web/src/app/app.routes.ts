@@ -17,6 +17,7 @@ import { DEBUG_ROUTES } from './features/debug/debug.routes';
 import { ORG_ROUTES } from './features/org-settings/org-settings.routes';
 import { ACTIVITY_ROUTES } from './features/activity/activity.routes';
 import { LOGIN_ROUTES } from './features/auth/login/login.routes';
+import { SETUP_ROUTES } from './features/setup/setup.routes';
 import { PREFLIGHT_ROUTES } from './features/preflight/preflight.routes';
 import { READINESS_ROUTES } from './features/readiness/readiness.routes';
 import { ALERTS_ROUTES } from './features/alerts/alerts.routes';
@@ -50,7 +51,8 @@ import { landingGuard } from './core/shell/landing-guard';
  * parent route — the standard Angular way to apply one `canActivate` to a whole group without
  * touching each feature's own `<name>.routes.ts` file or changing any URL (an empty path segment
  * contributes nothing to a child's own path, so `/fly`, `/command`, etc. are unchanged). `/login`
- * itself sits **outside** that group — the one route that must stay reachable with no session.
+ * and `/setup` (docs/plans/active/AUTH-ROLES-PLAN.md wave W3) both sit **outside** that group — the two
+ * routes that must stay reachable with no session at all.
  *
  * **`landingGuard` (docs/plans/done/OPS-UX-PLAN.md §2 A1)** resolves the bare `''` path by role — ADMIN/MANAGER
  * land on `/command` (the fleet-wide overview their authority spans), PILOT lands on `/fly` (the
@@ -64,6 +66,7 @@ import { landingGuard } from './core/shell/landing-guard';
  */
 export const routes: Routes = [
   { path: '', canActivate: [landingGuard], children: [] },
+  ...SETUP_ROUTES,
   ...LOGIN_ROUTES,
   {
     path: '',

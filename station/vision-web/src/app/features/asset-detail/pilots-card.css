@@ -51,4 +51,13 @@
   min-width: 0;
   font-weight: 500;
   color: var(--text);
+  flex: 1 1 auto;
+}
+
+/* The per-row seat picker (docs/plans/active/AUTH-ROLES-PLAN.md wave W3) — narrow and fixed, since
+   there are only ever two options (`PILOT`/`CREW`), sitting between the name and the Remove button. */
+.pilots-role {
+  min-height: 32px;
+  flex: none;
+  width: auto;
 }

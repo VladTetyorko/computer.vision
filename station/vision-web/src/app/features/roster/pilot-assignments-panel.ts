@@ -2,8 +2,8 @@ import { ChangeDetectionStrategy, Component, input, output, signal } from '@angu
 import { FormsModule } from '@angular/forms';
 import { SectionHeader } from '../../shared/ui/section-header';
 import { EmptyState } from '../../shared/ui/empty-state';
-import type { AssetSummary } from '../../core/api/models';
-import type { PilotAssetAssignment } from '../../core/roster/roster-pivot-logic';
+import type { AssetSummary, AssignmentRole } from '../../core/api/models';
+import { assignmentRoleLabel, type PilotAssetAssignment } from '../../core/roster/roster-pivot-logic';
 
 /**
  * `vision-pilot-assignments-panel` — `/manage/roster`'s "By pilot" detail pane
@@ -23,6 +23,13 @@ import type { PilotAssetAssignment } from '../../core/roster/roster-pivot-logic'
  * inputs, and reports the two mutations upward — `RosterFacade` is the one place that actually calls
  * `VisionApi.assignPilot`/`unassignPilot` for both pivots, so the two directions never drift into two
  * separate assignment implementations.
+ *
+ * **`assign` carries a seat** (docs/plans/active/AUTH-ROLES-PLAN.md wave W3, `{assetId, role}` rather than a
+ * bare `assetId`) — reused for **both** a brand-new assignment (the add-form's own picker) and an
+ * existing row's seat change (`assignPilot`'s own `PUT` is idempotent, `VisionApi.assignPilot`'s doc
+ * comment), the same "no separate update endpoint" reasoning `pilots-card.ts#changeRole` already
+ * documents for its own identical case — one output covers both, rather than this panel growing a
+ * second `changeRole` output that would do the exact same round trip.
  */
 @Component({
   selector: 'vision-pilot-assignments-panel',
@@ -39,17 +46,30 @@ export class PilotAssignmentsPanel {
   /** Disables both the picker and every row's Unassign button while a mutation is in flight. */
   readonly busy = input(false);
 
-  readonly assign = output<string>();
+  readonly assign = output<{ assetId: string; role: AssignmentRole }>();
   readonly unassign = output<string>();
 
   protected readonly pickAssetId = signal('');
+  /** The seat granted to a brand-new assignment — defaults to `'PILOT'`, this panel's own pre-existing behavior before the seat picker existed. */
+  protected readonly pickRole = signal<AssignmentRole>('PILOT');
+  protected readonly assignmentRoleLabel = assignmentRoleLabel;
+  protected readonly roleOptions: readonly AssignmentRole[] = ['PILOT', 'CREW'];
 
   protected emitAssign(): void {
     const assetId = this.pickAssetId();
     if (!assetId || this.busy()) {
       return;
     }
-    this.assign.emit(assetId);
+    this.assign.emit({ assetId, role: this.pickRole() });
     this.pickAssetId.set('');
+    this.pickRole.set('PILOT');
+  }
+
+  /** A row's own seat picker changed — re-emits `assign` with the existing `assetId`, same "assignPilot's PUT is idempotent" reasoning as this class's own doc comment. */
+  protected emitChangeRole(assetId: string, role: AssignmentRole): void {
+    if (this.busy()) {
+      return;
+    }
+    this.assign.emit({ assetId, role });
   }
 }

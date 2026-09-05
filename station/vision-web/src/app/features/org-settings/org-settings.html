@@ -184,40 +184,149 @@
       } @else {
         <ul class="org-list">
           @for (user of facade.org.users(); track user.userId) {
-            <li class="org-row">
-              <div class="org-row-main">
-                <span class="org-row-name truncate">{{ user.displayName }}</span>
-                <span class="muted org-row-sub truncate">{{ user.username }} · {{ user.email }}</span>
-                @if (user.memberships.length > 0) {
-                  <!-- docs/plans/done/VISUAL-REFRESH-PLAN.md F5 rule 4 — classification is muted text, not a
-                       chip; N group memberships collapse to one comma-joined muted list (mirrors
-                       `features/roster/roster.html`'s identical N-chips-to-one-text-list fix). -->
-                  <span
-                    class="muted org-row-groups truncate"
-                    [title]="facade.membershipsSummary(user.memberships)"
-                  >{{ facade.membershipsSummary(user.memberships) }}</span>
-                }
-              </div>
-              <div class="org-row-actions">
-                <!-- Top role is this row's classification (muted text); Enabled/Disabled is its one
-                     state chip, per F5 rule 4. -->
-                @if (user.topRole) {
-                  <span class="muted">{{ facade.roleLabel(user.topRole) }}</span>
-                } @else {
-                  <span class="faint">No role</span>
-                }
-                @if (user.enabled) {
-                  <span class="chip ok">Enabled</span>
-                  <button type="button" class="btn secondary small" (click)="facade.toggleEnabled(user.userId, false)">
-                    Disable
+            <li>
+              <div class="org-row">
+                <div class="org-row-main">
+                  <span class="org-row-name truncate">{{ user.displayName }}</span>
+                  <span class="muted org-row-sub truncate">{{ user.username }} · {{ user.email }}</span>
+                  @if (user.memberships.length > 0) {
+                    <!-- docs/plans/done/VISUAL-REFRESH-PLAN.md F5 rule 4 — classification is muted text, not a
+                         chip; N group memberships collapse to one comma-joined muted list (mirrors
+                         `features/roster/roster.html`'s identical N-chips-to-one-text-list fix). -->
+                    <span
+                      class="muted org-row-groups truncate"
+                      [title]="facade.membershipsSummary(user.memberships)"
+                    >{{ facade.membershipsSummary(user.memberships) }}</span>
+                  }
+                </div>
+                <div class="org-row-actions">
+                  <!-- Top role is this row's classification (muted text); Enabled/Disabled is its one
+                       state chip, per F5 rule 4. -->
+                  @if (user.topRole) {
+                    <span class="muted">{{ facade.roleLabel(user.topRole) }}</span>
+                  } @else {
+                    <span class="faint">No role</span>
+                  }
+                  @if (user.enabled) {
+                    <span class="chip ok">Enabled</span>
+                    <button type="button" class="btn secondary small" (click)="facade.toggleEnabled(user.userId, false)">
+                      Disable
+                    </button>
+                  } @else {
+                    <span class="chip danger">Disabled</span>
+                    <button type="button" class="btn secondary small" (click)="facade.toggleEnabled(user.userId, true)">
+                      Enable
+                    </button>
+                  }
+                  <button
+                    type="button"
+                    class="btn secondary small"
+                    [attr.aria-expanded]="facade.isManaging(user.userId)"
+                    (click)="facade.isManaging(user.userId) ? facade.closeManageUser() : facade.openManageUser(user)"
+                  >
+                    {{ facade.isManaging(user.userId) ? 'Close' : 'Manage' }}
                   </button>
-                } @else {
-                  <span class="chip danger">Disabled</span>
-                  <button type="button" class="btn secondary small" (click)="facade.toggleEnabled(user.userId, true)">
-                    Enable
-                  </button>
-                }
+                </div>
               </div>
+
+              <!-- Manage-user panel (docs/plans/active/AUTH-ROLES-PLAN.md wave W3) — memberships editor +
+                   admin-on-behalf-of password reset. Inline expansion under the row, mirroring the
+                   create-user/create-group forms' own inline-panel shape above, rather than a floating
+                   dialog. -->
+              @if (facade.isManaging(user.userId)) {
+                <div class="org-manage">
+                  <section class="org-manage-section">
+                    <h3>Memberships</h3>
+                    @if (facade.editMemberships().length === 0) {
+                      <p class="muted">No group memberships — this user has no role anywhere.</p>
+                    } @else {
+                      <ul class="org-manage-memberships">
+                        @for (membership of facade.editMemberships(); track membership.groupId) {
+                          <li>
+                            <span class="truncate">{{ facade.groupName(membership.groupId) }}</span>
+                            <select
+                              [ngModel]="membership.role"
+                              (ngModelChange)="facade.setDraftMembershipRole(membership.groupId, $event)"
+                              [disabled]="facade.savingMemberships()"
+                            >
+                              @for (option of facade.roleOptions; track option.value) {
+                                <option [value]="option.value">{{ option.label }}</option>
+                              }
+                            </select>
+                            <button
+                              type="button"
+                              class="btn secondary small"
+                              (click)="facade.removeDraftMembership(membership.groupId)"
+                              [disabled]="facade.savingMemberships()"
+                            >
+                              Remove
+                            </button>
+                          </li>
+                        }
+                      </ul>
+                    }
+                    <div class="org-manage-add">
+                      <select
+                        [ngModel]="facade.draftGroupId()"
+                        (ngModelChange)="facade.draftGroupId.set($event)"
+                        [disabled]="facade.savingMemberships()"
+                      >
+                        <option value="">Add group…</option>
+                        @for (node of facade.draftAddableGroups(); track node.group.id) {
+                          <option [value]="node.group.id">{{ node.group.name }}</option>
+                        }
+                      </select>
+                      <select
+                        [ngModel]="facade.draftRole()"
+                        (ngModelChange)="facade.draftRole.set($event)"
+                        [disabled]="facade.savingMemberships() || !facade.draftGroupId()"
+                      >
+                        @for (option of facade.roleOptions; track option.value) {
+                          <option [value]="option.value">{{ option.label }}</option>
+                        }
+                      </select>
+                      <button
+                        type="button"
+                        class="btn secondary small"
+                        (click)="facade.addDraftMembership()"
+                        [disabled]="facade.savingMemberships() || !facade.draftGroupId()"
+                      >
+                        Add
+                      </button>
+                    </div>
+                    <div class="org-form-buttons">
+                      <button type="button" class="btn" (click)="facade.saveMemberships()" [disabled]="facade.savingMemberships()">
+                        {{ facade.savingMemberships() ? 'Saving…' : 'Save memberships' }}
+                      </button>
+                    </div>
+                  </section>
+
+                  <section class="org-manage-section">
+                    <h3>Reset password</h3>
+                    <p class="muted">
+                      Sets a new password on {{ user.displayName }}'s behalf — they must change it at next sign-in.
+                    </p>
+                    <div class="org-manage-add">
+                      <input
+                        type="password"
+                        autocomplete="new-password"
+                        placeholder="New password"
+                        [ngModel]="facade.resetPasswordValue()"
+                        (ngModelChange)="facade.resetPasswordValue.set($event)"
+                        [disabled]="facade.resettingPassword()"
+                      />
+                      <button
+                        type="button"
+                        class="btn secondary small"
+                        (click)="facade.submitPasswordReset()"
+                        [disabled]="!facade.canResetPassword()"
+                      >
+                        {{ facade.resettingPassword() ? 'Resetting…' : 'Reset password' }}
+                      </button>
+                    </div>
+                  </section>
+                </div>
+              }
             </li>
           }
         </ul>

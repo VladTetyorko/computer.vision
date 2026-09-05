@@ -1,4 +1,4 @@
-import type { AssetSummary, AssignedPilot, UserSummary } from '../api/models';
+import type { AssetSummary, AssignedPilot, AssignmentRole, UserSummary } from '../api/models';
 
 /**
  * Pure, Angular-free logic behind `/manage/roster`'s `By asset | By pilot` pivot
@@ -17,10 +17,11 @@ export function parseRosterPivot(raw: string | null | undefined): RosterPivot {
   return raw === 'pilot' ? 'pilot' : 'asset';
 }
 
-/** One asset a pilot is assigned to, resolved to a display name (the "By pilot" row's own assignment list). */
+/** One asset a pilot is assigned to, resolved to a display name (the "By pilot" row's own assignment list). `role` (docs/plans/active/AUTH-ROLES-PLAN.md wave W3) is the seat this assignment grants — see `AssignmentRole`'s own doc comment. */
 export interface PilotAssetAssignment {
   readonly assetId: string;
   readonly displayName: string;
+  readonly role: AssignmentRole;
 }
 
 /** One row of the "By pilot" pivot — a user plus the assets currently assigned to them, possibly none. */
@@ -55,7 +56,7 @@ export function buildPilotRows(
     }
     for (const pilot of pilots) {
       const list = assignmentsByUser.get(pilot.userId) ?? [];
-      list.push({ assetId, displayName: asset.displayName });
+      list.push({ assetId, displayName: asset.displayName, role: pilot.role });
       assignmentsByUser.set(pilot.userId, list);
     }
   }
@@ -69,6 +70,22 @@ export function buildPilotRows(
         .slice()
         .sort((a, b) => a.displayName.localeCompare(b.displayName, undefined, { sensitivity: 'base' })),
     }));
+}
+
+const ASSIGNMENT_ROLE_LABELS: Record<AssignmentRole, string> = {
+  PILOT: 'Pilot',
+  CREW: 'Crew',
+};
+
+/**
+ * `AssignmentRole` rendered for a human (docs/plans/active/AUTH-ROLES-PLAN.md wave W3) — the one
+ * label map for the per-asset seat, shared by `features/asset-detail/pilots-card.ts` and
+ * `features/roster/pilot-assignments-panel.ts` rather than each growing its own copy. Mirrors
+ * `auth-logic.ts#roleLabel`'s identical shape for the org-wide `Role` — a different enum, so it
+ * can't reuse that map directly, but the same "one label function per enum" convention.
+ */
+export function assignmentRoleLabel(role: AssignmentRole): string {
+  return ASSIGNMENT_ROLE_LABELS[role];
 }
 
 /**

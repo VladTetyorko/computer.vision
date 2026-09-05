@@ -62,6 +62,13 @@ function fakeAuthStore(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT', authEnabled = fa
     loginBusy: () => false,
     loginError: () => null,
     login: () => Promise.resolve(false),
+    // `<vision-force-password-change>` (wave W3) is likewise mounted unconditionally in `app.html`
+    // — `false` here keeps it rendering nothing, same reasoning as `reauthRequired` above (neither
+    // component has a dedicated spec, mirroring `reauth-overlay.ts`'s own untested-directly
+    // precedent — see that file's doc comment).
+    mustChangePassword: () => false,
+    changePassword: () => Promise.resolve(null),
+    logout: () => Promise.resolve(),
   };
 }
 

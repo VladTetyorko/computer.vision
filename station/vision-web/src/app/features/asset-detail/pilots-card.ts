@@ -8,7 +8,8 @@ import { AuthStore } from '../../core/auth/auth-store';
 import { canManageOrg } from '../../core/org/org-logic';
 import { SectionHeader } from '../../shared/ui/section-header';
 import { EmptyState } from '../../shared/ui/empty-state';
-import type { AssignedPilot, UserSummary } from '../../core/api/models';
+import { assignmentRoleLabel } from '../../core/roster/roster-pivot-logic';
+import type { AssignedPilot, AssignmentRole, UserSummary } from '../../core/api/models';
 
 /** Stable per-file console tag, mirroring `[auth]`/`[fleet]`/`[org]`. */
 const LOG_PREFIX = '[pilots]';
@@ -64,13 +65,19 @@ export class PilotsCard {
   protected readonly loading = signal(false);
   protected readonly busy = signal(false);
   protected readonly pickUserId = signal('');
+  /** The seat granted to a newly-added pilot (docs/plans/active/AUTH-ROLES-PLAN.md wave W3) — defaults to
+   *  `'PILOT'`, this card's own pre-existing behavior before the seat picker existed at all. */
+  protected readonly pickRole = signal<AssignmentRole>('PILOT');
+  protected readonly assignmentRoleLabel = assignmentRoleLabel;
+  protected readonly roleOptions: readonly AssignmentRole[] = ['PILOT', 'CREW'];
 
-  /** The assigned pilots, resolved to a display name against the user list when possible. */
+  /** The assigned pilots, resolved to a display name against the user list when possible, carrying each one's own seat. */
   protected readonly assigned = computed(() => {
     const byId = new Map(this.users().map((user) => [user.userId, user]));
     return this.pilots().map((pilot) => ({
       userId: pilot.userId,
       displayName: byId.get(pilot.userId)?.displayName ?? pilot.userId.slice(0, 8),
+      role: pilot.role,
     }));
   });
 
@@ -111,8 +118,10 @@ export class PilotsCard {
     if (!userId || this.busy()) {
       return;
     }
-    await this.mutate(() => this.api.assignPilot(this.assetId(), userId), 'Assigned pilot.');
+    const role = this.pickRole();
+    await this.mutate(() => this.api.assignPilot(this.assetId(), userId, role), `Assigned as ${assignmentRoleLabel(role).toLowerCase()}.`);
     this.pickUserId.set('');
+    this.pickRole.set('PILOT');
   }
 
   protected async remove(userId: string): Promise<void> {
@@ -120,6 +129,19 @@ export class PilotsCard {
       return;
     }
     await this.mutate(() => this.api.unassignPilot(this.assetId(), userId), 'Removed pilot.');
+  }
+
+  /**
+   * Changes an already-assigned pilot's seat (docs/plans/active/AUTH-ROLES-PLAN.md wave W3) — re-issues
+   * the same idempotent `PUT` `assignPilot` already makes for a brand-new assignment (`VisionApi
+   * .assignPilot`'s own doc comment: "idempotent"), so there is no separate "update role" endpoint
+   * to call.
+   */
+  protected async changeRole(userId: string, role: AssignmentRole): Promise<void> {
+    if (this.busy()) {
+      return;
+    }
+    await this.mutate(() => this.api.assignPilot(this.assetId(), userId, role), `Changed seat to ${assignmentRoleLabel(role).toLowerCase()}.`);
   }
 
   private async mutate(action: () => Promise<void>, okMessage: string): Promise<void> {

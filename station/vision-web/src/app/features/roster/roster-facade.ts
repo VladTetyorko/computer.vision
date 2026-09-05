@@ -5,7 +5,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
 import { ToastService } from '../../core/toast.service';
-import type { AssetSummary, AssignedPilot, Category, UserSummary } from '../../core/api/models';
+import type { AssetSummary, AssignedPilot, AssignmentRole, Category, UserSummary } from '../../core/api/models';
 import {
   buildRosterRows,
   countAssetsWithoutPilot,
@@ -242,9 +242,15 @@ export class RosterFacade {
     }
   }
 
-  /** The "By pilot" detail pane's Assign action — see this class's own "one assignment path" note. */
-  async assignPilotToAsset(userId: string, assetId: string): Promise<void> {
-    await this.mutateAssignment(() => this.api.assignPilot(assetId, userId), assetId, 'Assigned pilot.');
+  /**
+   * The "By pilot" detail pane's Assign action — see this class's own "one assignment path" note.
+   * `role` (docs/plans/active/AUTH-ROLES-PLAN.md wave W3) serves both a brand-new assignment and an
+   * existing one's seat change — `assignPilot`'s own `PUT` is idempotent, so re-issuing it with a
+   * different role is the update (`pilot-assignments-panel.ts`'s own doc comment for why there is no
+   * separate "change role" call).
+   */
+  async assignPilotToAsset(userId: string, assetId: string, role?: AssignmentRole): Promise<void> {
+    await this.mutateAssignment(() => this.api.assignPilot(assetId, userId, role), assetId, 'Assigned pilot.');
   }
 
   /** The "By pilot" detail pane's Unassign action. */

@@ -4,7 +4,7 @@ import { Router } from '@angular/router';
 import { VisionApi } from '../api/vision-api';
 import { describeHttpError } from '../api-error';
 import { LiveStore } from '../live/live-store';
-import type { AuthCapability, ChangePasswordRequest, MeResponse, ScopeKind } from '../api/models';
+import type { AuthCapability, BootstrapRequest, ChangePasswordRequest, MeResponse, ScopeKind } from '../api/models';
 import type { AuthStatus } from './auth-logic';
 import { hasCapability } from './auth-logic';
 
@@ -210,6 +210,45 @@ export class AuthStore {
       if (error instanceof HttpErrorResponse && error.status === 401) {
         return 'Incorrect current password.';
       }
+      return describeHttpError(error);
+    }
+  }
+
+  /**
+   * `GET /api/auth/bootstrap` (docs/plans/active/AUTH-ROLES-PLAN.md §3.5, wave W3) — whether this
+   * station still needs its first administrator created. Deliberately **never cached**: `required`
+   * is a one-way latch server-side (once an ADMIN exists it is `false` forever), so re-asking is
+   * always safe and cheap (`@OpenByDesign`/`permitAll`, no session needed) — the guard calling this
+   * (`core/auth/auth-guard.ts`) gets the current truth on every navigation, including a bootstrap
+   * completed a moment ago in another tab, with no separate "invalidate the cache" path to forget.
+   * Fails toward `false` (the ordinary `/login` path) on a network error — a station this app can't
+   * currently reach must not manufacture a `/setup` redirect out of nothing.
+   */
+  async bootstrapRequired(): Promise<boolean> {
+    try {
+      const status = await this.api.bootstrapStatus();
+      return status.required;
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} GET /api/auth/bootstrap failed — assuming no bootstrap is needed`, { error });
+      return false;
+    }
+  }
+
+  /**
+   * `POST /api/auth/bootstrap` (wave W3) — creates this station's first administrator and
+   * establishes their session, the same `applySession`/`liveStore.reconnect()` sequence
+   * `login()` follows. Never throws — mirrors `login()`'s own "turn a failure into a message"
+   * contract, for `features/setup/*`'s inline handling: `409 ALREADY_INITIALIZED` (someone else won
+   * the race) and `400 WEAK_PASSWORD` both carry a server-written sentence already specific enough
+   * that this method adds nothing on top (unlike `login()`'s deliberately-vague 401 copy).
+   */
+  async bootstrap(request: BootstrapRequest): Promise<string | null> {
+    try {
+      const me = await this.api.bootstrap(request);
+      this.applySession(me);
+      this.liveStore.reconnect();
+      return null;
+    } catch (error) {
       return describeHttpError(error);
     }
   }

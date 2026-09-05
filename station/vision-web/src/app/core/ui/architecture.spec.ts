@@ -47,6 +47,9 @@ const ROUTED_PAGES = [
   'activity/activity',
   'settings/account-settings',
   'auth/login/login',
+  // First-boot bootstrap page (docs/plans/active/AUTH-ROLES-PLAN.md wave W3) — same shape/posture as
+  // `login/login` above, guarded here from day one for the same reason.
+  'setup/setup',
   'labeling/datasets',
   'labeling/dataset-detail',
   'labeling/sample-editor',

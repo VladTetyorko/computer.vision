@@ -12,6 +12,11 @@
       <option [value]="asset.assetId">{{ asset.displayName }}</option>
     }
   </select>
+  <select aria-label="Seat" [ngModel]="pickRole()" (ngModelChange)="pickRole.set($event)" [disabled]="busy()">
+    @for (role of roleOptions; track role) {
+      <option [value]="role">{{ assignmentRoleLabel(role) }}</option>
+    }
+  </select>
   <button type="button" class="btn" (click)="emitAssign()" [disabled]="busy() || !pickAssetId()">Assign</button>
 </div>
 
@@ -25,6 +30,17 @@
     @for (assignment of assignments(); track assignment.assetId) {
       <li class="pilots-row">
         <span class="pilots-name truncate">{{ assignment.displayName }}</span>
+        <select
+          [attr.aria-label]="'Seat for ' + assignment.displayName"
+          class="pilots-role"
+          [ngModel]="assignment.role"
+          (ngModelChange)="emitChangeRole(assignment.assetId, $event)"
+          [disabled]="busy()"
+        >
+          @for (role of roleOptions; track role) {
+            <option [value]="role">{{ assignmentRoleLabel(role) }}</option>
+          }
+        </select>
         <button type="button" class="btn danger small" (click)="unassign.emit(assignment.assetId)" [disabled]="busy()">
           Unassign
         </button>

@@ -9,7 +9,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { NavigationEnd, Router, RouterOutlet } from '@angular/router';
+import { NavigationEnd, Router, RouterLink, RouterOutlet } from '@angular/router';
 import { filter, map } from 'rxjs';
 import { AuthStore } from './core/auth/auth-store';
 import { FleetStore } from './core/fleet/fleet-store';
@@ -18,6 +18,7 @@ import { LiveStore } from './core/live/live-store';
 import { SidebarStore } from './core/shell/sidebar-store';
 import { ThemeStore } from './core/shell/theme-store';
 import { AppSidebar } from './shared/ui/app-sidebar/app-sidebar';
+import { ForcePasswordChange } from './shared/ui/force-password-change';
 import { ReauthOverlay } from './shared/ui/reauth-overlay';
 import { ToastHost } from './shared/ui/toast-host';
 import { UndoToast } from './shared/ui/undo-toast';
@@ -64,7 +65,7 @@ import { UndoToast } from './shared/ui/undo-toast';
  */
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, AppSidebar, ToastHost, UndoToast, ReauthOverlay],
+  imports: [RouterOutlet, RouterLink, AppSidebar, ToastHost, UndoToast, ReauthOverlay, ForcePasswordChange],
   templateUrl: './app.html',
   styleUrl: './app.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

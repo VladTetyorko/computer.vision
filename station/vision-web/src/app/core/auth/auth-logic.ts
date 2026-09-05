@@ -65,6 +65,18 @@ export function needsLogin(status: AuthStatus, authEnabled: boolean, user: MeRes
 }
 
 /**
+ * Where an anonymous visitor who cannot proceed belongs — the one decision every bootstrap-aware
+ * guard (`core/auth/auth-guard.ts`'s `authGuard`/`loginGuard`/`setupGuard`) defers to
+ * (docs/plans/active/AUTH-ROLES-PLAN.md §3.5, wave W3). `/setup` while the one-way
+ * `GET /api/auth/bootstrap` latch still reads `required` — a fresh station has nobody to sign in
+ * as at all, so sending it to `/login` would show a form with no account behind it — `/login`
+ * otherwise, the ordinary case for the rest of this station's life.
+ */
+export function anonymousDestination(bootstrapRequired: boolean): '/setup' | '/login' {
+  return bootstrapRequired ? '/setup' : '/login';
+}
+
+/**
  * Does this session hold `capability`? (docs/plans/active/AUTH-ROLES-PLAN.md §3.1/§3.2, wave W1/W2 — the
  * one place every "what may I *do*" gate in this app now reads, replacing a `topRole ===`
  * comparison — see `core/org/org-logic.ts#canManageOrg`/`features/models/models-logic.ts`'s own

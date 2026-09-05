@@ -3,7 +3,13 @@ import { VisionApi } from '../api/vision-api';
 import { describeHttpError } from '../api-error';
 import { ToastService } from '../toast.service';
 import { buildGroupTree } from './org-logic';
-import type { CreateGroupRequest, CreateUserRequest, GroupSummary, UserSummary } from '../api/models';
+import type {
+  CreateGroupRequest,
+  CreateUserRequest,
+  GroupSummary,
+  UserMembership,
+  UserSummary,
+} from '../api/models';
 
 /** Stable per-file console tag, mirroring `[auth]`/`[fleet]` — no shared logging service in this app. */
 const LOG_PREFIX = '[org]';
@@ -83,6 +89,39 @@ export class OrgStore {
       this.toasts.ok(`Created ${group.name}.`);
       return group;
     });
+  }
+
+  /**
+   * Wholesale-replaces `userId`'s group memberships (docs/plans/active/AUTH-ROLES-PLAN.md wave W3,
+   * `PUT /api/users/{id}/memberships`) — not a delta, so the caller (`org-settings-facade.ts`'s
+   * manage-user panel) always sends the *complete* intended set. A `403` (a grant above the
+   * caller's own scope) surfaces via `describeHttpError`'s own specific sentence, same as every
+   * other mutation here.
+   */
+  async setMemberships(userId: string, memberships: readonly UserMembership[]): Promise<UserSummary | null> {
+    return this.run(async () => {
+      const user = await this.api.setMemberships(userId, { memberships });
+      await this.refresh({ quiet: true });
+      this.toasts.ok(`Updated ${user.displayName}'s memberships.`);
+      return user;
+    });
+  }
+
+  /**
+   * Sets `userId`'s password on their behalf (docs/plans/active/AUTH-ROLES-PLAN.md wave W3,
+   * `POST /api/users/{id}/password`) — always forces the target's own `mustChangePassword` on the
+   * next request they make, per the endpoint's own frozen contract; this store has no local
+   * `mustChangePassword` copy to flip, `refresh()` re-reads the true value from `/api/users`.
+   * Returns `true` on success, `false` on any failure (already toasted by `run()`) — the manage-user
+   * panel uses this to decide whether to also clear its own password-reset field.
+   */
+  async adminSetPassword(userId: string, newPassword: string): Promise<boolean> {
+    const result = await this.run(async () => {
+      await this.api.adminSetPassword(userId, { newPassword });
+      this.toasts.ok('Password reset — they must change it at next sign-in.');
+      return true;
+    });
+    return result ?? false;
   }
 
   /** Runs an action, turning any failure into one explained toast (mirrors `FleetStore.run`). */

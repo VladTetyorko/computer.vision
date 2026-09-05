@@ -62,42 +62,55 @@ describe('isFreshStation', () => {
 
 describe('buildSetupChecklist', () => {
   it('a brand-new station: every row undone, linking to the page that does it', () => {
-    const rows = buildSetupChecklist(seedUsers, [group({ id: 'root', name: 'Root' })], 0, false);
+    const rows = buildSetupChecklist(seedUsers, [group({ id: 'root', name: 'Root' })], 0, false, false);
     expect(rows).toEqual([
       { id: 'create-group', label: 'Create a group', done: false, to: '/org' },
       { id: 'add-pilots', label: 'Add pilots', done: false, to: '/org' },
       { id: 'add-aircraft', label: 'Add your first aircraft', done: false, to: '/add-source' },
       { id: 'assign-pilot', label: 'Assign a pilot', done: false, to: '/manage/roster' },
+      { id: 'secure-station', label: 'Secure this station', done: false, to: '/settings' },
     ]);
   });
 
   it('"create a group" ticks off once a second group exists beyond the seeded Root', () => {
     const groups = [group({ id: 'root', name: 'Root' }), group({ id: 'g-2', name: 'Field team' })];
-    const rows = buildSetupChecklist(seedUsers, groups, 0, false);
+    const rows = buildSetupChecklist(seedUsers, groups, 0, false, false);
     expect(rows.find((r) => r.id === 'create-group')?.done).toBe(true);
   });
 
   it('"add pilots" ticks off once a second PILOT-role user exists beyond the seeded pilot', () => {
     const users = [...seedUsers, user({ userId: 'u-2', username: 'jane', memberships: [{ groupId: 'root', role: 'PILOT' }] })];
-    const rows = buildSetupChecklist(users, [group()], 0, false);
+    const rows = buildSetupChecklist(users, [group()], 0, false, false);
     expect(rows.find((r) => r.id === 'add-pilots')?.done).toBe(true);
   });
 
   it('"add pilots" stays undone for a second MANAGER — that is not a pilot', () => {
     const users = [...seedUsers, user({ userId: 'u-2', username: 'jane', memberships: [{ groupId: 'root', role: 'MANAGER' }] })];
-    const rows = buildSetupChecklist(users, [group()], 0, false);
+    const rows = buildSetupChecklist(users, [group()], 0, false, false);
     expect(rows.find((r) => r.id === 'add-pilots')?.done).toBe(false);
   });
 
   it('"add your first aircraft" ticks off from totalAssets alone', () => {
-    const rows = buildSetupChecklist(seedUsers, [group()], 1, false);
+    const rows = buildSetupChecklist(seedUsers, [group()], 1, false, false);
     expect(rows.find((r) => r.id === 'add-aircraft')?.done).toBe(true);
   });
 
   it('"assign a pilot" ticks off only when told an assignment exists', () => {
-    const notYet = buildSetupChecklist(seedUsers, [group()], 1, false);
-    const done = buildSetupChecklist(seedUsers, [group()], 1, true);
+    const notYet = buildSetupChecklist(seedUsers, [group()], 1, false, false);
+    const done = buildSetupChecklist(seedUsers, [group()], 1, true, false);
     expect(notYet.find((r) => r.id === 'assign-pilot')?.done).toBe(false);
     expect(done.find((r) => r.id === 'assign-pilot')?.done).toBe(true);
+  });
+
+  it('"secure this station" ticks off once auth is enabled — the one row with no in-app action', () => {
+    const notYet = buildSetupChecklist(seedUsers, [group()], 1, false, false);
+    const done = buildSetupChecklist(seedUsers, [group()], 1, false, true);
+    expect(notYet.find((r) => r.id === 'secure-station')).toEqual({
+      id: 'secure-station',
+      label: 'Secure this station',
+      done: false,
+      to: '/settings',
+    });
+    expect(done.find((r) => r.id === 'secure-station')?.done).toBe(true);
   });
 });

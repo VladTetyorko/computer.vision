@@ -22,8 +22,9 @@ describe('canManageOrg', () => {
 });
 
 describe('roleOptions', () => {
-  it('lists all three roles least→most privileged, with human labels', () => {
+  it('lists all four roles least→most privileged, with human labels', () => {
     expect(roleOptions()).toEqual([
+      { value: 'VIEWER', label: 'Viewer' },
       { value: 'PILOT', label: 'Pilot' },
       { value: 'MANAGER', label: 'Manager' },
       { value: 'ADMIN', label: 'Admin' },

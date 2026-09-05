@@ -48,4 +48,13 @@
   min-width: 0;
   font-weight: 500;
   color: var(--text);
+  flex: 1 1 auto;
+}
+
+/* The per-row seat picker (docs/plans/active/AUTH-ROLES-PLAN.md wave W3) — mirrors `pilots-card.css`'s
+   identical rule, see this file's own class doc comment for why it's a separate copy. */
+.pilots-role {
+  min-height: 32px;
+  flex: none;
+  width: auto;
 }

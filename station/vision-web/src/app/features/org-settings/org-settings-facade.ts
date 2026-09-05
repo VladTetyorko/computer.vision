@@ -2,7 +2,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { OrgStore } from '../../core/org/org-store';
 import { flattenGroupTree, roleOptions } from '../../core/org/org-logic';
 import { roleLabel } from '../../core/auth/auth-logic';
-import type { CreateUserRequest, Role, UserMembership } from '../../core/api/models';
+import type { CreateUserRequest, Role, UserMembership, UserSummary } from '../../core/api/models';
 
 type Tab = 'users' | 'groups';
 
@@ -131,6 +131,98 @@ export class OrgSettingsFacade {
 
   async toggleEnabled(userId: string, enabled: boolean): Promise<void> {
     await this.org.setUserEnabled(userId, enabled);
+  }
+
+  // --- Manage-user panel (docs/plans/active/AUTH-ROLES-PLAN.md wave W3): edit memberships + reset ---
+  // ---  a password on another user's behalf. One panel, expanded inline under its row (mirrors the
+  // ---  create-user/create-group forms' own inline-panel shape, not a floating dialog) — at most
+  // ---  one user managed at a time, so a plain nullable id is the whole "which row is open" state,
+  // ---  same non-`UiStore` carve-out `tab`/`userFormOpen` above already use.
+
+  readonly managingUserId = signal<string | null>(null);
+  /** A working copy of the managed user's memberships — replaced wholesale on save, never a delta (mirrors `SetMembershipsRequest`'s own wire contract). */
+  readonly editMemberships = signal<readonly UserMembership[]>([]);
+  /** The "add a membership" row's own two pickers. */
+  readonly draftGroupId = signal('');
+  readonly draftRole = signal<Role>('PILOT');
+  readonly savingMemberships = signal(false);
+
+  readonly resetPasswordValue = signal('');
+  readonly resettingPassword = signal(false);
+
+  isManaging(userId: string): boolean {
+    return this.managingUserId() === userId;
+  }
+
+  /** Groups not already in the working set — the add-membership picker's own options, so a user can't be given the same group twice. */
+  readonly draftAddableGroups = computed(() => {
+    const taken = new Set(this.editMemberships().map((m) => m.groupId));
+    return this.flatGroups().filter((node) => !taken.has(node.group.id));
+  });
+
+  openManageUser(user: UserSummary): void {
+    this.managingUserId.set(user.userId);
+    this.editMemberships.set(user.memberships);
+    this.draftGroupId.set('');
+    this.draftRole.set('PILOT');
+    this.resetPasswordValue.set('');
+  }
+
+  closeManageUser(): void {
+    this.managingUserId.set(null);
+    this.editMemberships.set([]);
+    this.resetPasswordValue.set('');
+  }
+
+  addDraftMembership(): void {
+    const groupId = this.draftGroupId();
+    if (!groupId) {
+      return;
+    }
+    this.editMemberships.set([...this.editMemberships(), { groupId, role: this.draftRole() }]);
+    this.draftGroupId.set('');
+    this.draftRole.set('PILOT');
+  }
+
+  removeDraftMembership(groupId: string): void {
+    this.editMemberships.set(this.editMemberships().filter((m) => m.groupId !== groupId));
+  }
+
+  setDraftMembershipRole(groupId: string, role: Role): void {
+    this.editMemberships.set(this.editMemberships().map((m) => (m.groupId === groupId ? { ...m, role } : m)));
+  }
+
+  async saveMemberships(): Promise<void> {
+    const userId = this.managingUserId();
+    if (!userId || this.savingMemberships()) {
+      return;
+    }
+    this.savingMemberships.set(true);
+    const updated = await this.org.setMemberships(userId, this.editMemberships());
+    this.savingMemberships.set(false);
+    if (updated) {
+      // Re-seed from the server's own response rather than assuming the wholesale replace echoed
+      // back exactly what was sent — same "single source of truth" reasoning as `submitUser`'s own
+      // reset-from-`created` pattern above.
+      this.editMemberships.set(updated.memberships);
+    }
+  }
+
+  canResetPassword(): boolean {
+    return !this.resettingPassword() && this.resetPasswordValue().length > 0;
+  }
+
+  async submitPasswordReset(): Promise<void> {
+    const userId = this.managingUserId();
+    if (!userId || !this.canResetPassword()) {
+      return;
+    }
+    this.resettingPassword.set(true);
+    const ok = await this.org.adminSetPassword(userId, this.resetPasswordValue());
+    this.resettingPassword.set(false);
+    if (ok) {
+      this.resetPasswordValue.set('');
+    }
   }
 
   openGroupForm(): void {

@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { AssetSummary, AssignedPilot, UserSummary } from '../api/models';
-import { buildPilotRows, countPilotsWithoutAssets, isPilot, parseRosterPivot, searchPilotRows } from './roster-pivot-logic';
+import {
+  assignmentRoleLabel,
+  buildPilotRows,
+  countPilotsWithoutAssets,
+  isPilot,
+  parseRosterPivot,
+  searchPilotRows,
+} from './roster-pivot-logic';
 
 function asset(partial: Partial<AssetSummary> = {}): AssetSummary {
   return {
@@ -59,6 +66,13 @@ describe('buildPilotRows', () => {
     expect(rows[0].assignments.map((a) => a.displayName)).toEqual(['Falcon', 'Hawk']);
   });
 
+  it('carries each assignment\'s own seat (PILOT/CREW) through untouched', () => {
+    const assets = [asset({ assetId: 'a-1', displayName: 'Hawk' })];
+    const pilotsByAsset = new Map<string, readonly AssignedPilot[]>([['a-1', [{ userId: 'u-1', role: 'CREW' }]]]);
+    const rows = buildPilotRows(assets, pilotsByAsset, [user({ userId: 'u-1' })]);
+    expect(rows[0].assignments).toEqual([{ assetId: 'a-1', displayName: 'Hawk', role: 'CREW' }]);
+  });
+
   it('drops an assignment referencing an asset not in the fetched list, rather than showing an unresolved name', () => {
     const pilotsByAsset = new Map<string, readonly AssignedPilot[]>([['gone', [{ userId: 'u-1', role: 'PILOT' }]]]);
     const rows = buildPilotRows([], pilotsByAsset, [user({ userId: 'u-1' })]);
@@ -75,6 +89,15 @@ describe('buildPilotRows', () => {
     const rows = buildPilotRows(assets, pilotsByAsset, users);
     expect(rows.find((r) => r.userId === 'u-1')?.assignments).toHaveLength(2);
     expect(rows.find((r) => r.userId === 'u-2')?.assignments).toHaveLength(1);
+  });
+});
+
+describe('assignmentRoleLabel', () => {
+  it.each<['PILOT' | 'CREW', string]>([
+    ['PILOT', 'Pilot'],
+    ['CREW', 'Crew'],
+  ])('renders %s as %s', (role, label) => {
+    expect(assignmentRoleLabel(role)).toBe(label);
   });
 });
 

@@ -196,7 +196,7 @@
               [assignments]="row.assignments"
               [assignableAssets]="facade.assignableAssetsForSelectedPilot()"
               [busy]="facade.assignBusy()"
-              (assign)="facade.assignPilotToAsset(row.userId, $event)"
+              (assign)="facade.assignPilotToAsset(row.userId, $event.assetId, $event.role)"
               (unassign)="facade.unassignPilotFromAsset(row.userId, $event)"
             />
           }

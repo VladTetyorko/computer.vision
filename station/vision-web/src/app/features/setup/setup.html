@@ -1,0 +1,94 @@
+<div class="setup-shell">
+  <form class="card setup-card" (ngSubmit)="submit()">
+    <div class="setup-brand">
+      <span class="setup-brand-mark" aria-hidden="true"></span>
+      <span>Vision</span>
+    </div>
+
+    <div>
+      <h1>Secure this station</h1>
+      <p class="muted">
+        This station has no administrator yet. Create the first account — it will be able to manage
+        every user, group, and asset.
+      </p>
+    </div>
+
+    <label class="setup-field">
+      <span class="label">Username</span>
+      <input
+        type="text"
+        name="username"
+        autocomplete="username"
+        autocapitalize="none"
+        [ngModel]="facade.username()"
+        (ngModelChange)="facade.username.set($event)"
+        [disabled]="facade.busy()"
+        required
+      />
+    </label>
+
+    <label class="setup-field">
+      <span class="label">Display name</span>
+      <input
+        type="text"
+        name="displayName"
+        autocomplete="name"
+        [ngModel]="facade.displayName()"
+        (ngModelChange)="facade.displayName.set($event)"
+        [disabled]="facade.busy()"
+        required
+      />
+    </label>
+
+    <label class="setup-field">
+      <span class="label">Email</span>
+      <input
+        type="email"
+        name="email"
+        autocomplete="email"
+        autocapitalize="none"
+        [ngModel]="facade.email()"
+        (ngModelChange)="facade.email.set($event)"
+        [disabled]="facade.busy()"
+        required
+      />
+    </label>
+
+    <label class="setup-field">
+      <span class="label">Password</span>
+      <input
+        type="password"
+        name="password"
+        autocomplete="new-password"
+        [ngModel]="facade.password()"
+        (ngModelChange)="facade.password.set($event)"
+        [disabled]="facade.busy()"
+        required
+      />
+    </label>
+
+    <label class="setup-field">
+      <span class="label">Confirm password</span>
+      <input
+        type="password"
+        name="confirmPassword"
+        autocomplete="new-password"
+        [ngModel]="facade.confirmPassword()"
+        (ngModelChange)="facade.confirmPassword.set($event)"
+        [disabled]="facade.busy()"
+        required
+      />
+      @if (facade.password() && facade.confirmPassword() && !facade.passwordsMatch()) {
+        <span class="setup-field-hint">Passwords don't match.</span>
+      }
+    </label>
+
+    @if (facade.error(); as error) {
+      <vision-notice variant="danger">{{ error }}</vision-notice>
+    }
+
+    <button type="submit" class="btn setup-submit" [disabled]="!facade.canSubmit()">
+      {{ facade.busy() ? 'Creating…' : 'Create administrator' }}
+    </button>
+  </form>
+</div>

@@ -397,9 +397,15 @@ export class CommandFacade {
     () => this.setupDataLoadedSignal() && canAdminister(this.auth.scopeKind()) && isFreshStation(this.setupUsersSignal(), this.summary()?.totalAssets ?? 0),
   );
 
-  /** The four rows themselves — only built while `showSetupChecklist` is true (no reason to compute it otherwise). */
+  /** The five rows themselves — only built while `showSetupChecklist` is true (no reason to compute it otherwise). */
   readonly setupChecklist = computed<readonly SetupChecklistRow[]>(() =>
-    buildSetupChecklist(this.setupUsersSignal(), this.setupGroupsSignal(), this.summary()?.totalAssets ?? 0, this.hasAnyPilotAssignmentSignal()),
+    buildSetupChecklist(
+      this.setupUsersSignal(),
+      this.setupGroupsSignal(),
+      this.summary()?.totalAssets ?? 0,
+      this.hasAnyPilotAssignmentSignal(),
+      this.auth.authEnabled(),
+    ),
   );
 
   private appliedDeepLink = false;

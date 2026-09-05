@@ -1,6 +1,8 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
+import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
+import { Notice } from '../../shared/ui/notice';
 import { AccountSettingsFacade } from './account-settings-facade';
 
 /**
@@ -22,7 +24,7 @@ import { AccountSettingsFacade } from './account-settings-facade';
  */
 @Component({
   selector: 'vision-account-settings',
-  imports: [PageBar, RouterLink],
+  imports: [PageBar, RouterLink, FormsModule, Notice],
   templateUrl: './account-settings.html',
   styleUrl: './account-settings.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

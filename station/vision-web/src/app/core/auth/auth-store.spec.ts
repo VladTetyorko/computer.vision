@@ -40,13 +40,20 @@ function meResponse(overrides: Partial<MeResponse> = {}): MeResponse {
 }
 
 function stubApi(
-  overrides: Partial<Record<'authMe' | 'authLogin' | 'authLogout' | 'changePassword', ReturnType<typeof vi.fn>>> = {},
+  overrides: Partial<
+    Record<
+      'authMe' | 'authLogin' | 'authLogout' | 'changePassword' | 'bootstrapStatus' | 'bootstrap',
+      ReturnType<typeof vi.fn>
+    >
+  > = {},
 ) {
   return {
     authMe: vi.fn().mockResolvedValue(null),
     authLogin: vi.fn(),
     authLogout: vi.fn().mockResolvedValue(undefined),
     changePassword: vi.fn().mockResolvedValue(undefined),
+    bootstrapStatus: vi.fn().mockResolvedValue({ required: false }),
+    bootstrap: vi.fn(),
     ...overrides,
   };
 }
@@ -392,6 +399,79 @@ describe('AuthStore', () => {
       const result = await store.changePassword('old-pw', '123');
 
       expect(result).toBe('Too short.');
+    });
+  });
+
+  describe('bootstrapRequired', () => {
+    it('reflects the latch as the server reports it', async () => {
+      const api = stubApi({ bootstrapStatus: vi.fn().mockResolvedValue({ required: true }) });
+      const store = create(api);
+      await store.ready;
+
+      expect(await store.bootstrapRequired()).toBe(true);
+    });
+
+    it('reflects false once the latch has closed', async () => {
+      const api = stubApi({ bootstrapStatus: vi.fn().mockResolvedValue({ required: false }) });
+      const store = create(api);
+      await store.ready;
+
+      expect(await store.bootstrapRequired()).toBe(false);
+    });
+
+    it('fails safe to false (never throws) when the check itself is unreachable', async () => {
+      const api = stubApi({ bootstrapStatus: vi.fn().mockRejectedValue(new HttpErrorResponse({ status: 0 })) });
+      const store = create(api);
+      await store.ready;
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const result = await store.bootstrapRequired();
+
+      expect(result).toBe(false);
+      expect(warn).toHaveBeenCalled();
+      warn.mockRestore();
+    });
+  });
+
+  describe('bootstrap', () => {
+    it('success applies the new admin session and reconnects the live store, returning null', async () => {
+      const created = meResponse({ topRole: 'ADMIN', username: 'root-admin' });
+      const api = stubApi({ bootstrap: vi.fn().mockResolvedValue(created) });
+      const liveStore = stubLiveStore();
+      const store = create(api, stubRouter(), liveStore);
+      await store.ready;
+
+      const result = await store.bootstrap({
+        username: 'root-admin',
+        displayName: 'Root Admin',
+        email: 'root@example.com',
+        password: 'a-strong-password',
+      });
+
+      expect(result).toBeNull();
+      expect(store.status()).toBe('authed');
+      expect(store.user()).toEqual(created);
+      expect(liveStore.reconnect).toHaveBeenCalled();
+    });
+
+    it('a failure (e.g. the latch already closed) returns the server message and never throws', async () => {
+      const api = stubApi({
+        bootstrap: vi
+          .fn()
+          .mockRejectedValue(new HttpErrorResponse({ status: 409, error: { error: 'ALREADY_INITIALIZED', message: 'This station already has an administrator.' } })),
+      });
+      const store = create(api);
+      await store.ready;
+
+      const result = await store.bootstrap({
+        username: 'root-admin',
+        displayName: 'Root Admin',
+        email: 'root@example.com',
+        password: 'a-strong-password',
+      });
+
+      expect(result).toBe('This station already has an administrator.');
+      expect(store.status()).toBe('anon'); // no session was applied
     });
   });
 });

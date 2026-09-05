@@ -85,6 +85,71 @@
     }
   </section>
 
+  <!-- ---- Security (docs/plans/active/AUTH-ROLES-PLAN.md wave W3) — self-service password change while
+       real auth is on; the one canonical "how do I turn auth on" explanation while it's off (linked
+       from both the unsecured shell banner and the "Secure this station" setup-checklist row, rather
+       than duplicating this copy in either place). -->
+  <section class="card">
+    <header><h2>Security</h2></header>
+    @if (facade.authEnabled()) {
+      <form class="security-form" (ngSubmit)="facade.submitPasswordChange()">
+        <div class="security-field">
+          <span class="label">Current password</span>
+          <input
+            type="password"
+            name="currentPassword"
+            autocomplete="current-password"
+            [ngModel]="facade.currentPassword()"
+            (ngModelChange)="facade.currentPassword.set($event)"
+            [disabled]="facade.changingPassword()"
+            required
+          />
+        </div>
+        <div class="security-field">
+          <span class="label">New password</span>
+          <input
+            type="password"
+            name="newPassword"
+            autocomplete="new-password"
+            [ngModel]="facade.newPassword()"
+            (ngModelChange)="facade.newPassword.set($event)"
+            [disabled]="facade.changingPassword()"
+            required
+          />
+        </div>
+        <div class="security-field">
+          <span class="label">Confirm new password</span>
+          <input
+            type="password"
+            name="confirmPassword"
+            autocomplete="new-password"
+            [ngModel]="facade.confirmPassword()"
+            (ngModelChange)="facade.confirmPassword.set($event)"
+            [disabled]="facade.changingPassword()"
+            required
+          />
+          @if (facade.newPassword() && facade.confirmPassword() && !facade.passwordsMatch()) {
+            <span class="security-field-hint">Passwords don't match.</span>
+          }
+        </div>
+        @if (facade.passwordChangeError(); as error) {
+          <vision-notice variant="danger">{{ error }}</vision-notice>
+        }
+        <button type="submit" class="btn" [disabled]="!facade.canChangePassword()">
+          {{ facade.changingPassword() ? 'Changing…' : 'Change password' }}
+        </button>
+      </form>
+    } @else {
+      <p class="muted hint">
+        This station is running with auth off — everyone who reaches it is the same unbounded
+        administrator, and there is no password to change. To secure it, set
+        <code>vision.auth.enabled: true</code> (or the <code>VISION_AUTH_ENABLED=true</code>
+        environment variable) and restart the app; the next visitor will be sent to create the
+        first real administrator account.
+      </p>
+    }
+  </section>
+
   <!-- ---- Settings (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1, wave W1) — Controller left the
        sidebar rail this wave; this link list is its one remaining door, alongside the org link a
        manager already had elsewhere (`identity-chip.ts`). Detection defaults (`/settings/detection`)

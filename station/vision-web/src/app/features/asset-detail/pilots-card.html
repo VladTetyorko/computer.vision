@@ -13,7 +13,12 @@
         <option [value]="user.userId">{{ user.displayName }} ({{ user.username }})</option>
       }
     </select>
-    <button type="button" class="btn" (click)="add()" [disabled]="busy() || !pickUserId()">Add pilot</button>
+    <select aria-label="Seat" [ngModel]="pickRole()" (ngModelChange)="pickRole.set($event)" [disabled]="busy()">
+      @for (role of roleOptions; track role) {
+        <option [value]="role">{{ assignmentRoleLabel(role) }}</option>
+      }
+    </select>
+    <button type="button" class="btn" (click)="add()" [disabled]="busy() || !pickUserId()">Add</button>
   </div>
 
   @if (loading() && assigned().length === 0) {
@@ -25,6 +30,17 @@
       @for (pilot of assigned(); track pilot.userId) {
         <li class="pilots-row">
           <span class="pilots-name truncate">{{ pilot.displayName }}</span>
+          <select
+            [attr.aria-label]="'Seat for ' + pilot.displayName"
+            class="pilots-role"
+            [ngModel]="pilot.role"
+            (ngModelChange)="changeRole(pilot.userId, $event)"
+            [disabled]="busy()"
+          >
+            @for (role of roleOptions; track role) {
+              <option [value]="role">{{ assignmentRoleLabel(role) }}</option>
+            }
+          </select>
           <button type="button" class="btn danger small" (click)="remove(pilot.userId)" [disabled]="busy()">
             Remove
           </button>

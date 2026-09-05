@@ -1,0 +1,81 @@
+/* Mirrors login.css's own centered-card layout almost exactly — the two are the only pages ever
+   shown to a visitor with no session at all, and should read as siblings (this component's own
+   doc comment). Duplicated rather than shared: `features/auth/login/login.css`'s own `.login-*`
+   classes are view-encapsulated to that component, and this app's precedent (`app-sidebar.css`'s
+   own `.brand-mark` copy) is to re-declare the small brand mark per file rather than extract a
+   shared component for it. */
+:host {
+  display: block;
+}
+
+.setup-shell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--shell-h);
+  padding: var(--space-24) var(--space-16);
+}
+
+.setup-card {
+  width: min(26rem, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.setup-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.85rem;
+  letter-spacing: -0.01em;
+}
+
+.setup-brand-mark {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--color-info);
+  position: relative;
+  flex: none;
+}
+
+.setup-brand-mark::after {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  border-radius: 50%;
+  background: var(--color-info);
+}
+
+.setup-card h1 {
+  margin-bottom: var(--space-4);
+}
+
+.setup-card .muted {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.setup-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.setup-field input {
+  min-height: 44px;
+}
+
+.setup-field-hint {
+  font-size: 0.8rem;
+  color: var(--color-danger-text);
+}
+
+.setup-submit {
+  min-height: 44px;
+  justify-content: center;
+  font-size: 0.92rem;
+}
