@@ -148,11 +148,16 @@
           classpath transitively, which is what PersistenceWiringConfiguration's new DataSource
           and PlatformTransactionManager beans (see that class's own javadoc) get bound to.
           Version managed by spring-boot-dependencies (this module's grandparent POM), same
-          convention as spring-boot-starter-security above.
+          convention as spring-boot-starter-security above. Must be Boot's own
+          spring-boot-session-jdbc module, not bare org.springframework.session:spring-session-jdbc:
+          Boot 4 moved session auto-configuration out of spring-boot-autoconfigure into
+          per-technology modules, so the bare library sits inert on the classpath: no
+          SessionRepositoryFilter registered, Tomcat keeps serving in-memory JSESSIONID.
+          Found live when a restart logged every session out despite green tests.
         -->
         <dependency>
-            <groupId>org.springframework.session</groupId>
-            <artifactId>spring-session-jdbc</artifactId>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-session-jdbc</artifactId>
         </dependency>
         <!--
           Liveness probe (docs/plans/done/SYSTEM-STATUS-PLAN.md §4.4): only the `health` endpoint

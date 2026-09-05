@@ -1,5 +1,7 @@
 package com.drones.vision.kernel;
 
+import java.io.Serializable;
+
 /**
  * Who an {@link Asset} belongs to: an owning user within a group.
  *
@@ -11,10 +13,16 @@ package com.drones.vision.kernel;
  * that constant is applied in the application layer, never hard-coded in
  * the domain.
  *
+ * <p>{@link Serializable} (docs/plans/active/AUTH-ROLES-PLAN.md B5-fix): this is the exact type
+ * a live {@code POST /api/auth/login} 500'd on — held directly by the {@code VisionUserDetails}
+ * principal (station/vision-app) that Spring Session JDBC java-serializes into
+ * {@code spring_session_attributes}. {@code java.io} is JDK, not a third-party dependency, so
+ * this costs nothing against the module's own dependency rule.
+ *
  * @param ownerId owning user; must not be {@code null}
  * @param groupId owning group; must not be {@code null}
  */
-public record Ownership(UserId ownerId, GroupId groupId) {
+public record Ownership(UserId ownerId, GroupId groupId) implements Serializable {
 
     public Ownership {
         if (ownerId == null) {

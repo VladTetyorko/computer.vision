@@ -971,3 +971,86 @@ new migration this wave — the D16 test needed no schema change). Both builds r
 an explicit generous timeout, never backgrounded.
 
 AUTH-ROLES-PLAN.md is now fully closed — B0b was its last open wave.
+
+**B5-fix (2026-09-05): live verification found wave B5 broken in production, two stacked defects.**
+"Fully closed" above spoke too soon — B0b's own green suite could not have caught either defect, since
+neither one is observable through this module's test doubles; both only surface against a real socket
+and a real Postgres connection with the JDBC session store genuinely active.
+
+*Defect 1 — the session store was inert.* `pom.xml` depended on the bare
+`org.springframework.session:spring-session-jdbc`, not Boot's own `org.springframework.boot:
+spring-boot-session-jdbc`. Spring Boot 4 moved session auto-configuration out of
+`spring-boot-autoconfigure` into per-technology modules (the same restructuring that moved
+`TestRestTemplate` out of `spring-boot-test`, below) — the bare library sits on the classpath with no
+`SessionRepositoryFilter` ever registered, so Tomcat silently kept serving in-memory `JSESSIONID`
+cookies the whole time. `spring_session` stayed at 0 rows forever; `spring.session.store-type`
+has not existed since Boot 3 and was dead config, now removed from `application.yaml` along with the
+stale "store-type=jdbc backs..." comment line that referenced it. Fixed by depending on
+`spring-boot-session-jdbc` instead — no other change needed, Spring Session's own JDBC schema/table
+names are unaffected.
+
+*Defect 2 — the principal graph wasn't `Serializable`.* With the JDBC store genuinely active,
+`POST /api/auth/login` started 500ing: `SerializationFailedException` /
+`NotSerializableException: com.drones.vision.kernel.Ownership`. Spring Session JDBC java-serializes
+the whole `SecurityContext` into `spring_session_attributes`, and `VisionUserDetails` (this module's
+`UserDetails` principal) holds a plain `User` plus a derived `Ownership` — neither was `Serializable`.
+Fixed at the source, not here: `core/vision-kernel`'s `UserId`/`GroupId`/`Ownership` and
+`contexts/vision-identity`'s `User`/`Membership` all gained `implements java.io.Serializable` (see
+those modules' own MODULE.md entries for the root-cause writeup) — nothing in this module's own
+source changed for Defect 2, only its test suite gained the regression coverage below.
+`SecurityContextPrincipalResolver` never held `VisibilityScope`/`Authority` in the session at all
+(both are recomputed per-request from `ScopeResolver`, already the "slim principal, re-resolve per
+request" shape CLAUDE.md rule 9 favors) — so the fix's blast radius is exactly `User`+`Ownership`'s
+own reachable graph, not the wider principal-adjacent type set the live-verification report
+considered making Serializable.
+
+*Why `AuthEnabledFlowTest` never caught either defect.* That test builds its `MockMvc` by hand —
+`MockMvcBuilders.webAppContextSetup(webApplicationContext).addFilters(springSecurityFilterChain)` —
+which registers exactly one filter bean, the named Spring Security chain. Boot's own
+`SessionRepositoryFilter` (a `FilterRegistrationBean` against the real `ServletContext`, which only
+`@AutoConfigureMockMvc` or a real embedded server picks up) is never one of the filters handed to
+`addFilters(...)`. `request.getSession(...)` in that test therefore resolves to a plain
+`MockHttpSession` the servlet-mock layer invents on the spot — never a JDBC-backed `Session` — so
+`HttpSessionSecurityContextRepository#saveContext` just calls `setAttribute` on that mock object and
+Java serialization is never invoked at all. This is not a lazy-flush timing gap; MockMvc's manual
+filter list structurally cannot reach `SessionRepositoryFilter`, so no additional assertion inside
+`AuthEnabledFlowTest` itself could have caught this.
+
+**New regression test, `SessionPersistenceIntegrationTest`** — the one this module needed and did not
+have: `@SpringBootTest(webEnvironment = RANDOM_PORT, properties = {"vision.auth.enabled=true", ...})`,
+a real embedded server, a real login over HTTP, asserting (1) the login response is `200` (a `500`
+here fails for the same reason production did), (2) the `Set-Cookie` response carries a `SESSION`
+cookie and no `JSESSIONID` (proving `SessionRepositoryFilter` actually engaged, not Tomcat's own
+container-level session), and (3) `select count(*) from spring_session` is `> 0` after login (a row
+genuinely landed). Deliberately its own `@SpringBootTest` context (`RANDOM_PORT`, unlike every other
+class's default `MOCK`) so it is never folded into the cached context `AuthEnabledFlowTest` and its
+siblings share via `PostgresContextCustomizerFactory`/`PostgresResetTestExecutionListener` — this is
+the one test in the module that actually needs a live socket.
+
+**`TestRestTemplate` does not exist in Boot 4** (a second instance of the same "moved out" pattern as
+Defect 1): `spring-boot-test-4.1.0.jar` has no `org.springframework.boot.test.web.client` package at
+all — confirmed by inspecting the jar directly, present as recently as `spring-boot-test-3.5.3.jar`
+and gone by `4.0.0`. Its Boot-4/Spring-Framework-7 replacement is `org.springframework.test.web.
+servlet.client.RestTestClient` (`spring-test`, the same artifact `MockMvc` already lives in — no
+`pom.xml` change needed): `RestTestClient.bindToServer().baseUrl("http://localhost:" + port).build()`
+for a real live-server round trip (there is also `.bindTo(MockMvc)` for an in-process variant, unused
+here since a live socket is the whole point). `@LocalServerPort` itself is unaffected by the
+restructuring — still `org.springframework.boot.test.web.server.LocalServerPort`. Its fluent API
+mirrors `WebTestClient`'s shape (`.post().uri(...).contentType(...).body(...).exchange()`, returning a
+`ResponseSpec`); `.exchange().returnResult()` hands back a plain `ExchangeResult` with `getStatus()`/
+`getResponseCookies()` for a JUnit-assertion style, used here instead of the fluent
+`expectStatus()...` chain to keep the test's assertions in the same idiom as the rest of this module's
+suite.
+
+Test counts: `./mvnw -B -pl core/vision-kernel,core/vision-platform,contexts/vision-warehouse,
+contexts/vision-identity,contexts/vision-flight,contexts/vision-perception,contexts/vision-map,
+contexts/vision-events,contexts/vision-learning,contexts/vision-simulation install -DskipTests` —
+**BUILD SUCCESS**, all ten (adding `Serializable` to five types elsewhere is source-compatible, no
+downstream module needed a code change). `./mvnw -B -pl core/vision-kernel,contexts/vision-identity
+test` — **153/153** green, unchanged (neither module's own suite serializes these types). `./mvnw -B
+-pl storage/persistence,station/vision-api,station/vision-app install -DskipWeb` —
+**BUILD SUCCESS**: `adapter-persistence` **277/277** (unchanged from B0b), `vision-api` **985/985**
+(untouched by either defect — every `vision.auth.enabled` reference there is javadoc/comment prose,
+no `@SpringBootTest` binding), `vision-app` **334/334** (**333/333** unchanged +1 new —
+`SessionPersistenceIntegrationTest`). Docker ran for real throughout (Testcontainers `postgres:16`).
+Every build ran in the foreground with an explicit generous timeout, never backgrounded.

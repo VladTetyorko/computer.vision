@@ -1,6 +1,7 @@
 package com.drones.vision.identity.domain.model;
 
 import com.drones.vision.kernel.UserId;
+import java.io.Serializable;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -36,6 +37,12 @@ import java.util.Optional;
  * bootstrap-chosen password ({@code UserService#createFirstAdmin}) never sets it, since nobody
  * handed that password to them.
  *
+ * <p>{@link Serializable} (docs/plans/active/AUTH-ROLES-PLAN.md B5-fix): this is the aggregate the
+ * {@code VisionUserDetails} principal (station/vision-app) holds whole, and which Spring Session
+ * JDBC java-serializes into {@code spring_session_attributes} once a session carries an
+ * authenticated principal. Every component type here is already {@link Serializable} for the same
+ * reason ({@link UserId}, {@link Membership}, {@link String}, {@code boolean}).
+ *
  * @param id                  typed user identity
  * @param username            login handle; must not be blank; normalized to lower-case (trimmed)
  * @param displayName         human-readable name; must not be blank
@@ -47,7 +54,8 @@ import java.util.Optional;
  * @param memberships         the groups this user belongs to and their role in each; defensively copied; may be empty
  */
 public record User(UserId id, String username, String displayName, String email, String passwordHash,
-                    boolean enabled, boolean mustChangePassword, List<Membership> memberships) {
+                    boolean enabled, boolean mustChangePassword, List<Membership> memberships)
+        implements Serializable {
 
     public User {
         if (id == null) {

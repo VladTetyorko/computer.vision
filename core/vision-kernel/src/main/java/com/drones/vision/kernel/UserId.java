@@ -1,5 +1,6 @@
 package com.drones.vision.kernel;
 
+import java.io.Serializable;
 import java.util.UUID;
 
 /**
@@ -13,9 +14,14 @@ import java.util.UUID;
  * well-known {@link UUID} — owns everything, applied in the application
  * layer and never hard-coded in the domain.
  *
+ * <p>{@link Serializable} (docs/plans/active/AUTH-ROLES-PLAN.md B5-fix): reachable from the
+ * {@code VisionUserDetails} principal (station/vision-app) that Spring Session JDBC
+ * java-serializes into {@code spring_session_attributes} — {@code java.io} is JDK, not a
+ * third-party dependency, so this costs nothing against the module's own dependency rule.
+ *
  * @param value the underlying identity; must not be {@code null}
  */
-public record UserId(UUID value) {
+public record UserId(UUID value) implements Serializable {
 
     public UserId {
         if (value == null) {

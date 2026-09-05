@@ -47,14 +47,13 @@ spring:
   # binding constraint at 100 viewers.
   session:
     # Sessions that survive the station (docs/plans/active/AUTH-ROLES-PLAN.md §3.6, wave B5):
-    # store-type=jdbc backs HttpSession with SPRING_SESSION/SPRING_SESSION_ATTRIBUTES rows in the
+    # Spring Session JDBC backs HttpSession with SPRING_SESSION/SPRING_SESSION_ATTRIBUTES rows in the
     # same Postgres this app already runs against (V34__spring_session.sql, storage/persistence),
     # replacing Tomcat's in-memory session map -- a restart/redeploy no longer logs every operator
     # out. Only takes effect once vision.auth.enabled=true wires the SecuritySessionAuthenticator/
     # secured filter chain that actually puts something meaningful into a session; with auth off
     # (this file's own default, see vision.auth.enabled below) a session is still opened per the
     # JDBC store, it just never carries an authenticated principal.
-    store-type: jdbc
     jdbc:
       # Flyway owns this schema (V34__spring_session.sql) -- same "one migration path, not two"
       # rule as every other table in this app; letting Spring Session ALSO try to initialize it
