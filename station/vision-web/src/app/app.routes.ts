@@ -1,6 +1,7 @@
 import { Routes } from '@angular/router';
 import { HUBS_ROUTES } from './features/hubs/hubs.routes';
 import { FLY_ROUTES } from './features/fly/fly.routes';
+import { CREW_ROUTES } from './features/crew/crew.routes';
 import { COMMAND_ROUTES } from './features/command/command.routes';
 import { WALL_ROUTES } from './features/wall/wall.routes';
 import { MAP_ROUTES } from './features/map/map.routes';
@@ -91,6 +92,7 @@ export const routes: Routes = [
       ...TRAINING_JOB_ROUTES,
       ...LABELING_ROUTES,
       ...FLY_ROUTES,
+      ...CREW_ROUTES,
       ...COMMAND_ROUTES,
       ...WALL_ROUTES,
       ...MAP_ROUTES,

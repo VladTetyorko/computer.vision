@@ -1,0 +1,212 @@
+@if (facade.asset(); as a) {
+  <!-- ---- Crew grid (docs/plans/active/CREW-CONTROL-PLAN.md §3.4) — one layer lighter than the
+       cockpit: no `grid-banner` (no failsafe/grounded banners — this page issues no flight verb, so
+       neither concept applies here), no `grid-telemetry` OSD shelf (the read-only telemetry readout
+       is a corner overlay instead, `.crew-telemetry` below — see this file's own comment there for
+       why). `.surface-dark` is this component's own root (`crew.routes.ts`'s `fullBleed: true` means
+       no page-bar wraps it), same reasoning as `cockpit.html`'s identical enclave comment. -->
+  <div class="crew surface-dark">
+    <div class="grid-main">
+      <div class="stage-video">
+        <vision-player
+          [src]="facade.stream()?.viewUrl ?? null"
+          [whepUrl]="facade.stream()?.whepUrl ?? null"
+          [stopped]="facade.stopped()"
+          [compact]="true"
+          [detections]="facade.detections.results()"
+          [boxesMode]="facade.boxesMode()"
+          [lockedTrackId]="facade.lockedTrackId()"
+          [cropFollowEnabled]="facade.settings.cropFollowEnabled()"
+          [hoveredClass]="facade.hoveredDetectionClass()"
+          [lostBox]="facade.lostBox()"
+          (trackFollowed)="facade.followTrack($event)"
+        />
+
+        <!-- Follow HUD (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.2/§3.3) — `[canRelease]` is real
+             here, not a placeholder `true`: Release is itself a CAMERA-guarded write (§3.3), so it
+             only renders actionable while `facade.stage() === 'C3'` — see `CrewFacade.canRelease`'s
+             own doc comment. -->
+        <vision-follow-hud
+          [follow]="facade.follow()"
+          [canRelease]="facade.canRelease()"
+          [cropFollowEnabled]="facade.settings.cropFollowEnabled()"
+          (cropFollowEnabledChange)="facade.settings.cropFollowEnabled.set($event)"
+          (release)="facade.releaseFollow()"
+          (reacquire)="facade.reacquireFollow()"
+        />
+
+        <!-- ---- The dock (§3.4's four-row table, copy verbatim from `crew-logic.ts#crewDock`) — one
+             bottom-centre zone: stage text, then at most one action. Only `C0` ever has anything in
+             the action slot — either the Start-video button, or (camera seat blocked, or no camera
+             device at all) an inline reason, never both. -->
+        <div class="dock">
+          <div class="dock-card card">
+            <p class="dock-card-title">{{ facade.dock().text }}</p>
+            @if (facade.dock().actionLabel; as actionLabel) {
+              @if (facade.primaryDevice()) {
+                <button type="button" class="btn big" (click)="facade.start()" [disabled]="facade.busy()">
+                  {{ facade.busy() ? 'Starting…' : actionLabel }}
+                </button>
+              } @else {
+                <p class="muted hint">No camera device on this drone — nothing to stream.</p>
+              }
+            } @else if (facade.dock().reason; as reason) {
+              <p class="muted hint">{{ reason }}</p>
+            }
+          </div>
+        </div>
+      </div>
+
+      <!-- ---- Header (§3.4: "asset identity · seat chip") ---------------------------------------- -->
+      <div class="main-header">
+        <div class="header-left">
+          <a class="icon-btn" routerLink="/wall" title="Exit to the Wall">
+            <vision-icon name="chevron-left" />
+          </a>
+          <span class="asset-name">{{ a.displayName }}</span>
+        </div>
+
+        <div class="header-actions">
+          <!-- The header's own seat chip (§3.4) — a persistent, at-a-glance readout, distinct from
+               the dock's stage text (which only ever speaks about the camera seat at `C0`'s blocked
+               branch and at `C2`). Legible at every stage, including before video starts. -->
+          <span class="seat-chip" [class.seat-chip-mine]="facade.seats.camera().mine">
+            Camera · {{ facade.cameraChipLabel() }}
+          </span>
+        </div>
+      </div>
+
+      <!-- ---- Telemetry readout (§3.4: "read-only instruments; no <vision-fly-hud>, ever") — a
+           corner overlay rather than a full OSD shelf: this page has no flight-command row to anchor
+           one to, and the plan's own layer vocabulary (L0-L3) names no such row for this page. Gated
+           on `hasTelemetryDevice()` exactly like `live.html`'s identical "Telemetry" card. -->
+      @if (facade.hasTelemetryDevice()) {
+        <div class="crew-telemetry">
+          @if (facade.telemetry.hasTelemetry()) {
+            <vision-telemetry-osd />
+          } @else {
+            <p class="muted hint">No telemetry yet.</p>
+          }
+        </div>
+      }
+
+      <!-- ---- Detections strip (§3.4: "detections strip (bottom)") — unlike the cockpit, this is
+           not tucked in a drawer: a crew member's whole job is watching what the aircraft sees, so
+           it stays permanently visible whenever a stream is live. Interactive (the class-hide
+           `labelDenyFilter` write) only at `C3` — camera-seat guarded like any other write (§3.3);
+           `[streamId]` unbound reverts the strip to its own plain read-only chip mode at every other
+           stage, same dual-mode contract `cockpit.html` already relies on. -->
+      @if (facade.live()) {
+        <div class="crew-detections">
+          <vision-detections-strip
+            [streamId]="facade.stage() === 'C3' ? facade.stream()?.streamId : undefined"
+            [labelDenyFilter]="facade.resolvedCvConfig()?.labelDenyFilter ?? []"
+            (hoveredClassChange)="facade.hoveredDetectionClass.set($event)"
+            (configChanged)="facade.refreshStreamConfig()"
+          />
+        </div>
+      }
+
+      <!-- ---- Vision drawer (§3.4: "the CV control body") — visible-but-inert at `C2` rather than
+           hidden: the plan's own table says "CV controls render disabled with that reason", not
+           "CV controls are absent". `<vision-cv-control-panel>` has no `disabled`/`readOnly` input
+           of its own (it is body-only by design, CV-PANEL-SPLIT-PLAN.md P1, and out of this wave's
+           file scope regardless) — `.panel-inert` achieves the same thing from this page's own CSS:
+           dimmed, `pointer-events: none`, with the seat's own reason stated above it. -->
+      @if (isPanelOpen('vision')) {
+        <vision-side-panel title="Vision" icon="eye" subtitle="What the aircraft sees" (close)="panels.close()">
+          @if (facade.stage() === 'C2') {
+            <p class="muted hint panel-inert-reason">Pilot has the camera — controls are read-only.</p>
+          }
+          <div [class.panel-inert]="facade.stage() === 'C2'">
+            <vision-cv-control-panel
+              [streamId]="facade.stream()?.streamId"
+              [config]="facade.resolvedCvConfig()"
+              [effectiveProfile]="facade.effectiveProfile()"
+              [assetId]="a.assetId"
+              [boxesMode]="facade.boxesMode()"
+              (boxesModeChange)="facade.boxesMode.set($event)"
+              [detectionEnabled]="facade.detectionOn()"
+              [detectionPending]="facade.detectionPending()"
+              (detectionEnabledChange)="facade.setDetection($event)"
+              (setupRequested)="requestCvSetup()"
+              (configChanged)="facade.refreshStreamConfig()"
+            />
+          </div>
+        </vision-side-panel>
+      }
+
+      <!-- ---- Map tools (§3.4: one combined capability set — marks + layers(manage) + draw + zones,
+           "Mark target" geolocation is a crew job) — no `[map]` binding: this page mounts no
+           `<vision-tactical-map>` of its own, mirroring `cockpit.html`'s own `marks` door (which
+           likewise omits `[map]`). -->
+      @if (isPanelOpen('map')) {
+        <vision-map-tools [capabilities]="mapToolsCapabilities()" title="Map tools" (close)="panels.close()" />
+      }
+    </div>
+
+    <!-- ---- Tool rail (§3.4's frozen composition table — exactly two doors, no flight/rc/help). -->
+    <div class="grid-rail">
+      <div class="rail-group" role="group" aria-label="Vision">
+        <span class="rail-item">
+          <vision-icon-button
+            icon="eye"
+            label="Vision"
+            variant="hud"
+            [active]="isPanelOpen('vision')"
+            (activated)="togglePanel('vision')"
+          />
+          @if (!facade.detectionOn()) {
+            <span class="rail-dot" title="Detection is off"></span>
+          }
+        </span>
+      </div>
+
+      <div class="rail-group" role="group" aria-label="Situational">
+        <span class="rail-divider" aria-hidden="true"></span>
+        <vision-icon-button
+          icon="layers"
+          label="Map tools"
+          variant="hud"
+          [active]="isPanelOpen('map')"
+          (activated)="togglePanel('map')"
+        />
+      </div>
+    </div>
+
+    <!-- ---- CV setup modal — only reachable from `<vision-cv-control-panel>`'s own "Change…"/
+         "Detection setup…" buttons above, so nothing can open it while the Vision drawer is closed;
+         `!isCvSetupOpen() at C2` is not additionally gated here — those buttons are already inside
+         `.panel-inert` at `C2`, so `pointer-events: none` already keeps them unreachable there. -->
+    @if (isCvSetupOpen()) {
+      <vision-cv-setup-modal
+        [streamId]="facade.stream()?.streamId"
+        [config]="facade.resolvedCvConfig()"
+        [effectiveProfile]="facade.effectiveProfile()"
+        [assetId]="a.assetId"
+        [assetDisplayName]="a.displayName"
+        [canManage]="facade.canManage()"
+        [expertOpen]="facade.cvExpertOpen()"
+        (expertOpenChange)="facade.cvExpertOpen.set($event)"
+        (closed)="closeCvSetup()"
+        (configChanged)="facade.refreshStreamConfig()"
+        (profileSaved)="facade.refreshEffectiveProfile()"
+      />
+    }
+  </div>
+} @else if (facade.loadError()) {
+  <!-- Honest empty state — mirrors `cockpit.html`/`live.html`'s identical "not found" branch. -->
+  <div class="crew crew-empty surface-dark">
+    <vision-empty title="Drone not found">
+      <p>
+        No drone with id <span class="mono">{{ assetId() }}</span> is registered here. It may have
+        been removed, or the link may be out of date.
+      </p>
+      <a class="btn" routerLink="/wall">Back to the Wall</a>
+    </vision-empty>
+  </div>
+} @else {
+  <div class="crew crew-loading surface-dark">
+    <div class="card skeleton-card"></div>
+  </div>
+}

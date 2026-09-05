@@ -151,6 +151,21 @@ export const NAV_MODES: readonly NavMode[] = [
         description: "The live status card for any drone — saved, editable templates are coming.",
         to: '/operate/preflight',
       },
+      {
+        icon: 'eye',
+        name: 'Crew seat',
+        // New this wave (docs/plans/active/CREW-CONTROL-PLAN.md §4, wave W3) — the sensor-operator
+        // seat: video, CV controls, and map-tools on an asset a pilot may already be flying, with no
+        // flight verb anywhere on the page. Named "Crew seat", not the bare "Crew" (Fleet's own
+        // `/manage/roster` entry already owns that name for the pilot-assignment roster — a different
+        // page entirely; this file's own "no duplicate entry name within one group" guard only checks
+        // per-group, but two identically-named sidebar links to different destinations is confusing
+        // regardless of which test would catch it). Ungated (no `requires`) — the same "working the
+        // fleet is not a management action" reasoning as Cockpit/Wall above; `/crew` itself redirects
+        // to Wall until a real crew landing page exists (`crew.routes.ts`'s own doc comment).
+        description: 'Watch the picture and work the camera on a drone — no flight controls.',
+        to: '/crew',
+      },
     ],
   },
   {

@@ -111,8 +111,10 @@ describe('NAV_MODES', () => {
   describe('OPERATE — Readiness rename (rule 4)', () => {
     const operate = NAV_MODES.find((mode) => mode.id === 'operate')!;
 
-    it('has exactly Cockpit, Wall, Readiness, in that order, none gated', () => {
-      expect(operate.entries.map((entry) => entry.name)).toEqual(['Cockpit', 'Wall', 'Readiness']);
+    it('has exactly Cockpit, Wall, Readiness, Crew seat, in that order, none gated', () => {
+      // "Crew seat" joined this wave (docs/plans/active/CREW-CONTROL-PLAN.md §4, wave W3) — the
+      // sensor-operator seat, ungated like every other entry in this group.
+      expect(operate.entries.map((entry) => entry.name)).toEqual(['Cockpit', 'Wall', 'Readiness', 'Crew seat']);
       for (const entry of operate.entries) {
         expect(entry.requires, entry.name).toBeFalsy();
       }
@@ -276,9 +278,11 @@ describe('NAV_MODES', () => {
    * (docs/plans/active/CV-SETTINGS-PLAN.md) moves it to 19** — one new gated entry (Profiles)
    * joins Vision (+1): 18 + 1 = 19. The PILOT count is unaffected across both waves — none of the
    * changed entries was ever pilot-visible (every VISION entry, Profiles included, is `MANAGE_ORG`-gated)
-   * — it still lands on the plan's own "10".
+   * — it still lands on the plan's own "10". **Wave W3 (docs/plans/active/CREW-CONTROL-PLAN.md §4)
+   * moves both counts to +1** — "Crew seat" is ungated, so it joins both the pilot and manager
+   * lists alike: pilot 10 + 1 = 11, manager 19 + 1 = 20.
    */
-  it('a PILOT sees exactly the plan\'s own 10 entries; a MANAGER/ADMIN sees 19 (18 + 1 new Profiles — see this test\'s own doc comment)', () => {
+  it('a PILOT sees exactly the plan\'s own 11 entries; a MANAGER/ADMIN sees 20 (19 + 1 new Crew seat — see this test\'s own doc comment)', () => {
     const pilotVisible = visibleEntries(false);
     const managerVisible = visibleEntries(true);
 
@@ -286,6 +290,7 @@ describe('NAV_MODES', () => {
       'Cockpit',
       'Wall',
       'Readiness',
+      'Crew seat',
       'Command',
       'Activity',
       'Replay library',
@@ -294,8 +299,8 @@ describe('NAV_MODES', () => {
       'System status',
       'Settings',
     ]);
-    expect(pilotVisible.length).toBe(10);
-    expect(managerVisible.length).toBe(19);
+    expect(pilotVisible.length).toBe(11);
+    expect(managerVisible.length).toBe(20);
   });
 });
 

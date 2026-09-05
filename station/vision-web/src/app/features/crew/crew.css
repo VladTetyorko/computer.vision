@@ -1,0 +1,293 @@
+/* ---- Crew grid (docs/plans/active/CREW-CONTROL-PLAN.md §3.4, wave W3) — one layer lighter than
+   `cockpit.css`'s own grid (that file's own top comment has the full history this one borrows):
+   no `banner` row (this page issues no flight verb, so neither the failsafe nor the grounded banner
+   concept applies here) and no `telemetry` row (the read-only OSD is a corner overlay instead,
+   `.crew-telemetry` below, not a full-width shelf — this page has no Start/Stop/Replay dock content
+   competing for that shelf's own space the way the cockpit's `.telemetry-stop` does). Two areas only:
+   `main` (the video hero) and `rail` (the tool-rail column), same `1fr auto` column split. */
+.crew {
+  position: relative;
+  display: grid;
+  grid-template-areas: 'main rail';
+  grid-template-columns: 1fr auto;
+  grid-template-rows: 1fr;
+  --overlay-pad: var(--space-16);
+  /* `--shell-h` (`styles.css`), not a bare `100dvh` — identical reasoning to `cockpit.css`'s own rule
+     (this page also carries `fullBleed: true` and sits directly inside the same shell `<main>`). */
+  height: var(--shell-h);
+  min-height: 20rem;
+  overflow: hidden;
+  background: var(--black);
+}
+
+.crew-empty,
+.crew-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-32);
+}
+
+.crew-loading .skeleton-card {
+  width: 100%;
+  max-width: 30rem;
+  height: 12rem;
+}
+
+/* Honest empty state (mirrors `cockpit.css`'s identical comment) — a bad/stale `:assetId` link. */
+.crew-empty {
+  color: var(--text);
+}
+
+.grid-main {
+  grid-area: main;
+  position: relative;
+  overflow: hidden;
+  background: var(--black);
+}
+
+.stage-video {
+  position: absolute;
+  inset: 0;
+}
+
+/* See `cockpit.css`'s identical rule for the full reasoning — the shared `<vision-player>` frame
+   normally holds a fixed 16:9 ratio (right for a rail tile, wrong for a full-bleed stage). */
+:host ::ng-deep .stage-video vision-player .frame {
+  position: absolute;
+  inset: 0;
+  height: 100%;
+  aspect-ratio: unset;
+  border-radius: 0;
+}
+
+/* ---- The dock (§3.4's four-row table) — one bottom-centre anchor, mirrors `cockpit.css#.dock`
+   verbatim (same safe-margin cap, same z-index tier below the header). */
+.dock {
+  position: absolute;
+  left: 50%;
+  bottom: 6.5rem;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
+  max-width: min(90%, 24rem);
+}
+
+.dock-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
+  width: min(100%, 22rem);
+  text-align: center;
+  background: var(--panel-raised);
+  box-shadow: var(--shadow);
+}
+
+.dock-card p {
+  margin: 0;
+}
+
+.dock-card-title {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.dock-card .btn.big {
+  align-self: stretch;
+  justify-content: center;
+  margin-top: var(--space-8);
+}
+
+.btn.big {
+  padding: var(--space-8) var(--space-24);
+  font-size: 1rem;
+  border-radius: var(--radius);
+}
+
+.hint {
+  font-size: 0.72rem;
+}
+
+/* ---- Header overlay: exit + asset identity + seat chip (§3.4) — a lighter twin of `cockpit.css`'s
+   own 3-column safe-area grid: no drone switcher, no "Bring home" — this page has exactly one
+   left cluster (exit + name) and one right cluster (the seat chip), so a simple flex row already
+   has a real safe area on both edges without needing the cockpit's `minmax(0, auto)` column dance. */
+.main-header {
+  position: absolute;
+  top: var(--overlay-pad);
+  left: var(--overlay-pad);
+  right: var(--overlay-pad);
+  z-index: 6;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-8);
+}
+
+.header-left {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.header-actions {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-8);
+  border-radius: var(--radius-pill);
+  background: var(--hud-bg);
+  backdrop-filter: blur(var(--hud-blur));
+  border: var(--hud-border);
+  color: var(--text);
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  background: var(--hud-bg-strong);
+}
+
+.asset-name {
+  align-self: center;
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The seat chip (§3.4: "header (asset identity · seat chip)") — same frosted-pill chrome family as
+   `.icon-btn` beside it, but a fact, not a control (no `cursor: pointer`, no `:hover`), mirroring
+   `cockpit.css#.origin-chip`'s identical honesty-pill precedent. `--color-info` on the mine-held
+   state only — this app's one "current/mine/active" accent, not a fabricated third color. */
+.seat-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-4) var(--space-8);
+  border-radius: var(--radius-pill);
+  background: var(--hud-bg);
+  backdrop-filter: blur(var(--hud-blur));
+  border: var(--hud-border);
+  color: var(--text);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.seat-chip-mine {
+  border: 1px solid var(--color-info);
+  color: var(--color-info);
+}
+
+/* ---- Telemetry corner overlay (§3.4: read-only instruments, no `<vision-fly-hud>`) — this page has
+   no bottom OSD shelf to anchor to (see this file's own top comment), so the readout sits as its own
+   small frosted card in the opposite top corner from the seat chip, clear of the header row above it
+   and the dock below. */
+.crew-telemetry {
+  position: absolute;
+  top: calc(var(--overlay-pad) + var(--space-32));
+  right: var(--overlay-pad);
+  z-index: 4;
+  max-width: min(90%, 20rem);
+  padding: var(--space-8) var(--space-16);
+  border-radius: var(--radius-sm);
+  background: var(--hud-bg);
+  backdrop-filter: blur(var(--hud-blur));
+  border: var(--hud-border);
+  color: var(--text);
+}
+
+/* ---- Detections strip (§3.4: "detections strip (bottom)") — a real bottom-of-stage overlay, not a
+   drawer (this file's own crew.html comment has the "a crew member's whole job is watching what the
+   aircraft sees" reasoning); pinned above the dock's own safe area rather than sharing its z-index
+   tier, since the two never need to occupy the exact same row. */
+.crew-detections {
+  position: absolute;
+  left: var(--overlay-pad);
+  right: var(--overlay-pad);
+  bottom: var(--overlay-pad);
+  z-index: 4;
+}
+
+/* ---- Tool rail (§3.4's frozen composition table — exactly two doors) — mirrors `cockpit.css`'s
+   identical rule verbatim. */
+.grid-rail {
+  grid-area: rail;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-16);
+  padding: var(--space-16) var(--space-8);
+}
+
+.rail-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-8);
+}
+
+.rail-divider {
+  width: 1.25rem;
+  height: 1px;
+  background: var(--hairline);
+}
+
+.rail-item {
+  position: relative;
+  display: inline-flex;
+}
+
+/* The CV rail button's own "detection is off" tell — mirrors `cockpit.css#.rail-dot` verbatim,
+   including its own "this is the neutral/muted tone, not a fault" reasoning. */
+.rail-dot {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  pointer-events: none;
+}
+
+/* ---- The Vision drawer's own C2 read-only posture (§3.4: "CV controls render disabled with that
+   reason", not absent) — a CSS-only inert wrapper: `<vision-cv-control-panel>` has no
+   `disabled`/`readOnly` input of its own (body-only by design, out of this wave's file scope
+   regardless), so this page achieves the same effect from its own stylesheet instead. Dimmed rather
+   than hidden, so the reason line above it and the (now unreachable) panel both stay legible — the
+   crew member can still *see* what the pilot is doing with CV, just not touch it. */
+.panel-inert {
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.panel-inert-reason {
+  margin: 0 0 var(--space-8);
+}
+
+@media (max-width: 640px) {
+  /* --bp-sm */
+  .asset-name {
+    max-width: 8rem;
+  }
+
+  .crew-telemetry {
+    display: none;
+  }
+}

@@ -74,6 +74,9 @@ const ROUTED_PAGES = [
   // §4/§8, wave Z5) — pure frontend, no `VisionApi` call anywhere in the flow; the page injects only
   // its facade, which itself wraps `WebSerialGateway` (a hardware gateway, not a `*Store`).
   'provisioning/provisioning',
+  // The crew seat (docs/plans/active/CREW-CONTROL-PLAN.md §3.4, wave W3) — guarded from day one like
+  // every other routed page above.
+  'crew/crew',
 ];
 
 // All feature .ts sources, inlined as raw strings at build time. Keys look like

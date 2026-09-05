@@ -1359,6 +1359,59 @@ export interface AssetUsage {
 }
 
 /**
+ * Mirrors `dto.SeatKind` (docs/plans/active/CREW-CONTROL-PLAN.md §3.1) — the two seats a station
+ * arbitrates on one asset. `FLIGHT` guards arm/disarm/mode/RTH/e-stop/aux, RC engage, and session
+ * engage/disengage; `CAMERA` guards stream start/stop and `PATCH` stream config (including the
+ * target lock). No ordinal semantics — never compare or sort by this enum's declaration order.
+ */
+export type SeatKind = 'FLIGHT' | 'CAMERA';
+
+/**
+ * Mirrors `dto.SeatHolderResponse`, nested twice inside {@link SeatsResponse} — one per
+ * {@link SeatKind}. `@JsonInclude` is deliberately **not** applied: a free seat is four explicit
+ * `null`s, never an omitted holder, so "nobody holds this" is never confused with "not loaded yet".
+ * `mine` is this response's caller's own view of the holder — never re-derive "do I hold this" by
+ * comparing `holderUserId` to a locally-cached user id.
+ */
+export interface SeatHolderResponse {
+  readonly holderUserId: string | null;
+  readonly holderDisplayName: string | null;
+  readonly acquiredAt: string | null;
+  readonly expiresAt: string | null;
+  readonly mine: boolean;
+}
+
+/**
+ * Mirrors `dto.SeatsResponse` (CREW-CONTROL-PLAN.md §3.6) — `GET /api/assets/{id}/seats`, and the
+ * 200 body every `POST .../seats/{kind}` (take-or-renew) also returns. `flight`/`camera` are always
+ * both present. `ttlMs` is the server-configured lease length (`vision.crew.seat-ttl-ms`, default
+ * `15000`) — a caller derives its renewal cadence as `ttlMs / 3`, never a hard-coded interval.
+ * `mayTakeFlight`/`mayTakeCamera`/`mayForceSeat` are the **caller's own** authority for this asset —
+ * a UI renders posture from these booleans, never re-derives authority from `topRole` or a capability
+ * set (IC-2, §3.7). With `vision.crew.enabled=false` (the default), both seats report free and all
+ * three booleans are `true` — the single-operator degrade, not an error.
+ */
+export interface SeatsResponse {
+  readonly assetId: string;
+  readonly ttlMs: number;
+  readonly flight: SeatHolderResponse;
+  readonly camera: SeatHolderResponse;
+  readonly mayTakeFlight: boolean;
+  readonly mayTakeCamera: boolean;
+  readonly mayForceSeat: boolean;
+}
+
+/**
+ * Mirrors `dto.TakeSeatRequest` — the optional body of `POST /api/assets/{id}/seats/{kind}`. The
+ * whole body may be absent; `force` defaults `false` server-side and is honoured only for a caller
+ * with `mayForceSeat` (mirrors the `arm` endpoint's optional-body idiom). This wave's `SeatStore`
+ * never sends `force: true` — forcing the flight seat is a manager affordance built in a later wave.
+ */
+export interface TakeSeatRequest {
+  readonly force?: boolean;
+}
+
+/**
  * Mirrors `dto.FirmwareResponse` — the asset's most recently observed firmware, joined from
  * vision-flight at the vision-api layer (docs/plans/active/WAREHOUSE-UX-PLAN.md D5: "firmware stays
  * flight-owned; the table joins it. Warehouse must not read `vehicle_profiles`."). Nested on

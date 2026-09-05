@@ -106,6 +106,8 @@ import type {
   SamplesResponse,
   ScanRequest,
   ScanResult,
+  SeatKind,
+  SeatsResponse,
   SetLayerGrantsRequest,
   SetMembershipsRequest,
   SettableLifecycleState,
@@ -118,6 +120,7 @@ import type {
   StreamTracksResponse,
   SystemNetworkResponse,
   SystemStatus,
+  TakeSeatRequest,
   TelemetrySample,
   TrainingJobResponse,
   TrainingJobsResponse,
@@ -459,6 +462,42 @@ export class VisionApi {
   disengageAssetSession(assetId: string): Promise<void> {
     return firstValueFrom(
       this.http.delete<void>(`/api/assets/${encodeURIComponent(assetId)}/session`),
+    );
+  }
+
+  // --- Seats (docs/plans/active/CREW-CONTROL-PLAN.md §3.6, frozen — byte-exact) ------------------
+  // Both seats are always present in the response, holder fields explicit `null` when free. With
+  // `vision.crew.enabled=false` (default) the endpoint reports both seats free and every `may*` true
+  // — `core/seat/seat-store.ts` treats a `404` (feature not deployed at all) the same way, never as
+  // an error to surface.
+
+  /** `200` `SeatsResponse` — `404` unknown or out-of-visibility asset (a read hides existence);
+   * `400` bad UUID. */
+  getAssetSeats(assetId: string): Promise<SeatsResponse> {
+    return firstValueFrom(
+      this.http.get<SeatsResponse>(`/api/assets/${encodeURIComponent(assetId)}/seats`),
+    );
+  }
+
+  /** Take-or-renew, idempotent for the current holder — this is the seat heartbeat
+   * (`SeatStore`'s renewal cadence is `ttlMs / 3`, never hard-coded). `409` held by another; `403`
+   * caller lacks authority for this `kind`; `404` unknown asset; `400` bad UUID or unknown kind. The
+   * body may be omitted entirely — `force` is honoured only for a caller with `mayForceSeat`, which
+   * this wave never sets. */
+  takeAssetSeat(assetId: string, kind: SeatKind, request: TakeSeatRequest = {}): Promise<SeatsResponse> {
+    return firstValueFrom(
+      this.http.post<SeatsResponse>(
+        `/api/assets/${encodeURIComponent(assetId)}/seats/${kind.toLowerCase()}`,
+        request,
+      ),
+    );
+  }
+
+  /** `204` — idempotent: a no-op if free or already released. `403` held by another and caller lacks
+   * `mayForceSeat`; `404` unknown; `400` bad UUID or unknown kind. */
+  releaseAssetSeat(assetId: string, kind: SeatKind): Promise<void> {
+    return firstValueFrom(
+      this.http.delete<void>(`/api/assets/${encodeURIComponent(assetId)}/seats/${kind.toLowerCase()}`),
     );
   }
 
