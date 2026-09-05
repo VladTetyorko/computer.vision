@@ -12,9 +12,14 @@ import type {
   AssetUsage,
   AssignedPilot,
   Assignment,
+  AssignmentRole,
   AuditEntry,
+  AdminSetPasswordRequest,
   BindingScope,
+  BootstrapRequest,
+  BootstrapStatusResponse,
   CalibrateCameraPoseRequest,
+  ChangePasswordRequest,
   CalibrationResult,
   CameraPoseRequest,
   CameraPoseResponse,
@@ -100,6 +105,7 @@ import type {
   ScanRequest,
   ScanResult,
   SetLayerGrantsRequest,
+  SetMembershipsRequest,
   SettableLifecycleState,
   SimulationResponse,
   StartSimulationRequest,
@@ -1262,14 +1268,52 @@ export class VisionApi {
     }
   }
 
-  /** `401` (bad credentials) rejects the promise — `core/auth/auth-store.ts#login` turns that into an inline form error, never a toast (a login failure is squarely the login form's own business). */
-  authLogin(username: string, password: string): Promise<MeResponse> {
-    return firstValueFrom(this.http.post<MeResponse>('/api/auth/login', { username, password }));
+  /**
+   * `401` (bad credentials) rejects the promise — `core/auth/auth-store.ts#login` turns that into an
+   * inline form error, never a toast (a login failure is squarely the login form's own business).
+   * `kiosk` (docs/plans/active/AUTH-ROLES-PLAN.md §3.5/§3.7, wave B3) requests the long-lived session an
+   * always-on wall display needs — omitted callers get the ordinary session, unchanged.
+   */
+  authLogin(username: string, password: string, kiosk?: boolean): Promise<MeResponse> {
+    return firstValueFrom(
+      this.http.post<MeResponse>('/api/auth/login', { username, password, kiosk: kiosk ?? false }),
+    );
   }
 
   /** `204` on success. `core/auth/auth-store.ts#logout` clears its local session regardless of whether this call itself succeeds — there is no state left to reconcile either way. */
   authLogout(): Promise<void> {
     return firstValueFrom(this.http.post<void>('/api/auth/logout', {}));
+  }
+
+  // --- Bootstrap + password management (docs/plans/active/AUTH-ROLES-PLAN.md §3.5, wave B3) -----------------
+
+  /** Whether a first-admin bootstrap is still needed (`GET /api/auth/bootstrap`) — a one-way latch, see `BootstrapStatusResponse`'s own doc comment. `core/auth/auth-store.ts` is the only caller. */
+  bootstrapStatus(): Promise<BootstrapStatusResponse> {
+    return firstValueFrom(this.http.get<BootstrapStatusResponse>('/api/auth/bootstrap'));
+  }
+
+  /** Creates the first administrator (`POST /api/auth/bootstrap`) and returns their session, same shape as `authLogin`. `409` (`ALREADY_INITIALIZED`) if an ADMIN already exists; `400` (`WEAK_PASSWORD`) if the chosen password fails `PasswordPolicy`. */
+  bootstrap(request: BootstrapRequest): Promise<MeResponse> {
+    return firstValueFrom(this.http.post<MeResponse>('/api/auth/bootstrap', request));
+  }
+
+  /** Self-service password change (`POST /api/auth/password`) — re-confirms the current password. `401` if `currentPassword` is wrong; `400` (`WEAK_PASSWORD`) if the new one fails policy. */
+  changePassword(request: ChangePasswordRequest): Promise<void> {
+    return firstValueFrom(this.http.post<void>('/api/auth/password', request));
+  }
+
+  /** An admin/manager sets another user's password on their behalf (`POST /api/users/{id}/password`) — always forces `mustChangePassword` on the target. `core/org/org-store.ts` is the only caller. */
+  adminSetPassword(id: string, request: AdminSetPasswordRequest): Promise<void> {
+    return firstValueFrom(
+      this.http.post<void>(`/api/users/${encodeURIComponent(id)}/password`, request),
+    );
+  }
+
+  /** Wholesale-replaces a user's group memberships (`PUT /api/users/{id}/memberships`) — not a delta. `403` if any grant exceeds the caller's own scope. */
+  setMemberships(id: string, request: SetMembershipsRequest): Promise<UserSummary> {
+    return firstValueFrom(
+      this.http.put<UserSummary>(`/api/users/${encodeURIComponent(id)}/memberships`, request),
+    );
   }
 
   // --- Org settings: users, groups (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2's frozen contract) --------
@@ -1311,12 +1355,16 @@ export class VisionApi {
     );
   }
 
-  /** Assign a pilot to an asset (idempotent, `204`). `403` = the asset is outside the caller's scope. */
-  assignPilot(assetId: string, userId: string): Promise<void> {
+  /**
+   * Assign a pilot to an asset (idempotent, `204`). `403` = the asset is outside the caller's scope.
+   * `role` (docs/plans/active/AUTH-ROLES-PLAN.md §3.4, wave B3) is the seat granted — omitted defaults to
+   * `'PILOT'` server-side, same as before this wave existed.
+   */
+  assignPilot(assetId: string, userId: string, role?: AssignmentRole): Promise<void> {
     return firstValueFrom(
       this.http.put<void>(
         `/api/assets/${encodeURIComponent(assetId)}/pilots/${encodeURIComponent(userId)}`,
-        {},
+        role ? { role } : {},
       ),
     );
   }

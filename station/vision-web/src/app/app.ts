@@ -18,6 +18,7 @@ import { LiveStore } from './core/live/live-store';
 import { SidebarStore } from './core/shell/sidebar-store';
 import { ThemeStore } from './core/shell/theme-store';
 import { AppSidebar } from './shared/ui/app-sidebar/app-sidebar';
+import { ReauthOverlay } from './shared/ui/reauth-overlay';
 import { ToastHost } from './shared/ui/toast-host';
 import { UndoToast } from './shared/ui/undo-toast';
 
@@ -63,7 +64,7 @@ import { UndoToast } from './shared/ui/undo-toast';
  */
 @Component({
   selector: 'app-root',
-  imports: [RouterOutlet, AppSidebar, ToastHost, UndoToast],
+  imports: [RouterOutlet, AppSidebar, ToastHost, UndoToast, ReauthOverlay],
   templateUrl: './app.html',
   styleUrl: './app.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

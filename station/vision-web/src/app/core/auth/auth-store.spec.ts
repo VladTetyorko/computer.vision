@@ -4,26 +4,49 @@ import { Router } from '@angular/router';
 import { describe, expect, it, vi } from 'vitest';
 import { AuthStore } from './auth-store';
 import { VisionApi } from '../api/vision-api';
-import type { MeResponse } from '../api/models';
+import { LiveStore } from '../live/live-store';
+import type { AuthCapability, MeResponse, Role, ScopeKind } from '../api/models';
+
+/** Mirrors the real `RoleAuthority`/`DefaultScopeResolver` policy table closely enough for a
+ *  fixture — see `auth-logic.spec.ts`'s identical helper for the full reasoning. */
+const ROLE_CAPABILITIES: Record<Role, readonly AuthCapability[]> = {
+  VIEWER: [],
+  PILOT: ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT'],
+  MANAGER: ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT', 'MANAGE_FLEET', 'MANAGE_ORG'],
+  ADMIN: ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT', 'MANAGE_FLEET', 'MANAGE_ORG'],
+};
+const ROLE_SCOPE_KIND: Record<Role, ScopeKind> = {
+  VIEWER: 'GROUPS',
+  PILOT: 'ASSIGNED_ASSETS',
+  MANAGER: 'GROUPS',
+  ADMIN: 'UNBOUNDED',
+};
 
 function meResponse(overrides: Partial<MeResponse> = {}): MeResponse {
+  const topRole = overrides.topRole ?? 'PILOT';
   return {
     userId: 'u-1',
     username: 'pilot',
     displayName: 'Pat Pilot',
     email: 'pilot@example.com',
     memberships: [{ groupId: 'g-1', groupName: 'HQ', role: 'PILOT' }],
-    topRole: 'PILOT',
+    topRole,
     authEnabled: true,
+    capabilities: ROLE_CAPABILITIES[topRole],
+    scopeKind: ROLE_SCOPE_KIND[topRole],
+    mustChangePassword: false,
     ...overrides,
   };
 }
 
-function stubApi(overrides: Partial<Record<'authMe' | 'authLogin' | 'authLogout', ReturnType<typeof vi.fn>>> = {}) {
+function stubApi(
+  overrides: Partial<Record<'authMe' | 'authLogin' | 'authLogout' | 'changePassword', ReturnType<typeof vi.fn>>> = {},
+) {
   return {
     authMe: vi.fn().mockResolvedValue(null),
     authLogin: vi.fn(),
     authLogout: vi.fn().mockResolvedValue(undefined),
+    changePassword: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -32,9 +55,23 @@ function stubRouter() {
   return { navigateByUrl: vi.fn().mockResolvedValue(true) };
 }
 
-function create(api: ReturnType<typeof stubApi>, router: ReturnType<typeof stubRouter> = stubRouter()): AuthStore {
+/** `reconnect`/`stop` spied so `login`/`logout`'s own hooks into it (wave W1) are directly assertable. */
+function stubLiveStore() {
+  return { reconnect: vi.fn(), stop: vi.fn() };
+}
+
+function create(
+  api: ReturnType<typeof stubApi>,
+  router: ReturnType<typeof stubRouter> = stubRouter(),
+  liveStore: ReturnType<typeof stubLiveStore> = stubLiveStore(),
+): AuthStore {
   TestBed.configureTestingModule({
-    providers: [AuthStore, { provide: VisionApi, useValue: api }, { provide: Router, useValue: router }],
+    providers: [
+      AuthStore,
+      { provide: VisionApi, useValue: api },
+      { provide: Router, useValue: router },
+      { provide: LiveStore, useValue: liveStore },
+    ],
   });
   return TestBed.inject(AuthStore);
 }
@@ -195,5 +232,166 @@ describe('AuthStore', () => {
     expect(store.user()).toBeNull();
     expect(store.status()).toBe('anon');
     expect(router.navigateByUrl).toHaveBeenCalledWith('/login');
+  });
+
+  it('login: reconnects the live store on success (a fresh session supersedes whatever it was open under)', async () => {
+    const api = stubApi({ authMe: vi.fn().mockResolvedValue(null), authLogin: vi.fn().mockResolvedValue(meResponse()) });
+    const liveStore = stubLiveStore();
+    const store = create(api, stubRouter(), liveStore);
+    await store.ready;
+
+    await store.login('pilot', 'pilot');
+
+    expect(liveStore.reconnect).toHaveBeenCalled();
+    expect(liveStore.stop).not.toHaveBeenCalled();
+  });
+
+  it('login: does not touch the live store on a failed attempt', async () => {
+    const api = stubApi({ authMe: vi.fn().mockResolvedValue(null), authLogin: vi.fn().mockRejectedValue(new HttpErrorResponse({ status: 401 })) });
+    const liveStore = stubLiveStore();
+    const store = create(api, stubRouter(), liveStore);
+    await store.ready;
+
+    await store.login('pilot', 'wrong');
+
+    expect(liveStore.reconnect).not.toHaveBeenCalled();
+  });
+
+  it('logout: stops the live store when auth was enabled', async () => {
+    const api = stubApi({ authMe: vi.fn().mockResolvedValue(meResponse({ authEnabled: true })) });
+    const liveStore = stubLiveStore();
+    const store = create(api, stubRouter(), liveStore);
+    await store.ready;
+
+    await store.logout();
+
+    expect(liveStore.stop).toHaveBeenCalled();
+  });
+
+  it('logout: leaves the live store alone in dev parity (authEnabled=false) — there was no real session change', async () => {
+    const api = stubApi({ authMe: vi.fn().mockResolvedValue(meResponse({ authEnabled: false })) });
+    const liveStore = stubLiveStore();
+    const store = create(api, stubRouter(), liveStore);
+    await store.ready;
+
+    await store.logout();
+
+    expect(liveStore.stop).not.toHaveBeenCalled();
+  });
+
+  describe('capabilities/scopeKind/mustChangePassword accessors', () => {
+    it('read off the session once resolved', async () => {
+      const user = meResponse({ topRole: 'MANAGER', mustChangePassword: true });
+      const store = create(stubApi({ authMe: vi.fn().mockResolvedValue(user) }));
+      await store.ready;
+
+      expect(store.capabilities()).toEqual(['OPERATE_PAYLOAD', 'COMMAND_FLIGHT', 'MANAGE_FLEET', 'MANAGE_ORG']);
+      expect(store.scopeKind()).toBe('GROUPS');
+      expect(store.mustChangePassword()).toBe(true);
+    });
+
+    it('degrade to empty/undefined/false while there is no session', async () => {
+      const store = create(stubApi({ authMe: vi.fn().mockResolvedValue(null) }));
+      await store.ready;
+
+      expect(store.capabilities()).toEqual([]);
+      expect(store.scopeKind()).toBeUndefined();
+      expect(store.mustChangePassword()).toBe(false);
+    });
+  });
+
+  describe('can', () => {
+    it('is true iff the resolved session holds the capability', async () => {
+      const user = meResponse({ topRole: 'PILOT' });
+      const store = create(stubApi({ authMe: vi.fn().mockResolvedValue(user) }));
+      await store.ready;
+
+      expect(store.can('OPERATE_PAYLOAD')).toBe(true);
+      expect(store.can('MANAGE_ORG')).toBe(false);
+    });
+  });
+
+  describe('sessionExpired (docs/plans/active/AUTH-ROLES-PLAN.md §3.7 clause 2 — session-interceptor.ts\'s only caller)', () => {
+    it('onFlyRoute=true sets reauthRequired and touches nothing else — no session clear, no navigation implied', async () => {
+      const user = meResponse();
+      const router = stubRouter();
+      const store = create(stubApi({ authMe: vi.fn().mockResolvedValue(user) }), router);
+      await store.ready;
+
+      store.sessionExpired(true);
+
+      expect(store.reauthRequired()).toBe(true);
+      expect(store.user()).toEqual(user); // untouched — the cockpit behind the overlay stays exactly as it was
+      expect(store.status()).toBe('authed');
+      expect(router.navigateByUrl).not.toHaveBeenCalled();
+    });
+
+    it('onFlyRoute=false clears the local session but leaves navigation to the caller', async () => {
+      const user = meResponse();
+      const router = stubRouter();
+      const store = create(stubApi({ authMe: vi.fn().mockResolvedValue(user) }), router);
+      await store.ready;
+
+      store.sessionExpired(false);
+
+      expect(store.reauthRequired()).toBe(false);
+      expect(store.user()).toBeNull();
+      expect(store.status()).toBe('anon');
+      expect(router.navigateByUrl).not.toHaveBeenCalled(); // session-interceptor.ts's own job, not this method's
+    });
+
+    it('is superseded by the next resolved session (a successful reauth clears it exactly like an ordinary login)', async () => {
+      const api = stubApi({ authMe: vi.fn().mockResolvedValue(meResponse()), authLogin: vi.fn().mockResolvedValue(meResponse()) });
+      const store = create(api);
+      await store.ready;
+
+      store.sessionExpired(true);
+      expect(store.reauthRequired()).toBe(true);
+
+      await store.login('pilot', 'pilot');
+
+      expect(store.reauthRequired()).toBe(false);
+    });
+  });
+
+  describe('changePassword', () => {
+    it('success re-fetches /me and returns null', async () => {
+      const refreshed = meResponse({ mustChangePassword: false });
+      const api = stubApi({ authMe: vi.fn().mockResolvedValue(refreshed), changePassword: vi.fn().mockResolvedValue(undefined) });
+      const store = create(api);
+      await store.ready;
+
+      const result = await store.changePassword('old-pw', 'new-pw');
+
+      expect(result).toBeNull();
+      expect(api.changePassword).toHaveBeenCalledWith({ currentPassword: 'old-pw', newPassword: 'new-pw' });
+      expect(api.authMe).toHaveBeenCalledTimes(2); // once at boot, once refreshing post-change
+    });
+
+    it('a 401 (wrong current password) returns a specific message, not the generic session-death copy', async () => {
+      const api = stubApi({
+        authMe: vi.fn().mockResolvedValue(meResponse()),
+        changePassword: vi.fn().mockRejectedValue(new HttpErrorResponse({ status: 401 })),
+      });
+      const store = create(api);
+      await store.ready;
+
+      const result = await store.changePassword('wrong-pw', 'new-pw');
+
+      expect(result).toBe('Incorrect current password.');
+    });
+
+    it('any other failure degrades via describeHttpError', async () => {
+      const api = stubApi({
+        authMe: vi.fn().mockResolvedValue(meResponse()),
+        changePassword: vi.fn().mockRejectedValue(new HttpErrorResponse({ status: 400, error: { error: 'WEAK_PASSWORD', message: 'Too short.' } })),
+      });
+      const store = create(api);
+      await store.ready;
+
+      const result = await store.changePassword('old-pw', '123');
+
+      expect(result).toBe('Too short.');
+    });
   });
 });

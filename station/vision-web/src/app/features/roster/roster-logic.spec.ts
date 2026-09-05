@@ -52,7 +52,7 @@ describe('sortAssetsByName', () => {
 describe('buildRosterRows', () => {
   it('resolves each assigned pilot to a display name', () => {
     const assets = [asset({ assetId: 'a-1', displayName: 'Falcon' })];
-    const pilotsByAsset = new Map<string, readonly AssignedPilot[]>([['a-1', [{ userId: 'u-1' }]]]);
+    const pilotsByAsset = new Map<string, readonly AssignedPilot[]>([['a-1', [{ userId: 'u-1', role: 'PILOT' }]]]);
     const users = [user({ userId: 'u-1', displayName: 'Jane Pilot' })];
     const rows = buildRosterRows(assets, pilotsByAsset, users);
     expect(rows).toEqual([{ asset: assets[0], pilotNames: ['Jane Pilot'] }]);
@@ -60,7 +60,7 @@ describe('buildRosterRows', () => {
 
   it('falls back to a short id fragment for an unresolvable pilot', () => {
     const assets = [asset({ assetId: 'a-1' })];
-    const pilotsByAsset = new Map<string, readonly AssignedPilot[]>([['a-1', [{ userId: 'unknown-user-id' }]]]);
+    const pilotsByAsset = new Map<string, readonly AssignedPilot[]>([['a-1', [{ userId: 'unknown-user-id', role: 'PILOT' }]]]);
     const rows = buildRosterRows(assets, pilotsByAsset, []);
     expect(rows[0].pilotNames).toEqual(['unknown-']);
   });
@@ -81,7 +81,7 @@ describe('buildRosterRows', () => {
 describe('searchRosterRows', () => {
   const rows = buildRosterRows(
     [asset({ assetId: 'a-1', displayName: 'Falcon' }), asset({ assetId: 'a-2', displayName: 'Hawk' })],
-    new Map<string, readonly AssignedPilot[]>([['a-1', [{ userId: 'u-1' }]]]),
+    new Map<string, readonly AssignedPilot[]>([['a-1', [{ userId: 'u-1', role: 'PILOT' }]]]),
     [user({ userId: 'u-1', displayName: 'Jane Pilot' })],
   );
 
@@ -109,7 +109,7 @@ describe('countAssetsWithoutPilot', () => {
   it('counts rows with zero assigned pilots', () => {
     const rows = buildRosterRows(
       [asset({ assetId: 'a-1' }), asset({ assetId: 'a-2' })],
-      new Map<string, readonly AssignedPilot[]>([['a-1', [{ userId: 'u-1' }]]]),
+      new Map<string, readonly AssignedPilot[]>([['a-1', [{ userId: 'u-1', role: 'PILOT' }]]]),
       [user({ userId: 'u-1' })],
     );
     expect(countAssetsWithoutPilot(rows, drone)).toBe(1);
@@ -123,7 +123,7 @@ describe('countAssetsWithoutPilot', () => {
   it('is zero when every asset has ≥1 pilot', () => {
     const rows = buildRosterRows(
       [asset({ assetId: 'a-1' })],
-      new Map<string, readonly AssignedPilot[]>([['a-1', [{ userId: 'u-1' }]]]),
+      new Map<string, readonly AssignedPilot[]>([['a-1', [{ userId: 'u-1', role: 'PILOT' }]]]),
       [user({ userId: 'u-1' })],
     );
     expect(countAssetsWithoutPilot(rows, drone)).toBe(0);

@@ -1,4 +1,4 @@
-import type { MeResponse, Role } from '../api/models';
+import type { AuthCapability, MeResponse, Role, ScopeKind } from '../api/models';
 
 /**
  * Pure decision logic behind `core/auth/auth-store.ts`/`auth-guard.ts` and the login/identity-chip
@@ -15,6 +15,7 @@ import type { MeResponse, Role } from '../api/models';
 export type AuthStatus = 'loading' | 'anon' | 'authed';
 
 const ROLE_LABELS: Record<Role, string> = {
+  VIEWER: 'Viewer',
   PILOT: 'Pilot',
   MANAGER: 'Manager',
   ADMIN: 'Admin',
@@ -61,4 +62,34 @@ export function initialsFor(displayName: string): string {
  */
 export function needsLogin(status: AuthStatus, authEnabled: boolean, user: MeResponse | null): boolean {
   return authEnabled && status === 'anon' && user === null;
+}
+
+/**
+ * Does this session hold `capability`? (docs/plans/active/AUTH-ROLES-PLAN.md §3.1/§3.2, wave W1/W2 — the
+ * one place every "what may I *do*" gate in this app now reads, replacing a `topRole ===`
+ * comparison — see `core/org/org-logic.ts#canManageOrg`/`features/models/models-logic.ts`'s own
+ * doc comments for why `topRole` alone was never a reliable stand-in once `VIEWER` existed.)
+ *
+ * Tolerates `capabilities` being `null`/`undefined` (a not-yet-loaded `MeResponse`) by answering
+ * `false` rather than throwing — same "read it as it actually arrives" convention `canManageOrg`'s
+ * own `topRole` parameter already followed.
+ */
+export function hasCapability(
+  capabilities: readonly AuthCapability[] | null | undefined,
+  capability: AuthCapability,
+): boolean {
+  return (capabilities ?? []).includes(capability);
+}
+
+/**
+ * Is this session's visibility `UNBOUNDED` — the server's own `VisibilityScope#canAdminister()`
+ * (docs/plans/active/AUTH-ROLES-PLAN.md §3.1, `DefaultScopeResolver`: only an ADMIN session ever
+ * resolves to `UNBOUNDED`). Strictly narrower than `hasCapability(…, 'MANAGE_ORG')` — a MANAGER's
+ * `GROUPS` scope administers their own subtree, not the whole deployment (`ModelRegistryController`'s
+ * own javadoc, mirrored by `features/models/models-logic.ts#canAdministerRegistry`,
+ * `features/geo/region-manager-facade.ts`, `features/command/command-facade.ts`'s setup checklist,
+ * and `shared/map/map-controls/layer-manager.ts`'s all-groups fetch).
+ */
+export function canAdminister(scopeKind: ScopeKind | null | undefined): boolean {
+  return scopeKind === 'UNBOUNDED';
 }

@@ -1,0 +1,53 @@
+:host {
+  display: contents;
+}
+
+/* z-index above `confirm-dialog.css`'s own 150 (and the toast host's 100) — a dead session can, in
+   the rare worst case, land on top of an already-open confirm dialog, and it must win: nothing on
+   screen is actionable without a session, this one included. */
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-16);
+  background: var(--hud-bg-strong);
+  backdrop-filter: blur(2px);
+}
+
+.dialog {
+  width: min(22rem, 100%);
+  margin-bottom: 0;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-16);
+}
+
+.dialog h2 {
+  margin: 0;
+}
+
+.dialog .muted {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+/* Comfortable touch targets — this overlay can land on a phone-sized viewport just as easily as a
+   desktop one, same rule `login.css` already follows for the ordinary sign-in form. */
+.field input {
+  min-height: 44px;
+}
+
+.reauth-submit {
+  min-height: 44px;
+  justify-content: center;
+}

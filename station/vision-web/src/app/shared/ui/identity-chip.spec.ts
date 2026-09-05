@@ -5,17 +5,36 @@ import { IdentityChip } from './identity-chip';
 import { AuthStore } from '../../core/auth/auth-store';
 import { VisionApi } from '../../core/api/vision-api';
 import { GlobalOverlayStore } from '../../core/ui/overlay-store';
-import type { MeResponse } from '../../core/api/models';
+import type { AuthCapability, MeResponse, Role, ScopeKind } from '../../core/api/models';
+
+/** Mirrors the real `RoleAuthority`/`DefaultScopeResolver` policy table closely enough for a
+ *  fixture — see `core/auth/auth-logic.spec.ts`'s identical helper for the full reasoning. */
+const ROLE_CAPABILITIES: Record<Role, readonly AuthCapability[]> = {
+  VIEWER: [],
+  PILOT: ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT'],
+  MANAGER: ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT', 'MANAGE_FLEET', 'MANAGE_ORG'],
+  ADMIN: ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT', 'MANAGE_FLEET', 'MANAGE_ORG'],
+};
+const ROLE_SCOPE_KIND: Record<Role, ScopeKind> = {
+  VIEWER: 'GROUPS',
+  PILOT: 'ASSIGNED_ASSETS',
+  MANAGER: 'GROUPS',
+  ADMIN: 'UNBOUNDED',
+};
 
 function meResponse(overrides: Partial<MeResponse> = {}): MeResponse {
+  const topRole = overrides.topRole ?? 'PILOT';
   return {
     userId: 'u-1',
     username: 'pilot',
     displayName: 'Pat Pilot',
     email: 'pilot@example.com',
     memberships: [{ groupId: 'g-1', groupName: 'HQ', role: 'PILOT' }],
-    topRole: 'PILOT',
+    topRole,
     authEnabled: true,
+    capabilities: ROLE_CAPABILITIES[topRole],
+    scopeKind: ROLE_SCOPE_KIND[topRole],
+    mustChangePassword: false,
     ...overrides,
   };
 }

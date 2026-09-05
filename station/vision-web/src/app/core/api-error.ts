@@ -23,7 +23,14 @@ export function describeHttpError(error: unknown): string {
     case 400:
       return fromServer ?? 'The request was rejected as invalid.';
     case 401:
-      return fromServer ?? 'The device rejected these credentials.';
+      // Retired the old RTSP-camera framing ("the device rejected these credentials") — every 401
+      // in this app is now this app's own session dying, not a device's (docs/plans/active/AUTH-ROLES-PLAN.md
+      // §3.6/§3.7, wave W1): `core/auth/session-interceptor.ts` already turns this into an in-place
+      // reauth overlay or a redirect to `/login` for every endpoint that can genuinely session-401;
+      // this generic copy only ever surfaces for a caller that renders its own toast/error text on
+      // top of that (the interceptor re-throws, it doesn't swallow), or for the two excluded
+      // endpoints with their own inline 401 handling (`AuthStore.login`/`changePassword`).
+      return fromServer ?? 'Your session is no longer valid — sign in again.';
     case 403:
       return fromServer ?? 'You do not have access to that.';
     case 404:

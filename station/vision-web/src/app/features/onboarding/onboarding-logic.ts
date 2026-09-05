@@ -268,8 +268,8 @@ export function buildPostSimulationAssetEdit(
 
 // --- Hand over: "Who takes this?" (docs/plans/done/OPS-UX-PLAN.md §2 A3; docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4 D3) --
 
-/** Least→most privileged, mirroring the domain's own `Role` ordinal — used only to find the *highest* of a set of memberships below. */
-const ROLE_RANK: Readonly<Record<Role, number>> = { PILOT: 0, MANAGER: 1, ADMIN: 2 };
+/** Least→most privileged, mirroring the domain's own `Role` ordinal — used only to find the *highest* of a set of memberships below. `VIEWER` (docs/plans/active/AUTH-ROLES-PLAN.md, wave B0a/B6) ranks below `PILOT`, same as the real enum's own ordinal order. */
+const ROLE_RANK: Readonly<Record<Role, number>> = { VIEWER: 0, PILOT: 1, MANAGER: 2, ADMIN: 3 };
 
 /**
  * The group a newly-created asset silently belongs to (docs/conclusions/OPS-UX-REVIEW.md §A4 — `POST

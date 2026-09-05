@@ -220,6 +220,30 @@ export class LiveStore {
     inject(DestroyRef).onDestroy(() => this.teardown());
   }
 
+  /**
+   * Force-closes the current connection and immediately opens a fresh one (docs/plans/active/AUTH-ROLES-PLAN.md
+   * §3.7, wave W1) — `core/auth/auth-store.ts#login` calls this on every successful sign-in, so a
+   * connection opened under a stale/anonymous/different-user session never lingers into the new one.
+   * A no-op-then-reconnect if `EventSource` was never available in this environment at all (`available`
+   * stays `false` regardless — `connect()` itself doesn't guard on it, matching the constructor's own
+   * one-time check; a caller only ever reaches this from a real browser).
+   */
+  reconnect(): void {
+    this.teardown();
+    this.connect();
+  }
+
+  /**
+   * Force-closes the current connection without reopening one (wave W1) — `core/auth/auth-store.ts#logout`
+   * calls this once a real session ends, so a signed-out browser stops holding an authenticated SSE
+   * connection open while the login screen is up. `login()`'s own subsequent `reconnect()` is what
+   * opens the next one; nothing else in this store calls `connect()` again on its own after this.
+   */
+  stop(): void {
+    this.teardown();
+    this.stateSignal.set('closed');
+  }
+
   /** The accumulated live samples for `assetId` — empty until `trackTelemetry(assetId)` is called and data arrives. */
   telemetryFor(assetId: string): Signal<readonly TelemetrySample[]> {
     return this.telemetrySignalFor(assetId);

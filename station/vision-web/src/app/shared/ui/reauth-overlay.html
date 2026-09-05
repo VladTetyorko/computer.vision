@@ -1,0 +1,43 @@
+@if (auth.reauthRequired()) {
+  <div class="backdrop">
+    <form class="dialog card" role="alertdialog" aria-modal="true" (ngSubmit)="submit()">
+      <h2>Sign in again</h2>
+      <p class="muted">Your session ended. Sign back in to continue — this page stays exactly as it is.</p>
+
+      <label class="field">
+        <span class="label">Username</span>
+        <input
+          type="text"
+          name="username"
+          autocomplete="username"
+          autocapitalize="none"
+          [ngModel]="username()"
+          (ngModelChange)="username.set($event)"
+          [disabled]="auth.loginBusy()"
+          required
+        />
+      </label>
+
+      <label class="field">
+        <span class="label">Password</span>
+        <input
+          type="password"
+          name="password"
+          autocomplete="current-password"
+          [ngModel]="password()"
+          (ngModelChange)="password.set($event)"
+          [disabled]="auth.loginBusy()"
+          required
+        />
+      </label>
+
+      @if (auth.loginError(); as error) {
+        <vision-notice variant="danger">{{ error }}</vision-notice>
+      }
+
+      <button type="submit" class="btn reauth-submit" [disabled]="!canSubmit()">
+        {{ auth.loginBusy() ? 'Signing in…' : 'Sign in' }}
+      </button>
+    </form>
+  </div>
+}

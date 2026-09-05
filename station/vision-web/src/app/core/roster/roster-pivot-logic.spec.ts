@@ -51,8 +51,8 @@ describe('buildPilotRows', () => {
   it('resolves each pilot\'s assigned assets to display names, sorted', () => {
     const assets = [asset({ assetId: 'a-1', displayName: 'Hawk' }), asset({ assetId: 'a-2', displayName: 'Falcon' })];
     const pilotsByAsset = new Map<string, readonly AssignedPilot[]>([
-      ['a-1', [{ userId: 'u-1' }]],
-      ['a-2', [{ userId: 'u-1' }]],
+      ['a-1', [{ userId: 'u-1', role: 'PILOT' }]],
+      ['a-2', [{ userId: 'u-1', role: 'PILOT' }]],
     ]);
     const rows = buildPilotRows(assets, pilotsByAsset, [user({ userId: 'u-1', displayName: 'Jane' })]);
     expect(rows).toHaveLength(1);
@@ -60,7 +60,7 @@ describe('buildPilotRows', () => {
   });
 
   it('drops an assignment referencing an asset not in the fetched list, rather than showing an unresolved name', () => {
-    const pilotsByAsset = new Map<string, readonly AssignedPilot[]>([['gone', [{ userId: 'u-1' }]]]);
+    const pilotsByAsset = new Map<string, readonly AssignedPilot[]>([['gone', [{ userId: 'u-1', role: 'PILOT' }]]]);
     const rows = buildPilotRows([], pilotsByAsset, [user({ userId: 'u-1' })]);
     expect(rows[0].assignments).toEqual([]);
   });
@@ -68,8 +68,8 @@ describe('buildPilotRows', () => {
   it('a pilot assigned to two assets appears once, with both listed', () => {
     const assets = [asset({ assetId: 'a-1', displayName: 'Hawk' }), asset({ assetId: 'a-2', displayName: 'Falcon' })];
     const pilotsByAsset = new Map<string, readonly AssignedPilot[]>([
-      ['a-1', [{ userId: 'u-1' }, { userId: 'u-2' }]],
-      ['a-2', [{ userId: 'u-1' }]],
+      ['a-1', [{ userId: 'u-1', role: 'PILOT' }, { userId: 'u-2', role: 'PILOT' }]],
+      ['a-2', [{ userId: 'u-1', role: 'PILOT' }]],
     ]);
     const users = [user({ userId: 'u-1', displayName: 'Jane' }), user({ userId: 'u-2', displayName: 'Bo' })];
     const rows = buildPilotRows(assets, pilotsByAsset, users);
@@ -113,7 +113,7 @@ describe('countPilotsWithoutAssets', () => {
 
   it('does not count a pilot who has at least one assignment', () => {
     const assets = [asset({ assetId: 'a-1', displayName: 'Hawk' })];
-    const pilotsByAsset = new Map<string, readonly AssignedPilot[]>([['a-1', [{ userId: 'u-1' }]]]);
+    const pilotsByAsset = new Map<string, readonly AssignedPilot[]>([['a-1', [{ userId: 'u-1', role: 'PILOT' }]]]);
     const users = [user({ userId: 'u-1', memberships: [{ groupId: 'g-1', role: 'PILOT' }] })];
     const rows = buildPilotRows(assets, pilotsByAsset, users);
     expect(countPilotsWithoutAssets(rows, users)).toBe(0);
@@ -141,7 +141,7 @@ describe('countPilotsWithoutAssets', () => {
 
 describe('searchPilotRows', () => {
   const assets = [asset({ assetId: 'a-1', displayName: 'Falcon' })];
-  const pilotsByAsset = new Map<string, readonly AssignedPilot[]>([['a-1', [{ userId: 'u-1' }]]]);
+  const pilotsByAsset = new Map<string, readonly AssignedPilot[]>([['a-1', [{ userId: 'u-1', role: 'PILOT' }]]]);
   const users = [user({ userId: 'u-1', displayName: 'Jane Pilot', username: 'jpilot' }), user({ userId: 'u-2', displayName: 'Bo' })];
   const rows = buildPilotRows(assets, pilotsByAsset, users);
 

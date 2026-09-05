@@ -1,10 +1,12 @@
-import { Injectable, inject, signal } from '@angular/core';
+import { Injectable, computed, inject, signal } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { VisionApi } from '../api/vision-api';
 import { describeHttpError } from '../api-error';
-import type { MeResponse } from '../api/models';
+import { LiveStore } from '../live/live-store';
+import type { AuthCapability, ChangePasswordRequest, MeResponse, ScopeKind } from '../api/models';
 import type { AuthStatus } from './auth-logic';
+import { hasCapability } from './auth-logic';
 
 /** Console prefix mirroring `[fleet]`/`[weather]`/`[player]` — a stable per-file tag, no shared logging service. */
 const LOG_PREFIX = '[auth]';
@@ -38,12 +40,15 @@ const LOG_PREFIX = '[auth]';
 export class AuthStore {
   private readonly api = inject(VisionApi);
   private readonly router = inject(Router);
+  private readonly liveStore = inject(LiveStore);
 
   private readonly userSignal = signal<MeResponse | null>(null);
   private readonly authEnabledSignal = signal(false);
   private readonly statusSignal = signal<AuthStatus>('loading');
   private readonly loginBusySignal = signal(false);
   private readonly loginErrorSignal = signal<string | null>(null);
+  /** Set by `core/auth/session-interceptor.ts` when a request 401s while on `/fly` — see that file's own doc comment for the frozen "never navigate away from /fly" rule this exists to satisfy. */
+  private readonly reauthRequiredSignal = signal(false);
 
   readonly user = this.userSignal.asReadonly();
   /** `false` until the first `loadMe()` resolves and says otherwise — see class doc's "no render flash". */
@@ -53,12 +58,37 @@ export class AuthStore {
   readonly loginBusy = this.loginBusySignal.asReadonly();
   /** The login form's inline error text, or `null` — cleared at the start of every new attempt. */
   readonly loginError = this.loginErrorSignal.asReadonly();
+  /** `shared/ui/reauth-overlay.ts`'s own gate — see `reauthRequiredSignal`'s doc comment. */
+  readonly reauthRequired = this.reauthRequiredSignal.asReadonly();
+
+  /**
+   * The verbs this session holds, deployment/org-wide (docs/plans/active/AUTH-ROLES-PLAN.md §3.1/§3.2,
+   * wave W1) — `[]` while there is no session, never a crash. `core/auth/auth-logic.ts#hasCapability`
+   * is the one place this is tested; no page/component compares `topRole` to decide what it may do.
+   */
+  readonly capabilities = computed<readonly AuthCapability[]>(() => this.userSignal()?.capabilities ?? []);
+
+  /**
+   * Which `VisibilityScope.Kind` this session's visibility resolves to — `undefined` while there is
+   * no session. `core/auth/auth-logic.ts#canAdminister` is the one place `'UNBOUNDED'` is tested;
+   * `'ASSIGNED_ASSETS'` uniquely identifies a PILOT-only session post-B6 (see that type's own doc
+   * comment in `core/api/models.ts`).
+   */
+  readonly scopeKind = computed<ScopeKind | undefined>(() => this.userSignal()?.scopeKind);
+
+  /** Mirrors `User#mustChangePassword()` — `true` forces a change-password gate before anything else (`shared/ui/force-password-change.ts`, wave W3). `false` while there is no session. */
+  readonly mustChangePassword = computed(() => this.userSignal()?.mustChangePassword ?? false);
 
   /** Resolves once the boot-time `loadMe()` settles — see class doc. Never rejects: every failure path inside `loadMe()` is caught and turned into `'anon'`. */
   readonly ready: Promise<void>;
 
   constructor() {
     this.ready = this.loadMe();
+  }
+
+  /** Convenience over `hasCapability(this.capabilities(), capability)` — reads exactly as `if (auth.can('MANAGE_ORG'))` at a call site that doesn't otherwise need the raw list. */
+  can(capability: AuthCapability): boolean {
+    return hasCapability(this.capabilities(), capability);
   }
 
   /**
@@ -92,6 +122,10 @@ export class AuthStore {
     try {
       const me = await this.api.authLogin(username, password);
       this.applySession(me);
+      // A fresh session supersedes whatever the live connection was opened under (a stale/anon one
+      // pre-login, or a *different* user's after the mid-flight-401 reauth overlay) — reconnect so
+      // its topic scope and any server-side session check start clean under the new session.
+      this.liveStore.reconnect();
       return true;
     } catch (error) {
       this.loginErrorSignal.set(loginErrorMessage(error));
@@ -99,6 +133,33 @@ export class AuthStore {
     } finally {
       this.loginBusySignal.set(false);
     }
+  }
+
+  /**
+   * A request 401'd — called only by `core/auth/session-interceptor.ts`, which alone knows whether
+   * the current route is `/fly` (see that file's own doc comment for the full frozen-rule reasoning).
+   *
+   * **`onFlyRoute: true`** sets {@link reauthRequired} and does *nothing else* — no navigation, no
+   * local state cleared — so `shared/ui/reauth-overlay.ts` can present in place while everything
+   * already on screen (including a live manual-control session) stays exactly as it was.
+   *
+   * **`onFlyRoute: false`** clears the session locally (`userSignal`/`statusSignal`) so the shell
+   * stops rendering around a session that no longer exists — `authEnabledSignal` is left untouched
+   * at `true`, since this can only ever fire once auth was already enabled (every endpoint capable
+   * of a genuine session-death 401 requires one). The interceptor itself performs the actual
+   * navigation to `/login`; this method only updates state.
+   *
+   * Either branch is superseded the instant `login()`/`logout()` next resolves a session
+   * (`applySession` always clears {@link reauthRequiredSignal}), so a successful reauth — through
+   * the overlay or through `/login` itself — closes this out exactly like an ordinary login would.
+   */
+  sessionExpired(onFlyRoute: boolean): void {
+    if (onFlyRoute) {
+      this.reauthRequiredSignal.set(true);
+      return;
+    }
+    this.userSignal.set(null);
+    this.statusSignal.set('anon');
   }
 
   /**
@@ -120,11 +181,42 @@ export class AuthStore {
     const wasAuthEnabled = this.authEnabledSignal();
     this.userSignal.set(null);
     this.statusSignal.set('anon');
+    if (wasAuthEnabled) {
+      // Only when there was a real session to invalidate — dev parity (`authEnabled === false`)
+      // never had a session change happen at all, so leaving the live connection alone is correct.
+      this.liveStore.stop();
+    }
     await this.router.navigateByUrl(wasAuthEnabled ? '/login' : '/fly');
+  }
+
+  /**
+   * Self-service password change (`POST /api/auth/password`, docs/plans/active/AUTH-ROLES-PLAN.md §3.5,
+   * wave B3) — re-confirms `currentPassword` rather than re-authenticating. On success, re-fetches
+   * `/api/auth/me` so `mustChangePassword` (and anything else the backend recomputed) reflects
+   * reality immediately, rather than this store guessing `false` locally. Never throws — a failure
+   * (401 wrong current password, 400 weak new password) is turned into a returned message, for
+   * `shared/ui/force-password-change.ts`/the account-settings Security section's own inline handling.
+   */
+  async changePassword(currentPassword: string, newPassword: string): Promise<string | null> {
+    const request: ChangePasswordRequest = { currentPassword, newPassword };
+    try {
+      await this.api.changePassword(request);
+      await this.loadMe();
+      return null;
+    } catch (error) {
+      // A 401 here means "wrong current password" (`AuthPasswordController`'s own javadoc) — this
+      // endpoint is excluded from `session-interceptor.ts`'s generic handling for exactly this
+      // reason, so `describeHttpError`'s generic session-death copy would be actively misleading.
+      if (error instanceof HttpErrorResponse && error.status === 401) {
+        return 'Incorrect current password.';
+      }
+      return describeHttpError(error);
+    }
   }
 
   /** Shared by `loadMe`/`login` — both resolve to the same `MeResponse | null` shape and apply it identically. */
   private applySession(me: MeResponse | null): void {
+    this.reauthRequiredSignal.set(false); // a resolved session (real or anon) always supersedes it.
     if (me === null) {
       this.userSignal.set(null);
       this.authEnabledSignal.set(true); // see `loadMe`'s own doc comment for why this is safe here.

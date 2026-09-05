@@ -2986,8 +2986,43 @@ export interface OpsThresholdsResponse {
  * Mirrors `domain.model.Role` — ordered least→most privileged, though this app never compares
  * roles by ordinal (only ever renders a label — `core/auth/auth-logic.ts#roleLabel`); the ordering
  * is the domain's own concern (`User.topRole()`), not re-derived here.
+ *
+ * **`VIEWER`** added by docs/plans/active/AUTH-ROLES-PLAN.md (wave B0a/B6) — a read-only role a
+ * `GROUPS`-scoped session can hold with **no** capabilities (unlike a `PILOT`, who at least holds
+ * `OPERATE_PAYLOAD`/`COMMAND_FLIGHT`). Never compare against this app's own authority checks by
+ * `topRole` — see `AuthCapability`/`ScopeKind` below, and `core/auth/auth-logic.ts#hasCapability`/
+ * `canAdminister`, which is what every real gate in this app now reads instead.
  */
-export type Role = 'PILOT' | 'MANAGER' | 'ADMIN';
+export type Role = 'VIEWER' | 'PILOT' | 'MANAGER' | 'ADMIN';
+
+/**
+ * Mirrors `com.drones.vision.platform.Capability` — one verb a session's `Authority` may hold,
+ * deployment/org-wide, independent of what it may *see* (`ScopeKind` below is the "see" axis).
+ * `MeResponse#capabilities` is the sorted enum-name list; `core/auth/auth-logic.ts#hasCapability`
+ * is the one place this app tests membership in it — no page/component compares `topRole` to decide
+ * what it may do (docs/plans/active/AUTH-ROLES-PLAN.md §3.1/§3.2's frozen policy table).
+ *
+ * Deliberately not named `Capability` — that name is already taken in this file (device
+ * capabilities: `VIDEO`/`TELEMETRY`/`PTZ`/`AUDIO`, line 14 above), an unrelated axis entirely.
+ */
+export type AuthCapability = 'OPERATE_PAYLOAD' | 'COMMAND_FLIGHT' | 'MANAGE_FLEET' | 'MANAGE_ORG';
+
+/**
+ * Mirrors `com.drones.vision.platform.VisibilityScope.Kind` — which shape of "what may this session
+ * see" its `Authority` resolves to. `MeResponse#scopeKind` carries the enum name; `UNBOUNDED`
+ * uniquely identifies an ADMIN-equivalent session (`core/auth/auth-logic.ts#canAdminister`),
+ * `ASSIGNED_ASSETS` uniquely identifies a PILOT-only session post-B6 (a VIEWER/MANAGER without an
+ * asset assignment resolves to `GROUPS` instead — see `DefaultScopeResolver`'s own javadoc).
+ */
+export type ScopeKind = 'UNBOUNDED' | 'GROUPS' | 'ASSIGNED_ASSETS';
+
+/**
+ * Mirrors `domain.model.AssignmentRole` — the seat a pilot-asset assignment grants, **not** a
+ * `Role`: this answers "what can this person do with *this one aircraft*", orthogonal to their
+ * org-wide `Role`/`AuthCapability` set (docs/plans/active/CREW-CONTROL-PLAN.md IC-2). `PILOT` may
+ * fly it; `CREW` may ride along (view telemetry/video) but not take the stick.
+ */
+export type AssignmentRole = 'PILOT' | 'CREW';
 
 /** Mirrors `dto.MembershipResponse`, one row of `MeResponse#memberships` — a user's role within one group. */
 export interface Membership {
@@ -3006,9 +3041,13 @@ export interface Membership {
  * the highest `Role` across `memberships` (the domain's own `User.topRole()`, mirrored — a real
  * account always carries at least one membership, per that method's own contract).
  *
- * **No visibility scoping rides on this type** — every logged-in user still sees the whole fleet
- * (docs/plans/done/U-AUTH-PLAN.md's own "identity becomes real; nothing is visibility-scoped yet" framing);
- * `memberships`/`topRole` back the identity chip's role badge only, in this slice.
+ * **Visibility scoping arrived with docs/plans/active/AUTH-ROLES-PLAN.md §3.5 (wave B3)**: `capabilities`
+ * is `Authority#capabilities()` by name — what this session may *do*, deployment/org-wide; `scopeKind`
+ * is `VisibilityScope.Kind`'s name — what it may *see*. Neither rides on `topRole`, which stays
+ * purely a display concern (the identity chip's role badge) — every real gate in this app reads
+ * `capabilities`/`scopeKind` via `core/auth/auth-logic.ts#hasCapability`/`canAdminister` instead.
+ * `mustChangePassword` mirrors `User#mustChangePassword()` — `true` forces `AuthStore` to surface a
+ * change-password gate before anything else (see that store's own `mustChangePassword` accessor).
  */
 export interface MeResponse {
   readonly userId: string;
@@ -3018,6 +3057,47 @@ export interface MeResponse {
   readonly memberships: readonly Membership[];
   readonly topRole: Role;
   readonly authEnabled: boolean;
+  readonly capabilities: readonly AuthCapability[];
+  readonly scopeKind: ScopeKind;
+  readonly mustChangePassword: boolean;
+}
+
+// --- Bootstrap + password management (docs/plans/active/AUTH-ROLES-PLAN.md §3.5, wave B3) -------------
+// `core/auth/auth-store.ts` is the only caller of `bootstrapStatus`/`bootstrap`/`changePassword`;
+// `core/org/org-store.ts` the only caller of `adminSetPassword`/`setMemberships` (admin-on-behalf-of
+// another user). Same "no page talks to a URL directly" rule as everywhere else in this file.
+
+/**
+ * Mirrors `dto.BootstrapStatusResponse` — `GET /api/auth/bootstrap`. `required` is a one-way latch:
+ * once `false` (an ADMIN already exists), it stays `false` for the life of the station — a fresh
+ * clone with an empty `users` table is the only case this is ever `true`.
+ */
+export interface BootstrapStatusResponse {
+  readonly required: boolean;
+}
+
+/** Mirrors `dto.BootstrapRequest` — the body of `POST /api/auth/bootstrap`, the first administrator's own choice of credentials, made once. */
+export interface BootstrapRequest {
+  readonly username: string;
+  readonly displayName: string;
+  readonly email: string;
+  readonly password: string;
+}
+
+/** Mirrors `dto.ChangePasswordRequest` — the body of `POST /api/auth/password`, a session's own self-service password change (re-confirms the current password rather than re-authenticating). */
+export interface ChangePasswordRequest {
+  readonly currentPassword: string;
+  readonly newPassword: string;
+}
+
+/** Mirrors `dto.AdminSetPasswordRequest` — the body of `POST /api/users/{id}/password`, an admin/manager choosing a temporary password on another user's behalf. Always forces `mustChangePassword` on the target. */
+export interface AdminSetPasswordRequest {
+  readonly newPassword: string;
+}
+
+/** Mirrors `dto.SetMembershipsRequest` — the body of `PUT /api/users/{id}/memberships`, a wholesale replacement (not a delta) of a user's group memberships. Reuses `UserMembership`'s shape (below) for each element, same as the backend reuses `CreateUserRequest.MembershipRequest`. */
+export interface SetMembershipsRequest {
+  readonly memberships: readonly UserMembership[];
 }
 
 // --- Org settings: users, groups, pilot assignment, activity ------------------------------------
@@ -3083,14 +3163,25 @@ export interface CreateGroupRequest {
   readonly parentGroupId?: string;
 }
 
-/** Mirrors `dto.PilotResponse` — one row of `GET /api/assets/{id}/pilots`. A record (not a bare id) so the shape can grow (a display name, an assigned-at time) without a wire break, exactly as the backend DTO's own doc comment notes. */
+/**
+ * Mirrors `dto.PilotResponse` — one row of `GET /api/assets/{id}/pilots`. A record (not a bare id) so
+ * the shape can grow without a wire break, exactly as the backend DTO's own doc comment notes.
+ * `role` (docs/plans/active/AUTH-ROLES-PLAN.md §3.4, wave B3) is the seat this assignment grants —
+ * the `AssignmentRole` enum name, the CREW-CONTROL-PLAN.md IC-2 answer for this one assignment.
+ */
 export interface AssignedPilot {
   readonly userId: string;
+  readonly role: AssignmentRole;
 }
 
-/** Mirrors `dto.AssignmentResponse` — one row of `GET /api/me/assignments`, an asset the acting pilot may fly. Same room-to-grow shape as `AssignedPilot`. */
+/**
+ * Mirrors `dto.AssignmentResponse` — one row of `GET /api/me/assignments`, an asset the acting user
+ * is assigned to. Same room-to-grow shape as `AssignedPilot`. `role` (wave B3) is the seat the
+ * caller holds on this one asset — `'PILOT'` may fly it, `'CREW'` may only ride along.
+ */
 export interface Assignment {
   readonly assetId: string;
+  readonly role: AssignmentRole;
 }
 
 /**

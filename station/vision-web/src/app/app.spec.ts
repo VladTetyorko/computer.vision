@@ -39,6 +39,13 @@ function fakeAuthStore(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT', authEnabled = fa
   return {
     user: () => (topRole ? { topRole, displayName: 'Test User', username: 'test' } : null),
     authEnabled: () => authEnabled,
+    // `<vision-reauth-overlay>` (wave W1) is mounted unconditionally in `app.html`, alongside every
+    // App render this file exercises — `false` here keeps it rendering nothing, exactly as every
+    // test in this file already assumes with no session ever having 401'd.
+    reauthRequired: () => false,
+    loginBusy: () => false,
+    loginError: () => null,
+    login: () => Promise.resolve(false),
   };
 }
 
