@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import type { DiscoveryCandidate, DiscoveryCandidateStatus, DiscoverySource } from '../api/models';
+import type {
+  DiscoveryCandidate,
+  DiscoveryEventPayload,
+  DiscoverySource,
+} from '../api/models';
 import {
+  applyDiscoveryEvents,
   buildDeviceSpecFromCandidate,
   buildRegisterCommand,
   candidateActions,
@@ -157,19 +162,26 @@ describe('candidateActions', () => {
     const actions = candidateActions(
       candidate({ status: 'NEW', suggestedStreamProtocol: 'rtsp', suggestedStreamUri: 'rtsp://cam/1' }),
     );
-    expect(actions).toEqual({ canAdd: true, canAttach: true, canDismiss: true });
+    expect(actions).toEqual({ canAdd: true, canAttach: true, canDismiss: true, canRestore: false });
   });
 
   it('offers Add/Dismiss but not Attach for a NEW candidate with no suggested stream', () => {
     const actions = candidateActions(candidate({ status: 'NEW' }));
-    expect(actions).toEqual({ canAdd: true, canAttach: false, canDismiss: true });
+    expect(actions).toEqual({ canAdd: true, canAttach: false, canDismiss: true, canRestore: false });
   });
 
-  it.each<DiscoveryCandidateStatus>(['REGISTERED', 'DISMISSED'])('offers nothing once %s', (status) => {
+  it('offers only Restore for a DISMISSED candidate', () => {
     const actions = candidateActions(
-      candidate({ status, suggestedStreamProtocol: 'rtsp', suggestedStreamUri: 'rtsp://cam/1' }),
+      candidate({ status: 'DISMISSED', suggestedStreamProtocol: 'rtsp', suggestedStreamUri: 'rtsp://cam/1' }),
     );
-    expect(actions).toEqual({ canAdd: false, canAttach: false, canDismiss: false });
+    expect(actions).toEqual({ canAdd: false, canAttach: false, canDismiss: false, canRestore: true });
+  });
+
+  it('offers nothing once REGISTERED', () => {
+    const actions = candidateActions(
+      candidate({ status: 'REGISTERED', suggestedStreamProtocol: 'rtsp', suggestedStreamUri: 'rtsp://cam/1' }),
+    );
+    expect(actions).toEqual({ canAdd: false, canAttach: false, canDismiss: false, canRestore: false });
   });
 });
 
@@ -230,5 +242,47 @@ describe('buildDeviceSpecFromCandidate', () => {
 
   it('returns undefined when the candidate has no suggested stream', () => {
     expect(buildDeviceSpecFromCandidate(candidate())).toBeUndefined();
+  });
+});
+
+describe('applyDiscoveryEvents', () => {
+  function event(action: DiscoveryEventPayload['action'], candidateOverride: Partial<DiscoveryCandidate>): DiscoveryEventPayload {
+    return { action, candidate: candidate(candidateOverride) };
+  }
+
+  it('returns the same array reference when there are no events to fold', () => {
+    const rows = [candidate({ id: '1' })];
+    expect(applyDiscoveryEvents(rows, [])).toBe(rows);
+  });
+
+  it('appends a REPORTED candidate not already in the poll-fetched list', () => {
+    const rows = [candidate({ id: '1' })];
+    const result = applyDiscoveryEvents(rows, [event('REPORTED', { id: '2', name: 'New rover' })]);
+    expect(result.map((c) => c.id)).toEqual(['1', '2']);
+  });
+
+  it('replaces the existing entry in place for a status change on a known id', () => {
+    const rows = [candidate({ id: '1', status: 'NEW' }), candidate({ id: '2', status: 'NEW' })];
+    const result = applyDiscoveryEvents(rows, [event('REGISTERED', { id: '1', status: 'REGISTERED' })]);
+    expect(result.map((c) => [c.id, c.status])).toEqual([
+      ['1', 'REGISTERED'],
+      ['2', 'NEW'],
+    ]);
+  });
+
+  it('applies multiple events in order, later wins for the same id', () => {
+    const rows = [candidate({ id: '1', status: 'NEW' })];
+    const result = applyDiscoveryEvents(rows, [
+      event('DISMISSED', { id: '1', status: 'DISMISSED' }),
+      event('RESTORED', { id: '1', status: 'NEW' }),
+    ]);
+    expect(result).toEqual([candidate({ id: '1', status: 'NEW' })]);
+  });
+
+  it('does not mutate the input array', () => {
+    const rows = [candidate({ id: '1' })];
+    const copy = [...rows];
+    applyDiscoveryEvents(rows, [event('REPORTED', { id: '2' })]);
+    expect(rows).toEqual(copy);
   });
 });

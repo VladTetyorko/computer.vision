@@ -183,6 +183,14 @@ describe('DronePickerPage', () => {
     expect(addSource?.getAttribute('href')).toBe('/add-source');
   });
 
+  it('D7 (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md): a PILOT never sees the "Your vehicles" empty leg\'s Add-source link, since /add-source is orgGuard-gated and would bounce them', async () => {
+    const fixture = await render([SIM], { topRole: 'PILOT', memberships: [{ groupId: 'g-1', groupName: 'Alpha', role: 'PILOT' }] });
+
+    expect(fixture.nativeElement.textContent).toContain('No real vehicles yet');
+    expect(fixture.nativeElement.querySelector('.picker-group-empty a')).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('ask a fleet manager');
+  });
+
   it('falls back to the full-page empty state when there are no assets at all', async () => {
     const fixture = await render([], { topRole: 'ADMIN', memberships: [] });
 

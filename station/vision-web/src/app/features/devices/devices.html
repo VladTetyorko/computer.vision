@@ -317,6 +317,23 @@
           @if (simulatedInfo(row.device); as simInfo) {
             <span class="chip accent" [title]="'Simulated asset: ' + simInfo.displayName">Simulated</span>
           }
+          <!-- Sense/Sight role status (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md P3) — one more
+               chip alongside the merged state above; both read the device's own condition, not one
+               merged verdict, so both stay (§5's "one chip per row" governs the *table* row, not this
+               already-multi-chip detail panel, matching "Simulated"'s own precedent just above). -->
+          @if (roleChipFor(row); as roleChip) {
+            @switch (roleChip.kind) {
+              @case ('ok') {
+                <span class="chip ok"><span class="dot live"></span>{{ roleChip.label }}</span>
+              }
+              @case ('warn') {
+                <span class="chip warn">{{ roleChip.label }}</span>
+              }
+              @case ('quiet') {
+                <span class="row-state"><span class="dot"></span><span class="muted">{{ roleChip.label }}</span></span>
+              }
+            }
+          }
         </div>
 
         <!-- Fact grid (F6 — two columns, fixed-width muted label column). Capabilities/Protocol are
@@ -325,6 +342,10 @@
           <div class="detail-field">
             <dt>Lifecycle</dt>
             <dd>{{ lifecycleLabel(row.lifecycle) }}</dd>
+          </div>
+          <div class="detail-field">
+            <dt>Role</dt>
+            <dd class="muted">{{ roleLabelFor(row) }}</dd>
           </div>
           <div class="detail-field">
             <dt>Capabilities</dt>

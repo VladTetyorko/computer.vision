@@ -1010,10 +1010,15 @@ export interface RegisterDiscoveryCandidateResponse {
  * into an identical empty list (`core/discovery/discovery-inbox-logic.ts#sourceUnreachableWarnings`).
  * `id` is the same mechanism key `DiscoveryCandidate#method` carries (`mavlink`/`onvif`/`mdns`/
  * `v4l2`/`mediamtx`) — `discoveryMethodLabel` gives both the same human name.
+ *
+ * `'NEVER_SCANNED'` (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.2 C2) closes U8 — a source
+ * that has never run used to report `'OK'`, indistinguishable from a scan that genuinely found
+ * nothing. `lastScanAt` is absent exactly when `status` is `'NEVER_SCANNED'`.
  */
 export interface DiscoverySource {
   readonly id: string;
-  readonly status: 'OK' | 'UNREACHABLE';
+  readonly status: 'OK' | 'UNREACHABLE' | 'NEVER_SCANNED';
+  readonly lastScanAt?: string;
 }
 
 /**
@@ -1024,6 +1029,78 @@ export interface DiscoverySource {
 export interface DiscoveryInboxResponse {
   readonly candidates: readonly DiscoveryCandidate[];
   readonly sources: readonly DiscoverySource[];
+}
+
+/**
+ * Mirrors `dto.AttachDiscoveryCandidateRequest` — the body of `POST
+ * /api/discovery/inbox/{id}/attach` (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.2 C1), the
+ * atomic server-side twin of {@link RegisterDiscoveryCandidateRequest} for the case an operator
+ * already has an existing asset in mind. Registers the device from the candidate's own suggested
+ * stream and assigns it in one call — replacing the client's own two-call `registerDevice` +
+ * `assignDevice` sequence (U7), which could half-fail and leave an orphan device.
+ */
+export interface AttachDiscoveryCandidateRequest {
+  readonly assetId: string;
+}
+
+// --- Discovery status (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.2 C2) -----------------
+// `GET /api/discovery/status` (manageOrg) — "the most important endpoint in the plan": one screen
+// answering whether zero-config onboarding is actually working, without correlating the inbox,
+// `/api/system/network` and the MAVLink lobby's own logs by hand. `core/onboarding/intake-logic.ts`
+// is the one place this response becomes an honest per-row `IntakeState`.
+
+/**
+ * Mirrors `dto.TelemetryIntakeResponse` — the standing MAVLink lobby's own reachability/decode
+ * counters. `datagramsReceived`/`framesDecoded` together (never either alone) are the actual
+ * diagnostic: bytes arriving with nothing decoding is a wrong-protocol/garbage answer no other
+ * signal in this app can express (S1/P2). `lastDatagramAt` is absent when none has ever arrived.
+ */
+export interface TelemetryIntake {
+  readonly bound: boolean;
+  readonly bindAddress: string;
+  readonly lobbyHeld: boolean;
+  readonly datagramsReceived: number;
+  readonly bytesReceived: number;
+  readonly lastDatagramAt?: string;
+  readonly framesDecoded: number;
+  readonly unclaimedSysids: readonly number[];
+  readonly claimedSysids: readonly number[];
+}
+
+/**
+ * Mirrors `dto.VideoIntakeResponse` — mediamtx push reachability. Absent from
+ * {@link DiscoveryStatusResponse} entirely when mediamtx publish is unconfigured.
+ */
+export interface VideoIntake {
+  readonly pushPort: number;
+  readonly pathPrefix: string;
+  readonly readyPaths: readonly string[];
+}
+
+/**
+ * Mirrors `dto.DiscoveryStatusResponse`, the body of `GET /api/discovery/status`. `telemetryIntake`
+ * is never absent (the standing lobby always answers, worst case `bound: false`); `lastSweepAt` is
+ * absent before the first sweep completes; `videoIntake` is absent when mediamtx publish is
+ * unconfigured.
+ */
+export interface DiscoveryStatusResponse {
+  readonly sweepSeconds: number;
+  readonly lastSweepAt?: string;
+  readonly telemetryIntake: TelemetryIntake;
+  readonly videoIntake?: VideoIntake;
+  readonly sources: readonly DiscoverySource[];
+}
+
+/**
+ * Mirrors the `discovery` SSE topic's payload (`dto.DiscoveryEventPayload`,
+ * docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.2 C4) — an operator's discovery-inbox list
+ * changing. `candidate` is the same 13-field `DiscoveryCandidate` shape `GET /api/discovery/inbox`
+ * already returns per element, so `core/discovery/discovery-inbox-logic.ts#applyDiscoveryEvents`
+ * applies this delta with no new mapping code.
+ */
+export interface DiscoveryEventPayload {
+  readonly action: 'REPORTED' | 'REGISTERED' | 'DISMISSED' | 'RESTORED';
+  readonly candidate: DiscoveryCandidate;
 }
 
 // --- Device probe (docs/plans/done/UX-REWORK-PLAN.md §U-d — the onboarding wizard's Test step) -----------
@@ -1888,7 +1965,7 @@ export interface DevicesSnapshot {
  * Mirrors `dto.LiveEnvelopeResponse` — the shape of every regular (default-named) `GET /api/live`
  * SSE `data:` line; the event's own `id:` field carries `seq` as a string (which is what makes
  * `EventSource`'s automatic `Last-Event-ID` resume work with no client code at all). A discriminated
- * union on `type` so a `switch` narrows `payload` to the right shape per branch — the eight `type`
+ * union on `type` so a `switch` narrows `payload` to the right shape per branch — the nine `type`
  * values and their payloads are fixed 1:1 with `LiveTopicKind`'s wire values and
  * `LiveUpdateRegistry`'s own javadoc (vision-api). `devices`/`detection-events`/`map` (each its own
  * backend follow-up batch) are, like `fleet`/`event`, always-on — every connection gets them
@@ -1904,6 +1981,13 @@ export interface DevicesSnapshot {
  * opt-in like `telemetry`/`detections` (not always-on), coalescing latest-wins with ring capacity 1
  * (the freshest correction is the only one that matters, CLAUDE.md rule 9); payload is
  * {@link CorrectionResponse} verbatim, byte-identical to the REST shape.
+ *
+ * **`discovery` is the 9th, from docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.2 C4** — always-on
+ * like `fleet`/`event`/`devices`/`detection-events`/`map`, but **delta-only**: published only when a
+ * sweep or an operator verb (attach/register/dismiss/restore) actually changes a candidate, never
+ * once per sweep regardless of content — a quiet lab produces zero `discovery` traffic. Payload is
+ * {@link DiscoveryEventPayload}; `core/discovery/discovery-inbox-store.ts` folds each arrival on top
+ * of its own kept 30s poll, the same append-log pattern `core/map-data/marks-store.ts` uses for `map`.
  */
 export type LiveEnvelope =
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'fleet'; readonly payload: readonly AssetSummary[] }
@@ -1913,7 +1997,8 @@ export type LiveEnvelope =
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'devices'; readonly payload: DevicesSnapshot }
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'detection-events'; readonly payload: DetectionEvent }
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'map'; readonly payload: MapEventPayload }
-  | { readonly seq: number; readonly assetId: string; readonly type: 'geo'; readonly payload: CorrectionResponse };
+  | { readonly seq: number; readonly assetId: string; readonly type: 'geo'; readonly payload: CorrectionResponse }
+  | { readonly seq: number; readonly assetId?: undefined; readonly type: 'discovery'; readonly payload: DiscoveryEventPayload };
 
 /**
  * Mirrors `dto.UpdateLiveTopicsRequest` — the body of `PATCH /api/live/{connectionId}/topics`
@@ -2634,27 +2719,46 @@ export type VehicleKind = 'COPTER' | 'PLANE' | 'ROVER' | 'UNKNOWN';
 
 // --- Guided drone onboarding (docs/plans/active/DRONE-INFRA-PLAN.md I-g's frozen wire contract) --------------
 
-/** One site-local IPv4 address this platform's host is reachable on. Mirrors `dto.NetworkAddressResponse`. */
+/**
+ * Mirrors `dto.NetworkAddressResponse` — one site-local IPv4 address this platform's host is
+ * reachable on. `kind` (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.2 C3) classifies purely
+ * from `interfaceName`'s prefix — `'VIRTUAL'` for docker/`br-`/veth/virbr/tun/tap, `'LAN'`
+ * otherwise; `'UNKNOWN'` is a reserved third value the backend's classifier never actually assigns.
+ */
 export interface NetworkAddress {
   readonly address: string;
   readonly interfaceName: string;
+  readonly kind: 'LAN' | 'VIRTUAL' | 'UNKNOWN';
 }
 
 /**
  * Mirrors `dto.SystemNetworkResponse`, the body of `GET /api/system/network` (docs/plans/active/DRONE-INFRA-PLAN.md
- * I-g's frozen wire contract) — every site-local IPv4 address of an up, non-loopback interface, sorted
- * by interface name, plus the MAVLink heartbeat scanner's own listen port (shared with the backend's
- * `vision.discovery.mavlink-port` property so the two can never disagree). This is what lets the
- * onboarding wizard's "Add a real drone" config snippets carry this platform's own reachable
- * address/port instead of asking the operator to type one in (`features/onboarding/drone-config-logic.ts#configSnippets`).
+ * I-g's frozen wire contract, extended by docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.2 C3)
+ * — every site-local IPv4 address of an up, non-loopback interface, plus the MAVLink heartbeat
+ * scanner's own listen port (shared with the backend's `vision.discovery.mavlink-port` property so
+ * the two can never disagree). This is what lets the onboarding wizard's "Add a real drone" config
+ * snippets carry this platform's own reachable address/port instead of asking the operator to type
+ * one in (`features/onboarding/drone-config-logic.ts#configSnippets`).
+ *
+ * **Sort order is `kind` (LAN first) → `interfaceName` → `address`** (D5) — a deliberate behavior
+ * change fixing the defect where a docker bridge (`br-…`) could sort above the real LAN interface
+ * (`wlp2s0`) a device on the network can actually reach; this is the single most likely cause of a
+ * silent "nothing arrives" (P1).
  *
  * `addresses` is never absent, but **may be empty** — a host with no detectable site-local interface
  * is not an error (the plan's own wording: "Never errors for 'no addresses'"); the wizard degrades to
  * a manual-address text input rather than treating an empty list as a failed fetch.
+ *
+ * `videoPushPort`/`videoPushPathPrefix` (C3) are the mediamtx push address's own port/path-prefix —
+ * absent together when mediamtx publish is unconfigured. A client composes the full push URL itself:
+ * `rtsp://<selected address>:<videoPushPort>/<videoPushPathPrefix><name>` — never a fabricated host;
+ * the reachable host is whichever `addresses` entry the operator picks.
  */
 export interface SystemNetworkResponse {
   readonly addresses: readonly NetworkAddress[];
   readonly mavlinkPort: number;
+  readonly videoPushPort?: number;
+  readonly videoPushPathPrefix?: string;
 }
 
 // --- Drone onboarding: vehicle profile & fleet readiness (docs/plans/active/DRONE-ONBOARDING-PLAN.md

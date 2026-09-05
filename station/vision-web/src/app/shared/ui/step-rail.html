@@ -1,23 +1,23 @@
 <nav class="rail" aria-label="Setup steps">
   <ol class="rail-list">
-    @for (step of steps(); track step.id; let i = $index) {
+    @for (item of items(); track item.id; let i = $index) {
       <li>
         <button
           type="button"
           class="rail-step"
-          [class.done]="statusOf(step) === 'done'"
+          [class.done]="item.done"
           [class.current]="i === currentIndex()"
           [attr.aria-current]="i === currentIndex() ? 'step' : null"
           (click)="jump.emit(i)"
         >
           <span class="rail-glyph">
-            @if (statusOf(step) === 'done') {
+            @if (item.done) {
               <vision-icon name="check" [size]="14" />
             } @else {
               <span class="rail-dot"></span>
             }
           </span>
-          <span class="rail-title">{{ step.title }}</span>
+          <span class="rail-title">{{ item.label }}</span>
         </button>
       </li>
     }

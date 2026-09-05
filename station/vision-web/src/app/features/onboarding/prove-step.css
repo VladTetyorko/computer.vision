@@ -1,0 +1,84 @@
+/* This component's own copy of every class it uses — CSS encapsulation means a child component's
+   template classes never match a parent's scoped rules (see `features/asset-detail/asset-detail.css`'s
+   own doc comment for the precedent this follows). */
+
+.hint {
+    font-size: 0.8rem;
+    margin: 0 0 var(--space-16);
+}
+
+.role-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel-raised);
+    padding: var(--space-16) var(--space-16);
+    margin-bottom: var(--space-16);
+}
+
+.role-card-head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-8);
+    margin-bottom: var(--space-16);
+}
+
+.role-label {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text);
+}
+
+/* The Test/Verify separator within one role card — same rule as identify-step's `.advanced`, kept
+   as its own class since it never carries an `h3` (that rule's own small-caps override would be the
+   wrong register for the plain "Verify" `.label` above it). */
+.prove-divider {
+    margin-top: var(--space-16);
+    padding-top: var(--space-16);
+    border-top: 1px solid var(--border);
+}
+
+.test-result {
+    margin-top: var(--space-16);
+}
+
+.test-frame {
+    max-width: 100%;
+    max-height: 20rem;
+    display: block;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    margin-bottom: var(--space-16);
+}
+
+.warnings {
+    margin: var(--space-8) 0 0;
+    padding-left: var(--space-16);
+    color: var(--color-warn);
+    font-size: 0.82rem;
+}
+
+.facts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-8) var(--space-16);
+    margin: 0 0 var(--space-16);
+}
+
+.fact dt {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+.fact dd {
+    margin: var(--space-2) 0 0;
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.table-scroll {
+    overflow-x: auto;
+    margin-top: var(--space-8);
+}

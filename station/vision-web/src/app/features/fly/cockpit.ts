@@ -55,8 +55,8 @@ type CockpitDialog = 'stop' | 'cv-setup';
  * read-model, and HTTP-backed command lives in {@link CockpitFacade} (provided below, alongside
  * `TelemetryStore`/`DetectionsStore`/`WeatherStore` — one poller-set per route activation). This
  * component is left holding only:
- *   - the route-bound `assetId`/`watch` inputs (only a component can receive one) and the
- *     constructor wiring that forwards them into the facade — `assetId` is now the route's own
+ *   - the route-bound `assetId`/`watch`/`autostart` inputs (only a component can receive one) and
+ *     the constructor wiring that forwards them into the facade — `assetId` is now the route's own
  *     `:assetId` param (matched by name via `withComponentInputBinding()`, mirrors `LivePage`'s
  *     identical `deviceId`/`LiveFacade#setDeviceId` shape) and stays reactive across a same-route
  *     drone switch (the header switcher/a picker-card pick both navigate to a new `/fly/:assetId`,
@@ -118,6 +118,12 @@ export class CockpitPage {
 
   /** `?watch=1` — hides Start/Stop (docs/plans/done/MVP3-PLAN.md §C-b, C-c's own drill-down target). */
   readonly watch = input<string | undefined>(undefined);
+
+  /** `?autostart=1` — the onboarding wizard's Ready screen's `Open cockpit ›` terminal action
+   * (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.3). Forwarded into {@link CockpitFacade} below,
+   * same as {@link watch} — see that facade's own `autostartSignal`/one-shot-effect doc comment for
+   * what actually consuming it does. */
+  readonly autostart = input<string | undefined>(undefined);
 
   protected readonly facade = inject(CockpitFacade);
 
@@ -203,6 +209,10 @@ export class CockpitPage {
     // `watch` must stay reactive across a same-route navigation — mirrors `LivePage`'s identical
     // `effect(() => this.facade.setDeviceId(...))`.
     effect(() => this.facade.setWatch(this.watch()));
+
+    // `autostart` — forwarded the same way `watch` is; the facade's own effect does the actual
+    // one-shot consumption (see `CockpitFacade`'s doc comment on `autostartSignal`).
+    effect(() => this.facade.setAutostart(this.autostart()));
 
     // Tactical marks (docs/plans/done/TACTICAL-MARKS-PLAN.md M5) — a captured map click always produces a
     // `MarksStore.draft()` regardless of whether the `marks` drawer happens to be open at that

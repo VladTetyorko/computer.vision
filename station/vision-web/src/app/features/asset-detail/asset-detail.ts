@@ -30,9 +30,11 @@ import { AssetDetailFacade } from './asset-detail-facade';
 import {
   attributeRowsToRecord,
   attributesToRows,
+  roleStatusDescriptor,
   sampleAgeLabel,
   telemetryFactRows,
   type AttributeRow,
+  type RoleStatusDescriptor,
   type TelemetryFactRow,
 } from './asset-detail-logic';
 import type { AssetUsage, Device, DetectionEvent } from '../../core/api/models';
@@ -136,6 +138,16 @@ export class AssetDetailPage {
     const asset = this.facade.asset();
     return asset?.hasImage ? this.facade.imageUrl(asset.assetId) : null;
   });
+
+  /**
+   * Sense/Sight role-status chips (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md P3), shown in the
+   * cockpit-band header and again next to the "Hardware & devices" subview's own section header —
+   * both read {@link AssetDetailFacade.senseStatus}/`sightStatus` through the same descriptor mapping
+   * so the two spots can never disagree. `roleStatusDescriptor` returning `{ kind: 'muted' }` for
+   * `not-fitted` is this page's own cue to render no chip at all (see the template).
+   */
+  protected readonly senseChip = computed<RoleStatusDescriptor>(() => roleStatusDescriptor(this.facade.senseStatus()));
+  protected readonly sightChip = computed<RoleStatusDescriptor>(() => roleStatusDescriptor(this.facade.sightStatus()));
 
   // --- Overlay/view state — host-owned, see this class's own doc comment above ------------------
 

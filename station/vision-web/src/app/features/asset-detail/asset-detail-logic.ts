@@ -3,6 +3,7 @@ import type { KpiTile } from '../../core/fleet/asset-stats-logic';
 import { hasFix } from '../../core/geo/geo-logic';
 import { hoursSinceClose } from '../../core/maintenance/maintenance-logic';
 import { humanAge } from '../../core/telemetry/telemetry-logic';
+import type { RoleStatus } from '../../core/onboarding/fit-out-logic';
 
 /**
  * Pure logic behind the asset detail page (docs/main/CYCLES-PLAN.md §11, CD-b items 2–3): picking the
@@ -216,4 +217,42 @@ export function formatSinceService(hours: number | undefined): string {
 export function sinceServiceTile(records: readonly MaintenanceRecord[], nowMs: number): KpiTile {
   const record = mostRecentlyClosedRecord(records);
   return { label: 'Since service', value: formatSinceService(record ? hoursSinceClose(record, nowMs) : undefined) };
+}
+
+// --- Sense/Sight role status (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md P3) ---------------------
+
+/**
+ * Presentational tone for a {@link RoleStatus} value, shared with `features/devices/devices-page-
+ * logic.ts#roleStatusDescriptor` — same mapping, deliberately duplicated rather than centralized in
+ * `core/onboarding/fit-out-logic.ts`. This codebase's own precedent for that trade-off is
+ * `core/fleet/triage-logic.ts`'s doc comment: no feature imports another feature's own `*-logic.ts`,
+ * and a two-line mapping duplicated once is cheaper than a new cross-feature import or a `core/` move
+ * for a single extra reader — this wave's own file-scope (features/asset-detail/** only) makes editing
+ * `core/onboarding/**` an out-of-scope change regardless.
+ */
+export type RoleStatusToneKind = 'muted' | 'quiet' | 'ok' | 'warn';
+
+export interface RoleStatusDescriptor {
+  readonly kind: RoleStatusToneKind;
+  readonly label: string;
+}
+
+const ROLE_STATUS_DESCRIPTORS: Readonly<Record<RoleStatus, RoleStatusDescriptor>> = {
+  'not-fitted': { kind: 'muted', label: '—' },
+  'never-seen': { kind: 'quiet', label: 'Never heard' },
+  live: { kind: 'ok', label: 'Live' },
+  stalled: { kind: 'warn', label: 'Stalled' },
+  stopped: { kind: 'quiet', label: 'Stopped' },
+  stale: { kind: 'warn', label: 'Stale' },
+};
+
+/**
+ * `not-fitted` → muted `—` (render no chip at all — the asset was never fitted for this role, not a
+ * failure); `never-seen` → honest quiet non-error state (fitted, but nothing has ever reported);
+ * `live` → the one green/live affordance; `stalled`/`stale` → warn (something is fitted and was seen,
+ * but isn't fresh right now); `stopped` → quiet (fitted, intentionally idle). At most one chip per
+ * row either way (§5).
+ */
+export function roleStatusDescriptor(status: RoleStatus): RoleStatusDescriptor {
+  return ROLE_STATUS_DESCRIPTORS[status];
 }

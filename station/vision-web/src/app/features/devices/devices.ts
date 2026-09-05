@@ -12,11 +12,15 @@ import { DevicesFacade } from './devices-facade';
 import {
   DEVICE_ACTION_LABELS,
   RESTORE_TARGET_STATE,
+  deviceRoleLabel,
+  deviceRoleStatus,
   describeDeviceState,
   reasonedDeviceActions,
+  roleStatusDescriptor,
   type ActionAvailability,
   type DeviceLifecycleAction,
   type DeviceStateDescriptor,
+  type RoleStatusDescriptor,
   type WarehouseRow,
 } from './devices-page-logic';
 
@@ -127,6 +131,27 @@ export class DevicesPage {
    */
   protected deviceState(row: WarehouseRow): DeviceStateDescriptor {
     return describeDeviceState(row);
+  }
+
+  /**
+   * Sense/Sight classification label for the detail panel's fact grid (docs/plans/active/
+   * SOURCE-ONBOARDING-2-PLAN.md P3) — muted text alongside Capabilities/Protocol, not a chip
+   * (§5 — classification is never a chip).
+   */
+  protected roleLabelFor(row: WarehouseRow): 'Sense' | 'Sight' {
+    return deviceRoleLabel(row.device);
+  }
+
+  /**
+   * The role-status chip itself (P3) — judged against every device the owning asset has (a lone
+   * unassigned device judges itself), the fleet's live streams, and that asset's own telemetry age
+   * (`facade.telemetryAgeMsFor`, silently `undefined` — and so honestly `not-fitted`/`never-seen`
+   * rather than fabricated — until the fleet summary loads or for an unowned device).
+   */
+  protected roleChipFor(row: WarehouseRow): RoleStatusDescriptor {
+    const ownerDevices = this.facade.ownerDevices(row.owner?.assetId);
+    const status = deviceRoleStatus(row.device, ownerDevices, this.facade.fleet.streams(), this.facade.telemetryAgeMsFor(row.owner?.assetId));
+    return roleStatusDescriptor(status);
   }
 
   protected clearSearch(): void {

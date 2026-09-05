@@ -154,8 +154,7 @@
 
       @if (facade.draft(); as draft) {
         <vision-step-rail
-          [steps]="steps()"
-          [draft]="draft"
+          [items]="railItems()"
           [currentIndex]="currentStepIndex()"
           (jump)="currentStepIndex.set($event)"
         />

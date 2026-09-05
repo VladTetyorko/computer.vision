@@ -436,6 +436,22 @@
   background: var(--hud-bg-strong);
 }
 
+/* Synthetic-feed honesty pill (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md D6) — same frosted chrome
+   as `.icon-btn` beside it, minus the pointer affordance: this states a fact, it isn't a control, so
+   no `cursor: pointer`/`:hover` state. */
+.origin-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--space-4) var(--space-8);
+  border-radius: var(--radius-pill);
+  background: var(--hud-bg);
+  backdrop-filter: blur(var(--hud-blur));
+  border: var(--hud-border);
+  color: var(--text);
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
 /* Quick-access pass (docs/plans/done/UX-QUICKWINS-PLAN.md QF-1): a labeled cockpit control, not a bare native
    `<select>` — the "DRONE" label is always visible (fleet/military ethos: words, not just a control
    floating unexplained in the header), styled as the same frosted-pill chrome every other HUD
@@ -627,6 +643,14 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* D6's per-device honesty suffix (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md) — quieter than the
+   device name it follows, same "mix a base token with transparent" idiom `diagnostics-card.ts`'s own
+   muted label already uses, based on `--white` here since this label sits on the dark scrim rather
+   than a themed panel. */
+.tile-sim {
+  color: color-mix(in srgb, var(--white) 70%, transparent);
 }
 
 /* ---- Events ticker (docs/plans/active/FLY-FLOW-PLAN.md §4 W2) — a transient, non-interactive

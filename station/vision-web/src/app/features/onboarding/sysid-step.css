@@ -1,0 +1,18 @@
+/* This component's own copy of every class it uses — CSS encapsulation means a child component's
+   template classes never match a parent's scoped rules (see `features/asset-detail/asset-detail.css`'s
+   own doc comment for the precedent this follows). */
+
+.hint {
+    font-size: 0.8rem;
+    margin: 0 0 var(--space-16);
+}
+
+.field {
+    margin-bottom: var(--space-16);
+}
+
+.wizard-nav {
+    margin-top: var(--space-24);
+    padding-top: var(--space-16);
+    border-top: 1px solid var(--border);
+}

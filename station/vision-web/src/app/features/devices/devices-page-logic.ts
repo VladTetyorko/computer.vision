@@ -1,4 +1,5 @@
-import type { AssetDetails, CreateAssetRequest, Device, LifecycleState } from '../../core/api/models';
+import type { ActiveStream, AssetDetails, CreateAssetRequest, Device, LifecycleState } from '../../core/api/models';
+import { roleForDevice, roleStatus, type RoleStatus } from '../../core/onboarding/fit-out-logic';
 
 /**
  * Pure logic behind the Devices page's raw-devices table/grid (docs/main/CYCLES-PLAN.md §8, §11; the
@@ -263,4 +264,65 @@ export function buildCreateAssetRequestForDevice(
     category,
     deviceIds: [device.id],
   };
+}
+
+// --- Per-role status readout (P3, docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.3) -------------
+// The Links tab (this page, embedded into Inventory's own `?tab=links`) is one of the two surfaces
+// P3 names — `features/asset-detail/asset-detail-logic.ts` carries an identical, independently
+// tested copy of `RoleStatusDescriptor`/`roleStatusDescriptor` for the asset manager page. Small and
+// duplicated on purpose (`core/fleet/triage-logic.ts`'s own doc comment: "a two-line … constant
+// duplicated once is cheaper than a new cross-feature import") rather than lifted into `core/`,
+// since this wave's task explicitly scopes it to three feature folders, none of which is `core/`.
+
+/**
+ * One device row's role, read straight off its own `capabilities` (`roleForDevice`) — a `find`/
+ * `simulate` row's own device is unambiguous the moment it's created (`fit-out-logic.ts#roleForDevice`'s
+ * own doc comment: TELEMETRY-capable is Sense, everything else is Sight). Classification, not state
+ * (frontend-style §5) — rendered as plain muted text next to Capabilities/Protocol, never a chip.
+ */
+export function deviceRoleLabel(device: Pick<Device, 'capabilities'>): 'Sense' | 'Sight' {
+  return roleForDevice(device) === 'sense' ? 'Sense' : 'Sight';
+}
+
+/**
+ * One device's own `RoleStatus` (`core/onboarding/fit-out-logic.ts#roleStatus`) — judged over its
+ * *owning asset's* full device list, not the single row alone, since a role can be fitted more than
+ * once (`roleStatus`'s own doc comment). `ownerDevices` is `undefined` for an unowned device or one
+ * whose owner hasn't loaded yet (`DevicesFacade#ownerDevices`) — falls back to `[device]` alone so
+ * this stays a total function; an unowned device is always `roleForDevice`'s only member of its own
+ * role, so the fallback reads identically to the real thing.
+ */
+export function deviceRoleStatus(
+  device: Device,
+  ownerDevices: readonly Device[] | undefined,
+  streams: readonly Pick<ActiveStream, 'deviceId' | 'state'>[],
+  telemetryAgeMs: number | undefined,
+): RoleStatus {
+  return roleStatus(roleForDevice(device), ownerDevices ?? [device], streams, telemetryAgeMs);
+}
+
+/** How {@link roleStatusDescriptor} renders a `RoleStatus` — `muted` is a plain dash (never a
+ *  chip, CLAUDE.md degrade-honestly); `quiet` is a dot + muted text (mirrors `describeDeviceState`'s
+ *  own "stopped" — the merely-normal/never-yet case, not worth a fourth chip color); `ok`/`warn` are
+ *  full `.chip.ok`/`.chip.warn`, this app's only two non-neutral state colors besides `danger`/`live`. */
+export type RoleStatusToneKind = 'muted' | 'quiet' | 'ok' | 'warn';
+
+export interface RoleStatusDescriptor {
+  readonly kind: RoleStatusToneKind;
+  readonly label: string;
+}
+
+const ROLE_STATUS_DESCRIPTORS: Readonly<Record<RoleStatus, RoleStatusDescriptor>> = {
+  'not-fitted': { kind: 'muted', label: '—' },
+  'never-seen': { kind: 'quiet', label: 'Never heard' },
+  live: { kind: 'ok', label: 'Live' },
+  stalled: { kind: 'warn', label: 'Stalled' },
+  stopped: { kind: 'quiet', label: 'Stopped' },
+  stale: { kind: 'warn', label: 'Stale' },
+};
+
+/** Tone + label for one `RoleStatus` value — same tone vocabulary `describeDeviceState`/
+ *  `stream-state-logic.ts#videoNotice` already established elsewhere in this app, never a new hue. */
+export function roleStatusDescriptor(status: RoleStatus): RoleStatusDescriptor {
+  return ROLE_STATUS_DESCRIPTORS[status];
 }

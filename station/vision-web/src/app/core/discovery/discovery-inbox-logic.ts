@@ -2,6 +2,7 @@ import { humanAge } from '../telemetry/telemetry-logic';
 import type {
   DiscoveryCandidate,
   DiscoveryCandidateStatus,
+  DiscoveryEventPayload,
   DiscoverySource,
   RegisterDeviceRequest,
   RegisterDiscoveryCandidateRequest,
@@ -124,11 +125,14 @@ export function dismissedCandidateCount(candidates: readonly DiscoveryCandidate[
  *  additionally requires a suggested stream (protocol + uri), since "attach to existing asset"
  *  has no device spec to register without one — a telemetry-only candidate with no stream (or,
  *  today, none the scanner could resolve) can still be **added** as a bare asset, just not
- *  attached as a device onto an existing one. */
+ *  attached as a device onto an existing one. `canRestore` is the mirror image of `canDismiss` —
+ *  only a `DISMISSED` candidate can be undone (W3, docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md
+ *  §11), reopening it back to `NEW` via `DiscoveryInboxStore#restore`. */
 export interface CandidateActions {
   readonly canAdd: boolean;
   readonly canAttach: boolean;
   readonly canDismiss: boolean;
+  readonly canRestore: boolean;
 }
 
 export function candidateActions(candidate: DiscoveryCandidate): CandidateActions {
@@ -137,6 +141,7 @@ export function candidateActions(candidate: DiscoveryCandidate): CandidateAction
     canAdd: isNew,
     canAttach: isNew && Boolean(candidate.suggestedStreamProtocol) && Boolean(candidate.suggestedStreamUri),
     canDismiss: isNew,
+    canRestore: candidate.status === 'DISMISSED',
   };
 }
 
@@ -189,4 +194,29 @@ export function buildDeviceSpecFromCandidate(candidate: DiscoveryCandidate): Reg
     uri: candidate.suggestedStreamUri,
     options: candidate.suggestedStreamOptions ?? {},
   };
+}
+
+/**
+ * Folds `discovery` SSE deltas (`DiscoveryEventPayload`, docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md
+ * §3.2 C4, wave W1) onto the inbox's own poll-fetched candidate list — upsert by id, in event
+ * order, so a later delta for the same candidate always wins over an earlier one regardless of its
+ * `action` (mirrors `core/map-data/marks-store.ts`'s own upsert-by-id fold over `mapEvents`). Every
+ * action (`REPORTED` a first sight or a re-sight; `REGISTERED`/`DISMISSED`/`RESTORED` a status
+ * change) carries the candidate's own full current shape, so this never needs to special-case by
+ * `action` — it is always exactly "replace this id, or append it if new". A candidate this poll
+ * hasn't fetched yet (a brand-new `REPORTED` arriving between two polls) is appended, keeping it
+ * visible immediately rather than waiting up to the poll interval to appear.
+ */
+export function applyDiscoveryEvents(
+  candidates: readonly DiscoveryCandidate[],
+  events: readonly DiscoveryEventPayload[],
+): readonly DiscoveryCandidate[] {
+  if (events.length === 0) {
+    return candidates;
+  }
+  const byId = new Map(candidates.map((candidate) => [candidate.id, candidate] as const));
+  for (const event of events) {
+    byId.set(event.candidate.id, event.candidate);
+  }
+  return [...byId.values()];
 }

@@ -1,0 +1,168 @@
+<h2>Prove</h2>
+<p class="muted hint">Before this becomes an asset, make sure what you connected is actually there.</p>
+
+@for (role of facade.fitOutRoles; track role) {
+  @if (facade.store.rows()[role].value === 'find' && !facade.store.preProvenRoles().has(role)) {
+    <div class="role-card">
+      <div class="role-card-head">
+        <span class="role-label">{{ facade.store.fitOutRoleLabels[role] }}</span>
+        <span class="muted">{{ facade.store.fitOutRoleHints[role] }}</span>
+      </div>
+
+      @if (facade.store.telemetryOnlyLink(role)) {
+        <p class="muted hint">Make sure this platform can actually hear it.</p>
+      } @else {
+        <p class="muted hint">Make sure it actually produces a frame.</p>
+      }
+
+      <div class="row">
+        <button
+          type="button"
+          class="btn"
+          (click)="facade.store.testRow(role)"
+          [disabled]="facade.store.proveByRole()[role].probing"
+        >
+          {{
+            facade.store.proveByRole()[role].probing
+              ? 'Testing…'
+              : (facade.store.proveByRole()[role].lastProbeResult || facade.store.proveByRole()[role].lastProbeError)
+                ? 'Retry'
+                : 'Run test'
+          }}
+        </button>
+      </div>
+
+      @if (facade.store.proveByRole()[role].probing) {
+        <div class="empty"><p class="faint">Connecting…</p></div>
+      } @else if (facade.store.proveByRole()[role].lastProbeError; as error) {
+        <vision-notice variant="danger">{{ error }}</vision-notice>
+      } @else if (facade.store.proveByRole()[role].lastProbeResult; as result) {
+        <div class="test-result">
+          @if (result.frameJpegBase64) {
+            <img
+              class="test-frame"
+              [src]="'data:image/jpeg;base64,' + result.frameJpegBase64"
+              alt="Decoded test frame from the connection"
+            />
+          }
+          <dl class="facts">
+            @if (result.widthPx !== undefined && result.heightPx !== undefined) {
+              <div class="fact">
+                <dt>Resolution</dt>
+                <dd class="mono">{{ result.widthPx }}×{{ result.heightPx }}</dd>
+              </div>
+            } @else {
+              <div class="fact">
+                <dt>Video</dt>
+                <dd>None — telemetry link</dd>
+              </div>
+            }
+            @if (result.codec) {
+              <div class="fact"><dt>Codec</dt><dd>{{ result.codec }}</dd></div>
+            }
+            @if (result.fps !== undefined) {
+              <div class="fact"><dt>FPS</dt><dd class="mono">{{ result.fps }}</dd></div>
+            }
+            <div class="fact">
+              <dt>Telemetry</dt>
+              <dd>{{ result.telemetryDetected ? 'Detected' : 'Not detected' }}</dd>
+            </div>
+          </dl>
+          @if (result.warnings && result.warnings.length > 0) {
+            <ul class="warnings">
+              @for (warning of result.warnings; track warning) {
+                <li>{{ warning }}</li>
+              }
+            </ul>
+          }
+        </div>
+      } @else {
+        <div class="empty"><p class="faint">Not tested yet.</p></div>
+      }
+
+      <div class="prove-divider">
+        <p class="label">Verify</p>
+        <p class="muted hint">
+          Optional — listens to the aircraft's own telemetry link and reports what it hears. You can
+          continue either way.
+        </p>
+
+        <div class="row">
+          <button
+            type="button"
+            class="btn"
+            (click)="facade.store.verifyRow(role)"
+            [disabled]="facade.store.proveByRole()[role].verifying"
+          >
+            {{
+              facade.store.proveByRole()[role].verifying
+                ? 'Listening…'
+                : (facade.store.proveByRole()[role].lastVerifyResult
+                    || facade.store.proveByRole()[role].lastVerifyError
+                    || facade.store.proveByRole()[role].verifyDisabled)
+                  ? 'Retry'
+                  : 'Observe vehicle'
+            }}
+          </button>
+        </div>
+
+        @if (facade.store.proveByRole()[role].verifying) {
+          <div class="empty"><p class="faint">Listening to the link…</p></div>
+        } @else if (facade.store.proveByRole()[role].verifyDisabled) {
+          <vision-notice icon="help">
+            Vehicle verification isn't enabled on this deployment
+            (<code class="mono">vision.onboarding.probe.enabled</code>). You can still continue and
+            register the asset.
+          </vision-notice>
+        } @else if (facade.store.proveByRole()[role].lastVerifyError; as error) {
+          <vision-notice variant="warn">{{ error }}</vision-notice>
+        } @else if (facade.store.proveByRole()[role].lastVerifyResult; as profile) {
+          <div class="test-result">
+            <dl class="facts">
+              @if (profile.sysid !== null) {
+                <div class="fact"><dt>System id</dt><dd class="mono">{{ profile.sysid }}</dd></div>
+              }
+              <div class="fact"><dt>Firmware</dt><dd>{{ profile.firmware ?? '—' }}</dd></div>
+              @if (profile.firmwareVersion) {
+                <div class="fact"><dt>Version</dt><dd class="mono">{{ profile.firmwareVersion }}</dd></div>
+              }
+              @if (profile.vehicleKind) {
+                <div class="fact"><dt>Vehicle kind</dt><dd>{{ profile.vehicleKind }}</dd></div>
+              }
+              <div class="fact"><dt>Messages seen</dt><dd class="mono">{{ profile.messages.length }}</dd></div>
+            </dl>
+
+            @if (profile.messages.length > 0) {
+              <div class="table-scroll">
+                <table>
+                  <thead><tr><th>Message</th><th>Rate</th><th>Count</th></tr></thead>
+                  <tbody>
+                    @for (message of profile.messages; track message.messageId) {
+                      <tr>
+                        <td>{{ message.name }}</td>
+                        <td class="mono">{{ message.hz }} Hz</td>
+                        <td class="mono">{{ message.count }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            }
+
+            @if (!profile.complete) {
+              <vision-notice variant="warn" icon="alert">
+                {{ profile.incompleteReason ?? 'The observation window ended before every signal arrived.' }}
+              </vision-notice>
+            }
+          </div>
+        } @else {
+          <div class="empty"><p class="faint">Not observed yet.</p></div>
+        }
+      </div>
+    </div>
+  }
+}
+
+@if (!facade.store.canAdvanceProve()) {
+  <p class="disabled-reason">Run the test and get a successful result on every row above before continuing.</p>
+}

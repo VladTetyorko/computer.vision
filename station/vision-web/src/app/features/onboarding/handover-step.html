@@ -1,0 +1,115 @@
+<h2>Hand over</h2>
+
+@if (facade.store.handoverOutcome() !== null || facade.store.existingAssetPath()) {
+  <!-- ---- Terminal screen (D9) — always ends here, whichever fork got the asset created/attached.
+       Two-half Sight/Sense proof, never a fabricated "ready" — a half that was never actually
+       proven (a pre-proven-but-unverified row, or a plain `simulate`/`none` row) says so honestly. -->
+  @if (facade.store.handoverOutcome(); as outcome) {
+    <vision-notice variant="ok" icon="check">
+      @switch (outcome) {
+        @case ('issued') {
+          "{{ facade.store.createdAssetDisplayName() }}" was issued. You can always change custody
+          later from the asset's page.
+        }
+        @case ('stocked') {
+          "{{ facade.store.createdAssetDisplayName() }}" is left in stock — issue it whenever it's
+          ready to fly.
+        }
+      }
+    </vision-notice>
+  } @else if (facade.store.existingAssetPath()) {
+    <p class="muted hint">Attached onto "{{ facade.store.createdAssetDisplayName() }}".</p>
+  }
+
+  <div class="proof-halves">
+    <div class="proof-half" [class.proven]="facade.sightProof().proven">
+      <span class="proof-role">Sight</span>
+      <span class="proof-label">{{ facade.sightProof().label }}</span>
+    </div>
+    <div class="proof-half" [class.proven]="facade.senseProof().proven">
+      <span class="proof-role">Sense</span>
+      <span class="proof-label">{{ facade.senseProof().label }}</span>
+    </div>
+  </div>
+
+  @if (facade.store.createdAssetId(); as assetId) {
+    <div class="row wizard-nav">
+      <a class="btn" [routerLink]="['/fly', assetId]" [queryParams]="{ autostart: 1 }">Open cockpit ›</a>
+    </div>
+  }
+} @else {
+  <p class="muted hint">"{{ facade.store.createdAssetDisplayName() }}" is saved. Who takes it?</p>
+
+  @if (facade.store.handoverError(); as error) {
+    <!-- The asset already exists by the time this can ever render — worded so a failed hand-over
+         is never mistaken for a failed creation (see `onboarding-store.ts`'s own Hand-over section
+         doc comment). -->
+    <vision-notice variant="danger" icon="alert">
+      The asset was created, but issuing it failed: {{ error }}. You can try again, or leave it in
+      stock and issue it later from <a routerLink="/manage/roster">the roster</a>.
+    </vision-notice>
+  }
+
+  @if (facade.store.pilotCandidatesLoading()) {
+    <p class="muted">Loading pilots…</p>
+  } @else if (facade.store.pilotCandidates().length === 0) {
+    <vision-empty
+      title="No pilots to offer yet"
+      [message]="
+        facade.store.ownerGroupName()
+          ? 'Nobody in ' + facade.store.ownerGroupName() + ' is a pilot yet.'
+          : 'Could not determine your group.'
+      "
+    >
+      <a class="btn secondary" routerLink="/manage/roster">Go to roster</a>
+    </vision-empty>
+  } @else {
+    <p class="label">Issue to — {{ facade.store.ownerGroupName() }}</p>
+    <ul class="pilot-list">
+      @for (candidate of facade.store.pilotCandidates(); track candidate.userId) {
+        <li>
+          <label class="checkbox-field pilot-row">
+            <input
+              type="radio"
+              name="custodian"
+              [checked]="facade.store.selectedCustodianId() === candidate.userId"
+              (change)="facade.store.selectCustodian(candidate.userId)"
+            />
+            <span>{{ candidate.displayName }} ({{ candidate.username }})</span>
+          </label>
+        </li>
+      }
+    </ul>
+
+    <div class="field">
+      <label class="label" for="handover-location">Location (optional)</label>
+      <input
+        id="handover-location"
+        name="handoverLocation"
+        class="field-md"
+        [ngModel]="facade.store.handoverLocation()"
+        (ngModelChange)="facade.store.setHandoverLocation($event)"
+        placeholder="Hangar 2"
+      />
+    </div>
+  }
+
+  <div class="row wizard-nav">
+    <button
+      type="button"
+      class="btn secondary"
+      (click)="facade.store.leaveInStock()"
+      [disabled]="facade.store.handingOver()"
+    >
+      Leave in stock
+    </button>
+    <button
+      type="button"
+      class="btn"
+      (click)="facade.store.issueToCustodian()"
+      [disabled]="facade.store.handingOver() || !facade.store.selectedCustodianId()"
+    >
+      {{ facade.store.handingOver() ? 'Issuing…' : 'Issue to' }}
+    </button>
+  </div>
+}

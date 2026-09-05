@@ -7,12 +7,12 @@ import { Icon } from '../../shared/ui/icon';
 import { ConfirmDialog } from '../../shared/ui/confirm-dialog';
 import { UiStore } from '../../core/ui/ui-store';
 import { RcInputService } from '../../core/rc/rc-input.service';
-import { wizardSteps, type WizardStep as WizardStepModel } from '../../core/rc/controller-wizard-logic';
+import { stepStatus, wizardSteps, type WizardStep as WizardStepModel } from '../../core/rc/controller-wizard-logic';
 import { channelOutputs, type ChannelOutput } from '../../core/rc/channel-output-logic';
 import { asStickMode, channelOptions } from '../../core/rc/controller-setup-logic';
 import { DEFAULT_STICK_MODE, STICK_MODES, type StickMode } from '../../core/rc/controller-diagram-logic';
 import { ControllerSetupFacade } from './controller-setup-facade';
-import { StepRail } from './step-rail';
+import { StepRail, type StepRailItem } from '../../shared/ui/step-rail';
 import { WizardStep as WizardStepComponent } from './wizard-step';
 import { AllControls } from './all-controls';
 import type { ControlProfile, VehicleKind } from '../../core/api/models';
@@ -127,6 +127,23 @@ export class ControllerSetupPage implements OnInit {
   });
 
   protected readonly currentStepIndex = signal(0);
+
+  /** `shared/ui/step-rail.ts#StepRail`'s own `items` input — resolves each step's `done`-ness here
+   *  (via `stepStatus`) since the shared rail no longer knows about `WizardStepModel`/`ProfileDraft`
+   *  at all (see that component's own class doc for why it was generalized this way). `undefined`
+   *  draft (no layout selected yet) never reaches this: the rail only renders once `facade.draft()`
+   *  is truthy (`controller-setup.html`'s own `@if`), same guard as before this lift. */
+  protected readonly railItems = computed<readonly StepRailItem[]>(() => {
+    const draft = this.facade.draft();
+    if (!draft) {
+      return [];
+    }
+    return this.steps().map((step) => ({
+      id: step.id,
+      label: step.title,
+      done: stepStatus(step, draft) === 'done',
+    }));
+  });
 
   constructor() {
     // A freshly opened (or newly created) layout always starts its wizard at step one.

@@ -178,6 +178,17 @@ export function isWatchMode(param: string | undefined): boolean {
 }
 
 /**
+ * `?autostart=1` exactly (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.3 "the terminal action" —
+ * the onboarding wizard's Ready screen's `Open cockpit ›` link, once both proof halves are shown,
+ * navigates to `/fly/:assetId?autostart=1`). Same narrow, exact-match contract as {@link
+ * isWatchMode} right above, for the identical reason: this is a query param a page constructs for
+ * itself, never one a person is expected to type, so no other truthy-looking string should count.
+ */
+export function isAutostart(param: string | undefined): boolean {
+  return param === '1';
+}
+
+/**
  * Whether `cockpit.html`'s video-surface "Detection is off — video only" chip should show
  * (docs/plans/done/CV-DEMAND-PLAN.md wave D3 — the honest affordance that replaces "an operator sees no
  * boxes and has no idea why"). Requires **both** that a stream is actually live and that detection

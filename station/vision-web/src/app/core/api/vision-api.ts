@@ -47,10 +47,12 @@ import type {
   DatasetsResponse,
   DetectionEvent,
   DetectionResult,
+  AttachDiscoveryCandidateRequest,
   Device,
   DeviceEdit,
   DiscoveryCandidate,
   DiscoveryInboxResponse,
+  DiscoveryStatusResponse,
   EffectiveCvProfile,
   FleetMaintenanceRecord,
   FleetReadiness,
@@ -314,12 +316,42 @@ export class VisionApi {
     );
   }
 
-  /** "Not now" — reversible in spirit only via the inbox's own "show dismissed" toggle; there is
-   *  no un-dismiss endpoint (a later scan hit for the same identity revives it server-side). */
+  /** "Not now" — a later scan hit for the same identity also revives it server-side, but an
+   *  operator can undo the dismissal directly too, via {@link restoreDiscoveryCandidate} (W3). */
   dismissDiscoveryCandidate(id: string): Promise<DiscoveryCandidate> {
     return firstValueFrom(
       this.http.post<DiscoveryCandidate>(`/api/discovery/inbox/${encodeURIComponent(id)}/dismiss`, {}),
     );
+  }
+
+  /** Undoes a dismiss — puts a `DISMISSED` candidate back to `NEW` (`DiscoveryInboxController`'s
+   *  `/restore`). Not offered for a candidate that's already `REGISTERED`; the store/UI enforce
+   *  that, the endpoint itself only ever touches status + clears `registeredAssetId`. */
+  restoreDiscoveryCandidate(id: string): Promise<DiscoveryCandidate> {
+    return firstValueFrom(
+      this.http.post<DiscoveryCandidate>(`/api/discovery/inbox/${encodeURIComponent(id)}/restore`, {}),
+    );
+  }
+
+  /** Atomic "this candidate *is* that asset" — attaches a discovered device straight onto an
+   *  existing asset in one call (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md C1), replacing the
+   *  pre-existing two-step register-then-move-device dance for the common "it's my rover, I
+   *  already registered it, this is just its camera" case. */
+  attachDiscoveryCandidate(id: string, request: AttachDiscoveryCandidateRequest): Promise<DiscoveryCandidate> {
+    return firstValueFrom(
+      this.http.post<DiscoveryCandidate>(
+        `/api/discovery/inbox/${encodeURIComponent(id)}/attach`,
+        request,
+      ),
+    );
+  }
+
+  /** `GET /api/discovery/status` (C2) — the standing MAVLink lobby's + mediamtx push's own live
+   *  facts, manageOrg-gated server-side same as the rest of discovery. Powers the `source`/`prove`
+   *  steps' waiting room (`core/onboarding/intake-logic.ts#intakeState`) — polled, not pushed; the
+   *  `discovery` SSE topic carries only inbox candidate deltas, not this summary. */
+  discoveryStatus(): Promise<DiscoveryStatusResponse> {
+    return firstValueFrom(this.http.get<DiscoveryStatusResponse>('/api/discovery/status'));
   }
 
   // --- Device probe (docs/plans/done/UX-REWORK-PLAN.md §U-d — the onboarding wizard's Test step) ---------

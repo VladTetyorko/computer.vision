@@ -2,20 +2,32 @@ import type {
   AssetEdit,
   AssetIdentity,
   CreateAssetRequest,
+  DiscoveryCandidate,
   Membership,
+  NetworkAddress,
   ProbeCandidateRequest,
   ProbeDeviceRequest,
+  ProbeDeviceResult,
   Role,
   UserSummary,
+  VehicleProfile,
 } from '../../core/api/models';
-import { fitOutDeviceSpecs, type FitOutRows } from '../../core/onboarding/fit-out-logic';
+import {
+  FIT_OUT_ROLES,
+  fitOutDeviceSpecs,
+  type FitOutFindMethod,
+  type FitOutRole,
+  type FitOutRowValue,
+  type FitOutRows,
+} from '../../core/onboarding/fit-out-logic';
 import type { SimulateMode } from '../../core/fleet/simulation-logic';
+import { humanAge } from '../../core/telemetry/telemetry-logic';
 
 /**
- * Pure logic behind the onboarding wizard (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4, wave W6):
- * step-state transitions, poka-yoke advance gating, and request builders. Split out so it is
- * unit-testable without HTTP, the router, or a canvas — mirrors every other `*-logic.ts` module in
- * this app (`features/devices/devices-page-logic.ts`, `core/telemetry/telemetry-logic.ts`).
+ * Pure logic behind the onboarding wizard (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.1,
+ * wave W2): step-state transitions, poka-yoke advance gating, and request builders. Split out so it
+ * is unit-testable without HTTP, the router, or a canvas — mirrors every other `*-logic.ts` module
+ * in this app (`features/devices/devices-page-logic.ts`, `core/telemetry/telemetry-logic.ts`).
  *
  * `OnboardingStore` (the wizard's own "component store", provided per-route like
  * `TelemetryStore`/`DetectionsStore`) is the only caller — it owns every signal and orchestrates the
@@ -27,108 +39,132 @@ import type { SimulateMode } from '../../core/fleet/simulation-logic';
  */
 
 /**
- * The wizard's six steps. Five are visible in the stepper (see {@link visibleSteps}); **`sysid`**
- * never is, exactly like the pre-W6 wizard's own `sysid` step — the wizard reaches it only via an
- * explicit call from `OnboardingStore#finishCreate`, when the just-created asset's own Prove-step
- * probe collided with a sysid an already-registered device claims
+ * The wizard's six steps (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.1 D2/D3 — replaces the
+ * pre-W2 `'identify'|'connect'|'prove'|'register'|'sysid'|'handover'` union). Five are visible in
+ * the rail (see {@link visibleSteps}); **`sysid`** never is, exactly like before — the wizard reaches
+ * it only via an explicit call from `OnboardingStore#finishCreate`, when the just-created asset's
+ * own Prove-step probe collided with a sysid an already-registered device claims
  * (`sysid-collision-logic.ts#detectSysidCollision`); every other path skips straight to `handover`.
  *
- * - **`identify`** (was `profile`): name, category, photo, plus serial/make/model/registration
- *   (docs/plans/active/WAREHOUSE-UX-PLAN.md D1). If the chosen category is `connected: false`
- *   (equipment — a battery, a spare prop), this step's own action button reads "Receive" instead of
- *   "Next" and performs the create call directly (`OnboardingStore#receiveEquipmentAsset`), skipping
- *   `connect`/`prove`/`register` as rendered steps entirely — `nextStep`'s own `identify` case below
- *   still defines a `register` target for totality, but no real equipment flow ever calls `next()`
- *   from this step to reach it.
- * - **`connect`**: the fit-out table (`core/onboarding/fit-out-logic.ts`) — one row per role (Sense/
- *   Sight), replacing the pre-W6 five-tile single-device Connect step. Closes coupling C2: a vehicle
- *   with both a real flight controller and a real camera registers both in one visit.
- * - **`prove`** (was `test` + `verify`, merged): runs the Test + Verify probes per filled `find` row,
- *   results shown per row (`OnboardingStore`'s own per-role Prove state). Skipped entirely when no
- *   row needs proving (`fit-out-logic.ts#needsProve`) — generalizing the pre-W6 "simulate skips test"
- *   rule to every row, not just a single wizard-wide method.
- * - **`register`** (was `create`): unchanged in substance — one `POST /api/assets`, now with
- *   `identity` and N devices (`fit-out-logic.ts#fitOutDeviceSpecs`) instead of exactly one.
- * - **`handover`** (was `assign`): "Issue to" a custodian (`VisionApi#setAssetCustody` +
- *   `assignPilot`, since `issue` alone does not create a pilot assignment) or "Leave in stock". Ends
- *   in a completed sub-state naming the next verb — readiness for a connected vehicle, inventory for
- *   equipment — rather than an automatic router redirect (`OnboardingStore#handoverOutcome`).
+ * - **`source`** (was `connect`, moved first — D2): the "honest fork" — It comes to us / We go to
+ *   it / Find it for me / Nothing to connect — feeding the same fit-out table
+ *   (`core/onboarding/fit-out-logic.ts`) the pre-W2 wizard's Connect step did. "Nothing to connect"
+ *   sets both rows to `none` with `equipmentConfirmed: true` (D3) — {@link isEquipmentPath} is what
+ *   the rest of this file reads back, never a category fact chosen later.
+ * - **`prove`**: runs the Test + Verify probes per filled `find` row not already pre-proven by a
+ *   discovery-inbox candidate pick (§3.1's candidate-entrance table) — skipped entirely when no row
+ *   still needs it.
+ * - **`identify`** (moved after `source`/`prove` — D2 "the device names itself first"): name,
+ *   category, photo, plus serial/make/model/registration. On the equipment path this step's own
+ *   action button reads "Receive" instead of "Next" and performs the create call directly
+ *   (`OnboardingStore#receiveEquipmentAsset`), skipping `attach` entirely — `nextStep`'s own
+ *   `identify` case below still defines an `attach` target for totality, but no equipment flow ever
+ *   calls `next()` from this step to reach it. The category picker itself is filtered to
+ *   `connected: false` categories only on this path (D3).
+ * - **`attach`** (was `register`) — the flow diagram's own "Attach" fork (§0.2): **new** creates the
+ *   asset exactly as `register` used to (`POST /api/assets`, one call, N devices); **existing**
+ *   attaches this visit's connection onto an already-registered asset instead — the candidate
+ *   entrance's atomic `POST /api/discovery/inbox/{id}/attach` (C1) when this visit started from a
+ *   discovery candidate, or a plain register-device-then-assign otherwise. The existing-asset path
+ *   skips `handover`'s custodian picker (the asset already has one) straight to the terminal proof.
+ * - **`handover`** (was `assign`): "Issue to" a custodian or "Leave in stock" for the **new**-asset
+ *   path; for the **existing**-asset path this step renders only its own terminal outcome, never the
+ *   picker. Ends in the two-half Sight/Sense proof + "Open cockpit ›" terminal screen (D9), not an
+ *   automatic router redirect.
  *
  * Like `sysid`, `handover` is never reached via `next()` either — only via a successful
- * `finishCreate`/`receiveEquipmentAsset` — and is never back-navigable into `register` (the asset
- * already exists by the time it renders). `nextStep`/`prevStep` still define total cases for both
- * purely so they stay total over the whole `WizardStep` union; `onboarding.html`'s own footer is what
- * actually withholds the generic Back/Next buttons on these two steps.
+ * `finishCreate`/`receiveEquipmentAsset`/`attachToExisting` — and is never back-navigable into
+ * `attach` post-creation. `nextStep`/`prevStep` still define total cases for both purely so they
+ * stay total over the whole `WizardStep` union; `onboarding.html`'s own footer is what actually
+ * withholds the generic Back/Next buttons on these two steps.
  */
-export type WizardStep = 'identify' | 'connect' | 'prove' | 'register' | 'sysid' | 'handover';
+export type WizardStep = 'source' | 'prove' | 'identify' | 'attach' | 'sysid' | 'handover';
 
-/** Every step, used internally where the full universe matters (e.g. this file's own totality checks). Not what the stepper renders — see {@link visibleSteps}. */
-export const WIZARD_STEPS: readonly WizardStep[] = ['identify', 'connect', 'prove', 'register', 'sysid', 'handover'];
+/** Every step, used internally where the full universe matters (e.g. this file's own totality checks). Not what the rail renders — see {@link visibleSteps}. */
+export const WIZARD_STEPS: readonly WizardStep[] = ['source', 'prove', 'identify', 'attach', 'sysid', 'handover'];
 
 /**
- * The stepper's own label row (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4 — "Identify · Connect ·
- * Prove · Register · Hand over"). `sysid` is never included, on either branch — see
- * {@link WizardStep}'s own doc comment. An equipment category (`connected: false`) shows only the
- * two steps its own flow actually renders; a connected one shows all five, `prove` included even
- * though a particular visit might skip past it at runtime (the label row describes the wizard's
- * shape, not one run's actual path — same as the pre-W6 stepper always showing "Test"/"Verify" even
- * on the simulate path that skipped both).
+ * Both fit-out rows answered `—` — the equipment path (D3): a battery, a prop, a case, nothing that
+ * connects. Only reachable past `source` via the fork's own "Nothing to connect" tile
+ * (`fit-out-logic.ts#canAdvanceFromFitOut`'s `equipmentConfirmed` parameter), so checking the rows
+ * alone (no separate flag to thread through every step) is sufficient here.
  */
-export function visibleSteps(connected: boolean): readonly WizardStep[] {
-  return connected ? ['identify', 'connect', 'prove', 'register', 'handover'] : ['identify', 'handover'];
+export function isEquipmentPath(rows: FitOutRows): boolean {
+  return FIT_OUT_ROLES.every((role) => rows[role].value === 'none');
+}
+
+/**
+ * The rail's own visible steps (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.1's frozen
+ * pseudocode) — `sysid` never included, on any branch, same reason as before. `needsProve` is the
+ * caller's own *effective* value (`OnboardingStore` excludes a role pre-proven by a discovery-inbox
+ * candidate pick from `fit-out-logic.ts#needsProve`'s raw answer), not re-derived here — this stays
+ * a pure function of exactly the two facts that decide shape.
+ */
+export function visibleSteps(rows: FitOutRows, needsProve: boolean): readonly WizardStep[] {
+  if (isEquipmentPath(rows)) {
+    return ['source', 'identify', 'handover'];
+  }
+  return needsProve
+    ? ['source', 'prove', 'identify', 'attach', 'handover']
+    : ['source', 'identify', 'attach', 'handover'];
 }
 
 /** What {@link nextStep}/{@link prevStep} need to know beyond the current step. */
 export interface StepContext {
-  /** `Category#connected` for the chosen category — see {@link WizardStep}'s own `identify` case. */
-  readonly connected: boolean;
-  /** `fit-out-logic.ts#needsProve` for the current Connect draft. */
+  /** {@link isEquipmentPath} for the current fit-out rows. */
+  readonly equipment: boolean;
+  /** The caller's own *effective* `fit-out-logic.ts#needsProve` — see {@link visibleSteps}'s own doc comment. */
   readonly needsProve: boolean;
 }
 
 /**
- * The next step for the wizard's own forward-only "Next" action. Calling this on `'register'` is a
+ * The next step for the wizard's own forward-only "Next" action. Calling this on `'attach'` is a
  * caller bug — there is no forward step from it via `next()` (`OnboardingStore#finishCreate` is what
- * actually advances past it, only after `POST /api/assets` succeeds) — so, like every other total
- * function in this file, it is left as a harmless no-op (returns `'register'`) rather than throwing.
+ * actually advances past it, only after the create/attach call succeeds) — so, like every other
+ * total function in this file, it is left as a harmless no-op (returns `'attach'`) rather than
+ * throwing.
  */
 export function nextStep(current: WizardStep, ctx: StepContext): WizardStep {
   switch (current) {
-    case 'identify':
-      return ctx.connected ? 'connect' : 'register';
-    case 'connect':
-      return ctx.needsProve ? 'prove' : 'register';
+    case 'source':
+      if (ctx.equipment) {
+        return 'identify';
+      }
+      return ctx.needsProve ? 'prove' : 'identify';
     case 'prove':
-    case 'register':
-      return 'register';
+      return 'identify';
+    case 'identify':
+      return ctx.equipment ? 'handover' : 'attach'; // the equipment short-circuit never actually calls next() here — see WizardStep's own identify doc comment.
+    case 'attach':
+      return 'attach'; // terminal via next() — see this function's own doc comment.
     case 'sysid':
-      return 'sysid'; // terminal, like 'register' above — see this type's own doc comment.
+      return 'sysid'; // terminal, same reason.
     case 'handover':
-      return 'handover'; // terminal, like 'register' above — see this type's own doc comment.
+      return 'handover'; // terminal, same reason.
   }
 }
 
-/** The inverse of {@link nextStep} — back-navigable, per the plan's own "stepper … back-navable" ask. */
+/** The inverse of {@link nextStep} — back-navigable, per the plan's own "rail … back-navigable" ask. */
 export function prevStep(current: WizardStep, ctx: StepContext): WizardStep {
   switch (current) {
-    // `handover`'s own immediate predecessor is `register`, kept only for totality — see
-    // `WizardStep`'s own doc comment for why `onboarding.html` never renders a Back button here.
+    // `handover`'s own immediate predecessor is `identify` on the equipment path (there is no
+    // `attach` step to return to) or `attach` otherwise — kept only for totality, same as `sysid`
+    // below; `onboarding.html` never renders a Back button on either step.
     case 'handover':
-      return 'register';
-    // `sysid`'s own immediate predecessor is conceptually `register` too — kept only for totality,
-    // same as `handover` above; `onboarding.html` never renders a Back button on this step either.
+      return ctx.equipment ? 'identify' : 'attach';
     case 'sysid':
-      return 'register';
-    case 'register':
-      if (!ctx.connected) {
-        return 'identify'; // the equipment short-circuit never actually renders this step, but stays total.
-      }
-      return ctx.needsProve ? 'prove' : 'connect';
-    case 'prove':
-      return 'connect';
-    case 'connect':
-    case 'identify':
+      return 'attach';
+    case 'attach':
       return 'identify';
+    case 'identify':
+      if (ctx.equipment) {
+        return 'source';
+      }
+      return ctx.needsProve ? 'prove' : 'source';
+    case 'prove':
+      return 'source';
+    case 'source':
+      return 'source';
   }
 }
 
@@ -277,7 +313,7 @@ const ROLE_RANK: Readonly<Record<Role, number>> = { VIEWER: 0, PILOT: 1, MANAGER
  * (`VisionUserDetails#ownershipOf`, station/vision-app): the group tied to the creator's **highest**
  * `Role` membership, ties broken by encounter order (the backend's own tie-break is undocumented as
  * stable either — see that method's own comment) — never a group the caller has to pick, since the
- * wizard's Identify/Connect/Prove/Register steps never ask for one. Returns `undefined` only for a
+ * wizard's Source/Identify/Prove/Attach steps never ask for one. Returns `undefined` only for a
  * membership-less account (the "couldn't determine your group" honest-degrade case downstream).
  *
  * **Known dev-parity gap** (`vision.auth.enabled=false`): the fixed dev-admin principal's own
@@ -324,4 +360,162 @@ export function pilotsInGroup(users: readonly UserSummary[], groupId: string | u
  */
 export function defaultPilotSelection(creatorUserId: string, ownershipGroup: Membership | undefined): readonly string[] {
   return ownershipGroup?.role === 'PILOT' ? [creatorUserId] : [];
+}
+
+// --- Terminal Ready screen: the two-half Sight/Sense proof (D9, docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.1) --
+// "Sight ✓ first frame 1280×720 H.264 / Sense ✓ heartbeat, sysid 7 — ArduPilot rover", sourced from
+// facts the wizard already fetched during Prove — never a fresh probe, never fabricated. A row this
+// wizard never proved (a `simulate` row, or one filled straight from a discovery candidate — see
+// `core/onboarding/intake-logic.ts`'s own doc comment for why that skips Prove) renders honestly
+// unproven rather than a green tick it hasn't earned (CLAUDE.md degrade-honestly).
+
+/** One half's terminal proof — `proven` gates the green check; `label` is always a plain fact, never a placeholder. */
+export interface RoleProof {
+  readonly proven: boolean;
+  readonly label: string;
+}
+
+/** Sight's terminal proof from the Prove step's own Test result — `find` rows only. */
+export function sightTerminalProof(rowValue: FitOutRowValue, result: ProbeDeviceResult | null | undefined): RoleProof {
+  if (rowValue === 'none') {
+    return { proven: false, label: '—' };
+  }
+  if (rowValue === 'simulate') {
+    return { proven: false, label: 'simulated, not yet verified' };
+  }
+  if (!result || !result.ok) {
+    return { proven: false, label: 'not yet verified' };
+  }
+  const dims = result.widthPx && result.heightPx ? `${result.widthPx}×${result.heightPx}` : undefined;
+  const bits = [dims, result.codec].filter((bit): bit is string => Boolean(bit));
+  return { proven: true, label: bits.length > 0 ? `first frame ${bits.join(' ')}` : 'first frame received' };
+}
+
+/** Sense's terminal proof from the Prove step's own Verify result — `find` rows only. */
+export function senseTerminalProof(rowValue: FitOutRowValue, result: VehicleProfile | null | undefined): RoleProof {
+  if (rowValue === 'none') {
+    return { proven: false, label: '—' };
+  }
+  if (rowValue === 'simulate') {
+    return { proven: false, label: 'simulated, not yet verified' };
+  }
+  if (!result) {
+    return { proven: false, label: 'not yet verified' };
+  }
+  const bits = ['heartbeat'];
+  if (result.sysid !== null) {
+    bits.push(`sysid ${result.sysid}`);
+  }
+  const trailer = [result.firmware, result.vehicleKind].filter((bit): bit is string => Boolean(bit)).join(' ');
+  return { proven: true, label: trailer.length > 0 ? `${bits.join(', ')} — ${trailer}` : bits.join(', ') };
+}
+
+// --- `source` step: the honest fork (D3, docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §0.4) ----------------
+// Four tiles, one per row of the fork table: **passive** ("It comes to us" — the standing MAVLink
+// lobby / mediamtx push, `core/onboarding/intake-logic.ts`'s own waiting room), **manual** ("We go
+// to it" — both roles now get the plain register-form, fixing D3's Sight-only defect), **scan**
+// ("Find it for me" — the five existing scanners, unchanged plumbing), **equipment** ("Nothing to
+// connect" — both rows `—`, `equipmentConfirmed: true`). `OnboardingStore` holds the chosen mode as
+// its own orchestration-level signal, orthogonal to each row's own `findMethod` — a row already
+// filled from a discovery-candidate entrance renders as its own resolved summary regardless of
+// which tile is selected.
+
+export type SourceMode = 'passive' | 'manual' | 'scan' | 'equipment';
+
+/**
+ * Which fit-out row a discovery candidate's method belongs on — `DiscoveryCandidate` carries no
+ * `capabilities` field the way `Device` does (so `fit-out-logic.ts#roleForDevice` cannot be reused
+ * verbatim here), but every method this app's scanners report is already role-specific by
+ * construction: `mavlink` is the only telemetry-carrying one, everything else (`onvif`/`mdns`/
+ * `v4l2`/`mediamtx`) is video.
+ */
+export function roleForDiscoveryMethod(method: string): FitOutRole {
+  return method.toLowerCase() === 'mavlink' ? 'sense' : 'sight';
+}
+
+/**
+ * One fit-out row's resolved fields, prefilled straight from a discovery-inbox candidate
+ * (`?candidateId=` entrance, §3.1's candidate-entrance table) — `undefined` when the candidate has
+ * no suggested stream yet (a bare heartbeat sighting the sweep hasn't resolved further), so the
+ * caller degrades honestly by leaving the row empty rather than filling it with nothing. `findMethod`
+ * is chosen for the row's own display only (`fit-out-logic.ts#FIT_OUT_FIND_METHODS` is a
+ * template-rendering lookup, not an enforced constraint) — `listen`/`discover`, never `register`,
+ * since this data arrived passively, not typed by the operator.
+ */
+export interface DiscoveryCandidatePrefill {
+  readonly role: FitOutRole;
+  readonly findMethod: FitOutFindMethod;
+  readonly protocol: string;
+  readonly uri: string;
+  readonly options?: Readonly<Record<string, string>>;
+  readonly displayName: string;
+  readonly category?: string;
+}
+
+export function prefillFromDiscoveryCandidate(candidate: DiscoveryCandidate): DiscoveryCandidatePrefill | undefined {
+  if (!candidate.suggestedStreamProtocol || !candidate.suggestedStreamUri) {
+    return undefined;
+  }
+  const role = roleForDiscoveryMethod(candidate.method);
+  return {
+    role,
+    findMethod: role === 'sense' ? 'listen' : 'discover',
+    protocol: candidate.suggestedStreamProtocol,
+    uri: candidate.suggestedStreamUri,
+    options: candidate.suggestedStreamOptions,
+    displayName: candidate.name,
+    category: candidate.suggestedCategory,
+  };
+}
+
+/**
+ * The "It comes to us" tile's own push-address card (§3.2 C3, wave U6) — composed from
+ * `GET /api/system/network`'s LAN-first `addresses` plus the optional `videoPushPort`/
+ * `videoPushPathPrefix`, never fabricated. `undefined` whenever either optional field is absent
+ * (push is unconfigured on this station) or no address is known at all — the caller then omits the
+ * card with an honest reason instead of showing a broken URL (CLAUDE.md degrade-honestly).
+ *
+ * The trailing path segment is deliberately a placeholder, not a real name: this card renders on the
+ * `source` step, *before* `identify` ever asks for one (D2 — Source now comes first), so there is no
+ * asset name yet to compose in. `base` already ends in the resolved `pathPrefix`; the caller renders
+ * `placeholder` as an obviously-fill-this-in run (e.g. `<em>`), mirroring how API docs write
+ * `<your-bucket-name>` rather than a real, if wrong, example.
+ */
+export interface PushAddressCard {
+  readonly base: string;
+  readonly placeholder: string;
+}
+
+export function composePushAddress(
+  addresses: readonly NetworkAddress[],
+  videoPushPort: number | undefined,
+  videoPushPathPrefix: string | undefined,
+): PushAddressCard | undefined {
+  if (videoPushPort === undefined || videoPushPathPrefix === undefined) {
+    return undefined;
+  }
+  const address = addresses.find((a) => a.kind === 'LAN') ?? addresses[0];
+  if (!address) {
+    return undefined;
+  }
+  return { base: `rtsp://${address.address}:${videoPushPort}/${videoPushPathPrefix}`, placeholder: 'your-camera-name' };
+}
+
+/**
+ * "last heard 12s ago" / "last scanned 12s ago" — one relative-age render shared by the P1
+ * diagnostic panel's own facts (`lastDatagramAt`, a source's `lastScanAt`), reusing `humanAge`
+ * (`core/telemetry/telemetry-logic.ts`) the same way `discovery-inbox-logic.ts#candidateAgeLabel`
+ * already does for a candidate card — `nowMs` is threaded in by the caller, never `Date.now()` here,
+ * so this stays a pure, clock-free function. `undefined` for a missing/unparseable timestamp, never
+ * a fabricated "just now".
+ */
+export function relativeAge(iso: string | undefined, nowMs: number): string | undefined {
+  if (!iso) {
+    return undefined;
+  }
+  const parsed = Date.parse(iso);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+  return `${humanAge(Math.max(0, (nowMs - parsed) / 1000))} ago`;
 }

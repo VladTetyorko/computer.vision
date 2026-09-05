@@ -74,8 +74,16 @@
     <section class="picker-group">
       <h2 class="picker-group-label">Your vehicles ({{ facade.groups().yours.length }})</h2>
       @if (facade.groups().yours.length === 0) {
+        <!-- D7 (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §1/§2.3/§3.5) — `/add-source` is
+             `orgGuard`-gated by design (registering inventory is a manager act); a PILOT clicking
+             this link was bounced straight back out. Fixed by gating the link itself, not by
+             relaxing the guard: a non-manager gets an honest next step instead of a dead door. -->
         <p class="muted picker-group-empty">
-          No real vehicles yet — <a routerLink="/add-source">Add source ›</a>
+          @if (facade.canManageOrg()) {
+            No real vehicles yet — <a routerLink="/add-source">Add source ›</a>
+          } @else {
+            No real vehicles yet — ask a fleet manager to add one.
+          }
         </p>
       } @else {
         <div class="picker-grid">

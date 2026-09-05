@@ -132,6 +132,16 @@
     flex-wrap: wrap;
 }
 
+/* Role-status "quiet" tone (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md P3) — dot + muted text,
+   not a chip; same class name as `features/devices/devices.css`/`features/assets/assets.css`'s own
+   identical copy (Angular's emulated view encapsulation means one component's stylesheet never
+   reaches another's template, so this is duplicated on purpose, not missed). */
+.row-state {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-4);
+}
+
 /* ---- Drill-in launcher (docs/plans/done/UI-REDESIGN-PLAN.md Wave 3, D-F) — the overview's one exhaustive
    index into every heavier area; individual overview cards (Position, Recent flights) also carry
    their own single most-relevant shortcut in their own `[actions]` slot, so this row is the

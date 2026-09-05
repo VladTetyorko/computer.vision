@@ -200,6 +200,16 @@
               (activated)="facade.toggleMapVisible()"
             />
           }
+          <!-- Synthetic-feed honesty (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md D6) — reads
+               `device.origin` on the primary VIDEO device itself, never the asset's category: a
+               vehicle can be half real (a real autopilot with a synthetic camera), so this is a
+               per-device fact, not a per-asset one. A status pill, not a control — no `variant="hud"`
+               icon-button, since there is nothing to click. -->
+          @if (facade.primaryDevice()?.origin === 'SIMULATED') {
+            <span class="origin-chip" title="This drone's primary camera feed is synthetic, not a real sensor">
+              Simulated feed
+            </span>
+          }
         </div>
 
         <div class="header-actions">
@@ -261,7 +271,15 @@
                   [whepUrl]="facade.fleet.streamFor(device.id)?.whepUrl ?? null"
                   [compact]="true"
                 />
-                <span class="tile-label">{{ device.name }}</span>
+                <!-- D6 (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md) — same per-device `origin` read as the
+                     primary-feed pill above, applied to each secondary tile independently: a
+                     multi-camera vehicle can mix a real and a synthetic feed. -->
+                <span class="tile-label">
+                  {{ device.name }}
+                  @if (device.origin === 'SIMULATED') {
+                    <span class="tile-sim">· Simulated</span>
+                  }
+                </span>
               </button>
             }
           </div>

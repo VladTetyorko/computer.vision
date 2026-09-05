@@ -1,8 +1,10 @@
-import { Injectable, inject, signal } from '@angular/core';
+import { Injectable, effect, inject, signal } from '@angular/core';
 import { VisionApi } from '../api/vision-api';
 import { describeHttpError } from '../api-error';
 import { PollScheduler } from '../poll-scheduler';
 import { ToastService } from '../toast.service';
+import { LiveStore } from '../live/live-store';
+import { applyDiscoveryEvents } from './discovery-inbox-logic';
 import type {
   DiscoveryCandidate,
   DiscoverySource,
@@ -49,12 +51,24 @@ const POLL_INTERVAL_MS = 30_000;
  * so `FoundDevices` can say "mediamtx unreachable" instead of leaving an operator staring at an
  * ambiguous empty list. Degrades the same way `candidates` does — a failed poll leaves both
  * signals exactly as they were.
+ *
+ * **The `discovery` SSE topic (W1, docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.2 C4)** now
+ * layers on top of that poll, exactly like `MarksStore` layers `map` on top of its own `GET
+ * /api/map/marks` — the poll stays the safety net (still the only thing that ever populates
+ * `sources`, and what a viewer who mounts after a topic-blip reconciles against), while the
+ * always-on, delta-only feed (`LiveStore.discoveryEvents`) folds in near-instant `REPORTED`/
+ * `REGISTERED`/`DISMISSED`/`RESTORED` changes via `discovery-inbox-logic.ts#applyDiscoveryEvents`.
+ * This fold runs unconditionally from construction (not gated by `activate`/`release`) — it costs
+ * nothing but an array upsert against a signal the shared `/api/live` connection already carries
+ * regardless of whether this store has an active consumer right now, and keeps `candidates` warm
+ * for the next `activate()` instead of every mount starting from a stale poll.
  */
 @Injectable({ providedIn: 'root' })
 export class DiscoveryInboxStore {
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
   private readonly scheduler = inject(PollScheduler);
+  private readonly live = inject(LiveStore);
 
   private readonly candidatesSignal = signal<readonly DiscoveryCandidate[]>([]);
   readonly candidates = this.candidatesSignal.asReadonly();
@@ -63,12 +77,27 @@ export class DiscoveryInboxStore {
   readonly sources = this.sourcesSignal.asReadonly();
 
   readonly loading = signal(false);
-  /** The one candidate id currently mid-mutation (register/dismiss/attach) — disables that card's
-   *  own buttons without freezing the rest of the list, mirrors `FleetStore#busyAssetId`. */
+  /** The one candidate id currently mid-mutation (register/dismiss/attach/restore) — disables that
+   *  card's own buttons without freezing the rest of the list, mirrors `FleetStore#busyAssetId`. */
   readonly busyId = signal<string | null>(null);
 
   private activeConsumers = 0;
   private stopPollingFn: (() => void) | null = null;
+
+  /** How many live `discovery` deltas this store has already folded in — see `MarksStore`'s identical cursor. */
+  private processedLiveEventCount = 0;
+
+  constructor() {
+    effect(() => {
+      const events = this.live.discoveryEvents();
+      if (events.length <= this.processedLiveEventCount) {
+        return;
+      }
+      const newEvents = events.slice(this.processedLiveEventCount);
+      this.processedLiveEventCount = events.length;
+      this.candidatesSignal.update((candidates) => applyDiscoveryEvents(candidates, newEvents));
+    });
+  }
 
   /** Registers interest — call once from a consumer's constructor. The first `activate()` since
    *  the last full `release()` triggers an immediate fetch and starts the shared 30s cadence. */
@@ -153,12 +182,51 @@ export class DiscoveryInboxStore {
     }
   }
 
+  /**
+   * Atomic "this candidate *is* that asset" (W3, docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md
+   * C1) — one call, `POST /api/discovery/inbox/{id}/attach`, replacing {@link attach}'s two-step
+   * register-then-assign dance for the common "it's my rover, I already registered it, this is
+   * just its camera" case. **Left `attach()` above untouched on purpose** — existing callers
+   * (`FoundDevices`/`AttachCandidateDialog`, pre-dating this wave) keep working unchanged until W3
+   * repoints them; this is a new, additive method. Unlike `attach()`, the server flips the
+   * candidate to `REGISTERED` synchronously with this call (see `DiscoveryInboxService#attach`'s
+   * own contract) — no sweep-lag wait, so the response is adopted directly instead of triggering a
+   * re-fetch.
+   */
+  async attachCandidate(id: string, assetId: string): Promise<boolean> {
+    this.busyId.set(id);
+    try {
+      const result = await this.run(() => this.api.attachDiscoveryCandidate(id, { assetId }));
+      if (result) {
+        this.candidatesSignal.update((list) => list.map((candidate) => (candidate.id === id ? result : candidate)));
+        this.toasts.ok(`Attached "${result.name}" to the asset.`);
+      }
+      return result !== null;
+    } finally {
+      this.busyId.set(null);
+    }
+  }
+
   /** No confirm — reversible in spirit (the "show dismissed" toggle still shows it). Patches with
    *  the server's own returned candidate (real, not guessed). */
   async dismiss(id: string): Promise<void> {
     this.busyId.set(id);
     try {
       const result = await this.run(() => this.api.dismissDiscoveryCandidate(id));
+      if (result) {
+        this.candidatesSignal.update((list) => list.map((candidate) => (candidate.id === id ? result : candidate)));
+      }
+    } finally {
+      this.busyId.set(null);
+    }
+  }
+
+  /** Undoes a `dismiss` — `POST /api/discovery/inbox/{id}/restore` puts a `DISMISSED` candidate
+   *  back to `NEW` (W3). Patches with the server's own returned candidate, same shape as `dismiss`. */
+  async restore(id: string): Promise<void> {
+    this.busyId.set(id);
+    try {
+      const result = await this.run(() => this.api.restoreDiscoveryCandidate(id));
       if (result) {
         this.candidatesSignal.update((list) => list.map((candidate) => (candidate.id === id ? result : candidate)));
       }

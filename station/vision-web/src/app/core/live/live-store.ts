@@ -6,6 +6,7 @@ import type {
   DetectionEvent,
   DetectionResult,
   DevicesSnapshot,
+  DiscoveryEventPayload,
   LiveConnected,
   LiveEnvelope,
   LiveEvent,
@@ -48,12 +49,19 @@ const MAX_LIVE_DETECTION_EVENTS = 300;
 const MAX_LIVE_MAP_EVENTS = 300;
 
 /**
+ * How many `discovery` arrivals `discoveryEvents` retains — a candidate inbox is a small, bursty
+ * list (a handful of vehicles at once, not hundreds), so this is generous headroom rather than a
+ * tuned capacity like the other topics' own buffer-matched caps.
+ */
+const MAX_LIVE_DISCOVERY_EVENTS = 200;
+
+/**
  * Owns the app's **one** `GET /api/live` connection (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) — the
  * server-push replacement for steady-state polling. `TelemetryStore`/`DetectionsStore` project this
  * store's per-asset signals when live, falling back to their own polling otherwise (see their own
  * doc comments and `live-fallback-logic.ts#resolveAssetScopedTransport`).
  *
- * <h2>Eight topics now, eight projected stores — read before wiring a new consumer</h2>
+ * <h2>Nine topics now, nine projected stores — read before wiring a new consumer</h2>
  * The backend started with four topics (`fleet`, `event`, `telemetry:<assetId>`,
  * `detections:<assetId>`) and grew three more, always-on like `fleet`/`event`: `devices` and
  * `detection-events` (docs/plans/done/REALTIME-PLAN.md §4's backend follow-up batch), then `map`
@@ -98,6 +106,13 @@ const MAX_LIVE_MAP_EVENTS = 300;
  *   the single most recent {@link CorrectionResponse} — `GeoStore`'s own poll fallback (`GET
  *   /api/geo/corrections/live`, filtered client-side to the tracked asset) is what replays history
  *   after a reconnect, exactly like `detections:<assetId>`'s "latest only, no backlog" contract.
+ * - `discovery` ↔ `core/discovery/discovery-inbox-store.ts#DiscoveryInboxStore`
+ *   (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.2 C4, wave W1) — the 9th topic, always-on like
+ *   `map`/`devices`/`detection-events`, carrying {@link DiscoveryEventPayload}s (FIFO,
+ *   **not** snapshot-on-connect — same reasoning as `map`: the poll fallback already gives a full
+ *   picture, this feed is deltas only). `DiscoveryInboxStore` keeps its existing poll as the safety
+ *   net and folds this log on top via the same `processedLiveEventCount` cursor idiom `MarksStore`
+ *   established for `map`.
  *
  * `fleet`'s own {@link AssetSummary} polling is still done ad hoc by several pages (`fly.ts`'s own
  * picker refresh, `core/map/map-store.ts`, `asset-detail.ts`), with no single existing store class —
@@ -199,6 +214,20 @@ export class LiveStore {
   private readonly mapEventsSignal = signal<readonly MapEventPayload[]>([]);
   /** The projection source shared by `LayersStore`/`MarksStore`/`DrawingsStore` — see this field's own doc comment above. */
   readonly mapEvents = this.mapEventsSignal.asReadonly();
+
+  /**
+   * Every `discovery` arrival this connection has seen, chronological (oldest-first, true FIFO
+   * append — same "later must not be clobbered by earlier" reasoning as `mapEventsSignal` above).
+   * Always-on (`LiveTopicKind.DISCOVERY`, docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.2 C4),
+   * delta-only like `map` — no snapshot-on-connect, since the poll-fallback `GET
+   * /api/discovery/inbox` already gives `DiscoveryInboxStore` a full picture on its own; this feed
+   * is purely incremental candidate-lifecycle deltas (`REPORTED`/`REGISTERED`/`DISMISSED`/`RESTORED`)
+   * layered on top of that store's existing poll (mirrors `MarksStore`'s own
+   * `processedLiveEventCount` cursor idiom over `mapEvents`).
+   */
+  private readonly discoveryEventsSignal = signal<readonly DiscoveryEventPayload[]>([]);
+  /** `core/discovery/discovery-inbox-store.ts#DiscoveryInboxStore`'s own projection source — see this field's own doc comment above. */
+  readonly discoveryEvents = this.discoveryEventsSignal.asReadonly();
 
   private readonly telemetrySignals = new Map<string, ReturnType<typeof signal<readonly TelemetrySample[]>>>();
   private readonly detectionsSignals = new Map<string, ReturnType<typeof signal<DetectionResult | undefined>>>();
@@ -440,6 +469,12 @@ export class LiveStore {
         // Latest-wins, like `detections` above — the server's own ring capacity 1 means this is
         // never a batch to merge, just the freshest correction replacing the last one.
         this.geoSignalFor(envelope.assetId).set(envelope.payload);
+        return;
+      case 'discovery':
+        // Chronological append — identical reasoning to `map`/`detection-events` above.
+        this.discoveryEventsSignal.update((events) =>
+          [...events, envelope.payload].slice(-MAX_LIVE_DISCOVERY_EVENTS),
+        );
         return;
     }
   }

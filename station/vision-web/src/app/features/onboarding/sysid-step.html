@@ -1,0 +1,46 @@
+<h2>Fix the sysid collision</h2>
+<p class="muted hint">
+  This vehicle answers to system id <span class="mono">{{ facade.sysidCollision() }}</span>, which
+  another vehicle in the fleet already claims — until it gets a distinct id, one of the two will be
+  invisible or unreliable on this link. You can fix it now, or continue and fix it later from the
+  asset's readiness page.
+</p>
+
+<div class="field">
+  <label class="label" for="sysid-value">New system id</label>
+  <input
+    id="sysid-value"
+    name="sysidValue"
+    type="number"
+    class="field-sm"
+    min="1"
+    max="255"
+    step="1"
+    [ngModel]="facade.store.sysidValue()"
+    (ngModelChange)="facade.store.sysidValue.set($event)"
+    placeholder="e.g. 2"
+  />
+</div>
+
+<div class="row">
+  <button
+    type="button"
+    class="btn"
+    (click)="facade.store.writeSysid()"
+    [disabled]="facade.store.writingSysid() || facade.store.sysidValue() === null"
+  >
+    {{ facade.store.writingSysid() ? 'Writing…' : 'Write sysid' }}
+  </button>
+</div>
+
+@if (facade.store.sysidWriteResult(); as result) {
+  <vision-notice [variant]="facade.sysidOutcomeVariant(result.outcome)">
+    {{ facade.outcomeLabel(result.outcome) }}@if (result.detail) { — {{ result.detail }} }
+  </vision-notice>
+} @else if (facade.store.sysidWriteError(); as error) {
+  <vision-notice variant="danger" icon="alert">{{ error }}</vision-notice>
+}
+
+<div class="row wizard-nav">
+  <button type="button" class="btn" (click)="facade.store.continueFromSysidStep()">Continue</button>
+</div>

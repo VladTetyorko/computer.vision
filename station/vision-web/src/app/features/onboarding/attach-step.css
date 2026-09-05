@@ -1,0 +1,42 @@
+/* This component's own copy of every class it uses — CSS encapsulation means a child component's
+   template classes never match a parent's scoped rules (see `features/asset-detail/asset-detail.css`'s
+   own doc comment for the precedent this follows). */
+
+.hint {
+    font-size: 0.8rem;
+    margin: 0 0 var(--space-16);
+}
+
+.field {
+    margin-bottom: var(--space-16);
+}
+
+.facts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-8) var(--space-16);
+    margin: 0 0 var(--space-16);
+}
+
+.fact dt {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+.fact dd {
+    margin: var(--space-2) 0 0;
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.photo-preview {
+    width: 6rem;
+    height: 6rem;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border);
+    background: var(--panel-raised);
+    margin-bottom: var(--space-16);
+}

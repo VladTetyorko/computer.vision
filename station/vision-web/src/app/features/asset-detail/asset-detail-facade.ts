@@ -45,12 +45,14 @@ import {
   withFixOnlyPosition,
   type TelemetryFactRow,
 } from './asset-detail-logic';
+import { roleStatus } from '../../core/onboarding/fit-out-logic';
 import type {
   AssetDetails,
   AssetIdentity,
   AssetStats,
   Device,
   DetectionEvent,
+  FleetSummary,
   MaintenanceRecord,
   SettableLifecycleState,
   TelemetrySample,
@@ -121,6 +123,31 @@ export class AssetDetailFacade {
   });
   /** Read-only: whether *someone* is currently streaming this asset. Piloting is the cockpit's job. */
   readonly live = computed(() => this.stream() !== undefined);
+
+  // --- Sense/Sight role status (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md P3) -----------------
+  //
+  // `GET /api/fleet/summary` is the only source of a per-asset `telemetryAgeMs` (`FleetSummary`/
+  // `AssetAttention`, `core/api/models.ts`) — no shared store fetches it (`InventoryFacade`/
+  // `CommandFacade` each fetch it independently too; see those facades' own `fleetSummaryData`).
+  // Fetched with `includeArchived: true` unconditionally: this page has no "show archived" toggle of
+  // its own but can still be reached for an archived asset (its own `assetLifecycleAction`/`archived`
+  // above already handle that case) — a `false` fetch would silently starve `telemetryAgeMs` there.
+
+  private readonly fleetSummaryData = signal<FleetSummary | undefined>(undefined);
+
+  /** `undefined` until the fleet summary loads, or for an asset the summary doesn't (yet) know about
+   *  — {@link roleStatus} already treats an unknown age as honestly `never-seen`/`stale` rather than
+   *  fabricating a reading, so this never needs its own separate fallback. */
+  private readonly telemetryAgeMs = computed(
+    () => this.fleetSummaryData()?.assets.find((a) => a.assetId === this.currentAssetIdSignal())?.telemetryAgeMs,
+  );
+
+  readonly senseStatus = computed(() =>
+    roleStatus('sense', this.asset()?.devices ?? [], this.fleet.streams(), this.telemetryAgeMs()),
+  );
+  readonly sightStatus = computed(() =>
+    roleStatus('sight', this.asset()?.devices ?? [], this.fleet.streams(), this.telemetryAgeMs()),
+  );
 
   // --- Events (docs/plans/done/MVP2-PLAN.md §E, E-b bullet 2) ---------------------------------------------
 
@@ -314,6 +341,18 @@ export class AssetDetailFacade {
     void this.fetchAsset(assetId);
     void this.loadStats(assetId);
     void this.loadMaintenanceRecords(assetId);
+    void this.loadFleetSummary();
+  }
+
+  /** Feeds {@link senseStatus}/{@link sightStatus} — same "enrichment, not a user-initiated action,
+   *  silent-degrade" convention as {@link loadStats}: a failed read leaves the previous summary in
+   *  place (or `undefined`, before the first success) rather than blocking or fabricating a reading. */
+  private async loadFleetSummary(): Promise<void> {
+    try {
+      this.fleetSummaryData.set(await this.api.fleetSummary(true));
+    } catch {
+      // Silent-degrade — see this method's own doc comment.
+    }
   }
 
   /** Silent-degrade to an empty list on failure — same "enrichment, not a user-initiated action"
@@ -367,7 +406,9 @@ export class AssetDetailFacade {
     if (!id) {
       return Promise.resolve();
     }
-    return Promise.all([this.fetchAsset(id), this.loadStats(id), this.loadMaintenanceRecords(id)]).then(() => undefined);
+    return Promise.all([this.fetchAsset(id), this.loadStats(id), this.loadMaintenanceRecords(id), this.loadFleetSummary()]).then(
+      () => undefined,
+    );
   }
 
   /** The cockpit-link band's secondary CTA — the lightweight single-device watch page, read-only. */

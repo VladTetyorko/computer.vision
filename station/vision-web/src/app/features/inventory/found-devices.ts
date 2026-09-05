@@ -5,7 +5,6 @@ import { PollScheduler } from '../../core/poll-scheduler';
 import { DiscoveryInboxStore } from '../../core/discovery/discovery-inbox-store';
 import {
   DEFAULT_DISCOVERY_INBOX_VISIBILITY,
-  buildDeviceSpecFromCandidate,
   buildRegisterCommand,
   dismissedCandidateCount,
   newCandidateCount,
@@ -151,13 +150,16 @@ export class FoundDevices {
 
   protected async onAttachSubmit(assetId: string): Promise<void> {
     const target = this.attachTarget();
-    const spec = target ? buildDeviceSpecFromCandidate(target) : undefined;
-    if (!target || !spec) {
+    if (!target) {
       return;
     }
-    const ok = await this.store.attach(target.id, spec, assetId);
+    const ok = await this.store.attachCandidate(target.id, assetId);
     if (ok) {
       this.closeDialogs();
     }
+  }
+
+  protected async onRestore(candidate: DiscoveryCandidate): Promise<void> {
+    await this.store.restore(candidate.id);
   }
 }

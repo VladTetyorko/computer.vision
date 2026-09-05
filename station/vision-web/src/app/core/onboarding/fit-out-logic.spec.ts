@@ -11,10 +11,12 @@ import {
   isRowFilled,
   needsProve,
   roleForDevice,
+  roleStatus,
   usesLegacySimulationPath,
   type FitOutRowDraft,
   type FitOutRows,
 } from './fit-out-logic';
+import type { ActiveStream, Device } from '../api/models';
 
 function row(partial: Partial<FitOutRowDraft> & Pick<FitOutRowDraft, 'role'>): FitOutRowDraft {
   return { ...emptyFitOutRow(partial.role), ...partial };
@@ -66,6 +68,18 @@ describe('canAdvanceFromFitOut', () => {
 
   it('is true when both rows are filled', () => {
     expect(canAdvanceFromFitOut(rows({ value: 'simulate' }, { value: 'simulate' }))).toBe(true);
+  });
+
+  it('is false for both-none without the equipment flag — silence is not a deliberate answer (D3)', () => {
+    expect(canAdvanceFromFitOut(emptyFitOutRows(), false)).toBe(false);
+  });
+
+  it('is true for both-none once the fork\'s equipment tile is confirmed (D3)', () => {
+    expect(canAdvanceFromFitOut(emptyFitOutRows(), true)).toBe(true);
+  });
+
+  it('a filled row still advances regardless of the equipment flag', () => {
+    expect(canAdvanceFromFitOut(rows({ value: 'simulate' }), false)).toBe(true);
   });
 });
 
@@ -212,5 +226,71 @@ describe('combinedSysidCollision', () => {
 
   it('is null when neither collided', () => {
     expect(combinedSysidCollision({ sense: null, sight: null })).toBeNull();
+  });
+});
+
+describe('roleStatus', () => {
+  function device(partial: Partial<Device> & Pick<Device, 'id'>): Device {
+    return {
+      name: 'Device',
+      capabilities: ['VIDEO'],
+      protocol: 'rtsp',
+      uri: 'rtsp://x',
+      options: {},
+      state: 'ACTIVE',
+      ...partial,
+    } as Device;
+  }
+
+  function stream(partial: Partial<ActiveStream> & Pick<ActiveStream, 'deviceId'>): Pick<ActiveStream, 'deviceId' | 'state'> {
+    return { state: 'LIVE', ...partial };
+  }
+
+  const sightDevice = device({ id: 'cam-1', capabilities: ['VIDEO'] });
+  const senseDevice = device({ id: 'fc-1', capabilities: ['TELEMETRY'] });
+
+  it('is not-fitted when no device of that role exists on the asset', () => {
+    expect(roleStatus('sight', [], [], undefined)).toBe('not-fitted');
+    expect(roleStatus('sense', [], [], undefined)).toBe('not-fitted');
+  });
+
+  it('Sight: fitted with no matching active stream is stopped — history-agnostic (D-honesty)', () => {
+    expect(roleStatus('sight', [sightDevice], [], undefined)).toBe('stopped');
+  });
+
+  it('Sight: fitted with a stream not in the list is still stopped even alongside other streams', () => {
+    expect(roleStatus('sight', [sightDevice], [stream({ deviceId: 'other-device' })], undefined)).toBe('stopped');
+  });
+
+  it('Sight: LIVE/STARTING/UNOBSERVED all read as live — cannot judge, do not invent a fault', () => {
+    expect(roleStatus('sight', [sightDevice], [stream({ deviceId: 'cam-1', state: 'LIVE' })], undefined)).toBe('live');
+    expect(roleStatus('sight', [sightDevice], [stream({ deviceId: 'cam-1', state: 'STARTING' })], undefined)).toBe(
+      'live',
+    );
+    expect(
+      roleStatus('sight', [sightDevice], [stream({ deviceId: 'cam-1', state: 'UNOBSERVED' })], undefined),
+    ).toBe('live');
+  });
+
+  it('Sight: STALLED/RECONNECTING both read as stalled', () => {
+    expect(roleStatus('sight', [sightDevice], [stream({ deviceId: 'cam-1', state: 'STALLED' })], undefined)).toBe(
+      'stalled',
+    );
+    expect(
+      roleStatus('sight', [sightDevice], [stream({ deviceId: 'cam-1', state: 'RECONNECTING' })], undefined),
+    ).toBe('stalled');
+  });
+
+  it('Sense: fitted but never heard from is never-seen, not stopped — telemetry has no such state', () => {
+    expect(roleStatus('sense', [senseDevice], [], undefined)).toBe('never-seen');
+  });
+
+  it('Sense: live/aging freshness both read as live (coarser vocabulary)', () => {
+    expect(roleStatus('sense', [senseDevice], [], 1_000)).toBe('live');
+    expect(roleStatus('sense', [senseDevice], [], 7_000)).toBe('live');
+  });
+
+  it('Sense: stale freshness reads as stale', () => {
+    expect(roleStatus('sense', [senseDevice], [], 120_000)).toBe('stale');
   });
 });

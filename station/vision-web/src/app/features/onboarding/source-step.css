@@ -1,0 +1,492 @@
+/* This component's own copy of every class it uses — Angular's emulated view encapsulation means a
+   child component's template classes never match a parent's scoped rules (see
+   `features/asset-detail/asset-detail.css`'s own doc comment for the precedent this follows). */
+
+.hint {
+    font-size: 0.8rem;
+    margin: 0 0 var(--space-16);
+}
+
+.hint code {
+    font-family: var(--mono);
+    background: var(--bg);
+    padding: var(--space-2) var(--space-4);
+    border-radius: 4px;
+}
+
+.field {
+    margin-bottom: var(--space-16);
+}
+
+.field.wide {
+    min-width: 0;
+}
+
+.checkbox-field {
+    display: flex;
+    align-items: center;
+    gap: var(--space-8);
+    flex-direction: row;
+}
+
+.checkbox-field input {
+    width: auto;
+}
+
+/* ---- The fork itself (D3, wave W3) ------------------------------------------------------------ */
+
+.fork-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    gap: var(--space-16);
+    margin-bottom: var(--space-16);
+}
+
+.fork-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-8);
+    text-align: left;
+    background: var(--panel-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-16) var(--space-16);
+    cursor: pointer;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.fork-tile:hover {
+    border-color: var(--color-info);
+    background: var(--panel-hover);
+}
+
+.fork-tile.inert {
+    cursor: default;
+    opacity: 0.65;
+}
+
+.fork-tile.inert:hover {
+    border-color: var(--border);
+    background: var(--panel-raised);
+}
+
+.fork-title {
+    font-weight: 600;
+    color: var(--text);
+    font-size: 0.95rem;
+}
+
+.fork-sub {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+}
+
+.resolved-chip-row {
+    justify-content: space-between;
+    margin-bottom: var(--space-8);
+}
+
+.source-mode-head {
+    margin-bottom: var(--space-16);
+}
+
+/* ---- The waiting room (§3.1 scope item 6) ------------------------------------------------------ */
+
+.waiting-room {
+    display: flex;
+    align-items: center;
+    gap: var(--space-12);
+    padding: var(--space-12) var(--space-16);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel-raised);
+    margin-bottom: var(--space-16);
+}
+
+.waiting-room p {
+    margin: 0;
+}
+
+.waiting-dot {
+    width: 0.6rem;
+    height: 0.6rem;
+    flex: none;
+    border-radius: 50%;
+    background: var(--text-faint);
+    animation: waiting-pulse 1.6s ease-in-out infinite;
+}
+
+.waiting-dot.heard {
+    background: var(--color-success);
+    animation: none;
+}
+
+@keyframes waiting-pulse {
+    0%, 100% { opacity: 0.35; }
+    50% { opacity: 1; }
+}
+
+.push-address {
+    margin-bottom: var(--space-16);
+}
+
+.push-address .mono {
+    word-break: break-all;
+}
+
+.push-address em {
+    font-style: italic;
+    color: var(--text-muted);
+}
+
+.diagnostic-panel {
+    margin-bottom: var(--space-16);
+    font-size: 0.85rem;
+}
+
+.diagnostic-panel summary {
+    cursor: pointer;
+    color: var(--text-muted);
+}
+
+.diagnostic-panel table {
+    margin-top: var(--space-8);
+}
+
+/* ---- Role cards (docs/plans/active/SOURCE-ONBOARDING-CONTEXT.md §6, WAREHOUSE-UX-PLAN.md §3.4 wave W6) --- */
+
+.role-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel-raised);
+    padding: var(--space-16) var(--space-16);
+    margin-bottom: var(--space-16);
+}
+
+.role-card-head {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-8);
+    margin-bottom: var(--space-16);
+}
+
+.role-label {
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--text);
+}
+
+/* ---- Tile grid / finder glyphs (moved verbatim from features/devices/devices.css) ------------- */
+
+.method-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+    gap: var(--space-16);
+}
+
+.method-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-8);
+    text-align: left;
+    background: var(--panel-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-16) var(--space-16);
+    cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.method-tile:hover {
+    border-color: var(--color-info);
+    background: var(--panel-hover);
+}
+
+/* The `.method-glyph` family below draws small hand-tuned ring/dot icons inside a fixed 22px circle
+   via `::before`/`::after` `inset`. These pixel offsets are icon geometry (same bucket as the
+   circle's own border-width/border-radius, both kept literal), not layout spacing between elements
+   — snapping them to the 8px grid would visibly redraw each glyph's proportions, so they stay px. */
+.method-glyph {
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 2px solid var(--color-info);
+    position: relative;
+    flex: none;
+}
+
+.glyph-register::after {
+    content: "";
+    position: absolute;
+    inset: 6px;
+    border-radius: 50%;
+    background: var(--color-info);
+}
+
+.glyph-discover {
+    border-style: dashed;
+}
+
+.glyph-discover::after {
+    content: "";
+    position: absolute;
+    inset: 4px;
+    border-radius: 50%;
+    border: 1px solid var(--color-info);
+}
+
+.glyph-simulate::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 50%;
+    border: 2px solid var(--color-info);
+    transform: scale(0.55) rotate(45deg);
+}
+
+.glyph-listen::after {
+    content: "";
+    position: absolute;
+    inset: 5px;
+    border-radius: 50%;
+    border: 1px solid var(--color-info);
+}
+
+.glyph-listen::before {
+    content: "";
+    position: absolute;
+    inset: 9px;
+    border-radius: 50%;
+    background: var(--color-info);
+}
+
+.glyph-drone {
+    border: none;
+}
+
+.glyph-drone::before,
+.glyph-drone::after {
+    content: "";
+    position: absolute;
+    inset: 3px 9px;
+    border-radius: 2px;
+    background: var(--color-info);
+}
+
+.glyph-drone::before {
+    transform: rotate(45deg);
+}
+
+.glyph-drone::after {
+    transform: rotate(-45deg);
+}
+
+.method-title {
+    font-weight: 600;
+    color: var(--text);
+    font-size: 0.9rem;
+}
+
+.method-sub {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+}
+
+.method-chosen-row {
+    margin-bottom: var(--space-16);
+    justify-content: space-between;
+}
+
+.back-btn {
+    padding: var(--space-4) var(--space-8);
+}
+
+.register-form {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
+    gap: var(--space-8);
+    align-items: end;
+    margin-bottom: var(--space-8);
+}
+
+.register-form .field {
+    margin-bottom: 0;
+}
+
+.register-form .field.wide {
+    grid-column: span 2;
+}
+
+@media (max-width: 900px) { /* --bp-md */
+    .register-form {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+.advanced {
+    margin-top: var(--space-16);
+    padding-top: var(--space-16);
+    border-top: 1px solid var(--border);
+}
+
+.advanced h3 {
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.72rem;
+}
+
+.option-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr auto;
+    gap: var(--space-8);
+    margin-bottom: var(--space-8);
+}
+
+.scan-row {
+    margin-bottom: var(--space-16);
+}
+
+.scan-timeout select {
+    width: 5.5rem;
+}
+
+.details {
+    max-width: 16rem;
+}
+
+td.actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-8);
+    justify-content: flex-end;
+}
+
+.vehicle-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+}
+
+.vehicle-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-16);
+    padding: var(--space-8) var(--space-16);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel-raised);
+}
+
+.vehicle-row.claimed {
+    opacity: 0.6;
+}
+
+.vehicle-main {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    min-width: 0;
+}
+
+.vehicle-name {
+    font-weight: 600;
+    font-size: 0.88rem;
+}
+
+.vehicle-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-4);
+}
+
+.vehicle-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: var(--space-4);
+}
+
+.vehicle-actions .disabled-reason {
+    margin-top: 0;
+}
+
+/* ---- "Add a real drone" (docs/plans/active/DRONE-INFRA-PLAN.md I-g) ---------------------------- */
+
+.drone-compat {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-4);
+    margin: var(--space-8) 0 var(--space-16);
+}
+
+.config-block {
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel-raised);
+    padding: var(--space-16) var(--space-16);
+    margin-bottom: var(--space-16);
+}
+
+.config-body {
+    margin: var(--space-8) 0 0;
+    padding: var(--space-8) var(--space-8);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-size: 0.78rem;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 16rem;
+    overflow-y: auto;
+}
+
+.flight-plan-summary {
+    flex-wrap: wrap;
+}
+
+.home-point-fallback {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    margin-bottom: var(--space-16);
+}
+
+.home-point-fallback summary {
+    cursor: pointer;
+}
+
+.home-point-fallback .row {
+    margin-top: var(--space-8);
+}
+
+/* Facts grid — mirrors features/asset-detail/asset-detail.css's identical rules; CSS encapsulation
+   means every consumer keeps its own copy, see that file's own doc comment for the precedent. */
+.facts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-8) var(--space-16);
+    margin: 0 0 var(--space-16);
+}
+
+.fact dt {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+.fact dd {
+    margin: var(--space-2) 0 0;
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+}

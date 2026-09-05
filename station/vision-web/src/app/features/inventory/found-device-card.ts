@@ -13,9 +13,9 @@ import { candidateActions, candidateAgeLabel, discoveryMethodLabel } from '../..
  * render pure/testable and matching `fly-osd`/the picker cards' own convention).
  *
  * **Status-aware body**, mirrored from §11's own contract: `NEW` shows the action row; `REGISTERED`
- * shows a quiet link to the asset it became instead of any button; `DISMISSED` shows neither — it
- * has no un-dismiss endpoint (see `VisionApi#dismissDiscoveryCandidate`'s own doc comment), so this
- * card is read-only once dismissed.
+ * shows a quiet link to the asset it became instead of any button; `DISMISSED` shows a Restore
+ * button (W3, docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §11) — `DiscoveryInboxStore#restore`
+ * puts it back to `NEW`, undoing a `dismiss` that has no other way back.
  */
 @Component({
   selector: 'vision-found-device-card',
@@ -33,6 +33,7 @@ export class FoundDeviceCard {
   readonly add = output<void>();
   readonly attachTo = output<void>();
   readonly dismiss = output<void>();
+  readonly restore = output<void>();
 
   protected readonly methodLabel = computed(() => discoveryMethodLabel(this.candidate().method));
   protected readonly ageLabel = computed(() => candidateAgeLabel(this.candidate().lastSeen, this.now()));

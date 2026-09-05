@@ -1,7 +1,9 @@
 # SOURCE-ONBOARDING-2 — one door for "I have a thing, make it work here"
 
-Status: ACTIVE · plan doc only, nothing built · branch `feat/source-onboarding-2` (sub-branch per
-wave) · owner mandate 2026-09-04: *"think the WHOLE FLOW from the user's perspective before any
+Status: **BUILT 2026-09-05** on branch `feat/source-onboarding-2` — backend waves A1–A3/B1/B2/C1 and
+web waves W1–W6 all landed (§6 Close-out); not yet merged to master, not yet committed on the web
+side (every web wave was instructed not to `git commit` — the diff sits in the working tree pending
+review). Owner mandate 2026-09-04: *"think the WHOLE FLOW from the user's perspective before any
 implementation."*
 
 Same doctrine as [`FLY-FLOW-PLAN.md`](FLY-FLOW-PLAN.md) and
@@ -598,3 +600,100 @@ station with nothing plugged in is a complete verification of it.
 | **OQ1** | **Flip `vision.onboarding.probe.enabled` to `true`?** It would make the readiness report — ANY-DRONE step 3 — real, and would give the wizard's Prove step a genuine message-inventory answer. It is RX + two read requests, no writes. | **keep `false` this cycle.** Flipping it deserves its own verification wave (it changes what every `/api/assets/{id}/probe` call does), and this plan is already large. |
 | **OQ2** | Should the Found-devices cards move onto the fork's first step *and* stay on `/assets`, or only the former? | **both.** One machine, two entrances (D1); Inventory keeps its badge because that is where a manager lives. |
 | **OQ3** | `datagramsReceived` is a counter with no reset. Per-boot, or resettable from the waiting room? | **per-boot, monotonic.** A resettable counter invites "did I reset it?" ambiguity; `lastDatagramAt` answers recency. |
+
+---
+
+## 6. Close-out (2026-09-05, backend merged onto this branch; web built on `feat/source-onboarding-2`, uncommitted)
+
+Full per-wave detail — component trees, exact test counts, doc-comment reasoning — lives in each
+touched module's own `MODULE.md` (`station/vision-web/MODULE.md`'s `onboarding/`, `devices/`,
+`asset-detail/`, `fly/`, `inventory/` bullets plus the W1/W4/W2+W3 Status entries; the backend
+modules' own `MODULE.md`s for A1–C1). This table is the plan's own summary, not a duplicate.
+
+| Wave | Commit(s) | Status |
+|---|---|---|
+| A1 — pre-parse datagram counters | `586d070a` | Shipped, merged onto this branch. |
+| A2 — `intakeStatus`/scanner `lastStatus` honesty | `556e95ac` | Shipped, merged onto this branch. |
+| A3 — `V4l2Scanner` honesty + ESP32-CAM stream path applied (U9) | `c0d1666d` | Shipped, merged onto this branch. |
+| B1 — discovery inbox attach/restore, honest health | `c96a7b87` | Shipped, merged onto this branch. |
+| B2 — `StreamStateObserver` seam | `bc8a65a6` | Shipped, merged onto this branch. |
+| C1 — the five wire changes (attach/restore/status, network kind, discovery SSE, stream-state push) | `2103bec4`, reconciled onto AUTH-ROLES' Authority axis at `83ac3246` | Shipped, merged onto this branch. |
+| W1 — shared stepper, `intakeState`/`roleStatus`, `DiscoveryInboxStore` SSE fold, wire-shape widening | uncommitted (working tree) | Shipped. `shared/ui/step-rail.*` lifted from `features/controller/step-rail.*` (kept 3-file, kept its independent done/current classes); `core/onboarding/{intake,fit-out}-logic.ts`; `core/discovery/discovery-inbox-{logic,store}.ts` gained the `discovery` SSE topic fold plus atomic `attachCandidate`/`restore`; `core/live/live-store.ts` now nine topics. |
+| W2+W3 — the step machine + honest fork + monolith retired | uncommitted (working tree) | Shipped. `onboarding.html` (1161 lines) retired into six 3-file step components behind a thin shell; the honest fork (D3: passive/manual/scan/equipment + provision-wifi); waiting room + P1 diagnostics + push-address card; candidate-entrance prefill; Attach step's new-vs-existing-asset fork; D9 two-half terminal proof + `Open cockpit ›` → `/fly/:assetId?autostart=1`; Found-devices/attach-candidate-dialog repointed to the atomic `attachCandidate` + a new Restore action. |
+| W4 — `device.origin` badge + per-role status (Devices/Asset-detail) | uncommitted (working tree) | Shipped. D6: `simulate-logic.ts#isSimulatedAsset`/`SIMULATED_CATEGORY` deleted, `mapSimulatedDevices` now per-device off `origin`. P3: `roleStatus()` rendered on the Links tab detail panel and Asset Detail's cockpit-band/Hardware subview. |
+| W5 — `?autostart=1` consumption + cockpit badge + D7 fix | uncommitted (working tree) | Shipped. One-shot effect (`autostartHandled` a plain field, not a signal) calls `start()`/`engageSession()` exactly as a manual click would, then strips the param via `replaceUrl`. Cockpit's own D6 badge (primary-feed pill + per-tile suffix). D7: the ungated `Add source ›` link in the picker's grouped empty leg now gated on `MANAGE_ORG`, matching the pre-existing gate on the flat picker's identical link. |
+| W6 — close-out | (this pass) | This section, `MODULE.md` cross-checked intact, `docs/plans/README.md` row S corrected. |
+
+**Disclosed deviations from the plan's literal text** (each already logged in `MODULE.md` at the
+wave that produced it; consolidated here for one-stop review):
+
+- **W1 — `features/controller/wizard-step.ts` was not lifted into `shared/ui/`.** The reuse ledger
+  implied it was liftable the same way `step-rail.ts` was; a full read (463 lines) found it entirely
+  built around RC channel/action-binding domain logic with no separable generic "step shell." Only
+  `StepRail` was actually lifted; W2's six per-step components were authored fresh instead — which
+  is what the plan's own W2 row already asked for ("`onboarding.html` split into per-step 3-file
+  components"), so nothing was lost, just not sourced from a lift that didn't actually exist.
+- **W2+W3 — `scan` mode auto-selects nothing for either fit-out row**, not Sight→`discover` as a
+  literal first reading of the fork might suggest. Auto-selecting would have made the legacy
+  whole-vehicle Simulate demo path unreachable for Sight; both rows instead render their own tile
+  grid, narrowed only to exclude the `register` tile (`manual`'s own job).
+- **W2+W3 — the rail's one-way-door-past-creation rule lives in `OnboardingStore#jumpToStep`**, not
+  in `shared/ui/step-rail.ts` itself — that shared component stays permanently unrestricted per its
+  own doc comment, since the controller-setup wizard that also consumes it has no such rule.
+- **Process note, not a content deviation:** a mid-flight write-collision between one of the W2+W3
+  agent's own read-only research forks and its primary rewrite was caught before any file damage —
+  cross-corroborated by two independent forks plus a clean `git status`, resolved by an explicit
+  ownership ruling (sole ownership of `onboarding-{store,facade}.ts`/`onboarding.{ts,html,css}`) —
+  and the found-devices/attach-candidate-dialog diff that briefly looked unattributed during that
+  exchange was confirmed to be genuine, correctly-wired W1-era work, not a second collision.
+
+**Verified against the frozen contracts (§3):** the `WizardStep` union
+(`'source'|'prove'|'identify'|'attach'|'sysid'|'handover'`), `visibleSteps(rows, needsProve)`, the
+three wizard entrances (candidate/manual/equipment), and the six wire contracts C1–C6 all ship
+exactly as specified — checked directly against `onboarding-logic.ts`, `core/onboarding/{intake,
+fit-out}-logic.ts`, and `core/api/models.ts` during this close-out, not just taken on each wave's own
+word.
+
+**Non-goals (§5.3)** were not touched by any wave and remain open exactly as named there: N1
+(ONVIF credentials → CAMERA-FIRST C5), N2 (Betaflight/INAV), N3 (deleting the `simulated` category —
+D6 makes it cosmetic only, as designed), N4 (simulating onto an existing asset), N5
+(`Capability.CONTROL`), N6 (firmware, ZERO-CONFIG Z6), N7 (auto-registration, refused), N8 (per-path
+mediamtx tokens), N9 (identity merging across a changed address, R4 below), N10 (a "give up" state
+for a permanently dead source).
+
+**Residuals and open questions (§5.4), re-affirmed:**
+- **R1** — no live/SITL/browser screenshot verification this cycle. Explicitly out of scope for the
+  web waves this time: the running station's backend build predates this branch's own backend
+  waves, so live verification against it would have proven nothing and risked misreading a stale-
+  server artifact as a web defect. Stands as the owner's own smoke pass, now after W6 rather than
+  after W3.
+- **R2** — unrelated, untouched, unchanged.
+- **R3** — **addressed.** `/provision-wifi` is a first-class fork tile, gated on
+  `WebSerialGateway.isSupported()`, and states the reason (secure-context requirement) when false —
+  never hidden, never a silently inert control.
+- **R4** — accept, unchanged; still true after this work.
+- **OQ1** — kept `false` this cycle, unchanged.
+- **OQ2** — **both**, delivered: Found-devices stays on `/assets` (with its own new Restore action)
+  *and* the wizard's `source` step gained the candidate-entrance prefill — one machine, two
+  entrances, as decided.
+- **OQ3** — per-boot, monotonic — backend-only, unaffected by the web waves, unchanged.
+
+**Final verify chain (W6), re-run over the whole tree, not taken on any single wave's own word:**
+
+- `npx tsc --noEmit -p tsconfig.app.json` / `-p tsconfig.spec.json` — clean, 0 errors both, over the
+  full combined W1+W2+W3+W4+W5 diff together.
+- `npm run test:ci` — **183/183 files, 3695/3695 tests**, foreground, full suite.
+- `npx ng build --configuration production` (bare `ng` on this box's `PATH` resolves to an unrelated
+  binary and panics — see `station/vision-web/MODULE.md`'s own Gotchas entry; `npx ng`/`npm run`
+  avoid it) — completes for every chunk; the only non-zero exit is the pre-existing, already-
+  documented initial-bundle **ERROR**-level budget gate (440 kB threshold): **470.36 kB**, essentially
+  flat against AUTH-ROLES W3's own last-recorded **469.50 kB** (+0.86 kB, from this plan's small
+  CSS/logic additions to already-loaded shared surfaces — confirmed unrelated to any single wave by
+  each wave's own scoped `git stash` isolation check). The `onboarding` lazy chunk carries this
+  plan's real cost of retiring a 1161-line template into six components plus genuinely new surface:
+  **98.09 kB → 123.31 kB raw (+25.22 kB), 23.60 kB → 28.52 kB transfer (+4.92 kB)**.
+
+**Left unverified:** no live/browser pass in either theme (R1, above) — every acceptance claim in
+this close-out rests on the pure-logic test suite plus direct source-diff review, not on a running
+station. The owner's own post-close-out smoke pass is the one item this document cannot mark green
+from documentation review alone.

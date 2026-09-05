@@ -1,0 +1,134 @@
+<h2>Identify</h2>
+<p class="muted hint">What is it, and what does it look like?</p>
+
+<div class="field">
+  <label class="label" for="id-name">Display name</label>
+  <input
+    id="id-name"
+    name="displayName"
+    class="field-md"
+    [ngModel]="facade.store.displayName()"
+    (ngModelChange)="facade.store.displayName.set($event)"
+    placeholder="Falcon-2"
+    required
+  />
+</div>
+
+<div class="field">
+  <label class="label" for="id-category">Category</label>
+  <select
+    id="id-category"
+    name="category"
+    class="field-md"
+    [ngModel]="facade.store.category()"
+    (ngModelChange)="facade.store.chooseCategory($event)"
+  >
+    <option value="" disabled>Choose a category…</option>
+    @for (option of facade.store.identifyCategoryOptions(); track option.slug) {
+      <option [value]="option.slug">{{ option.name }}</option>
+    }
+  </select>
+  <!-- The equipment short-circuit's own tell (WAREHOUSE-UX-PLAN.md §3.4/D4) — named here, not just
+       implied by the footer's swapped button, so the operator knows *why* the wizard is about to
+       skip straight to Hand-over. -->
+  @if (facade.store.category() && !facade.store.categoryConnected()) {
+    <p class="muted hint">
+      This category is equipment, not a vehicle — no device to connect. You'll receive it straight
+      into inventory.
+    </p>
+  }
+</div>
+
+<div class="field">
+  <label class="label" for="id-reg">Registration / tail number (optional)</label>
+  <input
+    id="id-reg"
+    name="registrationNumber"
+    class="field-sm"
+    [ngModel]="facade.store.registrationNumber()"
+    (ngModelChange)="facade.store.registrationNumber.set($event)"
+    placeholder="N12345"
+  />
+</div>
+
+<div class="field">
+  <label class="label" for="id-serial">Serial number (optional)</label>
+  <input
+    id="id-serial"
+    name="serialNumber"
+    class="field-sm"
+    [ngModel]="facade.store.serialNumber()"
+    (ngModelChange)="facade.store.serialNumber.set($event)"
+    placeholder="e.g. SN-00231"
+  />
+</div>
+
+<div class="field">
+  <label class="label" for="id-make">Make (optional)</label>
+  <input
+    id="id-make"
+    name="make"
+    class="field-sm"
+    [ngModel]="facade.store.make()"
+    (ngModelChange)="facade.store.make.set($event)"
+    placeholder="e.g. DJI"
+  />
+</div>
+
+<div class="field">
+  <label class="label" for="id-model">Model (optional)</label>
+  <input
+    id="id-model"
+    name="model"
+    class="field-sm"
+    [ngModel]="facade.store.model()"
+    (ngModelChange)="facade.store.model.set($event)"
+    placeholder="e.g. Mavic 3"
+  />
+</div>
+
+<div class="field photo-field">
+  <span class="label">Photo (optional)</span>
+  <div class="row photo-row">
+    @if (facade.store.photoPreviewUrl(); as preview) {
+      <img class="photo-preview" [src]="preview" alt="Selected photo preview" />
+    } @else {
+      <div class="photo-placeholder" aria-hidden="true"></div>
+    }
+    <div class="photo-actions">
+      <input
+        #photoInput
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        (change)="onPhotoSelected($event)"
+        class="visually-hidden"
+        aria-label="Choose a photo"
+      />
+      <button
+        type="button"
+        class="btn secondary small"
+        (click)="photoInput.click()"
+        [disabled]="facade.store.photoProcessing()"
+      >
+        {{
+          facade.store.photoProcessing()
+            ? 'Processing…'
+            : facade.store.photoPreviewUrl()
+              ? 'Replace photo'
+              : 'Choose photo'
+        }}
+      </button>
+      @if (facade.store.photoPreviewUrl()) {
+        <button type="button" class="btn secondary small" (click)="facade.store.removePhoto()">Remove</button>
+      }
+      @if (facade.store.photoError(); as error) {
+        <p class="disabled-reason">{{ error }}</p>
+      }
+      <p class="muted hint">Downscaled to fit under 2MB automatically — any size photo works.</p>
+    </div>
+  </div>
+</div>
+
+@if (!facade.store.canAdvanceIdentify()) {
+  <p class="disabled-reason">Enter a display name and choose a category.</p>
+}

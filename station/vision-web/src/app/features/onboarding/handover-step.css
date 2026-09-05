@@ -1,0 +1,87 @@
+/* This component's own copy of every class it uses — CSS encapsulation means a child component's
+   template classes never match a parent's scoped rules (see `features/asset-detail/asset-detail.css`'s
+   own doc comment for the precedent this follows). */
+
+.hint {
+    font-size: 0.8rem;
+    margin: 0 0 var(--space-16);
+}
+
+.field {
+    margin-bottom: var(--space-16);
+}
+
+.checkbox-field {
+    display: flex;
+    align-items: center;
+    gap: var(--space-8);
+    flex-direction: row;
+}
+
+.checkbox-field input {
+    width: auto;
+}
+
+.wizard-nav {
+    margin-top: var(--space-24);
+    padding-top: var(--space-16);
+    border-top: 1px solid var(--border);
+}
+
+.pilot-list {
+    list-style: none;
+    margin: 0 0 var(--space-16);
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.pilot-row {
+    padding: var(--space-8) 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.85rem;
+}
+
+.pilot-list li:last-child .pilot-row {
+    border-bottom: none;
+}
+
+/* ---- The terminal screen's two-half proof (D9) — honest per-role evidence, never a single
+   fabricated "ready" state. An unproven half (`.proof-half` without `.proven`) reads muted; a
+   proven half gets the same ok/positive tone `vision-notice[variant=ok]` uses elsewhere. --------- */
+
+.proof-halves {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+    gap: var(--space-16);
+    margin: var(--space-16) 0;
+}
+
+.proof-half {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    padding: var(--space-16) var(--space-16);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--panel-raised);
+}
+
+.proof-half.proven {
+    border-color: var(--color-success);
+}
+
+.proof-role {
+    font-weight: 600;
+    font-size: 0.85rem;
+    color: var(--text);
+}
+
+.proof-label {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+}
+
+.proof-half.proven .proof-label {
+    color: var(--color-success-text);
+}

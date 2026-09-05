@@ -8,6 +8,7 @@ import {
   earlierReplayableUsages,
   flyStage,
   isAllDronesOption,
+  isAutostart,
   isSwitcherOptionSelected,
   isWatchMode,
   lastSeenLabel,
@@ -196,6 +197,19 @@ describe('isWatchMode', () => {
     expect(isWatchMode('0')).toBe(false);
     expect(isWatchMode('')).toBe(false);
     expect(isWatchMode(undefined)).toBe(false);
+  });
+});
+
+describe('isAutostart (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.3 "the terminal action")', () => {
+  it('is true only for the exact literal "1"', () => {
+    expect(isAutostart('1')).toBe(true);
+  });
+
+  it('is false for anything else, including other truthy-looking strings', () => {
+    expect(isAutostart('true')).toBe(false);
+    expect(isAutostart('0')).toBe(false);
+    expect(isAutostart('')).toBe(false);
+    expect(isAutostart(undefined)).toBe(false);
   });
 });
 

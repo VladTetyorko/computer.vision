@@ -8,6 +8,7 @@ import {
   freshestSample,
   groupTelemetryByDevice,
   mostRecentlyClosedRecord,
+  roleStatusDescriptor,
   sampleAgeLabel,
   sinceServiceTile,
   telemetryFactRows,
@@ -232,5 +233,28 @@ describe('sinceServiceTile', () => {
     const closed = record({ closedAt: '2026-07-20T00:00:00Z' });
     const tile = sinceServiceTile([closed], Date.parse('2026-07-22T00:00:00Z'));
     expect(tile).toEqual({ label: 'Since service', value: '2d ago' });
+  });
+});
+
+describe('roleStatusDescriptor', () => {
+  it('renders not-fitted as a muted em dash — "no chip" territory, not an error', () => {
+    expect(roleStatusDescriptor('not-fitted')).toEqual({ kind: 'muted', label: '—' });
+  });
+
+  it('renders never-seen as a quiet, honest non-error state', () => {
+    expect(roleStatusDescriptor('never-seen')).toEqual({ kind: 'quiet', label: 'Never heard' });
+  });
+
+  it('renders live as the one ok/green affordance', () => {
+    expect(roleStatusDescriptor('live')).toEqual({ kind: 'ok', label: 'Live' });
+  });
+
+  it('renders stalled and stale as warn', () => {
+    expect(roleStatusDescriptor('stalled')).toEqual({ kind: 'warn', label: 'Stalled' });
+    expect(roleStatusDescriptor('stale')).toEqual({ kind: 'warn', label: 'Stale' });
+  });
+
+  it('renders stopped as quiet, not warn — intentionally idle, not broken', () => {
+    expect(roleStatusDescriptor('stopped')).toEqual({ kind: 'quiet', label: 'Stopped' });
   });
 });

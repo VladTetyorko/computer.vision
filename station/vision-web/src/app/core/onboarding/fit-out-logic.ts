@@ -1,4 +1,5 @@
-import type { Capability, CreateAssetDeviceSpec, Device } from '../api/models';
+import type { ActiveStream, Capability, CreateAssetDeviceSpec, Device } from '../api/models';
+import { freshness } from '../telemetry/telemetry-logic';
 
 /**
  * The Connect step's fit-out table (docs/plans/active/SOURCE-ONBOARDING-CONTEXT.md §6,
@@ -106,9 +107,19 @@ export function isRowFilled(row: FitOutRowDraft): boolean {
   }
 }
 
-/** Connect step: at least one row must be filled to continue (docs/plans/active/SOURCE-ONBOARDING-CONTEXT.md §6's own mockup footer — "at least one row filled"). Both may be filled at once. */
-export function canAdvanceFromFitOut(rows: FitOutRows): boolean {
-  return FIT_OUT_ROLES.some((role) => isRowFilled(rows[role]));
+/**
+ * Source step: at least one row must be filled to continue (docs/plans/active/SOURCE-ONBOARDING-CONTEXT.md
+ * §6's own mockup footer — "at least one row filled"). Both may be filled at once.
+ *
+ * `equipmentConfirmed` (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.1 D3) relaxes this: **both
+ * rows `—` is legal when the operator has explicitly answered "nothing to connect" on the fork** —
+ * a battery, a prop, a case. Defaults `false` so every existing caller (pre-dating this wave) keeps
+ * its old behavior byte-for-byte; the fork's own fourth tile is the only place that ever passes
+ * `true`. This is what removes the old circularity where equipment-ness was a category fact chosen
+ * *after* Connect, forcing both rows to `—` implicitly instead of by a deliberate, first-class answer.
+ */
+export function canAdvanceFromFitOut(rows: FitOutRows, equipmentConfirmed = false): boolean {
+  return equipmentConfirmed || FIT_OUT_ROLES.some((role) => isRowFilled(rows[role]));
 }
 
 /**
@@ -213,4 +224,67 @@ export function roleForDevice(device: Pick<Device, 'capabilities'>): FitOutRole 
  */
 export function combinedSysidCollision(byRole: Readonly<Record<FitOutRole, number | null>>): number | null {
   return byRole.sense ?? byRole.sight;
+}
+
+// --- Per-role status after registration (P3, docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.3) ---
+// The wizard proves each row once, then that knowledge used to be thrown away — nothing on
+// `/assets/:id` or the cockpit said which half of a vehicle was actually alive. `roleStatus` is the
+// one derivation both surfaces read, over facts they already fetch (no new endpoint).
+
+/**
+ * A role's status once an asset actually exists — coarser than either wire vocabulary it reads
+ * (`StreamState`'s five values, `telemetry-logic.ts#freshness`'s four), because `not-fitted`/
+ * `never-seen` must mean the same thing for both roles even though Sight and Sense prove
+ * themselves through entirely different facts. `not-fitted` renders `—`, never a green tick
+ * (CLAUDE.md degrade-honestly).
+ */
+export type RoleStatus = 'not-fitted' | 'never-seen' | 'live' | 'stalled' | 'stopped' | 'stale';
+
+/** Freshness tiers that still read as "alive enough" for Sense's coarser vocabulary — `aging` is
+ *  not yet worth a distinct warning at this altitude (that finer distinction is `telemetry-logic.ts`'s
+ *  own job, e.g. the OSD chip); only `stale` earns its own `RoleStatus` member here. */
+const LIVE_FRESHNESS: ReadonlySet<string> = new Set(['live', 'aging']);
+
+/**
+ * One row's status, read off facts the calling page already fetches — `GET /api/streams` (Sight)
+ * and `AssetAttention.telemetryAgeMs` (Sense) — never a new endpoint.
+ *
+ * **Sight** narrows `devices` to this asset's VIDEO-capable ones (`roleForDevice`), then looks for a
+ * matching `ActiveStream` by `deviceId`: none fitted → `not-fitted`; fitted but no active stream →
+ * `stopped` (this app has no way to tell "never started" from "started, then stopped" from
+ * `GET /api/streams` alone — a stopped stream simply isn't in that list, per `ActiveStream`'s own
+ * doc comment — so `stopped` is the honest, history-agnostic answer for either). A found stream's
+ * `state` maps via the same "cannot judge, don't invent a fault" rule `stream-state-logic.ts#videoNotice`
+ * already applies: `LIVE`/`STARTING`/`UNOBSERVED`/absent → `live`; `STALLED`/`RECONNECTING` → `stalled`.
+ *
+ * **Sense** narrows the same way to TELEMETRY-capable devices: none fitted → `not-fitted`;
+ * `telemetryAgeMs` absent → `never-seen` (nothing has ever been heard — a fact distinct from
+ * "fitted but not currently live", which telemetry has no such state for: `AssetAttention.telemetryAgeMs`
+ * is deliberately still reported after a session ends, so a stopped link simply ages into `stale` on
+ * its own, without a separate `stopped` branch). Otherwise `telemetry-logic.ts#freshness` decides:
+ * `live`/`aging` → `live`, `stale` → `stale`.
+ */
+export function roleStatus(
+  role: FitOutRole,
+  devices: readonly Device[],
+  streams: readonly Pick<ActiveStream, 'deviceId' | 'state'>[],
+  telemetryAgeMs: number | undefined,
+): RoleStatus {
+  const fitted = devices.filter((device) => roleForDevice(device) === role);
+  if (fitted.length === 0) {
+    return 'not-fitted';
+  }
+  if (role === 'sight') {
+    const fittedIds = new Set(fitted.map((device) => device.id));
+    const stream = streams.find((s) => fittedIds.has(s.deviceId));
+    if (!stream) {
+      return 'stopped';
+    }
+    return stream.state === 'STALLED' || stream.state === 'RECONNECTING' ? 'stalled' : 'live';
+  }
+  // role === 'sense'
+  if (telemetryAgeMs === undefined) {
+    return 'never-seen';
+  }
+  return LIVE_FRESHNESS.has(freshness(telemetryAgeMs / 1000)) ? 'live' : 'stale';
 }

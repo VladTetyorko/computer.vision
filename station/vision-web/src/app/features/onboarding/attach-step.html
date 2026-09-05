@@ -1,0 +1,87 @@
+<h2>Attach</h2>
+<p class="muted hint">Everything looks right? This is the last step.</p>
+
+<div class="segmented" role="group" aria-label="Attach target">
+  <button
+    type="button"
+    class="btn secondary small"
+    [class.active]="facade.store.attachTarget() === 'new'"
+    (click)="facade.store.chooseAttachTarget('new')"
+  >
+    New vehicle
+  </button>
+  <button
+    type="button"
+    class="btn secondary small"
+    [class.active]="facade.store.attachTarget() === 'existing'"
+    (click)="facade.store.chooseAttachTarget('existing')"
+  >
+    Add to an existing asset
+  </button>
+</div>
+
+@if (facade.store.attachTarget() === 'new') {
+  <dl class="facts">
+    <div class="fact"><dt>Name</dt><dd>{{ facade.store.displayName() }}</dd></div>
+    <div class="fact"><dt>Category</dt><dd>{{ facade.categoryName() }}</dd></div>
+    @if (facade.store.registrationNumber()) {
+      <div class="fact"><dt>Registration</dt><dd>{{ facade.store.registrationNumber() }}</dd></div>
+    }
+    @if (facade.store.serialNumber()) {
+      <div class="fact"><dt>Serial number</dt><dd class="mono">{{ facade.store.serialNumber() }}</dd></div>
+    }
+    @if (facade.store.make() || facade.store.model()) {
+      <div class="fact"><dt>Make / model</dt><dd>{{ facade.store.make() }} {{ facade.store.model() }}</dd></div>
+    }
+    <div class="fact"><dt>Sense</dt><dd>{{ facade.rowSummary('sense') }}</dd></div>
+    <div class="fact"><dt>Sight</dt><dd>{{ facade.rowSummary('sight') }}</dd></div>
+  </dl>
+
+  @if (facade.store.photoPreviewUrl(); as preview) {
+    <img class="photo-preview" [src]="preview" alt="Selected photo preview" />
+  }
+} @else {
+  <p class="muted hint">
+    This visit's connection — <span class="mono">{{ facade.rowSummary('sense') }}</span> /
+    <span class="mono">{{ facade.rowSummary('sight') }}</span> — will be added onto the asset you
+    pick below, instead of creating a new one.
+  </p>
+
+  @if (facade.store.existingAssetsLoading()) {
+    <div class="empty"><p class="faint">Loading assets…</p></div>
+  } @else if (facade.store.existingAssets().length === 0) {
+    <div class="empty"><p>No existing assets to attach onto.</p></div>
+  } @else {
+    <div class="field wide">
+      <label class="label" for="attach-existing-asset">Asset</label>
+      <select
+        id="attach-existing-asset"
+        name="existingAsset"
+        class="field-lg"
+        [ngModel]="facade.store.selectedExistingAssetId() ?? ''"
+        (ngModelChange)="facade.store.selectExistingAsset($event)"
+      >
+        <option value="" disabled>Choose an asset…</option>
+        @for (asset of facade.store.existingAssets(); track asset.assetId) {
+          <option [value]="asset.assetId">{{ asset.displayName }} — {{ asset.categoryName }}</option>
+        }
+      </select>
+    </div>
+  }
+}
+
+<div class="row">
+  <button type="button" class="btn secondary" (click)="facade.store.back()">Back</button>
+  <button
+    type="button"
+    class="btn"
+    (click)="facade.store.createAsset()"
+    [disabled]="facade.store.creating() || (facade.store.attachTarget() === 'existing' && !facade.store.selectedExistingAssetId())"
+  >
+    {{
+      facade.store.creating()
+        ? (facade.store.attachTarget() === 'existing' ? 'Attaching…' : 'Creating…')
+        : (facade.store.attachTarget() === 'existing' ? 'Attach' : 'Create asset')
+    }}
+  </button>
+</div>

@@ -1,6 +1,7 @@
 import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
 import { AuthStore } from '../../core/auth/auth-store';
+import { hasCapability } from '../../core/auth/auth-logic';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { LiveStore } from '../../core/live/live-store';
 import { isLiveAvailable } from '../../core/live/live-fallback-logic';
@@ -111,6 +112,18 @@ export class DronePickerFacade {
   readonly emptyState = computed(() =>
     pickerEmptyStateCopy(this.auth.scopeKind(), this.auth.capabilities(), this.auth.user()?.memberships ?? []),
   );
+
+  /**
+   * Gates the **grouped** "Your vehicles" leg's own empty-line `Add source ›` link — the D7 defect
+   * (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §1/§2.3/§3.5): `/add-source` is `orgGuard`-gated by
+   * design (registering inventory is a manager act), but the un-grouped empty-picker leg above
+   * ({@link emptyState}'s own `showAddSource`) already gated its identical link and this one never
+   * did, so a PILOT with no assignments yet but at least one *simulated* asset in view saw a link
+   * guaranteed to bounce them. Mirrors `fly-logic.ts#pickerEmptyStateCopy`'s `showAddSource` exactly
+   * (`hasCapability(capabilities, 'MANAGE_ORG')`) rather than inventing a second capability check —
+   * one gate, read the same way everywhere it's needed.
+   */
+  readonly canManageOrg = computed(() => hasCapability(this.auth.capabilities(), 'MANAGE_ORG'));
 
   /** `GET /api/me/assignments`'s own row set, as ids — see class doc's B4 note. Empty until the
    *  fetch resolves, and stays empty forever on a failed fetch — {@link myAssigned} then degrades to

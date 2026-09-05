@@ -1,5 +1,5 @@
 import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { SettingsStore } from '../../core/settings/settings-store';
@@ -39,6 +39,7 @@ import {
   earlierReplayableUsages,
   flyStage,
   isAllDronesOption,
+  isAutostart,
   isWatchMode,
   latestFinishedUsage,
   positionLabel,
@@ -117,6 +118,10 @@ const LOG_PREFIX = '[cockpit]';
 export class CockpitFacade {
   private readonly api = inject(VisionApi);
   private readonly router = inject(Router);
+  /** Only for the autostart effect's own `router.navigate([], { relativeTo: this.route, ... })` call
+   * below — mirrors `inventory-facade.ts`/`devices-facade.ts`/`command-facade.ts`'s identical
+   * one-shot-query-param-strip idiom. */
+  private readonly route = inject(ActivatedRoute);
   private readonly scheduler = inject(PollScheduler);
   /** Named `liveStore`, not `live` — this class already has a public `live` computed (below,
    * "stream() !== undefined"), unrelated to `LiveStore`'s own connection state. */
@@ -308,6 +313,17 @@ export class CockpitFacade {
   /** Fed by `CockpitPage`'s own `watch` route input — see this class's own doc comment above. */
   private readonly watchSignal = signal<string | undefined>(undefined);
   readonly watchMode = computed(() => isWatchMode(this.watchSignal()));
+
+  /** Fed by `CockpitPage`'s own `autostart` route input (`?autostart=1` —
+   * docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.3 "the terminal action"). Consumed exactly once by
+   * the constructor effect near the end of this class ({@link autostartHandled}), never re-read
+   * after — see that effect's own doc comment for the full one-shot mechanics. */
+  private readonly autostartSignal = signal<string | undefined>(undefined);
+  /** One-shot guard for the autostart effect — a plain field, not a signal: writing it must not
+   * itself be a tracked dependency (that would defeat the guard), and it must simply persist for the
+   * life of this facade instance, matching `?autostart=1`'s pinned "consumed once per component
+   * instance" contract. */
+  private autostartHandled = false;
 
   readonly telemetryDevicesList = computed(() => telemetryDevices(this.asset()?.devices ?? []));
   readonly hasTelemetryDevice = computed(() => this.telemetryDevicesList().length > 0);
@@ -801,6 +817,58 @@ export class CockpitFacade {
       }
     });
 
+    // `?autostart=1` (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.3 "the terminal action") — the
+    // onboarding wizard's Ready screen links `Open cockpit ›` straight to
+    // `/fly/:assetId?autostart=1` once both proof halves are shown; this is where that link's
+    // promise is kept. Consumed **exactly once** per component/facade instance ({@link
+    // autostartHandled}), never re-armed by a later re-render: a bare `effect()` with no guard would
+    // re-fire on *any* dependency change it reads, including its own side effects —
+    // {@link engageSession}'s success path re-fetches {@link asset}, which would otherwise retrigger
+    // this very effect and re-issue the command a second time.
+    //
+    // Waits for the asset load {@link selectAsset} already kicked off to actually settle
+    // ({@link asset} truthy, or {@link loadError} — a genuine dead `:assetId`) before deciding
+    // anything: {@link primaryDevice}/{@link hasTelemetryDevice} both read `asset()?.devices`, so
+    // deciding before that resolves would misread "not loaded yet" as "not fitted" and silently skip
+    // a half that is actually there — a fabricated-by-omission attempt (CLAUDE.md rule 9).
+    //
+    // Calls {@link start}/{@link engageSession} exactly as a manual click on the same buttons would
+    // — no second, competing denial UI here; a grounding denial (docs/plans/active/ASSET-FLOWS-PLAN.md
+    // S1) or any other failure surfaces through those methods' own existing toast/silent-degrade
+    // paths, untouched. A half with no matching device is never attempted at all — never a
+    // fabricated attempt, never a fake tick (§3.3's own "a half that is not-fitted shows —, never a
+    // green tick" carried into the command itself, not just the Ready screen's own display).
+    effect(() => {
+      const autostart = this.autostartSignal();
+      if (!isAutostart(autostart) || this.autostartHandled) {
+        return;
+      }
+      const asset = this.asset();
+      const failed = this.loadError();
+      if (!asset && !failed) {
+        return; // still loading — this effect re-runs once `loadAsset` settles either way
+      }
+      this.autostartHandled = true;
+      if (asset) {
+        if (this.primaryDevice()) {
+          void this.start();
+        }
+        if (this.hasTelemetryDevice()) {
+          void this.engageSession();
+        }
+      }
+      // Strips the param so a reload of the resulting URL never re-fires (§3.3) — `merge` leaves
+      // every other query param untouched, mirroring every other one-shot query-param consumer in
+      // this app (`inventory-facade.ts#clearSelection`, `devices-facade.ts`, `command-facade.ts`,
+      // `roster-facade.ts`, `alerts-facade.ts`).
+      void this.router.navigate([], {
+        relativeTo: this.route,
+        queryParams: { autostart: null },
+        queryParamsHandling: 'merge',
+        replaceUrl: true,
+      });
+    });
+
     inject(DestroyRef).onDestroy(() => {
       this.events.release();
       this.stopAssetPolling();
@@ -1112,6 +1180,12 @@ export class CockpitFacade {
   /** Fed from `CockpitPage`'s own route-bound `watch` input — see this class's own doc comment. */
   setWatch(watch: string | undefined): void {
     this.watchSignal.set(watch);
+  }
+
+  /** Fed from `CockpitPage`'s own route-bound `autostart` input — see {@link autostartSignal}'s own
+   * doc comment. */
+  setAutostart(autostart: string | undefined): void {
+    this.autostartSignal.set(autostart);
   }
 
   // --- Drawings (docs/plans/done/MAP-REWORK-PLAN.md §5.2) ---------------------------------------------------

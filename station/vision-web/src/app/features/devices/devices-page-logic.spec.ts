@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import type { AssetDetails, Device } from '../../core/api/models';
+import type { ActiveStream, AssetDetails, Device } from '../../core/api/models';
 import {
   buildCreateAssetRequestForDevice,
   buildWarehouseRows,
   describeDeviceState,
+  deviceRoleLabel,
+  deviceRoleStatus,
   endpointConflicts,
   filterRowsByArchived,
   findWarehouseRowById,
   mapDeviceOwners,
+  roleStatusDescriptor,
   searchWarehouseRowsByQuery,
 } from './devices-page-logic';
 
@@ -356,5 +359,74 @@ describe('buildCreateAssetRequestForDevice (docs/plans/done/UX-QUICKWINS-PLAN.md
     );
     expect(request.deviceIds).toEqual(['dev-2']);
     expect(request).not.toHaveProperty('devices');
+  });
+});
+
+/** Mirrors `core/onboarding/fit-out-logic.spec.ts#stream`'s own identical helper — `roleStatus`
+ *  (via `deviceRoleStatus`) only ever reads `deviceId`/`state`. */
+function stream(partial: Partial<ActiveStream> & Pick<ActiveStream, 'deviceId'>): Pick<ActiveStream, 'deviceId' | 'state'> {
+  return { state: 'LIVE', ...partial };
+}
+
+describe('deviceRoleLabel (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md P3)', () => {
+  it('is Sense for a TELEMETRY-capable device', () => {
+    expect(deviceRoleLabel({ capabilities: ['TELEMETRY'] })).toBe('Sense');
+  });
+
+  it('is Sight for a VIDEO-only device', () => {
+    expect(deviceRoleLabel({ capabilities: ['VIDEO'] })).toBe('Sight');
+  });
+});
+
+describe('deviceRoleStatus (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md P3)', () => {
+  it('is not-fitted for an unowned device with no telemetry facts (falls back to itself alone)', () => {
+    const videoDevice = device({ id: 'dev-1', capabilities: ['VIDEO'] });
+    // Falls back to `[device]` — a lone VIDEO device is trivially its own only Sight member, so this
+    // still reads as "no stream running" honestly, exactly like an owned one would.
+    expect(deviceRoleStatus(videoDevice, undefined, [], undefined)).toBe('stopped');
+  });
+
+  it('is not-fitted for a TELEMETRY device with no owner and nothing ever heard', () => {
+    const senseDevice = device({ id: 'dev-2', capabilities: ['TELEMETRY'] });
+    expect(deviceRoleStatus(senseDevice, undefined, [], undefined)).toBe('never-seen');
+  });
+
+  it("judges a Sight device against its owning asset's own streams, not just itself", () => {
+    const videoDevice = device({ id: 'dev-3', capabilities: ['VIDEO'] });
+    const owner = [videoDevice, device({ id: 'dev-4', capabilities: ['TELEMETRY'] })];
+    const streams = [stream({ deviceId: 'dev-3', state: 'LIVE' })];
+
+    expect(deviceRoleStatus(videoDevice, owner, streams, undefined)).toBe('live');
+  });
+
+  it('reads a Sense device as stale once its telemetry age crosses the stale threshold', () => {
+    const senseDevice = device({ id: 'dev-5', capabilities: ['TELEMETRY'] });
+    // Comfortably past `core/telemetry/telemetry-logic.ts#STALE_AFTER_SECONDS`'s own threshold.
+    expect(deviceRoleStatus(senseDevice, [senseDevice], [], 60_000)).toBe('stale');
+  });
+
+  it('reads a Sense device as live for a fresh telemetry age', () => {
+    const senseDevice = device({ id: 'dev-6', capabilities: ['TELEMETRY'] });
+    expect(deviceRoleStatus(senseDevice, [senseDevice], [], 500)).toBe('live');
+  });
+});
+
+describe('roleStatusDescriptor (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md P3)', () => {
+  it('renders not-fitted as a muted dash, never a chip', () => {
+    expect(roleStatusDescriptor('not-fitted')).toEqual({ kind: 'muted', label: '—' });
+  });
+
+  it('renders live as the ok tone', () => {
+    expect(roleStatusDescriptor('live')).toEqual({ kind: 'ok', label: 'Live' });
+  });
+
+  it('renders stalled and stale as the warn tone', () => {
+    expect(roleStatusDescriptor('stalled').kind).toBe('warn');
+    expect(roleStatusDescriptor('stale').kind).toBe('warn');
+  });
+
+  it('renders never-seen and stopped as the quiet tone — a fact, not a fault', () => {
+    expect(roleStatusDescriptor('never-seen').kind).toBe('quiet');
+    expect(roleStatusDescriptor('stopped').kind).toBe('quiet');
   });
 });

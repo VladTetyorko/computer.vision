@@ -111,6 +111,34 @@
               }
               {{ facade.live() ? 'Streaming' : 'Offline' }}
             </span>
+            <!-- Sense/Sight role status (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md P3) — `muted`
+                 (not-fitted) renders no chip at all; this asset simply has no device in that role. -->
+            @if (senseChip().kind !== 'muted') {
+              @switch (senseChip().kind) {
+                @case ('ok') {
+                  <span class="chip ok"><span class="dot live"></span>Sense: {{ senseChip().label }}</span>
+                }
+                @case ('warn') {
+                  <span class="chip warn">Sense: {{ senseChip().label }}</span>
+                }
+                @case ('quiet') {
+                  <span class="row-state"><span class="dot"></span><span class="muted">Sense: {{ senseChip().label }}</span></span>
+                }
+              }
+            }
+            @if (sightChip().kind !== 'muted') {
+              @switch (sightChip().kind) {
+                @case ('ok') {
+                  <span class="chip ok"><span class="dot live"></span>Sight: {{ sightChip().label }}</span>
+                }
+                @case ('warn') {
+                  <span class="chip warn">Sight: {{ sightChip().label }}</span>
+                }
+                @case ('quiet') {
+                  <span class="row-state"><span class="dot"></span><span class="muted">Sight: {{ sightChip().label }}</span></span>
+                }
+              }
+            }
             <span class="muted cockpit-hint">Piloting and live video are in the cockpit — this page is for managing the asset.</span>
           </div>
           <div class="row cockpit-actions">
@@ -347,6 +375,38 @@
           <vision-section-header eyebrow="Drill-in" title="Hardware &amp; devices">
             <button type="button" actions class="btn secondary small" (click)="openAssign()">Attach a device</button>
           </vision-section-header>
+        </div>
+
+        <!-- Sense/Sight role status (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md P3) — same two
+             chips as the cockpit band above, repeated here since this is where the fitted devices
+             themselves are listed; `muted` (not-fitted) renders no chip. -->
+        <div class="row cockpit-status">
+          @if (senseChip().kind !== 'muted') {
+            @switch (senseChip().kind) {
+              @case ('ok') {
+                <span class="chip ok"><span class="dot live"></span>Sense: {{ senseChip().label }}</span>
+              }
+              @case ('warn') {
+                <span class="chip warn">Sense: {{ senseChip().label }}</span>
+              }
+              @case ('quiet') {
+                <span class="row-state"><span class="dot"></span><span class="muted">Sense: {{ senseChip().label }}</span></span>
+              }
+            }
+          }
+          @if (sightChip().kind !== 'muted') {
+            @switch (sightChip().kind) {
+              @case ('ok') {
+                <span class="chip ok"><span class="dot live"></span>Sight: {{ sightChip().label }}</span>
+              }
+              @case ('warn') {
+                <span class="chip warn">Sight: {{ sightChip().label }}</span>
+              }
+              @case ('quiet') {
+                <span class="row-state"><span class="dot"></span><span class="muted">Sight: {{ sightChip().label }}</span></span>
+              }
+            }
+          }
         </div>
 
         @if (isEditorOpen('assign')) {

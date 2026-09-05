@@ -41,7 +41,12 @@
       </div>
     }
     @case ('DISMISSED') {
-      <p class="muted found-device-resolved">Dismissed</p>
+      <div class="row spread found-device-resolved">
+        <span class="muted">Dismissed</span>
+        @if (actions().canRestore) {
+          <button type="button" class="btn secondary small" [disabled]="busy()" (click)="restore.emit()">Restore</button>
+        }
+      </div>
     }
   }
 </div>

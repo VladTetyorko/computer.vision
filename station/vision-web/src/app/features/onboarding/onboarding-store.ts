@@ -1,8 +1,11 @@
-import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
-import { ActivatedRoute, Router } from '@angular/router';
+import { DestroyRef, Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
+import { ActivatedRoute } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { AuthStore } from '../../core/auth/auth-store';
 import { FleetStore } from '../../core/fleet/fleet-store';
+import { DiscoveryInboxStore } from '../../core/discovery/discovery-inbox-store';
+import { PollScheduler } from '../../core/poll-scheduler';
+import { WebSerialGateway } from '../provisioning/web-serial-gateway';
 import { ToastService } from '../../core/toast.service';
 import { describeHttpError } from '../../core/api-error';
 import {
@@ -25,9 +28,12 @@ import {
 } from './drone-config-logic';
 import { buildTelemetryRequest, type FlightPlanForm } from '../../shared/map/flight-plan-logic';
 import type {
+  AssetSummary,
   Category,
   CreateAssetRequest,
   DiscoveredDevice,
+  DiscoveryCandidate,
+  DiscoveryStatusResponse,
   NetworkAddress,
   ParameterWriteRequest,
   ParameterWriteResponse,
@@ -47,15 +53,17 @@ import {
 } from './protocols';
 import { downscaleImageToJpeg, isAcceptableImageType } from './image-downscale';
 import {
+  FIT_OUT_ROLES,
   FIT_OUT_ROLE_HINTS,
   FIT_OUT_ROLE_LABELS,
   canAdvanceFromFitOut,
-  canAdvanceFromFitOutProve,
   collectRowOptions,
   combinedSysidCollision,
   effectiveProtocol,
+  emptyFitOutRow,
   emptyFitOutRows,
-  needsProve,
+  fitOutDeviceSpecs,
+  isRowFilled,
   roleForDevice,
   usesLegacySimulationPath,
   type FitOutFindMethod,
@@ -70,13 +78,17 @@ import {
   buildProbeRequest,
   buildVerifyRequest,
   canAdvanceFromIdentify,
+  composePushAddress,
   creatorOwnershipGroup,
   defaultPilotSelection,
+  isEquipmentPath,
   isTelemetryOnlyProtocol,
   nextStep,
   pilotsInGroup,
+  prefillFromDiscoveryCandidate,
   prevStep,
   type IdentifyDraft,
+  type SourceMode,
   type StepContext,
   type WizardStep,
 } from './onboarding-logic';
@@ -91,6 +103,17 @@ const SCAN_TIMEOUTS = [2_000, 4_000, 8_000] as const;
  * comes from the network response itself (`SystemNetworkResponse#mavlinkPort`), never assumed.
  */
 const DEFAULT_MAVLINK_PORT = 14_550;
+
+/**
+ * The waiting room's own poll cadence (§3.1, wave W3) — a multiple of `PollScheduler`'s 1s heartbeat
+ * (its own doc comment). Snappier than `DiscoveryInboxStore`'s 30s inbox-sweep floor (matches the
+ * backend's own sweep cadence, `vision.discovery.inbox.sweep-seconds`) since this is an
+ * actively-watched screen — an operator staring at "listening… nothing yet" notices a 30s lag; a
+ * one-off `GET /api/discovery/status` summary is cheap enough that 3s doesn't meaningfully load the
+ * backend, and this poll only ever runs while the `source` step itself is on screen (see the
+ * `step()` effect in the constructor).
+ */
+const DISCOVERY_STATUS_POLL_MS = 3_000;
 
 /** Shown under the legacy Simulate mode selector — one sentence per mode, docs/main/CYCLES-PLAN.md §4's own wording. */
 const SIMULATE_MODE_HINTS: Record<SimulateMode, string> = {
@@ -133,36 +156,42 @@ function emptyRowProveState(): RowProveState {
 }
 
 /**
- * The onboarding wizard's own "component store" (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4 wave
- * W6, replacing the pre-W6 single-device wizard). Provided per-route on `OnboardingPage`
- * (`providers: [OnboardingStore]`, same DI-sharing idiom as `AssetDetailPage`'s
- * `TelemetryStore`/`DetectionsStore`), not `providedIn: 'root'`: wizard state has no reason to
- * survive leaving `/add-source`, and a fresh instance per visit means a second pass through the
- * wizard never starts warm with a previous attempt's half-filled form.
+ * The onboarding wizard's own "component store" (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md
+ * §3.1, wave W2+W3 — replaces the pre-W2 single-fork-less wizard). Provided per-route on
+ * `OnboardingPage` (`providers: [OnboardingStore, OnboardingFacade]`, same DI-sharing idiom as
+ * `AssetDetailPage`'s `TelemetryStore`/`DetectionsStore`), not `providedIn: 'root'`: wizard state has
+ * no reason to survive leaving `/add-source`, and a fresh instance per visit means a second pass
+ * through the wizard never starts warm with a previous attempt's half-filled form.
  *
  * Holds every signal across all six steps (five visible, `sysid` hidden — see
- * `onboarding-logic.ts#WizardStep`) and orchestrates the actual HTTP calls; every yes/no decision
- * (can this step advance?) and every request shape is delegated to the pure functions in
+ * `onboarding-logic.ts#WizardStep`) and orchestrates every HTTP call; every yes/no decision (can
+ * this step advance?) and every request shape is delegated to the pure functions in
  * `onboarding-logic.ts`/`core/onboarding/fit-out-logic.ts` — this class is deliberately thin glue,
  * not where the interesting logic lives.
  *
- * **The fit-out table's two rows share one finder each**: `scan`/`useCandidate` (the `register`/
- * `discover` finders) always act on the **Sight** row; `scanForDrones`/`useDroneVehicle`/the guided
- * drone-config sub-flow (`listen`/`drone`) always act on the **Sense** row. A finder never needs to
- * know which row it is feeding — `FIT_OUT_FIND_METHODS` in `fit-out-logic.ts` fixes the mapping —
- * so every one of those methods keeps its pre-W6 body, only now writing into that row's own slice of
- * `rows` instead of the old flat `protocolSelect`/`customProtocol`/`uri`/`options` signals.
+ * **The fit-out table's two rows share one finder each**: `scan`/`useCandidate` (Sight's `discover`
+ * finder) always act on the **Sight** row; `scanForDrones`/`useDroneVehicle`/the guided drone-config
+ * sub-flow (`listen`/`drone`) always act on the **Sense** row. `FIT_OUT_FIND_METHODS` in
+ * `fit-out-logic.ts` fixes the mapping — every one of those methods keeps its pre-W2 body, only
+ * writing into that row's own slice of `rows`.
+ *
+ * **The `source` step's fork is a view-selector layered on top of the same rows** (`sourceMode`
+ * below) — it decides which sub-UI an *unresolved* row renders (waiting room / register-form /
+ * scanner), never overwriting a row the operator (or a discovery-candidate entrance) has already
+ * resolved. See {@link chooseSourceMode}'s own doc comment.
  */
 @Injectable()
 export class OnboardingStore {
   private readonly api = inject(VisionApi);
   private readonly fleet = inject(FleetStore);
   private readonly toasts = inject(ToastService);
-  private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly auth = inject(AuthStore);
+  private readonly discoveryInbox = inject(DiscoveryInboxStore);
+  private readonly poll = inject(PollScheduler);
+  private readonly webSerial = inject(WebSerialGateway);
 
-  readonly step = signal<WizardStep>('identify');
+  readonly step = signal<WizardStep>('source');
 
   // --- Step 1: Identify (docs/plans/active/WAREHOUSE-UX-PLAN.md D1 — name/category/photo, plus serial/make/model/registration) --
 
@@ -174,7 +203,7 @@ export class OnboardingStore {
   readonly category = signal('');
   /** The picker's own `{slug,name}` options — see `loadCategoryOptions` below. */
   readonly categoryOptions = signal<readonly { slug: string; name: string }[]>([]);
-  /** The raw category list (`GET /api/categories`), kept alongside `categoryOptions` only so {@link categoryConnected} can read `Category#connected` — a fact the derived picker options don't carry. */
+  /** The raw category list (`GET /api/categories`), kept alongside `categoryOptions` only so {@link categoryConnected}/{@link identifyCategoryOptions} can read `Category#connected` — a fact the derived picker options don't carry. */
   private readonly categories = signal<readonly Category[]>([]);
 
   readonly photoFile = signal<File | null>(null);
@@ -185,16 +214,33 @@ export class OnboardingStore {
 
   readonly canAdvanceIdentify = computed(() => canAdvanceFromIdentify(this.displayName(), this.category()));
 
-  /**
-   * Whether the chosen category wraps at least one device (`Category#connected`,
-   * docs/plans/active/WAREHOUSE-UX-PLAN.md D4). Defaults `true` (the historical assumption every
-   * asset needs a device) when the category isn't in `categories()` yet — a fresh page load before
-   * `loadCategoryOptions` resolves, or a category typed in ahead of the seed list — never blocking or
-   * silently offering the equipment short-circuit for a category this app hasn't actually confirmed.
-   * Drives the whole Identify→Register short-circuit ({@link WizardStep}'s own `identify` doc
-   * comment) and the Hand-over end screen's own next-verb link.
-   */
+  /** Whether the chosen category wraps at least one device (`Category#connected`) — defaults `true` when the category isn't in `categories()` yet (a fresh page load, or a category typed in ahead of the seed list). Feeds {@link identifyCategoryOptions} and the Hand-over end screen's own branch. */
   readonly categoryConnected = computed(() => this.categories().find((c) => c.slug === this.category())?.connected ?? true);
+
+  /**
+   * Whether both fit-out rows answered `—` at the `source` step's own "Nothing to connect" tile
+   * (D3) — this, not `categoryConnected`, is what now drives the Identify→Hand-over short-circuit
+   * (`onboarding-logic.ts#isEquipmentPath`'s own doc comment: removes the old circularity where
+   * equipment-ness was a category fact chosen *after* Connect).
+   */
+  readonly equipment = computed(() => isEquipmentPath(this.rows()));
+
+  /**
+   * The category picker's own options on the equipment path (§3.1 scope item 2) — narrowed to
+   * `connected: false` categories only, so an operator who has already said "nothing to connect"
+   * isn't then offered a vehicle category the rest of this app assumes carries a device. A category
+   * this app hasn't resolved a `connected` fact for at all (an asset-derived option not in
+   * `categories()`) is excluded here too — an unconfirmed fact is not the same as a confirmed `false`.
+   * Every other path (not equipment) sees the full, unfiltered list, unchanged.
+   */
+  readonly identifyCategoryOptions = computed(() => {
+    const options = this.categoryOptions();
+    if (!this.equipment()) {
+      return options;
+    }
+    const bySlug = new Map(this.categories().map((c) => [c.slug, c] as const));
+    return options.filter((option) => bySlug.get(option.slug)?.connected === false);
+  });
 
   private identifyDraft(): IdentifyDraft {
     return {
@@ -252,9 +298,9 @@ export class OnboardingStore {
     this.photoPreviewUrl.set(null);
   }
 
-  // --- Step 2: Connect — the fit-out table (docs/plans/active/SOURCE-ONBOARDING-CONTEXT.md §6,
-  //     docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4 wave W6). One row per role; see this class's own
-  //     doc comment for why each finder is fixed to exactly one row. ------------------------------
+  // --- Step: Source — the honest fork (D2/D3, docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §0.4)
+  //     feeding the same fit-out table (`core/onboarding/fit-out-logic.ts`) the pre-W2 wizard's
+  //     Connect step did. -------------------------------------------------------------------------
 
   readonly rows = signal<FitOutRows>(emptyFitOutRows());
   readonly fitOutRoleLabels = FIT_OUT_ROLE_LABELS;
@@ -262,44 +308,149 @@ export class OnboardingStore {
   readonly registerableProtocols = REGISTERABLE_PROTOCOLS;
   readonly customProtocolOption = CUSTOM_PROTOCOL_OPTION;
 
-  readonly canAdvanceConnect = computed(() => canAdvanceFromFitOut(this.rows()));
+  /** Which of the four fork tiles is active — `null` while the tile grid itself is still showing.
+   *  See {@link chooseSourceMode}'s own doc comment for the full contract. */
+  readonly sourceMode = signal<SourceMode | null>(null);
+
+  /** Set only by the fork's own "Nothing to connect" tile — {@link canAdvanceFromSource}'s own `equipmentConfirmed` argument (`fit-out-logic.ts#canAdvanceFromFitOut`'s own doc comment). */
+  readonly equipmentConfirmed = signal(false);
+
+  readonly canAdvanceFromSource = computed(() => canAdvanceFromFitOut(this.rows(), this.equipmentConfirmed()));
+
+  /** Roles pre-proven by a discovery-inbox candidate pick (query-param entrance or the waiting
+   *  room's own live "Use") — excluded from {@link effectiveNeedsProve} and {@link canAdvanceProve},
+   *  per `onboarding-logic.ts`'s own `prove` step doc comment. Cleared the moment that role's
+   *  connection fields are edited again (`clearPreProven`, called from every row mutator below) —
+   *  a manual edit un-trusts the pre-proven claim, mirroring `lastProbeOk`'s own "stale fields"
+   *  reasoning. */
+  readonly preProvenRoles = signal<ReadonlySet<FitOutRole>>(new Set());
+
+  private clearPreProven(role: FitOutRole): void {
+    this.preProvenRoles.update((roles) => {
+      if (!roles.has(role)) {
+        return roles;
+      }
+      const next = new Set(roles);
+      next.delete(role);
+      return next;
+    });
+  }
+
+  /** The one discovery-inbox candidate id this visit's `attach` step may still attach atomically
+   *  (C1) — set only by the `?candidateId=` query-param entrance (never by the waiting room's own
+   *  ad-hoc "Use" click, which carries no such "this candidate *is* that asset" promise). */
+  readonly originCandidateId = signal<string | null>(null);
+
+  /**
+   * Picks one of the fork's four tiles. A row this step itself half-initialized under a
+   * *previously*-chosen tile (not yet resolved, i.e. `!isRowFilled`, and not pre-proven from a
+   * candidate) is reset to empty first — so tapping between tiles never leaves a stale finder
+   * behind; a row the operator has actually resolved, or that arrived pre-proven, is left alone
+   * regardless of which tile is chosen afterward (this is what lets Sense arrive passively while
+   * Sight is filled in manually, per this class's own doc comment).
+   *
+   * `'equipment'` is the one tile with an immediate, unconditional effect: both rows are forced to
+   * `none` and `equipmentConfirmed` is set true right away — there is no second confirmation click,
+   * clicking the tile *is* the deliberate "nothing to connect" answer (D3).
+   */
+  chooseSourceMode(mode: SourceMode): void {
+    if (mode === 'equipment') {
+      this.setRowValue('sense', 'none');
+      this.setRowValue('sight', 'none');
+      this.preProvenRoles.set(new Set());
+      this.originCandidateId.set(null);
+      this.equipmentConfirmed.set(true);
+      this.sourceMode.set('equipment');
+      return;
+    }
+    this.equipmentConfirmed.set(false);
+    for (const role of FIT_OUT_ROLES) {
+      if (!this.preProvenRoles().has(role) && !isRowFilled(this.rows()[role])) {
+        this.setRowValue(role, 'none');
+      }
+    }
+    this.sourceMode.set(mode);
+    if (mode === 'passive') {
+      this.initEmptyRow('sense', 'listen');
+      this.initEmptyRow('sight', 'discover');
+    } else if (mode === 'manual') {
+      this.initEmptyRow('sense', 'register');
+      this.initEmptyRow('sight', 'register');
+    }
+    // 'scan' initializes nothing: both rows stay `none` and render their own tile grid, narrowed by
+    // `OnboardingFacade#rowFindMethods` to exclude `register` (manual's own tile) — Sight is left
+    // with one real method (`discover`) plus the universal "Use a test source" tile, Sense keeps its
+    // full two (`listen`/`drone`) plus the same. Auto-selecting `discover` for Sight here (an earlier
+    // version of this method did) would have silently made the legacy Simulate video-file demo
+    // unreachable through this fork — every tile grid, on every mode, always keeps `setRowValue(role,
+    // 'simulate')` reachable.
+  }
+
+  private initEmptyRow(role: FitOutRole, method: FitOutFindMethod): void {
+    if (this.preProvenRoles().has(role) || isRowFilled(this.rows()[role])) {
+      return;
+    }
+    this.chooseRowFind(role, method);
+  }
+
+  /** Returns to the fork's own tile grid — never touches `rows`; a resolved row's own summary card renders independent of `sourceMode` regardless (this class's own doc comment). */
+  backToSourceFork(): void {
+    this.sourceMode.set(null);
+  }
+
+  /** The resolved-row summary card's own "Change" affordance — clears exactly that role, including
+   *  any pre-proven/candidate-origin tracking, regardless of the current `sourceMode`. */
+  clearRow(role: FitOutRole): void {
+    this.rows.update((r) => ({ ...r, [role]: emptyFitOutRow(role) }));
+    this.clearPreProven(role);
+    if (this.originCandidateId()) {
+      this.originCandidateId.set(null);
+    }
+  }
 
   /** The row's top-level choice (`find… · simulate · —`) — switching resets that row's own draft (finder, protocol, uri, options) entirely, so a stale half-entered connection from a previously-chosen value can never leak into the new one. */
   setRowValue(role: FitOutRole, value: FitOutRowValue): void {
     this.rows.update((r) => ({ ...r, [role]: { ...emptyFitOutRowLike(r[role]), value } }));
+    this.clearPreProven(role);
   }
 
   /** Picks one of that row's own finders (`FIT_OUT_FIND_METHODS`) — `drone` also resets the guided config sub-step to its start. */
   chooseRowFind(role: FitOutRole, method: FitOutFindMethod): void {
     this.rows.update((r) => ({ ...r, [role]: { ...r[role], value: 'find', findMethod: method } }));
+    this.clearPreProven(role);
     if (method === 'drone') {
       this.droneSubStep.set('picker');
     }
   }
 
-  /** Back from a row's resolved/scanning state to its own finder-tile choice — mirrors the pre-W6 `onConnectBack`'s unconditional reset. */
+  /** Back from a row's resolved/scanning state to its own finder-tile choice (only Sense's own scan-mode two-tile picker still nests a sub-view — see `chooseSourceMode`'s own doc comment). */
   backFromRowFind(role: FitOutRole): void {
     this.rows.update((r) => ({ ...r, [role]: { ...r[role], findMethod: null } }));
   }
 
   setRowProtocolSelect(role: FitOutRole, value: string): void {
     this.rows.update((r) => ({ ...r, [role]: { ...r[role], protocolSelect: value } }));
+    this.clearPreProven(role);
   }
 
   setRowCustomProtocol(role: FitOutRole, value: string): void {
     this.rows.update((r) => ({ ...r, [role]: { ...r[role], customProtocol: value } }));
+    this.clearPreProven(role);
   }
 
   setRowUri(role: FitOutRole, value: string): void {
     this.rows.update((r) => ({ ...r, [role]: { ...r[role], uri: value } }));
+    this.clearPreProven(role);
   }
 
   addRowOption(role: FitOutRole): void {
     this.rows.update((r) => ({ ...r, [role]: { ...r[role], options: [...r[role].options, { key: '', value: '' }] } }));
+    this.clearPreProven(role);
   }
 
   removeRowOption(role: FitOutRole, index: number): void {
     this.rows.update((r) => ({ ...r, [role]: { ...r[role], options: r[role].options.filter((_, i) => i !== index) } }));
+    this.clearPreProven(role);
   }
 
   updateRowOptionKey(role: FitOutRole, index: number, key: string): void {
@@ -307,6 +458,7 @@ export class OnboardingStore {
       ...r,
       [role]: { ...r[role], options: r[role].options.map((o, i) => (i === index ? { ...o, key } : o)) },
     }));
+    this.clearPreProven(role);
   }
 
   updateRowOptionValue(role: FitOutRole, index: number, value: string): void {
@@ -314,6 +466,7 @@ export class OnboardingStore {
       ...r,
       [role]: { ...r[role], options: r[role].options.map((o, i) => (i === index ? { ...o, value } : o)) },
     }));
+    this.clearPreProven(role);
   }
 
   rowProtocol(role: FitOutRole): string {
@@ -328,7 +481,7 @@ export class OnboardingStore {
     return this.rows()[role].protocolSelect === CUSTOM_PROTOCOL_OPTION;
   }
 
-  /** Fills a row's register fields from a resolved connection and switches it to the standard register sub-view — the "candidate → register" pivot every finder below uses. */
+  /** Fills a row's register fields from a resolved connection and switches it to the standard register sub-view — the "candidate → register" pivot every finder below uses. Never pre-proven — only {@link prefillRowFromCandidate} sets that. */
   private applyResolvedConnection(
     role: FitOutRole,
     resolved: { protocol: string | undefined; uri: string; options?: Record<string, string> },
@@ -346,9 +499,55 @@ export class OnboardingStore {
         options: resolved.options ? Object.entries(resolved.options).map(([key, value]) => ({ key, value })) : [],
       },
     }));
+    this.clearPreProven(role);
   }
 
-  // --- Connect: discovery (Sight row — `register`/`discover`) -------------------------------------
+  /**
+   * Fills a row straight from a discovery-inbox candidate (§3.1 candidate-entrance table) — used by
+   * both the `?candidateId=` query-param entrance and the waiting room's own live "Use" action
+   * (`useHeardCandidate` below). Marks the role pre-proven ({@link preProvenRoles}) rather than
+   * routing through {@link applyResolvedConnection}: this data already arrived over the wire (a
+   * real MAVLink heartbeat, a real mediamtx push), which is why the wizard's own Prove step can
+   * honestly skip it (`onboarding-logic.ts`'s own `prove` step doc comment) — it is not, however, a
+   * substitute for the Prove step's own recorded probe/verify *result*, so a row filled this way
+   * still renders honestly unproven on the terminal screen ({@link sightTerminalProof}/
+   * {@link senseTerminalProof} — no fabricated green tick).
+   */
+  private prefillRowFromCandidate(candidate: DiscoveryCandidate): void {
+    const prefill = prefillFromDiscoveryCandidate(candidate);
+    if (!prefill) {
+      this.toasts.info(`${candidate.method} could not supply a stream address for "${candidate.name}" yet.`);
+      return;
+    }
+    const selection = protocolSelectionFor(prefill.protocol);
+    this.rows.update((r) => ({
+      ...r,
+      [prefill.role]: {
+        ...r[prefill.role],
+        value: 'find',
+        findMethod: prefill.findMethod,
+        protocolSelect: selection.select,
+        customProtocol: selection.custom,
+        uri: prefill.uri,
+        options: prefill.options ? Object.entries(prefill.options).map(([key, value]) => ({ key, value })) : [],
+      },
+    }));
+    this.preProvenRoles.update((roles) => new Set(roles).add(prefill.role));
+    if (this.displayName().trim().length === 0) {
+      this.displayName.set(prefill.displayName);
+    }
+    if (prefill.category && this.category().trim().length === 0) {
+      this.chooseCategory(prefill.category);
+    }
+    this.sourceMode.set('passive');
+  }
+
+  /** The waiting room's own live "Use" action (§3.1 scope item 6) — acts on exactly the candidate {@link intakeState}'s own `heard` branch is describing. */
+  useHeardCandidate(candidate: DiscoveryCandidate): void {
+    this.prefillRowFromCandidate(candidate);
+  }
+
+  // --- Connect: discovery (Sight row — `discover`) -------------------------------------------------
 
   readonly scanTimeouts = SCAN_TIMEOUTS;
   readonly scanTimeout = signal<number>(4_000);
@@ -456,6 +655,19 @@ export class OnboardingStore {
    *  (manual-entry fallback) when that list came back empty. */
   readonly selectedServerAddress = signal<string>('');
 
+  /** `GET /api/system/network`'s own optional video-push facts (C3, wave U6) — `undefined` on a
+   *  station with no push configured; feeds {@link pushAddressCard} below. Never fabricated. */
+  readonly videoPushPort = signal<number | undefined>(undefined);
+  readonly videoPushPathPrefix = signal<string | undefined>(undefined);
+
+  /** The "It comes to us" tile's own push-address card — see `onboarding-logic.ts#composePushAddress`'s own doc comment for the honesty rule and the placeholder-name reasoning. */
+  readonly pushAddressCard = computed(() => composePushAddress(this.networkAddresses(), this.videoPushPort(), this.videoPushPathPrefix()));
+
+  /** Web Serial's own live availability (R3, wave U5) — checked once at construction, not cached
+   *  across a page the operator never reloads mid-visit; gates the fork's own provision-wifi tile
+   *  without ever hiding it (`WebSerialGateway#isSupported`'s own doc comment). */
+  readonly provisionWifiSupported = signal(false);
+
   readonly droneCompatibility = computed<LinkCompatibility | null>(() => {
     const firmware = this.droneFirmware();
     const link = this.droneLink();
@@ -501,8 +713,8 @@ export class OnboardingStore {
    * The hand-off (docs/plans/active/DRONE-INFRA-PLAN.md I-g step 3, "listen is the scan"): switches the Sense row
    * straight to the existing `listen` finder and starts its scan, exactly as if the operator had
    * picked that tile directly. Everything past this point — the vehicle list, claimed-vehicle
-   * dimming, `useDroneVehicle`'s "Use" pivot, Prove, Register — is the pre-existing I-b flow,
-   * entirely unmodified by this method.
+   * dimming, `useDroneVehicle`'s "Use" pivot, Prove, Attach — is the pre-existing I-b flow, entirely
+   * unmodified by this method.
    */
   async finishDroneConfigAndListen(): Promise<void> {
     this.chooseRowFind('sense', 'listen');
@@ -555,12 +767,55 @@ export class OnboardingStore {
     return plan ? buildTelemetryRequest(plan) : undefined;
   }
 
-  // --- Step 3: Prove — Test + Verify, per filled `find` row (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4 wave W6,
+  // --- Waiting room (§3.1 scope item 6, wave W3) — live intake per row, fed by a poll only the
+  //     `source` step keeps running (see the constructor's own `step()` effect). -------------------
+
+  readonly discoveryStatus = signal<DiscoveryStatusResponse | null>(null);
+  /** Threaded into `intakeState`'s own `nowMs` so a candidate's age stays live without a second clock timer — ticked once per poll, same cadence as `discoveryStatus` itself. */
+  readonly nowMs = signal(Date.now());
+  /** The discovery inbox's own live candidate list (`DiscoveryInboxStore`, SSE-fed) — reused as-is rather than re-polled here; see this class's own `discoveryInbox` field doc. */
+  readonly discoveryCandidates = this.discoveryInbox.candidates;
+
+  private stopDiscoveryStatusPoll: (() => void) | null = null;
+
+  private startDiscoveryStatusPoll(): void {
+    if (this.stopDiscoveryStatusPoll) {
+      return;
+    }
+    void this.fetchDiscoveryStatus();
+    this.stopDiscoveryStatusPoll = this.poll.schedule(DISCOVERY_STATUS_POLL_MS, () => this.fetchDiscoveryStatus());
+    this.discoveryInbox.activate();
+  }
+
+  private stopDiscoveryStatusPollNow(): void {
+    this.stopDiscoveryStatusPoll?.();
+    this.stopDiscoveryStatusPoll = null;
+    this.discoveryInbox.release();
+  }
+
+  /** Silent-degrade, like every poller in this app — a failed read leaves `discoveryStatus` exactly
+   *  as it was (stale, never blanked or fabricated into a `failed` state the wire never actually
+   *  reported; see `intakeState`'s own doc comment). */
+  private async fetchDiscoveryStatus(): Promise<void> {
+    this.nowMs.set(Date.now());
+    try {
+      this.discoveryStatus.set(await this.api.discoveryStatus());
+    } catch {
+      // Silent-degrade — see this method's own doc comment.
+    }
+  }
+
+  // --- Step: Prove — Test + Verify, per filled `find` row not already pre-proven (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4 wave W6,
   //     merging the pre-W6 wizard's separate Test/Verify steps into one, run once per row) ----------
 
   readonly proveByRole = signal<Record<FitOutRole, RowProveState>>({ sense: emptyRowProveState(), sight: emptyRowProveState() });
 
-  readonly rowsNeedProve = computed(() => needsProve(this.rows()));
+  /** The caller's own *effective* `fit-out-logic.ts#needsProve` — excludes a role {@link preProvenRoles} already covers, per `onboarding-logic.ts`'s own `prove` step doc comment. Fed to {@link visibleSteps}/`nextStep`/`prevStep` via `stepContext` below. */
+  readonly rowsNeedProve = computed(() => {
+    const rows = this.rows();
+    const preProven = this.preProvenRoles();
+    return FIT_OUT_ROLES.some((role) => rows[role].value === 'find' && !preProven.has(role));
+  });
 
   private currentProbeRequest(role: FitOutRole): ProbeDeviceRequest | null {
     const row = this.rows()[role];
@@ -601,19 +856,21 @@ export class OnboardingStore {
 
   /**
    * Whether the row's chosen connection carries telemetry and no video
-   * (docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md §2 B3) — read by `onboarding.html` to word that row's
-   * Prove card for the device in front of the operator instead of demanding a frame that, on a
-   * flight-controller link, cannot exist. In practice only the Sense row is ever telemetry-only, but
-   * this is computed the same way for both — no reason to special-case a role here when the protocol
-   * string already carries the answer.
+   * (docs/plans/active/TELEMETRY-ONLY-ONBOARDING-CONTEXT.md §2 B3) — read by the Prove step to word
+   * that row's card for the device in front of the operator instead of demanding a frame that, on a
+   * flight-controller link, cannot exist.
    */
   telemetryOnlyLink(role: FitOutRole): boolean {
     return isTelemetryOnlyProtocol(this.rowProtocol(role));
   }
 
-  readonly canAdvanceProve = computed(() =>
-    canAdvanceFromFitOutProve(this.rows(), { sense: this.lastProbeOk('sense'), sight: this.lastProbeOk('sight') }),
-  );
+  readonly canAdvanceProve = computed(() => {
+    const rows = this.rows();
+    const preProven = this.preProvenRoles();
+    return FIT_OUT_ROLES.filter((role) => rows[role].value === 'find' && !preProven.has(role)).every(
+      (role) => this.lastProbeOk(role) === true,
+    );
+  });
 
   private updateProve(role: FitOutRole, patch: Partial<RowProveState>): void {
     this.proveByRole.update((p) => ({ ...p, [role]: { ...p[role], ...patch } }));
@@ -691,13 +948,48 @@ export class OnboardingStore {
     }
   }
 
-  // --- Step 4: Register (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4 wave W6 — unchanged in substance from the
-  //     pre-W6 Create step, now with `identity` and N devices instead of one) -----------------------
+  // --- Step: Attach (was Register) — new asset, or attach onto an existing one (§0.2 "Attach" fork) --
 
   readonly creating = signal(false);
 
+  /** New vehicle (default), or attach this visit's connection onto an already-registered asset instead. */
+  readonly attachTarget = signal<'new' | 'existing'>('new');
+  readonly existingAssets = signal<readonly AssetSummary[]>([]);
+  readonly existingAssetsLoading = signal(false);
+  readonly selectedExistingAssetId = signal<string | null>(null);
+  /** Set once the Attach step actually attached onto an existing asset — the Hand-over step reads
+   *  this to skip its own custodian picker straight to the terminal proof (that asset already has an
+   *  owner; see this class's own Hand-over section doc). */
+  readonly existingAssetPath = signal(false);
+
+  chooseAttachTarget(target: 'new' | 'existing'): void {
+    this.attachTarget.set(target);
+    if (target === 'existing' && this.existingAssets().length === 0 && !this.existingAssetsLoading()) {
+      void this.loadExistingAssets();
+    }
+  }
+
+  private async loadExistingAssets(): Promise<void> {
+    this.existingAssetsLoading.set(true);
+    try {
+      this.existingAssets.set(await this.api.listAssets());
+    } catch (error) {
+      this.toasts.error(describeHttpError(error));
+    } finally {
+      this.existingAssetsLoading.set(false);
+    }
+  }
+
+  selectExistingAsset(assetId: string): void {
+    this.selectedExistingAssetId.set(assetId);
+  }
+
   async createAsset(): Promise<void> {
     if (this.creating()) {
+      return;
+    }
+    if (this.attachTarget() === 'existing') {
+      await this.attachToExistingAsset();
       return;
     }
     this.creating.set(true);
@@ -724,10 +1016,56 @@ export class OnboardingStore {
   }
 
   /**
+   * "Attach to existing" (§0.2's "Attach" fork, "existing" branch): the candidate-entrance's atomic
+   * `POST /api/discovery/inbox/{id}/attach` (C1, via `DiscoveryInboxStore#attachCandidate`) when this
+   * visit started from a discovery candidate ({@link originCandidateId}); a plain
+   * register-device-then-assign otherwise ({@link registerAndAssignRows}) — the same two-call shape
+   * `DiscoveryInboxStore#attach` already uses for its own candidate case, repeated here rather than
+   * shared since there is no candidate id to reuse that method's own signature with.
+   */
+  private async attachToExistingAsset(): Promise<void> {
+    const assetId = this.selectedExistingAssetId();
+    if (!assetId) {
+      return;
+    }
+    this.creating.set(true);
+    try {
+      const asset = this.existingAssets().find((a) => a.assetId === assetId);
+      const displayName = asset?.displayName ?? assetId;
+      const candidateId = this.originCandidateId();
+      const ok = candidateId
+        ? await this.discoveryInbox.attachCandidate(candidateId, assetId)
+        : await this.registerAndAssignRows(assetId);
+      if (!ok) {
+        return;
+      }
+      this.existingAssetPath.set(true);
+      await this.fleet.refresh({ quiet: true });
+      await this.finishCreate(assetId, displayName);
+    } finally {
+      this.creating.set(false);
+    }
+  }
+
+  private async registerAndAssignRows(assetId: string): Promise<boolean> {
+    const specs = fitOutDeviceSpecs(this.rows(), this.displayName().trim() || 'Device');
+    try {
+      for (const spec of specs) {
+        const device = await this.api.registerDevice(spec);
+        await this.api.assignDevice(assetId, device.id);
+      }
+      return true;
+    } catch (error) {
+      this.toasts.error(describeHttpError(error));
+      return false;
+    }
+  }
+
+  /**
    * The equipment short-circuit's own action (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4 — "Register happens
-   * with zero devices"). Called directly from the Identify step's own "Receive" button for a
-   * `connected: false` category — `connect`/`prove`/`register` are never rendered as steps at all
-   * (see `onboarding-logic.ts#WizardStep`'s own `identify` doc comment); `devices` on the resulting
+   * with zero devices"). Called directly from the Identify step's own "Receive" button on the
+   * equipment path ({@link equipment}) — `prove`/`attach` are never rendered as steps at all (see
+   * `onboarding-logic.ts#WizardStep`'s own `identify` doc comment); `devices` on the resulting
    * request is simply omitted (`fitOutDeviceSpecs` of empty rows is `[]`), which `AssetSpec#toSpec`
    * treats identically to an explicit empty list.
    */
@@ -759,9 +1097,6 @@ export class OnboardingStore {
   private async createViaSimulation(): Promise<void> {
     try {
       if (this.simMode() === 'synthetic') {
-        // Not an orphaned raw-device registration (unlike the pre-wizard "Add the simulated
-        // source" quick-add still used by features/devices/devices.ts's own empty state) — wrapped
-        // into a real asset immediately, exactly like the multi-device path.
         const synthetic = buildSyntheticRegisterRequest(this.displayName());
         const identity = buildIdentityRequest(this.identifyDraft());
         const request: CreateAssetRequest = {
@@ -836,13 +1171,12 @@ export class OnboardingStore {
     }
   }
 
-  // --- Step 4.5: fix a sysid collision (docs/plans/active/FLEET-RADIO-PLAN.md R5/F0) ----------------
+  // --- Step: fix a sysid collision (docs/plans/active/FLEET-RADIO-PLAN.md R5/F0) --------------------
   // Entered only from `finishCreate` above, only when a Prove-step row's profile collided with an
-  // already-claimed sysid. Like Hand-over below, this step is offered only *after* `POST /api/assets`
-  // has already succeeded — a failed write here can never be mistaken for "the asset wasn't
-  // created", the asset demonstrably already exists by the time any of this runs. Advisory, never a
-  // hard block: `continueFromSysidStep` always proceeds into Hand-over regardless of whether a write
-  // was even attempted, let alone whether it succeeded.
+  // already-claimed sysid. Like Hand-over below, this step is offered only *after* the asset has
+  // already been created/attached — a failed write here can never be mistaken for "the asset wasn't
+  // created". Advisory, never a hard block: `continueFromSysidStep` always proceeds into Hand-over
+  // regardless of whether a write was even attempted, let alone whether it succeeded.
 
   readonly writingSysid = signal(false);
   readonly sysidWriteResult = signal<ParameterWriteResponse | null>(null);
@@ -893,12 +1227,13 @@ export class OnboardingStore {
     void this.enterHandoverStep(assetId, this.createdAssetDisplayName());
   }
 
-  // --- Step 5: Hand over (docs/plans/done/OPS-UX-PLAN.md §2 A3; docs/plans/active/WAREHOUSE-UX-PLAN.md
-  //     §3.4 D3, wave W6 — replaces the pre-W6 "Pilots"/Assign step). Offered only *after*
-  //     `POST /api/assets` has already succeeded — every signal below is therefore about handing the
-  //     asset off, never creation, and `handoverError` is read that way too: a failure here can never
-  //     be mistaken for "the asset wasn't created" because the asset demonstrably already exists by
-  //     the time any of this runs. ------------------------------------------------------------------
+  // --- Step: Hand over (docs/plans/done/OPS-UX-PLAN.md §2 A3; docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md
+  //     D9) — "Issue to" a custodian or "Leave in stock" for the **new**-asset path; the
+  //     **existing**-asset path ({@link existingAssetPath}) skips the picker straight to the
+  //     terminal proof, since that asset already has an owner. Ends in the two-half Sight/Sense
+  //     proof + "Open cockpit ›" screen (D9), never an automatic router redirect. Offered only
+  //     *after* the asset has already been created/attached — every signal below is therefore about
+  //     handing the asset off, never creation, and `handoverError` is read that way too. ------------
 
   readonly createdAssetId = signal<string | null>(null);
   readonly createdAssetDisplayName = signal('');
@@ -906,29 +1241,16 @@ export class OnboardingStore {
   /** The custodian candidate list — every enabled PILOT-role member of the asset's own (silently-assigned) ownership group. Empty means "couldn't offer anyone", not "nobody exists" — see `ownerGroupName`'s own doc comment for how the template tells those two apart. */
   readonly pilotCandidates = signal<readonly UserSummary[]>([]);
   readonly pilotCandidatesLoading = signal(false);
-  /** `undefined` only when the creator's own group could not be resolved at all (a membership-less account) — `onboarding.html` reads this to distinguish "nobody in your group flies yet" from "couldn't tell what your group even is", never fabricating either. */
+  /** `undefined` only when the creator's own group could not be resolved at all (a membership-less account). */
   readonly ownerGroupName = signal<string | undefined>(undefined);
   /** Single-select — "Issue to" hands the asset to exactly one custodian (D3), unlike the pre-W6 Assign step's multi-pilot checklist. */
   readonly selectedCustodianId = signal<string | null>(null);
   readonly handoverLocation = signal('');
   readonly handingOver = signal(false);
-  /** Set only if `setAssetCustody`/`assignPilot` itself fails — see this section's own class-doc paragraph for why that can never read as a creation failure. */
+  /** Set only if `setAssetCustody`/`assignPilot` itself fails — never a creation failure (see this section's own class-doc paragraph). */
   readonly handoverError = signal<string | null>(null);
-  /**
-   * The step's own completed sub-state (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4 — "the end screen must
-   * name the next verb"), rendered in place of an automatic router redirect: `'issued'`/`'stocked'`
-   * once the operator has picked one of the step's two actions, `null` while the step itself is still
-   * showing the custodian picker.
-   */
+  /** `'issued'`/`'stocked'` once the operator has picked one of the step's two actions, `null` while the picker itself is still showing (never reached at all on {@link existingAssetPath}). */
   readonly handoverOutcome = signal<'issued' | 'stocked' | null>(null);
-
-  /** The end screen's one link — readiness for a connected (device-bearing) vehicle, inventory for equipment (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4). */
-  readonly handoverNext = computed(() => {
-    const assetId = this.createdAssetId();
-    return this.categoryConnected() && assetId
-      ? { label: 'Open readiness ›', path: ['/assets', assetId, 'readiness'] as const, queryParams: undefined }
-      : { label: 'Back to inventory', path: ['/assets'] as const, queryParams: { tab: 'equipment' } };
-  });
 
   selectCustodian(userId: string | null): void {
     this.selectedCustodianId.set(userId);
@@ -944,6 +1266,9 @@ export class OnboardingStore {
     this.handoverOutcome.set(null);
     this.handoverError.set(null);
     this.step.set('handover');
+    if (this.existingAssetPath()) {
+      return; // that asset already has an owner — no roster to fetch, no picker to show.
+    }
     this.pilotCandidatesLoading.set(true);
     try {
       const creator = this.auth.user();
@@ -954,10 +1279,8 @@ export class OnboardingStore {
       this.selectedCustodianId.set(creator ? defaultPilotSelection(creator.userId, group)[0] ?? null : null);
     } catch {
       // Silent-degrade (this app's own background-check convention, e.g. `loadCategoryOptions`
-      // below) — `GET /api/users` may 403 for a caller without org-management rights (a plain
-      // PILOT self-registering, still reachable ahead of the backend's own wave-C gate); the
-      // asset is already created and unaffected either way, so this only ever narrows the picker
-      // to its own empty state, never blocks the page.
+      // below) — `GET /api/users` may 403 for a caller without org-management rights; the asset is
+      // already created and unaffected either way.
       this.pilotCandidates.set([]);
     } finally {
       this.pilotCandidatesLoading.set(false);
@@ -968,8 +1291,8 @@ export class OnboardingStore {
    * The step's primary action — hands the asset to the selected custodian. `setAssetCustody`'s own
    * `ISSUE` action does not create a pilot assignment (verified by reading
    * `DefaultAssetCustodyService#issue`, which only touches `Custody`/`InventoryState`), so this calls
-   * `assignPilot` immediately after, exactly mirroring the pre-W6 Assign step's own effect. No-op
-   * with nobody selected — the picker's own "Issue to" button stays disabled for that case.
+   * `assignPilot` immediately after. No-op with nobody selected — the picker's own "Issue to" button
+   * stays disabled for that case.
    */
   async issueToCustodian(): Promise<void> {
     const assetId = this.createdAssetId();
@@ -986,9 +1309,6 @@ export class OnboardingStore {
       await this.fleet.refresh({ quiet: true });
       this.handoverOutcome.set('issued');
     } catch (error) {
-      // The asset already exists (see this section's own class-doc paragraph) — this message is
-      // rendered plainly on the step itself (`onboarding.html`), not folded into a generic toast,
-      // precisely so it never reads as "the asset wasn't saved".
       this.handoverError.set(describeHttpError(error));
     } finally {
       this.handingOver.set(false);
@@ -1000,27 +1320,27 @@ export class OnboardingStore {
     this.handoverOutcome.set('stocked');
   }
 
-  // --- Step navigation (docs/plans/done/UX-REWORK-PLAN.md §U-d item 1 — stepper, back-navable) -------------
+  // --- Step navigation (docs/plans/done/UX-REWORK-PLAN.md §U-d item 1 — rail, back-navable) -------
 
   private readonly stepContext = computed<StepContext>(() => ({
-    connected: this.categoryConnected(),
+    equipment: this.equipment(),
     needsProve: this.rowsNeedProve(),
   }));
 
   readonly canAdvance = computed(() => {
     switch (this.step()) {
-      case 'identify':
-        return this.canAdvanceIdentify();
-      case 'connect':
-        return this.canAdvanceConnect();
+      case 'source':
+        return this.canAdvanceFromSource();
       case 'prove':
         return this.canAdvanceProve();
-      case 'register':
-        return false; // the Register step has its own "Create asset"/"Receive" action, not a "Next"
+      case 'identify':
+        return this.canAdvanceIdentify();
+      case 'attach':
+        return false; // its own Create/Attach action, not a "Next"
       case 'sysid':
-        return false; // the sysid step has its own "Write sysid"/"Continue" actions, not a "Next"
+        return false; // its own "Write sysid"/"Continue" actions, not a "Next"
       case 'handover':
-        return false; // the Hand-over step has its own "Issue to"/"Leave in stock" actions, not a "Next"
+        return false; // its own "Issue to"/"Leave in stock" actions, not a "Next"
     }
   });
 
@@ -1035,11 +1355,48 @@ export class OnboardingStore {
     this.step.set(prevStep(this.step(), this.stepContext()));
   }
 
+  /**
+   * The rail's own `(jump)` output — `vision-step-rail` itself imposes no restriction at all ("every
+   * step is re-enterable by design", its own class doc), so this wizard's one-way door past a
+   * successful create/attach (`onboarding-logic.ts#WizardStep`'s own doc comment: "never
+   * back-navigable into attach post-creation") is enforced here, the one place every rail click
+   * funnels through. A no-op once {@link createdAssetId} is set — `attach`/`sysid`/`handover` are
+   * never rail targets anyway (`sysid` is excluded from `visibleSteps` entirely, and this guard is
+   * what keeps a click on the rail's own "Attach"/"Hand over" chip from re-opening a step whose work
+   * is already done).
+   */
+  jumpToStep(step: WizardStep): void {
+    if (this.createdAssetId()) {
+      return;
+    }
+    this.step.set(step);
+  }
+
   constructor() {
     void this.loadCategoryOptions();
     void this.loadSystemNetwork();
-    void this.applyDevicePrefill();
-    inject(DestroyRef).onDestroy(() => this.revokePreview());
+    void this.applyCandidateQueryPrefill();
+    this.provisionWifiSupported.set(this.webSerial.isSupported());
+
+    // The waiting-room poll (`discoveryStatus`) and the shared discovery-inbox candidate feed only
+    // ever matter while the `source` step itself is on screen — started/stopped here rather than
+    // unconditionally for the store's whole lifetime, so leaving `/add-source` (destroying this
+    // per-route store) or simply moving past `source` releases both immediately.
+    effect(() => {
+      const onSource = this.step() === 'source';
+      untracked(() => {
+        if (onSource) {
+          this.startDiscoveryStatusPoll();
+        } else {
+          this.stopDiscoveryStatusPollNow();
+        }
+      });
+    });
+
+    inject(DestroyRef).onDestroy(() => {
+      this.revokePreview();
+      this.stopDiscoveryStatusPollNow();
+    });
   }
 
   private async loadCategoryOptions(): Promise<void> {
@@ -1062,19 +1419,20 @@ export class OnboardingStore {
   }
 
   /**
-   * Fetched once, up front, so the "configure your drone" sub-step's snippets are ready to render
-   * the moment the operator gets there (docs/plans/active/DRONE-INFRA-PLAN.md I-g) — not fetched lazily on first
-   * pick, which would show a blank/loading config panel on an otherwise-instant step transition.
-   * Silent-degrade on failure exactly like `loadCategoryOptions` above: `mavlinkPort` keeps its
-   * `DEFAULT_MAVLINK_PORT` fallback and `networkAddresses` stays `[]`, which is the same UI state
-   * `SystemNetworkResponse#addresses` being genuinely empty already has to handle (the manual-address
-   * input) — no separate error state needed.
+   * Fetched once, up front, so the "configure your drone" sub-step's snippets and the `source`
+   * step's own push-address card are ready to render the moment the operator gets there. Silent-
+   * degrade on failure exactly like `loadCategoryOptions` above: `mavlinkPort` keeps its
+   * `DEFAULT_MAVLINK_PORT` fallback, `networkAddresses` stays `[]`, and `videoPushPort`/
+   * `videoPushPathPrefix` stay `undefined` — {@link pushAddressCard} already renders that
+   * combination as "no card" honestly, no separate error state needed.
    */
   private async loadSystemNetwork(): Promise<void> {
     try {
       const network = await this.api.systemNetwork();
       this.networkAddresses.set(network.addresses);
       this.mavlinkPort.set(network.mavlinkPort);
+      this.videoPushPort.set(network.videoPushPort);
+      this.videoPushPathPrefix.set(network.videoPushPathPrefix);
       if (network.addresses.length > 0) {
         this.selectedServerAddress.set(network.addresses[0].address);
       }
@@ -1084,37 +1442,26 @@ export class OnboardingStore {
   }
 
   /**
-   * The wizard's own entry-point prefill contract (docs/plans/active/WAREHOUSE-UX-CONTEXT.md "W6
-   * handoff"): a `?deviceId=<uuid>` query param on `/add-source` prefills the Connect step with that
-   * device's own `protocol`/`uri`/`options`, landing on whichever fit-out row matches its
-   * capabilities (`fit-out-logic.ts#roleForDevice` — TELEMETRY-capable is Sense, everything else is
-   * Sight). Background, best-effort, silent-degrade like every other read in this constructor: an
-   * unknown id, a 403, or no `deviceId` at all simply leaves both rows at their empty default —
-   * never a blocked page over a read this app cannot promise will succeed.
-   *
-   * **Known limitation**: this creates a *new* device row on the asset the wizard is about to
-   * register, not a reference to the original `Device` by id (`CreateAssetRequest` carries no such
-   * field for `devices[]` — only `deviceIds[]` does, which this wizard's multi-role fit-out table
-   * does not thread through). A caller linking here to "attach this already-registered device to a
-   * new asset" gets a duplicate device row with the same protocol/uri, not a move — see this wave's
-   * WAREHOUSE-UX-CONTEXT.md handoff for the full contract and this tradeoff.
+   * The wizard's own candidate-entrance contract (§3.1's candidate-entrance table): a
+   * `?candidateId=<uuid>` query param on `/add-source` prefills the fit-out row that candidate's own
+   * method belongs on (`onboarding-logic.ts#roleForDiscoveryMethod`), pre-proven, `needsProve` false
+   * for that role. Mirrors the pre-W2 wizard's own `?deviceId=` prefill pattern exactly (background,
+   * best-effort, silent-degrade) — no single-candidate-by-id `GET` exists, so this fetches the whole
+   * inbox and finds by id, same as that prefill's own `listDevices()` + find.
    */
-  private async applyDevicePrefill(): Promise<void> {
-    const deviceId = this.route.snapshot.queryParamMap.get('deviceId');
-    if (!deviceId) {
+  private async applyCandidateQueryPrefill(): Promise<void> {
+    const candidateId = this.route.snapshot.queryParamMap.get('candidateId');
+    if (!candidateId) {
       return;
     }
     try {
-      const devices = await this.api.listDevices();
-      const device = devices.find((d) => d.id === deviceId);
-      if (!device) {
+      const response = await this.api.listDiscoveryInboxCandidates();
+      const candidate = response.candidates.find((c) => c.id === candidateId);
+      if (!candidate) {
         return;
       }
-      this.applyResolvedConnection(roleForDevice(device), {
-        protocol: device.protocol,
-        uri: device.uri,
-        options: Object.keys(device.options).length > 0 ? device.options : undefined,
-      });
+      this.prefillRowFromCandidate(candidate);
+      this.originCandidateId.set(candidateId);
     } catch {
       // Silent-degrade — see this method's own doc comment.
     }

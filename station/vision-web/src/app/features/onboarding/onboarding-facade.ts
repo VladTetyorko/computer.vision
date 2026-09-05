@@ -2,15 +2,32 @@ import { Injectable, computed, inject } from '@angular/core';
 import { SettingsStore } from '../../core/settings/settings-store';
 import { ToastService } from '../../core/toast.service';
 import { OnboardingStore } from './onboarding-store';
-import { visibleSteps, type WizardStep } from './onboarding-logic';
+import {
+  relativeAge,
+  senseTerminalProof,
+  sightTerminalProof,
+  visibleSteps,
+  type RoleProof,
+  type SourceMode,
+  type WizardStep,
+} from './onboarding-logic';
 import {
   FIT_OUT_FIND_METHODS,
   FIT_OUT_ROLES,
   combinedSysidCollision,
+  isRowFilled,
   usesLegacySimulationPath,
   type FitOutFindMethod,
   type FitOutRole,
 } from '../../core/onboarding/fit-out-logic';
+import {
+  MAVLINK_METHOD,
+  MEDIAMTX_METHOD,
+  freshestNewCandidate,
+  intakeState,
+  type IntakeState,
+} from '../../core/onboarding/intake-logic';
+import { candidateAgeLabel, discoveryMethodLabel } from '../../core/discovery/discovery-inbox-logic';
 import {
   detailsSummary,
   isClaimedVehicle,
@@ -26,19 +43,22 @@ import {
   type ConfigBlock,
 } from './drone-config-logic';
 import { outcomeLabel, outcomeTone } from '../../core/readiness/readiness-logic';
-import type { DiscoveredDevice, ParameterWriteResponse } from '../../core/api/models';
+import { humanAge } from '../../core/telemetry/telemetry-logic';
+import type { DiscoveredDevice, DiscoveryCandidate, ParameterWriteResponse } from '../../core/api/models';
+import type { StepRailItem } from '../../shared/ui/step-rail';
 
 interface StepDescriptor {
   readonly step: WizardStep;
   readonly label: string;
 }
 
-/** The stepper's own label row (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4 — "Identify · Connect · Prove · Register · Hand over"). `sysid` is never included — see `onboarding-logic.ts#WizardStep`'s own doc comment. */
+/** The rail's own label row (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.1). `sysid` is never
+ *  included — see `onboarding-logic.ts#WizardStep`'s own doc comment. */
 const STEP_LABELS: Record<WizardStep, string> = {
-  identify: 'Identify',
-  connect: 'Connect',
+  source: 'Source',
   prove: 'Prove',
-  register: 'Register',
+  identify: 'Identify',
+  attach: 'Attach',
   sysid: 'Sysid',
   handover: 'Hand over',
 };
@@ -51,7 +71,7 @@ const FIND_METHOD_LABELS: Record<FitOutFindMethod, string> = {
   drone: 'Add a real drone',
 };
 
-/** Each finder tile's own one-line sub-copy — moved verbatim from the pre-W6 Connect step's five tiles. */
+/** Each finder tile's own one-line sub-copy — moved verbatim from the pre-W2 Connect step's tiles. */
 const FIND_METHOD_HINTS: Record<FitOutFindMethod, string> = {
   register: "Paste a camera's stream URL if you already have one (RTSP, MJPEG, HTTP).",
   discover: "Scan your local network and pick from what's found — no address needed.",
@@ -59,15 +79,53 @@ const FIND_METHOD_HINTS: Record<FitOutFindMethod, string> = {
   drone: "Connect a flight controller (Betaflight, INAV, ArduPilot) — we'll walk you through it with the connection settings pre-filled.",
 };
 
+/** One of the `source` step's four fork tiles (D3, wave W3). */
+export interface SourceModeOption {
+  readonly mode: SourceMode;
+  readonly label: string;
+  readonly hint: string;
+}
+
+const SOURCE_MODE_OPTIONS: readonly SourceModeOption[] = [
+  {
+    mode: 'passive',
+    label: 'It comes to us',
+    hint: 'Passive listening — the standing MAVLink lobby and the mediamtx push path pick this up on their own. Nothing to type, nothing to scan.',
+  },
+  {
+    mode: 'manual',
+    label: 'We go to it',
+    hint: 'Type in a stream or telemetry address you already have — a camera or a flight controller, either one.',
+  },
+  {
+    mode: 'scan',
+    label: 'Find it for me',
+    hint: 'Scan the local network for cameras, and listen for nearby drones already broadcasting telemetry.',
+  },
+  {
+    mode: 'equipment',
+    label: 'Nothing to connect',
+    hint: 'A battery, propeller, case, or other piece of gear with no video or telemetry link of its own.',
+  },
+];
+
 /**
  * `OnboardingPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — orchestrates `OnboardingStore`/
- * `SettingsStore`/`ToastService`, exactly what the page injected directly before this refactor.
- * `OnboardingStore` already owns the wizard's whole step machine/draft state/HTTP orchestration (this
- * component's own page-provided "component store"); this facade adds only the small set of
- * page-local read-models/commands `OnboardingPage` used to own directly (label maps, the summary
- * lines, the clipboard/download helpers) — every one byte-for-byte unchanged from the pre-W6 wizard
- * except where the fit-out table's per-row shape required it (`connectionSummary` below, now
- * `rowSummary`; `onConnectBack`, now `onRowBack`).
+ * `SettingsStore`/`ToastService`. `OnboardingStore` already owns the wizard's whole step machine/
+ * draft state/HTTP orchestration (this component's own page-provided "component store"); this facade
+ * adds the page-local read-models/commands every step component needs (label maps, per-row
+ * summaries, the rail's own items, the waiting room's live intake render, the clipboard/download
+ * helpers) — every one byte-for-byte carried over from the pre-W2 wizard except where the fit-out
+ * table's per-row shape or the new `source`/`attach` steps required a change (`connectionSummary`,
+ * now `rowSummary`; `onConnectBack`, now `onRowBack`; the rail/intake/source-mode additions below are
+ * new to this wave).
+ *
+ * Every one of the six per-step components (`source-step`/`prove-step`/`identify-step`/
+ * `attach-step`/`sysid-step`/`handover-step`) injects this facade directly — the non-routed-child
+ * carve-out `core/ui/architecture.spec.ts` documents (they sit inside `OnboardingPage`'s own
+ * `providers: [OnboardingStore, OnboardingFacade]` injector, so nothing is re-provided) — never
+ * `OnboardingStore` itself, keeping one single access path (`facade.xxx`/`facade.store.xxx`)
+ * consistent with the page shell's own rule (routed pages inject only their facade).
  *
  * `OnboardingStore.flightPlanDialogOpen` stays where it already lives (that store) rather than
  * moving to a `UiStore` group — it's the only dialog this page ever shows, so there is nothing for
@@ -80,21 +138,46 @@ export class OnboardingFacade {
   readonly settings = inject(SettingsStore);
   private readonly toasts = inject(ToastService);
 
-  /** Two steps for equipment (`connected: false`), five otherwise — see `onboarding-logic.ts#visibleSteps`'s own doc comment. */
+  /** Two steps for equipment, four/five otherwise — see `onboarding-logic.ts#visibleSteps`'s own doc comment. */
   readonly steps = computed<readonly StepDescriptor[]>(() =>
-    visibleSteps(this.store.categoryConnected()).map((step) => ({ step, label: STEP_LABELS[step] })),
+    visibleSteps(this.store.rows(), this.store.rowsNeedProve()).map((step) => ({ step, label: STEP_LABELS[step] })),
   );
+
+  readonly sourceModeOptions = SOURCE_MODE_OPTIONS;
 
   readonly findMethodLabels = FIND_METHOD_LABELS;
   readonly findMethodHints = FIND_METHOD_HINTS;
 
-  /** The Connect step's two rows, in render order — see `fit-out-logic.ts#FIT_OUT_ROLES`. */
+  /** The Source step's two rows, in render order — see `fit-out-logic.ts#FIT_OUT_ROLES`. */
   readonly fitOutRoles = FIT_OUT_ROLES;
-  /** Which finder tiles each row offers — see `fit-out-logic.ts#FIT_OUT_FIND_METHODS`'s own doc comment. */
-  readonly fitOutFindMethods = FIT_OUT_FIND_METHODS;
 
   /**
-   * Whether the Connect step must also render the legacy whole-vehicle Simulate sub-form (mode
+   * Which finder tiles a row's own grid offers right now — `fit-out-logic.ts#FIT_OUT_FIND_METHODS`'s
+   * fixed per-role list, narrowed on the `scan` fork tile to exclude `register` (that method is
+   * `manual`'s own tile — offering it again here would overlap the fork's two modes). `manual` never
+   * renders a tile grid at all (`OnboardingStore#chooseSourceMode` auto-resolves both rows straight
+   * to `register`), so this narrowing only ever matters for `scan`. The "Use a test source" tile is
+   * not part of this list at all — every row's tile grid renders it unconditionally alongside
+   * whatever this returns, on every mode, so the legacy Simulate path stays reachable regardless of
+   * which fork tile got the operator here.
+   */
+  rowFindMethods(role: FitOutRole): readonly FitOutFindMethod[] {
+    const all = FIT_OUT_FIND_METHODS[role];
+    return this.store.sourceMode() === 'scan' ? all.filter((method) => method !== 'register') : all;
+  }
+
+  /** A row already resolved (filled, or pre-proven from a discovery-candidate entrance) — renders its own summary card regardless of `sourceMode` (`OnboardingStore#chooseSourceMode`'s own doc comment). */
+  rowResolved(role: FitOutRole): boolean {
+    return this.store.preProvenRoles().has(role) || isRowFilled(this.store.rows()[role]);
+  }
+
+  /** The freshest `NEW` discovery candidate the waiting room's own live "Use" action would act on for this role — `undefined` until one has actually arrived. */
+  heardCandidateFor(role: FitOutRole): DiscoveryCandidate | undefined {
+    return freshestNewCandidate(this.store.discoveryCandidates(), role === 'sense' ? MAVLINK_METHOD : MEDIAMTX_METHOD);
+  }
+
+  /**
+   * Whether the Source step must also render the legacy whole-vehicle Simulate sub-form (mode
    * picker, video path, flight plan) below the fit-out table — see
    * `fit-out-logic.ts#usesLegacySimulationPath`'s own doc comment for exactly which row combination
    * this is. A plain simulated Sense/Sight row outside that combination needs no further setup: the
@@ -116,10 +199,10 @@ export class OnboardingFacade {
     return this.store.categoryOptions().find((option) => option.slug === slug)?.name ?? slug;
   });
 
-  /** The Register step's own equipment/Receive wording — "Receive" for a `connected: false` category, "Create asset" otherwise. */
-  readonly registerActionLabel = computed(() => (this.store.categoryConnected() ? 'Create asset' : 'Receive'));
+  /** The Identify step's own primary-action wording — "Receive" on the equipment path (performs the create call directly), "Next" otherwise. */
+  readonly identifyActionLabel = computed(() => (this.store.equipment() ? 'Receive' : 'Next'));
 
-  /** The Register step's one-line-per-row summary of the Connect step's outcome — never re-derives a request. */
+  /** The Attach step's own one-line-per-row summary of the Source step's outcome — never re-derives a request. */
   rowSummary(role: FitOutRole): string {
     const row = this.store.rows()[role];
     switch (row.value) {
@@ -154,13 +237,30 @@ export class OnboardingFacade {
     return this.steps().findIndex((s) => s.step === step);
   }
 
+  /** `-1` only on the hidden `sysid` interstitial (never in `steps()` — see `onboarding-logic.ts#WizardStep`'s own doc comment); `vision-step-rail` simply highlights nothing for that one transient step, an honest, momentary degrade rather than a fabricated position. */
+  readonly currentStepIndex = computed(() => this.stepIndex(this.store.step()));
+
+  /** The rail's own items — a step already passed (index less than the current one) reads `done`. */
+  readonly railItems = computed<readonly StepRailItem[]>(() => {
+    const current = this.currentStepIndex();
+    return this.steps().map((s, i) => ({ id: s.step, label: s.label, done: current >= 0 && i < current }));
+  });
+
+  /** The rail's own `(jump)` output — see `OnboardingStore#jumpToStep`'s own doc comment for the one-way-door-past-creation rule this enforces. */
+  jumpTo(index: number): void {
+    const target = this.steps()[index]?.step;
+    if (target) {
+      this.store.jumpToStep(target);
+    }
+  }
+
   /** See {@link detailsSummary} — the general "Discover on network" table's own Details column. */
   detailsSummary(details: Record<string, string>): string {
     return detailsSummary(details);
   }
 
   // --- "Listen for drones" results list (docs/plans/active/DRONE-INFRA-PLAN.md I-b) — thin helpers over
-  //     `drone-scan-logic.ts`'s own pure functions, same pattern as `detailPairs` above.
+  //     `drone-scan-logic.ts`'s own pure functions, same pattern as `detailsSummary` above.
 
   droneVehicleClaimed(candidate: DiscoveredDevice): boolean {
     return isClaimedVehicle(candidate);
@@ -179,13 +279,12 @@ export class OnboardingFacade {
   // --- "Add a real drone" (docs/plans/active/DRONE-INFRA-PLAN.md I-g) -------------------------------------------
 
   /**
-   * A row's "‹ back" affordance is shared by every finder (`onboarding.html`'s
-   * `.method-chosen-row`, now rendered once per fit-out row); for `drone` specifically it must step
-   * back one sub-state (`config` → `picker`) before falling through to the generic "leave this
-   * finder entirely" — every other finder has only one sub-state, so this is the one place that
-   * distinction matters. `drone` only ever appears on the Sense row (`FIT_OUT_FIND_METHODS`), but
-   * this checks the row's own `findMethod` rather than hardcoding that, so a future finder
-   * reassignment can't silently break it.
+   * A row's "‹ back" affordance is shared by every finder (`source-step.html`'s own resolved-row
+   * card, one per fit-out row); for `drone` specifically it must step back one sub-state (`config` →
+   * `picker`) before falling through to the generic "leave this finder entirely" — every other
+   * finder has only one sub-state, so this is the one place that distinction matters. `drone` only
+   * ever appears on the Sense row (`FIT_OUT_FIND_METHODS`), but this checks the row's own
+   * `findMethod` rather than hardcoding that, so a future finder reassignment can't silently break it.
    */
   onRowBack(role: FitOutRole): void {
     const row = this.store.rows()[role];
@@ -223,7 +322,7 @@ export class OnboardingFacade {
     URL.revokeObjectURL(url);
   }
 
-  // --- Step 4.5: fix a sysid collision (docs/plans/active/FLEET-RADIO-PLAN.md R5/F0) -----------------
+  // --- Step: fix a sysid collision (docs/plans/active/FLEET-RADIO-PLAN.md R5/F0) -----------------
   // Reuses `core/readiness/readiness-logic.ts#outcomeLabel`/`outcomeTone` — the same
   // `ParameterWriteOutcome`-shaped `'ACCEPTED'|'DENIED'|'NO_ACK'|'UNSUPPORTED'` union
   // `RemediationAction#outcome` already carries, `features/readiness/readiness.html`'s own second
@@ -240,5 +339,72 @@ export class OnboardingFacade {
   sysidOutcomeVariant(outcome: ParameterWriteResponse['outcome']): 'neutral' | 'warn' | 'danger' | 'ok' {
     const tone = outcomeTone(outcome);
     return tone === 'muted' ? 'neutral' : tone;
+  }
+
+  // --- Source step: waiting room + P1 diagnostics (§3.1 scope items 6/7, wave W3) ------------------
+
+  discoveryMethodLabel(method: string): string {
+    return discoveryMethodLabel(method);
+  }
+
+  candidateAgeLabel(candidate: DiscoveryCandidate): string {
+    return candidateAgeLabel(candidate.lastSeen, this.store.nowMs());
+  }
+
+  /** The P1 diagnostic panel's own relative-age facts (`lastDatagramAt`, a source's own `lastScanAt`) — see `onboarding-logic.ts#relativeAge`'s own doc comment. `undefined` renders as the usual faint em dash, never a fabricated "just now". */
+  diagnosticAge(iso: string | undefined): string | undefined {
+    return relativeAge(iso, this.store.nowMs());
+  }
+
+  /** "12s ago" from a raw millisecond duration (`IntakeState`'s own `heard` variant carries `ageMs`, not a timestamp to re-diff) — same `humanAge` render as {@link diagnosticAge}, just fed a duration directly instead of an ISO instant. */
+  agoFromMs(ms: number): string {
+    return `${humanAge(ms / 1000)} ago`;
+  }
+
+  /**
+   * One fit-out row's live waiting-room state (§3.1 scope item 6) — layers the store's own recorded
+   * Prove-step probe result over `core/onboarding/intake-logic.ts#intakeState`'s purely passive read,
+   * exactly as that module's own doc comment specifies ("`OnboardingStore` already tracks that
+   * separately … and is the one place that ever renders the `proven` branch"). A row pre-proven by a
+   * discovery-candidate entrance (§3.1's candidate-entrance table) is deliberately **not** rendered
+   * `proven` here — only the Hand-over step's own terminal proof does that, and only once an actual
+   * probe ran (`onboarding-logic.ts#sightTerminalProof`/`senseTerminalProof`'s own doc comment); this
+   * waiting room stays honest about the difference between "arrived over the wire" and "verified".
+   *
+   * While the very first `GET /api/discovery/status` poll is still in flight (`discoveryStatus()`
+   * still `null`), a `find` row reads `listening`/"Checking…" rather than `idle` — it genuinely is
+   * trying to prove itself, this app just has no data back yet; a `none`/`simulate` row still reads
+   * `idle`, matching `intakeState`'s own rule.
+   */
+  intakeFor(role: FitOutRole): IntakeState {
+    const row = this.store.rows()[role];
+    const status = this.store.discoveryStatus();
+    const raw: IntakeState = status
+      ? intakeState(row, status, this.store.discoveryCandidates(), this.store.nowMs())
+      : row.value === 'find'
+        ? { kind: 'listening', where: 'Checking…', seenNothing: true }
+        : { kind: 'idle' };
+    if (this.store.lastProbeOk(role) === true) {
+      return { kind: 'proven', what: raw.kind === 'heard' ? raw.what : 'verified' };
+    }
+    return raw;
+  }
+
+  // --- Hand-over step: two-half terminal proof (§3.1 scope item 5, D9) -----------------------------
+
+  /** Sight's half of the Hand-over screen's terminal proof (D9) — replaces the old `handoverNext()`
+   *  router-link guess entirely with honest per-half evidence, since the two halves can be proven
+   *  independently (e.g. Sight proven from its own Prove-step Test, Sense still simulated). Reads
+   *  straight off the Prove step's own recorded result — a pre-proven-but-never-actually-tested row
+   *  (a discovery-candidate entrance, or the waiting room's own "Use") has no `lastProbeResult` here,
+   *  so it renders the same honest "not yet verified" as any other unproven row; see
+   *  `onboarding-logic.ts#sightTerminalProof`'s own doc comment. */
+  sightProof(): RoleProof {
+    return sightTerminalProof(this.store.rows().sight.value, this.store.proveByRole().sight.lastProbeResult);
+  }
+
+  /** Sense's half of the same terminal proof — mirrors {@link sightProof} off the Prove step's own Verify result. */
+  senseProof(): RoleProof {
+    return senseTerminalProof(this.store.rows().sense.value, this.store.proveByRole().sense.lastVerifyResult);
   }
 }

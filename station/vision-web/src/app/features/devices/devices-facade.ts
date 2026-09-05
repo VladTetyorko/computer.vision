@@ -9,9 +9,10 @@ import {
   type AssetDetails,
   type Category,
   type Device,
+  type FleetSummary,
   type SettableLifecycleState,
 } from '../../core/api/models';
-import { isSimulatedAsset, mapSimulatedDevices, type SimulatedDeviceInfo } from './simulate-logic';
+import { mapSimulatedDevices, type SimulatedDeviceInfo } from './simulate-logic';
 import {
   RESTORE_TARGET_STATE,
   buildCreateAssetRequestForDevice,
@@ -79,6 +80,16 @@ export class DevicesFacade {
   /** deviceId → the simulated asset owning it; empty for a device that isn't simulated. */
   readonly simulatedDevices = signal<ReadonlyMap<string, SimulatedDeviceInfo>>(new Map());
   readonly busySimulatedAssetId = signal<string | null>(null);
+
+  /**
+   * Per-asset attention facts (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.3, P3) — fetched only
+   * for {@link telemetryAgeMsFor}'s sake, the same "one extra fleet-wide fetch, silently degrades on
+   * its own" precedent `InventoryFacade`/`CommandFacade` already established for this exact endpoint.
+   * A failure here must never blank the devices table — see {@link refreshFleetSummary}'s own doc
+   * comment — so it's a separate signal/fetch from `assets` above, not folded into the same
+   * try/catch.
+   */
+  private readonly fleetSummaryData = signal<FleetSummary | undefined>(undefined);
 
   private readonly warehouseDevices = computed<readonly Device[]>(() =>
     this.showArchived() ? this.allDevicesIncludingArchived() : this.fleet.devices(),
@@ -292,6 +303,7 @@ export class DevicesFacade {
     await Promise.all([
       this.showArchived() ? this.refreshArchivedDevices() : Promise.resolve(),
       this.refreshWarehouseAssets(),
+      this.refreshFleetSummary(),
     ]);
   }
 
@@ -305,9 +317,10 @@ export class DevicesFacade {
   /**
    * Loads every asset (respecting `showArchived`) plus its resolved devices, then stores the full
    * `AssetDetails` list — feeds `deviceOwners` (`mapDeviceOwners`, the "owned by" column + unassign
-   * action) and `simulatedDevices` (`mapSimulatedDevices`, filtered). Best-effort like
-   * `TelemetryStore`'s own asset lookups: this is enrichment for already-visible rows, not a
-   * user-initiated action, so a failure degrades silently rather than raising a toast.
+   * action) and `simulatedDevices` (`mapSimulatedDevices`, now read off every asset's own devices'
+   * `origin`, not a category pre-filter — docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md D6). Best-
+   * effort like `TelemetryStore`'s own asset lookups: this is enrichment for already-visible rows,
+   * not a user-initiated action, so a failure degrades silently rather than raising a toast.
    */
   private async refreshWarehouseAssets(): Promise<void> {
     try {
@@ -319,10 +332,43 @@ export class DevicesFacade {
       const details = await Promise.all(summaries.map((asset) => this.api.getAsset(asset.assetId)));
       this.assets.set(details);
       this.deviceOwners.set(mapDeviceOwners(details));
-      this.simulatedDevices.set(mapSimulatedDevices(details.filter(isSimulatedAsset)));
+      this.simulatedDevices.set(mapSimulatedDevices(details));
     } catch {
       // Silent-degrade — see doc comment above.
     }
+  }
+
+  /**
+   * `AssetAttention.telemetryAgeMs` per asset (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.3,
+   * P3) — the Links tab's own detail panel reads this through {@link telemetryAgeMsFor} to judge a
+   * Sense device's `roleStatus` (`devices-page-logic.ts#deviceRoleStatus`). A fetch failure here
+   * must never blank the devices table itself — kept as its own signal/try-catch rather than folded
+   * into {@link refreshWarehouseAssets}'s `Promise.all`, so a summary-only outage degrades the role-
+   * status chip to `never-seen`/`not-fitted` instead of losing the whole table's asset enrichment.
+   */
+  private async refreshFleetSummary(): Promise<void> {
+    try {
+      this.fleetSummaryData.set(await this.api.fleetSummary(this.showArchived()));
+    } catch {
+      // Silent-degrade — see doc comment above.
+    }
+  }
+
+  /**
+   * Every device on `assetId`'s asset, if it's loaded — `deviceRoleStatus` needs a device's *sibling*
+   * devices of the same role to judge fairly (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.3's own
+   * `roleStatus` doc comment: a role can be fitted more than once). `undefined` for an unowned
+   * device, or one whose owner hasn't loaded yet — `deviceRoleStatus`'s own single-device fallback
+   * covers both honestly.
+   */
+  ownerDevices(assetId: string | undefined): readonly Device[] | undefined {
+    return assetId ? this.assets().find((asset) => asset.assetId === assetId)?.devices : undefined;
+  }
+
+  /** `undefined` for an unowned device or before the fleet summary has loaded — `deviceRoleStatus`
+   *  reads that as "never heard", never a fabricated reading (see {@link refreshFleetSummary}). */
+  telemetryAgeMsFor(assetId: string | undefined): number | undefined {
+    return assetId ? this.fleetSummaryData()?.assets.find((asset) => asset.assetId === assetId)?.telemetryAgeMs : undefined;
   }
 
   /** The page's "Refresh" button re-reads devices/streams *and* the whole warehouse view. */
