@@ -2,6 +2,7 @@ package com.drones.vision.adapter.discovery.mdns;
 
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
+import com.drones.vision.warehouse.domain.model.SourceStatus;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.warehouse.domain.port.DeviceDiscoveryPort;
 
@@ -79,6 +80,16 @@ public final class MdnsScanner implements DeviceDiscoveryPort {
     private final ScanBudget budget;
 
     /**
+     * {@link SourceStatus#OK} until a scan fails to even create its jmdns instance, {@link
+     * SourceStatus#UNREACHABLE} after; the next successful scan resets it. Without this override
+     * the port's {@link DeviceDiscoveryPort#lastStatus()} default answers {@link
+     * SourceStatus#NEVER_SCANNED} forever, which {@code DefaultDiscoveryService#health()} may pair
+     * with a real last-scan time — a combination {@code SourceHealth}'s compact constructor
+     * rightly rejects (the C2-wave default change from OK to NEVER_SCANNED missed this scanner).
+     */
+    private volatile SourceStatus lastStatus = SourceStatus.OK;
+
+    /**
      * Binds jmdns to the platform's default interface/address selection,
      * using {@link ScanBudget#defaults()}.
      */
@@ -127,6 +138,11 @@ public final class MdnsScanner implements DeviceDiscoveryPort {
     }
 
     @Override
+    public SourceStatus lastStatus() {
+        return lastStatus;
+    }
+
+    @Override
     public List<DiscoveredDevice> scan(Duration timeout) {
         Objects.requireNonNull(timeout, "timeout must not be null");
         long timeoutMillis = Math.max(1L, timeout.toMillis());
@@ -139,6 +155,7 @@ public final class MdnsScanner implements DeviceDiscoveryPort {
         try {
             jmdns = createJmDns();
         } catch (IOException e) {
+            lastStatus = SourceStatus.UNREACHABLE;
             throw new UncheckedIOException("mDNS scan failed", e);
         }
         try {
@@ -158,6 +175,7 @@ public final class MdnsScanner implements DeviceDiscoveryPort {
         for (ServiceInfo info : httpHits.get()) {
             devices.add(toDiscoveredDevice(info, false));
         }
+        lastStatus = SourceStatus.OK;
         return List.copyOf(devices);
     }
 

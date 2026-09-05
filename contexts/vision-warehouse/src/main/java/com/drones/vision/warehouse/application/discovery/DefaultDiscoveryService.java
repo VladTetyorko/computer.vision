@@ -2,6 +2,7 @@ package com.drones.vision.warehouse.application.discovery;
 
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
+import com.drones.vision.warehouse.domain.model.SourceStatus;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.warehouse.domain.port.DeviceDiscoveryPort;
 
@@ -182,9 +183,16 @@ public final class DefaultDiscoveryService implements DiscoveryService {
         List<SourceHealth> health = new ArrayList<>(portsByMethod.size());
         for (DeviceDiscoveryPort port : portsByMethod.values()) {
             Instant lastScanAt = lastScanAtByMethod.get(port.method());
-            health.add(lastScanAt == null
+            // An adapter that still answers NEVER_SCANNED after this service has scanned it is
+            // breaking the port contract (it never tracks its own status); degrade that one entry
+            // to the honest "no answer" shape instead of constructing the illegal
+            // (NEVER_SCANNED, lastScanAt) pair — which SourceHealth rejects and which would
+            // otherwise turn one adapter's contract slip into a permanent 400 for the whole
+            // /api/discovery/status endpoint (found live, 2026-09-05).
+            SourceStatus status = port.lastStatus();
+            health.add(lastScanAt == null || status == SourceStatus.NEVER_SCANNED
                     ? new SourceHealth(port.method())
-                    : new SourceHealth(port.method(), port.lastStatus(), lastScanAt));
+                    : new SourceHealth(port.method(), status, lastScanAt));
         }
         return List.copyOf(health);
     }

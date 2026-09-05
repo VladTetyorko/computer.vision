@@ -3,6 +3,7 @@ package com.drones.vision.adapter.discovery.onvif;
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
+import com.drones.vision.warehouse.domain.model.SourceStatus;
 import com.drones.vision.warehouse.domain.port.DeviceDiscoveryPort;
 
 import java.io.IOException;
@@ -112,6 +113,16 @@ public final class OnvifWsDiscoveryScanner implements DeviceDiscoveryPort {
     private final InetSocketAddress probeTarget;
     private final OnvifDeviceClient deviceClient;
 
+    /**
+     * {@link SourceStatus#OK} until a scan fails to even open/send its probe socket, {@link
+     * SourceStatus#UNREACHABLE} after; the next successful scan resets it. Without this override
+     * the port's {@link DeviceDiscoveryPort#lastStatus()} default answers {@link
+     * SourceStatus#NEVER_SCANNED} forever, which {@code DefaultDiscoveryService#health()} may pair
+     * with a real last-scan time — a combination {@code SourceHealth}'s compact constructor
+     * rightly rejects (the C2-wave default change from OK to NEVER_SCANNED missed this scanner).
+     */
+    private volatile SourceStatus lastStatus = SourceStatus.OK;
+
     /** Uses the standard WS-Discovery multicast address, {@code 239.255.255.250:3702}. */
     public OnvifWsDiscoveryScanner() {
         this(new InetSocketAddress(STANDARD_MULTICAST_HOST, STANDARD_MULTICAST_PORT));
@@ -134,6 +145,11 @@ public final class OnvifWsDiscoveryScanner implements DeviceDiscoveryPort {
     }
 
     @Override
+    public SourceStatus lastStatus() {
+        return lastStatus;
+    }
+
+    @Override
     public List<DiscoveredDevice> scan(Duration timeout) {
         Objects.requireNonNull(timeout, "timeout must not be null");
         long budgetNanos = timeout.isNegative() ? 0L : timeout.toNanos();
@@ -150,8 +166,10 @@ public final class OnvifWsDiscoveryScanner implements DeviceDiscoveryPort {
             // failure per the port contract; the caller (DiscoveryService)
             // isolates it. Mid-scan receive errors are handled inside
             // collectResponses and never reach here.
+            lastStatus = SourceStatus.UNREACHABLE;
             throw new UncheckedIOException("ONVIF WS-Discovery scan failed", e);
         }
+        lastStatus = SourceStatus.OK;
         return List.copyOf(completeStreams(found.values(), deadlineNanos));
     }
 

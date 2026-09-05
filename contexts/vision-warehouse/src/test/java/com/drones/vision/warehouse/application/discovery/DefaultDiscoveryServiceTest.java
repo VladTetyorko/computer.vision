@@ -291,6 +291,21 @@ class DefaultDiscoveryServiceTest {
     }
 
     @Test
+    void healthDegradesAContractBreakingPortToNeverScannedInsteadOfThrowing() {
+        // A real adapter that never overrides lastStatus() answers NEVER_SCANNED even after a
+        // scan (the port default). Pairing that with the recorded lastScanAt would trip
+        // SourceHealth's compact constructor and 400 the whole status endpoint (found live,
+        // 2026-09-05: MdnsScanner/OnvifWsDiscoveryScanner missed the C2 default change).
+        FakePort forgetful = FakePort.returning("mdns", List.of());
+        forgetful.status(SourceStatus.NEVER_SCANNED);
+        DiscoveryService service = new DefaultDiscoveryService(List.of(forgetful));
+
+        service.scan(new DiscoveryScanSpec(Duration.ofSeconds(1), Set.of()));
+
+        assertEquals(List.of(new SourceHealth("mdns")), service.health());
+    }
+
+    @Test
     void healthIsReadableWithoutRunningAScan() {
         FakePort mdns = FakePort.returning("mdns", List.of());
         DiscoveryService service = new DefaultDiscoveryService(List.of(mdns));
