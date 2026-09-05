@@ -63,6 +63,9 @@ const PREROLL_MARGIN = '250px';
 export class WallTile {
   readonly tile = input.required<WallTileModel>();
   readonly boxesMode = input.required<BoxesMode>();
+  /** F2 crop-follow (per-viewer, facade-owned like {@link boxesMode}); echoed, never stored here. */
+  readonly cropFollowEnabled = input<boolean>(false);
+  readonly cropFollowEnabledChange = output<boolean>();
 
   readonly focused = output<string>();
 

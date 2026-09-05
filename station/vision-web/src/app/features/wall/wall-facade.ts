@@ -104,6 +104,9 @@ export class WallFacade {
    *  Fly cockpit and `/live` already read/write (H12, `CockpitFacade#boxesMode`'s identical
    *  simplification). */
   readonly boxesMode = this.settings.declutterLevel;
+  /** F2 crop-follow — the same per-viewer `SettingsStore` signal Fly/Live write; tiles get it as
+   *  an input and echo changes back, per the wall's facade-owns-settings idiom (`boxesMode`). */
+  readonly cropFollowEnabled = this.settings.cropFollowEnabled;
   cycleBoxesMode(): void {
     this.boxesMode.update((mode: BoxesMode) => cycleBoxesMode(mode));
   }

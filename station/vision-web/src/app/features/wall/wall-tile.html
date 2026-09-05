@@ -15,6 +15,8 @@
     [compact]="true"
     [detections]="detections.results()"
     [boxesMode]="boxesMode()"
+    [lockedTrackId]="lockedTrackId()"
+    [cropFollowEnabled]="cropFollowEnabled()"
   />
 
   @if (tile().severity !== 'ok') {
@@ -67,4 +69,9 @@
      `<button>` (Re-acquire), which nested inside `.tile` would be invalid, click-bubbling HTML.
      `canRelease` is hardcoded `false` and neither `(release)` nor `(reacquire)` is bound — this
      mount can never send a write, by construction, regardless of what the lock's own state is. -->
-<vision-follow-hud [follow]="follow()" [canRelease]="false" />
+<vision-follow-hud
+  [follow]="follow()"
+  [canRelease]="false"
+  [cropFollowEnabled]="cropFollowEnabled()"
+  (cropFollowEnabledChange)="cropFollowEnabledChange.emit($event)"
+/>

@@ -62,7 +62,13 @@
          renders it. -->
     <div class="grid" [style.--tile-min.px]="facade.tileMinPx()">
       @for (tile of facade.tiles(); track tile.streamId) {
-        <vision-wall-tile [tile]="tile" [boxesMode]="facade.boxesMode()" (focused)="facade.focus($event)" />
+        <vision-wall-tile
+          [tile]="tile"
+          [boxesMode]="facade.boxesMode()"
+          [cropFollowEnabled]="facade.cropFollowEnabled()"
+          (cropFollowEnabledChange)="facade.cropFollowEnabled.set($event)"
+          (focused)="facade.focus($event)"
+        />
       }
     </div>
   }

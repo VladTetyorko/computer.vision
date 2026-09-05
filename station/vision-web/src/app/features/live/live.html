@@ -35,6 +35,7 @@
           [boxesMode]="facade.boxesMode()"
           [lockedTrackId]="facade.lockedTrackId()"
           [lostBox]="facade.lostBox()"
+          [cropFollowEnabled]="facade.settings.cropFollowEnabled()"
           (latencyChanged)="facade.onLatency($event)"
           (transportChanged)="facade.onTransport($event)"
           (trackFollowed)="facade.followTrack($event)"
@@ -47,6 +48,8 @@
         <vision-follow-hud
           [follow]="facade.follow()"
           [canRelease]="facade.canRelease()"
+          [cropFollowEnabled]="facade.settings.cropFollowEnabled()"
+          (cropFollowEnabledChange)="facade.settings.cropFollowEnabled.set($event)"
           (release)="facade.releaseFollow()"
           (reacquire)="facade.reacquireFollow()"
         />

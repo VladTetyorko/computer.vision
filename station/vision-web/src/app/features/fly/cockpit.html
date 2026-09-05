@@ -39,6 +39,7 @@
           [detections]="facade.detections.results()"
           [boxesMode]="facade.boxesMode()"
           [lockedTrackId]="facade.lockedTrackId()"
+          [cropFollowEnabled]="facade.settings.cropFollowEnabled()"
           [hoveredClass]="facade.hoveredDetectionClass()"
           [lostBox]="facade.lostBox()"
           (latencyChanged)="facade.onLatency($event)"
@@ -266,6 +267,8 @@
         <vision-follow-hud
           [follow]="facade.follow()"
           [canRelease]="!facade.watchMode()"
+          [cropFollowEnabled]="facade.settings.cropFollowEnabled()"
+          (cropFollowEnabledChange)="facade.settings.cropFollowEnabled.set($event)"
           (release)="facade.releaseFollow()"
           (reacquire)="facade.reacquireFollow()"
         />
