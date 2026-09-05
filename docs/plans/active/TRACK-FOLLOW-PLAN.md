@@ -812,3 +812,60 @@ not claimed.
    §5.2's list is the gate, not `tsc` green.
 5. **F2 is a crop of already-downscaled pixels.** At ×2 on a 640-px detect width the result is soft.
    The label says so; there is no honest way to make it not true.
+
+## 6. Close-out (2026-09-05)
+
+Status: **BUILT + verified**, branch `feat/track-follow` (stacked, unmerged). All waves W0–W6
+committed green; W7 ran trackeval plus a live walk against a local cv-service on the
+`fuel_station.mp4` loop. Web suite at close: **187 files / 3737 tests** green (`npm run test:ci`).
+
+### 6.1 Wave commits
+
+| Wave | Commit | Scope |
+|---|---|---|
+| W3 | `2e5303d3` | REST exposure — `follow` block on `GET /api/streams/{id}/tracks` |
+| W4 | `e62ba512` | Follow HUD + D1 lock-outlives-drawer + frozen `lastBox` |
+| W5 | `0d706796` | Target list; HUD reaches `/live` and Wall |
+| fix | `9dfb303c` | Re-acquire button honors `canRelease` (W5 live find) |
+| W6 | `16e3e984` | ×2 crop-follow (client-side, honest label) |
+| fix | `0c2629a3` | Host wiring for the ×2 toggle — cockpit, `/live`, Wall (W6 shipped it unwired; Wall's `[lockedTrackId]` was never bound at all) |
+| fix | `1f31dec6` | **Release returns the stream to `ASSOCIATE`** (live find, §6.3) |
+
+### 6.2 §5.2 live-walk results
+
+| Step | Result |
+|---|---|
+| 1 click-to-follow | ✅ HUD `Following · cake #274` within one poll (yolo26n mislabels on this footage — known, not a defect) |
+| 2 D1 drawer close | ✅ headline regression: drawer closed, HUD + lock #274 survive |
+| 3 coasting | ✅ wire + HUD `truck #282 · Coasting`, dashed box |
+| 4 LOST honesty | ✅ frozen dashed lastBox, age ticking, Re-acquire only inside TTL, crop toggle hidden |
+| 5 re-acquire | ⚠️ **timing residual.** `reacquirable=true` observed on the wire at ages 16–25 s and the button renders then; but the 44.9 s loop's quiet gap (~28 s) sits at the 30 s memory TTL edge, so the target never returned *inside* the window across four attempts — no live HOLDING-again observed. trackeval `occlusion`/`long_occlusion` prove the recovery path (100 % recovery, 0 IDSW). |
+| 6 release | ✅ follow block leaves the wire, HUD leaves the glass, un-dims |
+| 7 target list | ✅ empty state, ordered rows, row click fires the same lock PATCH as a box click |
+| 8 /live + Wall | ⚠️ not walked live (session ended by the disk incident, §6.4). Spec-covered: W5 tests pin HUD presence on both and `canRelease=false` renders no buttons on Wall tiles. |
+| 9 two-box click at ×2 | ⚠️ unstageable live in FOLLOW mode — only the lock carries an identity, so a second clickable box cannot exist (mode semantics, §6.3). Covered by W6 unit tests. |
+| 10 both themes | ⚠️ not walked live (disk incident). HUD is built from theme-invariant `--hud-*` tokens per frontend-style §2. |
+| D9 ladder reason | ⚠️ residual as §5.2 allows: `capability-level ≤ 2` was never set live. |
+
+### 6.3 Defects found by the walk (all fixed on-branch)
+
+1. **Release stranded the stream in FOLLOW** — cv-service's FOLLOW session without a lock emits no
+   track identities and an empty `tracks[]`, so after Release the click hit-test and target list were
+   permanently dead; the only way back was an API-level mode flip no UI offers. `1f31dec6` makes
+   Release restore `ASSOCIATE`.
+2. **Re-acquire ignored `canRelease`** — Wall tiles would have offered a control that cannot act.
+   `9dfb303c`.
+3. **W6 shipped the crop toggle unwired** (file scope excluded hosts — a plan defect to carry into
+   the next plan's wave-scoping) and Wall's player never received `lockedTrackId`. `0c2629a3`.
+
+New residuals from the walk: **`REQUESTING` has no timeout** — a lock request for a track that dies
+before the session flip binds never resolves and never fails; the operator's only exit is Release.
+Worth a small follow-up (client-side "didn't catch it" after ~5 s). Also: heavy id churn on busy
+scenes means a clicked id can die between click and bind; the same follow-up covers it.
+
+### 6.4 Session note
+
+The live walk was cut short by a machine-level incident unrelated to this branch: the Discord snap
+flooded AppArmor audit denials (~62 M events) until `/var/log` (5.6 GB) filled the disk to 0 bytes
+and rsyslog entered an ENOSPC error loop. Steps 8/10 and D9 are recorded above as residuals with
+their compensating spec coverage rather than claimed.
