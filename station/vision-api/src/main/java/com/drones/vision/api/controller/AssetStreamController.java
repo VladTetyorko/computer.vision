@@ -62,9 +62,9 @@ import com.drones.vision.api.security.SeatAccess;
  * caller stop any asset's stream regardless of scope. It is scoped narrowly, on purpose: "may this
  * caller touch this asset at all" (visibility, {@link #requireInScope}), <b>not</b> "does this
  * caller have exclusive claim to it" — two authorized operators contending for the same aircraft is
- * deliberately out of scope here and stays with {@code CREW-CONTROL-PLAN.md} §2.6/§4.5
- * ({@code AssignmentRole{PIC,OBSERVER}} + a TTL control claim), which owns multi-operator
- * arbitration. An out-of-scope or unknown asset now 404s instead of the previous unconditional
+ * deliberately out of scope here and stays with {@code CREW-CONTROL-PLAN.md} §3.2/§3.3
+ * (the two-seat authority rule + guard table; built as the CAMERA-seat guard below), which owns
+ * multi-operator arbitration. An out-of-scope or unknown asset now 404s instead of the previous unconditional
  * no-op/204 — existence hidden, matching every other scoped read in this codebase.
  *
  * <h2>Status codes</h2>

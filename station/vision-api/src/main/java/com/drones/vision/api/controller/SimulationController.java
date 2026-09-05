@@ -47,7 +47,7 @@ import com.drones.vision.api.security.CurrentUser;
  * all", the same visibility question {@link AssetStreamController#stopStream} answers for its own
  * stop endpoint, <b>not</b> an exclusive-claim/arbitration question: two authorized operators
  * contending for one simulated aircraft is deliberately out of scope here and stays with
- * {@code CREW-CONTROL-PLAN.md} §2.6/§4.5.
+ * {@code CREW-CONTROL-PLAN.md} §3.2/§3.3.
  *
  * <h2>Status codes</h2>
  * A bad {@code videoPath} (failing {@code SimulationService}'s filesystem checks — missing, not a

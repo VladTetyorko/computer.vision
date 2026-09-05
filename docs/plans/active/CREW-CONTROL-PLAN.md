@@ -516,3 +516,54 @@ true** — the owner is now §3.2/§3.3. W5 repoints both citations.
 | §5.1 — `?watch=1` becomes a voluntary layout hint, posture from a server fact | **Kept and sharpened** — §3.6's `may*` fields are that fact, and D1 fixes the lie that survived three cockpit reworks |
 | §§2.7, 3.1-invites, 4.3, 4.4, CC-5, CC-6 — passwords and one-time-token invites | **Moved out of this plan entirely.** They are an onboarding feature that was bundled here only because both needed "a second person to exist". They belong with AUTH-ROLES |
 | §6 — the M/~4-agent-day estimate | **Re-derived.** W1 S · W2 M · W3 M · W4 S · W5 S — with the `features/live/` reuse (A1) and one write endpoint (A2), the web half is materially smaller than the old CC-4 |
+
+---
+
+## 7. Close-out (2026-09-05)
+
+Status: **BUILT + live-verified**, branch `feat/crew-control` (stacked on `feat/track-follow`,
+unmerged). All five waves done. Suites at close: vision-flight **447** (+37), vision-api **1046**
+(+37, Testcontainers ran for real), vision-app **334**, web **190 files / 3793 tests** (+56 over
+the pre-plan 187/3737).
+
+| Wave | Commit | Notes |
+|---|---|---|
+| W1 | `546545d9` | Seat/SeatKind + DefaultSeatService. One flagged deviation: `forceRelease` has no actor in the frozen signature, so the FORCE audit entry is written by W2's caller |
+| W2 | `c827069e` | SeatAccess + guards + `/seats` wire + `SEAT_HELD` WS code. `AssetAuthority` already existed — AUTH-ROLES B4 shipped IC-2 for real (`AssignmentRole.CREW`), so `ScopeAssetAuthority` was never needed. Also fixed a pre-existing `LiveFrameFallbackStreamService#followStatus` missing override |
+| W3 | `7382c43b` | `/crew/:assetId` (`CrewSeatPage` — `features/roster` already owned the `CrewPage` name), SeatStore, single-operator degrade |
+| W4 | `c74a798f` | Dock crew line, Take camera in the Vision drawer, **D1 fixed**: watch mode gates the fly-hud command surface via `commandSurfaceVisible()` |
+| W5 | `9c3ffce4` + this section | Live matrix below; javadoc citations repointed to §3.2/§3.3 |
+
+### 7.1 §5.1 live matrix — run against a real station, `auth=true`, `crew=true`, three real accounts
+
+admin (ADMIN, unbounded) · bob (PILOT membership + PILOT assignment) · anna (PILOT membership +
+**`AssignmentRole.CREW`** assignment on the asset). Wire observed byte-exact §3.6 — free seat is
+four explicit nulls; anna's `mayTakeFlight:false, mayTakeCamera:true`.
+
+| # | Result |
+|---|---|
+| 1 | ✅ crew's `arm` → **403** "may not be flown by you" (CREW assignment has no flight standing at all — stronger than the specced 409); a second *pilot*'s `arm` while bob held the flight seat → **409** "flight seat is held by Bob Pilot" + audit `DENIED:SEAT_HELD:FLIGHT` |
+| 2 | ✅ anna takes camera; pilot cockpit dock renders exactly `Crew · Anna Kovalenko on camera`; crew page seat chip `Camera · Anna Kovalenko`; C0-with-holder withholds Start video and says `Camera held by Anna Kovalenko` |
+| 3 | ✅ flight-holder bob's camera write while anna held it → 200, `PREEMPT:CAMERA` audited, no dialog; anna's next write → **409** naming Bob Pilot. First attempt was confounded by the 15 s TTL lapsing between test bursts — redone inside one window |
+| 4 | ⚠️ not staged live (needs a live CV stream); the lock PATCH rides the same guarded endpoint row 3 proves; W2 unit tests cover it |
+| 5 | ✅ 17 s of silence frees both seats (lazy expiry, nothing sent anywhere) |
+| 6 | ✅ with no flight seat held, crew takes camera on a parked asset — flight stays free |
+| 7 | ✅ `force:true` by admin while bob held flight → 200, seat transfers, `FORCE:FLIGHT` audited; without force → 409. The live-RC-socket release half is covered by W2's `SEAT_HELD`/hook tests, not staged live |
+| 8 | ✅ **release gate**: flag off (default) — seat POST is a 200 no-op, seats read free, `arm` conflicts identically for both users with the *pre-existing* "no active MAVLink device" body, zero seat 409s |
+
+### 7.2 Defects found by verification (fixed on-branch)
+
+1. **`/crew/:assetId` was unreachable** — the bare-`/crew` redirect used the default
+   `pathMatch: 'prefix'` and swallowed every deep link to the Wall. `9c3ffce4`. (Also the reason the
+   first walk attempt saw `/wall`: a stale dev server serving from a deleted `.angular` cache masked
+   the real defect for one round.)
+
+### 7.3 Residuals beyond §5.2's accepted list
+
+- **Force writes a double audit entry** — `TAKE:FLIGHT` + `FORCE:FLIGHT` 6 ms apart for the same
+  gesture (the service audits the take, the caller audits the force). Cosmetic; the story is still
+  readable. Fold into any later audit pass.
+- Matrix rows 4 and 7's RC-socket half are test-covered, not live-staged (no live CV stream / RC
+  session was up during the walk).
+- Both-themes screenshot pass over the crew page not performed (page is `.surface-dark` +
+  theme-invariant `--hud-*` tokens throughout; same posture as TRACK-FOLLOW's step 10 residual).
