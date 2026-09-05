@@ -3,7 +3,7 @@ package com.drones.vision.app.events;
 import com.drones.vision.api.live.LiveUpdateRegistry;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.UserId;
-import com.drones.vision.platform.VisibilityScope;
+import com.drones.vision.platform.Authority;
 import com.drones.vision.warehouse.application.discovery.DiscoveryInboxService;
 import com.drones.vision.warehouse.application.discovery.RegisterFromCandidateCommand;
 import com.drones.vision.warehouse.application.discovery.ReportOutcome;
@@ -83,7 +83,7 @@ public final class LiveUpdateDiscoveryInboxService implements DiscoveryInboxServ
      * refresh the inbox list after a register anyway.
      */
     @Override
-    public Asset register(DiscoveryCandidateId id, RegisterFromCandidateCommand command, VisibilityScope scope,
+    public Asset register(DiscoveryCandidateId id, RegisterFromCandidateCommand command, Authority scope,
                            UserId actor) {
         Asset asset = delegate.register(id, command, scope, actor);
         delegate.candidates().stream().filter(candidate -> candidate.id().equals(id)).findFirst()
@@ -92,7 +92,7 @@ public final class LiveUpdateDiscoveryInboxService implements DiscoveryInboxServ
     }
 
     @Override
-    public DiscoveryCandidate attach(DiscoveryCandidateId id, AssetId assetId, VisibilityScope scope, UserId actor) {
+    public DiscoveryCandidate attach(DiscoveryCandidateId id, AssetId assetId, Authority scope, UserId actor) {
         DiscoveryCandidate attached = delegate.attach(id, assetId, scope, actor);
         liveUpdateRegistry.publishDiscoveryEvent("REGISTERED", attached);
         return attached;

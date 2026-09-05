@@ -69,7 +69,7 @@ public interface DiscoveryInboxService {
      * <p>Unscoped by design, like {@link com.drones.vision.warehouse.application.category.CategoryService}:
      * a not-yet-registered candidate has no {@code Ownership} for a per-instance visibility check to
      * authorise against. {@code vision-api} gates the endpoint on {@code
-     * VisibilityScope#canManageOrg()} itself, the same org-level read gate {@code CategoryController}
+     * Authority#mayManageOrg()} itself, the same org-level read gate {@code CategoryController}
      * already applies.
      *
      * @return an immutable snapshot
@@ -127,7 +127,7 @@ public interface DiscoveryInboxService {
      * {@code assetId} — all under this service's existing coarse lock, and all validated before the
      * device is registered, so a failure never leaves an orphan device behind.
      *
-     * <p>Authorization mirrors {@link #register}'s {@code canManageOrg} gate. The target asset's
+     * <p>Authorization mirrors {@link #register}'s {@code mayManageOrg} gate. The target asset's
      * visibility is checked the same way any scoped read is: an asset outside {@code scope} throws
      * {@link java.util.NoSuchElementException}, the same 404 an unknown asset id gives — deliberately
      * never {@link AccessDeniedException} here, so this one check never reveals whether an
@@ -141,7 +141,7 @@ public interface DiscoveryInboxService {
      * @throws java.util.NoSuchElementException                 if no candidate has that id, or
      *                                                           {@code assetId} is unknown or
      *                                                           outside {@code scope}
-     * @throws AccessDeniedException                            if {@code !scope.canManageOrg()}
+     * @throws AccessDeniedException                            if {@code !scope.mayManageOrg()}
      * @throws DiscoveryCandidateAlreadyRegisteredException      if the candidate is already {@code
      *                                                           REGISTERED} to a different asset
      * @throws IllegalStateException                            if the candidate has no {@code
@@ -152,7 +152,7 @@ public interface DiscoveryInboxService {
      *                                                           com.drones.vision.warehouse.application.asset.AssetService#createFromCandidate}'s
      *                                                           throw)
      */
-    DiscoveryCandidate attach(DiscoveryCandidateId id, AssetId assetId, VisibilityScope scope, UserId actor);
+    DiscoveryCandidate attach(DiscoveryCandidateId id, AssetId assetId, Authority scope, UserId actor);
 
     /**
      * An operator reopens a candidate — undoes a {@link #dismiss}, or manually recovers a stale
@@ -163,7 +163,7 @@ public interface DiscoveryInboxService {
      *
      * <p>No {@code VisibilityScope} parameter, mirroring {@link #dismiss}: a candidate carries no
      * {@code Ownership} for a per-instance check to authorise against; {@code vision-api} gates the
-     * endpoint on {@code VisibilityScope#canManageOrg()} itself.
+     * endpoint on {@code Authority#mayManageOrg()} itself.
      *
      * @param id    the candidate to restore
      * @param actor the user performing the restore

@@ -418,7 +418,7 @@ class DefaultDiscoveryInboxServiceTest {
                 discovered.suggestedStream());
         when(deviceService.register(any(), any())).thenReturn(registeredDevice);
 
-        DiscoveryCandidate result = serviceAt(NOW).attach(candidate.id(), assetId, VisibilityScope.unbounded(), actor);
+        DiscoveryCandidate result = serviceAt(NOW).attach(candidate.id(), assetId, Authority.full(), actor);
 
         assertEquals(CandidateStatus.REGISTERED, result.status());
         assertEquals(assetId, result.registeredAsset());
@@ -431,7 +431,8 @@ class DefaultDiscoveryInboxServiceTest {
 
     @Test
     void attachRefusesWhenScopeCannotManageOrg() {
-        VisibilityScope pilotScope = VisibilityScope.assignedAssets(Set.of());
+        Authority pilotScope = new Authority(VisibilityScope.assignedAssets(Set.of()),
+                java.util.EnumSet.noneOf(com.drones.vision.platform.Capability.class));
 
         assertThrows(AccessDeniedException.class,
                 () -> serviceAt(NOW).attach(DiscoveryCandidateId.random(), AssetId.random(), pilotScope, actor));
@@ -445,7 +446,7 @@ class DefaultDiscoveryInboxServiceTest {
         when(candidateRepository.findById(unknown)).thenReturn(Optional.empty());
 
         assertThrows(NoSuchElementException.class,
-                () -> serviceAt(NOW).attach(unknown, AssetId.random(), VisibilityScope.unbounded(), actor));
+                () -> serviceAt(NOW).attach(unknown, AssetId.random(), Authority.full(), actor));
     }
 
     @Test
@@ -458,7 +459,7 @@ class DefaultDiscoveryInboxServiceTest {
                 .thenThrow(new NoSuchElementException("Unknown asset: " + assetId.value()));
 
         assertThrows(NoSuchElementException.class,
-                () -> serviceAt(NOW).attach(candidate.id(), assetId, VisibilityScope.unbounded(), actor),
+                () -> serviceAt(NOW).attach(candidate.id(), assetId, Authority.full(), actor),
                 "an out-of-scope/unknown target asset must be 404, never 403 (repo convention)");
         verify(deviceService, never()).register(any(), any());
     }
@@ -471,7 +472,7 @@ class DefaultDiscoveryInboxServiceTest {
         when(candidateRepository.findById(candidate.id())).thenReturn(Optional.of(candidate));
 
         assertThrows(IllegalStateException.class,
-                () -> serviceAt(NOW).attach(candidate.id(), assetId, VisibilityScope.unbounded(), actor));
+                () -> serviceAt(NOW).attach(candidate.id(), assetId, Authority.full(), actor));
         verifyNoInteractions(deviceService);
     }
 
@@ -488,7 +489,7 @@ class DefaultDiscoveryInboxServiceTest {
         when(assetService.details(owningAsset)).thenReturn(detailsOf(owningAsset));
 
         assertThrows(IllegalStateException.class,
-                () -> serviceAt(NOW).attach(candidate.id(), assetId, VisibilityScope.unbounded(), actor));
+                () -> serviceAt(NOW).attach(candidate.id(), assetId, Authority.full(), actor));
         verify(deviceService, never()).register(any(), any());
     }
 
@@ -502,7 +503,7 @@ class DefaultDiscoveryInboxServiceTest {
         when(candidateRepository.findById(candidate.id())).thenReturn(Optional.of(candidate));
 
         assertThrows(DiscoveryCandidateAlreadyRegisteredException.class,
-                () -> serviceAt(NOW).attach(candidate.id(), targetAsset, VisibilityScope.unbounded(), actor));
+                () -> serviceAt(NOW).attach(candidate.id(), targetAsset, Authority.full(), actor));
         verifyNoInteractions(deviceService);
     }
 

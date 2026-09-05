@@ -27,7 +27,7 @@ import java.util.function.Supplier;
  * directly (both forbidden by the dependency rule).
  *
  * <h2>Authorization</h2>
- * Gated on {@link com.drones.vision.platform.VisibilityScope#canManageOrg() scope().canManageOrg()}
+ * Gated on {@link com.drones.vision.platform.Authority#mayManageOrg() authority().mayManageOrg()}
  * directly in this controller, the same org-level read gate {@link DiscoveryInboxController#list}
  * already applies — this endpoint reports process-wide intake facts with no per-instance {@code
  * Ownership} to authorise against.
@@ -53,7 +53,7 @@ public class DiscoveryStatusController {
      */
     @GetMapping("/api/discovery/status")
     public DiscoveryStatusResponse status() {
-        if (!currentUser.scope().canManageOrg()) {
+        if (!currentUser.authority().mayManageOrg()) {
             throw new AccessDeniedException("Not permitted to view discovery status");
         }
         DiscoveryStatusFacts facts = statusFacts.get();

@@ -147,12 +147,12 @@ public final class DefaultDiscoveryInboxService implements DiscoveryInboxService
     }
 
     @Override
-    public synchronized DiscoveryCandidate attach(DiscoveryCandidateId id, AssetId assetId, VisibilityScope scope,
+    public synchronized DiscoveryCandidate attach(DiscoveryCandidateId id, AssetId assetId, Authority scope,
                                                    UserId actor) {
         Objects.requireNonNull(assetId, "assetId must not be null");
         Objects.requireNonNull(scope, "scope must not be null");
         Objects.requireNonNull(actor, "actor must not be null");
-        if (!scope.canManageOrg()) {
+        if (!scope.mayManageOrg()) {
             throw new AccessDeniedException("not permitted to attach a discovery candidate");
         }
 
@@ -171,7 +171,7 @@ public final class DefaultDiscoveryInboxService implements DiscoveryInboxService
         // 404, never 403, for an unknown-or-out-of-scope target asset (docs/plans/active/
         // SOURCE-ONBOARDING-2-PLAN.md §3.2 C1) — the same scoped-read convention every other 404
         // here follows, so this check never reveals whether an out-of-scope asset exists.
-        assetService.details(scope, assetId);
+        assetService.details(scope.scope(), assetId);
         requireNoDuplicateStream(suggestedStream);
 
         DeviceRegistration registration = new DeviceRegistration(candidate.discovered().name(),

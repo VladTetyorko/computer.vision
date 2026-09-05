@@ -36,7 +36,7 @@ import java.util.Objects;
  * <h2>Authorization</h2>
  * {@link #list} is gated on {@link com.drones.vision.platform.Authority#mayManageOrg()
  * authority().mayManageOrg()} directly in this controller (docs/plans/active/AUTH-ROLES-PLAN.md wave
- * B6, superseding the bare {@code VisibilityScope#canManageOrg()} check this gate used before) — the
+ * B6, superseding the bare {@code Authority#mayManageOrg()} check this gate used before) — the
  * same org-level read gate {@link AuditController#list} already applies — per {@link
  * DiscoveryInboxService#candidates()}'s own javadoc: a not-yet-registered candidate has no {@code
  * Ownership} for a per-instance visibility check to authorise against, so the coarser org-wide gate
@@ -141,7 +141,7 @@ public class DiscoveryInboxController {
      * Attaches a candidate onto an existing asset — the atomic twin of {@link #register}, for the
      * case an operator already has an asset in mind (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md
      * &sect;3.2 C1). No explicit gate here: {@link DiscoveryInboxService#attach} performs its own
-     * {@code canManageOrg()} check and its own scoped 404 (never 403) for an unknown-or-out-of-scope
+     * {@code mayManageOrg()} check and its own scoped 404 (never 403) for an unknown-or-out-of-scope
      * {@code assetId} — the same "service throws, controller does not duplicate the check" shape
      * {@link #register} already follows.
      *
@@ -163,7 +163,7 @@ public class DiscoveryInboxController {
     public DiscoveryCandidateResponse attach(@PathVariable String id,
                                               @RequestBody AttachDiscoveryCandidateRequest request) {
         return DiscoveryCandidateResponse.from(discoveryInboxService.attach(DiscoveryCandidateId.of(id),
-                AssetId.of(request.assetId()), currentUser.scope(), currentUser.userId()));
+                AssetId.of(request.assetId()), currentUser.authority(), currentUser.userId()));
     }
 
     /**
@@ -180,7 +180,7 @@ public class DiscoveryInboxController {
      */
     @PostMapping("/api/discovery/inbox/{id}/restore")
     public DiscoveryCandidateResponse restore(@PathVariable String id) {
-        if (!currentUser.scope().canManageOrg()) {
+        if (!currentUser.authority().mayManageOrg()) {
             throw new AccessDeniedException("Not permitted to restore a discovery candidate");
         }
         return DiscoveryCandidateResponse.from(
