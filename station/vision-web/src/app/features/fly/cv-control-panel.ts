@@ -4,8 +4,10 @@ import { DetectionsStore } from '../../core/detections/detections-store';
 import type { EffectiveCvProfile, UpdateStreamConfigRequest } from '../../core/api/models';
 import type { BoxesMode } from '../../shared/player/player';
 import { DECLUTTER_LEVELS, DEFAULT_DECLUTTER_LEVEL, declutterLevelLabel } from '../../shared/player/detection-overlay-logic';
+import { TargetList } from './target-list';
 import {
   DETECTION_LAG_BUDGET_MILLIS,
+  buildFollowLockPatch,
   buildReleaseLockPatch,
   classesOnScreenCount,
   detectionStatus,
@@ -65,7 +67,7 @@ import {
  */
 @Component({
   selector: 'vision-cv-control-panel',
-  imports: [],
+  imports: [TargetList],
   templateUrl: './cv-control-panel.html',
   styleUrl: './cv-control-panel.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -165,6 +167,38 @@ export class CvControlPanel {
   /** `0` = no lock held. **This is the one and only signal the "Following #N — release" chip reads**
    * — never the trackId just clicked, never an optimistic local flag. */
   protected readonly lockedTrackId = computed(() => this.detections.tracks()?.lockedTrackId ?? 0);
+
+  // --- Target list (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.4, wave W5) — "the second door" onto
+  // Follow, mounted at the top of this panel's own template (below the sibling detections strip in
+  // `cockpit.html`, above this panel's own body — §3.4's placement, achieved from inside this
+  // component since `cockpit.html` itself is out of this wave's file scope). Reads the exact same
+  // `DetectionsStore#tracks()` poll {@link lockedTrackId} above already reads — "it adds no
+  // request" (§3.4) — never a second subscription.
+
+  /** `<vision-target-list>`'s own `[tracks]` — the stream's live tracks, straight off the tracks
+   *  poll this panel already renders a chip from. `[]` before the first read resolves or with
+   *  nothing to show, which the component's own empty state renders honestly. */
+  protected readonly liveTracks = computed(() => this.detections.tracks()?.tracks ?? []);
+
+  /**
+   * `<vision-target-list>`'s own `(trackSelected)` — the identical `buildFollowLockPatch(trackId)`
+   * PATCH `CockpitFacade#followTrack`'s own glass-click write path already sends, mirroring how
+   * {@link releaseLock} below already duplicates `CockpitFacade#releaseFollow`'s own PATCH: same
+   * builder function, two independent call sites, so a list click and a box click can never produce
+   * a different lock. No optimistic UI — the row's own "followed" tint waits for the next tracks-poll
+   * read, same honesty rule as every other lock affordance in this drawer.
+   */
+  protected selectTrack(trackId: number): void {
+    const streamId = this.streamId();
+    if (!streamId) {
+      return;
+    }
+    void this.fleet.patchStreamConfig(streamId, buildFollowLockPatch(trackId)).then((result) => {
+      if (result) {
+        this.configChanged.emit();
+      }
+    });
+  }
 
   // --- Detection status line (docs/plans/done/CV-UX-RESEARCH.md §1.2/§3/§9.2, waves U3+U5) -----
 

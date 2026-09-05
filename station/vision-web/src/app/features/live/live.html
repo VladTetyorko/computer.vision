@@ -33,8 +33,22 @@
           [stopped]="facade.stopped()"
           [detections]="facade.detections.results()"
           [boxesMode]="facade.boxesMode()"
+          [lockedTrackId]="facade.lockedTrackId()"
+          [lostBox]="facade.lostBox()"
           (latencyChanged)="facade.onLatency($event)"
           (transportChanged)="facade.onTransport($event)"
+          (trackFollowed)="facade.followTrack($event)"
+        />
+
+        <!-- ---- Follow HUD (docs/plans/active/TRACK-FOLLOW-PLAN.md §2.2 D6, wave W5) — Follow used to
+             be reachable only from the Fly cockpit; this page can now click-to-follow the same way
+             and see the identical readout. `facade.follow()` is `null` whenever no lock has ever been
+             issued or after release — the component itself renders nothing in that case. -->
+        <vision-follow-hud
+          [follow]="facade.follow()"
+          [canRelease]="facade.canRelease()"
+          (release)="facade.releaseFollow()"
+          (reacquire)="facade.reacquireFollow()"
         />
 
         @if (facade.live() && !facade.stream()?.viewUrl) {

@@ -1,3 +1,17 @@
+<!-- ---- Target list — "the second door" onto Follow (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.4,
+     wave W5): one row per live track, click to follow. Sits above this panel's own body and below
+     the sibling `<vision-detections-strip>` `cockpit.html` mounts before this component — the
+     gesture is now discoverable by existing, which is why the old "click a box" hint below is gone.
+     Gated on {@link streamId} exactly like the click-to-follow section further down: no stream, no
+     tracks, nothing to click-to-follow via either door. -->
+@if (streamId()) {
+  <vision-target-list
+    [tracks]="liveTracks()"
+    [followedTrackId]="lockedTrackId()"
+    (trackSelected)="selectTrack($event)"
+  />
+}
+
 <p class="muted hint cv-scope-hint">
   @if (streamId()) {
     Changes below apply live to the running stream.
@@ -82,19 +96,19 @@
   <p class="muted hint">How boxes are drawn — detection keeps running the same either way.</p>
 </section>
 
-<!-- ---- 5. Click-to-follow + lock chip — the real Follow interaction is clicking a box in the
-     video (`buildFollowLockPatch`), not a control in either surface; stays in this panel regardless
-     of the setup modal's own tracking-mode picker (docs/plans/done/CV-UX-RESEARCH.md §6). Wire-
-     confirmed only (docs/extracts/TRACKING-ORCHESTRATION.md §3.3) — unchanged by the P1 split. -->
-@if (streamId()) {
+<!-- ---- 5. Lock chip — the real Follow interaction is clicking a box in the video or a row in the
+     target list above (`buildFollowLockPatch`), not a control in either surface; stays in this panel
+     regardless of the setup modal's own tracking-mode picker (docs/plans/done/CV-UX-RESEARCH.md §6).
+     Wire-confirmed only (docs/extracts/TRACKING-ORCHESTRATION.md §3.3) — unchanged by the P1 split.
+     The old "click a box" hint (docs/plans/active/TRACK-FOLLOW-PLAN.md §2.2 D7) is gone: the target
+     list above makes the gesture discoverable by existing, and `<vision-follow-hud>` (`cockpit.html`)
+     states the lock's own name once one is held. -->
+@if (streamId() && lockedTrackId(); as locked) {
   <section class="cv-section">
-    <p class="muted hint">Click a tracked box in the video to lock onto it.</p>
-    @if (lockedTrackId(); as locked) {
-      <div class="tracking-lock-row">
-        <span class="chip accent">Following #{{ locked }}</span>
-        <button type="button" class="btn secondary small" (click)="releaseLock()">Release</button>
-      </div>
-    }
+    <div class="tracking-lock-row">
+      <span class="chip accent">Following #{{ locked }}</span>
+      <button type="button" class="btn secondary small" (click)="releaseLock()">Release</button>
+    </div>
   </section>
 }
 

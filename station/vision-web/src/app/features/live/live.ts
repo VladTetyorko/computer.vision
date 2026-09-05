@@ -9,6 +9,7 @@ import { DetectionsStore } from '../../core/detections/detections-store';
 import { TelemetryOsd } from './telemetry-osd';
 import { TacticalMap } from '../../shared/map/tactical-map/tactical-map';
 import { DetectionsStrip } from '../../shared/player/detections-strip';
+import { FollowHud } from '../../shared/player/follow-hud/follow-hud';
 import { Notice } from '../../shared/ui/notice';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
@@ -30,7 +31,7 @@ import { LiveFacade } from './live-facade';
  */
 @Component({
   selector: 'vision-live',
-  imports: [Player, RouterLink, TelemetryOsd, TacticalMap, DetectionsStrip, StreamInfoPanel, Notice, EmptyState, PageBar, MapTools],
+  imports: [Player, RouterLink, TelemetryOsd, TacticalMap, DetectionsStrip, FollowHud, StreamInfoPanel, Notice, EmptyState, PageBar, MapTools],
   templateUrl: './live.html',
   styleUrl: './live.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

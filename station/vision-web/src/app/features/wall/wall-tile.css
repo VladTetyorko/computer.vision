@@ -1,3 +1,13 @@
+/* The host itself is now the positioning context for `<vision-follow-hud>` (docs/plans/active/
+   TRACK-FOLLOW-PLAN.md §3.3, wave W5) — that pill is a light-DOM sibling of `.tile`, not a
+   descendant (`wall-tile.html`'s own comment), so it can no longer anchor off `.tile`'s own
+   `position: relative`. A no-op for layout otherwise: a `<vision-wall-tile>` is already blockified
+   as a CSS Grid item regardless of this declaration. */
+:host {
+  position: relative;
+  display: block;
+}
+
 /* One tile — the click target for focus-in-place (D9/D10, WALL-FLOW-PLAN.md §3.4). A real
    `<button>` (not an `<article>` with a nested link, the pre-W2 shape) so the whole surface is one
    keyboard-reachable control; `.secondary-tile` (`fly/cockpit.css`) is the same idiom at cockpit
@@ -129,4 +139,15 @@
 
 .detail .muted {
   font-size: 0.72rem;
+}
+
+/* `<vision-follow-hud>`'s own `:host{display:contents}` (frozen, `follow-hud.css`) means its
+   `.follow-hud` pill is the element actually in the box tree here — fills the one still-unused
+   corner (`.severity-dot` top-left, `.pulse-chip` top-right), same absolute-badge idiom, same
+   `--hud-*`/`surface-dark` legality (frontend-style §2/§7: a control floating directly over video). */
+:host ::ng-deep .follow-hud {
+  position: absolute;
+  bottom: var(--space-8);
+  left: var(--space-8);
+  max-width: calc(100% - var(--space-16));
 }

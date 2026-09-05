@@ -11,6 +11,13 @@ import { LayersStore } from '../../core/map-data/layers-store';
 import { DrawingsStore } from '../../core/map-data/drawings-store';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { followMarkers } from '../../shared/map/tactical-map/tactical-map-logic';
+import type { BoundingBox, FollowStatus } from '../../core/api/models';
+// Reused, not re-implemented (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.4/D6, wave W5) — the exact
+// same PATCH builders `CockpitFacade#followTrack`/`releaseFollow` already send, so a lock issued from
+// `/live/:deviceId` and one issued from the Fly cockpit can never disagree about the wire shape. This
+// is the one cross-feature import in this file, and it is deliberate: duplicating these two one-line
+// functions would be exactly the kind of drift this wave exists to rule out.
+import { buildFollowLockPatch, buildReleaseLockPatch } from '../fly/cv-control-panel-logic';
 
 /** Panel-state memory (docs/plans/done/UX-REWORK-PLAN.md §U-b item 7) — the two toggles below already
  * existed; only the localStorage key names are new. See `core/panel-state.ts`'s own doc comment
@@ -89,10 +96,51 @@ export class LiveFacade {
    * aliases `SettingsStore.declutterLevel` directly, the same instance `CockpitFacade`/`WallTile`
    * read/write, replacing this page's own previously-unshared in-memory signal (see
    * `CockpitFacade#boxesMode`'s identical simplification, and that field's own doc comment for the
-   * full rationale). This page has no FOLLOW-lock plumbing at all, so `<vision-player>`'s
-   * `lockedTrackId` input is simply never bound here — it stays its own default `0`, an honest "no
-   * lock known" rather than a fabricated one. */
+   * full rationale). */
   readonly boxesMode = this.settings.declutterLevel;
+
+  // --- Follow (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1/§3.5, wave W5 — D6's fix: "Follow is
+  // reachable from exactly one page" no longer holds). Mirrors `CockpitFacade`'s identical trio of
+  // reads verbatim; see that class's own doc comments for the full honesty rationale each follows.
+
+  /**
+   * The FOLLOW-locked track id, read from the **per-frame** detections feed
+   * (`FrameTracking#lockedTrackId` on `detections.results()[0]`), never the slower tracks poll —
+   * mirrors `CockpitFacade#lockedTrackId` exactly (same D1 fix: this survives the tracks poll
+   * stopping, since the detections feed runs for this page's whole session regardless). `0` is the
+   * wire's own "no lock" sentinel.
+   */
+  readonly lockedTrackId = computed(() => this.detections.results()[0]?.tracking?.lockedTrackId ?? 0);
+
+  /**
+   * The follow lock's own lifecycle — mirrors `GET .../tracks`' trailing `follow` object 1:1, same
+   * as `CockpitFacade#follow`. `null` before any lock has ever been issued this session, after a
+   * `RELEASED` read, or on any tracks-poll transport failure. Feeds `<vision-follow-hud>` (`live.html`).
+   */
+  readonly follow = computed<FollowStatus | null>(() => this.detections.tracks()?.follow ?? null);
+
+  /**
+   * The lost target's last-confirmed box, fed to `<vision-player>`'s `lostBox` input only while
+   * {@link follow} reports `LOST` — mirrors `CockpitFacade#lostBox`.
+   */
+  readonly lostBox = computed<BoundingBox | null>(() => {
+    const follow = this.follow();
+    return follow?.state === 'LOST' ? follow.lastBox : null;
+  });
+
+  /**
+   * Whether the `GET .../tracks` poll should be running (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.5
+   * "two feeds, two jobs"). **Deliberately simpler than `CockpitFacade#wantsTracksPoll`**: that
+   * formula's first clause exists only because Fly's Vision drawer can be closed while a lock is
+   * still held; this page has no drawer of any kind — its own Detections card already renders
+   * unconditionally whenever {@link live} is true (`live.html`'s own `@if (facade.live())`) — so
+   * there is no narrower "operator plausibly cares about Vision right now" signal to gate on here
+   * than {@link live} itself. This still errs toward *more* polling than strictly necessary (one 2s
+   * request while merely live, lock or no lock), never toward silently dropping a `LOST` recovery
+   * window — the one honesty-critical case (mirrors `CockpitFacade`'s own accepted deviation, §5.4
+   * residual 1).
+   */
+  private readonly wantsTracksPoll = computed(() => this.live());
 
   // --- Deliberately-stopped state (docs/plans/done/MVP2-PLAN.md §S, S-b) ---------------------------------
   // `explicitlyStopped` is this page's own Stop action; `hasBeenLive` tracks whether *this page
@@ -188,6 +236,15 @@ export class LiveFacade {
       }
     });
 
+    // Drives the `GET .../tracks` poll (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.5, wave W5) —
+    // mirrors `CockpitFacade`'s identical effect; `DetectionsStore.followTracks` already no-ops
+    // internally on an unchanged `(streamId, wanted)` pair, so re-running this on every stream-poll
+    // tick is harmless.
+    effect(() => {
+      const streamId = this.stream()?.streamId;
+      this.detections.followTracks(streamId ?? '', streamId !== undefined && this.wantsTracksPoll());
+    });
+
     // `M` toggles the map inset (docs/main/CYCLES-PLAN.md §9, CU-b item 4) — ignored while a form
     // field has focus (typing "m" into the name/URI fields elsewhere in the app must not fight
     // this) and while the device has no telemetry to show a map for in the first place.
@@ -247,6 +304,59 @@ export class LiveFacade {
   setBoxesMode(mode: BoxesMode): void {
     this.boxesMode.set(mode);
   }
+
+  /**
+   * `<vision-player>`'s own `(trackFollowed)` — the operator clicking a tracked box in the video
+   * (docs/plans/active/TRACK-FOLLOW-PLAN.md §2.2 D6, wave W5: Follow used to be reachable only from
+   * the Fly cockpit). Mirrors `CockpitFacade#followTrack` exactly — a single PATCH, always
+   * `mode:'FOLLOW'` + the lock together, no optimistic UI: the HUD's own confirmation comes from the
+   * tracks poll, never from this call's return value.
+   */
+  followTrack(trackId: number): void {
+    const streamId = this.stream()?.streamId;
+    if (!streamId) {
+      return;
+    }
+    void this.fleet.patchStreamConfig(streamId, buildFollowLockPatch(trackId));
+  }
+
+  /**
+   * `<vision-follow-hud>`'s own `(release)` — mirrors `CockpitFacade#releaseFollow`'s identical
+   * `buildReleaseLockPatch()` PATCH, so this page's HUD can never send a different release than the
+   * cockpit's does.
+   */
+  releaseFollow(): void {
+    const streamId = this.stream()?.streamId;
+    if (!streamId) {
+      return;
+    }
+    void this.fleet.patchStreamConfig(streamId, buildReleaseLockPatch());
+  }
+
+  /**
+   * `<vision-follow-hud>`'s own `(reacquire)` — offered only while {@link follow} reports `LOST`
+   * and `reacquirable`; re-issues the original lock for the same track id (mirrors
+   * `CockpitFacade#reacquireFollow`).
+   */
+  reacquireFollow(): void {
+    const trackId = this.follow()?.trackId;
+    if (trackId === undefined) {
+      return;
+    }
+    this.followTrack(trackId);
+  }
+
+  /**
+   * `<vision-follow-hud>`'s own `[canRelease]` (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.3, wave
+   * W5). This page has no watch-mode/role gate of any kind today — unlike
+   * `CockpitFacade#watchMode`, every viewer who can reach `/live/:deviceId` already has full
+   * Start/Stop control ({@link start}/{@link stop} above), so Release is no different. `true`,
+   * plainly — not fabricated, since there is genuinely nothing this page withholds from anyone who
+   * can reach it yet. A real observer posture (CREW-CONTROL, unbuilt) is where this would tighten to
+   * `false`; §0's own "nothing in this plan needs re-authoring" note is exactly why a plain constant
+   * is enough until that lands.
+   */
+  readonly canRelease = computed(() => true);
 
   toggleMapInset(): void {
     this.mapInsetVisible.update((visible) => !visible);

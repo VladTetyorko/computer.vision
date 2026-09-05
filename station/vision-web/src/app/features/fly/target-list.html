@@ -1,0 +1,46 @@
+@if (rows().length === 0) {
+  <vision-empty title="No tracked objects right now." />
+} @else {
+  <div class="table-scroll">
+    <table>
+      <thead>
+        <tr>
+          <th>Label</th>
+          <th>Id</th>
+          <th>State</th>
+          <th class="col-num">Age</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (row of rows(); track row.trackId) {
+          <tr
+            class="row-selectable"
+            [class.followed]="row.followed"
+            tabindex="0"
+            role="button"
+            [attr.aria-pressed]="row.followed"
+            [attr.aria-label]="'Follow ' + (row.label || 'track') + ' number ' + row.trackId"
+            (click)="selectTrack(row.trackId)"
+            (keydown.enter)="selectTrack(row.trackId)"
+            (keydown.space)="$event.preventDefault(); selectTrack(row.trackId)"
+          >
+            <td class="truncate">{{ row.label || '—' }}</td>
+            <td class="mono muted">#{{ row.trackId }}</td>
+            <td>
+              <span class="row-state">
+                <span
+                  class="dot"
+                  [class.live]="row.stateTone === 'live'"
+                  [class.warn]="row.stateTone === 'warn'"
+                  [class.danger]="row.stateTone === 'danger'"
+                ></span>
+                {{ row.stateLabel }}
+              </span>
+            </td>
+            <td class="mono col-num">{{ row.age }}</td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  </div>
+}

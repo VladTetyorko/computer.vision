@@ -1,0 +1,55 @@
+/* `:host { display: contents }` — mounted as drawer content inside `CvControlPanel`'s own template
+   (itself `display: contents` in `cv-control-panel.css`), never a layout box of its own. */
+:host {
+  display: contents;
+}
+
+/* Defensive horizontal scroll (frontend-style: "wide content must scroll inside its own
+   overflow-x: auto container") — this drawer can collapse to a narrow bottom sheet below `--bp-sm`
+   (`cv-control-panel.css`'s own comment), and four columns plus `.truncate` still want a floor. */
+.table-scroll {
+  overflow-x: auto;
+}
+
+table {
+  min-width: 20rem;
+}
+
+td:first-child {
+  min-width: 6rem;
+}
+
+/* The one selection language (frontend-style §4) — identical recipe to
+   `features/inventory/vehicles-table.css`'s own `.row-selectable.selected`, renamed `.followed`
+   here since a target-list row's selection state *is* the follow lock, not a detail-panel pick. */
+tbody tr.row-selectable {
+  cursor: pointer;
+}
+
+tbody tr.row-selectable:hover {
+  background: var(--panel-hover);
+}
+
+tbody tr.row-selectable:focus-visible {
+  outline: 2px solid var(--color-info);
+  outline-offset: -2px;
+}
+
+tbody tr.row-selectable.followed {
+  background: var(--color-info-soft);
+  box-shadow: inset 2px 0 0 0 var(--color-info);
+}
+
+/* State column — a dot + plain text, never a second chip (§3.4: the followed row already spends
+   the row's one chip via the selection bar above). Mirrors
+   `features/inventory/vehicles-table.css`'s identical `.row-state` shape. */
+.row-state {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+th.col-num,
+td.col-num {
+  text-align: right;
+}
