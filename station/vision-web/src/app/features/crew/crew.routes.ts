@@ -21,6 +21,9 @@ export const CREW_ROUTES: Routes = [
     // closest "which live asset" surface, same honest-interim shape `fly-redirect-guard.ts` used
     // before `/fly`'s own picker existed. Revisit once a real crew landing page is built.
     path: 'crew',
+    // `full`, not the prefix default: a prefix redirect on `crew` swallows `crew/:assetId` itself
+    // and bounces every deep link to the Wall (found live in W5 verification).
+    pathMatch: 'full',
     redirectTo: '/wall',
   },
   {
