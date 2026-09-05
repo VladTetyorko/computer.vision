@@ -2,6 +2,7 @@ package com.drones.vision.api.controller;
 
 import com.drones.vision.api.dto.ActiveStreamResponse;
 import com.drones.vision.api.dto.DetectionResultResponse;
+import com.drones.vision.api.dto.FollowResponse;
 import com.drones.vision.api.dto.StartStreamRequest;
 import com.drones.vision.api.dto.StartStreamResponse;
 import com.drones.vision.api.dto.DetectionRateResponse;
@@ -23,6 +24,8 @@ import com.drones.vision.perception.domain.model.DetectionQuery;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.perception.domain.model.DetectionState;
+import com.drones.vision.perception.domain.model.FollowState;
+import com.drones.vision.perception.domain.model.FollowStatus;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.perception.domain.model.VideoFrame;
@@ -43,10 +46,12 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.net.URI;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.util.Optional;
 import com.drones.vision.api.support.SnapshotJpegEncoder;
 
 /**
@@ -302,9 +307,10 @@ public class StreamController {
 
     /**
      * A running stream's track book plus the duty-cycle counters over it (docs/plans/done/TRACKING-PLAN.md
-     * §4.E's frozen wire contract) — what backs the cockpit's track list, its
-     * "Following #N — release" chip, and the flow strip that puts "the detector stopped running and
-     * the tracker took over" on screen instead of in {@code htop}.
+     * §4.E's frozen wire contract, extended by docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1) — what
+     * backs the cockpit's track list, its "Following #N — release" chip, and the flow strip that
+     * puts "the detector stopped running and the tracker took over" on screen instead of in {@code
+     * htop}.
      *
      * <p><b>Never errors for an unknown or stopped stream</b> — that case is a 200 with an empty
      * list, {@code lockedTrackId: 0} and no {@code stats}, the same forgiving idiom {@link
@@ -316,7 +322,16 @@ public class StreamController {
      *
      * <p>{@code lockedTrackId} is hoisted to the top level rather than living inside {@code stats}
      * (§4.E): it is the confirmed-from-the-wire held target, and the chip that reads it must stay
-     * honest even when the window has no statistics to show.
+     * honest even when the window has no statistics to show. <b>Its source is {@link
+     * StreamService#followStatus}, not {@code stats}</b> (TRACK-FOLLOW-PLAN §3.1 decision 4): {@code
+     * stats.lockedTrackId()} decays to {@code 0} the moment its statistics window empties of
+     * samples, which made a stalled-but-still-locked stream report "not following" even though the
+     * lock itself was never released — the very dishonesty this field's own javadoc always promised
+     * not to have. {@code lockedTrackId} equals the bound track id while {@link FollowStatus#state()}
+     * is {@link FollowState#HOLDING}/{@link FollowState#COASTING}, and falls to {@code 0} for every
+     * other state (or no lock at all) — {@link FollowState#LOST} included, even though {@code
+     * follow.trackId} itself stays at its last-bound value so a re-acquire affordance can still name
+     * the target.
      *
      * <p>{@code stats} is omitted whenever the window has not yet recorded a single detector pass —
      * a stream that has just started, or one with tracking off. That is exactly the "nothing to
@@ -324,9 +339,14 @@ public class StreamController {
      * TrackStatsResponse#lastDetectorReason()} a real value in every response that carries the
      * object at all, rather than a half-populated strip of zeros.
      *
+     * <p>{@code follow} is omitted whenever {@link StreamService#followStatus} reads empty — no lock
+     * has ever been issued on this stream, or the most recent lock action was a release. See {@link
+     * FollowResponse}'s own javadoc for its fields' null-vs-absent rules.
+     *
      * @param streamId the stream to inspect, as a canonical UUID string
-     * @return the stream's tracks, its held target, the window's counters when there are any, and
-     *         which detection gate currently explains its boxes-or-no-boxes state (docs/plans/done/CV-DEMAND-PLAN.md
+     * @return the stream's tracks, its held target, the window's counters when there are any, the
+     *         held lock's own lifecycle when one has ever been issued, and which detection gate
+     *         currently explains its boxes-or-no-boxes state (docs/plans/done/CV-DEMAND-PLAN.md
      *         &sect;3.6)
      * @throws java.util.NoSuchElementException if {@code streamId} is currently running on a device
      *                                            whose asset the caller's scope may not reach
@@ -355,8 +375,18 @@ public class StreamController {
                 .map(DetectionRateResponse::from)
                 .orElse(null);
         DetectionState detectionState = streamService.detectionState(id).orElse(null);
-        return new StreamTracksResponse(id.value().toString(), stats == null ? 0L : stats.lockedTrackId(), tracks,
-                statsResponse, latencyResponse, rateResponse, detectionState);
+        Optional<FollowStatus> follow = streamService.followStatus(id);
+        // D4's bug fix: the confirmed-from-the-wire held target, sourced from the lock's own
+        // lifecycle rather than the decaying stats window. `follow.trackId()` itself stays at its
+        // last-bound value through LOST (so a re-acquire affordance can still name the target), so
+        // this top-level field is gated on state rather than reading FollowStatus::trackId directly.
+        long lockedTrackId = follow
+                .filter(status -> status.state() == FollowState.HOLDING || status.state() == FollowState.COASTING)
+                .map(FollowStatus::trackId)
+                .orElse(0L);
+        FollowResponse followResponse = follow.map(status -> FollowResponse.from(status, Instant.now())).orElse(null);
+        return new StreamTracksResponse(id.value().toString(), lockedTrackId, tracks, statsResponse, latencyResponse,
+                rateResponse, detectionState, followResponse);
     }
 
     /**

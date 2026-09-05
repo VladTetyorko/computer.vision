@@ -15,9 +15,12 @@ import java.util.List;
  * /api/streams/{streamId}/detections} already uses, and the reason a polling client needs one code
  * path instead of two.
  *
- * <p>{@code @JsonInclude(NON_NULL)} covers {@code stats}, {@code latency} and {@code rate}: {@code stats} is absent whenever
- * there is nothing honest to report (see {@code StreamController#tracks}), never a zeroed object —
- * the flow strip hides itself rather than showing a strip of zeros.
+ * <p>{@code @JsonInclude(NON_NULL)} covers {@code stats}, {@code latency}, {@code rate} and {@code
+ * follow}: {@code stats} is absent whenever there is nothing honest to report (see {@code
+ * StreamController#tracks}), never a zeroed object — the flow strip hides itself rather than
+ * showing a strip of zeros. {@code follow} follows the same rule (docs/plans/active/TRACK-FOLLOW-PLAN.md
+ * &sect;3.1 decision 3): absent, not a zeroed/empty object, until an operator has actually issued a
+ * lock.
  *
  * @param streamId      the queried stream, canonical UUID string; echoed back even when nothing is running
  * @param lockedTrackId the track {@code FOLLOW} currently holds, {@code 0} when none — <b>top level,
@@ -37,26 +40,45 @@ import java.util.List;
  *                       stream's boxes-or-no-boxes state (docs/plans/done/CV-DEMAND-PLAN.md
  *                       &sect;3.6), or absent for an unknown/not-running stream. See {@link
  *                       DetectionState}'s own javadoc: this reports gating, never health.
+ * @param follow         the {@code FOLLOW} lock's own lifecycle (docs/plans/active/TRACK-FOLLOW-PLAN.md
+ *                       &sect;3.1), or absent when no lock has ever been issued on this stream, or
+ *                       the most recent lock action was a release — the same "never a zeroed
+ *                       object" idiom {@code stats} already uses. {@code lockedTrackId} above is a
+ *                       fact derived from this same source (see {@code StreamController#tracks}),
+ *                       not from {@code stats} any more (D4): the two must never be read as
+ *                       independent
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record StreamTracksResponse(String streamId, long lockedTrackId, List<TrackResponse> tracks,
                                     TrackStatsResponse stats, PipelineLatencyResponse latency,
-                                    DetectionRateResponse rate, DetectionState detectionState) {
+                                    DetectionRateResponse rate, DetectionState detectionState,
+                                    FollowResponse follow) {
 
     public StreamTracksResponse {
         tracks = List.copyOf(tracks);
     }
 
     /**
+     * The shape before {@code follow} was added, kept as a convenience constructor defaulting it to
+     * absent — same "N-1-arg convenience ctor" idiom the domain records use, so every pre-existing
+     * caller (and every test asserting the old body) compiles and behaves unchanged.
+     */
+    public StreamTracksResponse(String streamId, long lockedTrackId, List<TrackResponse> tracks,
+                                 TrackStatsResponse stats, PipelineLatencyResponse latency,
+                                 DetectionRateResponse rate, DetectionState detectionState) {
+        this(streamId, lockedTrackId, tracks, stats, latency, rate, detectionState, null);
+    }
+
+    /**
      * The shape before {@code detectionState} was added, kept as a convenience constructor
-     * defaulting it to absent — same "N-1-arg convenience ctor" idiom the domain records use, so
-     * every pre-existing caller (and every test asserting the old body) compiles and behaves
-     * unchanged.
+     * defaulting it (and {@code follow}) to absent — same "N-1-arg convenience ctor" idiom the
+     * domain records use, so every pre-existing caller (and every test asserting the old body)
+     * compiles and behaves unchanged.
      */
     public StreamTracksResponse(String streamId, long lockedTrackId, List<TrackResponse> tracks,
                                  TrackStatsResponse stats, PipelineLatencyResponse latency,
                                  DetectionRateResponse rate) {
-        this(streamId, lockedTrackId, tracks, stats, latency, rate, null);
+        this(streamId, lockedTrackId, tracks, stats, latency, rate, null, null);
     }
 
     /**
@@ -67,6 +89,6 @@ public record StreamTracksResponse(String streamId, long lockedTrackId, List<Tra
      */
     public StreamTracksResponse(String streamId, long lockedTrackId, List<TrackResponse> tracks,
                                  TrackStatsResponse stats, PipelineLatencyResponse latency) {
-        this(streamId, lockedTrackId, tracks, stats, latency, null, null);
+        this(streamId, lockedTrackId, tracks, stats, latency, null, null, null);
     }
 }

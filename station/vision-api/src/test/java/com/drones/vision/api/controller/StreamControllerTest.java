@@ -33,6 +33,8 @@ import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
+import com.drones.vision.perception.domain.model.FollowState;
+import com.drones.vision.perception.domain.model.FollowStatus;
 import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.model.PixelFormat;
@@ -78,6 +80,7 @@ import com.drones.vision.api.support.StreamDetectionSupport;
 import com.drones.vision.api.support.VisionApiProperties;
 
 import static org.hamcrest.Matchers.hasSize;
+import static org.hamcrest.Matchers.nullValue;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -1181,6 +1184,12 @@ class StreamControllerTest {
         when(streamService.trackingStats(streamId)).thenReturn(Optional.of(
                 new TrackingStats(TrackingMode.FOLLOW, "lk", Duration.ofSeconds(30), 12, 348, 0.034, 0.4, 0.9,
                         DetectorReason.CADENCE, 7L, Map.of(TrackState.CONFIRMED, 3, TrackState.COASTING, 1))));
+        // TRACK-FOLLOW-PLAN §3.1 decision 4: `lockedTrackId` is now sourced from `followStatus()`,
+        // not `stats` -- this stub is what actually hoists 7 to the top level post-repoint (the
+        // `TrackingStats.lockedTrackId()` above no longer feeds it at all).
+        when(streamService.followStatus(streamId)).thenReturn(Optional.of(
+                new FollowStatus(FollowState.HOLDING, 7L, "car", firstSeen, lastSeen, detection.box(), false, 0L,
+                        0.0)));
 
         mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
                 .andExpect(status().isOk())
@@ -1331,6 +1340,109 @@ class StreamControllerTest {
         mockMvc.perform(get("/api/streams/{streamId}/tracks", "not-a-uuid"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+    }
+
+    // ---- docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1: the `follow` object ----
+
+    @Test
+    void tracksOmitsFollowWhenNoLockHasEverBeenIssued() throws Exception {
+        // streamService.followStatus is left unstubbed -- Optional.empty(), the same "nothing to
+        // report yet" default every other forgiving field on this endpoint already uses.
+        when(streamService.tracks(any())).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/streams/{streamId}/tracks", StreamId.random().value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.follow").doesNotExist());
+    }
+
+    @Test
+    void tracksSerializesFollowWhileHoldingAndHoistsLockedTrackIdFromIt() throws Exception {
+        StreamId streamId = StreamId.random();
+        Instant since = Instant.parse("2026-09-04T10:15:02.500Z");
+        Instant lastSeenAt = Instant.parse("2026-09-04T10:15:06.700Z");
+        when(streamService.tracks(streamId)).thenReturn(List.of());
+        when(streamService.followStatus(streamId)).thenReturn(Optional.of(
+                new FollowStatus(FollowState.HOLDING, 7L, "person", since, lastSeenAt,
+                        new BoundingBox(0.41, 0.32, 0.08, 0.19), false, 0L, 0.0)));
+
+        mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.lockedTrackId").value(7))
+                .andExpect(jsonPath("$.follow.state").value("HOLDING"))
+                .andExpect(jsonPath("$.follow.trackId").value(7))
+                .andExpect(jsonPath("$.follow.label").value("person"))
+                .andExpect(jsonPath("$.follow.since").value(since.toString()))
+                .andExpect(jsonPath("$.follow.lastSeenAt").value(lastSeenAt.toString()))
+                .andExpect(jsonPath("$.follow.lastSeenAgeMillis").isNumber())
+                .andExpect(jsonPath("$.follow.lastBox.x").value(0.41))
+                .andExpect(jsonPath("$.follow.lastBox.y").value(0.32))
+                .andExpect(jsonPath("$.follow.lastBox.width").value(0.08))
+                .andExpect(jsonPath("$.follow.lastBox.height").value(0.19))
+                .andExpect(jsonPath("$.follow.reacquirable").value(false))
+                .andExpect(jsonPath("$.follow.recoveredAfterMillis").value(0))
+                .andExpect(jsonPath("$.follow.recoveryConfidence").value(0.0));
+    }
+
+    @Test
+    void tracksSerializesFollowWhileRequestingWithNullLastSeenFields() throws Exception {
+        // REQUESTING is the one state the object can be present for before any box has ever been
+        // observed -- lastSeenAt/lastSeenAgeMillis/lastBox are known-absent facts, serialized as a
+        // literal JSON null (not omitted -- see FollowResponse's own javadoc for why the two differ).
+        StreamId streamId = StreamId.random();
+        Instant since = Instant.parse("2026-09-04T10:15:02.500Z");
+        when(streamService.tracks(streamId)).thenReturn(List.of());
+        when(streamService.followStatus(streamId))
+                .thenReturn(Optional.of(new FollowStatus(FollowState.REQUESTING, 0L, "", since, null, null, false,
+                        0L, 0.0)));
+
+        mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.lockedTrackId").value(0))
+                .andExpect(jsonPath("$.follow.state").value("REQUESTING"))
+                .andExpect(jsonPath("$.follow.trackId").value(0))
+                .andExpect(jsonPath("$.follow.label").value(""))
+                .andExpect(jsonPath("$.follow.lastSeenAt").value(nullValue()))
+                .andExpect(jsonPath("$.follow.lastSeenAgeMillis").value(nullValue()))
+                .andExpect(jsonPath("$.follow.lastBox").value(nullValue()));
+    }
+
+    @Test
+    void tracksReportsLockedTrackIdAsZeroWhileLostEvenThoughFollowTrackIdStaysBound() throws Exception {
+        // D3/D5: a LOST bind freezes trackId/label/lastBox for a re-acquire affordance, but the
+        // top-level lockedTrackId -- the "currently held" fact the cockpit's chip gates on -- must
+        // fall to 0, distinguishing "held" from "was held and lost" honestly.
+        StreamId streamId = StreamId.random();
+        Instant since = Instant.parse("2026-09-04T10:15:10.000Z");
+        Instant lastSeenAt = Instant.parse("2026-09-04T10:15:06.700Z");
+        when(streamService.tracks(streamId)).thenReturn(List.of());
+        when(streamService.followStatus(streamId)).thenReturn(Optional.of(
+                new FollowStatus(FollowState.LOST, 7L, "person", since, lastSeenAt,
+                        new BoundingBox(0.41, 0.32, 0.08, 0.19), true, 0L, 0.0)));
+
+        mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.lockedTrackId").value(0))
+                .andExpect(jsonPath("$.follow.state").value("LOST"))
+                .andExpect(jsonPath("$.follow.trackId").value(7))
+                .andExpect(jsonPath("$.follow.label").value("person"))
+                .andExpect(jsonPath("$.follow.lastBox.x").value(0.41))
+                .andExpect(jsonPath("$.follow.reacquirable").value(true));
+    }
+
+    @Test
+    void tracksSerializesTheRecoveryFieldsWhenABindCameBackFromFollowMemory() throws Exception {
+        StreamId streamId = StreamId.random();
+        Instant since = Instant.parse("2026-09-04T10:15:02.500Z");
+        Instant lastSeenAt = Instant.parse("2026-09-04T10:15:06.700Z");
+        when(streamService.tracks(streamId)).thenReturn(List.of());
+        when(streamService.followStatus(streamId)).thenReturn(Optional.of(
+                new FollowStatus(FollowState.HOLDING, 7L, "person", since, lastSeenAt,
+                        new BoundingBox(0.41, 0.32, 0.08, 0.19), false, 8200L, 0.71)));
+
+        mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.follow.recoveredAfterMillis").value(8200))
+                .andExpect(jsonPath("$.follow.recoveryConfidence").value(0.71));
     }
 
     // ---- docs/plans/done/TRACKING-PLAN.md §4.G: the nested track/tracking objects on the detections wire ----

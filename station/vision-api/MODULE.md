@@ -96,7 +96,7 @@ the full mechanism.
 | StreamController | GET | `/api/streams/{streamId}/detections?limit=` | Recent per-frame detections | scope |
 | StreamController | GET | `/api/streams/{streamId}/snapshot` | Latest frame as downscaled JPEG (only binary, non-JSON response besides the HLS proxy) | scope |
 | StreamController | PATCH | `/api/streams/{streamId}/config` | Hot-patch confidence/fps/labelFilter/model/tracking — never interrupts video | scope |
-| StreamController | GET | `/api/streams/{streamId}/tracks` | Track book + duty-cycle stats; never errors on unknown stream (empty `tracks`) | scope |
+| StreamController | GET | `/api/streams/{streamId}/tracks` | Track book + duty-cycle stats + the held `FOLLOW` lock's own lifecycle (`follow`, TRACK-FOLLOW-PLAN §3.1 — omitted until a lock is issued); never errors on unknown stream (empty `tracks`) | scope |
 | HlsProxyController | GET | `/hls/{streamId}/**` | Reverse-proxy this asset's live HLS bytes to the mediamtx sidecar | scope (`StreamAccess#requireVisibleForHlsProxy`, checked **before** the upstream is ever contacted; fails closed on an unknown/stopped id — AUTH-ROLES-PLAN.md D10, wave B4 — unlike the other `StreamAccess`-gated rows above, which keep `requireVisible`'s no-op) — also now behind `SecurityConfig`'s secured chain's `authenticated()` rule (`/hls/**` joined `/api/**`/`/ws/**`) |
 | CvModelsController | GET | `/api/cv/models` | Detection-model roster — widened (CV-SETTINGS-PLAN §5.2) to serve the registry's live roster (`registrySource: true`) when `vision.cv.registry.enabled`, else the static config catalogue; never errors | open |
 | CvTrackersController | GET | `/api/cv/trackers` | Static tracker-engine roster | open |
