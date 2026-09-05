@@ -22,7 +22,7 @@ const LOG_PREFIX = '[pilots]';
  * so a non-manager never even sees the affordance, not just an empty drawer behind it).
  *
  * **Role-gated inside the component, too**: renders **nothing** unless the viewer can manage the org
- * (`canManageOrg(topRole)` — ADMIN/MANAGER); a pilot viewing an asset doesn't manage its roster, so
+ * (`canManageOrg(capabilities)` — `MANAGE_ORG`, held by MANAGER/ADMIN); a pilot viewing an asset doesn't manage its roster, so
  * the host can mount this unconditionally and let the card decide — this is the belt to the host's
  * own suspenders, not a second source of truth. In dev-parity mode (`vision.auth.enabled=false`) the
  * dev admin is ADMIN, so the card shows exactly as before.
@@ -57,7 +57,7 @@ export class PilotsCard {
   private readonly toasts = inject(ToastService);
   private readonly auth = inject(AuthStore);
 
-  protected readonly canManage = computed(() => canManageOrg(this.auth.user()?.topRole));
+  protected readonly canManage = computed(() => canManageOrg(this.auth.capabilities()));
 
   private readonly pilots = signal<readonly AssignedPilot[]>([]);
   private readonly users = signal<readonly UserSummary[]>([]);

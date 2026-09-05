@@ -267,7 +267,7 @@ export class CockpitFacade {
    *  profile" action is hidden for anyone who couldn't reach that page to see the result anyway.
    *  Dev parity: `vision.auth.enabled=false`'s dev principal resolves to `ADMIN`/unbounded, so this
    *  is always `true` in dev, unchanged behavior. */
-  readonly canManage = computed(() => canManageOrg(this.auth.user()?.topRole));
+  readonly canManage = computed(() => canManageOrg(this.auth.capabilities()));
 
   private lastEffectiveProfileAssetId: string | undefined = undefined;
   private lastStreamConfigStreamId: string | undefined = undefined;

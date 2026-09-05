@@ -1,27 +1,30 @@
 import { describe, expect, it } from 'vitest';
 import { landingRouteFor } from './landing-logic';
-import type { Role } from '../api/models';
+import type { AuthCapability } from '../api/models';
+
+const MANAGE_ORG_CAPS: readonly AuthCapability[] = ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT', 'MANAGE_FLEET', 'MANAGE_ORG'];
+const PILOT_CAPS: readonly AuthCapability[] = ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT'];
 
 describe('landingRouteFor', () => {
-  describe('auth enabled — the role decides', () => {
-    it.each<[Role | null | undefined, string]>([
-      ['ADMIN', '/command'],
-      ['MANAGER', '/command'],
-      ['PILOT', '/fly'],
+  describe('auth enabled — MANAGE_ORG decides', () => {
+    it.each<[readonly AuthCapability[] | null | undefined, string]>([
+      [MANAGE_ORG_CAPS, '/command'], // ADMIN/MANAGER
+      [PILOT_CAPS, '/fly'],
+      [[], '/fly'], // VIEWER
       [undefined, '/fly'],
       [null, '/fly'],
-    ])('%s → %s', (role, expected) => {
-      expect(landingRouteFor(role, true)).toBe(expected);
+    ])('capabilities=%s → %s', (capabilities, expected) => {
+      expect(landingRouteFor(capabilities, true)).toBe(expected);
     });
   });
 
-  // The dev principal reports topRole ADMIN with auth off (`MeResponse#devAdmin`); landing on
-  // /command there would move every unsecured install off the cockpit MVP3 §C-b chose for it.
-  describe('auth disabled — always the cockpit, whatever the reported role', () => {
-    it.each<[Role | null | undefined]>([['ADMIN'], ['MANAGER'], ['PILOT'], [undefined], [null]])(
+  // The dev principal reports the full capability set with auth off (`MeResponse#devAdmin`);
+  // landing on /command there would move every unsecured install off the cockpit MVP3 §C-b chose for it.
+  describe('auth disabled — always the cockpit, whatever the reported capabilities', () => {
+    it.each<[readonly AuthCapability[] | null | undefined]>([[MANAGE_ORG_CAPS], [PILOT_CAPS], [[]], [undefined], [null]])(
       '%s → /fly',
-      (role) => {
-        expect(landingRouteFor(role, false)).toBe('/fly');
+      (capabilities) => {
+        expect(landingRouteFor(capabilities, false)).toBe('/fly');
       },
     );
   });

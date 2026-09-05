@@ -1,3 +1,4 @@
+import type { AuthCapability } from '../../core/api/models';
 import type { IconName } from '../../shared/ui/icon-registry';
 
 /**
@@ -55,7 +56,7 @@ import type { IconName } from '../../shared/ui/icon-registry';
  * (`/settings/detection`) followed the same path in WAREHOUSE-UX-PLAN.md §3.1, but wave W6
  * (docs/plans/active/CV-SETTINGS-PLAN.md) supersedes that move outright: the whole surface it stood in
  * for is gone (replaced by named, bindable profiles, not a single-org form), so it comes back as a
- * first-class, `managerOnly` **Vision** entry (**Profiles**, below) rather than a Settings-page link —
+ * first-class, `MANAGE_ORG`-gated **Vision** entry (**Profiles**, below) rather than a Settings-page link —
  * see that entry's own comment.
  *
  * **W4 folds Asset categories, Inventory reports, and Devices into Inventory itself** (docs/plans/active/WAREHOUSE-UX-PLAN.md
@@ -68,16 +69,22 @@ import type { IconName } from '../../shared/ui/icon-registry';
  * `features/maintenance/**`) — `/manage/health`'s old `ComingSoon` scaffold is a real page now,
  * so it earns the nav entry that a `badge: 'soon'` stub never got.
  *
- * **`managerOnly`** — hidden unless `canManageOrg(topRole)` (`core/org/org-logic.ts`, ADMIN/MANAGER) is
- * true, the same gate `shared/ui/identity-chip.ts`'s Organization link and `core/org/org-guard.ts`'s
- * route guard use. Applied exactly once, in `shared/ui/app-sidebar/app-sidebar.ts#modes`. **Every route
- * whose nav entry is `managerOnly` now also carries `canActivate: [orgGuard]` on the route itself**
- * (WAREHOUSE-UX-PLAN.md §3.1 rule 6, closing PLATFORM-AUDIT-UI D2/D3: a `managerOnly` nav entry with no
- * route guard was a door a pilot could still type into) — see each touched `*.routes.ts`'s own doc
- * comment. `System status` keeps its one documented exception: `diagnostics`-flavoured but not
- * `managerOnly` (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.1) — an operator whose CV pipeline just died needs to
- * see why, the same reasoning `/command` already applies more broadly. `Settings` is deliberately not
- * `managerOnly` either — every signed-in user, pilot included, owns account/controller preferences.
+ * **`requires`** — hidden unless the session holds the named `AuthCapability`
+ * (`core/auth/auth-logic.ts#hasCapability`); every entry below names `'MANAGE_ORG'`, the same
+ * capability `shared/ui/identity-chip.ts`'s Organization link and `core/org/org-guard.ts`'s route
+ * guard gate on (`core/org/org-logic.ts#canManageOrg`) — granted to MANAGER/ADMIN only, never
+ * PILOT/VIEWER, per the backend's own role→capability policy. **Renamed from the boolean
+ * `managerOnly` (docs/plans/active/AUTH-ROLES-PLAN.md §3.2, wave W2)** once "manager-only" stopped being
+ * the only shape a gate could take — `requires` names *which* capability, so a future entry needing
+ * a narrower one (e.g. `MANAGE_FLEET` alone) doesn't have to grow a second boolean flag next to this
+ * one. Applied exactly once, in `shared/ui/app-sidebar/app-sidebar.ts#modes`. **Every route whose nav
+ * entry sets `requires` now also carries `canActivate: [orgGuard]` on the route itself**
+ * (WAREHOUSE-UX-PLAN.md §3.1 rule 6, closing PLATFORM-AUDIT-UI D2/D3: a gated nav entry with no route
+ * guard was a door a pilot could still type into) — see each touched `*.routes.ts`'s own doc
+ * comment. `System status` keeps its one documented exception: `diagnostics`-flavoured but ungated
+ * (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.1) — an operator whose CV pipeline just died needs to
+ * see why, the same reasoning `/command` already applies more broadly. `Settings` is deliberately
+ * ungated either — every signed-in user, pilot included, owns account/controller preferences.
  */
 export type NavModeId = 'operate' | 'monitor' | 'fleet' | 'vision' | 'system';
 
@@ -89,11 +96,12 @@ export interface NavEntry {
    *  that every `badge: 'soon'` stub has left the rail (see this file's own class doc). */
   readonly to: string;
   /**
-   * Hidden unless `canManageOrg(topRole)` is true — see this file's own class doc. Every route this
-   * gates has a matching `canActivate: [orgGuard]` on its own `*.routes.ts` entry (WAREHOUSE-UX-PLAN.md
-   * §3.1 rule 6), with the two documented exceptions named there (`System status`, `Settings`).
+   * Hidden unless the session holds this `AuthCapability` — see this file's own class doc. Every
+   * route this gates has a matching `canActivate: [orgGuard]` on its own `*.routes.ts` entry
+   * (WAREHOUSE-UX-PLAN.md §3.1 rule 6), with the two documented exceptions named there (`System
+   * status`, `Settings`).
    */
-  readonly managerOnly?: boolean;
+  readonly requires?: AuthCapability;
 }
 
 export interface NavMode {
@@ -197,11 +205,11 @@ export const NAV_MODES: readonly NavMode[] = [
       {
         icon: 'plus',
         name: 'Add vehicle',
-        // Renamed from "Add source". managerOnly mirrors `POST /api/assets`'s own `canManageOrg()`
-        // gate (docs/plans/done/OPS-UX-PLAN.md §2 A4) — unchanged by this wave.
+        // Renamed from "Add source". `requires: 'MANAGE_ORG'` mirrors `POST /api/assets`'s own
+        // `canManageOrg()` gate (docs/plans/done/OPS-UX-PLAN.md §2 A4) — unchanged by this wave.
         description: 'Enter an address, scan the network, listen for a drone, or simulate one — four steps.',
         to: '/add-source',
-        managerOnly: true,
+        requires: 'MANAGE_ORG',
       },
       {
         icon: 'pilot',
@@ -209,7 +217,7 @@ export const NAV_MODES: readonly NavMode[] = [
         // Renamed from "Pilots / roster".
         description: "A dedicated roster across every asset's pilot assignments.",
         to: '/manage/roster',
-        managerOnly: true,
+        requires: 'MANAGE_ORG',
       },
       {
         icon: 'wrench',
@@ -218,7 +226,7 @@ export const NAV_MODES: readonly NavMode[] = [
         // scaffold redirects here now (`features/hubs/hubs.routes.ts`).
         description: 'Open and close maintenance/grounding records across the fleet.',
         to: '/fleet/maintenance',
-        managerOnly: true,
+        requires: 'MANAGE_ORG',
       },
     ],
   },
@@ -237,28 +245,28 @@ export const NAV_MODES: readonly NavMode[] = [
         // `/settings/detection` now redirects here (`settings.routes.ts`).
         description: 'Named CV configs — model, thresholds, tracking — bound per organization, category, or asset.',
         to: '/vision/profiles',
-        managerOnly: true,
+        requires: 'MANAGE_ORG',
       },
       {
         icon: 'target',
         name: 'CV training',
         description: 'Capture live frames, correct the boxes, and export YOLO datasets to improve detection models.',
         to: '/manage/training',
-        managerOnly: true,
+        requires: 'MANAGE_ORG',
       },
       {
         icon: 'archive',
         name: 'CV model registry',
         description: 'Every model cv-service knows about — promote one to make it the live default for new detections.',
         to: '/manage/training/models',
-        managerOnly: true,
+        requires: 'MANAGE_ORG',
       },
       {
         icon: 'satellite',
         name: 'Geo regions',
         description: 'Reference-imagery regions for visual geolocation — ingest a bounding box, then watch it index.',
         to: '/manage/geo/regions',
-        managerOnly: true,
+        requires: 'MANAGE_ORG',
       },
     ],
   },
@@ -273,7 +281,7 @@ export const NAV_MODES: readonly NavMode[] = [
       {
         icon: 'signal',
         name: 'System status',
-        // The one deliberate non-managerOnly diagnostics entry (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.1) — an
+        // The one deliberate ungated diagnostics entry (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.1) — an
         // operator whose CV pipeline just died needs to see why. Unchanged by this wave.
         description: 'What the platform reports about its own health — subsystems, live transport, and system events.',
         to: '/manage/system',
@@ -285,14 +293,14 @@ export const NAV_MODES: readonly NavMode[] = [
         // own `AuditController#list` `canManageOrg()` gate (docs/plans/done/OPS-UX-PLAN.md §3 B1).
         description: 'Who changed what, fleet-wide — actor, action, target, and result.',
         to: '/monitor/audit',
-        managerOnly: true,
+        requires: 'MANAGE_ORG',
       },
       {
         icon: 'gear',
         name: 'Debug',
         description: 'The raw API console — inspect requests/responses directly.',
         to: '/debug',
-        managerOnly: true,
+        requires: 'MANAGE_ORG',
       },
       {
         icon: 'settings',
@@ -300,7 +308,7 @@ export const NAV_MODES: readonly NavMode[] = [
         // New this wave (WAREHOUSE-UX-PLAN.md §3.1 rule 5) — Account settings plus a link list to
         // Controller, the one entry that just left the rail (see this file's own class doc); every
         // signed-in user, pilot included, owns these preferences. Detection defaults used to be
-        // listed here too — it left this link list for its own `managerOnly` Vision nav entry
+        // listed here too — it left this link list for its own `MANAGE_ORG`-gated Vision nav entry
         // (`Profiles`, wave W6) once it stopped being a single-org form.
         description: 'Your account, plus a link to your controller layout.',
         to: '/settings',

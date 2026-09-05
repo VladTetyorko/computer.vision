@@ -40,13 +40,13 @@ describe('modelKey', () => {
 });
 
 describe('canAdministerRegistry', () => {
-  it('is true only for ADMIN', () => {
-    expect(canAdministerRegistry('ADMIN')).toBe(true);
-    expect(canAdministerRegistry('MANAGER')).toBe(false);
-    expect(canAdministerRegistry('PILOT')).toBe(false);
+  it('is true only for UNBOUNDED scope', () => {
+    expect(canAdministerRegistry('UNBOUNDED')).toBe(true);
+    expect(canAdministerRegistry('GROUPS')).toBe(false);
+    expect(canAdministerRegistry('ASSIGNED_ASSETS')).toBe(false);
   });
 
-  it('is false for a missing role', () => {
+  it('is false for a missing scope', () => {
     expect(canAdministerRegistry(undefined)).toBe(false);
     expect(canAdministerRegistry(null)).toBe(false);
   });

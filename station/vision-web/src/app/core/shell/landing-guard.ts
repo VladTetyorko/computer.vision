@@ -12,16 +12,16 @@ import { landingRouteFor } from './landing-logic';
  * for the identical reason.
  *
  * Awaits `AuthStore.ready` first, same as `auth-guard.ts`/`org-guard.ts` — the decision runs
- * against the *resolved* session's `topRole`, never a transitional `undefined` mid-boot. Only ever
- * reached at the exact `''` path (see `app.routes.ts`'s own routing comment for why): a deep link
- * to `/fly`, `/command`, `/assets/...` etc. never touches this guard at all, so it cannot affect
- * deep-link or browser-back behaviour — this guard's only job is what happens when a session opens
- * the app with no destination named yet. **Dev parity**: `authEnabled === false` resolves the dev
- * principal to `topRole: 'ADMIN'` (`AuthStore`'s own fixed dev-admin shape) — which is the absence
- * of a role signal, not a manager, so `landingRouteFor` deliberately ignores it and keeps `/fly`
- * for that mode. See its own javadoc for why: honouring it would move every unsecured install off
- * the cockpit and break the same "with auth off nothing changes" invariant the backend half of this
- * task froze (docs/plans/done/OPS-UX-PLAN.md §1).
+ * against the *resolved* session's `capabilities`, never a transitional `undefined` mid-boot. Only
+ * ever reached at the exact `''` path (see `app.routes.ts`'s own routing comment for why): a deep
+ * link to `/fly`, `/command`, `/assets/...` etc. never touches this guard at all, so it cannot
+ * affect deep-link or browser-back behaviour — this guard's only job is what happens when a session
+ * opens the app with no destination named yet. **Dev parity**: `authEnabled === false` resolves the
+ * dev principal to the full capability set (`AuthStore`'s own fixed dev-admin shape) — which is the
+ * absence of a role signal, not a manager, so `landingRouteFor` deliberately ignores it and keeps
+ * `/fly` for that mode. See its own javadoc for why: honouring it would move every unsecured install
+ * off the cockpit and break the same "with auth off nothing changes" invariant the backend half of
+ * this task froze (docs/plans/done/OPS-UX-PLAN.md §1).
  */
 export const landingGuard: CanActivateFn = async () => {
   const auth = inject(AuthStore);
@@ -29,5 +29,5 @@ export const landingGuard: CanActivateFn = async () => {
 
   await auth.ready;
 
-  return router.parseUrl(landingRouteFor(auth.user()?.topRole, auth.authEnabled()));
+  return router.parseUrl(landingRouteFor(auth.capabilities(), auth.authEnabled()));
 };

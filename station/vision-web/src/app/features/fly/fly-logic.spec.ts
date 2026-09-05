@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AssetSummary, AssetUsage, GeoPosition, Membership, Role } from '../../core/api/models';
+import type { AssetSummary, AssetUsage, AuthCapability, GeoPosition, Membership, ScopeKind } from '../../core/api/models';
 import type { PreflightSummary } from '../../core/telemetry/flight-state-logic';
 import {
   ALL_DRONES_OPTION_VALUE,
@@ -355,48 +355,54 @@ function membership(groupName: string, role: Membership['role'] = 'PILOT'): Memb
   return { groupId: `g-${groupName}`, groupName, role };
 }
 
-describe('pickerEmptyStateCopy (docs/plans/done/OPS-UX-PLAN.md §2 A2 — truthful Fly-picker empty state)', () => {
-  it('a PILOT with one membership is told which group has nobody assigned to them', () => {
-    const state = pickerEmptyStateCopy('PILOT', [membership('Alpha Squadron')]);
+describe('pickerEmptyStateCopy (docs/plans/done/OPS-UX-PLAN.md §2 A2 — truthful Fly-picker empty state; scopeKind/capabilities per docs/plans/active/AUTH-ROLES-PLAN.md §3.2, wave W2)', () => {
+  const PILOT_CAPS: readonly AuthCapability[] = ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT'];
+  const MANAGER_CAPS: readonly AuthCapability[] = ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT', 'MANAGE_FLEET', 'MANAGE_ORG'];
+
+  it('an ASSIGNED_ASSETS scope (a PILOT session) with one membership is told which group has nobody assigned to them', () => {
+    const state = pickerEmptyStateCopy('ASSIGNED_ASSETS', PILOT_CAPS, [membership('Alpha Squadron')]);
     expect(state.title).toBe('No aircraft assigned to you yet');
     expect(state.message).toContain('Alpha Squadron');
     expect(state.showAddSource).toBe(false);
   });
 
   it('a PILOT in several groups gets every distinct group name named, never just the first', () => {
-    const state = pickerEmptyStateCopy('PILOT', [membership('Alpha Squadron'), membership('Bravo Team')]);
+    const state = pickerEmptyStateCopy('ASSIGNED_ASSETS', PILOT_CAPS, [membership('Alpha Squadron'), membership('Bravo Team')]);
     expect(state.message).toContain('Alpha Squadron');
     expect(state.message).toContain('Bravo Team');
   });
 
   it('de-duplicates a repeated group name rather than naming it twice', () => {
-    const state = pickerEmptyStateCopy('PILOT', [membership('Alpha Squadron'), membership('Alpha Squadron')]);
+    const state = pickerEmptyStateCopy('ASSIGNED_ASSETS', PILOT_CAPS, [membership('Alpha Squadron'), membership('Alpha Squadron')]);
     expect(state.message.match(/Alpha Squadron/g)?.length).toBe(1);
   });
 
   it('a PILOT with no memberships at all gets an honest "could not determine" message, never a fabricated group', () => {
-    const state = pickerEmptyStateCopy('PILOT', []);
+    const state = pickerEmptyStateCopy('ASSIGNED_ASSETS', PILOT_CAPS, []);
     expect(state.title).toBe('No aircraft assigned to you yet');
     expect(state.message).not.toMatch(/undefined|null/i);
     expect(state.message.toLowerCase()).toContain('could not determine');
     expect(state.showAddSource).toBe(false);
   });
 
-  it('a PILOT never gets the Add source CTA, even with memberships resolved', () => {
-    expect(pickerEmptyStateCopy('PILOT', [membership('Alpha Squadron')]).showAddSource).toBe(false);
+  it('a PILOT never gets the Add source CTA, even with memberships resolved (and even if `capabilities` somehow carried MANAGE_ORG — ASSIGNED_ASSETS scope alone suppresses it)', () => {
+    expect(pickerEmptyStateCopy('ASSIGNED_ASSETS', ['MANAGE_ORG'], [membership('Alpha Squadron')]).showAddSource).toBe(false);
   });
 
-  it.each<Role | null | undefined>(['MANAGER', 'ADMIN', undefined, null])(
-    '%s sees the genuinely-empty-fleet message, with the Add source CTA offered',
-    (topRole) => {
-      const state = pickerEmptyStateCopy(topRole, []);
-      expect(state.title).toBe('No drones registered yet');
-      expect(state.showAddSource).toBe(topRole === 'MANAGER' || topRole === 'ADMIN');
-    },
-  );
+  it.each<readonly [ScopeKind | null | undefined, readonly AuthCapability[]]>([
+    ['GROUPS', MANAGER_CAPS], // MANAGER
+    ['UNBOUNDED', MANAGER_CAPS], // ADMIN
+    ['GROUPS', []], // VIEWER — GROUPS scope, no MANAGE_ORG
+    [undefined, []], // not-yet-loaded session
+    [null, []],
+  ])('scope=%s/capabilities=%s sees the genuinely-empty-fleet message, Add source CTA following MANAGE_ORG alone', (scopeKind, capabilities) => {
+    const state = pickerEmptyStateCopy(scopeKind, capabilities, []);
+    expect(state.title).toBe('No drones registered yet');
+    expect(state.showAddSource).toBe(capabilities.includes('MANAGE_ORG'));
+  });
 
   it('MANAGER/ADMIN copy is unaffected by memberships — the fleet-empty message never mentions a group', () => {
-    const state = pickerEmptyStateCopy('MANAGER', [membership('Alpha Squadron')]);
+    const state = pickerEmptyStateCopy('GROUPS', MANAGER_CAPS, [membership('Alpha Squadron')]);
     expect(state.message).not.toContain('Alpha Squadron');
   });
 });

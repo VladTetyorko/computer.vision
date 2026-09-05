@@ -100,7 +100,7 @@ export class VisionProfilesFacade {
   readonly loaded = this.loadedSignal.asReadonly();
   readonly error = this.errorSignal.asReadonly();
 
-  readonly canManage = computed(() => canManageOrg(this.auth.user()?.topRole));
+  readonly canManage = computed(() => canManageOrg(this.auth.capabilities()));
   /** The caller's own org `groupId` (single-org simplification — see `primaryGroupId`'s own doc comment). */
   readonly orgGroupId = computed(() => primaryGroupId(this.auth.user()?.memberships ?? []));
   readonly orgGroupName = computed(() => {

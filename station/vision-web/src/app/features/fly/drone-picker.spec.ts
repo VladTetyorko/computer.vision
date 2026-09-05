@@ -7,7 +7,7 @@ import { VisionApi } from '../../core/api/vision-api';
 import { AuthStore } from '../../core/auth/auth-store';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { LiveStore, type LiveConnectionState } from '../../core/live/live-store';
-import type { AssetSummary, MeResponse } from '../../core/api/models';
+import type { AssetSummary, AuthCapability, MeResponse, Role, ScopeKind } from '../../core/api/models';
 
 /**
  * `DronePickerPage` TestBed specs (docs/plans/active/OPERATOR-UX-3-PLAN.md wave T1) — the wiring a
@@ -37,9 +37,30 @@ function stubApi(assets: readonly AssetSummary[]) {
   return { listAssets: vi.fn().mockResolvedValue(assets) };
 }
 
-/** Mirrors `landing-guard.spec.ts#fakeAuthStore` — only `user()` is read by this facade. */
+/** Mirrors the real `RoleAuthority`/`DefaultScopeResolver` policy table closely enough for a
+ *  fixture — see `core/auth/auth-logic.spec.ts`'s identical helper for the full reasoning. */
+const ROLE_CAPABILITIES: Record<Role, readonly AuthCapability[]> = {
+  VIEWER: [],
+  PILOT: ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT'],
+  MANAGER: ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT', 'MANAGE_FLEET', 'MANAGE_ORG'],
+  ADMIN: ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT', 'MANAGE_FLEET', 'MANAGE_ORG'],
+};
+const ROLE_SCOPE_KIND: Record<Role, ScopeKind> = {
+  VIEWER: 'GROUPS',
+  PILOT: 'ASSIGNED_ASSETS',
+  MANAGER: 'GROUPS',
+  ADMIN: 'UNBOUNDED',
+};
+
+/** Mirrors `landing-guard.spec.ts#fakeAuthStore` — `user()`, plus `capabilities()`/`scopeKind()`
+ *  (docs/plans/active/AUTH-ROLES-PLAN.md §3.2, wave W2), the fields `emptyState`
+ *  (`drone-picker-facade.ts`) now reads instead of `user()?.topRole`. */
 function fakeAuthStore(user: Pick<MeResponse, 'topRole' | 'memberships'> | null = { topRole: 'ADMIN', memberships: [] }) {
-  return { user: () => user };
+  return {
+    user: () => user,
+    capabilities: () => (user ? ROLE_CAPABILITIES[user.topRole] : []),
+    scopeKind: () => (user ? ROLE_SCOPE_KIND[user.topRole] : undefined),
+  };
 }
 
 /** Mirrors `fleet-store.spec.ts#stubScheduler`, narrowed to what this facade needs — a no-op

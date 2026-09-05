@@ -30,7 +30,7 @@ export class DatasetsFacade {
   private readonly api = inject(VisionApi);
 
   readonly training = inject(TrainingStore);
-  readonly canManage = computed(() => canManageOrg(this.auth.user()?.topRole));
+  readonly canManage = computed(() => canManageOrg(this.auth.capabilities()));
 
   /** Per-row delete confirm — one group, so at most one row's confirm is ever open at once. */
   readonly dialogs = new UiStore();

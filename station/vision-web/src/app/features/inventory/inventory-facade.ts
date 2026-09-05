@@ -83,7 +83,7 @@ export class InventoryFacade {
   // --- Tab + role gate (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1: a pilot only sees Vehicles/Equipment) --
 
   readonly tab = signal<InventoryTab>('vehicles');
-  readonly canManageOrg = computed(() => computeCanManageOrg(this.auth.user()?.topRole));
+  readonly canManageOrg = computed(() => computeCanManageOrg(this.auth.capabilities()));
   readonly visibleTabs = computed(() => visibleInventoryTabs(this.canManageOrg()));
 
   /** Route-bound `?tab=` → the facade's own `tab` signal, falling back to `vehicles` for a pilot who

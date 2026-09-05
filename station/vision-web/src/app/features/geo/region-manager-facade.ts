@@ -5,7 +5,7 @@ import { PollScheduler } from '../../core/poll-scheduler';
 import { UiStore } from '../../core/ui/ui-store';
 import { ToastService } from '../../core/toast.service';
 import { describeHttpError } from '../../core/api-error';
-import { canManageOrg } from '../../core/org/org-logic';
+import { canAdminister } from '../../core/auth/auth-logic';
 import {
   BLANK_REGION_INGEST_DRAFT,
   isVisualGeoDisabledError,
@@ -26,13 +26,16 @@ const PROGRESS_POLL_INTERVAL_MS = 3_000;
  * use (see `core/training/training-store.ts`'s own doc comment for the identical single-consumer
  * reasoning).
  *
- * **Role gating mirrors `DatasetsFacade` exactly**: §3.3's own `POST`/`DELETE /api/geo/regions/**`
- * gate is `canAdminister`, not the `canManageOrg` this client can actually observe (`MeResponse` has
- * no finer-grained permission than `topRole` today) — {@link canManage} hides the ingest form and
- * every row's delete action from a PILOT client-side, same "never show a button that would only ever
- * 403" posture, and a genuine `canAdminister`/`canManageOrg` mismatch (if one exists) still degrades
- * honestly via {@link errorMessage} rather than a blocked page. **Dev parity**: `authEnabled=false`'s
- * dev principal resolves to `ADMIN`, so `canManage` is `true` and this page behaves exactly as it
+ * **Role gating mirrors the server's own gate exactly, not `DatasetsFacade`'s** (D6, fixed
+ * docs/plans/active/AUTH-ROLES-PLAN.md §3.2, wave W2): §3.3's own `POST`/`DELETE /api/geo/regions/**`
+ * gate is `VisibilityScope#canAdminister()` (`UNBOUNDED` scope only), strictly narrower than
+ * `canManageOrg` (`MANAGE_ORG` capability, held by MANAGER too) — {@link canManage} used to mirror
+ * the latter because `MeResponse` carried no finer-grained permission than `topRole`; now that
+ * `scopeKind` ships on every session, {@link canManage} reads `core/auth/auth-logic.ts#canAdminister`
+ * directly, so a MANAGER (who would 403 on both endpoints) no longer sees the ingest form or a row's
+ * delete action either — the same "never show a button that would only ever 403" posture, just
+ * against the *correct* predicate this time. **Dev parity**: `authEnabled=false`'s dev principal
+ * resolves to `scopeKind: 'UNBOUNDED'`, so `canManage` is `true` and this page behaves exactly as it
  * does for a real admin.
  *
  * **Flag-off degrades to `disabled`, not an error** — mirrors `TrainingStore`'s identical D9-flavored
@@ -57,7 +60,7 @@ export class RegionManagerFacade {
   private readonly scheduler = inject(PollScheduler);
   private readonly toasts = inject(ToastService);
 
-  readonly canManage = computed(() => canManageOrg(this.auth.user()?.topRole));
+  readonly canManage = computed(() => canAdminister(this.auth.scopeKind()));
 
   readonly regions = signal<readonly RegionResponse[]>([]);
   readonly loading = signal(true);

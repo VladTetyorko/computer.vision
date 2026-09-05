@@ -4,7 +4,7 @@ import { Router, provideRouter } from '@angular/router';
 import { describe, expect, it } from 'vitest';
 import { landingGuard } from './landing-guard';
 import { AuthStore } from '../auth/auth-store';
-import type { MeResponse } from '../api/models';
+import type { AuthCapability, MeResponse, Role } from '../api/models';
 
 /**
  * `landingGuard` is otherwise thin wiring over `landing-logic.ts#landingRouteFor` (fully covered in
@@ -15,11 +15,22 @@ import type { MeResponse } from '../api/models';
  * DI-computed) — is itself the thing worth regression-covering, decoupled from the real app's heavy
  * feature routes (`app.routes.spec.ts` covers the real table's shape, not runtime navigation).
  */
+/** Mirrors the real `RoleAuthority` policy table closely enough for a fixture — see
+ *  `core/auth/auth-logic.spec.ts`'s identical helper for the full reasoning. Only `MANAGE_ORG`
+ *  actually matters to `landingRouteFor`, but the full set keeps this fixture honest. */
+const ROLE_CAPABILITIES: Record<Role, readonly AuthCapability[]> = {
+  VIEWER: [],
+  PILOT: ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT'],
+  MANAGER: ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT', 'MANAGE_FLEET', 'MANAGE_ORG'],
+  ADMIN: ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT', 'MANAGE_FLEET', 'MANAGE_ORG'],
+};
+
 function fakeAuthStore(user: Pick<MeResponse, 'topRole'> | null, authEnabled: boolean) {
   return {
     ready: Promise.resolve(),
     user: () => user,
     authEnabled: () => authEnabled,
+    capabilities: () => (user ? ROLE_CAPABILITIES[user.topRole] : []),
   };
 }
 

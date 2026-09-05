@@ -6,6 +6,8 @@ import { App, type RouteDataNode, routeTreeHasFullBleed } from './app';
 import { FleetStore } from './core/fleet/fleet-store';
 import { LeafletWarmup } from './core/leaflet-warmup';
 import { AuthStore } from './core/auth/auth-store';
+import { hasCapability } from './core/auth/auth-logic';
+import type { AuthCapability } from './core/api/models';
 import { EventsStore } from './core/events/events-store';
 import { LiveStore } from './core/live/live-store';
 import { VisionApi } from './core/api/vision-api';
@@ -32,13 +34,27 @@ function fakeLiveStore(connectionState: 'connecting' | 'open' | 'closed' = 'open
   return { liveEvents: () => [] as unknown[], connectionState: () => connectionState };
 }
 
+/** Mirrors the real policy table closely enough for a fixture (docs/plans/active/AUTH-ROLES-PLAN.md §3.2,
+ *  wave W2) — `AppSidebar`'s `modes` computed now calls `AuthStore.can(entry.requires)`, so this fake
+ *  needs a `capabilities()`/`can()` pair even though nothing in this file exercises role-gating
+ *  itself (`app-sidebar.spec.ts` owns that). This file's `topRole` type never includes `VIEWER`, so
+ *  the table doesn't need that row either. */
+const ROLE_CAPABILITIES: Record<'ADMIN' | 'MANAGER' | 'PILOT', readonly AuthCapability[]> = {
+  PILOT: ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT'],
+  MANAGER: ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT', 'MANAGE_FLEET', 'MANAGE_ORG'],
+  ADMIN: ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT', 'MANAGE_FLEET', 'MANAGE_ORG'],
+};
+
 /** `authEnabled` defaults to `false` — this app's own real default (`vision.auth.enabled=false`),
  *  so every existing call site here keeps exercising dev parity unless a test opts into a "real"
  *  secured session (docs/plans/done/OPS-UX-PLAN.md §2 A6's own dedicated tests below). */
 function fakeAuthStore(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT', authEnabled = false) {
+  const capabilities = topRole ? ROLE_CAPABILITIES[topRole] : [];
   return {
     user: () => (topRole ? { topRole, displayName: 'Test User', username: 'test' } : null),
     authEnabled: () => authEnabled,
+    capabilities: () => capabilities,
+    can: (capability: AuthCapability) => hasCapability(capabilities, capability),
     // `<vision-reauth-overlay>` (wave W1) is mounted unconditionally in `app.html`, alongside every
     // App render this file exercises — `false` here keeps it rendering nothing, exactly as every
     // test in this file already assumes with no session ever having 401'd.

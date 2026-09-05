@@ -49,14 +49,14 @@ export class AccountSettingsFacade {
    * the sidebar rail this wave (their pages have no manager-only content of their own, so they don't
    * need a route guard, and this link list is always visible, mirroring their old ungated nav
    * entries), but `/org` is genuinely gated server-side, so this page only offers it — the same
-   * `canManageOrg(topRole)` predicate `identity-chip.ts`/`app-sidebar.ts` already gate their own
+   * `canManageOrg(capabilities)` predicate `identity-chip.ts`/`app-sidebar.ts` already gate their own
    * `/org` link/nav-entry on — to a session that could actually open it, same "the affordance itself
    * degrades honestly" rule the rest of the app follows. Named `canManage`, not `canManageOrg`,
    * mirroring every other facade's own field (`ModelsFacade`/`DatasetsFacade`/`RegionManagerFacade`
    * et al.) — the shorter field name keeps the imported predicate's own name free to read
    * unqualified inside this file.
    */
-  readonly canManage = computed(() => canManageOrg(this.auth.user()?.topRole));
+  readonly canManage = computed(() => canManageOrg(this.auth.capabilities()));
 
   /**
    * The browser's own grant, read once per render rather than tracked as a signal — this app has

@@ -1,5 +1,5 @@
-import type { AuditEntry, GroupSummary, Role } from '../api/models';
-import { roleLabel } from '../auth/auth-logic';
+import type { AuditEntry, AuthCapability, GroupSummary, Role } from '../api/models';
+import { hasCapability, roleLabel } from '../auth/auth-logic';
 import { relativeTimeLabel } from '../events/events-logic';
 
 /**
@@ -11,17 +11,21 @@ import { relativeTimeLabel } from '../events/events-logic';
  */
 
 /**
- * May this role reach the org-settings surface (users/groups CRUD, pilot assignment)? ADMIN and
- * MANAGER only — a PILOT flies aircraft, they don't manage the org (docs/plans/done/U-SCOPE-PLAN.md's own
- * "a pilot flies their aircraft, not their org's inventory").
+ * May this session reach the org-settings surface (users/groups CRUD, pilot assignment)? A thin
+ * wrapper over `hasCapability(…, 'MANAGE_ORG')` (docs/plans/active/AUTH-ROLES-PLAN.md §3.1/§3.2, wave
+ * W2) — the backend's own role→capability policy grants `MANAGE_ORG` to MANAGER/ADMIN only, never
+ * PILOT or VIEWER, so this reads exactly as it did when it compared `topRole === 'ADMIN' ||
+ * topRole === 'MANAGER'` directly. Moved off `topRole` because that comparison was never a reliable
+ * stand-in once `VIEWER` existed as a *fifth* possible membership shape with its own scope
+ * (`core/auth/auth-logic.ts#hasCapability`'s own doc comment) — this is the one place "can manage
+ * the org" is written down; the route guard and the nav-link gate both defer to it.
  *
- * Takes `topRole` as it actually arrives — possibly `undefined`/`null` (a user with no membership
- * has no top role; `UserSummary#topRole` is optional, and a not-yet-loaded `MeResponse` reads
- * `undefined`) — and answers `false` for that case rather than throwing. This is the one place
- * "can manage the org" is written down; the route guard and the nav-link gate both defer to it.
+ * Takes `capabilities` as it actually arrives — possibly `undefined`/`null` (a not-yet-loaded
+ * `MeResponse`) — and answers `false` for that case rather than throwing (`hasCapability`'s own
+ * null-safety).
  */
-export function canManageOrg(topRole: Role | null | undefined): boolean {
-  return topRole === 'ADMIN' || topRole === 'MANAGER';
+export function canManageOrg(capabilities: readonly AuthCapability[] | null | undefined): boolean {
+  return hasCapability(capabilities, 'MANAGE_ORG');
 }
 
 /** One selectable role for the invite form's role picker. */

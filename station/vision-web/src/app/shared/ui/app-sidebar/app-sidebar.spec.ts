@@ -12,7 +12,17 @@ import { SidebarStore } from '../../../core/shell/sidebar-store';
 import { ThemeStore } from '../../../core/shell/theme-store';
 import { SystemStatusStore } from '../../../core/system-status/system-status-store';
 import { NAV_MODES } from '../../../features/hubs/nav-entries';
-import type { OverallHealth } from '../../../core/api/models';
+import { hasCapability } from '../../../core/auth/auth-logic';
+import type { AuthCapability, OverallHealth, Role } from '../../../core/api/models';
+
+/** Mirrors the real `RoleAuthority`/`DefaultScopeResolver` policy table closely enough for a
+ *  fixture — see `core/auth/auth-logic.spec.ts`'s identical helper for the full reasoning. */
+const ROLE_CAPABILITIES: Record<Role, readonly AuthCapability[]> = {
+  VIEWER: [],
+  PILOT: ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT'],
+  MANAGER: ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT', 'MANAGE_FLEET', 'MANAGE_ORG'],
+  ADMIN: ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT', 'MANAGE_FLEET', 'MANAGE_ORG'],
+};
 
 /**
  * `AppSidebar` mounts `<vision-identity-chip>`/`<vision-notification-bell>` in its foot, each with
@@ -41,9 +51,12 @@ function fakeSystemStatusStore(overall: OverallHealth | undefined) {
 }
 
 function fakeAuthStore(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT') {
+  const capabilities = topRole ? ROLE_CAPABILITIES[topRole] : [];
   return {
     user: () => (topRole ? { topRole, displayName: 'Test User', username: 'test' } : null),
     authEnabled: () => false,
+    capabilities: () => capabilities,
+    can: (capability: AuthCapability) => hasCapability(capabilities, capability),
   };
 }
 
@@ -145,7 +158,7 @@ describe('AppSidebar — nav groups + role gate (docs/plans/active/WAREHOUSE-UX-
     const groups = root.querySelectorAll('.nav-group');
 
     NAV_MODES.forEach((mode, i) => {
-      const visible = mode.entries.filter((entry) => !entry.managerOnly);
+      const visible = mode.entries.filter((entry) => !entry.requires);
       const hrefs = Array.from(groups[i].querySelectorAll(':scope > a.nav-row')).map((a) => a.getAttribute('href'));
       expect(hrefs, mode.id).toEqual(visible.map((entry) => entry.to));
     });
@@ -167,12 +180,12 @@ describe('AppSidebar — nav groups + role gate (docs/plans/active/WAREHOUSE-UX-
     }
   });
 
-  it('a PILOT sees no managerOnly entry anywhere, an ADMIN sees the full set (F10 — filtered exactly once, here)', () => {
+  it('a PILOT sees no requires-gated entry anywhere, an ADMIN sees the full set (F10 — filtered exactly once, here)', () => {
     const pilot = render({ topRole: 'PILOT' });
     const pilotHrefs = navRowHrefs(pilot.nativeElement as HTMLElement);
     for (const mode of NAV_MODES) {
       for (const entry of mode.entries) {
-        if (entry.managerOnly) {
+        if (entry.requires) {
           expect(pilotHrefs, `PILOT should not see ${entry.name}`).not.toContain(entry.to);
         }
       }

@@ -1,4 +1,5 @@
-import type { CvModel, CvModelMetrics, CvModelProvenance, Role } from '../../core/api/models';
+import type { CvModel, CvModelMetrics, CvModelProvenance, ScopeKind } from '../../core/api/models';
+import { canAdminister } from '../../core/auth/auth-logic';
 
 /**
  * Pure logic behind `ModelsPage` (`/manage/training/models`) — the CV model registry table: which
@@ -35,17 +36,19 @@ export function modelKey(model: Pick<CvModel, 'id' | 'version'>): string {
 }
 
 /**
- * May this role reach the registry's mutation surface (Promote/Roll back)? **ADMIN only** —
- * `ModelRegistryController`'s own javadoc: both operations require
+ * May this session reach the registry's mutation surface (Promote/Roll back)? **`UNBOUNDED` scope
+ * only** — `ModelRegistryController`'s own javadoc: both operations require
  * `VisibilityScope#canAdminister()`, which is strictly narrower than `canManageOrg()`
  * (`core/org/org-logic.ts`) — a MANAGER's `GROUPS` scope administers their own subtree, not "swap
- * the model every stream in the deployment uses" (`VisibilityScope#canAdminister`'s own javadoc).
- * Mirrors that predicate client-side so the buttons hide for a MANAGER too, rather than showing
- * ones that would only ever 403. **Dev parity**: `vision.auth.enabled=false`'s dev principal
- * resolves to `ADMIN`, so this reads `true` exactly as it does for a real admin.
+ * the model every stream in the deployment uses" (`VisibilityScope#canAdminister`'s own javadoc). A
+ * thin wrapper over `core/auth/auth-logic.ts#canAdminister` (docs/plans/active/AUTH-ROLES-PLAN.md
+ * §3.2, wave W2 — moved off `topRole === 'ADMIN'` for the same reason `canManageOrg` moved off
+ * `topRole` comparisons: it was never a reliable stand-in once `VIEWER` existed). **Dev parity**:
+ * `vision.auth.enabled=false`'s dev principal resolves to `scopeKind: 'UNBOUNDED'`, so this reads
+ * `true` exactly as it does for a real admin.
  */
-export function canAdministerRegistry(topRole: Role | null | undefined): boolean {
-  return topRole === 'ADMIN';
+export function canAdministerRegistry(scopeKind: ScopeKind | null | undefined): boolean {
+  return canAdminister(scopeKind);
 }
 
 /**

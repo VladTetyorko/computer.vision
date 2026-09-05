@@ -63,10 +63,10 @@ interface SubjectOption {
  * opens, and when it comes back empty the editor says so and still lets existing grants be
  * re-levelled or removed, rather than pretending there is nobody to add or blocking the whole panel.
  *
- * **Dev parity** (`vision.auth.enabled=false`): the dev admin reports `topRole: 'ADMIN'`, so the
- * Team-layer path resolves its group list from `OrgStore.groups()` (unbounded for that account) and
- * every management control is available exactly as it is for a real admin — the app behaves as
- * before with zero auth.
+ * **Dev parity** (`vision.auth.enabled=false`): the dev admin resolves to `scopeKind: 'UNBOUNDED'`,
+ * so the Team-layer path resolves its group list from `OrgStore.groups()` (unbounded for that
+ * account) and every management control is available exactly as it is for a real admin — the app
+ * behaves as before with zero auth.
  *
  * A non-routed presentational child, so it injects its root stores directly
  * (`architecture.spec.ts`'s own carve-out).
@@ -162,7 +162,7 @@ export class LayerManager {
     const managed = me.memberships
       .filter((membership) => membership.role !== 'PILOT')
       .map((membership) => ({ id: membership.groupId, name: membership.groupName }));
-    if (me.topRole !== 'ADMIN') {
+    if (this.auth.scopeKind() !== 'UNBOUNDED') {
       return managed;
     }
     const all = this.org.groups().map((group) => ({ id: group.id, name: group.name }));

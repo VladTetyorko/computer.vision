@@ -74,7 +74,7 @@ export class DatasetDetailFacade {
   readonly capturing = signal(false);
 
   /** `TrainingJobController#start`'s own manager gate, mirrored client-side — see this class's own doc comment. */
-  readonly canManage = computed(() => canManageOrg(this.auth.user()?.topRole));
+  readonly canManage = computed(() => canManageOrg(this.auth.capabilities()));
 
   readonly baseModel = signal(DEFAULT_BASE_MODEL);
   /** `number | null` because that's what an emptied `type="number"` `ngModel` actually produces. */

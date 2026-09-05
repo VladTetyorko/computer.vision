@@ -6,17 +6,18 @@ import {
   formatActivity,
   roleOptions,
 } from './org-logic';
-import type { AuditEntry, GroupSummary, Role } from '../api/models';
+import type { AuditEntry, AuthCapability, GroupSummary } from '../api/models';
 
 describe('canManageOrg', () => {
-  it.each<[Role | null | undefined, boolean]>([
-    ['ADMIN', true],
-    ['MANAGER', true],
-    ['PILOT', false],
+  it.each<[readonly AuthCapability[] | null | undefined, boolean]>([
+    [['OPERATE_PAYLOAD', 'COMMAND_FLIGHT', 'MANAGE_FLEET', 'MANAGE_ORG'], true], // ADMIN/MANAGER's full set
+    [['MANAGE_ORG'], true], // MANAGE_ORG alone is sufficient
+    [['OPERATE_PAYLOAD', 'COMMAND_FLIGHT'], false], // PILOT's set — no MANAGE_ORG
+    [[], false], // VIEWER — no capabilities at all
     [undefined, false],
     [null, false],
-  ])('is %s → %s', (role, expected) => {
-    expect(canManageOrg(role)).toBe(expected);
+  ])('capabilities=%s → %s', (capabilities, expected) => {
+    expect(canManageOrg(capabilities)).toBe(expected);
   });
 });
 

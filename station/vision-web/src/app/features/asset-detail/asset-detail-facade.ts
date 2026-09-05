@@ -104,7 +104,7 @@ export class AssetDetailFacade {
 
   /** Gates the Pilots drill-in trigger itself — a non-manager should never see the affordance, not
    *  just find an empty drawer behind it (`PilotsCard`'s own internal gate stays as a second layer). */
-  readonly canManagePilots = computed(() => canManageOrg(this.auth.user()?.topRole));
+  readonly canManagePilots = computed(() => canManageOrg(this.auth.capabilities()));
 
   readonly asset = signal<AssetDetails | undefined>(undefined);
   readonly loading = signal(true);

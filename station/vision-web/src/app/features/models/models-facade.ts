@@ -84,7 +84,7 @@ export class ModelsFacade {
   /** `true` once a mutation call has confirmed `vision.cv.registry.enabled=false` on this deployment. The roster read itself never sets this — it never 404s. */
   readonly registryDisabled = this.registryDisabledSignal.asReadonly();
 
-  readonly canAdminister = computed(() => canAdministerRegistry(this.auth.user()?.topRole));
+  readonly canAdminister = computed(() => canAdministerRegistry(this.auth.scopeKind()));
   readonly rollbackDialogOpen = computed(() => this.dialogs.isOpen(ROLLBACK_DIALOG_ID));
   readonly rollbackMessage = computed(() => rollbackConfirmMessage(this.liveModel()));
 

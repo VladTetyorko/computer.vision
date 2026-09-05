@@ -1,4 +1,5 @@
-import type { AssetStatus, AssetSummary, AssetUsage, GeoPosition, Membership, Role, StreamState } from '../../core/api/models';
+import type { AssetStatus, AssetSummary, AssetUsage, AuthCapability, GeoPosition, Membership, ScopeKind, StreamState } from '../../core/api/models';
+import { hasCapability } from '../../core/auth/auth-logic';
 import { hasFix } from '../../core/geo/geo-logic';
 import { humanAge } from '../../core/telemetry/telemetry-logic';
 import type { PreflightSummary } from '../../core/telemetry/flight-state-logic';
@@ -465,30 +466,39 @@ function membershipGroupNames(memberships: readonly Membership[]): string | unde
 }
 
 /**
- * The picker's empty-state copy, resolved by role — the one place `drone-picker.html`'s three-way
- * branch (error / loading / empty) collapses its "empty" leg down to a single view model, mirroring
- * `onboarding-logic.ts`'s "component reads a computed, never branches on `topRole` itself" convention.
+ * The picker's empty-state copy, resolved by scope/capability — the one place `drone-picker.html`'s
+ * three-way branch (error / loading / empty) collapses its "empty" leg down to a single view model,
+ * mirroring `onboarding-logic.ts`'s "component reads a computed, never branches on a raw role field
+ * itself" convention.
  *
  * **PILOT** (docs/plans/done/OPS-UX-PLAN.md §2 A2, verbatim wording): *"No aircraft assigned to you
  * yet"*, naming their group from `memberships` when one resolves — never a fabricated person's name.
- * A PILOT with genuinely no membership at all (an edge the plan doesn't name a copy for) gets an
- * honest "could not determine your group" rather than either blank text or an invented one — the
- * same "degrade honestly, never fabricate" rule every other empty state in this app follows.
+ * Read off `scopeKind === 'ASSIGNED_ASSETS'` (docs/plans/active/AUTH-ROLES-PLAN.md §3.1 — the one
+ * scope a PILOT-only/no-membership session ever resolves to, so it uniquely identifies this branch
+ * without comparing `topRole` — wave W2), not `topRole`. A PILOT with genuinely no membership at all
+ * (an edge the plan doesn't name a copy for) gets an honest "could not determine your group" rather
+ * than either blank text or an invented one — the same "degrade honestly, never fabricate" rule
+ * every other empty state in this app follows.
  *
- * **ADMIN/MANAGER**: unchanged title/message from before this task ("keeps its current, correct
+ * **MANAGER/ADMIN**: unchanged title/message from before this task ("keeps its current, correct
  * message" — OPS-UX-PLAN.md §2 A2) — only `drone-picker.html`'s CTA target changes, from
  * `/devices?addSource=1` to `/add-source` (A4), which is why that link lives in the template, not
  * in this string.
  *
- * **An unresolved `topRole`** (`undefined`/`null` — every real caller reaches this page behind
+ * **An unresolved `scopeKind`** (`undefined`/`null` — every real caller reaches this page behind
  * `authGuard`, which already awaited `AuthStore.ready`, so this is a defensive fallback, not a path
  * any real visit takes) gets the fleet-empty title/message — never the PILOT copy, which would
- * claim a specific relationship ("assigned to you") the app cannot back up for an unknown role —
- * but **not** the CTA: `showAddSource` mirrors `canManageOrg` exactly (`ADMIN`/`MANAGER` only), so an
- * unconfirmed role never gets offered a door `POST /api/assets` (A4) might refuse.
+ * claim a specific relationship ("assigned to you") the app cannot back up for an unresolved scope —
+ * but **not** the CTA: `showAddSource` mirrors `canManageOrg` exactly (`hasCapability(capabilities,
+ * 'MANAGE_ORG')` — MANAGER/ADMIN only), so an unconfirmed session never gets offered a door
+ * `POST /api/assets` (A4) might refuse.
  */
-export function pickerEmptyStateCopy(topRole: Role | null | undefined, memberships: readonly Membership[]): PickerEmptyState {
-  if (topRole === 'PILOT') {
+export function pickerEmptyStateCopy(
+  scopeKind: ScopeKind | null | undefined,
+  capabilities: readonly AuthCapability[] | null | undefined,
+  memberships: readonly Membership[],
+): PickerEmptyState {
+  if (scopeKind === 'ASSIGNED_ASSETS') {
     const groupNames = membershipGroupNames(memberships);
     return {
       title: 'No aircraft assigned to you yet',
@@ -501,6 +511,6 @@ export function pickerEmptyStateCopy(topRole: Role | null | undefined, membershi
   return {
     title: 'No drones registered yet',
     message: 'Add a source from the Devices tab — the synthetic test drone flies a route with no hardware at all.',
-    showAddSource: topRole === 'ADMIN' || topRole === 'MANAGER',
+    showAddSource: hasCapability(capabilities, 'MANAGE_ORG'),
   };
 }

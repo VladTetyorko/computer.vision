@@ -36,9 +36,10 @@ export function hasOnlySeededUsers(users: readonly UserSummary[]): boolean {
  * later un-creates a user or un-adds every last asset just to bring the banner back, so in practice
  * this is a one-way "still setting up" → "in real use" transition, never a flicker.
  *
- * `CommandFacade` gates the ADMIN-only part itself (`AuthStore.user()?.topRole`, read once
- * `AuthStore.ready` resolves) — this function only knows about freshness, not about who's allowed
- * to see it, so it stays reusable/testable independent of auth.
+ * `CommandFacade` gates the UNBOUNDED-scope-only part itself (`canAdminister(AuthStore.scopeKind())`,
+ * docs/plans/active/AUTH-ROLES-PLAN.md §3.2 wave W2 — moved off `AuthStore.user()?.topRole`) — this
+ * function only knows about freshness, not about who's allowed to see it, so it stays
+ * reusable/testable independent of auth.
  */
 export function isFreshStation(users: readonly UserSummary[], totalAssets: number): boolean {
   return hasOnlySeededUsers(users) || totalAssets === 0;

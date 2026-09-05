@@ -3,7 +3,6 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
 import { AuthStore } from '../../../core/auth/auth-store';
 import { FleetStore } from '../../../core/fleet/fleet-store';
 import { LiveStore } from '../../../core/live/live-store';
-import { canManageOrg } from '../../../core/org/org-logic';
 import { SidebarStore } from '../../../core/shell/sidebar-store';
 import { ThemeStore } from '../../../core/shell/theme-store';
 import { shellStatusLabel, shellStatusSeverity } from '../../../core/system-status/system-status-logic';
@@ -32,7 +31,7 @@ import { NotificationBell } from '../notification-bell';
  * - **F3** ("the dropdown is the only path to most pages, and it clips") — nothing here is a
  *   popover that can run out of viewport height; the body scrolls (`overflow-y: auto`) instead of
  *   silently cutting off Manage's ten entries the way a 961px-tall dropdown used to.
- * - **F10** ("role filtering is applied in one of the two navigation copies") — `managerOnly` (and,
+ * - **F10** ("role filtering is applied in one of the two navigation copies") — `requires` (and,
  *   since docs/plans/done/OPS-UX-PLAN.md §2 A5, `badge: 'soon'`) is filtered exactly once, in `modes()`
  *   below. The old split — `ManageHub` honoured it, the header dropdown didn't — cannot recur
  *   because there is only one place left that reads `NAV_MODES`.
@@ -153,19 +152,20 @@ export class AppSidebar {
   /** Optional — only present while the `@else` branch (closed) renders it; see class doc's mobile-sheet paragraph. */
   private readonly hamburgerEl = viewChild<ElementRef<HTMLButtonElement>>('hamburger');
 
-  /** Same ADMIN/MANAGER gate `identity-chip`/the former `ManageHub` used — applied exactly once, here (F10). */
-  private readonly canManage = computed(() => canManageOrg(this.auth.user()?.topRole));
-
   /**
-   * `NAV_MODES` with every `managerOnly` entry dropped for anyone who isn't ADMIN/MANAGER — the one
-   * filter left here now that every `badge: 'soon'` scaffold entry has left `NAV_MODES` outright
-   * (docs/plans/active/WAREHOUSE-UX-PLAN.md wave W1; `nav-entries.ts`'s own class doc has the full
-   * writeup of what replaced the old `badge`-drop half of this filter).
+   * `NAV_MODES` with every `requires`-gated entry dropped for a session lacking that capability —
+   * the one filter left here now that every `badge: 'soon'` scaffold entry has left `NAV_MODES`
+   * outright (docs/plans/active/WAREHOUSE-UX-PLAN.md wave W1; `nav-entries.ts`'s own class doc has the
+   * full writeup of what replaced the old `badge`-drop half of this filter). Reads
+   * `AuthStore.can()` directly per entry (docs/plans/active/AUTH-ROLES-PLAN.md §3.2, wave W2) rather
+   * than a single `canManage` computed pinned to `MANAGE_ORG` — every entry today happens to name
+   * that one capability (F10), but a future entry naming a different one (e.g. `MANAGE_FLEET` alone)
+   * is filtered correctly without this component growing a second gate.
    */
   protected readonly modes = computed<readonly NavMode[]>(() =>
     NAV_MODES.map((mode) => ({
       ...mode,
-      entries: mode.entries.filter((entry) => !entry.managerOnly || this.canManage()),
+      entries: mode.entries.filter((entry) => !entry.requires || this.auth.can(entry.requires)),
     })),
   );
 

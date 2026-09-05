@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { NAV_MODES, navModeById } from './nav-entries';
 
-/** Every entry a session with (`canManage`) or without (`!canManage`) ADMIN/MANAGER rights would see
- *  in the sidebar — mirrors `shared/ui/app-sidebar/app-sidebar.ts#modes`'s own filter exactly, kept
- *  here as a small local helper rather than imported so this spec stays a pure data-level check with
- *  no Angular/TestBed dependency (matching this file's own pre-existing "no Angular" precedent). */
+/** Every entry a session with (`canManage`) or without (`!canManage`) the `MANAGE_ORG` capability
+ *  would see in the sidebar — mirrors `shared/ui/app-sidebar/app-sidebar.ts#modes`'s own filter
+ *  exactly (every entry in `NAV_MODES` today names that one capability, so this stays a plain
+ *  boolean rather than importing `AuthCapability`/`hasCapability` for a real per-capability check),
+ *  kept here as a small local helper rather than imported so this spec stays a pure data-level check
+ *  with no Angular/TestBed dependency (matching this file's own pre-existing "no Angular" precedent). */
 function visibleEntries(canManage: boolean) {
-  return NAV_MODES.flatMap((mode) => mode.entries.filter((entry) => !entry.managerOnly || canManage));
+  return NAV_MODES.flatMap((mode) => mode.entries.filter((entry) => !entry.requires || canManage));
 }
 
 describe('NAV_MODES', () => {
@@ -109,10 +111,10 @@ describe('NAV_MODES', () => {
   describe('OPERATE — Readiness rename (rule 4)', () => {
     const operate = NAV_MODES.find((mode) => mode.id === 'operate')!;
 
-    it('has exactly Cockpit, Wall, Readiness, in that order, none managerOnly', () => {
+    it('has exactly Cockpit, Wall, Readiness, in that order, none gated', () => {
       expect(operate.entries.map((entry) => entry.name)).toEqual(['Cockpit', 'Wall', 'Readiness']);
       for (const entry of operate.entries) {
-        expect(entry.managerOnly, entry.name).toBeFalsy();
+        expect(entry.requires, entry.name).toBeFalsy();
       }
     });
 
@@ -127,10 +129,10 @@ describe('NAV_MODES', () => {
   describe('MONITOR — Command still one merged entry; Audit trail moved out to System', () => {
     const monitor = NAV_MODES.find((mode) => mode.id === 'monitor')!;
 
-    it('has exactly Command, Activity, Replay library, Alerts center, in that order, none managerOnly', () => {
+    it('has exactly Command, Activity, Replay library, Alerts center, in that order, none gated', () => {
       expect(monitor.entries.map((entry) => entry.name)).toEqual(['Command', 'Activity', 'Replay library', 'Alerts center']);
       for (const entry of monitor.entries) {
-        expect(entry.managerOnly, entry.name).toBeFalsy();
+        expect(entry.requires, entry.name).toBeFalsy();
       }
     });
 
@@ -159,23 +161,23 @@ describe('NAV_MODES', () => {
       const inventory = fleet.entries.find((entry) => entry.to === '/assets');
       expect(inventory).toBeDefined();
       expect(inventory?.name).toBe('Inventory');
-      expect(inventory?.managerOnly).toBeFalsy();
+      expect(inventory?.requires).toBeFalsy();
       expect(fleet.entries.some((entry) => entry.name === 'Assets')).toBe(false);
     });
 
-    it('"Add source" is renamed to "Add vehicle", stays managerOnly', () => {
+    it('"Add source" is renamed to "Add vehicle", stays MANAGE_ORG-gated', () => {
       const addVehicle = fleet.entries.find((entry) => entry.to === '/add-source');
       expect(addVehicle).toBeDefined();
       expect(addVehicle?.name).toBe('Add vehicle');
-      expect(addVehicle?.managerOnly).toBe(true);
+      expect(addVehicle?.requires).toBe('MANAGE_ORG');
       expect(fleet.entries.some((entry) => entry.name === 'Add source')).toBe(false);
     });
 
-    it('"Pilots / roster" is renamed to "Crew", stays managerOnly', () => {
+    it('"Pilots / roster" is renamed to "Crew", stays MANAGE_ORG-gated', () => {
       const crew = fleet.entries.find((entry) => entry.to === '/manage/roster');
       expect(crew).toBeDefined();
       expect(crew?.name).toBe('Crew');
-      expect(crew?.managerOnly).toBe(true);
+      expect(crew?.requires).toBe('MANAGE_ORG');
       expect(fleet.entries.some((entry) => entry.name === 'Pilots / roster')).toBe(false);
     });
 
@@ -196,18 +198,18 @@ describe('NAV_MODES', () => {
       }
     });
 
-    it('Maintenance is new this wave (W4 — the page itself shipped in W7, this nav entry did not), targets /fleet/maintenance, managerOnly', () => {
+    it('Maintenance is new this wave (W4 — the page itself shipped in W7, this nav entry did not), targets /fleet/maintenance, MANAGE_ORG-gated', () => {
       const maintenance = fleet.entries.find((entry) => entry.to === '/fleet/maintenance');
       expect(maintenance).toBeDefined();
       expect(maintenance?.name).toBe('Maintenance');
-      expect(maintenance?.managerOnly).toBe(true);
+      expect(maintenance?.requires).toBe('MANAGE_ORG');
     });
   });
 
-  describe('VISION — every entry managerOnly', () => {
+  describe('VISION — every entry MANAGE_ORG-gated', () => {
     const vision = NAV_MODES.find((mode) => mode.id === 'vision')!;
 
-    it('has exactly Profiles, CV training, CV model registry, Geo regions, in that order, all managerOnly', () => {
+    it('has exactly Profiles, CV training, CV model registry, Geo regions, in that order, all MANAGE_ORG-gated', () => {
       expect(vision.entries.map((entry) => entry.name)).toEqual([
         'Profiles',
         'CV training',
@@ -215,7 +217,7 @@ describe('NAV_MODES', () => {
         'Geo regions',
       ]);
       for (const entry of vision.entries) {
-        expect(entry.managerOnly, entry.name).toBe(true);
+        expect(entry.requires, entry.name).toBe('MANAGE_ORG');
       }
     });
 
@@ -227,7 +229,7 @@ describe('NAV_MODES', () => {
     });
   });
 
-  describe('SYSTEM — footer group, one deliberate managerOnly carve-out plus the new Settings entry', () => {
+  describe('SYSTEM — footer group, one deliberate ungated carve-out plus the new Settings entry', () => {
     const system = NAV_MODES.find((mode) => mode.id === 'system')!;
 
     it('renders in the sidebar footer', () => {
@@ -239,17 +241,17 @@ describe('NAV_MODES', () => {
     });
 
     /**
-     * docs/plans/done/SYSTEM-STATUS-PLAN.md §5.1: "System status" is not managerOnly — an operator whose CV
-     * pipeline just died needs to see why. "Settings" is not managerOnly either — every signed-in
-     * user, pilot included, owns account/detection/controller preferences. Audit trail and Debug stay
-     * managerOnly, mirroring the backend's own gates.
+     * docs/plans/done/SYSTEM-STATUS-PLAN.md §5.1: "System status" is ungated — an operator whose CV
+     * pipeline just died needs to see why. "Settings" is ungated too — every signed-in user, pilot
+     * included, owns account/detection/controller preferences. Audit trail and Debug stay
+     * `MANAGE_ORG`-gated, mirroring the backend's own gates.
      */
-    it('System status and Settings are ungated; Audit trail and Debug are managerOnly', () => {
+    it('System status and Settings are ungated; Audit trail and Debug are MANAGE_ORG-gated', () => {
       const byName = (name: string) => system.entries.find((entry) => entry.name === name)!;
-      expect(byName('System status').managerOnly).toBeFalsy();
-      expect(byName('Settings').managerOnly).toBeFalsy();
-      expect(byName('Audit trail').managerOnly).toBe(true);
-      expect(byName('Debug').managerOnly).toBe(true);
+      expect(byName('System status').requires).toBeFalsy();
+      expect(byName('Settings').requires).toBeFalsy();
+      expect(byName('Audit trail').requires).toBe('MANAGE_ORG');
+      expect(byName('Debug').requires).toBe('MANAGE_ORG');
     });
 
     it('Audit trail still targets /monitor/audit — only its group changed, not its route', () => {
@@ -268,12 +270,12 @@ describe('NAV_MODES', () => {
    * Entry-count regression guard (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1's own illustrative
    * "25 → 15 for a manager, 11 → 10 for a pilot"). Wave W1 landed the manager at the TRUE count of 20
    * (not the plan's own "15" estimate — see the W1-era version of this comment for the accounting).
-   * **Wave W4 moved the manager count to 18** — three carried-over `managerOnly` entries fold into
-   * Inventory's own tabs/KPI strip (Asset categories, Inventory reports, Devices: −3), and one new
-   * `managerOnly` entry (Maintenance, W7) joins Fleet (+1): 20 − 3 + 1 = 18. **Wave W6
-   * (docs/plans/active/CV-SETTINGS-PLAN.md) moves it to 19** — one new `managerOnly` entry (Profiles)
+   * **Wave W4 moved the manager count to 18** — three carried-over `MANAGE_ORG`-gated entries fold
+   * into Inventory's own tabs/KPI strip (Asset categories, Inventory reports, Devices: −3), and one
+   * new gated entry (Maintenance, W7) joins Fleet (+1): 20 − 3 + 1 = 18. **Wave W6
+   * (docs/plans/active/CV-SETTINGS-PLAN.md) moves it to 19** — one new gated entry (Profiles)
    * joins Vision (+1): 18 + 1 = 19. The PILOT count is unaffected across both waves — none of the
-   * changed entries was ever pilot-visible (every VISION entry, Profiles included, is `managerOnly`)
+   * changed entries was ever pilot-visible (every VISION entry, Profiles included, is `MANAGE_ORG`-gated)
    * — it still lands on the plan's own "10".
    */
   it('a PILOT sees exactly the plan\'s own 10 entries; a MANAGER/ADMIN sees 19 (18 + 1 new Profiles — see this test\'s own doc comment)', () => {

@@ -2,6 +2,7 @@ import { DestroyRef, Injectable, type Signal, computed, effect, inject, signal, 
 import { ActivatedRoute, Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { AuthStore } from '../../core/auth/auth-store';
+import { canAdminister } from '../../core/auth/auth-logic';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { buildTestDroneRequest } from '../../core/fleet/simulation-logic';
 import { PollScheduler } from '../../core/poll-scheduler';
@@ -363,14 +364,16 @@ export class CommandFacade {
   readonly addingTestDrone = this.addingTestDroneSignal.asReadonly();
 
   // --- "Set up this station" checklist (docs/plans/done/OPS-UX-PLAN.md §3 B2) ------------------------------
-  // ADMIN-only (`AuthStore.user()?.topRole`) — ADMIN is the one role that can act on every row (create a
+  // UNBOUNDED-scope-only (`canAdminister(AuthStore.scopeKind())`, docs/plans/active/AUTH-ROLES-PLAN.md
+  // §3.2, wave W2 — moved off `topRole === 'ADMIN'` for the same reason `canManageOrg`/
+  // `canAdministerRegistry` did) — an ADMIN is the one session that can act on every row (create a
   // group, create a user, add a source, assign a pilot), so a MANAGER/PILOT landing on `/command` never
   // sees a checklist pointing at doors they can't open. **Dev parity**: with `vision.auth.enabled=false`
-  // the backend's fixed dev principal reports `topRole: 'ADMIN'` (`AuthStore`'s own class doc comment,
-  // "Dev parity" paragraph) — so this gate is effectively "everyone" on a default install, which is the
-  // *right* call here (unlike, say, `core/shell/landing-logic.ts`'s stricter decision for a different
-  // question): a fresh unsecured station genuinely needs this setup walked through by whoever is sitting
-  // at it, same as a real ADMIN would.
+  // the backend's fixed dev principal resolves to `scopeKind: 'UNBOUNDED'` (`AuthStore`'s own class doc
+  // comment, "Dev parity" paragraph) — so this gate is effectively "everyone" on a default install,
+  // which is the *right* call here (unlike, say, `core/shell/landing-logic.ts`'s stricter decision for a
+  // different question): a fresh unsecured station genuinely needs this setup walked through by whoever
+  // is sitting at it, same as a real ADMIN would.
   private readonly setupUsersSignal = signal<readonly UserSummary[]>([]);
   private readonly setupGroupsSignal = signal<readonly GroupSummary[]>([]);
   /** Guards the very first render from a false "fresh!" flash before `listUsers`/`listGroups` land — see `showSetupChecklist`. */
@@ -391,7 +394,7 @@ export class CommandFacade {
    * load resolves.
    */
   readonly showSetupChecklist = computed(
-    () => this.setupDataLoadedSignal() && this.auth.user()?.topRole === 'ADMIN' && isFreshStation(this.setupUsersSignal(), this.summary()?.totalAssets ?? 0),
+    () => this.setupDataLoadedSignal() && canAdminister(this.auth.scopeKind()) && isFreshStation(this.setupUsersSignal(), this.summary()?.totalAssets ?? 0),
   );
 
   /** The four rows themselves — only built while `showSetupChecklist` is true (no reason to compute it otherwise). */
@@ -451,8 +454,8 @@ export class CommandFacade {
   /** Loads the checklist's own two small lists once — best-effort, mirrors every other poller's silent-degrade rule: a failed load just leaves the checklist not-yet-shown rather than surfacing a page-blocking error over the map. */
   private async loadSetupChecklistData(): Promise<void> {
     await this.auth.ready;
-    if (this.auth.user()?.topRole !== 'ADMIN') {
-      return; // never fetched for a role that could never see the checklist anyway
+    if (!canAdminister(this.auth.scopeKind())) {
+      return; // never fetched for a session that could never see the checklist anyway
     }
     try {
       const [users, groups] = await Promise.all([this.api.listUsers(), this.api.listGroups()]);

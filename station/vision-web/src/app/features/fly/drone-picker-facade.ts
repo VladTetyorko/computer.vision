@@ -41,10 +41,12 @@ const HIDE_SIMULATED_KEY = 'vision.fly.hideSimulated';
  * displays is a deliberate simplification of the split, not an oversight.
  *
  * **`AuthStore` (docs/plans/done/OPS-UX-PLAN.md §2 A2)** — the one addition this wave makes. `emptyState`
- * feeds `drone-picker.html`'s empty leg entirely from `fly-logic.ts#pickerEmptyStateCopy`: `topRole`
- * decides the wording (PILOT vs ADMIN/MANAGER), `memberships` names the PILOT's group. No new HTTP
- * call — `listAssets()` is already visibility-scoped, so an empty response for a PILOT already means
- * "nothing assigned to you" (see that function's own doc comment).
+ * feeds `drone-picker.html`'s empty leg entirely from `fly-logic.ts#pickerEmptyStateCopy`: `scopeKind`
+ * decides the wording (`ASSIGNED_ASSETS` ⇒ PILOT copy vs the MANAGER/ADMIN copy), `capabilities`
+ * decides the CTA, `memberships` names the PILOT's group (docs/plans/active/AUTH-ROLES-PLAN.md §3.2,
+ * wave W2 — moved off `topRole`). No new HTTP call — `listAssets()` is already visibility-scoped, so
+ * an empty response for a PILOT already means "nothing assigned to you" (see that function's own doc
+ * comment).
  *
  * **Poll gated on `LiveStore` (docs/plans/done/SCALE-100-PLAN.md §5 S6, item 1)** — mirrors
  * `core/fleet/fleet-store.ts#FleetStore`'s identical transport-switch effect: the 5s poll pauses
@@ -107,7 +109,7 @@ export class DronePickerFacade {
 
   /** The empty leg's whole view model — see this class's own doc comment. */
   readonly emptyState = computed(() =>
-    pickerEmptyStateCopy(this.auth.user()?.topRole, this.auth.user()?.memberships ?? []),
+    pickerEmptyStateCopy(this.auth.scopeKind(), this.auth.capabilities(), this.auth.user()?.memberships ?? []),
   );
 
   /** `GET /api/me/assignments`'s own row set, as ids — see class doc's B4 note. Empty until the

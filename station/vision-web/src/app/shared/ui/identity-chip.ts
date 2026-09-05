@@ -76,7 +76,7 @@ export class IdentityChip {
    * the door, not just a bounced click. **My activity** below it has no such gate (every user reads
    * their own).
    */
-  protected readonly canManageOrg = computed(() => canManageOrg(this.auth.user()?.topRole));
+  protected readonly canManageOrg = computed(() => canManageOrg(this.auth.capabilities()));
 
   constructor() {
     // Registers this component's own host (trigger + dropdown together) with the shell's overlay
