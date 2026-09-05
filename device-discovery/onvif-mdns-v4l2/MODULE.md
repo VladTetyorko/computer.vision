@@ -26,7 +26,7 @@ ONVIF WS-Discovery, mDNS/DNS-SD, V4L2 local enumeration, and mediamtx push-regis
   - No credentials, no WS-Security header, ever — every request is anonymous by construction.
 - `sealed interface StreamProbeOutcome` (package-private) — `Found(URI uri)` / `AuthRequired()` / `Unavailable()`; a plain algebraic result type, not a driven port.
 ### `com.drones.vision.adapter.discovery.v4l2`
-- `final class V4l2Scanner implements DeviceDiscoveryPort` — `method()` → `"v4l2"`. `V4l2Scanner()` (real `/dev`, `/sys`), `V4l2Scanner(Path devBase, Path sysBase)` — both a test seam and, per docs/plans/active/LAYERING-REFACTOR-PLAN.md §1.3 rule 4 (≤2 tunables ⇒ plain constructor params, no settings record needed), **already** the config-extraction seam for the future `vision.discovery.v4l2.dev-base`/`vision.discovery.v4l2.sys-base` properties — `vision-app` wiring in a later wave passes the configured `Path`s here directly; no change needed in this module. `scan(Duration)` lists `videoN` entries directly under `devBase`; friendly name read from `<sysBase>/class/video4linux/videoN/name` if readable, else the node name. Every candidate → category `"usb-camera"`, `suggestedStream` protocol `"v4l2"`, URI **always** `file:/dev/videoN` — the real path, regardless of `devBase` (that parameter only redirects *where the scanner looks*, e.g. in tests). **(SOURCE-ONBOARDING-2 U8, new)** `@Override public SourceStatus lastStatus()` — a `volatile SourceStatus`, defaulting to `OK`. Only this scanner among the three local-mechanism scanners overrides it — see the U8 Gotchas below for exactly why the other two deliberately stay unmodified.
+- `final class V4l2Scanner implements DeviceDiscoveryPort` — `method()` → `"v4l2"`. `V4l2Scanner()` (real `/dev`, `/sys`), `V4l2Scanner(Path devBase, Path sysBase)` — both a test seam and, per docs/plans/active/LAYERING-REFACTOR-PLAN.md §1.3 rule 4 (≤2 tunables ⇒ plain constructor params, no settings record needed), **already** the config-extraction seam for the future `vision.discovery.v4l2.dev-base`/`vision.discovery.v4l2.sys-base` properties — `vision-app` wiring in a later wave passes the configured `Path`s here directly; no change needed in this module. `scan(Duration)` lists `videoN` entries directly under `devBase`; friendly name read from `<sysBase>/class/video4linux/videoN/name` if readable, else the node name. Every candidate → category `"usb-camera"`, `suggestedStream` protocol `"v4l2"`, URI **always** `file:/dev/videoN` — the real path, regardless of `devBase` (that parameter only redirects *where the scanner looks*, e.g. in tests). **(SOURCE-ONBOARDING-2 U8, new)** `@Override public SourceStatus lastStatus()` — a `volatile SourceStatus`, defaulting to `OK`. All three local-mechanism scanners override it since 2026-09-05 (`MdnsScanner`/`OnvifWsDiscoveryScanner` gained the same volatile-field idiom — see the reversed U8 Gotchas entry below for why leaving them on the port default 400'd `/api/discovery/status`).
 ### `com.drones.vision.adapter.discovery.mediamtx`
 docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P3, §11 "Z3 amendment (2026-08-31) — poll, not hook": mediamtx's official image is scratch-based (no shell), so a `runOnAvailable` hook cannot run there — this scanner instead **polls** the same Control API `adapter-publish-hls`'s `MediamtxControlApi` already reads, on the ordinary `DeviceDiscoveryPort.scan(Duration)` cadence `DiscoveryInboxRunner` already drives for every other scanner. No new REST endpoint, no hook.
 - `record MediamtxScannerSettings(URI apiBase, URI rtspBase, String pathPrefix)` — the module's one collaborator record for this scanner (java-clean-code §3: >2 tunables/no sane single-constructor shape ⇒ settings record, not N-arg overloads). Compact constructor: `Objects.requireNonNull` on `apiBase`/`rtspBase`, `IllegalArgumentException` on a blank `pathPrefix`. `apiBase`/`rtspBase` are deliberately **not** module-local properties — `vision-app` wiring sources both from the existing `VisionPublishProperties.Mediamtx.apiBase()`/`.rtspBase()` (the same values `adapter-publish-hls`/MEDIA-SOT already use to reach this exact mediamtx instance), so the docker-compose-vs-localhost distinction is solved once, not duplicated as a parallel `vision.discovery.mediamtx.api-url` property. `pathPrefix` (default `"ingest/"`) is this module's own concern — it names the push-registry convention, not a mediamtx connection detail.
@@ -47,18 +47,20 @@ docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P3, §11 "Z3 amendment (
 - Config-extraction (docs/plans/active/LAYERING-REFACTOR-PLAN.md §1.3): the module's tunables are either a small framework-free settings record (`mdns.ScanBudget`, 3 fields > the rule's 2-tunable threshold) or plain constructor params (`V4l2Scanner`'s `devBase`/`sysBase`, ≤2 tunables) — never a bare literal baked into a class. No `Vision*Properties` type is imported here; that stays `vision-app`-only.
 
 ## Gotchas
-- **(SOURCE-ONBOARDING-2 U8) Only `V4l2Scanner` gained a `lastStatus()` override this wave — `MdnsScanner`/
-  `OnvifWsDiscoveryScanner` deliberately did not, per `DeviceDiscoveryPort#lastStatus()`'s own frozen
-  contract.** That port's javadoc (`contexts/vision-warehouse`) names mDNS/ONVIF/V4L2 explicitly and says
-  a mechanism whose genuine setup failure is *thrown* (never swallowed into an empty list) "has nothing
-  ambiguous to report" and needs no override; only a mechanism that itself collapses a real failure into
-  an empty `scan()` result needs one. `MdnsScanner`'s `createJmDns()` and `OnvifWsDiscoveryScanner`'s
-  `new DatagramSocket()`/`sendProbe` both still throw `UncheckedIOException` on a genuine setup failure,
-  exactly as before this wave — unmodified, matching the contract. `V4l2Scanner` is the one exception:
-  `scan()`'s own `Files.list(devBase)` call already swallowed a genuine I/O fault into `List.of()` with
-  only a `DEBUG` log, no distinguishing signal at all — the actual gap the port's javadoc describes. This
-  is a narrower fix than "add `lastStatus()` everywhere in this module" might suggest at first read of
-  the plan's task list; the port's own contract is the reason, not an oversight.
+- **(SOURCE-ONBOARDING-2 U8, REVERSED 2026-09-05) Every scanner in this module now overrides
+  `lastStatus()` — the U8-era decision to leave `MdnsScanner`/`OnvifWsDiscoveryScanner` on the port
+  default was itself a live defect.** The original reasoning ("a mechanism whose genuine setup
+  failure is thrown has nothing ambiguous to report") held only while the port default was `OK`;
+  once B1/U8 flipped the default to `NEVER_SCANNED`, a scanner without an override answered
+  `NEVER_SCANNED` *forever, even after being scanned* — and `DefaultDiscoveryService#health()`
+  paired that with a real `lastScanAt`, a combination `SourceHealth`'s compact constructor rejects,
+  turning the whole `/api/discovery/status` endpoint into a permanent 400 after the first sweep
+  (found live). Both scanners now track a `volatile SourceStatus` (`OK` on a successful scan,
+  `UNREACHABLE` when the genuine-setup-failure throw fires), same idiom as `V4l2Scanner`/
+  `MediamtxPathScanner`; `health()` also degrades a contract-breaking port to the never-scanned
+  shape rather than throwing, as a backstop. Rule of thumb: **every `DeviceDiscoveryPort`
+  implementation that scans must override `lastStatus()`** — the interface default exists only for
+  ports that have never been asked.
 - **`V4l2Scanner.lastStatus()` distinguishes "devBase genuinely cannot be listed" from "devBase simply
   does not exist".** The latter (`NoSuchFileException`) is the normal, expected state for any non-Linux
   host or a container with no `/dev` passthrough — the class's own javadoc has always called this "not
