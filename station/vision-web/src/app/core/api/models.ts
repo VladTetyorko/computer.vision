@@ -845,6 +845,48 @@ export interface PipelineLatency {
 }
 
 /**
+ * The follow lock's own lifecycle, independent of whether a box is on-screen right now
+ * (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1). `REQUESTING` is the brief window between a lock
+ * request and the first confirming frame; `HOLDING` is the steady state (`lockedTrackId` on the
+ * sibling response is non-zero); `COASTING` is a short server-side grace period after the box
+ * drops out of a detection frame, still non-zero; `LOST` is coasting's timeout — the lock is no
+ * longer authoritative (`lockedTrackId` reads `0`) but the operator hasn't released it, so the HUD
+ * keeps the target's name on screen and offers Re-acquire; `RELEASED` is the terminal state after
+ * an explicit release, present for one more poll before the `follow` object is omitted entirely.
+ */
+export type FollowState = 'REQUESTING' | 'HOLDING' | 'COASTING' | 'LOST' | 'RELEASED';
+
+/**
+ * Mirrors the trailing `"follow"` object of `GET /api/streams/{streamId}/tracks`
+ * (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1, wave W3, frozen wire) — the follow lock's own
+ * identity and health, orthogonal to the per-frame `lockedTrackId` sentinel on the same response
+ * (which goes `0` in `LOST` while `follow.trackId` stays bound; see `StreamTracksResponse`'s own
+ * doc comment). **The whole object is omitted** — not `null`, absent — when no lock was ever
+ * issued this session, or after a `RELEASED` read has been served once.
+ *
+ * `label` is `""` when the tracker never classified the target (the Fly HUD falls back to
+ * `#<trackId>` — see `follow-logic.ts#followTitle`, never left blank). `lastSeenAt`/
+ * `lastSeenAgeMillis` are `null` until at least one frame has confirmed the box; both keep
+ * advancing through `COASTING` and freeze at the last confirmed instant in `LOST`. `lastBox` is
+ * the last confirmed normalized (0..1) box — `null` only before the first confirming frame — and
+ * is what the cockpit feeds `<vision-player>`'s `lostBox` input while `state === 'LOST'`.
+ * `reacquirable` gates the HUD's Re-acquire action; `recoveredAfterMillis`/`recoveryConfidence`
+ * are `null` outside the one read that reports a successful `LOST → HOLDING` recovery.
+ */
+export interface FollowStatus {
+  readonly state: FollowState;
+  readonly trackId: number;
+  readonly label: string;
+  readonly since: string;
+  readonly lastSeenAt: string | null;
+  readonly lastSeenAgeMillis: number | null;
+  readonly lastBox: BoundingBox | null;
+  readonly reacquirable: boolean;
+  readonly recoveredAfterMillis: number | null;
+  readonly recoveryConfidence: number | null;
+}
+
+/**
  * Mirrors `GET /api/streams/{streamId}/tracks`'s 200 body (docs/plans/done/TRACKING-PLAN.md §4.E) — never
  * errors server-side; an unknown/stopped stream returns an empty `tracks` list and `lockedTrackId:
  * 0` (the same forgiving idiom `GET .../detections` already uses). A **transport failure** (this
@@ -862,6 +904,10 @@ export interface PipelineLatency {
  * already served all three — this app simply hadn't read them) are each independently absent when
  * there's nothing honest to report yet (no completed detection, or an old server) — never a zeroed
  * placeholder.
+ *
+ * `follow` (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1, wave W3) is the lock's own lifecycle —
+ * see {@link FollowStatus}'s doc comment for how it relates to `lockedTrackId`. Omitted when no
+ * lock was ever issued or after release; never fabricated as a default object.
  */
 export interface StreamTracksResponse {
   readonly streamId: string;
@@ -871,6 +917,7 @@ export interface StreamTracksResponse {
   readonly latency?: PipelineLatency;
   readonly rate?: DetectionRate;
   readonly detectionState?: DetectionState;
+  readonly follow?: FollowStatus;
 }
 
 /**

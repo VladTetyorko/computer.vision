@@ -1,0 +1,44 @@
+/* `:host { display: contents }` — this component is conditionally empty (`follow-hud.html`'s own
+   `@if (presentation(); as p)`), and it is mounted as a normal flex child of `cockpit.html`'s
+   `.main-left` column (`cockpit.css`'s own `gap`-based stack, `.main-diagnostics`'s identical
+   `display: contents` precedent in that same file) — without this, an empty `<vision-follow-hud>`
+   would still count as a flex item and claim a `gap` slot on either side even while rendering
+   nothing. */
+:host {
+  display: contents;
+}
+
+/* One `--hud-*` frosted pill row (frontend-style §2's widened rule — a control floating directly
+   over live video; Angular's emulated encapsulation means this recipe can't be shared *across*
+   component stylesheets, so it is re-declared here exactly like `fly-hud.css`'s own `.hud-pill`).
+   `.surface-dark` is self-applied in the template (`follow-hud.html`), not assumed from an ancestor
+   — this component is frozen to be mounted by hosts that are not always a full-bleed dark cockpit
+   (`/live`, the Wall — §3.3), so it must supply its own dark-video-enclave tokens regardless of the
+   page it lands in. */
+.follow-hud {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-8);
+  border-radius: var(--radius-pill);
+  background: var(--hud-bg);
+  border: var(--hud-border);
+  backdrop-filter: blur(var(--hud-blur));
+  color: var(--text);
+  font-size: 0.8rem;
+  padding: var(--space-8) var(--space-16);
+  max-width: 100%;
+}
+
+/* The dot itself carries the state colour (§3.3) — `.chip`/`.dot` are both global (`styles.css`),
+   re-used as-is; no bespoke tone classes of this component's own. */
+.follow-hud .chip {
+  background: transparent;
+  border-color: transparent;
+  padding: 0;
+}
+
+.detail {
+  color: var(--text-muted);
+  white-space: nowrap;
+}

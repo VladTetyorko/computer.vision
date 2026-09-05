@@ -14,7 +14,7 @@ import {
 } from '@angular/core';
 import type HlsType from 'hls.js';
 import { WebrtcCertificateService } from './webrtc-certificate';
-import type { Detection, DetectionResult } from '../../core/api/models';
+import type { BoundingBox, Detection, DetectionResult } from '../../core/api/models';
 import {
   DEFAULT_DECLUTTER_LEVEL,
   DEFAULT_MODEL_KEY,
@@ -22,6 +22,7 @@ import {
   SUB_SCALE_DOT_RADIUS_PX,
   T0_STROKE_WIDTH_PX,
   T1_STROKE_WIDTH_PX,
+  T2_ALPHA_PERCENT,
   T2_STROKE_WIDTH_PX,
   TRAIL_WINDOW_MS,
   applyStickyLabels,
@@ -380,17 +381,34 @@ export class Player {
    * the identical convention. Drives the T0 "committed" tier (docs/plans/active/
    * CV-FLY-INTERACTION-RESEARCH.md §3.2) alongside the hovered box.
    *
-   * **Where this comes from**: this component has no tracking poll of its own — the lock's only
-   * honest source is `GET /api/streams/{id}/tracks`' own echo (docs/extracts/TRACKING-ORCHESTRATION.md
-   * §3.3's "reflect the wire, never local intent"), which `CvControlPanel` already polls for its own
-   * "Following #N" chip (`cv-control-panel.ts#lockedTrackId`). Rather than duplicate that poll here,
-   * `CvControlPanel` emits its own read back out (`lockedTrackIdChange`) whenever it changes; the host
-   * (`CockpitFacade`) holds the resulting value in a plain signal and feeds it into this input — see
-   * that facade's own `lockedTrackId` doc comment. A host with no such plumbing (Live, Wall — neither
-   * page has a Follow/lock control at all) simply never binds this, so it stays `0` and T0 there is
-   * hover-only: an honest degrade, not a broken one, since there is genuinely no lock to report.
+   * **Where this comes from**: this component has no tracking poll of its own and never fabricates
+   * this value locally (docs/extracts/TRACKING-ORCHESTRATION.md §3.3's "reflect the wire, never local
+   * intent"). As of wave W4 (docs/plans/active/TRACK-FOLLOW-PLAN.md §2.2 D1) the host
+   * (`CockpitFacade#lockedTrackId`) reads it from the **per-frame** detections feed
+   * (`FrameTracking#lockedTrackId`, fed continuously for the whole stream session), not from
+   * `CvControlPanel`'s own slower, drawer-scoped tracks poll — the earlier plumbing silently zeroed
+   * this input the instant the Vision drawer closed even though the server-side lock was untouched,
+   * which is the defect wave W4 fixes. A host with no such plumbing (Live, Wall — neither page has a
+   * Follow/lock control at all) simply never binds this, so it stays `0` and T0 there is hover-only:
+   * an honest degrade, not a broken one, since there is genuinely no lock to report.
    */
   readonly lockedTrackId = input<number>(0);
+
+  /**
+   * D3 (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1, wave W4) — the follow lock's last-confirmed box
+   * while `follow.state === 'LOST'`, or `null` any other time (including no lock at all). The host
+   * (`CockpitFacade#lostBox`) is the one place that decides "only feed this while LOST" — this
+   * component just draws whatever it's given, pinned at that fixed position (never re-projected;
+   * there is nothing fresh to project from once the target stopped confirming). Drawn by a tier-
+   * independent pass in `redrawOverlay` ({@link drawLostBox}) — dashed, muted, no confidence label,
+   * and never added to {@link drawnBoxes} (no hover/click affordance; re-acquiring is the follow
+   * HUD's own button, not a second click target in the video). "No other box is dimmed" (§3.1's own
+   * requirement) falls out for free: {@link lockedTrackId} is `0` in `LOST` too (same wire fact, see
+   * that input's own doc comment), so `detection-overlay-logic.ts#tierAlphaPercent`'s existing
+   * lock-dims-rest rule already stops dimming everything else the instant the lock is lost — nothing
+   * in this file's tier code needed to change for that.
+   */
+  readonly lostBox = input<BoundingBox | null>(null);
 
   /**
    * The label currently hovered on the detections strip's remote-control chips
@@ -2138,22 +2156,48 @@ export class Player {
     ctx.clearRect(0, 0, width, height);
     this.drawnBoxes = [];
 
-    const results = this.detections();
-    if (!shouldDrawOverlay(this.boxesMode(), results.length > 0) || this.phase() !== 'playing') {
+    // D3 (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1, wave W4): this gate is the one every draw
+    // pass below needs — the detection-box pipeline *and* the lost-box pass alike need real video
+    // dimensions to compute `content`'s coordinate mapping (`letterboxRect`). `shouldDrawOverlay`'s
+    // own declutter/no-results gate, by contrast, only governs the detection-box pipeline
+    // (`drawDetections` below) — the lost-box pass is deliberately tier-independent
+    // (`detectionTiers`/`detection-overlay-logic.ts` untouched by this wave, per that plan's own file-
+    // scope constraint) and must still draw with declutter set to "off" or zero current detections,
+    // since a lost lock can easily outlive the last frame that had any boxes in it at all.
+    if (this.phase() !== 'playing' || video.videoWidth === 0 || video.videoHeight === 0) {
       return;
     }
-    const result = selectDetectionResult(
-      results,
-      Date.now(),
-      this.overlaySyncLatency(),
-      DEFAULT_SLACK_BATCHES,
-    );
-    if (!result || video.videoWidth === 0 || video.videoHeight === 0) {
-      return;
-    }
-
     const content = this.letterboxRect(width, height, video.videoWidth, video.videoHeight);
 
+    const results = this.detections();
+    if (shouldDrawOverlay(this.boxesMode(), results.length > 0)) {
+      const result = selectDetectionResult(results, Date.now(), this.overlaySyncLatency(), DEFAULT_SLACK_BATCHES);
+      if (result) {
+        this.drawDetections(ctx, content, results, result);
+      }
+    }
+
+    // D3's own draw pass — independent of the block above (see this method's own comment on why),
+    // so a `LOST` placeholder still appears even while `shouldDrawOverlay` says "nothing to draw".
+    const lostBox = this.lostBox();
+    if (lostBox !== null) {
+      this.drawLostBox(ctx, content, lostBox);
+    }
+  }
+
+  /**
+   * The detection-box pipeline extracted verbatim from `redrawOverlay` (wave W4, docs/plans/active/
+   * TRACK-FOLLOW-PLAN.md §3.1 D3) so that method's own top-level gate could stop being "no video
+   * dimensions or nothing to draw, bail out entirely" and become "no video dimensions, bail out" —
+   * the lost-box pass needs to run even when this whole pipeline doesn't. Behavior is otherwise
+   * completely unchanged from before this wave; every comment below predates it.
+   */
+  private drawDetections(
+    ctx: CanvasRenderingContext2D,
+    content: { x: number; y: number; width: number; height: number },
+    results: readonly DetectionResult[],
+    result: DetectionResult,
+  ): void {
     // Forward-projection (docs/plans/done/CV-CLEAN-FEED-PLAN.md §7, wave W7): `result`'s own boxes
     // are up to one poll/arrival cycle stale relative to the instant actually on screen — mirrors the
     // server's deleted `DetectionExtrapolator` (see `detection-overlay-logic.ts`'s own "Forward-
@@ -2275,6 +2319,40 @@ export class Player {
 
     this.paintLabels(ctx, labelCandidates, composite, hovered);
     this.drawnBoxes = drawn;
+  }
+
+  /**
+   * D3's own draw pass (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1, wave W4) — a dashed, muted
+   * placeholder pinned at the follow lock's last confirmed box, drawn whenever {@link lostBox} is
+   * non-null (i.e. `follow.state === 'LOST'`). Deliberately **not** routed through
+   * `drawTierBox`/`detectionTiers` (that file region is owned by a different wave, and this box isn't
+   * a detection at all — it has no confidence, no label, no track to hit-test): reuses that method's
+   * own `[6, 4]` dash pattern (the same "coasting" honest-uncertainty signal, `drawTierBox`'s own doc
+   * comment) and `T1_STROKE_WIDTH_PX` so it reads as *related to* the normal box vocabulary without
+   * pretending to be a live one. Color is a flat `--gray-300`/dark-theme `--text-muted` hex (canvas
+   * cannot read CSS custom properties — the same hardcoded-hex convention `DEFAULT_BOX_COLOR` already
+   * follows for `--blue-500`), at `T2_ALPHA_PERCENT` so it sits behind whatever a fresh redetection
+   * draws over it. Never pushed onto {@link drawnBoxes} — no label, no hover, no click target; the
+   * only affordance for a lost lock is the follow HUD's own Re-acquire button.
+   */
+  private drawLostBox(
+    ctx: CanvasRenderingContext2D,
+    content: { x: number; y: number; width: number; height: number },
+    box: BoundingBox,
+  ): void {
+    const rect = {
+      x: content.x + box.x * content.width,
+      y: content.y + box.y * content.height,
+      width: box.width * content.width,
+      height: box.height * content.height,
+    };
+    ctx.globalAlpha = T2_ALPHA_PERCENT / 100;
+    ctx.lineWidth = T1_STROKE_WIDTH_PX;
+    ctx.strokeStyle = '#8d99ab'; // --gray-300 / dark theme's --text-muted (styles.css)
+    ctx.setLineDash([6, 4]);
+    ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+    ctx.setLineDash([]); // never leak dashing into a later stroke
+    ctx.globalAlpha = 1;
   }
 
   /** The video's actual rendered rectangle within `element`, accounting for `object-fit: contain` letterboxing. */

@@ -17,12 +17,13 @@ const POLL_INTERVAL_MS = 2_000;
  * §3.3's honesty rule). Mirrors this store's own detections `POLL_INTERVAL_MS` — fast enough to feel
  * live, slow enough to stay a background read.
  *
- * **"Only while the drawer is open" is now free**, not a flag this store tracks itself (wave W5,
- * docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3): `CvControlPanel` is only ever mounted while the merged
- * Vision drawer is open (`cockpit.html` owns the mount, `<vision-side-panel>`'s own doc comment —
- * "mounting is the host's job… mounting IS opening"), so calling {@link trackTracks} from that
- * component's constructor and {@link untrackTracks} from its `DestroyRef` bounds this poll to exactly
- * the drawer's own open/closed lifetime, with no separate visibility signal to keep in sync.
+ * **Driven by `CockpitFacade`, not by whichever consumer happens to be mounted** (wave W4,
+ * docs/plans/active/TRACK-FOLLOW-PLAN.md §3.5 "two feeds, two jobs" — superseding wave W5's original
+ * "only while `CvControlPanel` is mounted" bound, `docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3): the
+ * facade calls {@link followTracks} from a `wantsTracksPoll`-gated effect so the poll also keeps
+ * running for a `LOST` lock even after the Vision drawer (and `CvControlPanel` with it) has closed —
+ * see `CockpitFacade`'s own doc comment for the full `wanted` formula. `CvControlPanel` no longer
+ * calls {@link trackTracks}/{@link untrackTracks} itself; it only reads {@link tracks} for its chip.
  */
 const TRACKS_POLL_INTERVAL_MS = 2_000;
 
@@ -320,10 +321,9 @@ export class DetectionsStore {
   /**
    * Starts polling `GET /api/streams/{streamId}/tracks` every {@link TRACKS_POLL_INTERVAL_MS}. A
    * no-op when `streamId` is unchanged from the current session, mirroring {@link track}'s own
-   * `lastTrackKey` dedupe. Call from a mounted consumer's constructor (today, only
-   * `CvControlPanel`) and pair with {@link untrackTracks} on that consumer's `DestroyRef` — see
-   * {@link TRACKS_POLL_INTERVAL_MS}'s own doc comment for why that alone is enough to bound the poll
-   * to "only while the drawer is open".
+   * `lastTrackKey` dedupe. Prefer {@link followTracks} — the boolean `wanted` wrapper `CockpitFacade`
+   * drives from its own effect (wave W4) — over calling this directly; kept public because
+   * `untrackTracks` needs a matching public start, and existing specs exercise this pair directly.
    */
   trackTracks(streamId: string): void {
     if (this.tracksStreamId === streamId) {
@@ -342,6 +342,22 @@ export class DetectionsStore {
     this.tracksStreamId = undefined;
     this.stopTracksPoll();
     this.tracksResponseSignal.set(null);
+  }
+
+  /**
+   * Thin `wanted`-boolean wrapper over {@link trackTracks}/{@link untrackTracks}
+   * (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.5, wave W4) — the shape `CockpitFacade`'s own
+   * `wantsTracksPoll`-gated effect can call unconditionally on every re-run without an `if` at the
+   * call site. `wanted` is re-evaluated idempotently: calling with the same `streamId`/`wanted` pair
+   * twice in a row is a no-op either way ({@link trackTracks}'s own `lastTrackKey`-style dedupe on
+   * the "on" branch, `untrackTracks`'s own already-stopped poll on the "off" branch).
+   */
+  followTracks(streamId: string, wanted: boolean): void {
+    if (wanted) {
+      this.trackTracks(streamId);
+    } else {
+      this.untrackTracks();
+    }
   }
 
   private async pollTracksOnce(streamId: string): Promise<void> {

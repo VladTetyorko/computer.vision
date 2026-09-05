@@ -40,6 +40,7 @@
           [boxesMode]="facade.boxesMode()"
           [lockedTrackId]="facade.lockedTrackId()"
           [hoveredClass]="facade.hoveredDetectionClass()"
+          [lostBox]="facade.lostBox()"
           (latencyChanged)="facade.onLatency($event)"
           (transportChanged)="facade.onTransport($event)"
           (trackFollowed)="facade.followTrack($event)"
@@ -256,6 +257,19 @@
            edge — the persistent items below it stay anchored to this column's own fixed `bottom`, never
            jump position as events come and go. -->
       <div class="main-left">
+        <!-- ---- Follow HUD (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.2/§3.3, wave W4) — the glass
+             readout for an active/lost follow lock, first in DOM so `column-reverse` above pins it to
+             this column's own bottom edge, closest to the video's own subject. Informational-only in
+             watch mode (`canRelease` false): a watcher can see what a lock is doing but never end it.
+             `facade.follow()` is `null` whenever no lock has ever been issued or after release — the
+             component itself renders nothing in that case (see `follow-hud.ts`'s own doc comment). -->
+        <vision-follow-hud
+          [follow]="facade.follow()"
+          [canRelease]="!facade.watchMode()"
+          (release)="facade.releaseFollow()"
+          (reacquire)="facade.reacquireFollow()"
+        />
+
         <!-- ---- Secondary video-device tiles ------------------------------------------------------ -->
         @if (facade.secondaryDevices().length > 0) {
           <div class="main-secondary">
@@ -392,7 +406,6 @@
               [assetId]="a.assetId"
               [boxesMode]="facade.boxesMode()"
               (boxesModeChange)="facade.boxesMode.set($event)"
-              (lockedTrackIdChange)="facade.lockedTrackId.set($event)"
               [detectionEnabled]="facade.detectionOn()"
               [detectionPending]="facade.detectionPending()"
               (detectionEnabledChange)="facade.setDetection($event)"

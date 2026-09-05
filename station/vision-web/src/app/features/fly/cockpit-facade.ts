@@ -30,7 +30,7 @@ import type { Transport } from '../../shared/player/player';
 import { cycleBoxesMode } from '../../shared/player/detection-overlay-logic';
 import { followMarkers, type DrawingDraft } from '../../shared/map/tactical-map/tactical-map-logic';
 import { canShowCommandPanel } from './flight-command-panel-logic';
-import { buildFollowLockPatch, buildHotKnobPatch, resolveCvConfig, type ResolvedCvConfig } from './cv-control-panel-logic';
+import { buildFollowLockPatch, buildHotKnobPatch, buildReleaseLockPatch, resolveCvConfig, type ResolvedCvConfig } from './cv-control-panel-logic';
 import { resolveDetectionEnabled, videoNotice } from './stream-state-logic';
 import {
   ALL_DRONES_OPTION_VALUE,
@@ -49,9 +49,11 @@ import {
 import type {
   AssetDetails,
   AssetSummary,
+  BoundingBox,
   DetectionEvent,
   EffectiveCvProfile,
   FlightCapability,
+  FollowStatus,
   StreamConfigResponse,
 } from '../../core/api/models';
 
@@ -537,15 +539,63 @@ export class CockpitFacade {
   readonly boxesMode = this.settings.declutterLevel;
 
   /**
-   * The FOLLOW-locked track id, echoed up from `CvControlPanel`'s own honest tracks-poll read
-   * (`lockedTrackIdChange`, wave W4) — the one plumbing path that gets the lock id from where it's
-   * actually known (the panel's poll) to `shared/player/player.ts`'s new `lockedTrackId` input,
-   * without relocating tracks-poll ownership. `0` is the wire's own "no lock" sentinel
-   * (`StreamTracksResponse#lockedTrackId`), never `null`/`undefined` — this signal seeds at that same
-   * sentinel so a player bound to it before the panel's first poll settles reads "no lock", not a
-   * false positive.
+   * The FOLLOW-locked track id, read from the **per-frame** detections feed
+   * (`FrameTracking#lockedTrackId` on `detections.results()[0]`), not from the 2s tracks poll
+   * (docs/plans/active/TRACK-FOLLOW-PLAN.md §2.2 D1, wave W4 — this fixes the defect the wave is named
+   * for: closing the Vision drawer used to stop `CvControlPanel`'s poll entirely, and with it the
+   * only signal that ever wrote this field, silently un-following the target the instant the drawer
+   * closed even though the server-side lock was untouched). The detections feed runs for the whole
+   * stream session regardless of any drawer (`DetectionsStore.track`'s own doc comment), so this now
+   * survives a closed drawer exactly like the lock itself does. `0` is the wire's own "no lock"
+   * sentinel (mirrors `StreamTracksResponse#lockedTrackId`), never `null`/`undefined` — with no
+   * detections yet, `results()[0]` is `undefined` and this reads `0`, the same "no lock" idle value
+   * as before.
    */
-  readonly lockedTrackId = signal(0);
+  readonly lockedTrackId = computed(() => this.detections.results()[0]?.tracking?.lockedTrackId ?? 0);
+
+  /**
+   * The follow lock's own lifecycle — mirrors `GET .../tracks`' trailing `follow` object 1:1
+   * (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1, wave W4). `null` before any lock has ever been
+   * issued this session, after a `RELEASED` read, or on any tracks-poll transport failure — the same
+   * "hidden, not fabricated" degrade every other tracks-poll-derived read in this class already
+   * follows. Feeds `<vision-follow-hud>` directly (`cockpit.html`); see {@link wantsTracksPoll} for
+   * what keeps the underlying poll itself alive long enough to observe a `LOST` transition.
+   */
+  readonly follow = computed<FollowStatus | null>(() => this.detections.tracks()?.follow ?? null);
+
+  /**
+   * The lost target's last-confirmed box, fed to `<vision-player>`'s `lostBox` input only while
+   * {@link follow} reports `LOST` (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1 wave W4, D3) — `null`
+   * the instant the state moves on (recovered to `HOLDING`, or released), so the dashed placeholder
+   * never lingers a frame past being true. `player.ts` draws this tier-independently of the normal
+   * detection-box pipeline; see that component's own `drawLostBox` doc comment.
+   */
+  readonly lostBox = computed<BoundingBox | null>(() => {
+    const follow = this.follow();
+    return follow?.state === 'LOST' ? follow.lastBox : null;
+  });
+
+  /**
+   * Whether the `GET .../tracks` poll should be running right now (docs/plans/active/
+   * TRACK-FOLLOW-PLAN.md §3.5 "two feeds, two jobs") — driven into `DetectionsStore.followTracks`
+   * by the constructor effect below. The plan's own formula is "the Vision drawer is open OR the
+   * per-frame lock is non-zero OR the last follow read was LOST"; the middle and last clauses are
+   * exactly {@link lockedTrackId}/{@link follow} below. **The first clause is a deliberate
+   * deviation**: `CockpitPage` owns the drawer's own open/closed `UiStore` and is out of this wave's
+   * file scope, and `UiStore` is deliberately non-injectable (`core/ui/ui-store.ts`'s own doc
+   * comment) — there is no DI path from this facade to that state without either injecting a store
+   * into a page component (an architecture.spec.ts invariant this wave must not touch) or adding a
+   * new output through `CvControlPanel` (out of scope — "keeps its chip but loses tracks-poll
+   * ownership" only). {@link detectionOn} substitutes for it instead: it is the same "operator
+   * plausibly cares about Vision right now" signal the drawer's own mount condition already reads
+   * from elsewhere in this cockpit, and it fails toward *more* polling (a few extra idle reads),
+   * never toward silently dropping a `LOST` recovery window — the one honesty-critical case. A
+   * follow-up wave touching `cockpit.ts` should close this gap properly by feeding the drawer's own
+   * open boolean into the facade instead.
+   */
+  private readonly wantsTracksPoll = computed(
+    () => this.detectionOn() || this.lockedTrackId() !== 0 || this.follow()?.state === 'LOST',
+  );
 
   /**
    * The class currently hovered in the merged Vision drawer's strip (wave W5,
@@ -688,6 +738,17 @@ export class CockpitFacade {
       } else {
         this.detections.reset();
       }
+    });
+
+    // Drives the `GET .../tracks` poll (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.5, wave W4) — see
+    // {@link wantsTracksPoll}'s own doc comment for the `wanted` formula and its one documented
+    // deviation. No `trackingIdChanged` guard needed: `DetectionsStore.followTracks` (like
+    // `geo.track`/`grounding.track` above) already no-ops internally on an unchanged
+    // `(streamId, wanted)` pair, so re-running this effect on every ~5s `stream()` poll tick is
+    // harmless, exactly like those two.
+    effect(() => {
+      const streamId = this.stream()?.streamId;
+      this.detections.followTracks(streamId ?? '', streamId !== undefined && this.wantsTracksPoll());
     });
 
     // Visual-geolocation corrections (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4, wave H6) — keyed
@@ -1033,6 +1094,36 @@ export class CockpitFacade {
       return;
     }
     void this.fleet.patchStreamConfig(streamId, buildFollowLockPatch(trackId));
+  }
+
+  /**
+   * `<vision-follow-hud>`'s own `(release)` output (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.3,
+   * wave W4) — the same `buildReleaseLockPatch()` PATCH `CvControlPanel`'s own chip Release button
+   * already sends (`releaseLock()` there), so the HUD cannot drift from the drawer's own affordance.
+   * No optimistic UI: {@link follow} moves to `RELEASED` (then absent) only once the next tracks
+   * poll confirms it, same honesty rule as {@link followTrack}.
+   */
+  releaseFollow(): void {
+    const streamId = this.stream()?.streamId;
+    if (!streamId) {
+      return;
+    }
+    void this.fleet.patchStreamConfig(streamId, buildReleaseLockPatch());
+  }
+
+  /**
+   * `<vision-follow-hud>`'s own `(reacquire)` output — offered only while {@link follow} reports
+   * `LOST` and `reacquirable` (the HUD's own `showReacquire` gate, `follow-logic.ts`). Re-acquiring
+   * is the same lock request as the original click-to-follow, just re-issued for the id the operator
+   * already had (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.3 decision 6) — a no-op if `follow` is
+   * absent (nothing to reacquire).
+   */
+  reacquireFollow(): void {
+    const trackId = this.follow()?.trackId;
+    if (trackId === undefined) {
+      return;
+    }
+    this.followTrack(trackId);
   }
 
   /**

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
 import type { EffectiveCvProfile, UpdateStreamConfigRequest } from '../../core/api/models';
@@ -43,13 +43,13 @@ import {
  * merged Vision drawer, mounting this component and `<vision-detections-strip>` as siblings inside
  * it; mounting this component *is* opening it.
  *
- * **The tracks poll (`GET .../tracks`) is still owned here** (`DetectionsStore#trackTracks`/
- * `untrackTracks`, constructor `effect`/`DestroyRef` below, unchanged from before the split) —
- * `CvSetupModal` deliberately does **not** call either: this panel stays mounted for the whole time
- * the Vision drawer is open, a strictly *longer* window than the modal's own (nested, shorter)
- * open/close cycle, so keeping the poll's lifecycle here is what keeps "poll only while the drawer
- * is open" true regardless of whether the modal happens to be open too. See `CvSetupModal`'s own
- * class doc comment for the reasoning from the modal's side.
+ * **No longer owns the tracks poll** (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.5, wave W4 —
+ * superseding wave W5's "still owned here"): this panel used to start/stop `DetectionsStore#
+ * trackTracks`/`untrackTracks` itself from its own mounted lifetime, which is exactly the D1 defect
+ * the wave is named for — closing the drawer (unmounting this component) silently stopped the poll
+ * that was the *only* thing keeping a `LOST` lock's recovery window observable. `CockpitFacade` now
+ * drives the poll from a `wantsTracksPoll`-gated effect that outlives this panel's own mount/unmount;
+ * this component only *reads* {@link DetectionsStore.tracks} for its own chip, never starts/stops it.
  *
  * **`detectionEnabled` is the one knob with a live wire readback** (docs/plans/active/STREAM-STATE-
  * PLAN.md §3.1) — see this class's own {@link onDetectionEnabledToggle} for why the hero switch
@@ -57,7 +57,11 @@ import {
  *
  * **The "Following #N — release" chip is wire-confirmed only** — never a click's own optimistic
  * guess (docs/extracts/TRACKING-ORCHESTRATION.md §3.3): {@link lockedTrackId} only ever reads
- * `DetectionsStore#tracks()`'s own echoed `lockedTrackId`, unchanged by the split.
+ * `DetectionsStore#tracks()`'s own echoed `lockedTrackId`, unchanged by the split. This is
+ * deliberately **not** the same value as `CockpitFacade#lockedTrackId` (wave W4 fixed the facade's
+ * copy to read the per-frame feed instead, so the HUD/overlay survive a closed drawer) — this
+ * panel's own chip is fine reading the slower tracks-poll copy since it only renders while the panel
+ * itself (and therefore the poll driven for it) is mounted anyway.
  */
 @Component({
   selector: 'vision-cv-control-panel',
@@ -162,10 +166,6 @@ export class CvControlPanel {
    * — never the trackId just clicked, never an optimistic local flag. */
   protected readonly lockedTrackId = computed(() => this.detections.tracks()?.lockedTrackId ?? 0);
 
-  /** Mirrors {@link lockedTrackId} out to the host, for `shared/player/player.ts`'s `lockedTrackId`
-   * input (wave W4) — the overlay's T0 tier needs the same honest, wire-confirmed-only lock id. */
-  readonly lockedTrackIdChange = output<number>();
-
   // --- Detection status line (docs/plans/done/CV-UX-RESEARCH.md §1.2/§3/§9.2, waves U3+U5) -----
 
   protected readonly hasStream = computed(() => !!this.streamId());
@@ -183,29 +183,6 @@ export class CvControlPanel {
     ),
   );
   protected readonly detectionStatusText = computed(() => this.detectionStatusInfo().text);
-
-  constructor() {
-    inject(DestroyRef).onDestroy(() => {
-      this.detections.untrackTracks();
-    });
-
-    // A stream change (including "stream stopped", `undefined`) starts/stops the tracks poll this
-    // component owns the lifetime of (`DetectionsStore#trackTracks`/`untrackTracks`, wave W5) — that
-    // call itself clears any stale lock/flow-strip reading immediately, so a *previous* stream's
-    // response can never linger into the next.
-    effect(() => {
-      const streamId = this.streamId();
-      if (streamId) {
-        this.detections.trackTracks(streamId);
-      } else {
-        this.detections.untrackTracks();
-      }
-    });
-
-    // See {@link lockedTrackIdChange}'s own doc comment — re-emits on every change, including back
-    // to `0` the instant a poll confirms the lock was released.
-    effect(() => this.lockedTrackIdChange.emit(this.lockedTrackId()));
-  }
 
   /** The release chip's own action — drops the lock, falls back to the mode's own policy. Every
    *  tracking PATCH is sent immediately, never debounced. Emits {@link configChanged} on success

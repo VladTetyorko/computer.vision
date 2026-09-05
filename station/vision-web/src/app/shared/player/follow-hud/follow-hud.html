@@ -1,0 +1,20 @@
+@if (presentation(); as p) {
+  <div class="follow-hud hud-pill surface-dark">
+    <span class="chip">
+      <span
+        class="dot"
+        [class.live]="p.tone === 'live'"
+        [class.warn]="p.tone === 'warn'"
+        [class.danger]="p.tone === 'danger'"
+      ></span>
+      {{ p.title }}
+    </span>
+    <span class="detail">{{ p.detail }}</span>
+    @if (p.showReacquire) {
+      <button type="button" class="btn secondary small" (click)="reacquire.emit()">Re-acquire</button>
+    }
+    @if (canRelease()) {
+      <button type="button" class="btn secondary small" (click)="release.emit()">Release</button>
+    }
+  </div>
+}

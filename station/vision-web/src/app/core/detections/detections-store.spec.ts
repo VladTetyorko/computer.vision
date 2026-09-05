@@ -488,4 +488,75 @@ describe('DetectionsStore', () => {
     store.untrackTracks();
     expect(store.tracks()).toBeNull();
   });
+
+  // --- followTracks() (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.5, wave W4) ----------------------
+
+  it('followTracks(streamId, true) starts the poll, mirroring trackTracks()', async () => {
+    const getStreamTracks = vi.fn().mockResolvedValue(tracksResponse({ streamId: 't-10', lockedTrackId: 5 }));
+    const api = stubApi(undefined, getStreamTracks);
+
+    const store = inject(api);
+    store.followTracks('t-10', true);
+    await flush();
+
+    expect(getStreamTracks).toHaveBeenCalledWith('t-10');
+    expect(store.tracks()?.lockedTrackId).toBe(5);
+    store.followTracks('t-10', false);
+  });
+
+  it('followTracks(streamId, false) stops the poll, mirroring untrackTracks()', async () => {
+    const getStreamTracks = vi.fn().mockResolvedValue(tracksResponse());
+    const api = stubApi(undefined, getStreamTracks);
+    const scheduler = stubScheduler();
+
+    const store = inject(api, { scheduler });
+    store.followTracks('t-11', true);
+    await flush();
+    expect(store.tracks()).not.toBeNull();
+    const poll = scheduler.lastFor(2_000);
+
+    store.followTracks('t-11', false);
+    expect(store.tracks()).toBeNull();
+    expect(poll?.stop).toHaveBeenCalledOnce();
+  });
+
+  // --- D1 regression (docs/plans/active/TRACK-FOLLOW-PLAN.md §2.2 D1, wave W4): closing the Vision
+  // drawer used to stop CvControlPanel's tracks poll, which used to be the *only* thing that ever
+  // wrote CockpitFacade#lockedTrackId — so the "Following #N" overlay lock silently vanished the
+  // instant the drawer closed, even though the server-side lock was untouched. The fix moves the
+  // facade's own lockedTrackId onto `results()[0]?.tracking?.lockedTrackId` (the per-frame detections
+  // feed, tracked independently of any tracks poll) — this test exercises that exact expression
+  // directly against this store, with the tracks poll never started at all, standing in for a
+  // TestBed-free proof that a closed drawer can no longer zero this value.
+
+  it('D1: the per-frame lockedTrackId (results()[0].tracking.lockedTrackId) reads non-zero with the tracks poll never started', async () => {
+    const result: DetectionResult = {
+      streamId: 's-lock',
+      frameSequence: 1,
+      capturedAt: new Date().toISOString(),
+      inferenceMillis: 4,
+      detections: [],
+      tracking: {
+        detectorRan: true,
+        detectorReason: 'ALWAYS',
+        trackerMillis: 2,
+        engineId: 'bytetrack',
+        lockedTrackId: 7,
+        detectionLagMillis: 12,
+        reupdateMillis: 0,
+        reupdatedTracks: 0,
+      },
+    };
+    const api = stubApi(vi.fn().mockResolvedValue([result]));
+
+    const store = inject(api);
+    store.track('s-lock');
+    await flush();
+
+    // The tracks poll (`tracks()`) was never started for this session — exactly the "drawer closed,
+    // or never opened" case D1 used to break — yet the per-frame lock reads through untouched.
+    expect(store.tracks()).toBeNull();
+    expect(store.results()[0]?.tracking?.lockedTrackId ?? 0).toBe(7);
+    store.reset();
+  });
 });

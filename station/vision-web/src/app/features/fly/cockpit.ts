@@ -6,6 +6,7 @@ import { WeatherStore } from '../../core/weather/weather-store';
 import { GeoStore } from '../../core/geo/geo-store';
 import { UiStore } from '../../core/ui/ui-store';
 import { Player } from '../../shared/player/player';
+import { FollowHud } from '../../shared/player/follow-hud/follow-hud';
 import { TacticalMap } from '../../shared/map/tactical-map/tactical-map';
 import { DetectionsStrip } from '../../shared/player/detections-strip';
 import { Icon } from '../../shared/ui/icon';
@@ -84,6 +85,7 @@ type CockpitDialog = 'stop' | 'cv-setup';
   imports: [
     RouterLink,
     Player,
+    FollowHud,
     TacticalMap,
     DetectionsStrip,
     Icon,
