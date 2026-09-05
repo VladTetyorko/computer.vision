@@ -16,6 +16,9 @@ import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
 import com.drones.vision.flight.domain.port.TelemetrySourcePort;
 import com.drones.vision.flight.domain.port.TrackCorrectionLiveUpdatePort;
 import com.drones.vision.flight.domain.port.VehicleProfileRepositoryPort;
+import com.drones.vision.flight.application.seat.SeatService;
+import com.drones.vision.flight.domain.model.SeatKind;
+import com.drones.vision.app.config.properties.VisionCrewProperties;
 import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.map.domain.port.DrawingRepositoryPort;
 import com.drones.vision.map.domain.port.MapLayerRepositoryPort;
@@ -126,7 +129,8 @@ import java.util.function.BiConsumer;
  */
 @Configuration
 @EnableConfigurationProperties({VisionCvProperties.class, VisionLiveProperties.class, VisionRcProperties.class,
-        VisionApplicationProperties.class, VisionPublishProperties.class, VisionSimulationProperties.class})
+        VisionApplicationProperties.class, VisionPublishProperties.class, VisionSimulationProperties.class,
+        VisionCrewProperties.class})
 public class ApplicationServiceWiring {
 
     /**
@@ -278,13 +282,46 @@ public class ApplicationServiceWiring {
      * ({@code .claude/skills/java-clean-code/SKILL.md} §3).
      */
     @Bean
-    public ManualControlService manualControlService(AssetService assetService, ManualControlPort manualControlPort,
-                                                       AuditTrailPort auditTrailPort, VisionRcProperties rcProperties,
-                                                       ControlProfileService controlProfileService,
-                                                       ReadinessService readinessService) {
+    public DefaultManualControlService defaultManualControlService(AssetService assetService,
+                                                                     ManualControlPort manualControlPort,
+                                                                     AuditTrailPort auditTrailPort,
+                                                                     VisionRcProperties rcProperties,
+                                                                     ControlProfileService controlProfileService,
+                                                                     ReadinessService readinessService) {
         return new DefaultManualControlService(assetService, manualControlPort, auditTrailPort, readinessService,
                 Clock.systemUTC(), rcWatchdogScheduler(), rcProperties.watchdogTimeoutMs(),
                 controlProfileService::activeFor);
+    }
+
+    /**
+     * The bean {@code ManualControlWebSocketHandler} actually injects — {@link
+     * #defaultManualControlService} itself, unless {@link VisionCrewProperties#enabled()}, in which
+     * case wrapped in a lambda decorator that registers the FLIGHT-seat {@code onPreempted} RC-release
+     * hook (docs/plans/active/CREW-CONTROL-PLAN.md &sect;3.2 rule 4) around every {@code engage}: a
+     * manager forcing the flight seat away from a live pilot fires {@link
+     * SeatService#forceRelease}/{@link SeatService#preempt}'s listener, which is this session's own
+     * {@link ManualControlSession#release}, so the displaced pilot's sticks die within one watchdog
+     * period rather than two stick sources being live at once.
+     *
+     * <p>Split into its own bean, rather than one more {@link #defaultManualControlService} parameter,
+     * for the exact reason that method's own javadoc already gives for keeping {@code
+     * controlProfileService::activeFor} a method reference instead of a sixth dependency: this class
+     * already does enough (.claude/skills/java-clean-code/SKILL.md &sect;3). Gated on {@link
+     * VisionCrewProperties#enabled()} (not wired unconditionally) so a disabled deployment never
+     * registers a listener that would otherwise accumulate, unused, in {@link SeatService}'s
+     * per-asset listener list for the life of the process (&sect;3.8 — the default-config guardrail).
+     */
+    @Bean
+    public ManualControlService manualControlService(DefaultManualControlService defaultManualControlService,
+                                                       SeatService seatService, VisionCrewProperties crewProperties) {
+        if (!crewProperties.enabled()) {
+            return defaultManualControlService;
+        }
+        return (assetId, actor, scope, onWatchdog) -> {
+            ManualControlSession session = defaultManualControlService.engage(assetId, actor, scope, onWatchdog);
+            seatService.onPreempted(assetId, SeatKind.FLIGHT, session::release);
+            return session;
+        };
     }
 
     private static ScheduledExecutorService rcWatchdogScheduler() {

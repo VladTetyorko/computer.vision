@@ -23,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Objects;
 import com.drones.vision.api.security.CurrentUser;
+import com.drones.vision.api.security.SeatAccess;
 
 /**
  * Driving REST adapter for asset-level stream lifecycle: {@code POST}/{@code DELETE
@@ -72,6 +73,16 @@ import com.drones.vision.api.security.CurrentUser;
  * through {@link ApiExceptionHandler}; a malformed UUID fails earlier in {@code AssetId.of}/{@code
  * DeviceId.of} and maps to 400, as do genuine validation failures such as an ambiguous device or a
  * device that does not belong to the asset.
+ *
+ * <h2>The CAMERA seat (docs/plans/active/CREW-CONTROL-PLAN.md &sect;3.2/&sect;3.3, wave W2)</h2>
+ * {@link #startStream}/{@link #stopStream} call {@link SeatAccess#requireCameraSeat(AssetId)} after
+ * {@link #requireInScope} — taking or renewing the caller's CAMERA seat, unconditionally preempting
+ * for the FLIGHT-seat holder (rule 3), or 409ing if held by someone else. This pushes the
+ * constructor one parameter past this codebase's five-parameter target
+ * (.claude/skills/java-clean-code/SKILL.md &sect;3) for the same reason {@link StreamController}
+ * already accepts a sixth: an authorization concern must not be conflated with an unrelated
+ * collaborator (URL resolution, pipeline config, tracking). Pass-through with {@code
+ * vision.crew.enabled=false} (default) — unchanged behavior.
  */
 @RestController
 public class AssetStreamController {
@@ -82,15 +93,18 @@ public class AssetStreamController {
     private final StreamViewerLinks streamViewerLinks;
     /** The deployment's default {@link PipelineConfig} for a newly started stream (docs/plans/done/CV-DEMAND-PLAN.md §3.7/§3.8). */
     private final PipelineConfig defaultConfig;
+    /** The authority seam {@link #startStream}/{@link #stopStream} consult — see class javadoc "The CAMERA seat". */
+    private final SeatAccess seatAccess;
 
     public AssetStreamController(AssetService assetService, AssetStreamService assetStreamService,
                                   CurrentUser currentUser, StreamViewerLinks streamViewerLinks,
-                                  PipelineConfig defaultConfig) {
+                                  PipelineConfig defaultConfig, SeatAccess seatAccess) {
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
         this.assetStreamService = Objects.requireNonNull(assetStreamService, "assetStreamService must not be null");
         this.currentUser = Objects.requireNonNull(currentUser, "currentUser must not be null");
         this.streamViewerLinks = Objects.requireNonNull(streamViewerLinks, "streamViewerLinks must not be null");
         this.defaultConfig = Objects.requireNonNull(defaultConfig, "defaultConfig must not be null");
+        this.seatAccess = Objects.requireNonNull(seatAccess, "seatAccess must not be null");
     }
 
     /**
@@ -118,6 +132,7 @@ public class AssetStreamController {
         PipelineConfig config = effective.mergeOnto(defaultConfig);
         TrackingConfigPatch tracking = effective.trackingPatch();
         requireInScope(assetId);
+        seatAccess.requireCameraSeat(assetId);
 
         StreamId streamId = assetStreamService.startStream(assetId, device, config, tracking);
         return new StartStreamResponse(streamId.value().toString(), streamViewerLinks.viewUrl(streamId),
@@ -139,6 +154,7 @@ public class AssetStreamController {
     public void stopStream(@PathVariable String id) {
         AssetId assetId = AssetId.of(id);
         requireInScope(assetId);
+        seatAccess.requireCameraSeat(assetId);
         assetService.stopStream(assetId);
     }
 

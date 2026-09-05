@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Objects;
 import com.drones.vision.api.security.AssetAuthority;
 import com.drones.vision.api.security.CurrentUser;
+import com.drones.vision.api.security.SeatAccess;
 
 /**
  * Driving REST adapter for the guarded return-to-home command (docs/plans/active/DRONE-INFRA-PLAN.md I-e, Stage
@@ -65,6 +66,12 @@ import com.drones.vision.api.security.CurrentUser;
  * fires once this one has already denied; it stays in place as the pre-existing scope-only backstop
  * for any caller this edge gate has not yet been asked about (e.g. a future direct caller of the
  * application service that bypasses this controller).
+ *
+ * <h2>The FLIGHT seat (docs/plans/active/CREW-CONTROL-PLAN.md &sect;3.2/&sect;3.3, wave W2)</h2>
+ * Every command below also calls {@link SeatAccess#requireFlightSeat(AssetId)} immediately after
+ * {@link #requireMayFly(AssetId)} — taking or renewing the caller's FLIGHT seat, or 409ing (not
+ * 403ing) if it is held by someone else. This is strictly additive: with {@code
+ * vision.crew.enabled=false} (default) {@link SeatAccess} is a pass-through and nothing here changes.
  */
 @RestController
 public class FlightCommandController {
@@ -72,13 +79,15 @@ public class FlightCommandController {
     private final FlightCommandService flightCommandService;
     private final CurrentUser currentUser;
     private final AssetAuthority assetAuthority;
+    private final SeatAccess seatAccess;
 
     public FlightCommandController(FlightCommandService flightCommandService, CurrentUser currentUser,
-                                    AssetAuthority assetAuthority) {
+                                    AssetAuthority assetAuthority, SeatAccess seatAccess) {
         this.flightCommandService =
                 Objects.requireNonNull(flightCommandService, "flightCommandService must not be null");
         this.currentUser = Objects.requireNonNull(currentUser, "currentUser must not be null");
         this.assetAuthority = Objects.requireNonNull(assetAuthority, "assetAuthority must not be null");
+        this.seatAccess = Objects.requireNonNull(seatAccess, "seatAccess must not be null");
     }
 
     /**
@@ -107,6 +116,7 @@ public class FlightCommandController {
     public ReturnHomeResponse returnHome(@PathVariable String id) {
         AssetId assetId = AssetId.of(id);
         requireMayFly(assetId);
+        seatAccess.requireFlightSeat(assetId);
         CommandResult result = flightCommandService.returnToHome(assetId, currentUser.userId(),
                 currentUser.scope());
         return ReturnHomeResponse.from(result);
@@ -124,6 +134,7 @@ public class FlightCommandController {
     public ReturnHomeResponse setMode(@PathVariable String id, @RequestBody SetModeRequest request) {
         AssetId assetId = AssetId.of(id);
         requireMayFly(assetId);
+        seatAccess.requireFlightSeat(assetId);
         CommandResult result = flightCommandService.setMode(assetId, request.requireMode(),
                 currentUser.userId(), currentUser.scope());
         return ReturnHomeResponse.from(result);
@@ -143,6 +154,7 @@ public class FlightCommandController {
                                   @RequestBody(required = false) ForceCommandRequest request) {
         AssetId assetId = AssetId.of(id);
         requireMayFly(assetId);
+        seatAccess.requireFlightSeat(assetId);
         ForceCommandRequest body = request != null ? request : ForceCommandRequest.EMPTY;
         CommandResult result = flightCommandService.arm(assetId, body.forceOrDefault(),
                 currentUser.userId(), currentUser.scope());
@@ -163,6 +175,7 @@ public class FlightCommandController {
                                      @RequestBody(required = false) ForceCommandRequest request) {
         AssetId assetId = AssetId.of(id);
         requireMayFly(assetId);
+        seatAccess.requireFlightSeat(assetId);
         ForceCommandRequest body = request != null ? request : ForceCommandRequest.EMPTY;
         CommandResult result = flightCommandService.disarm(assetId, body.forceOrDefault(),
                 currentUser.userId(), currentUser.scope());
@@ -186,6 +199,7 @@ public class FlightCommandController {
     public ReturnHomeResponse emergencyStop(@PathVariable String id) {
         AssetId assetId = AssetId.of(id);
         requireMayFly(assetId);
+        seatAccess.requireFlightSeat(assetId);
         CommandResult result = flightCommandService.emergencyStop(assetId, currentUser.userId(),
                 currentUser.scope());
         return ReturnHomeResponse.from(result);
@@ -208,6 +222,7 @@ public class FlightCommandController {
     public ReturnHomeResponse auxFunction(@PathVariable String id, @RequestBody AuxFunctionRequest request) {
         AssetId assetId = AssetId.of(id);
         requireMayFly(assetId);
+        seatAccess.requireFlightSeat(assetId);
         CommandResult result = flightCommandService.auxFunction(assetId, request.requireFunction(),
                 request.requireLevel(), currentUser.userId(), currentUser.scope());
         return ReturnHomeResponse.from(result);

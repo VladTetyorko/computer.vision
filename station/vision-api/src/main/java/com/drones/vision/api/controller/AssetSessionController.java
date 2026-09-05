@@ -20,6 +20,7 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.Map;
 import java.util.Objects;
 import com.drones.vision.api.security.CurrentUser;
+import com.drones.vision.api.security.SeatAccess;
 
 /**
  * Driving REST adapter for the operator {@code engage}/{@code disengage} verb: {@code
@@ -76,6 +77,18 @@ import com.drones.vision.api.security.CurrentUser;
  * through {@link ApiExceptionHandler}; engaging a deactivated or deleted asset surfaces as {@link
  * IllegalStateException} from {@link UsageTracker#engage} and maps to {@code 409}; a malformed UUID
  * fails earlier in {@code AssetId.of} and maps to {@code 400}.
+ *
+ * <h2>The FLIGHT seat (docs/plans/active/CREW-CONTROL-PLAN.md &sect;3.2/&sect;3.3, wave W2 — fixes
+ * D3)</h2>
+ * Both {@link #engage} and {@link #disengage} call {@link SeatAccess#requireFlightSeat(AssetId)}
+ * after {@link #requireInScope}: unlike {@link
+ * com.drones.vision.api.controller.FlightCommandController}, this controller had <b>no</b> {@link
+ * com.drones.vision.api.security.AssetAuthority} check at all before this wave, so the seat guard is
+ * also this endpoint's first authority check — {@code mayFly} is consulted inside {@link
+ * SeatAccess#requireFlightSeat(AssetId)} itself. D3 (anyone in scope could silently end anyone's
+ * session) is fixed as a side effect: ending a session now requires holding (or being able to take)
+ * the FLIGHT seat. Pass-through with {@code vision.crew.enabled=false} (default) — unchanged
+ * behavior.
  */
 @RestController
 public class AssetSessionController {
@@ -84,13 +97,15 @@ public class AssetSessionController {
     private final UsageTracker usageTracker;
     private final CurrentUser currentUser;
     private final AuditTrailPort auditTrail;
+    private final SeatAccess seatAccess;
 
     public AssetSessionController(AssetService assetService, UsageTracker usageTracker, CurrentUser currentUser,
-                                   AuditTrailPort auditTrail) {
+                                   AuditTrailPort auditTrail, SeatAccess seatAccess) {
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
         this.usageTracker = Objects.requireNonNull(usageTracker, "usageTracker must not be null");
         this.currentUser = Objects.requireNonNull(currentUser, "currentUser must not be null");
         this.auditTrail = Objects.requireNonNull(auditTrail, "auditTrail must not be null");
+        this.seatAccess = Objects.requireNonNull(seatAccess, "seatAccess must not be null");
     }
 
     /**
@@ -107,6 +122,7 @@ public class AssetSessionController {
     public AssetUsageResponse engage(@PathVariable String id) {
         AssetId assetId = AssetId.of(id);
         requireInScope(assetId);
+        seatAccess.requireFlightSeat(assetId);
         return AssetUsageResponse.from(usageTracker.engage(assetId, currentUser.userId()));
     }
 
@@ -128,6 +144,7 @@ public class AssetSessionController {
     public void disengage(@PathVariable String id) {
         AssetId assetId = AssetId.of(id);
         requireInScope(assetId);
+        seatAccess.requireFlightSeat(assetId);
         usageTracker.disengage(assetId).ifPresent(usage -> auditDisengage(assetId, usage));
     }
 

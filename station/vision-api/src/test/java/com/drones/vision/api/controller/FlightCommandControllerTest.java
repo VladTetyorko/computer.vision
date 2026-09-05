@@ -17,10 +17,20 @@ import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.NoSuchElementException;
 import com.drones.vision.api.security.AssetAuthority;
 import com.drones.vision.api.security.CurrentUser;
+import com.drones.vision.api.security.SeatAccess;
+import com.drones.vision.api.security.SeatAccessSettings;
+import com.drones.vision.api.support.SeatSupport;
+import com.drones.vision.flight.application.seat.DefaultSeatService;
+import com.drones.vision.flight.application.seat.SeatService;
+import com.drones.vision.flight.domain.model.SeatKind;
+import com.drones.vision.platform.AuditTrailPort;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -34,10 +44,17 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/**
+ * docs/plans/active/CREW-CONTROL-PLAN.md §3.3, wave W2: {@code seatAccess} below is a disabled
+ * (pass-through) {@link SeatAccess} — {@code vision.crew.enabled=false} — so every pre-existing test
+ * in this class keeps its original meaning unmodified (§3.8's release gate). The dedicated seat tests
+ * further down build their own enabled instance.
+ */
 class FlightCommandControllerTest {
 
     private FlightCommandService flightCommandService;
     private AssetAuthority assetAuthority;
+    private SeatAccess seatAccess;
     private MockMvc mockMvc;
 
     private final UserId ownerId = UserId.random();
@@ -52,11 +69,41 @@ class FlightCommandControllerTest {
         // meaning; denial is exercised by the dedicated tests further down.
         assetAuthority = mock(AssetAuthority.class);
         when(assetAuthority.mayFly(any())).thenReturn(true);
+        seatAccess = new SeatAccess(mock(SeatService.class), assetAuthority, currentUser, mock(SeatSupport.class),
+                new SeatAccessSettings(false, 15_000L));
 
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new FlightCommandController(flightCommandService, currentUser, assetAuthority))
+                .standaloneSetup(new FlightCommandController(flightCommandService, currentUser, assetAuthority,
+                        seatAccess))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
+    }
+
+    /**
+     * docs/plans/active/CREW-CONTROL-PLAN.md §3.3/§3.6, wave W2: a second user's guarded command
+     * 409s naming the FLIGHT seat's actual holder, once {@code vision.crew.enabled=true}.
+     */
+    @Test
+    void armReturns409WhenFlightSeatHeldByAnotherUser() throws Exception {
+        AssetId assetId = AssetId.random();
+        UserId holder = UserId.random();
+        SeatService seatService = new DefaultSeatService(Clock.fixed(Instant.now(), ZoneOffset.UTC),
+                mock(AuditTrailPort.class), 15_000L);
+        seatService.take(assetId, SeatKind.FLIGHT, holder);
+        SeatSupport seatSupport = mock(SeatSupport.class);
+        when(seatSupport.displayNameOrId(holder)).thenReturn("Anna Kovalenko");
+        SeatAccess enabledSeatAccess = new SeatAccess(seatService, assetAuthority, currentUser, seatSupport,
+                new SeatAccessSettings(true, 15_000L));
+        MockMvc mvc = MockMvcBuilders
+                .standaloneSetup(new FlightCommandController(flightCommandService, currentUser, assetAuthority,
+                        enabledSeatAccess))
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
+
+        mvc.perform(post("/api/assets/{id}/arm", assetId.value()))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message")
+                        .value("Asset " + assetId.value() + " flight seat is held by Anna Kovalenko"));
     }
 
     @Test

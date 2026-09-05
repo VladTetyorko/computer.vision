@@ -188,6 +188,17 @@ vision:
     idle-close: 10m
     sweep-period: 60s
 
+  # --- Two seats on one aircraft (docs/plans/active/CREW-CONTROL-PLAN.md §3.6, wave W2) ---
+  crew:
+    # false (default): SeatAccess is a pass-through -- no verb is seat-guarded, no 409/403 from a
+    # seat conflict is reachable, and GET .../seats reports both seats free with every "may take"
+    # flag true. The system behaves exactly as it does today. Flip true only once a second real
+    # person can exist (vision.auth.enabled=true) -- see the plan's §3.8 guardrail table.
+    enabled: false
+    # How long a seat survives without a renewal. The SPA's own poll/renew cadence is derived from
+    # this (ttlMs / 3), not hard-coded, so raising or lowering it here changes both sides at once.
+    seat-ttl-ms: 15000
+
   # --- Session auth (docs/plans/done/U-AUTH-PLAN.md wave 3; default flipped by
   # docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R7, then flipped back to
   # false here by an unrelated commit -- corrected for honesty by

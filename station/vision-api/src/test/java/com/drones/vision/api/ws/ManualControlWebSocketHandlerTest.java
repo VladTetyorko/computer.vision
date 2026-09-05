@@ -4,6 +4,13 @@ import com.drones.vision.api.dto.ManualControlChannelsRequest;
 import com.drones.vision.api.dto.ManualControlEngageRequest;
 import com.drones.vision.api.security.CapabilityAssetAuthority;
 import com.drones.vision.api.security.CurrentUser;
+import com.drones.vision.api.security.SeatAccess;
+import com.drones.vision.api.security.SeatAccessSettings;
+import com.drones.vision.api.support.SeatSupport;
+import com.drones.vision.flight.application.seat.DefaultSeatService;
+import com.drones.vision.flight.application.seat.SeatService;
+import com.drones.vision.flight.domain.model.SeatKind;
+import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.platform.AccessDeniedException;
@@ -35,6 +42,9 @@ import tools.jackson.databind.json.JsonMapper;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.security.Principal;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -67,6 +77,7 @@ class ManualControlWebSocketHandlerTest {
     private final JsonMapper jsonMapper = new JsonMapper();
     private FakeManualControlService service;
     private FakeAssetAuthority assetAuthority;
+    private SeatAccess seatAccess;
     private ManualControlWebSocketHandler handler;
     private FakeWebSocketSession session;
 
@@ -74,7 +85,13 @@ class ManualControlWebSocketHandlerTest {
     void setUp() {
         service = new FakeManualControlService();
         assetAuthority = new FakeAssetAuthority();
-        handler = new ManualControlWebSocketHandler(service, assetAuthority, WATCHDOG_TIMEOUT_MS,
+        // Disabled pass-through (docs/plans/active/CREW-CONTROL-PLAN.md §3.8 guardrail) -- never
+        // consults its collaborators, so every pre-existing test below is unaffected by the FLIGHT-seat
+        // guard `handleEngage` now calls.
+        seatAccess = new SeatAccess(mock(SeatService.class), assetAuthority, new CurrentUser(
+                new Ownership(UserId.random(), GroupId.random())), mock(SeatSupport.class),
+                new SeatAccessSettings(false, 15_000L));
+        handler = new ManualControlWebSocketHandler(service, assetAuthority, seatAccess, WATCHDOG_TIMEOUT_MS,
                 ENGAGE_SLOW_THRESHOLD_MS);
         session = new FakeWebSocketSession();
         session.getAttributes().put(ManualControlHandshakeInterceptor.ATTR_USER_ID, UserId.random());
@@ -187,6 +204,37 @@ class ManualControlWebSocketHandlerTest {
     }
 
     /**
+     * docs/plans/active/CREW-CONTROL-PLAN.md §3.2/§3.3, wave W2: a FLIGHT-seat conflict is denied with
+     * its own {@code SEAT_HELD} code -- checked (and thrown by {@link SeatAccess#requireFlightSeat})
+     * strictly after {@code mayFly} has already passed, never falling through to {@code
+     * NOT_COMMANDABLE}/{@code service.engage} at all.
+     */
+    @Test
+    void engageDeniedSeatHeldWhenFlightSeatHeldByAnotherUser() throws Exception {
+        AssetId assetId = AssetId.random();
+        UserId actor = (UserId) session.getAttributes().get(ManualControlHandshakeInterceptor.ATTR_USER_ID);
+        UserId otherHolder = UserId.random();
+        SeatService realSeatService = new DefaultSeatService(Clock.fixed(Instant.now(), ZoneOffset.UTC),
+                mock(AuditTrailPort.class), 15_000L);
+        realSeatService.take(assetId, SeatKind.FLIGHT, otherHolder);
+        SeatAccess enabledSeatAccess = new SeatAccess(realSeatService, assetAuthority,
+                new CurrentUser(new Ownership(UserId.random(), GroupId.random())), mock(SeatSupport.class),
+                new SeatAccessSettings(true, 15_000L));
+        ManualControlWebSocketHandler seatGuardedHandler = new ManualControlWebSocketHandler(service, assetAuthority,
+                enabledSeatAccess, WATCHDOG_TIMEOUT_MS, ENGAGE_SLOW_THRESHOLD_MS);
+        seatGuardedHandler.afterConnectionEstablished(session);
+
+        seatGuardedHandler.handleMessage(session, engageFrame(assetId));
+
+        JsonNode denied = lastFrame();
+        assertEquals("denied", denied.get("type").asString());
+        assertEquals("SEAT_HELD", denied.get("code").asString());
+        assertEquals(0, service.engageCallCount,
+                "a seat conflict must be denied before ManualControlService#engage is ever called");
+        assertNotEquals(actor, otherHolder);
+    }
+
+    /**
      * FLEET-RADIO R2: {@link VehicleUnidentifiedException} is caught before the plain {@link
      * IllegalStateException} case above, so it must map to its own dedicated {@code
      * VEHICLE_UNIDENTIFIED} code -- never message-sniffed into {@code NOT_COMMANDABLE}/{@code
@@ -295,7 +343,7 @@ class ManualControlWebSocketHandlerTest {
     @Test
     void engageDurationEscalatesToWarnOnceItReachesTheConfiguredSlowThreshold() throws Exception {
         ManualControlWebSocketHandler zeroThresholdHandler =
-                new ManualControlWebSocketHandler(service, assetAuthority, WATCHDOG_TIMEOUT_MS, 0L);
+                new ManualControlWebSocketHandler(service, assetAuthority, seatAccess, WATCHDOG_TIMEOUT_MS, 0L);
         zeroThresholdHandler.afterConnectionEstablished(session);
 
         List<LogRecord> records =

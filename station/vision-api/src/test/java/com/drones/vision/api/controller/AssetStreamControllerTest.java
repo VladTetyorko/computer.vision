@@ -24,6 +24,11 @@ import com.drones.vision.platform.Authority;
 import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.map.application.MapAccessPolicy;
 import com.drones.vision.api.security.PrincipalResolver;
+import com.drones.vision.api.security.AssetAuthority;
+import com.drones.vision.api.security.SeatAccess;
+import com.drones.vision.api.security.SeatAccessSettings;
+import com.drones.vision.api.support.SeatSupport;
+import com.drones.vision.flight.application.seat.SeatService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -62,6 +67,7 @@ class AssetStreamControllerTest {
     private AssetStreamService assetStreamService;
     private StreamPublisherPort streamPublisherPort;
     private MockMvc mockMvc;
+    private SeatAccess seatAccess;
 
     private final UserId ownerId = UserId.random();
     private final Ownership ownership = new Ownership(ownerId, GroupId.random());
@@ -76,10 +82,15 @@ class AssetStreamControllerTest {
         // §3.8) -- a real instance backed by the mocked port, matching this codebase's established
         // pattern of not mocking final support classes.
         StreamViewerLinks streamViewerLinks = new StreamViewerLinks(streamPublisherPort);
+        // Disabled pass-through (docs/plans/active/CREW-CONTROL-PLAN.md §3.8 guardrail) -- never
+        // consults its collaborators, so a single instance is safe to reuse across every CurrentUser
+        // variant the controller under test is constructed with.
+        seatAccess = new SeatAccess(mock(SeatService.class), mock(AssetAuthority.class), currentUser,
+                mock(SeatSupport.class), new SeatAccessSettings(false, 15_000L));
 
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new AssetStreamController(assetService, assetStreamService, currentUser,
-                        streamViewerLinks, PipelineConfig.defaults()))
+                        streamViewerLinks, PipelineConfig.defaults(), seatAccess))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -128,7 +139,7 @@ class AssetStreamControllerTest {
         StreamViewerLinks streamViewerLinks = new StreamViewerLinks(streamPublisherPort);
         return MockMvcBuilders
                 .standaloneSetup(new AssetStreamController(assetService, assetStreamService, user, streamViewerLinks,
-                        PipelineConfig.defaults()))
+                        PipelineConfig.defaults(), seatAccess))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }

@@ -13,6 +13,7 @@ import com.drones.vision.api.dto.TrackResponse;
 import com.drones.vision.api.dto.TrackStatsResponse;
 import com.drones.vision.api.dto.UpdateStreamConfigRequest;
 import com.drones.vision.api.dto.UpdateStreamConfigResponse;
+import com.drones.vision.api.security.SeatAccess;
 import com.drones.vision.api.security.StreamAccess;
 import com.drones.vision.api.support.StreamDetectionSupport;
 import com.drones.vision.perception.application.pipeline.TrackingStats;
@@ -94,6 +95,16 @@ import com.drones.vision.api.support.SnapshotJpegEncoder;
  * collaborators can absorb {@link StreamAccess} without conflating an authorization concern into an
  * unrelated one (URL resolution, JPEG encoding, detection-demand bookkeeping), so the sixth
  * parameter is accepted deliberately rather than forced into a false merge.
+ *
+ * <h2>The CAMERA seat (docs/plans/active/CREW-CONTROL-PLAN.md &sect;3.2/&sect;3.3, wave W2)</h2>
+ * {@link #start}, {@link #stop} and {@link #updateConfig} — the three write handlers, per &sect;3.3's
+ * guard table — each call {@link SeatAccess#requireCameraSeat} right after {@link
+ * StreamAccess#requireVisible}, taking or renewing the CAMERA seat (or preempting/409ing per rules
+ * 2-3). A seventh constructor parameter, for the identical reason {@link #streamAccess} is already a
+ * sixth: two independent authorization axes (visibility, seat) must not be folded into one
+ * collaborator or conflated with an unrelated one. Pass-through with {@code vision.crew.enabled=false}
+ * (default) — unchanged behavior. {@link #list}, {@link #config}, {@link #tracks}, {@link
+ * #detections} and {@link #snapshot} are reads and are never seat-guarded (&sect;3.3's last rows).
  */
 @RestController
 public class StreamController {
@@ -119,14 +130,16 @@ public class StreamController {
      * rather than each taking its own constructor slot.
      */
     private final StreamDetectionSupport streamDetectionSupport;
-    /** The authority seam every handler below consults — see this class's own "Authority" section. */
+    /** The visibility seam every handler below consults — see this class's own "Authority" section. */
     private final StreamAccess streamAccess;
+    /** The seat seam {@link #start}/{@link #stop}/{@link #updateConfig} consult — see class javadoc "The CAMERA seat". */
+    private final SeatAccess seatAccess;
 
     public StreamController(StreamService streamService, StreamPublisherPort streamPublisherPort,
                              DetectionRepositoryPort detectionRepositoryPort,
                              SnapshotJpegEncoder snapshotJpegEncoder,
                              StreamDetectionSupport streamDetectionSupport,
-                             StreamAccess streamAccess) {
+                             StreamAccess streamAccess, SeatAccess seatAccess) {
         this.streamService = Objects.requireNonNull(streamService, "streamService must not be null");
         this.streamPublisherPort =
                 Objects.requireNonNull(streamPublisherPort, "streamPublisherPort must not be null");
@@ -137,6 +150,7 @@ public class StreamController {
         this.streamDetectionSupport =
                 Objects.requireNonNull(streamDetectionSupport, "streamDetectionSupport must not be null");
         this.streamAccess = Objects.requireNonNull(streamAccess, "streamAccess must not be null");
+        this.seatAccess = Objects.requireNonNull(seatAccess, "seatAccess must not be null");
     }
 
     /**
@@ -176,6 +190,7 @@ public class StreamController {
         PipelineConfig config = streamDetectionSupport.resolveStartConfig(device, body);
         TrackingConfigPatch tracking = body.trackingPatch();
         streamAccess.requireVisible(device);
+        seatAccess.requireCameraSeat(device);
         StreamId streamId = streamService.start(device, config, tracking);
         StartStreamResponse response = new StartStreamResponse(streamId.value().toString(), viewUrl(streamId),
                 whepUrl(streamId));
@@ -224,6 +239,7 @@ public class StreamController {
     public void stop(@PathVariable String streamId) {
         StreamId id = StreamId.of(streamId);
         streamAccess.requireVisible(id);
+        seatAccess.requireCameraSeat(id);
         streamService.stop(id);
         LOG.log(System.Logger.Level.INFO, () -> "Stopped stream " + streamId);
     }
@@ -272,6 +288,7 @@ public class StreamController {
         // ordering as #start.
         PipelineConfigPatch patch = body.toPatch();
         streamAccess.requireVisible(id);
+        seatAccess.requireCameraSeat(id);
         UpdateOutcome outcome = streamService.updateConfig(id, patch);
         return new UpdateStreamConfigResponse(id.value().toString(), outcome.modelReArmed(),
                 outcome.trackingChanged());

@@ -16,10 +16,12 @@ vision-app depends on — see Gotchas)
 `controller/` (every `@RestController`, now including `AssetInventoryController`/
 `InventoryExportController` — WAREHOUSE-UX W3, `CvProfileController` — CV-SETTINGS W5,
 `DiscoveryInboxController` — ZERO-CONFIG-ONBOARDING Z2c, `DiscoveryStatusController` —
-SOURCE-ONBOARDING-2 wave C) · `dto/` (wire
-records only, ~187 — house rule "zero DTO leakage": no domain type is ever serialized directly) ·
+SOURCE-ONBOARDING-2 wave C, `SeatController` — CREW-CONTROL W2) · `dto/` (wire
+records only, ~190 — house rule "zero DTO leakage": no domain type is ever serialized directly;
+CREW-CONTROL W2 added `SeatsResponse`/`SeatHolderResponse`/`TakeSeatRequest`) ·
 `security/` (`CurrentUser`/
-`PrincipalResolver`/`StreamAccess`/`OpenByDesign`/`AssetAuthority`/`CapabilityAssetAuthority` — the
+`PrincipalResolver`/`StreamAccess`/`OpenByDesign`/`AssetAuthority`/`CapabilityAssetAuthority`/
+`SeatAccess`/`SeatAccessSettings` — the
 authorization seam, see Conventions) ·
 `live/` (SSE connection registry, per-topic ring buffers, per-connection visibility filtering) ·
 `ws/` (`/ws/manual-control` raw `WebSocketHandler`) · `proxy/` (`HlsProxyController` — a pass-through
@@ -29,7 +31,9 @@ edge owning no application service) · `ratelimit/` (`RateLimitFilter`/`TokenBuc
 plain (non-DTO) crossing-seam payload behind `GET /api/discovery/status`, `InventoryExportService` —
 WAREHOUSE-UX W3, the hand-rolled CSV behind `GET /api/inventory/export`; `AssetRowFacts` — WAREHOUSE-UX
 W8, bundles the `firmware`/`totalFlightSeconds` cross-context joins `AssetController` needs, see
-Conventions) · `demo/` (property-gated
+Conventions; `SeatSupport` — CREW-CONTROL W2, bundles `SeatAccess`'s device/stream→asset resolution,
+asset ownership, display-name lookup, and `FORCE`/`DENIED:SEAT_HELD` audit writes, see Conventions) ·
+`demo/` (property-gated
 demo-data seeding, deletable as one unit) · `exception/` (`ApiExceptionHandler` + api-local
 exceptions) · `config/` (MVC/WebSocket/SPA `@Configuration`).
 
@@ -122,6 +126,9 @@ the full mechanism.
 | FlightCommandController | POST | `/api/assets/{id}/emergency-stop` | Forced disarm, kept separate from `disarm{force}` for audit-trail clarity | scope + `mayFly` |
 | FlightCommandController | POST | `/api/assets/{id}/aux-function` | `MAV_CMD_DO_AUX_FUNCTION` | scope + `mayFly` |
 | FlightCommandController | GET | `/api/assets/{id}/flight-capabilities` | What this asset supports commanding | scope |
+| SeatController | GET | `/api/assets/{id}/seats` | Both seats' current holder/expiry + the caller's own `mayTakeFlight`/`mayTakeCamera`/`mayForceSeat` (CREW-CONTROL-PLAN.md §3.6, wave W2) | scope |
+| SeatController | POST | `/api/assets/{id}/seats/{kind}` | Take-or-renew (`kind` = `flight`\|`camera`); optional `{"force":true}` body, honoured only for a caller whose `mayForceSeat` is true and only against a *different* current holder — otherwise silently ignored, not rejected | scope + `SeatAccess` (§3.2 rules 2-4; 409 if held by another and not forced, 403 if the caller has no standing for that seat) |
+| SeatController | DELETE | `/api/assets/{id}/seats/{kind}` | Release (idempotent for a free seat or the caller's own); a manager may evict another holder (204), firing the same RC-release hook a forced `POST` does | scope + `SeatAccess` (403 if held by another and the caller may not force) |
 | ControlProfileController | GET | `/api/control-profiles` | Caller's saved layouts + built-ins; every row now also carries `stickMode`/`forwardIsUp` (C15), a built-in reporting `TransmitterView.DEFAULT` | own profile |
 | ControlProfileController | GET | `/api/control-profiles/catalog` | Every enumerable setup choice (vehicle kinds, input kinds, functions, …) | own profile |
 | ControlProfileController | POST | `/api/control-profiles` | Create (copy of the built-in for that vehicle kind) | own profile |
@@ -238,10 +245,22 @@ container's own message thread, which carries none. `handleEngage` now checks
 overload cannot be used here since it reads the ambient `CurrentUser`, which would throw once auth is
 enabled — **exactly once, at engage**, denying `OUT_OF_SCOPE` before `ManualControlService#engage` is
 ever called; a revocation mid-session is never re-checked (the mid-flight rule, §3.7 clause 1). The
-handler's constructor is now 4-arg: `(ManualControlService, CapabilityAssetAuthority,
+handler's constructor was 4-arg at the time: `(ManualControlService, CapabilityAssetAuthority,
 watchdogTimeoutMillis, engageSlowThresholdMillis)` — depends on the *concrete* class, not the
 `AssetAuthority` interface, specifically to reach this explicit-actor overload (a second public method
 on `CapabilityAssetAuthority`, not part of the frozen 3-method `AssetAuthority` interface).
+
+**CREW-CONTROL wave W2 — the flight-seat gate on `engage` (docs/plans/active/CREW-CONTROL-PLAN.md
+§3.3).** The constructor gained a third parameter, `SeatAccess`, ahead of the two `@Value` longs —
+`(ManualControlService, CapabilityAssetAuthority, SeatAccess, watchdogTimeoutMillis,
+engageSlowThresholdMillis)`. `handleEngage` calls `SeatAccess#requireFlightSeat(UserId, AssetId)` —
+the explicit-actor overload, since (as above) the message thread carries no ambient `CurrentUser` —
+immediately after the `mayFly` check and before `ManualControlService#engage` is ever called; on
+`IllegalStateException` (seat held by another) the handler answers a `denied` frame with
+`code:"SEAT_HELD"` rather than letting the exception propagate (there is no HTTP layer here to map it),
+mirroring the REST controllers' 409 with a WS-native shape. Disabled by default
+(`vision.crew.enabled=false`) via `SeatAccess`'s own settings-driven no-op, not a second code path in
+this handler.
 
 **AUTH-ROLES-PLAN wave B4 — the same `mayFly` gate on `FlightCommandController`'s six REST commands.**
 Unlike the WebSocket handler, this controller *can* reach the ambient `CurrentUser`, so it injects
@@ -255,7 +274,30 @@ the `COMMAND_FLIGHT` capability and, for an `ASSIGNED_ASSETS` caller, the `PILOT
 narrowing), so the service's own check never actually fires once this one has denied — it stays as
 the scope-only backstop for any future caller that reaches the service directly. `GET
 /api/assets/{id}/flight-capabilities` (a read) is untouched — it keeps its existing 404-on-out-of-scope
-convention, not this 403 gate. **FLEET-RADIO R2** added one additive `denied` reason code, `VEHICLE_UNIDENTIFIED`
+convention, not this 403 gate.
+
+**CREW-CONTROL wave W2 — the seat gate, layered after `mayFly`/`mayOperateCamera`, on five REST
+controllers and the WS handler above.** `SeatAccess` (`security/SeatAccess.java`) is the one
+collaborator every guard calls — constructed from `SeatService` (contexts/vision-flight),
+`AssetAuthority`, `CurrentUser`, `SeatSupport`, and `SeatAccessSettings` (5 params, at the
+constructor ceiling, documented in its own javadoc). `requireFlightSeat(AssetId)`/`requireCameraSeat
+(AssetId|DeviceId|StreamId)` are pass-through no-ops when `vision.crew.enabled=false` (the opt-in
+guardrail: default config is byte-identical to pre-W2 behaviour) and otherwise take-or-renew the
+caller's own seat, throwing `IllegalStateException` (→409, "Asset `<uuid>` `<kind>` seat is held by
+`<displayName>`") only when a *different* user holds it — per §3.3 rule 3, a flight-seat holder never
+conflicts on the camera seat and instead silently preempts any prior camera holder. Insertion points:
+`FlightCommandController#returnHome/setMode/arm/disarm/emergencyStop/auxFunction` (lines 119, 137,
+157, 178, 202, 225) each call `seatAccess.requireFlightSeat(assetId)` immediately after the
+pre-existing `mayFly` check; `AssetStreamController#startStream/stopStream` (lines 135, 157) and
+`StreamController#start/stop/updateConfig`-family (lines 193, 242, 291) call
+`seatAccess.requireCameraSeat(...)`; `AssetSessionController#engage/disengage` (lines 125, 147) call
+`seatAccess.requireFlightSeat(assetId)`. Each of these four controllers' constructors gained a
+trailing `SeatAccess` parameter — `AssetStreamController` to 6 args, `StreamController` to 7 (both
+past the 5-arg ceiling, documented in their own javadoc following the pre-existing `StreamAccess`
+precedent at 6). `SeatController` (`controller/SeatController.java`) is a new, separate controller
+exposing `GET/POST/DELETE /api/assets/{id}/seats[/{kind}]` directly over `SeatAccess`'s
+`seats`/`takeSeat`/`releaseSeat` — see the Endpoints table and "DTO conventions" above. **FLEET-RADIO
+R2** added one additive `denied` reason code, `VEHICLE_UNIDENTIFIED`
 — no frame added/removed, no field renamed: `engage` now catches `vision-flight`'s
 `VehicleUnidentifiedException` (a subtype of, and ahead of, the existing `IllegalStateException`
 clause) and maps it straight to `new ManualControlDeniedFrame(CODE_VEHICLE_UNIDENTIFIED, e.getMessage())`
@@ -470,7 +512,19 @@ implementation/one caller doesn't earn a new interface per `.claude/skills/java-
 `videoPushPort`/`videoPushPathPrefix` (`@JsonInclude(NON_NULL)`, both absent together when mediamtx
 publish is unconfigured).
 
-## Conventions
+**CREW-CONTROL wave W2 additions (docs/plans/active/CREW-CONTROL-PLAN.md §3.6, frozen wire
+contract)** — `SeatHolderResponse(holderUserId, holderDisplayName, expiresAt)`, deliberately **not**
+`@JsonInclude(NON_NULL)`: a free seat serializes all three fields as explicit JSON `null` rather than
+omitting them, because the frontend contract distinguishes "no holder" from "still loading" by key
+presence, not just falsiness — static `free()` factory returns the all-null instance. `SeatsResponse
+(assetId, ttlMs, flight, camera, mayTakeFlight, mayTakeCamera, mayForceSeat)` is `GET
+/api/assets/{id}/seats`'s shape; the three `may*` flags are the caller's *own* standing, computed by
+`SeatAccess#seats` against `AssetAuthority` and never require a client-side capability lookup.
+`TakeSeatRequest(force)` is `POST .../seats/{kind}`'s optional body (bare `{}` or an absent body both
+mean `force=false` — Jackson 3 defaults a missing `boolean` field to `false`, no explicit handling
+needed). None of the three names a `SeatKind` field: `kind` is a path variable
+(`SeatController#parseKind`, case-insensitive `"flight"`/`"camera"` → 400 `IllegalArgumentException`
+on anything else), never a body field, so there is exactly one place a client can get it wrong.
 
 - **Out-of-scope single-resource reads answer 404, not 403.** A caller must never be able to prove a
   resource exists by the status code alone. `AccessDeniedException`→403 is reserved for a scoped
@@ -1042,3 +1096,49 @@ storage/persistence,station/vision-api,station/vision-app test -DskipWeb` — `s
 own MODULE.md for wave C's actual test-count delta there) — all green, default-config bar held
 throughout (`vision.discovery.live.enabled`/`vision.live.stream-state-push.enabled` both default
 **true**, proven by this same green run rather than a separate flag-off suite). Nothing deferred.
+
+**CREW-CONTROL-PLAN.md wave W2 done (2026-09-05, uncommitted at time of writing, branch
+`feat/crew-control`).** New `security.SeatAccess` (the one collaborator every guard calls — 5 params,
+at the constructor ceiling) + `security.SeatAccessSettings` (plain, framework-free settings record
+bridged from `vision-app`'s `VisionCrewProperties`) + `support.SeatSupport` (device/stream→asset
+resolution, display-name lookup, `FORCE`/`DENIED:SEAT_HELD` audit writes) + new `SeatController`
+(`GET`/`POST`/`DELETE /api/assets/{id}/seats[/{kind}]`, §3.6 frozen wire contract) + 3 new DTOs
+(`SeatsResponse`/`SeatHolderResponse`/`TakeSeatRequest`, see "DTO conventions" above) + the seat guard
+threaded into `FlightCommandController` (6 command handlers), `AssetStreamController`
+(start/stop), `AssetSessionController` (engage/disengage), `StreamController` (start/stop/
+updateConfig-family), and `ManualControlWebSocketHandler#handleEngage` — see the two "CREW-CONTROL
+wave W2" convention notes above (REST + WS) for exact insertion points and rule composition.
+`AssetAuthority`/`CapabilityAssetAuthority` already existed (AUTH-ROLES-PLAN wave B4) and needed no
+change; this wave only adds `SeatAccess` as a second, later-consulted gate.
+
+Deviations, each one-line: (1) fixed a genuine **pre-existing** compile defect unrelated to
+CREW-CONTROL, in `vision-app`'s `LiveFrameFallbackStreamService` (missing `StreamService#followStatus`
+override — `git blame`-confirmed leftover from an already-merged, unrelated commit,
+`29536635 feat(track-follow W2)`, that widened the interface without updating this one decorator);
+fixed minimally, matching the class's own "every other method delegates unchanged" pattern — see that
+module's own MODULE.md. (2) Four constructors pushed past the 5-arg ceiling — `SeatAccess` and
+`SeatSupport` land exactly at 5, `AssetStreamController` to 6, `StreamController` to 7 — each
+documented in its own javadoc; `StreamController` was already at 6 for `StreamAccess` before this
+wave, so 7 continues an existing precedent rather than opening a new one. (3) §3.6 worked one example
+(`force` on the flight seat only); this implementation generalizes `force`/`mayForceSeat` to both seat
+kinds symmetrically, since the plan's own rule table (§3.2) states the force rule kind-agnostically
+and a flight-only implementation would have been an arbitrary, undocumented asymmetry. (4) The
+explicit-actor overload `requireFlightSeat(UserId, AssetId)` trusts `mayFly=true` unconditionally
+(mirrors `CapabilityAssetAuthority`'s own explicit-actor precedent, AUTH-ROLES wave B4) since the WS
+handler already ran its own `mayFly` check immediately before calling it — documented in `SeatAccess`'s
+own javadoc, not re-derived here.
+
+`./mvnw -B -pl contexts/vision-flight,station/vision-api,station/vision-app test -DskipWeb` —
+`contexts/vision-flight` **447** (unchanged — W2's file scope excludes this module, which W1 already
+shipped), `station/vision-api` **1046** (+37 over 1009: 22 `SeatAccessTest` + 12 `SeatControllerTest`
++ 1 `StreamControllerTest` case proving rule 3 — flight-seat holder never conflicts on the camera
+seat and preempts any prior camera holder — + 1 `ManualControlWebSocketHandlerTest` case proving the
+WS `SEAT_HELD` denial fires before `ManualControlService#engage` is ever called + 1
+`FlightCommandControllerTest` case), `station/vision-app` **334** (unchanged — no test file in this
+module's scope touched). All green, 0 failures/errors. Docker ran for real (Testcontainers
+`postgres:16`, Flyway migrated through `V34`). Default-config guardrail held: `vision.crew.enabled`
+defaults `false`, and every pre-existing test in all three modules is unmodified and still green
+under that default — the four pre-existing controller/WS-handler test files needed only a
+disabled/pass-through `SeatAccess` threaded into their existing construction call sites to keep
+compiling, never a behavioral change. Nothing deferred to a later wave from this module's own scope;
+W3 (crew UI, vision-web) is a separate, concurrently-running agent's file scope, not this one's.

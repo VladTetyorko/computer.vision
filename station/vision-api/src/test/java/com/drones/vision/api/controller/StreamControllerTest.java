@@ -4,6 +4,14 @@ import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.api.security.PrincipalResolver;
 import com.drones.vision.api.security.StreamAccess;
+import com.drones.vision.api.security.AssetAuthority;
+import com.drones.vision.api.security.SeatAccess;
+import com.drones.vision.api.security.SeatAccessSettings;
+import com.drones.vision.api.support.SeatSupport;
+import com.drones.vision.flight.application.seat.DefaultSeatService;
+import com.drones.vision.flight.application.seat.SeatService;
+import com.drones.vision.flight.domain.model.SeatKind;
+import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.map.application.MapAccessPolicy;
 import com.drones.vision.perception.application.pipeline.TrackingStats;
 import com.drones.vision.perception.application.profile.CvProfileService;
@@ -67,8 +75,10 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.ByteBuffer;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -206,13 +216,32 @@ class StreamControllerTest {
      * test asked for.
      */
     private MockMvc mockMvcFor(CurrentUser user) {
+        return mockMvcFor(user, disabledSeatAccess(user));
+    }
+
+    /**
+     * Disabled pass-through (docs/plans/active/CREW-CONTROL-PLAN.md §3.8 guardrail) -- never
+     * consults its (mocked) collaborators, so every pre-existing test below is unaffected by the
+     * CAMERA-seat guard {@link StreamController#start}/{@code #stop}/{@code #updateConfig} now call.
+     */
+    private SeatAccess disabledSeatAccess(CurrentUser user) {
+        return new SeatAccess(mock(SeatService.class), mock(AssetAuthority.class), user, mock(SeatSupport.class),
+                new SeatAccessSettings(false, 15_000L));
+    }
+
+    /**
+     * Same as {@link #mockMvcFor(CurrentUser)}, but with a caller-supplied {@link SeatAccess} — for
+     * the CAMERA-seat tests near the end of this file, which need it enabled and backed by a real
+     * {@link SeatService}.
+     */
+    private MockMvc mockMvcFor(CurrentUser user, SeatAccess seatAccess) {
         StreamAccess streamAccess = new StreamAccess(streamService, assetRepositoryPort, user);
         StreamDetectionSupport streamDetectionSupport = new StreamDetectionSupport(PipelineConfig.defaults(),
                 detectionDemand, cvProfileService, assetRepositoryPort, user);
         return MockMvcBuilders
                 .standaloneSetup(new StreamController(streamService, streamPublisherPort, detectionRepositoryPort,
                         new SnapshotJpegEncoder(VisionApiProperties.defaults()), streamDetectionSupport,
-                        streamAccess))
+                        streamAccess, seatAccess))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -600,6 +629,39 @@ class StreamControllerTest {
         mockMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value()))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+    }
+
+    /**
+     * docs/plans/active/CREW-CONTROL-PLAN.md §3.2 rule 3, wave W2: the actor already holding the
+     * FLIGHT seat on this asset never gets a 409 taking the CAMERA seat too -- {@link SeatAccess}
+     * calls {@code SeatService#preempt} unconditionally rather than contesting the seat, and the
+     * previous CAMERA holder is displaced.
+     */
+    @Test
+    void startNeverConflictsForTheFlightSeatHolderAndPreemptsAnyPriorCameraHolder() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.start(any(), any(), any())).thenReturn(streamId);
+        when(streamPublisherPort.viewUrl(streamId)).thenReturn(Optional.empty());
+
+        SeatService realSeatService = new DefaultSeatService(Clock.fixed(Instant.now(), ZoneOffset.UTC),
+                mock(AuditTrailPort.class), 15_000L);
+        AssetId assetId = ownedAsset.id();
+        UserId flightHolder = ownerId;
+        UserId priorCameraHolder = UserId.random();
+        realSeatService.take(assetId, SeatKind.FLIGHT, flightHolder);
+        realSeatService.take(assetId, SeatKind.CAMERA, priorCameraHolder);
+
+        SeatSupport seatSupport = mock(SeatSupport.class);
+        when(seatSupport.assetIdOf(deviceId)).thenReturn(Optional.of(assetId));
+        SeatAccess enabledSeatAccess = new SeatAccess(realSeatService, mock(AssetAuthority.class), currentUser,
+                seatSupport, new SeatAccessSettings(true, 15_000L));
+
+        MockMvc seatGuardedMvc = mockMvcFor(currentUser, enabledSeatAccess);
+
+        seatGuardedMvc.perform(post("/api/devices/{deviceId}/stream", deviceId.value()))
+                .andExpect(status().isCreated());
+
+        assertEquals(flightHolder, realSeatService.holder(assetId, SeatKind.CAMERA).orElseThrow().holder());
     }
 
     @Test

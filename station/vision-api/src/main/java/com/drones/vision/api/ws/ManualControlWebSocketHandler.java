@@ -8,6 +8,7 @@ import com.drones.vision.api.dto.ManualControlEngagedFrame;
 import com.drones.vision.api.dto.ManualControlReleasedFrame;
 import com.drones.vision.api.dto.ManualControlWatchdogFrame;
 import com.drones.vision.api.security.CapabilityAssetAuthority;
+import com.drones.vision.api.security.SeatAccess;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.flight.application.ManualControlService;
 import com.drones.vision.flight.application.ManualControlSession;
@@ -124,6 +125,16 @@ import java.util.concurrent.ConcurrentHashMap;
  * on the {@code ManualControlLink} it returns from {@code engage}, {@link ManualControlSession}
  * exposes it, and this handler echoes it (docs/plans/done/RC-LATENCY-PLAN.md §2 C). The
  * hand-mirrored constant this class used to send is gone.
+ *
+ * <h2>The FLIGHT seat (docs/plans/active/CREW-CONTROL-PLAN.md &sect;3.2/&sect;3.3, wave W2)</h2>
+ * Immediately after the {@code mayFly} gate above (never before it — an out-of-scope caller must
+ * never learn who holds a seat on an asset they cannot even fly), {@link #handleEngage} calls {@link
+ * SeatAccess#requireFlightSeat(UserId, AssetId)} — the explicit-actor overload, since this thread has
+ * no {@link com.drones.vision.api.security.CurrentUser} either. A seat conflict ({@link
+ * IllegalStateException}) answers the new {@code SEAT_HELD} denied code rather than {@code
+ * NOT_COMMANDABLE}, so a client can tell "someone else is flying this" apart from "this aircraft
+ * cannot currently be commanded". Pass-through with {@code vision.crew.enabled=false} (default) —
+ * unchanged behavior.
  */
 @Component
 public class ManualControlWebSocketHandler extends TextWebSocketHandler {
@@ -143,9 +154,12 @@ public class ManualControlWebSocketHandler extends TextWebSocketHandler {
     private static final String CODE_MALFORMED = "MALFORMED";
     private static final String CODE_UNKNOWN_TYPE = "UNKNOWN_TYPE";
     private static final String CODE_INTERNAL_ERROR = "INTERNAL_ERROR";
+    /** New for docs/plans/active/CREW-CONTROL-PLAN.md &sect;3.3/&sect;3.6, wave W2 — see class javadoc "The FLIGHT seat". */
+    private static final String CODE_SEAT_HELD = "SEAT_HELD";
 
     private final ManualControlService manualControlService;
     private final CapabilityAssetAuthority assetAuthority;
+    private final SeatAccess seatAccess;
     private final long watchdogTimeoutMillis;
     private final long engageSlowThresholdMillis;
     private final JsonMapper jsonMapper = new JsonMapper();
@@ -161,6 +175,9 @@ public class ManualControlWebSocketHandler extends TextWebSocketHandler {
      *                                  explicit-actor overload; see that class's own javadoc for why
      *                                  the ambient-{@code CurrentUser} interface method cannot be
      *                                  used here
+     * @param seatAccess                the FLIGHT-seat guard (docs/plans/active/CREW-CONTROL-PLAN.md
+     *                                  &sect;3.2/&sect;3.3, wave W2) — see class javadoc "The FLIGHT
+     *                                  seat"
      * @param watchdogTimeoutMillis     {@code vision.rc.watchdog-timeout-ms} — read independently
      *                                  here (rather than asked of {@code manualControlService},
      *                                  which has no getter for it) purely to echo it on the {@code
@@ -175,11 +192,13 @@ public class ManualControlWebSocketHandler extends TextWebSocketHandler {
      */
     public ManualControlWebSocketHandler(ManualControlService manualControlService,
                                           CapabilityAssetAuthority assetAuthority,
+                                          SeatAccess seatAccess,
                                           @Value("${vision.rc.watchdog-timeout-ms:300}") long watchdogTimeoutMillis,
                                           @Value("${vision.rc.engage-slow-threshold-ms:2000}") long engageSlowThresholdMillis) {
         this.manualControlService =
                 Objects.requireNonNull(manualControlService, "manualControlService must not be null");
         this.assetAuthority = Objects.requireNonNull(assetAuthority, "assetAuthority must not be null");
+        this.seatAccess = Objects.requireNonNull(seatAccess, "seatAccess must not be null");
         this.watchdogTimeoutMillis = watchdogTimeoutMillis;
         this.engageSlowThresholdMillis = engageSlowThresholdMillis;
     }
@@ -269,6 +288,18 @@ public class ManualControlWebSocketHandler extends TextWebSocketHandler {
             logEngageDuration(engageStartNanos, assetId, "denied:" + CODE_OUT_OF_SCOPE);
             sendFrame(session, state, new ManualControlDeniedFrame(CODE_OUT_OF_SCOPE,
                     "Asset " + assetId.value() + " may not be flown by you"));
+            return;
+        }
+
+        // The FLIGHT seat (docs/plans/active/CREW-CONTROL-PLAN.md §3.2/§3.3, wave W2) -- taken or
+        // renewed for this explicit actor now that mayFly has already passed; a conflict answers the
+        // new SEAT_HELD code rather than falling through to NOT_COMMANDABLE. Pass-through (never
+        // throws) when vision.crew.enabled=false.
+        try {
+            seatAccess.requireFlightSeat(actor, assetId);
+        } catch (IllegalStateException e) {
+            logEngageDuration(engageStartNanos, assetId, "denied:" + CODE_SEAT_HELD);
+            sendFrame(session, state, new ManualControlDeniedFrame(CODE_SEAT_HELD, e.getMessage()));
             return;
         }
 

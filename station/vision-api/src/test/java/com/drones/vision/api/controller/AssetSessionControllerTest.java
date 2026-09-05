@@ -20,6 +20,11 @@ import com.drones.vision.warehouse.domain.model.AssetUsage;
 import com.drones.vision.warehouse.domain.model.UsagePhase;
 import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.api.security.PrincipalResolver;
+import com.drones.vision.api.security.AssetAuthority;
+import com.drones.vision.api.security.SeatAccess;
+import com.drones.vision.api.security.SeatAccessSettings;
+import com.drones.vision.api.support.SeatSupport;
+import com.drones.vision.flight.application.seat.SeatService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.web.servlet.MockMvc;
@@ -55,6 +60,7 @@ class AssetSessionControllerTest {
     private UsageTracker usageTracker;
     private AuditTrailPort auditTrail;
     private MockMvc mockMvc;
+    private SeatAccess seatAccess;
 
     private final UserId ownerId = UserId.random();
     private final Ownership ownership = new Ownership(ownerId, GroupId.random());
@@ -65,9 +71,15 @@ class AssetSessionControllerTest {
         assetService = mock(AssetService.class);
         usageTracker = mock(UsageTracker.class);
         auditTrail = mock(AuditTrailPort.class);
+        // Disabled pass-through (docs/plans/active/CREW-CONTROL-PLAN.md §3.8 guardrail) -- never
+        // consults its collaborators, so a single instance is safe to reuse regardless of which
+        // CurrentUser variant the controller under test is constructed with.
+        seatAccess = new SeatAccess(mock(SeatService.class), mock(AssetAuthority.class), currentUser,
+                mock(SeatSupport.class), new SeatAccessSettings(false, 15_000L));
 
         mockMvc = MockMvcBuilders
-                .standaloneSetup(new AssetSessionController(assetService, usageTracker, currentUser, auditTrail))
+                .standaloneSetup(
+                        new AssetSessionController(assetService, usageTracker, currentUser, auditTrail, seatAccess))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -111,7 +123,7 @@ class AssetSessionControllerTest {
 
     private MockMvc mockMvcFor(CurrentUser user) {
         return MockMvcBuilders
-                .standaloneSetup(new AssetSessionController(assetService, usageTracker, user, auditTrail))
+                .standaloneSetup(new AssetSessionController(assetService, usageTracker, user, auditTrail, seatAccess))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
