@@ -1,5 +1,4 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
-import { FormsModule } from '@angular/forms';
 import { AuthStore } from '../../core/auth/auth-store';
 import { Notice } from './notice';
 
@@ -31,10 +30,18 @@ import { Notice } from './notice';
  * "never mind" here — the session is genuinely gone, and the only way off `/fly` without signing back
  * in would be a manual URL change, which is the operator's own choice, not a button this overlay
  * offers.
+ *
+ * **No `FormsModule`** — bound with native `[value]`/`(input)` instead. This component is
+ * reachable from the eagerly-loaded app shell (`app.ts` renders it unconditionally), so importing
+ * `FormsModule` here pulls all ~36 kB of `@angular/forms` into the *initial* bundle to serve a
+ * dialog almost nobody sees, which on its own broke `angular.json`'s 440 kB initial-bundle error
+ * budget. The bindings were already one-way into signals, so forms bought nothing. Keep it that
+ * way: `required` stays for a11y only — `canSubmit()` is the real gate, so native validation
+ * never fires.
  */
 @Component({
   selector: 'vision-reauth-overlay',
-  imports: [FormsModule, Notice],
+  imports: [Notice],
   templateUrl: './reauth-overlay.html',
   styleUrl: './reauth-overlay.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

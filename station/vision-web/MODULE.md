@@ -307,7 +307,18 @@ Everything listed under API surface is implemented and covered by the suite (160
 - **Verify-cadence / follow-fps sliders** are local draft state — the wire carries no readback for them.
 - **Tracking config is live-only**: `StartStreamRequest` has no `tracking` object, so a starting mode can't be requested, only PATCHed after start.
 - **Feature-flagged off by default server-side** — the UI is built and degrades honestly (endpoints answer 409 naming the flag): `vision.training.enabled`, `vision.geo.fixed-camera.enabled`, `vision.geo.visual.enabled`, `vision.cv.registry.enabled` (model Promote/Roll back only — the registry roster read itself, `GET /api/cv/models`, never errors server-side, wave W8).
-- Pre-existing, unfixed: the initial bundle sits a few kB over its 390 kB budget **warning** (error threshold 440 kB); canvas/Leaflet draw colors don't react to a theme flip without a `getComputedStyle` + re-style mechanism nobody has built.
+- **Initial-bundle budget — read this before believing a wave entry that calls the ERROR gate "pre-existing".**
+  The 390 kB **warning** is genuinely long-standing and still unfixed. The 440 kB **ERROR** gate is not: five wave
+  entries below (W5/W6/W7 of TRACK-FOLLOW, W3/W4 of CREW-CONTROL) each report `ng build --configuration production`
+  failing on it and call it "pre-existing, confirmed unrelated to this wave". Each was right about **its own delta**
+  (all ≈0) and wrong about the cause: every one of them measured against a baseline *already on the same feature
+  stack*, never against `master`. Measured against `master` in a disposable worktree on 2026-09-05, `master`'s initial
+  bundle was **421.60 kB and its production build exited 0** — the gate was broken inside the stack, by AUTH-ROLES'
+  two shell overlays (see the fix entry at the end of this file), and would have turned `master` red on merge.
+  **The lesson is about method, not about these five waves:** an intra-branch `git stash`/rebuild baseline can only
+  answer "did *I* add bytes", never "is this branch green". For a gate that is pass/fail rather than a delta, measure
+  against the merge target.
+- Pre-existing, unfixed: canvas/Leaflet draw colors don't react to a theme flip without a `getComputedStyle` + re-style mechanism nobody has built.
 - **2026-08-26, docs/plans/active/CONTROLLER-UX-PLAN.md wave X1:** `shared/ui/transmitter-view/` + `shared/ui/switch-gauge/` + `core/rc/transmitter-view-logic.ts` built and tested, but **not yet wired into any page** — no import exists outside their own files, so the production bundle is unaffected (delta 0 kB) until wave X2 (`rc-monitor` rebuild, also retires `features/fly/virtual-control-surface.*`) and wave X4 (`controller-setup`'s review step) consume them.
 - **2026-08-26, docs/plans/active/CONTROLLER-UX-PLAN.md wave X2:** `features/fly/rc-monitor.*` rebuilt around `TransmitterView` (first real consumer, alongside `SidePanel`'s previously-unused `[footer]` slot); `flight-command-panel` gained `modeAlsoOn`/`armAlsoOn` inputs; `virtual-control-surface.*` deleted. `tsc --noEmit` clean on both configs; `npm run test:ci` green (144/144 files, 2645/2645 tests). Production build re-measured as part of wave X4 below, once the two waves' overlapping edits to `features/controller/**` both landed.
 - **2026-08-26, docs/plans/active/CONTROLLER-UX-PLAN.md wave X4:** `/manage/controller` rebuilt as the step-by-step wizard described under `features/**` → `controller/` above (`StepRail`, `WizardStep`, `AllControls`, `ControllerSetupFacade#replaceDraft`). `tsc --noEmit` clean on both configs; `npm run test:ci` green (145/145 files, 2649/2649 tests, incl. 4 new `step-rail.spec.ts` + 4 new `wizard-step.spec.ts` TestBed specs covering rover/copter step lists, detection→defaults preselection, Next writing into the draft, the no-gamepad manual picker, and U12 built-in read-only). `ng build --configuration production` green; `controller-setup` lazy chunk grew from wave X2's own baseline (27.58 kB raw / 7.12 kB transfer — `TransmitterView`/`SwitchGauge` were not yet wired into this page) to 60.75 kB raw / 14.21 kB transfer (**+33.17 kB raw / +7.09 kB transfer**) now that the wizard's review step actually renders `TransmitterView`; initial bundle unchanged (410.19 kB, same pre-existing over-budget warning noted above). Not built at the time: a real mode-name source for the Mode step's datalist (free text still worked) — closed by wave M below. The manual picker's 8-axis/16-button range is still a UI convenience, not read from any device capability.
@@ -784,3 +795,39 @@ Built the wave's file-scoped slice entirely inside `features/fly/**` (no `core/s
 `ng build --configuration production` — fails on the identical **pre-existing** initial-bundle ERROR-level budget gate every recent wave's own entry above has hit (440 kB threshold), confirmed unrelated to this wave by an isolated `git stash -u`/rebuild/`git stash pop` (scoped to `-- station/vision-web/src/app/features/fly`): baseline (pre-wave, i.e. W3's own post-wave state) **471.20 kB** raw / 129.49 kB transfer initial, this wave's own **471.42 kB** / 129.58 kB (**+0.22 kB raw / +0.09 kB transfer** — the new `flyHudCanCommand`/camera-seat computeds and `SeatStore` injection touch `CockpitFacade`, which is page-provided, not root-provided, so this small delta is chunk-splitting noise rather than a new eager dependency; `SeatStore` itself was already reachable from the initial bundle's shared-chunk graph via W3's `crew` route). The named `cockpit` lazy chunk moved from **136.62 kB → 138.44 kB raw (+1.82 kB), 28.88 kB → 29.20 kB transfer (+0.32 kB)** — the expected cost of this wave's own new template/facade code.
 
 **Left incomplete:** nothing against this wave's own file scope — all three of (a)/(b)/(c) are built exactly to §3.5's one-CTA table (one text line, one drawer button, zero new stages, zero new CTAs, no toast), and the D1 fix is verified against every one of the plan's own named consumer sites. The pre-existing production-budget failure (documented above, inherited from before this wave) is left unfixed — out of `features/fly/**`'s mandate, and touching `angular.json`'s budget thresholds was never part of this wave's scope.
+
+### 2026-09-05, pre-merge fix: `@angular/forms` out of the initial bundle
+
+**Why this exists:** the four-feature stack (`feat/auth-roles` → `source-onboarding-2` → `track-follow` →
+`crew-control`) was green on every Java module and on `test:ci`, but `ng build --configuration production`
+failed the 440 kB initial-bundle ERROR gate at **471.44 kB**. Measured against `master` in a disposable
+worktree, `master` was **421.60 kB, exit 0** — so the stack, not history, broke it, and merging would have
+left `master` unbuildable. See the corrected Gotchas entry above for how five wave entries came to call it
+"pre-existing".
+
+**Cause:** `shared/ui/reauth-overlay.ts` and `shared/ui/force-password-change.ts` (AUTH-ROLES) were the only
+components in the eagerly-loaded shell tree importing `FormsModule`, and `app.ts` renders both
+unconditionally in `app.html`. That pulled the whole **36.30 kB** `@angular/forms` chunk into the *initial*
+bundle to serve two dialogs almost nobody sees.
+
+**Fix:** both were already binding **one-way** into signals (`[ngModel]` + `(ngModelChange)="x.set($event)"`),
+so forms bought them nothing — swapped to native `[value]` + `(input)="x.set($any($event.target).value)"`,
+`(ngSubmit)="submit()"` → `(submit)="$event.preventDefault(); submit()"`, and dropped the import. `required`
+stays for a11y only: `canSubmit()` already requires non-empty and `submit()` re-checks, so the native
+validation path FormsModule used to suppress (it auto-adds `novalidate`) is unreachable — no behavior change.
+
+**Rejected alternative:** `@defer (when …; prefetch on idle)` on the two hosts. It reached the same size
+(434.94 kB) but makes `App` require `TestBed.compileComponents()`, failing **20 `app.spec.ts` tests** and
+forcing 26 test callbacks to async — and it would fetch a chunk at the exact moment a session expires.
+Dropping `FormsModule` gets the identical saving with no test churn and no runtime risk.
+
+**Verify chain, all green:** full `./mvnw -B verify` — **BUILD SUCCESS**, all 36 modules (`vision-app` 334
+tests; earlier attempts never reached it). `npm run test:ci` — **190/190 files, 3793/3793 tests**, unchanged
+count (neither dialog has its own spec). `ng build --configuration production` — **exit 0**, initial
+**471.44 kB → 434.99 kB (−36.45 kB)**, now 5.01 kB under the 440 kB gate, leaving only the two pre-existing
+warnings (390 kB initial, `tactical-map.css`). Still +13.39 kB over `master` — the four features' legitimate
+eager growth, within budget.
+
+**Gotcha worth keeping:** `npm-build` binds to `process-classes`, which runs **before** the `test` phase, so a
+bundle-budget failure means `npm run test:ci` **never runs** in a reactor build. A red `vision-web` therefore
+proves nothing about the web tests — run them directly before concluding anything.

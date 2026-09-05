@@ -1,6 +1,6 @@
 @if (auth.reauthRequired()) {
   <div class="backdrop">
-    <form class="dialog card" role="alertdialog" aria-modal="true" (ngSubmit)="submit()">
+    <form class="dialog card" role="alertdialog" aria-modal="true" (submit)="$event.preventDefault(); submit()">
       <h2>Sign in again</h2>
       <p class="muted">Your session ended. Sign back in to continue — this page stays exactly as it is.</p>
 
@@ -11,8 +11,8 @@
           name="username"
           autocomplete="username"
           autocapitalize="none"
-          [ngModel]="username()"
-          (ngModelChange)="username.set($event)"
+          [value]="username()"
+          (input)="username.set($any($event.target).value)"
           [disabled]="auth.loginBusy()"
           required
         />
@@ -24,8 +24,8 @@
           type="password"
           name="password"
           autocomplete="current-password"
-          [ngModel]="password()"
-          (ngModelChange)="password.set($event)"
+          [value]="password()"
+          (input)="password.set($any($event.target).value)"
           [disabled]="auth.loginBusy()"
           required
         />
