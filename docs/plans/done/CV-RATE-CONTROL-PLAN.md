@@ -1,6 +1,6 @@
 # CV rate control — close the loop, then widen the pipe
 
-**Status:** R1–R3 done and measured, R4 done. 2026-08-12. Branch `feat/cv-rate-control`.
+**Status:** R1–R3 done and measured, R4 done. **MERGED to master 2026-08-12** via `feat/media-sot` (`610b1145`, merge `1bece62d`; branch deleted — verified `git merge-base --is-ancestor`, 2026-09-04).
 Results and their caveats live in `docs/conclusions/CV-RATE-BUDGET.md` §3 ("Re-measured"), which is
 the authority; this file is the design record.
 **Follows:** `docs/conclusions/CV-RATE-BUDGET.md` §6 items 1–2 (gap 1 + the ~25 ms overhead).

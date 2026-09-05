@@ -1,6 +1,6 @@
 # TRACK-IDENTITY-PLAN — the name stops flapping
 
-Status: **authoritative implementation plan** (2026-08-20). Executes the owner-approved
+Status: **MERGED to master 2026-08-22** (`2484d6ab`; waves individually L3 `34f528ed`, L1 `899fb838`, L2 `e25c9b03`, L4 `6176a44e` — verified `git merge-base --is-ancestor`, 2026-09-04). Originally authored 2026-08-20. Executes the owner-approved
 recommendation of `TRACK-IDENTITY-RESEARCH.md` (§3): L1 label election, L2 association
 hardening, L3 SPA stability, L4 FOLLOW memory path. L5 stays deferred.
 

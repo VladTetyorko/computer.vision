@@ -1,6 +1,6 @@
 # CV-CLEAN-FEED-PLAN — two streams, one overlay, an honest filter
 
-Status: **authoritative implementation plan** (2026-08-20). Owner decisions this plan executes:
+Status: **MERGED to master 2026-08-22** (carried inside `2484d6ab` — track-identity branched off this branch; verified `git merge-base --is-ancestor`, 2026-09-04). Originally authored 2026-08-20. Owner decisions this plan executes:
 1. **Remove burn-in entirely** — video and detections become two separate streams; the video is
    always clean pixels, detections are always data, and every rendering choice is client-side and
    customizable.
