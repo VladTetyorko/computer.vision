@@ -13,11 +13,16 @@ import { deriveCategoryOptions, type CategoryOption } from '../../core/fleet/cat
 import { buildSyntheticRegisterRequest } from '../../core/fleet/simulation-logic';
 import { RESTORE_TARGET_STATE } from '../../core/fleet/warehouse-logic';
 import {
+  inventoryActor,
   inventoryExportFilename,
   parseInventoryTab,
+  vehicleRowActions,
   visibleInventoryTabs,
+  type InventoryActor,
   type InventoryTab,
+  type VehicleRowActions,
 } from '../../core/fleet/inventory-logic';
+import { findVideoDevice } from '../../core/fleet/device-logic';
 import { inventoryKpis, type InventoryKpis } from './inventory-page-logic';
 import {
   buildVehicleRows,
@@ -39,11 +44,12 @@ import {
 } from './vehicles-logic';
 import type {
   AssetDetails,
+  AssetSummary,
   Category,
   FleetSummary,
   MaintenanceKind,
   MaintenanceRecord,
-  ReadinessVerdict,
+  ReadinessRow,
   UserSummary,
 } from '../../core/api/models';
 
@@ -58,10 +64,19 @@ import type {
  * ({@link filterVehicleRowsByConnected}) and run through one shared filter pipeline
  * ({@link filteredRows}) — switching tabs never re-fetches, only re-filters.
  *
- * **Firmware/Hours columns** read `AssetDetails#firmware`/`#totalFlightSeconds` directly (wave W9,
+ * **Firmware/Hours columns** read `AssetSummary#firmware`/`#totalFlightSeconds` directly (wave W9,
  * docs/plans/active/WAREHOUSE-UX-CONTEXT.md "W8 → W9 handoff") — already present on the same
- * `getAsset`/`listAssets` responses this facade already fetches, no second call. See
- * `vehicles-logic.ts`'s own module doc comment for the render (`firmwareLabel`/`formatFlightTime`).
+ * `listAssets` response this facade already fetches, no second call. See `vehicles-logic.ts`'s own
+ * module doc comment for the render (`firmwareLabel`/`formatFlightTime`).
+ *
+ * **Five requests, not `5 + N`** (docs/plans/active/INVENTORY-REWORK-PLAN.md wave W3): {@link loadAll}
+ * builds every row from `GET /api/assets` alone; the per-asset `GET /api/assets/{id}` runs only when
+ * a row is *selected* ({@link ensureDetails}, cached per id) or when the *Watch live* verb needs a
+ * device id.
+ *
+ * **Every verb on screen is one this session may actually use** — {@link actor} × {@link actionsFor}
+ * (`core/fleet/inventory-logic.ts#vehicleRowActions`, plan §5.2). No template in this feature makes
+ * its own authority decision.
  *
  * **Mutations patch in place.** `setAssetCustody`/`setAssetInventory` both return the asset's full,
  * updated `AssetDetails` — {@link patchAsset} splices it back into `assets()` directly rather than
@@ -86,6 +101,20 @@ export class InventoryFacade {
   readonly canManageOrg = computed(() => computeCanManageOrg(this.auth.capabilities()));
   readonly visibleTabs = computed(() => visibleInventoryTabs(this.canManageOrg()));
 
+  /**
+   * Who is looking (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.2, wave W3) — the one place this
+   * page reads the session's capabilities, threaded into every verb decision through
+   * {@link actionsFor}. Recomputes on its own the moment `GET /api/auth/me` resolves, so the first
+   * paint of a still-loading session offers *nothing* rather than optimistically offering
+   * everything and then taking it away.
+   */
+  readonly actor = computed<InventoryActor>(() => inventoryActor(this.auth.capabilities(), this.auth.user()?.userId));
+
+  /** The verb matrix for one row — every kebab/pane/card control reads this, never a bespoke `@if`. */
+  actionsFor(row: VehicleRow): VehicleRowActions {
+    return vehicleRowActions(row, this.actor());
+  }
+
   /** Route-bound `?tab=` → the facade's own `tab` signal, falling back to `vehicles` for a pilot who
    *  guesses/bookmarks a `?tab=links`/`?tab=categories` URL — mirrors `AssetsPage`'s own `?category=`
    *  forwarding, just with an extra honesty clamp on top. */
@@ -107,11 +136,13 @@ export class InventoryFacade {
   readonly busyAssetId = signal<string | null>(null);
 
   readonly showArchived = signal(false);
-  private readonly assets = signal<readonly AssetDetails[]>([]);
+  private readonly assets = signal<readonly AssetSummary[]>([]);
   private readonly categories = signal<readonly Category[]>([]);
   private readonly users = signal<readonly UserSummary[]>([]);
-  private readonly readinessByAssetId = signal<ReadonlyMap<string, ReadinessVerdict>>(new Map());
+  private readonly readinessByAssetId = signal<ReadonlyMap<string, ReadinessRow>>(new Map());
   private readonly fleetSummaryData = signal<FleetSummary | undefined>(undefined);
+  /** `GET /api/assets/{id}` responses fetched **on selection**, keyed by asset id — see {@link ensureDetails}. */
+  private readonly detailsByAssetId = signal<ReadonlyMap<string, AssetDetails>>(new Map());
 
   /** "Fleet at a glance" KPI strip above the Vehicles tab (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3)
    *  — ported from the deleted Reports page's own KPI-only section, see `inventory-page-logic.ts`. */
@@ -143,7 +174,13 @@ export class InventoryFacade {
    *  two-pane selection read this, never `assets()` directly (mirrors `AssetsFacade#allRows`). */
   private readonly allRows = computed<readonly VehicleRow[]>(() =>
     sortVehicleRowsByTriage(
-      buildVehicleRows(this.assets(), this.users(), this.readinessByAssetId(), Date.now()),
+      buildVehicleRows({
+        assets: this.assets(),
+        users: this.users(),
+        readinessByAssetId: this.readinessByAssetId(),
+        detailsByAssetId: this.detailsByAssetId(),
+        nowMs: Date.now(),
+      }),
       Date.now(),
     ),
   );
@@ -208,6 +245,25 @@ export class InventoryFacade {
     void this.router.navigate(['/fly']);
   }
 
+  /**
+   * The *Watch live* verb (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.2 column 4) — the
+   * lightweight read-only `/live/:deviceId` page, the same destination `asset-detail-facade.ts#watch`
+   * uses. A row carries no device id (that is exactly the `getAsset` this wave stopped issuing per
+   * row), so the click resolves one through {@link ensureDetails}: one request, cached, and only for
+   * the asset actually clicked. An asset with no video device says so rather than navigating
+   * nowhere — the verb only ever renders for a `STREAMING` asset, so this is the honest report of a
+   * genuinely odd state, not a routine path.
+   */
+  async watchLive(assetId: string): Promise<void> {
+    const details = await this.ensureDetails(assetId);
+    const device = findVideoDevice(details?.devices ?? []);
+    if (!device) {
+      this.toasts.error('No video device is linked to this vehicle.');
+      return;
+    }
+    await this.router.navigate(['/live', device.id]);
+  }
+
   openAsset(assetId: string): Promise<boolean> {
     return this.router.navigate(['/assets', assetId]);
   }
@@ -223,17 +279,53 @@ export class InventoryFacade {
   readonly maintenanceRecords = signal<readonly MaintenanceRecord[]>([]);
   readonly loadingMaintenance = signal(false);
 
+  // --- Details, on selection (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.3, context §3 defect D) --
+
+  readonly loadingDetails = signal(false);
+
+  /** The selected asset's devices/usages — `undefined` until its own `GET /api/assets/{id}` lands (or if it failed). The detail pane renders identity/custody/state from the row meanwhile; only device- and usage-level facts wait. */
+  readonly selectedDetails = computed<AssetDetails | undefined>(() => {
+    const id = this.selectedId();
+    return id ? this.detailsByAssetId().get(id) : undefined;
+  });
+
+  /**
+   * One asset's `AssetDetails`, fetched at most once per id and reused thereafter (mutations
+   * refresh the entry through {@link patchAsset}; a full {@link loadAll} empties the cache). Returns
+   * `undefined` on failure — the caller degrades, never blocks: the pane keeps rendering the row's
+   * own facts and the device list simply stays empty rather than the selection failing.
+   */
+  private async ensureDetails(assetId: string): Promise<AssetDetails | undefined> {
+    const cached = this.detailsByAssetId().get(assetId);
+    if (cached) {
+      return cached;
+    }
+    this.loadingDetails.set(true);
+    try {
+      const details = await this.api.getAsset(assetId);
+      this.detailsByAssetId.update((map) => new Map(map).set(assetId, details));
+      return details;
+    } catch {
+      return undefined;
+    } finally {
+      this.loadingDetails.set(false);
+    }
+  }
+
   constructor() {
     void this.loadAll();
 
-    // The detail pane's Maintenance drawer only ever needs the *selected* asset's own records —
-    // fetched on selection, cleared on deselection, never kept warm for the whole table. Deliberately
-    // still `listAssetMaintenance` (per-asset), not the fleet-wide `fleetMaintenance` `/fleet/maintenance`
+    // The detail pane's per-asset reads — the asset's own record (devices/usages) and its
+    // maintenance history — are both fetched on *selection*, cleared on deselection, and never kept
+    // warm for the whole table: 20 rows used to cost 20 `getAsset` calls nobody had asked for
+    // (docs/plans/active/INVENTORY-REWORK-CONTEXT.md §3 defect D). Maintenance is deliberately still
+    // `listAssetMaintenance` (per-asset), not the fleet-wide `fleetMaintenance` `/fleet/maintenance`
     // itself uses (wave W9) — this drawer is already scoped to one asset, so the fleet-wide read would
     // fetch every other asset's records only to discard them.
     effect(() => {
       const assetId = this.selectedId();
       if (assetId) {
+        void this.ensureDetails(assetId);
         void this.loadMaintenance(assetId);
       } else {
         this.maintenanceRecords.set([]);
@@ -280,10 +372,24 @@ export class InventoryFacade {
 
   // --- Row verbs — custody/inventory actions (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3/§3.4) ----
 
-  /** Splices one asset's freshly-returned `AssetDetails` back into the loaded list — every mutation
-   *  below reflects immediately without a full-fleet re-fetch. */
+  /**
+   * Splices one asset's freshly-returned `AssetDetails` back into the loaded list **and** the
+   * on-selection detail cache — every mutation below reflects immediately without a full-fleet
+   * re-fetch, and an open detail pane never shows a pre-mutation custody picture.
+   *
+   * **Merged, not replaced.** `AssetInventoryController#detailsResponse` deliberately omits
+   * `firmware`/`totalFlightSeconds` (and, from W1, `deviceCount`) from a custody/inventory response
+   * — it has no join to offer there, documented on `AssetSummary#firmware` itself. Overwriting the
+   * row wholesale would therefore blank the Firmware/Hours/Links columns the moment somebody
+   * pressed Issue; spreading over the previous record keeps the last honest value for exactly the
+   * fields this response says nothing about, while every field it *does* carry wins.
+   */
   private patchAsset(updated: AssetDetails): void {
-    this.assets.update((list) => list.map((asset) => (asset.assetId === updated.assetId ? updated : asset)));
+    this.assets.update((list) => list.map((asset) => (asset.assetId === updated.assetId ? { ...asset, ...updated } : asset)));
+    this.detailsByAssetId.update((map) => {
+      const merged = { ...(map.get(updated.assetId) ?? {}), ...updated };
+      return new Map(map).set(updated.assetId, merged);
+    });
   }
 
   async issueTo(assetId: string, custodianId: string, location: string): Promise<void> {
@@ -399,6 +505,18 @@ export class InventoryFacade {
 
   // --- Load ---------------------------------------------------------------------------------------
 
+  /**
+   * The page's whole fleet read — **five requests, flat, regardless of fleet size**
+   * (docs/plans/active/INVENTORY-REWORK-PLAN.md wave W3, context §3 defect D: this used to be
+   * `5 + one GET /api/assets/{id} per asset`, 25 requests for the dev fleet's 20 vehicles, every one
+   * of them re-fetching data `GET /api/assets` had already returned). Per-asset details now load on
+   * selection ({@link ensureDetails}).
+   *
+   * `GET /api/users` is skipped entirely for an `ASSIGNED_ASSETS` scope — a pilot-only session, for
+   * which `UserAdminController` answers `[]` by design (context §3). It is a *fallback* join now
+   * anyway: names travel on the wire (`AssetCustody#custodianName`, D3), so this only backfills a
+   * pre-W1 backend, and it is allowed to fail without failing the page.
+   */
   async loadAll(): Promise<void> {
     this.loading.set(true);
     this.error.set(null);
@@ -406,23 +524,37 @@ export class InventoryFacade {
       const [summaries, categories, users, readiness, summary] = await Promise.all([
         this.showArchived() ? this.fleet.listAssetsIncludingArchived() : this.api.listAssets(),
         this.api.listCategories(),
-        this.api.listUsers(),
+        this.loadUserNames(),
         this.api.fleetReadiness(),
         this.api.fleetSummary(),
       ]);
       if (summaries) {
-        const details = await Promise.all(summaries.map((asset) => this.api.getAsset(asset.assetId)));
-        this.assets.set(details);
+        this.assets.set(summaries);
       }
       this.categories.set(categories);
       this.users.set(users);
-      this.readinessByAssetId.set(new Map(readiness.assets.map((row) => [row.assetId, row.verdict])));
+      this.readinessByAssetId.set(new Map(readiness.assets.map((row) => [row.assetId, row])));
       this.fleetSummaryData.set(summary);
+      // A refresh must not leave a stale device/usage picture behind the pane; re-fetch only the one
+      // asset that is actually open, if any.
+      this.detailsByAssetId.set(new Map());
+      const selected = this.selectedId();
+      if (selected) {
+        void this.ensureDetails(selected);
+      }
     } catch (error) {
       this.error.set(describeHttpError(error));
     } finally {
       this.loading.set(false);
     }
+  }
+
+  /** See {@link loadAll} — `[]` for a pilot (no request at all), `[]` again if the listing fails. */
+  private loadUserNames(): Promise<readonly UserSummary[]> {
+    if (this.auth.scopeKind() === 'ASSIGNED_ASSETS') {
+      return Promise.resolve([]);
+    }
+    return this.api.listUsers().catch(() => []);
   }
 
   async toggleShowArchived(): Promise<void> {

@@ -1288,11 +1288,15 @@ export class OnboardingStore {
   }
 
   /**
-   * The step's primary action — hands the asset to the selected custodian. `setAssetCustody`'s own
-   * `ISSUE` action does not create a pilot assignment (verified by reading
-   * `DefaultAssetCustodyService#issue`, which only touches `Custody`/`InventoryState`), so this calls
-   * `assignPilot` immediately after. No-op with nobody selected — the picker's own "Issue to" button
-   * stays disabled for that case.
+   * The step's primary action — hands the asset to the selected custodian, in **one call**:
+   * `ISSUE` is custody *and* the `PILOT` assignment, composed server-side (decision D1 /
+   * docs/plans/active/INVENTORY-REWORK-PLAN.md §6 row 4, that plan's wave W1 — an idempotent
+   * assignment write, with the custody write compensated if it fails).
+   *
+   * It used to issue and then `assignPilot` as two client calls — WAREHOUSE-UX D3 half-shipped in
+   * the wrong layer (INVENTORY-REWORK-CONTEXT.md §3 defect B): the second call could fail on its
+   * own, leaving a custodian holding a vehicle they still could not see. No-op with nobody selected
+   * — the picker's own "Issue to" button stays disabled for that case.
    */
   async issueToCustodian(): Promise<void> {
     const assetId = this.createdAssetId();
@@ -1305,7 +1309,6 @@ export class OnboardingStore {
     try {
       const location = this.handoverLocation().trim();
       await this.api.setAssetCustody(assetId, { action: 'ISSUE', custodianId, ...(location.length > 0 ? { location } : {}) });
-      await this.api.assignPilot(assetId, custodianId);
       await this.fleet.refresh({ quiet: true });
       this.handoverOutcome.set('issued');
     } catch (error) {

@@ -9,7 +9,7 @@ import { KebabMenu } from '../../shared/ui/kebab-menu';
 import { TwoPane } from '../../shared/ui/two-pane/two-pane';
 import { pluralize } from '../../shared/ui/text-logic';
 import { InventoryFacade } from './inventory-facade';
-import { vehicleRowActions, type VehicleRow } from './vehicles-logic';
+import type { VehicleRow } from './vehicles-logic';
 
 /**
  * The Vehicles/Equipment tab's dense table + two-pane detail (docs/plans/active/WAREHOUSE-UX-PLAN.md
@@ -20,7 +20,9 @@ import { vehicleRowActions, type VehicleRow } from './vehicles-logic';
  * this file's own dialog-open flags are deliberately plain `signal()`s, mutually exclusive by
  * construction (only one dialog renders at a time, gated by which target signal is set).
  *
- * **Columns** (§3.3): Name · Category · Serial · Readiness · Custodian · Inventory state chip ·
+ * **Columns** (§3.3, extended by INVENTORY-REWORK-PLAN.md §5.1): Name · Category · Serial ·
+ * Readiness (dot + verdict + **first blocker**, `VehicleRow#readinessCause`) · Custodian (a *name*,
+ * from the wire — never a raw UUID) · **Location** · Inventory state chip ·
  * Firmware · Hours · Last flown · Links(n) — Readiness, Firmware, Hours, Last flown and Links all
  * render only for `connected` (Vehicles); Equipment categories are never flown or evaluated for
  * flight readiness (`GET /api/fleet/readiness` only ever carries a row for a connected-category
@@ -35,14 +37,18 @@ import { vehicleRowActions, type VehicleRow } from './vehicles-logic';
  * `formatFlightTime`) — `'—'` only for a genuinely never-probed/never-flown asset, never a
  * whole-column absence.
  *
- * **Kebab verbs** are gated by {@link vehicleRowActions} (a plain boolean set — see that function's
- * own doc comment for why this wave didn't reuse `warehouse-logic.ts`'s reasoned
- * `ActionAvailability<T>` shape): unavailable verbs are hidden, not shown-disabled, keeping the menu
- * short for the common case (an in-stock vehicle sees only Issue/Ground/Retire/Open/Fly, not six
- * rows half of them dimmed). "Issue to…"/"Ground" need form fields `vision-confirm-dialog` can't
- * hold (a pilot picker, a kind picker + summary) — both use a page-local custom modal, the exact
- * `.backdrop`/`.dialog` shape `features/command/geofence-zone-dialog.ts` set (Angular's emulated
- * view encapsulation means there's no shared `.dialog` class to reuse, only the convention).
+ * **Kebab verbs** are gated by `core/fleet/inventory-logic.ts#vehicleRowActions` through
+ * `InventoryFacade#actionsFor` (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.2, wave W3) — the
+ * matrix, not this template, decides. A verb this session's capabilities would have the server
+ * refuse is **not rendered at all** (a pilot's/viewer's kebab is Open — plus Watch live and Fly when
+ * their own capability allows — where it used to offer Issue/Ground/Retire and a 403 on click,
+ * context §3 defect A); a verb that exists for this session but is momentarily impossible renders
+ * disabled with its reason underneath (the shared `.kebab-item`/`.kebab-reason` primitive in
+ * `styles.css`), e.g. Retire on an issued vehicle. "Issue to…"/"Ground" need form fields
+ * `vision-confirm-dialog` can't hold (a pilot picker, a kind picker + summary) — both use a
+ * page-local custom modal, the exact `.backdrop`/`.dialog` shape
+ * `features/command/geofence-zone-dialog.ts` set (Angular's emulated view encapsulation means
+ * there's no shared `.dialog` class to reuse, only the convention).
  */
 @Component({
   selector: 'vision-vehicles-table',
@@ -59,7 +65,8 @@ export class VehiclesTable {
   protected readonly pluralize = pluralize;
   protected readonly verdictLabel = verdictLabel;
   protected readonly verdictTone = verdictTone;
-  protected readonly rowActions = vehicleRowActions;
+  /** The one authority-aware verb matrix (`core/fleet/inventory-logic.ts#vehicleRowActions`, via the facade's own `actor`) — this template never decides for itself what may be rendered. */
+  protected readonly rowActions = (row: VehicleRow) => this.facade.actionsFor(row);
 
   protected readonly noun = computed(() => (this.connected() ? 'vehicle' : 'item'));
 

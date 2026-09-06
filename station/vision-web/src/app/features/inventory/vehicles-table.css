@@ -46,6 +46,15 @@ td.col-num {
     display: inline-flex;
     align-items: center;
     gap: var(--space-4);
+    min-width: 0;
+}
+
+/* The readiness cause rides beside the verdict as muted text, never a second chip (frontend-style
+   §5's "one chip per row"). Capped so a long feature rollup can't push the columns after it out of
+   view — the full text stays in the cell's own `title`. */
+.readiness-cause {
+    min-width: 0;
+    max-width: 11rem;
 }
 
 .chip.faded {
@@ -187,6 +196,12 @@ tbody tr.row-selectable.archived {
     gap: var(--space-8);
     padding-top: var(--space-16);
     border-top: 1px solid var(--border);
+}
+
+/* A disabled verb explains itself right under its own button (poka-yoke rule 1) — the pane is a
+   single column, so the reason sits between the button and the next action rather than beside it. */
+.detail-actions .disabled-reason {
+    margin-top: calc(-1 * var(--space-4));
 }
 
 /* ---- Issue to… / Ground modals (mirrors `features/command/geofence-zone-dialog.css`'s own

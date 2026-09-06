@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
+import { AuthStore } from '../../core/auth/auth-store';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { DiscoveryInboxStore } from '../../core/discovery/discovery-inbox-store';
 import {
@@ -37,9 +38,11 @@ const CLOCK_TICK_MS = 1_000;
  * the count badge next to the section heading is the "how many need me" signal, mirroring the
  * app's other attention counts (Command's queue, the header bell).
  *
- * **Polling**: activates `DiscoveryInboxStore` on construction, releases on destroy — the store's
- * own activate/release refcount is what makes "no polling when unmounted" true, not a bespoke
- * teardown here (see that store's own class doc).
+ * **Polling**: activates `DiscoveryInboxStore` once this session is known to hold `MANAGE_ORG`
+ * ({@link canSeeInbox}), releases on destroy — the store's own activate/release refcount is what
+ * makes "no polling when unmounted" true, not a bespoke teardown here (see that store's own class
+ * doc). A pilot/viewer never activates it and never renders: the endpoint is `mayManageOrg`-only
+ * and answered them `403` on every tick (docs/plans/active/INVENTORY-REWORK-CONTEXT.md §3 defect F).
  *
  * **Categories/assets are fetched lazily**, once, the first time either dialog is opened — not
  * eagerly alongside the candidates poll, since most page visits open neither dialog at all.
@@ -60,7 +63,18 @@ const CLOCK_TICK_MS = 1_000;
 export class FoundDevices {
   protected readonly store = inject(DiscoveryInboxStore);
   private readonly api = inject(VisionApi);
+  private readonly auth = inject(AuthStore);
   private readonly router = inject(Router);
+
+  /**
+   * `GET /api/discovery/inbox` is `mayManageOrg`-only — `DiscoveryInboxController` answers `403` to
+   * everybody else (docs/plans/active/INVENTORY-REWORK-CONTEXT.md §3 defect F: every pilot and
+   * viewer opening `/assets` used to fire that request and take the error path, on a 30s cadence).
+   * This is a `computed`, not a constructor read, because `GET /api/auth/me` may not have resolved
+   * yet when this component mounts — the poll starts the moment it does, and never at all for a
+   * session that will never be allowed.
+   */
+  protected readonly canSeeInbox = computed(() => this.auth.can('MANAGE_ORG'));
 
   private readonly nowSignal = signal(Date.now());
   protected readonly now = this.nowSignal.asReadonly();
@@ -94,11 +108,21 @@ export class FoundDevices {
   });
 
   constructor() {
-    this.store.activate();
+    // Registered at most once, and only for a session allowed to read the inbox at all — the store's
+    // own refcount pairs one `activate()` with one `release()`, so the teardown mirrors that flag.
+    let activated = false;
+    effect(() => {
+      if (this.canSeeInbox() && !activated) {
+        activated = true;
+        this.store.activate();
+      }
+    });
     const scheduler = inject(PollScheduler);
     const stopClock = scheduler.schedule(CLOCK_TICK_MS, () => this.nowSignal.set(Date.now()));
     inject(DestroyRef).onDestroy(() => {
-      this.store.release();
+      if (activated) {
+        this.store.release();
+      }
       stopClock();
     });
   }

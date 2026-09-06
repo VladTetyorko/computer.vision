@@ -1,9 +1,19 @@
-import type { AssetDetails, Firmware, InventoryState, LifecycleState, ReadinessVerdict, UserSummary } from '../../core/api/models';
+import type {
+  AssetDetails,
+  AssetSummary,
+  Firmware,
+  InventoryState,
+  LifecycleState,
+  ReadinessRow,
+  ReadinessVerdict,
+  UserSummary,
+} from '../../core/api/models';
 import { effectiveRegistration } from '../../core/fleet/asset-attributes';
 import { formatFlightTime } from '../../core/fleet/asset-stats-logic';
 import { triageOrder } from '../../core/fleet/triage-logic';
 import { humanAge } from '../../core/telemetry/telemetry-logic';
-import { effectiveInventoryStateChip, type InventoryStateChip } from '../../core/fleet/inventory-logic';
+import { fleetRowAttention } from '../../core/readiness/readiness-logic';
+import { effectiveInventoryStateChip, shortIdLabel, type InventoryStateChip } from '../../core/fleet/inventory-logic';
 
 /**
  * Pure, Angular-free logic behind the Inventory page's Vehicles/Equipment tabs
@@ -22,19 +32,43 @@ import { effectiveInventoryStateChip, type InventoryStateChip } from '../../core
  * "always '—', no fleet-wide source" gap `station/vision-web/MODULE.md`'s W4 entry documented is
  * closed). Both still degrade honestly to `'—'` when the underlying asset was never probed /
  * never flown — see {@link firmwareLabel} and `formatFlightTime`'s own `null` case.
+ *
+ * **A row is built from `AssetSummary`, never `AssetDetails`** (docs/plans/active/INVENTORY-REWORK-PLAN.md
+ * wave W3, context §3 defect D). `GET /api/assets` alone carries everything ten of the eleven
+ * columns need; the per-asset `GET /api/assets/{id}` that used to run once per row — 20 assets, 25
+ * requests — now runs **once, on selection**, purely to fill the detail pane
+ * ({@link BuildVehicleRowsInput.detailsByAssetId} lets an already-fetched one sharpen the Links
+ * column, but no row ever *waits* on one).
  */
 
 /** One row of the Vehicles/Equipment table. */
 export interface VehicleRow {
-  readonly asset: AssetDetails;
+  /**
+   * The list-level asset record. Deliberately `AssetSummary`, not `AssetDetails` — see this module's
+   * own doc comment; a caller that needs devices/usages reads them from the detail cache instead
+   * (`InventoryFacade#selectedDetails`).
+   */
+  readonly asset: AssetSummary;
   readonly lifecycle: LifecycleState;
   readonly archived: boolean;
-  readonly deviceCount: number;
+  /** `AssetSummary#status === 'STREAMING'` — gates the *Watch live* verb (`core/fleet/inventory-logic.ts#vehicleRowActions`). */
+  readonly streaming: boolean;
+  /** How many devices are linked, already rendered: `deviceCount` from the wire, else an
+   *  already-loaded `AssetDetails#devices.length`, else `'—'` — never a fabricated `0`
+   *  ({@link linksLabel}). */
+  readonly links: string;
   readonly inventoryState?: InventoryState;
   /** The merged lifecycle+inventory-state chip (`core/fleet/inventory-logic.ts#effectiveInventoryStateChip`) — one chip per row max. */
   readonly stateChip: InventoryStateChip;
-  /** Resolved against the org's user list; falls back to the raw id when the custodian isn't found (a deactivated/deleted user). `undefined` when the asset is in stock. */
+  /** `custody.custodianId` — the matrix's own input, unrendered (the cell shows {@link custodianName}). */
+  readonly custodianId?: string;
+  /** Who holds it, as a human reads it: the wire's own `custodianName`, else the org user-list join,
+   *  else a truncated id ({@link custodianLabel}). `undefined` when the asset is in stock. */
   readonly custodianName?: string;
+  /** The full custodian id whenever {@link custodianName} is a truncation of it — the cell's `title`, so the value stays copyable. `undefined` when the name is a real name. */
+  readonly custodianTitle?: string;
+  /** Where it physically is (`custody.location`) — INVENTORY-REWORK-PLAN.md §5.1's new column. */
+  readonly location?: string;
   /** `identity.registration`, falling back to the legacy `attributes.registrationNumber` key
    *  (`core/fleet/asset-attributes.ts#effectiveRegistration` — the same fallback the asset detail
    *  page's own Identity fact group uses, so a pre-D1 asset's registration reads identically in both
@@ -42,6 +76,10 @@ export interface VehicleRow {
   readonly registration?: string;
   /** Joined from `GET /api/fleet/readiness` by `assetId`; `undefined` when the asset has never been evaluated. */
   readonly readinessVerdict?: ReadinessVerdict;
+  /** *Why* the verdict is what it is — the first non-`READY` feature, `+N more` for the rest
+   *  (`core/readiness/readiness-logic.ts#fleetRowAttention`). `undefined` for a GO row and for one
+   *  never evaluated: a verdict with no cause is the honest render of both. */
+  readonly readinessCause?: string;
   /** `{@link firmwareLabel}` of `asset.firmware` — `'—'` when never probed. */
   readonly firmware: string;
   /** `formatFlightTime` of `asset.totalFlightSeconds` — `'—'` when absent (no join to offer), never for a genuine zero (renders `'0m'`). */
@@ -86,41 +124,80 @@ export function vehicleLastFlownLabel(lastUsedAt: string | undefined, nowMs: num
   return `${humanAge(ageSeconds)} ago`;
 }
 
-/**
- * `AssetDetails[]` (+ the org's user list, + a readiness join map) → the table's row model. `users`/
- * `readinessByAssetId` are optional-empty-safe: a custodian id with no matching user, or an asset
- * with no readiness row yet, both degrade to `undefined`/the raw id rather than throwing.
- */
-export function buildVehicleRows(
-  assets: readonly AssetDetails[],
-  users: readonly UserSummary[],
-  readinessByAssetId: ReadonlyMap<string, ReadinessVerdict>,
-  nowMs: number,
-): readonly VehicleRow[] {
-  const nameById = new Map(users.map((user) => [user.userId, user.displayName]));
-  return assets.map((asset) => {
+/** The Links column's own render (docs/plans/active/INVENTORY-REWORK-PLAN.md §6 row 3, context §3
+ *  defect D): the wire's `deviceCount` first; an already-fetched `AssetDetails`' own device list
+ *  second (a station on a pre-W1 backend still gets a real number for the row it has open); `'—'`
+ *  otherwise. Never `0` from an absent field — "no devices linked" is a claim, and this row has no
+ *  evidence for it. */
+export function linksLabel(deviceCount: number | undefined, details: AssetDetails | undefined): string {
+  const count = deviceCount ?? details?.devices.length;
+  return count === undefined ? '—' : String(count);
+}
+
+/** One custodian, named the best way the data allows (docs/plans/active/INVENTORY-REWORK-PLAN.md §6
+ *  row 1, decision D3): the name the wire resolved, else the org user-list join (which returns `[]`
+ *  for a pilot's `ASSIGNED_ASSETS` scope, hence the third rung), else a truncated id paired with a
+ *  `title` carrying the whole thing. Fixes context §3 defect C — a pilot used to read raw 36-character
+ *  UUIDs in the Custodian column. */
+export function custodianLabel(
+  custody: { readonly custodianId?: string; readonly custodianName?: string } | undefined,
+  nameById: ReadonlyMap<string, string>,
+): { readonly name?: string; readonly title?: string } {
+  const id = custody?.custodianId;
+  if (!id) {
+    return {};
+  }
+  const resolved = custody?.custodianName ?? nameById.get(id);
+  return resolved ? { name: resolved } : { name: shortIdLabel(id), title: id };
+}
+
+/** Everything {@link buildVehicleRows} joins, as one record — a settings object rather than a sixth
+ *  positional parameter (CLAUDE.md rule 10's spirit: a new collaborator updates the record, never
+ *  grows an argument list). Every join is optional-empty-safe: a missing user, readiness row, or
+ *  cached detail degrades that one field, never the row. */
+export interface BuildVehicleRowsInput {
+  readonly assets: readonly AssetSummary[];
+  /** `GET /api/users`, or `[]` — deliberately not fetched at all for an `ASSIGNED_ASSETS` scope, where the server answers `[]` anyway (`InventoryFacade#loadAll`). */
+  readonly users: readonly UserSummary[];
+  /** `GET /api/fleet/readiness` rows by `assetId` — the whole row, not just its verdict, so {@link VehicleRow.readinessCause} can name the first blocker. */
+  readonly readinessByAssetId: ReadonlyMap<string, ReadinessRow>;
+  /** Details fetched on selection so far (`InventoryFacade#detailsByAssetId`) — only ever *sharpens* a row (today: the Links column on a pre-W1 backend); no row waits on one. */
+  readonly detailsByAssetId: ReadonlyMap<string, AssetDetails>;
+  readonly nowMs: number;
+}
+
+/** `AssetSummary[]` + the joins in {@link BuildVehicleRowsInput} → the table's row model. */
+export function buildVehicleRows(input: BuildVehicleRowsInput): readonly VehicleRow[] {
+  const nameById = new Map(input.users.map((user) => [user.userId, user.displayName]));
+  return input.assets.map((asset) => {
     const lifecycle = asset.lifecycle ?? 'ACTIVE';
     const archived = lifecycle === 'DELETED';
-    const custodianId = asset.custody?.custodianId;
+    const readiness = input.readinessByAssetId.get(asset.assetId);
+    const custodian = custodianLabel(asset.custody, nameById);
     return {
       asset,
       lifecycle,
       archived,
-      deviceCount: asset.devices.length,
+      streaming: asset.status === 'STREAMING',
+      links: linksLabel(asset.deviceCount, input.detailsByAssetId.get(asset.assetId)),
       inventoryState: asset.inventoryState,
       stateChip: effectiveInventoryStateChip({ lifecycle, archived, inventoryState: asset.inventoryState }),
-      custodianName: custodianId ? (nameById.get(custodianId) ?? custodianId) : undefined,
+      custodianId: asset.custody?.custodianId,
+      custodianName: custodian.name,
+      custodianTitle: custodian.title,
+      location: asset.custody?.location,
       registration: effectiveRegistration(asset),
-      readinessVerdict: readinessByAssetId.get(asset.assetId),
+      readinessVerdict: readiness?.verdict,
+      readinessCause: readiness ? (fleetRowAttention(readiness, 1) ?? undefined) : undefined,
       firmware: firmwareLabel(asset.firmware),
       hours: formatFlightTime(asset.totalFlightSeconds ?? null),
-      lastFlownLabel: vehicleLastFlownLabel(asset.lastUsedAt, nowMs),
+      lastFlownLabel: vehicleLastFlownLabel(asset.lastUsedAt, input.nowMs),
     };
   });
 }
 
 /** The table's default row order — reuses `core/fleet/triage-logic.ts#triageOrder` directly on each
- *  row's own `asset` (an `AssetDetails` structurally satisfies `TriageCandidate`), the same triage
+ *  row's own `asset` (an `AssetSummary` structurally satisfies `TriageCandidate`), the same triage
  *  `/fly`'s picker and Command's rail already give a fleet list — streaming first, last-seen
  *  descending, real vehicles ahead of simulated. */
 export function sortVehicleRowsByTriage(rows: readonly VehicleRow[], nowMs: number): readonly VehicleRow[] {
@@ -179,7 +256,7 @@ export function filterVehicleRowsByInventoryState(
 
 /** Filters to one custodian's own issued/in-field assets. */
 export function filterVehicleRowsByCustodian(rows: readonly VehicleRow[], custodianId: string | undefined): readonly VehicleRow[] {
-  return custodianId ? rows.filter((row) => row.asset.custody?.custodianId === custodianId) : rows;
+  return custodianId ? rows.filter((row) => row.custodianId === custodianId) : rows;
 }
 
 /** `'UNKNOWN'` here means "never evaluated" (no readiness row at all) — distinct from the wire's own
@@ -224,43 +301,10 @@ export interface CustodianOption {
 export function custodianFilterOptions(rows: readonly VehicleRow[]): readonly CustodianOption[] {
   const byId = new Map<string, string>();
   for (const row of rows) {
-    const id = row.asset.custody?.custodianId;
+    const id = row.custodianId;
     if (id && !byId.has(id)) {
       byId.set(id, row.custodianName ?? id);
     }
   }
   return [...byId.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
-}
-
-/** Which of the row kebab's seven verbs apply to one row — poka-yoke availability, not
- *  enable-then-error (mirrors `core/fleet/warehouse-logic.ts`'s own "reasoned action availability"
- *  pattern, simplified to a plain boolean set since none of these seven carry a distinct disabled
- *  *reason* string worth surfacing). An asset whose `inventoryState` hasn't been fetched at all
- *  (`undefined` — shouldn't happen once `AssetDetails` has loaded, but never assumed) hides every
- *  inventory-mutating verb rather than guessing one is safe; Open/Fly never depend on it. */
-export interface VehicleRowActions {
-  readonly issue: boolean;
-  readonly return: boolean;
-  readonly ground: boolean;
-  readonly release: boolean;
-  readonly retire: boolean;
-  readonly fly: boolean;
-}
-
-export function vehicleRowActions(row: Pick<VehicleRow, 'archived' | 'lifecycle' | 'inventoryState'>): VehicleRowActions {
-  const outOfService = row.archived || row.lifecycle === 'DEACTIVATED';
-  const state = row.inventoryState;
-  const known = state !== undefined;
-  const retired = state === 'RETIRED';
-  const maintenance = state === 'MAINTENANCE';
-  const issued = state === 'ISSUED' || state === 'IN_FIELD';
-  const inStock = state === 'IN_STOCK';
-  return {
-    issue: known && !outOfService && inStock,
-    return: known && !outOfService && issued,
-    ground: known && !outOfService && !retired && !maintenance,
-    release: known && !outOfService && maintenance,
-    retire: known && !outOfService && !retired,
-    fly: !outOfService,
-  };
 }

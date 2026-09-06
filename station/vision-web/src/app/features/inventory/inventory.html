@@ -97,7 +97,13 @@
     }
 
     <a pageBarActions class="btn secondary" [href]="facade.exportUrl()" [download]="facade.exportFilename()">Export CSV</a>
-    <button pageBarActions type="button" class="btn" (click)="facade.goToAddSource()">+ Add vehicle</button>
+    <!-- `POST /api/assets` requires MANAGE_ORG (`AssetController#register`), and `/add-source` is
+         already behind `orgGuard` — so this button used to bounce a pilot straight off that guard
+         (docs/plans/active/INVENTORY-REWORK-CONTEXT.md §3 defect A). Not rendered rather than
+         rendered-and-refused. -->
+    @if (facade.canManageOrg()) {
+      <button pageBarActions type="button" class="btn" (click)="facade.goToAddSource()">+ Add vehicle</button>
+    }
     <button
       pageBarActions
       type="button"

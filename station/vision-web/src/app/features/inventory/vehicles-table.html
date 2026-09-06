@@ -36,6 +36,7 @@
                 <th>Readiness</th>
               }
               <th>Custodian</th>
+              <th>Location</th>
               <th>State</th>
               @if (connected()) {
                 <th>Firmware</th>
@@ -68,18 +69,26 @@
                 <td class="muted truncate">{{ row.asset.categoryName }}</td>
                 <td class="mono truncate">{{ row.asset.identity?.serialNumber ?? '—' }}</td>
                 @if (connected()) {
+                  <!-- Readiness = dot + verdict + *why* (INVENTORY-REWORK-PLAN.md §5.1; the analog
+                       survey's "3+-state health with an inline cause" pattern). The cause is the
+                       first non-READY feature from the row this page already fetched — no extra
+                       call, and a bare "Unknown" with no reason was the live-verified complaint. -->
                   <td>
                     @if (row.readinessVerdict; as verdict) {
                       <span class="row-state">
                         <span class="dot" [class.ok]="verdictTone(verdict) === 'ok'" [class.danger]="verdictTone(verdict) === 'danger'"></span>
-                        <span class="muted">{{ verdictLabel(verdict) }}</span>
+                        <span>{{ verdictLabel(verdict) }}</span>
+                        @if (row.readinessCause; as cause) {
+                          <span class="muted truncate readiness-cause" [title]="cause">{{ cause }}</span>
+                        }
                       </span>
                     } @else {
                       <span class="muted">—</span>
                     }
                   </td>
                 }
-                <td class="truncate">{{ row.custodianName ?? '—' }}</td>
+                <td class="truncate" [title]="row.custodianTitle ?? row.custodianName ?? ''">{{ row.custodianName ?? '—' }}</td>
+                <td class="muted truncate" [title]="row.location ?? ''">{{ row.location ?? '—' }}</td>
                 <td>
                   <span
                     class="chip"
@@ -97,32 +106,97 @@
                   <td class="muted">{{ row.firmware }}</td>
                   <td class="col-num mono">{{ row.hours }}</td>
                   <td class="muted">{{ row.lastFlownLabel }}</td>
-                  <td class="col-num mono">{{ row.deviceCount }}</td>
+                  <td class="col-num mono">{{ row.links }}</td>
                 }
+                <!-- Verbs come from the one authority matrix (`InventoryFacade#actionsFor` →
+                     `core/fleet/inventory-logic.ts#vehicleRowActions`, INVENTORY-REWORK-PLAN.md
+                     §5.2): `shown` false = the server would refuse it for this session, so it is
+                     never drawn; `disabled` = this session may use it, just not on this row right
+                     now, so it is drawn dimmed with its reason. -->
                 <td class="row-kebab-cell" (click)="$event.stopPropagation()">
+                  @let verbs = rowActions(row);
                   <vision-kebab-menu [label]="'More actions for ' + row.asset.displayName">
-                    @if (rowActions(row).issue) {
-                      <button type="button" (click)="openIssue(row)">Issue to…</button>
-                    }
-                    @if (rowActions(row).return) {
-                      <button type="button" [disabled]="facade.busyAssetId() === row.asset.assetId" (click)="facade.returnAsset(row.asset.assetId)">
-                        Return
+                    @if (verbs.issue.shown) {
+                      <button type="button" [disabled]="verbs.issue.disabled" [title]="verbs.issue.reason ?? ''" (click)="openIssue(row)">
+                        Issue to…
                       </button>
                     }
-                    @if (rowActions(row).ground) {
-                      <button type="button" (click)="openGround(row)">Ground…</button>
+                    @if (verbs.return.shown) {
+                      <button
+                        type="button"
+                        [disabled]="verbs.return.disabled || facade.busyAssetId() === row.asset.assetId"
+                        [title]="verbs.return.reason ?? ''"
+                        (click)="facade.returnAsset(row.asset.assetId)"
+                      >
+                        Return to stock
+                      </button>
                     }
-                    @if (rowActions(row).release) {
-                      <button type="button" [disabled]="facade.busyAssetId() === row.asset.assetId" (click)="facade.release(row.asset.assetId)">
+                    @if (verbs.ground.shown) {
+                      <button type="button" [disabled]="verbs.ground.disabled" [title]="verbs.ground.reason ?? ''" (click)="openGround(row)">
+                        Ground…
+                      </button>
+                    }
+                    @if (verbs.release.shown) {
+                      <button
+                        type="button"
+                        [disabled]="verbs.release.disabled || facade.busyAssetId() === row.asset.assetId"
+                        [title]="verbs.release.reason ?? ''"
+                        (click)="facade.release(row.asset.assetId)"
+                      >
                         Release
                       </button>
                     }
-                    @if (rowActions(row).retire) {
-                      <button type="button" class="danger-action" (click)="openRetire(row)">Retire…</button>
+                    @if (verbs.restore.shown) {
+                      <button
+                        type="button"
+                        [disabled]="facade.busyAssetId() === row.asset.assetId"
+                        (click)="facade.restoreAssetNow(row.asset.assetId, row.asset.displayName)"
+                      >
+                        Restore
+                      </button>
                     }
                     <button type="button" (click)="facade.openAsset(row.asset.assetId)">Open</button>
-                    @if (rowActions(row).fly) {
-                      <button type="button" (click)="facade.openCockpitFor(row.asset.assetId)">Fly</button>
+                    @if (verbs.watchLive.shown) {
+                      <button type="button" (click)="facade.watchLive(row.asset.assetId)">Watch live</button>
+                    }
+                    @if (verbs.fly.shown) {
+                      <div class="kebab-item">
+                        <button type="button" [disabled]="verbs.fly.disabled" [title]="verbs.fly.reason ?? ''" (click)="facade.openCockpitFor(row.asset.assetId)">
+                          Fly
+                        </button>
+                        @if (verbs.fly.disabled && verbs.fly.reason) {
+                          <span class="kebab-reason">{{ verbs.fly.reason }}</span>
+                        }
+                      </div>
+                    }
+                    @if (verbs.retire.shown || verbs.archive.shown) {
+                      <div class="kebab-divider" role="separator"></div>
+                    }
+                    @if (verbs.retire.shown) {
+                      <div class="kebab-item">
+                        <button
+                          type="button"
+                          class="danger-action"
+                          [disabled]="verbs.retire.disabled"
+                          [title]="verbs.retire.reason ?? ''"
+                          (click)="openRetire(row)"
+                        >
+                          Retire…
+                        </button>
+                        @if (verbs.retire.disabled && verbs.retire.reason) {
+                          <span class="kebab-reason">{{ verbs.retire.reason }}</span>
+                        }
+                      </div>
+                    }
+                    @if (verbs.archive.shown) {
+                      <button
+                        type="button"
+                        class="danger-action"
+                        [disabled]="facade.busyAssetId() === row.asset.assetId"
+                        (click)="facade.archiveNow(row)"
+                      >
+                        Archive
+                      </button>
                     }
                   </vision-kebab-menu>
                 </td>
@@ -177,11 +251,11 @@
       <dl class="detail-fields">
         <div class="detail-field">
           <dt>Custodian</dt>
-          <dd>{{ row.custodianName ?? '—' }}</dd>
+          <dd class="truncate" [title]="row.custodianTitle ?? row.custodianName ?? ''">{{ row.custodianName ?? '—' }}</dd>
         </div>
         <div class="detail-field">
           <dt>Location</dt>
-          <dd>{{ row.asset.custody?.location ?? '—' }}</dd>
+          <dd>{{ row.location ?? '—' }}</dd>
         </div>
         <div class="detail-field">
           <dt>Since</dt>
@@ -206,9 +280,15 @@
                 <span class="muted">{{ record.kind }}</span>
                 <span class="truncate" [title]="record.summary">{{ record.summary }}</span>
                 @if (!record.closedAt) {
-                  <button type="button" class="btn secondary small" (click)="facade.closeMaintenanceRecordNow(row.asset.assetId, record.id)">
-                    Close
-                  </button>
+                  <!-- Closing a record is a MANAGE_FLEET write (`AssetInventoryController`); anyone
+                       else reads the record and sees that it is open, without a button that 403s. -->
+                  @if (facade.actor().canManageFleet) {
+                    <button type="button" class="btn secondary small" (click)="facade.closeMaintenanceRecordNow(row.asset.assetId, record.id)">
+                      Close
+                    </button>
+                  } @else {
+                    <span class="muted">Open</span>
+                  }
                 } @else {
                   <span class="muted">Closed</span>
                 }
@@ -217,6 +297,11 @@
           </ul>
         }
 
+        <!-- Opening a record is a MANAGE_FLEET write today. Wave W2 of
+             docs/plans/active/INVENTORY-REWORK-PLAN.md (decision D4) widens the server gate to a
+             COMMAND_FLIGHT holder in scope; until it lands, offering the form to a pilot would be
+             offering a 403. -->
+        @if (facade.actor().canManageFleet) {
         <form class="new-record-form" (submit)="$event.preventDefault(); openNewRecord(row.asset.assetId)">
           <select name="newRecordKind" [ngModel]="newRecordKind()" (ngModelChange)="newRecordKind.set($event)">
             <option value="NOTE">Note</option>
@@ -233,11 +318,27 @@
           />
           <button type="submit" class="btn secondary small" [disabled]="!newRecordSummary().trim() || facade.submitting()">Open record</button>
         </form>
+        }
       </div>
 
+      @let detailVerbs = rowActions(row);
       <div class="detail-actions">
-        @if (rowActions(row).fly) {
-          <button type="button" class="btn" (click)="facade.openCockpitFor(row.asset.assetId)">Fly</button>
+        @if (detailVerbs.fly.shown) {
+          <button
+            type="button"
+            class="btn"
+            [disabled]="detailVerbs.fly.disabled"
+            [title]="detailVerbs.fly.reason ?? ''"
+            (click)="facade.openCockpitFor(row.asset.assetId)"
+          >
+            Fly
+          </button>
+          @if (detailVerbs.fly.disabled && detailVerbs.fly.reason) {
+            <span class="disabled-reason">{{ detailVerbs.fly.reason }}</span>
+          }
+        }
+        @if (detailVerbs.watchLive.shown) {
+          <button type="button" class="btn secondary" (click)="facade.watchLive(row.asset.assetId)">Watch live</button>
         }
         <a class="btn secondary" [routerLink]="['/assets', row.asset.assetId]">Open full ›</a>
       </div>
