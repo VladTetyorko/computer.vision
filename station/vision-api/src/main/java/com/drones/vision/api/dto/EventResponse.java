@@ -8,9 +8,11 @@ import java.util.Map;
 
 /**
  * Response body element for a domain {@link Event} (docs/plans/done/REALTIME-PLAN.md §4) — the {@code
- * "event"} envelope payload on {@code GET /api/live}. There is no REST endpoint of its own for
- * this shape (see vision-api's own Gotchas for why {@code EventPublisherPort} has no read side to
- * back one) — this DTO exists purely so the live-update feed can carry it.
+ * "event"} envelope payload on {@code GET /api/live}, reused unchanged (docs/plans/active/
+ * ALWAYS-ON-FLOW-PLAN.md wave B3) as the body of {@link
+ * com.drones.vision.api.controller.SystemEventsController#recent}, {@code GET
+ * /api/system/events}'s durable-history counterpart to the live feed — the same wire shape either
+ * way, live or replayed.
  *
  * @param id         the event's own id (a plain string, not a typed id — see {@code Event}'s own
  *                    javadoc for why)

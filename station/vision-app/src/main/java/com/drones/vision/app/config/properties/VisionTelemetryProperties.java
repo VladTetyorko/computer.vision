@@ -31,10 +31,13 @@ public record VisionTelemetryProperties(@DefaultValue AlwaysOn alwaysOn) {
      *                      {@code docker-compose.yml}, which is where the run is described
      * @param sweepInterval how often the desired pin set is reconciled against what is open;
      *                      default {@value #DEFAULT_SWEEP_INTERVAL}. One asset listing per tick,
-     *                      plus an idempotent pin call per in-service asset — both in-memory once
-     *                      the sources are open, so this is cheap. It is a convergence loop, not a
-     *                      latency budget: a newly registered aircraft's link comes up within one
-     *                      sweep, which is well inside the time it takes an operator to walk to it
+     *                      plus one asset lookup per in-service asset — {@code
+     *                      UsageTracker#pinTelemetry} re-reads the asset so a device attached since
+     *                      the last sweep is picked up, so this is database work rather than purely
+     *                      in-memory, and at the default cadence amounts to N/30 lookups per second.
+     *                      It is a convergence loop, not a latency budget: a newly registered
+     *                      aircraft's link comes up within one sweep, which is well inside the time
+     *                      it takes an operator to walk to it
      */
     public record AlwaysOn(@DefaultValue("false") boolean enabled,
                             @DefaultValue(AlwaysOn.DEFAULT_SWEEP_INTERVAL) Duration sweepInterval) {

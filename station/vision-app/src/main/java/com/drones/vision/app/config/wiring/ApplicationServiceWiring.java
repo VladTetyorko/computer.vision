@@ -4,6 +4,7 @@ import com.drones.vision.perception.domain.port.DetectionDemandPort;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
+import com.drones.vision.platform.EventHistoryPort;
 import com.drones.vision.platform.EventLiveUpdatePort;
 import com.drones.vision.platform.EventPublisherPort;
 import com.drones.vision.warehouse.domain.port.AssetLiveStatePort;
@@ -34,12 +35,14 @@ import com.drones.vision.warehouse.domain.port.MaintenanceRepositoryPort;
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
 import com.drones.vision.adapter.persistence.repository.JpaAuditTrail;
 import com.drones.vision.adapter.persistence.repository.JpaDetectionEventRepository;
+import com.drones.vision.adapter.persistence.repository.JpaEventHistory;
 import com.drones.vision.adapter.publishhls.MediamtxLiveFrameGrabber;
 import com.drones.vision.api.live.LiveUpdateRegistry;
 import com.drones.vision.api.support.AssetRowFacts;
 import com.drones.vision.api.support.InventoryExportService;
 import com.drones.vision.app.config.properties.VisionApplicationProperties;
 import com.drones.vision.app.config.properties.VisionCvProperties;
+import com.drones.vision.app.config.properties.VisionEventHistoryProperties;
 import com.drones.vision.app.config.properties.VisionLiveProperties;
 import com.drones.vision.app.config.properties.VisionPersistenceProperties;
 import com.drones.vision.app.config.properties.VisionPublishProperties;
@@ -52,6 +55,7 @@ import com.drones.vision.app.events.DetectionSessionCleanupEventPublisher;
 import com.drones.vision.app.events.LiveUpdateAuditTrail;
 import com.drones.vision.app.events.LiveUpdateDetectionEventRepository;
 import com.drones.vision.app.events.LiveUpdateEventPublisher;
+import com.drones.vision.app.events.PersistingEventPublisher;
 import com.drones.vision.app.stream.LiveFrameFallbackStreamService;
 import com.drones.vision.perception.domain.port.PulledDetectionPort;
 import com.drones.vision.warehouse.application.asset.*;
@@ -125,12 +129,16 @@ import java.util.function.BiConsumer;
  * {@link #usageTracker}/{@link #streamService}; {@link #auditTrailPort}/{@link
  * #eventPublisherPort}/{@link #detectionEventRepositoryPort} each gain one more decorator ({@link
  * LiveUpdateAuditTrail}/{@link LiveUpdateEventPublisher}/{@link LiveUpdateDetectionEventRepository})
- * only when that property is {@code true}.
+ * only when that property is {@code true}. ALWAYS-ON-FLOW-PLAN wave B3 added a third always-Postgres
+ * port, {@link #eventHistoryPort} (backing {@code GET /api/system/events}), and a second, orthogonal
+ * decorator on {@link #eventPublisherPort} — {@link PersistingEventPublisher}, gated on {@link
+ * VisionEventHistoryProperties#enabled()} rather than {@link VisionLiveProperties#enabled()}, since
+ * durable history and live SSE delivery are independent concerns that can each be on or off alone.
  */
 @Configuration
 @EnableConfigurationProperties({VisionCvProperties.class, VisionLiveProperties.class, VisionRcProperties.class,
         VisionApplicationProperties.class, VisionPublishProperties.class, VisionSimulationProperties.class,
-        VisionCrewProperties.class})
+        VisionCrewProperties.class, VisionEventHistoryProperties.class})
 public class ApplicationServiceWiring {
 
     /**
@@ -139,22 +147,47 @@ public class ApplicationServiceWiring {
      * CvWiring}) resolved to a {@code GrpcDetectionPort}, the bean is instead a {@link
      * DetectionSessionCleanupEventPublisher} wrapping it — the wiring-layer seam that forwards a
      * {@code STREAM_STOPPED} event's stream id into {@code GrpcDetectionPort#streamEnded}. When
-     * {@link VisionLiveProperties#enabled()} is {@code true}, the result is further wrapped in
-     * {@link LiveUpdateEventPublisher}.
+     * {@link VisionEventHistoryProperties#enabled()} is {@code true} (ALWAYS-ON-FLOW-PLAN wave B3),
+     * the result is wrapped in {@link PersistingEventPublisher}, giving the notification bell/
+     * {@code GET /api/system/events} a durable copy to replay from. When {@link
+     * VisionLiveProperties#enabled()} is {@code true}, the result is further wrapped in {@link
+     * LiveUpdateEventPublisher} — durability wraps first so a caller reading history back never
+     * races the live-update announcement of the same event.
      */
     @Bean
     public EventPublisherPort eventPublisherPort(DetectionPort detectionPort, VisionCvProperties cvProperties,
                                                   EventLiveUpdatePort eventLiveUpdatePort,
                                                   FleetLiveUpdatePort fleetLiveUpdatePort,
-                                                  VisionLiveProperties liveProperties) {
+                                                  VisionLiveProperties liveProperties,
+                                                  EventHistoryPort eventHistoryPort,
+                                                  VisionEventHistoryProperties eventHistoryProperties) {
         EventPublisherPort delegate = new LoggingEventPublisher();
         if (cvProperties.enabled() && detectionPort instanceof GrpcDetectionPort grpcDetectionPort) {
             delegate = new DetectionSessionCleanupEventPublisher(delegate, grpcDetectionPort);
+        }
+        if (eventHistoryProperties.enabled()) {
+            delegate = new PersistingEventPublisher(delegate, eventHistoryPort);
         }
         if (liveProperties.enabled()) {
             delegate = new LiveUpdateEventPublisher(delegate, eventLiveUpdatePort, fleetLiveUpdatePort);
         }
         return delegate;
+    }
+
+    /**
+     * The durable home for platform {@link com.drones.vision.platform.Event}s (ALWAYS-ON-FLOW-PLAN
+     * wave B3) — Postgres-backed via {@link JpaEventHistory}, unconditional like every other
+     * repository-shaped port in this app (Postgres is the only store; see {@link
+     * PersistenceWiringConfiguration}'s own javadoc). Wired regardless of {@link
+     * VisionEventHistoryProperties#enabled()} so {@code GET /api/system/events} always resolves —
+     * whether it ever receives a write is decided at {@link #eventPublisherPort} instead, the same
+     * "flag gates the port/runner, controller always resolves" convention this class's own javadoc
+     * documents.
+     */
+    @Bean
+    public EventHistoryPort eventHistoryPort(EntityManagerFactory entityManagerFactory,
+                                              VisionEventHistoryProperties properties) {
+        return new JpaEventHistory(entityManagerFactory, properties.retention().maxRows());
     }
 
     /**

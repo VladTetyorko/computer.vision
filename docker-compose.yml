@@ -606,6 +606,14 @@ services:
       # discovery lobby holds :14550 at boot), so this adds claims, not sockets.
       # It opens no AssetUsage, so it writes no telemetry rows on its own.
       VISION_TELEMETRY_ALWAYS_ON_ENABLED: "true"
+
+      # --- Durable platform-event history (ALWAYS-ON-FLOW-PLAN.md wave B3) ---
+      # vision.events.history.enabled -- records every platform Event except DETECTION to Postgres,
+      # off the hot path, so the notification bell and /manage/system have a real history behind them
+      # instead of an in-memory log that starts empty on every page load and loses everything on an
+      # SSE reconnect. GET /api/system/events serves it back. See application.yaml's own comment
+      # block for the retention cap (vision.events.history.retention.max-rows, default 20000).
+      VISION_EVENTS_HISTORY_ENABLED: "true"
     ports:
       - "8080:8080" # REST + web console + WebSocket (/ws/manual-control) + the HLS proxy
       # MAVLink telemetry AND commands, both directions, on this ONE UDP port. A

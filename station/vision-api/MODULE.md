@@ -227,6 +227,7 @@ the full mechanism.
 | AfterActionController | GET | `/api/assets/{assetId}/usages/{usageId}/after-action/archive` | The ZIP archive, streamed (never buffered whole) | scope + export authority |
 | SystemStatusController | GET | `/api/system/status` | Subsystem health rollup; never errors | **unscoped** (ledger — deliberately: no secrets exposed) |
 | SystemNetworkController | GET | `/api/system/network` | Host's site-local IPv4 addresses (each now carrying a `kind` — `LAN`/`VIRTUAL`/`UNKNOWN`, sorted kind-first) plus `mavlinkPort` and, when mediamtx publish is configured, `videoPushPort`/`videoPushPathPrefix` (SOURCE-ONBOARDING-2-PLAN.md §3.2 C3) | **unscoped** (ledger) |
+| SystemEventsController | GET | `/api/system/events?sinceMs&limit` | Durable platform-`Event` history, newest-first (ALWAYS-ON-FLOW-PLAN wave B3) — the notification bell/`/manage/system`'s reconnect backfill; empty unless `vision.events.history.enabled` | `@OpenByDesign` (see class javadoc — durably replays exactly what the already-unscoped `event` SSE topic broadcasts) |
 | DemoController | GET | `/api/demo` | Demo-button availability probe | **unscoped** (ledger); gated by `vision.demo.enabled` (default on) |
 | DemoController | POST | `/api/demo/seed` | Seed demo assets/users/streams/zones/marks; fault-tolerant (failures land in `problems`, never an error status) | scope (`DemoScenario` resolves the acting user itself) |
 
@@ -384,6 +385,14 @@ transition (start/stop/error), not only on the triggers that already called it. 
 `vision.live.stream-state-push.enabled` (default **true**); the observer itself is edge-triggered and
 fires synchronously, isolated from a throwing implementation by `DefaultStreamService` — see
 `vision-app`'s MODULE.md for the wiring.
+
+**`event` now has a durable counterpart (ALWAYS-ON-FLOW-PLAN wave B3).** The `event` topic itself is
+unchanged — still live-only, still lost on disconnect — but `GET /api/system/events` (own row in the
+endpoint table above, `SystemEventsController`) now durably replays the same `platform.Event`s this
+topic fans out, for a caller that missed them across a page load or a reconnect. Same
+open-to-any-connected-caller posture as the topic it backfills (`@OpenByDesign`, not scope-filtered —
+see that controller's own class javadoc for the full reasoning), empty unless `vision-app`'s
+`vision.events.history.enabled` is on.
 
 **Scoped delivery**: `MapVisibility` gates the `map` topic by `MapAccessPolicy.canView`; `LiveAssetAccess`
 gates per-asset `telemetry`/`detections`/`geo` by `StreamAccess.visibleAsset`. Both filter at
@@ -642,7 +651,13 @@ on anything else), never a body field, so there is exactly one place a client ca
   currently running, so a *currently-running* stream out of scope is the only 404 case.
 - **`EventController` cannot cheaply carry generic `Event`s** (e.g. `PIPELINE_ERROR`) — `EventPublisherPort`
   is fire-and-forget with no read side at all, and `Event`'s shape shares nothing with `DetectionEvent`'s.
-  A future "pipeline errors in the events feed" ask needs a new `EventRepositoryPort`-shaped read side.
+  **ALWAYS-ON-FLOW-PLAN wave B3** built exactly the `EventHistoryPort`-shaped read side this gotcha
+  predicted would be needed, behind a new, separate controller (`SystemEventsController`, `GET
+  /api/system/events`) rather than a third `EventController` endpoint — see that controller's own
+  Live-updates-adjacent section below and `core/vision-platform`/`storage/persistence`/`vision-app`'s
+  MODULE.mds for the port/adapter/decorator. `DETECTION` is still never durably recorded there either
+  (excluded at the publisher, not the controller) — this gotcha's underlying observation about
+  `EventController` itself remains true, only the "nothing else can carry `Event`s" half is now stale.
 - **Usage-scoped reads are split across two controllers on purpose**: `AssetController` still owns the
   original, unwindowed `.../telemetry` (unscoped, see ledger above) — now reading
   `TelemetryRepositoryPort#findLatestByUsage` rather than `#findByUsage`

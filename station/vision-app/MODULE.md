@@ -28,9 +28,10 @@ com.drones.vision.app
     SecurityConfig      the 2 mutually-exclusive SecurityFilterChain beans
   security/             BcryptPasswordHasher, VisionUserDetails, DevPrincipalResolver,
                          SecurityContextPrincipalResolver, Security/NoopSessionAuthenticator
-  events/                DetectionSessionCleanupEventPublisher, LiveUpdateEventPublisher,
-                         LiveUpdateAuditTrail, LiveUpdateDetectionEventRepository,
-                         LiveUpdateDiscoveryInboxService (decorator chains)
+  events/                DetectionSessionCleanupEventPublisher, PersistingEventPublisher,
+                         LiveUpdateEventPublisher, LiveUpdateAuditTrail,
+                         LiveUpdateDetectionEventRepository, LiveUpdateDiscoveryInboxService
+                         (decorator chains)
   onboarding/            PassportCaptureObserver (UsagePhaseObserver impl)
   geo/                   TrackProjectionRunner, VisualGeoRunner (poller ApplicationRunners)
   usage/                 UsageIdleCloseRunner, TelemetryPinRunner (self-scheduled sweeps, same shape as geo/'s runners)
@@ -70,13 +71,14 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 | `UsageWiringConfiguration` | Usage | `usageIdleCloseService(AssetUsageRepositoryPort, AssetLiveStatePort, UsageSessionService, VisionUsageProperties)` (warehouse's `DefaultUsageIdleCloseService`), `usageIdleCloseRunner` (`initMethod="start"`, `destroyMethod="close"`) — both **unconditional, no enable flag** (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U1, wave W1: a data-correctness fix, not an optional feature). Pure downstream leaf — composes three already-unconditional beans from `PersistenceWiringConfiguration`/`ApplicationServiceWiring`, no new bean-cycle risk. **ALWAYS-ON-FLOW-PLAN wave A1** added a second runner here, `telemetryPinRunner(AssetService, UsageTracker, VisionTelemetryProperties)` (`initMethod="start"`, `destroyMethod="close"`), and a second `@EnableConfigurationProperties` entry (`VisionTelemetryProperties`). Also **unconditional as a bean** — the enable flag lives inside `TelemetryPinRunner#start()`, not on the `@Bean`, following `IdleStreamReaper`'s idiom rather than `@ConditionalOnProperty`: "always-on telemetry is off" then reads as a state of a present object (`pinnedCount()==0`, `lastSweepAt()==null`) rather than an absent one, which is what makes it diagnosable from `GET`-able status rather than only from a bean listing |
 | `OpsWiringConfiguration` | Ops | `opsThresholds(VisionOpsProperties)` → `OpsThresholdsResponse` (vision-api DTO), **unconditional, no enable flag** — display config, not a feature. Same "plain config-backed DTO bean, no service layer" shape `TrackingWiring#cvTrackerRoster` established (ASSET-FLOWS-PLAN §2/BK3). FLY-CONTROL-UX-PLAN §2/BK1 widened the built response with `RcThresholdsResponse(properties.rc().neutralTolerancePercent())`, mirroring the `battery` mapping verbatim — no new bean, no constructor overload |
 | `SeatWiringConfiguration` | Crew | `seatService(AuditTrailPort, VisionCrewProperties)` → `DefaultSeatService` (contexts/vision-flight), **unconditional** — cheap in-heap registry, inert until something calls `take`/`preempt`/`forceRelease`. `seatAccessSettings(VisionCrewProperties)` → `SeatAccessSettings`, the framework-free bridge-properties mirror `com.drones.vision.api.security.SeatAccess` consumes (vision-api may not depend on `@ConfigurationProperties`), same shape `OpsWiringConfiguration#opsThresholds` already establishes |
-| `ApplicationServiceWiring` | Cv, Live, Rc, Application, Publish, Simulation | The largest class — every `vision-application`/context `DefaultXService` bean. See "Application-service beans" below |
+| `ApplicationServiceWiring` | Cv, Live, Rc, Application, Publish, Simulation, EventHistory | The largest class — every `vision-application`/context `DefaultXService` bean. See "Application-service beans" below |
 
 ### Application-service beans (`ApplicationServiceWiring`)
 
 - **Live server-push selectors (6, not 5):** `fleetLiveUpdatePort`/`telemetryLiveUpdatePort`/`detectionLiveUpdatePort`/`mapLiveUpdatePort`/`eventLiveUpdatePort`/`trackCorrectionLiveUpdatePort` — each takes `VisionLiveProperties` + `@Qualifier("liveUpdateRegistry") ObjectProvider<LiveUpdateRegistry>`; returns the registry if `properties.enabled()` (default true) else `new NoopLiveUpdatePublisher()`. `trackCorrectionLiveUpdatePort` backs the `geo:<assetId>` topic (visual-geo), same flag.
 - **`streamStateObserver` (SOURCE-ONBOARDING-2 wave C) is a seventh selector alongside those six, but not a seventh `*LiveUpdatePort`** — `LiveUpdateRegistry` implements no such port for this. Gated on **both** `VisionLiveProperties#enabled()` and the new nested `VisionLiveProperties.StreamStatePush#enabled()` (both default true); with either off it's `StreamStateObserver.NOOP`, otherwise a lambda calling `LiveUpdateRegistry#publishDevicesSnapshot()` on every computed `StreamState` transition — the same `devices` snapshot `fleetLiveUpdatePort`'s sibling `publishFleetChanged` already coalesces into on asset/device/stream lifecycle changes, here additionally fired directly on a stream-state transition. Threaded into `streamService`'s `DefaultStreamServiceSettings` as its (now 7th) `StreamStateObserver` field.
-- `eventPublisherPort` — `LoggingEventPublisher`, wrapped in `DetectionSessionCleanupEventPublisher` if CV enabled and `detectionPort` is a real `GrpcDetectionPort`, further wrapped in `LiveUpdateEventPublisher` if live enabled.
+- `eventPublisherPort` — `LoggingEventPublisher`, wrapped in `DetectionSessionCleanupEventPublisher` if CV enabled and `detectionPort` is a real `GrpcDetectionPort`, then (ALWAYS-ON-FLOW-PLAN wave B3) wrapped in `events.PersistingEventPublisher` if `vision.events.history.enabled`, finally wrapped in `LiveUpdateEventPublisher` if live enabled. Durability wraps before the live announcement — a caller-visible ordering choice only in that `PersistingEventPublisher`'s async durable write and `LiveUpdateEventPublisher`'s SSE fan-out race independently either way, but placing the pure decorator (no I/O on the calling thread) closer to the raw publisher keeps `LiveUpdateEventPublisher` — which SSE-fans-out synchronously — as the outermost, most failure-visible layer.
+- `eventHistoryPort(EntityManagerFactory, VisionEventHistoryProperties)` (wave B3) → `JpaEventHistory`, **unconditional** (adapter-persistence is the only store, same posture as `auditTrailPort`/`detectionEventRepositoryPort` below) — resolved regardless of `vision.events.history.enabled`; only the *decorator* that writes to it is gated, following the "flag gates the write path, the port itself always exists" convention `NoopLiveUpdatePublisher`'s sibling ports do not need here since there is no in-memory fallback for this port at all (see `storage/persistence/MODULE.md`).
 - `auditTrailPort`/`detectionEventRepositoryPort` — `Jpa*` (adapter-persistence), each wrapped in a `LiveUpdate*` decorator when live enabled.
 - `defaultManualControlService` — `DefaultManualControlService`'s **7-arg canonical constructor** (`Clock.systemUTC()`, a private `rcWatchdogScheduler()` single-thread daemon, `rcProperties.watchdogTimeoutMs()`, and `ControlProfileService::activeFor` as a method reference, not the whole service). **CREW-CONTROL wave W2** split the bean `ManualControlWebSocketHandler` actually injects into a second bean, `manualControlService(DefaultManualControlService, SeatService, VisionCrewProperties)`: with `vision.crew.enabled=false` (default) it returns `defaultManualControlService` unchanged; when true it wraps `engage` in a lambda that additionally registers a `SeatService#onPreempted(assetId, FLIGHT, session::release)` listener — the RC-release hook that kills a displaced pilot's sticks within one watchdog period when a manager forces the flight seat away (§3.2 rule 4) — rather than adding a sixth parameter to `defaultManualControlService` itself (java-clean-code §3). The listener registration itself is gated on the same flag so a disabled deployment never accumulates an unused listener in `SeatService`'s per-asset list (§3.8, the default-config guardrail).
 - `flightCommandService(AssetService, FlightCommandPort, AuditTrailPort, ReadinessService)` — `DefaultFlightCommandService`'s 4-arg canonical constructor (ASSET-FLOWS-PLAN S1, wave BK1: `ReadinessService` is the new 4th param, same bean `manualControlService`/`OnboardingWiringConfiguration#readinessService` already consume — no new bean, just a new injection point).
@@ -121,6 +123,7 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 | `VisionOpsProperties` | `vision.ops` | `OpsWiringConfiguration`'s `opsThresholds` bean, behind `GET /api/ops/thresholds` (vision-api). Nested `Battery(int warningPercent, int criticalPercent)`, defaults 25/10, compact-constructor validated (`critical < warning`, both `[0,100]`); absent `battery` block falls back to `Battery.defaults()` since Spring relaxed binding does not apply a nested record's own `@DefaultValue`s when the whole block is missing (`VisionMavlinkProperties`'s `Scan`/`Transmit` precedent). `ApplicationServiceWiring#batteryMonitor` (BK2, this same cycle) independently reads the identical `vision.ops.battery.critical-percent`/`warning-percent` keys via raw `@Value`, by deliberate design (see that bean's own javadoc) rather than by accident — it carries the same 10/25 defaults inline so it behaves correctly whether or not this record/its `application.yaml` block exists yet, and now that both do, an operator override of the yaml block reaches **both** consumers identically since they bind the same property keys, which is the actual "one configured severity source" ASSET-FLOWS-PLAN §2 asks for. The two Java binding mechanisms (this `@ConfigurationProperties` record vs. `batteryMonitor`'s two `@Value`s) staying separate rather than both consuming this one record is a minor follow-up cleanup, not a config-drift risk. FLY-CONTROL-UX-PLAN §2/BK1 added a second nested record, `Rc(int neutralTolerancePercent)`, default **5**, compact-constructor validated `[1,25]`, absent `rc` block falling back to `Rc.defaults()` under the exact same whole-block-absent rule as `Battery` — the web cockpit's neutral-stick arm gate's tolerance, read off `GET /api/ops/thresholds`'s new `rc` field. |
 | `VisionAuthProperties` | `vision.auth` | **AUTH-ROLES-PLAN §3.6, wave B5.** `record VisionAuthProperties(Session session)`, one nested record `Session(Duration idleTimeout, Duration kioskIdleTimeout, boolean cookieSecure)` — defaults `12h`/`365d`/`false`, compact-constructor validated (both durations positive). Consumed by `AuthWiringConfiguration#securitySessionAuthenticator` → `SecuritySessionAuthenticator`'s constructor (idle/kiosk timeouts, replacing two bare `@Value`s) and by `application.yaml`'s `server.servlet.session.cookie.secure` (placeholder interpolation onto `vision.auth.session.cookie-secure`, not Java). **Scope note**: this record covers only the `session.*` block, deliberately narrower than §3.6/D2's full target shape (`enabled`+`session.*`+`password.*` in one record) — `vision.auth.enabled` (`SecurityConfig`'s/`AuthWiringConfiguration`'s own `@ConditionalOnProperty`s) and `password.*` (`AuthController`/`BootstrapController`/`AuthPasswordController`/`PasswordPolicy`'s scattered `@Value`s) are untouched, deferred to a later wave — see the record's own javadoc. |
 | `VisionCrewProperties` | `vision.crew` | **CREW-CONTROL-PLAN.md §3.6, wave W2.** `record VisionCrewProperties(boolean enabled, long seatTtlMs)` — `enabled` defaults `false` (the opt-in guardrail, §3.8: off, `SeatAccess` is a pass-through and every default-config test suite observes no change at all), `seatTtlMs` defaults `15000`, compact-constructor validated positive. Consumed by `SeatWiringConfiguration#seatService`/`#seatAccessSettings` and (for the gate flag only) `ApplicationServiceWiring#manualControlService`'s RC-release-hook registration. |
+| `VisionEventHistoryProperties` | `vision.events.history` | **ALWAYS-ON-FLOW-PLAN.md wave B3.** `record VisionEventHistoryProperties(boolean enabled, Retention retention)`, one nested `Retention(int maxRows)` — `enabled` defaults **`false`** (the opt-in guardrail; on in `docker-compose.yml`), `maxRows` defaults `20000`, compact-constructor validated positive; absent `retention` block falls back to `Retention.defaults()` under the same whole-block-absent rule as `VisionOpsProperties.Battery`/`VisionTelemetryProperties.AlwaysOn`. Consumed by `ApplicationServiceWiring#eventHistoryPort` (the cap, always) and `#eventPublisherPort` (the enable flag, gates the `PersistingEventPublisher` decorator only — the port itself is unconditional, see above). |
 
 `vision.discovery.enabled` and `vision.api.rate-limit.enabled` are read directly via
 `@ConditionalOnProperty` with no dedicated properties record.
@@ -1242,7 +1245,10 @@ flight ends.
 socket layer is shared and already always-on and reference-counted (`DiscoveryInboxRunner` holds the
 `:14550` lobby at boot; `MavlinkGateway#unregister` refuses to close a held socket), so this adds
 *claims*, not sockets — which is why wave A is M-effort rather than a rewrite. One asset listing per
-tick, in-memory once the sources are up.
+tick, plus one asset lookup per in-service asset: `UsageTracker#pinTelemetry` re-reads the asset so a
+device attached since the last sweep is picked up, so a sweep is database work, not purely in-memory
+— N/30 lookups per second at the default cadence, negligible here but worth knowing before shortening
+`sweep-interval`.
 
 `./mvnw -B -pl station/vision-app -am test -DskipWeb` — `TelemetryPinRunnerTest` 6 tests, all green
 (one sweep pins every in-service asset; repeated sweeps re-pin idempotently and never unpin; an asset
@@ -1261,4 +1267,113 @@ form is this repo's convention.
 
 The context-module half (`UsageTracker#pinTelemetry`/`#unpinTelemetry`, the `#applySample` sink split,
 and the `deviceStreamStopped` teardown guard) is in `contexts/vision-perception/MODULE.md`, including
-the **doctrine change** wave A2 makes. Waves B/C/D of the plan are not started.
+the **doctrine change** wave A2 makes. Wave B3 (below) is built; B1/B2 and waves C/D are not started.
+
+---
+
+## ALWAYS-ON-FLOW wave B3 — durable `Event` history + `GET /api/system/events` (2026-09-06)
+
+`docs/plans/active/ALWAYS-ON-FLOW-PLAN.md` wave B3: `platform.Event` (device online/offline, stream
+started/stopped, pipeline errors, geofence/battery/link alerts) had no REST endpoint and no durable
+store — the notification bell and `/manage/system` are a pure `computed` over the current
+`EventSource`'s in-memory log, so they started empty on every page load and lost everything on an SSE
+reconnect. Backend only, per the plan's own domain split (Wave B's B1/B2 and every UI consumer are a
+later/parallel wave — `station/vision-web` untouched by this task).
+
+**The port.** `EventHistoryPort` (`core/vision-platform`, own MODULE.md entry) is modeled directly on
+`AuditTrailPort`'s query surface and no wider: `record`, `findRecent(limit)`, `findSince(sinceInclusive,
+limit)`, both newest-first, both table-wide. Unlike `AuditTrailPort`'s "everything is recorded"
+contract, the port's javadoc explicitly allows an implementation to selectively exclude a high-volume
+`EventType` — see below.
+
+**The adapter.** `storage/persistence`'s `JpaEventHistory` (`V35__event_history.sql`, own MODULE.md
+entries) — always `persist`, table-wide prune-on-write (default 20,000 rows total, not per-stream:
+most persisted `EventType`s carry no `streamId` to group by, so a per-stream cap would leave most rows
+uncapped). **Single constructor**, `(EntityManagerFactory, int retentionLimit)` — deliberately not
+`JpaDetectionRepository`'s 1-arg-default-constant-plus-2-arg-test-seam shape, since
+`VisionEventHistoryProperties.Retention` is now the one source of truth for the default; a second,
+baked-in constant inside the adapter would just be a second place for that number to drift (CLAUDE.md
+rule 1). **Deviation from the literal brief, disclosed**: the brief asked for "a JPA impl and an
+in-memory devsupport impl". `station/vision-app/MODULE.md`'s own documented convention (see
+"devsupport fallbacks" above) is that no repository-shaped port gets an in-memory fallback —
+Postgres is the only store, decided by POSTGRES-ONLY-CONTEXT.md — and `AuditTrailPort`/
+`DetectionEventRepositoryPort` (this wave's own precedents) are wired the same unconditional-`Jpa*`
+way. Building an `InMemoryEventHistory` would have been new, unprecedented scope this codebase
+deliberately doesn't carry anywhere else, so none was built.
+
+**Keeping the durable write off the hot path.** `events.PersistingEventPublisher` decorates
+`EventPublisherPort` (`ApplicationServiceWiring#eventPublisherPort`, own entry above) rather than
+teaching any of the 9 real `EventPublisherPort#publish` call sites a new collaborator (CLAUDE.md rule
+10) — the same shape `LiveUpdateEventPublisher`/`DetectionSessionCleanupEventPublisher` already use.
+Two decisions handle write volume:
+1. **`EventType.DETECTION` is never even offered to `EventHistoryPort`.** It is this codebase's sole
+   hot-path/high-volume event type (raised once per non-empty inference result,
+   `StreamPipeline`); every other type is edge-triggered (a link/battery/geofence transition, a
+   stream lifecycle change) and low-frequency. Detections are already durable elsewhere
+   (`DetectionRepositoryPort`/`DetectionEventRepositoryPort`) and already excluded from the web
+   bell's own `systemEventRows` filtering — persisting them again into `event_history` would 100x
+   this table's write rate for a type nothing reads back through this port.
+2. **Every remaining write runs on its own virtual thread**
+   (`Executors.newVirtualThreadPerTaskExecutor()`, the same idiom `LiveUpdateRegistry`'s
+   `connectionWriteExecutor` already established for "don't block a hot caller on I/O"), wrapped in a
+   try/catch that swallows any `RuntimeException` and logs at `WARNING` via `System.Logger`. The
+   delegate's synchronous `publish` always completes and returns first; a durable-write failure
+   (a DB outage) never reaches the caller — `PersistingEventPublisherTest`'s
+   `aFailingDurableWriteNeverPropagatesToTheCaller` stubs `EventHistoryPort#record` to throw and
+   asserts `publish` still returns normally, using `Mockito.timeout(2000)` rather than a synchronous
+   `verify` since the write genuinely races the assertion on another thread (`PassportCaptureObserverTest`'s
+   established idiom for this exact situation).
+
+**Retention.** `VisionEventHistoryProperties` (`vision.events.history`, own table entry above): `enabled`
+(default `false`, the opt-in guardrail — the port bean always exists, only the recording decorator is
+gated) and `retention.max-rows` (default `20,000`). The cap is deliberately global, not per-`EventType`
+or per-stream — see `JpaEventHistory`'s own javadoc and `storage/persistence/MODULE.md`'s Retention
+section for why a keyed cap would under-serve the majority of rows here.
+
+**The endpoint.** `vision-api`'s `SystemEventsController` — `GET /api/system/events?sinceMs&limit`
+(`sinceMs` an epoch-millis cursor, optional; `limit` default 50) — returns `List<EventResponse>`
+newest-first via `findSince`. **Scoping decision, stated in the controller's own class javadoc**:
+`@OpenByDesign`, not `VisibilityScope`-filtered and not added to `EndpointAuthorizationTest`'s legacy
+`TEMPORARY_UNSCOPED` ledger. Reasoning: this endpoint durably replays exactly what the already-unscoped,
+always-on `event` SSE topic (`EventLiveUpdatePort`, documented in `vision-api`'s own MODULE.md as
+needing no auth beyond the connection itself) already broadcasts to any connected caller; gating the
+replay tighter than the live feed it backfills would 403 a caller for re-requesting what they were
+already shown live — the opposite of what this wave exists to fix. Per-event `VisibilityScope`
+narrowing was considered and rejected: most persisted `EventType`s carry no `streamId`/asset key to
+filter by at all, and stream-scoped types can outlive the stream's own live-registry entry, leaving no
+ownership to resolve against. `IllegalArgumentException` on a non-positive `limit` maps to the
+existing 400 (`ApiExceptionHandler`) — no new exception mapping needed.
+
+**Deviation noted, not fixed (pre-existing, out of scope for this wave)**: `SystemStatusController`/
+`SystemNetworkController` are prose-documented as "deliberately open" but are actually exempted only
+via the legacy `TEMPORARY_UNSCOPED` ledger, not `@OpenByDesign` — `SystemEventsController` uses the
+correct, intentional mechanism instead (matching `DeviceProbeController#probe`'s own precedent) rather
+than replicating that inconsistency.
+
+**Config.** `vision.events.history.{enabled,retention.max-rows}`, documented block in `application.yaml`
+(default `enabled: false`, `retention.max-rows: 20000`) and `VISION_EVENTS_HISTORY_ENABLED: "true"` in
+`docker-compose.yml`, same split as wave A's `VISION_TELEMETRY_ALWAYS_ON_ENABLED`.
+
+**Tests.** New: `EventHistoryPort`'s JPA adapter (`PostgresDockerIntegrationTest$EventHistoryRepositoryTests`,
+6 cases — round-trip incl. null `streamId`, round-trip with a `StreamId`, `findRecent` newest-first
+across every type, `findSince` cursor inclusivity, `findSince` with a null cursor, table-wide retention
+pruning verified against far-future timestamps so it cannot collide with a sibling test's rows in the
+same shared table — the shared-table filtering technique this class's own tests use throughout mirrors
+`AuditTrailRepositoryTests`'s precedent, `storage/persistence`), `PersistingEventPublisherTest` (4
+cases, `station/vision-app`), `VisionEventHistoryPropertiesTest` (6 cases, `station/vision-app`),
+`SystemEventsControllerTest` (6 cases, MockMvc `standaloneSetup`, no `CurrentUser` collaborator needed
+since the endpoint is `@OpenByDesign` — `station/vision-api`).
+
+`./mvnw -B -pl storage/persistence,station/vision-api,station/vision-app -am test -DskipWeb` — **BUILD
+SUCCESS** across the full 26-module reactor (`-am` pulls in every upstream module; all green,
+`vision-platform` 25/25 unaffected by this wave's javadoc-only edit there), Docker ran (not skipped —
+real Testcontainers `postgres:16`, Flyway migrated through `V35`). This wave's own new test methods:
+6 in `storage/persistence` (`EventHistoryRepositoryTests`, part of that module's 283-test total, up
+from 277 immediately before this wave), 6 in `vision-api` (`SystemEventsControllerTest`, part of its
+1052-test total), 10 in `vision-app` (4 `PersistingEventPublisherTest` + 6
+`VisionEventHistoryPropertiesTest`, part of its 350-test total) — 22 new test methods overall. No
+isolated "before" count exists for `vision-api`/`vision-app`'s own totals specific to just this wave
+(this branch already carries other concurrent waves' tests), so those two are reported as their
+current green total rather than a before/after delta. `EndpointAuthorizationTest` itself: 2/2,
+confirming `SystemEventsController#recent`'s `@OpenByDesign` is recognized with no new
+`TEMPORARY_UNSCOPED` ledger entry needed.

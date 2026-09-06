@@ -117,6 +117,36 @@ assets are in service". Details and the A2 doctrine change: the two modules' `MO
 **Doctrine change, flagged as one.** A2 changes a documented rule. It is the right change, but it is
 a decision, not a bug fix, and the plan records it as such.
 
+#### A-follow — the history half of wave A is still viewer-gated, and this is a decision to make
+
+Found while building wave A; **not fixed, deliberately.** Naming it so it is not mistaken for done.
+
+Wave A makes *live state* always-on. It does not make *durable history* always-on, because the
+durable per-usage write still needs an open `AssetUsage`, and a usage still opens only from a video
+stream starting or an explicit `engage`. Concretely, with always-on telemetry enabled:
+
+```mermaid
+flowchart LR
+    S["last stream stops<br/>(operator, or the 10-min idle reaper)"] --> U["AssetUsage CLOSES"]
+    S --> T["telemetry SURVIVES (wave A)"]
+    T --> L["live state: latestTelemetry, SSE push,<br/>geofence evaluation — all keep working"]
+    U --> H["durable telemetry rows: STOP"]
+```
+
+So an aircraft that is genuinely flying while nobody has a browser open now keeps a live link and a
+readable position — but writes no flight record. The owner asked for "state **and history**"; wave A
+delivers the state half of that for telemetry and leaves the history half where it was.
+
+**Why it was not simply fixed.** Opening a usage from an arriving sample is precisely the doctrine
+A2 was careful to preserve (`vision-perception/MODULE.md`: a straggler racing a legitimate close must
+never fabricate a phantom flight). That rule is sound and should not be deleted.
+
+**The distinction that would resolve it.** A straggler is one sample after a close; a sustained
+`ARMED`/`AIRBORNE` phase is not. `FlightPhaseRule` already computes exactly that from telemetry
+alone, so a policy could open a usage when an aircraft is *demonstrably flying*, without ever
+reopening one from a late sample. That is a change to what "a flight" means — a product decision,
+not a bug fix — so it is recorded here for the owner rather than taken unilaterally.
+
 ### Wave B — the state plane: one always-true per-asset read model
 
 *Domain: `vision-api`, `vision-web`.* **Effort: M**
@@ -150,6 +180,47 @@ doing. C is not merely a frontend nicety — it is load shedding.
 | **D1** | A per-asset **`DetectionPolicy { ON_VIEW, ALWAYS }`**, `ON_VIEW` the default. Implemented as a fourth OR-term in `LiveAndPollDetectionDemand`, structurally identical to the `hasCameraPose` term that already ships | The vocabulary is already specified in `CV-SCALE-PLAN` §S2 (`on-view` / `always`); nothing named that exists in code yet. **Blocker:** `CvProfileRepositoryPort` has zero implementations, so if the policy is to live on `CvProfile` it needs W3 first — hanging it on the asset avoids that dependency |
 | **D2** | **Split the CV gate.** One gate serves both paths today (`StreamPipeline:1200`): with no viewer there is no persistence, no `DETECTION` event and no `DetectionEvent` open/close. Separate them — the **durable** path follows the asset's policy, the **live fan-out** follows viewer demand | This is the actual "event-based application" enabler. Unattended alerting is the whole point of an always-on flow, and today it does not happen |
 | **D3** | A **fleet-wide inference budget and scheduler**: fair-share, low-rate, round-robin across `ALWAYS` streams, with the budget as configuration and the per-stream achieved rate visible | See §3. Without this, D1/D2 convert a viewer ceiling into a queueing collapse. `maxInFlightInferences` also needs a property key — today it has none |
+
+#### D2 in detail — the gate is three questions, not two
+
+Read before implementing. `StreamPipeline#detectionGateOpen()` today is one conjunction,
+`config.detectionEnabled() && detectionDemand`, and `onDetectionResult` runs **everything** behind it:
+
+| Behind today's single gate | Kind |
+|---|---|
+| `latestDetections`, extrapolator, `trackBook`, `trackingStats`, `followTracker`, `rateController` | live read model |
+| `liveUpdatePublisherPort.publishDetections` | live fan-out |
+| `eventEngine.accept` (opens/closes `DetectionEvent`) | **durable** |
+| `detectionRepositoryPort.save` | **durable** |
+| `eventPublisher.publish(DETECTION)` | **durable** |
+
+§4's one-line summary — *"the durable path follows the asset's policy, the live fan-out follows
+viewer demand"* — is the right instinct but the wrong arithmetic if read literally: an `ON_VIEW`
+asset with a viewer watching would stop persisting detections, which is a straight regression on
+today's behaviour. The correct decomposition is three questions, not a swap of one term:
+
+```mermaid
+flowchart TB
+    E["detectionEnabled<br/>(operator intent, per stream)"] --> INF
+    V["viewer demand<br/>(LiveAndPollDetectionDemand)"] --> INF
+    P["asset DetectionPolicy == ALWAYS<br/>(D1)"] --> INF
+    INF["INFERENCE runs<br/>enabled AND (viewer OR always)"] --> DUR["DURABLE fan-out<br/>save · DETECTION event · DetectionEvent open/close<br/>— runs whenever inference ran"]
+    INF --> LIVE["LIVE fan-out<br/>read models · SSE publish<br/>— enabled AND viewer only"]
+```
+
+- **Inference** — `enabled && (viewerDemand || policy == ALWAYS)`. A superset of today's gate, so no
+  stream that infers today stops inferring.
+- **Durable** — follows inference. Once a frame has been paid for, discarding the result is the
+  Finding-6 mistake in a new place. This is the term that delivers unattended alerting.
+- **Live** — `enabled && viewerDemand`, i.e. exactly today's gate, unchanged. Nobody watching means
+  no SSE push and no live read model to keep warm.
+
+**The gate-close clearing rule has to split with it.** `handleDetectionGateTransition()` clears every
+detection-derived read model on a true→false edge, on the sound reasoning that a closed gate has no
+"yet". That reasoning belongs to the **live** gate only: an `ALWAYS` stream losing its last viewer
+must clear its live read models while its durable path keeps running. Conversely the **inference**
+gate closing must still clear everything, as today. Two edges, two behaviours — the single
+`gateWasOpen` field cannot express that and must become two.
 
 ---
 
