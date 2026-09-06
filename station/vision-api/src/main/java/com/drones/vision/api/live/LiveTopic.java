@@ -7,14 +7,15 @@ import java.util.Set;
 
 /**
  * A subscribable {@code GET /api/live} topic (docs/plans/done/REALTIME-PLAN.md §4, item 2) — {@code fleet},
- * {@code event}, {@code devices}, {@code detection-events}, and {@code marks} are implicit and
- * always-on (every connection gets all five regardless of the {@code topics} query parameter);
- * {@code telemetry:<assetId>}/{@code detections:<assetId>} are opt-in, named explicitly by the
- * caller.
+ * {@code event}, {@code devices}, {@code detection-events}, {@code map}, {@code discovery},
+ * {@code zones}, and {@code system} are implicit and always-on (every connection gets all eight
+ * regardless of the {@code topics} query parameter); {@code telemetry:<assetId>}/{@code
+ * detections:<assetId>}/{@code geo:<assetId>} are opt-in, named explicitly by the caller.
  *
  * @param kind    which kind of topic
  * @param assetId the asset this topic is scoped to; {@code null} for {@link #FLEET}/{@link
- *                #EVENT}/{@link #DEVICES}/{@link #DETECTION_EVENTS}/{@link #MAP}
+ *                #EVENT}/{@link #DEVICES}/{@link #DETECTION_EVENTS}/{@link #MAP}/{@link
+ *                #DISCOVERY}/{@link #ZONES}/{@link #SYSTEM}
  */
 record LiveTopic(LiveTopicKind kind, AssetId assetId) {
 
@@ -35,6 +36,12 @@ record LiveTopic(LiveTopicKind kind, AssetId assetId) {
 
     /** The always-on discovery-inbox delta topic (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.2 C4 — see {@link LiveTopicKind#DISCOVERY}). */
     static final LiveTopic DISCOVERY = new LiveTopic(LiveTopicKind.DISCOVERY, null);
+
+    /** The always-on geofence-zone delta topic (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D2/§4.1 — see {@link LiveTopicKind#ZONES}). */
+    static final LiveTopic ZONES = new LiveTopic(LiveTopicKind.ZONES, null);
+
+    /** The always-on system-health topic (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D3/§4.2 — see {@link LiveTopicKind#SYSTEM}). */
+    static final LiveTopic SYSTEM = new LiveTopic(LiveTopicKind.SYSTEM, null);
 
     static LiveTopic telemetry(AssetId assetId) {
         return new LiveTopic(LiveTopicKind.TELEMETRY, assetId);
@@ -83,6 +90,8 @@ record LiveTopic(LiveTopicKind kind, AssetId assetId) {
             case DETECTION_EVENTS -> DETECTION_EVENTS;
             case MAP -> MAP;
             case DISCOVERY -> DISCOVERY;
+            case ZONES -> ZONES;
+            case SYSTEM -> SYSTEM;
             case TELEMETRY -> telemetry(requireAssetId(idPart, "telemetry"));
             case DETECTIONS -> detections(requireAssetId(idPart, "detections"));
             case GEO -> geo(requireAssetId(idPart, "geo"));

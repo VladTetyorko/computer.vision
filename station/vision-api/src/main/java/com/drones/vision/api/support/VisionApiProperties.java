@@ -137,9 +137,15 @@ public record VisionApiProperties(Snapshot snapshot, HlsProxy hlsProxy, Live liv
      *                        connection is unregistered as stalled/dead
      * @param bufferEviction  how often per-asset {@code telemetry}/{@code detections} buffers with
      *                        no subscriber left are swept away
+     * @param systemSample    how often {@code com.drones.vision.api.live.SystemStatusSampler} samples
+     *                        every subsystem for the {@code system} live topic (docs/plans/active/
+     *                        LIVE-POLL-RETIREMENT-PLAN.md &sect;3 D3/&sect;4.2, wave L4) — a broadcast
+     *                        only actually happens on a change, so this is an upper bound on
+     *                        detection latency, not a broadcast cadence
      */
     public record Live(Duration coalesce, Duration heartbeat, int telemetryBuffer, int eventBuffer,
-                        int detectionBuffer, int mapBuffer, Duration sendTimeout, Duration bufferEviction) {
+                        int detectionBuffer, int mapBuffer, Duration sendTimeout, Duration bufferEviction,
+                        Duration systemSample) {
 
         public Live {
             requirePositive(coalesce, "coalesce");
@@ -150,11 +156,12 @@ public record VisionApiProperties(Snapshot snapshot, HlsProxy hlsProxy, Live liv
             requirePositive(mapBuffer, "mapBuffer");
             requirePositive(sendTimeout, "sendTimeout");
             requirePositive(bufferEviction, "bufferEviction");
+            requirePositive(systemSample, "systemSample");
         }
 
         public static Live defaults() {
             return new Live(Duration.ofMillis(150), Duration.ofSeconds(15), 50, 300, 300, 300,
-                    Duration.ofSeconds(3), Duration.ofSeconds(60));
+                    Duration.ofSeconds(3), Duration.ofSeconds(60), Duration.ofSeconds(5));
         }
     }
 

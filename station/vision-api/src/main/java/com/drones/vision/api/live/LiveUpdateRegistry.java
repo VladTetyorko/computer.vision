@@ -10,10 +10,13 @@ import com.drones.vision.api.dto.DiscoveryCandidateResponse;
 import com.drones.vision.api.dto.DiscoveryEventPayload;
 import com.drones.vision.api.dto.CorrectionResponse;
 import com.drones.vision.api.dto.EventResponse;
+import com.drones.vision.api.dto.GeofenceZoneEventPayload;
+import com.drones.vision.api.dto.GeofenceZoneResponse;
 import com.drones.vision.api.dto.LiveConnectedResponse;
 import com.drones.vision.api.dto.LiveEnvelopeResponse;
 import com.drones.vision.api.dto.LiveSubscriptionResponse;
 import com.drones.vision.api.dto.MapEventPayload;
+import com.drones.vision.api.dto.SystemStatusResponse;
 import com.drones.vision.api.dto.TelemetrySampleResponse;
 import com.drones.vision.api.dto.UpdateLiveTopicsRequest;
 import com.drones.vision.api.support.VisionApiProperties;
@@ -25,12 +28,14 @@ import com.drones.vision.kernel.UserId;
 import com.drones.vision.perception.domain.model.DetectionEvent;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.platform.Event;
+import com.drones.vision.flight.domain.model.GeofenceZoneEvent;
 import com.drones.vision.map.domain.model.MapEvent;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
 import com.drones.vision.platform.EventLiveUpdatePort;
+import com.drones.vision.flight.domain.port.GeofenceLiveUpdatePort;
 import com.drones.vision.map.domain.port.MapLiveUpdatePort;
 import com.drones.vision.flight.domain.port.TelemetryLiveUpdatePort;
 import com.drones.vision.flight.domain.port.TrackCorrectionLiveUpdatePort;
@@ -76,15 +81,21 @@ import com.drones.vision.api.controller.StreamController;
  * EventLiveUpdatePort} — five ports the former god-port {@code LiveUpdatePublisherPort} split into,
  * docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6b — plus a sixth, {@link
  * TrackCorrectionLiveUpdatePort}, added for visual geolocation's {@code geo:<assetId>} topic,
- * docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4/D11), a per-process ({@code single-instance
+ * docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4/D11, and a seventh, {@link GeofenceLiveUpdatePort},
+ * added for the {@code zones} topic (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md &sect;3 D2/
+ * &sect;4.1, wave L3)), a per-process ({@code single-instance
  * deployment}, per the plan) hub fanning application-layer announcements out to every subscribed
  * {@code SseEmitter}. An adapter is exactly the place that may depend on every context at once —
- * each context's application code still only ever holds the one port it actually calls.
+ * each context's application code still only ever holds the one port it actually calls. {@code
+ * system} (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md &sect;3 D3/&sect;4.2, wave L4) is
+ * different: no context port backs it — {@link #publishSystemStatus} is called only by {@link
+ * SystemStatusSampler}, a fellow {@code vision-api} class, not through a port at all, since a
+ * server-side sampler (not a context's own write) is what decides when this topic changes.
  *
  * <h2>Topics</h2>
  * {@link LiveTopic#FLEET}/{@link LiveTopic#EVENT}/{@link LiveTopic#DEVICES}/{@link
- * LiveTopic#DETECTION_EVENTS}/{@link LiveTopic#MAP}/{@link LiveTopic#DISCOVERY} are implicit and
- * on for every connection;
+ * LiveTopic#DETECTION_EVENTS}/{@link LiveTopic#MAP}/{@link LiveTopic#DISCOVERY}/{@link
+ * LiveTopic#ZONES}/{@link LiveTopic#SYSTEM} are implicit and on for every connection;
  * {@code telemetry:<assetId>}/{@code detections:<assetId>} are opt-in (requested via the {@code
  * topics} query parameter at connect time, or added/removed later via {@link #updateTopics(String,
  * UpdateLiveTopicsRequest)}). {@code devices}/{@code detection-events} extend this channel beyond
@@ -221,7 +232,8 @@ import com.drones.vision.api.controller.StreamController;
 @Component
 @ConditionalOnProperty(prefix = "vision.live", name = "enabled", matchIfMissing = true)
 public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryLiveUpdatePort,
-        DetectionLiveUpdatePort, MapLiveUpdatePort, EventLiveUpdatePort, TrackCorrectionLiveUpdatePort {
+        DetectionLiveUpdatePort, MapLiveUpdatePort, EventLiveUpdatePort, TrackCorrectionLiveUpdatePort,
+        GeofenceLiveUpdatePort {
 
     private static final System.Logger LOG = System.getLogger(LiveUpdateRegistry.class.getName());
 
@@ -308,6 +320,21 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      * existing one.
      */
     private final LiveRingBuffer discoveryBuffer;
+
+    /**
+     * Shares {@link #eventBufferCapacity} rather than a dedicated property, exactly like {@link
+     * #discoveryBuffer} — a geofence-zone delta (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md
+     * &sect;3 D2/&sect;4.1, wave L3) is exactly as infrequent as a generic domain {@code Event}, so a
+     * second buffer-capacity knob would only duplicate the existing one.
+     */
+    private final LiveRingBuffer zonesBuffer;
+
+    /**
+     * Latest-only, capacity 1, like {@link #fleetBuffer}/{@link #devicesBuffer} — a fresh {@code
+     * system} sample (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md &sect;3 D3/&sect;4.2, wave L4)
+     * always supersedes the last one, so no dedicated buffer-capacity property is needed either.
+     */
+    private final LiveRingBuffer systemBuffer = new LiveRingBuffer(1, true);
 
     /**
      * Per-asset buffers for {@code telemetry:<assetId>}/{@code detections:<assetId>} — {@link
@@ -461,6 +488,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
         this.detectionEventsBuffer = new LiveRingBuffer(detectionEventBufferCapacity, false);
         this.mapBuffer = new LiveRingBuffer(mapBufferCapacity, false);
         this.discoveryBuffer = new LiveRingBuffer(eventBufferCapacity, false);
+        this.zonesBuffer = new LiveRingBuffer(eventBufferCapacity, false);
         this.fleetCoalesceWindowNanos = TimeUnit.MILLISECONDS.toNanos(coalesceMillis);
         this.scheduler.scheduleAtFixedRate(this::flushPending, coalesceMillis, coalesceMillis, TimeUnit.MILLISECONDS);
         this.scheduler.scheduleAtFixedRate(this::heartbeatAll, heartbeatMillis, heartbeatMillis, TimeUnit.MILLISECONDS);
@@ -525,6 +553,8 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
         connection.topics().add(LiveTopic.DETECTION_EVENTS);
         connection.topics().add(LiveTopic.MAP);
         connection.topics().add(LiveTopic.DISCOVERY);
+        connection.topics().add(LiveTopic.ZONES);
+        connection.topics().add(LiveTopic.SYSTEM);
         connection.topics().addAll(requestedTopics);
         connections.put(connectionId, connection);
 
@@ -680,7 +710,8 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      */
     boolean anyBufferEverDropped() {
         if (fleetBuffer.everDropped() || eventBuffer.everDropped() || devicesBuffer.everDropped()
-                || detectionEventsBuffer.everDropped() || mapBuffer.everDropped() || discoveryBuffer.everDropped()) {
+                || detectionEventsBuffer.everDropped() || mapBuffer.everDropped() || discoveryBuffer.everDropped()
+                || zonesBuffer.everDropped() || systemBuffer.everDropped()) {
             return true;
         }
         return telemetryBuffers.values().stream().anyMatch(LiveRingBuffer::everDropped)
@@ -836,6 +867,48 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
             LiveEnvelopeResponse devicesEnvelope = freshDevicesEnvelope();
             devicesBuffer.append(devicesEnvelope);
             broadcast(LiveTopic.DEVICES, devicesEnvelope);
+        });
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Appends one envelope to {@link #zonesBuffer} and broadcasts it, unfiltered, to every
+     * subscribed connection — see {@link GeofenceLiveUpdatePort}'s own javadoc for why {@code zones}
+     * needs no per-connection scoping. Called by {@code DefaultGeofenceService#create}/{@code
+     * #update}/{@code #delete} (vision-flight), immediately after that service's own {@code
+     * GeofenceMonitor#refresh()} — a rare, operator-driven write, not a hot path.
+     */
+    @Override
+    public void publishZoneEvent(GeofenceZoneEvent event) {
+        Objects.requireNonNull(event, "event must not be null");
+        scheduler.execute(() -> {
+            LiveEnvelopeResponse envelope = new LiveEnvelopeResponse(sequencer.incrementAndGet(), null,
+                    LiveTopicKind.ZONES.wire(),
+                    new GeofenceZoneEventPayload(event.action().name(), GeofenceZoneResponse.from(event.zone())));
+            zonesBuffer.append(envelope);
+            broadcast(LiveTopic.ZONES, envelope);
+        });
+    }
+
+    /**
+     * Publishes a fresh {@code system} sample (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md
+     * &sect;3 D3/&sect;4.2, wave L4) — appends to {@link #systemBuffer} and broadcasts it, unfiltered,
+     * to every subscribed connection; same body shape as {@link #publishDevicesSnapshot()}. Called
+     * only by {@link SystemStatusSampler}, on its own schedule, after that class has already decided
+     * the sample changed — this method itself applies no change detection and is not backed by a
+     * context port, unlike every other {@code publish*} method here (see this class's own javadoc).
+     *
+     * @param status the freshly-sampled system status, verbatim — the same shape {@code GET
+     *               /api/system/status} returns
+     */
+    public void publishSystemStatus(SystemStatusResponse status) {
+        Objects.requireNonNull(status, "status must not be null");
+        scheduler.execute(() -> {
+            LiveEnvelopeResponse envelope = new LiveEnvelopeResponse(sequencer.incrementAndGet(), null,
+                    LiveTopicKind.SYSTEM.wire(), status);
+            systemBuffer.append(envelope);
+            broadcast(LiveTopic.SYSTEM, envelope);
         });
     }
 
@@ -1034,7 +1107,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
             case FLEET -> buffer.append(freshFleetEnvelope());
             case DEVICES -> buffer.append(freshDevicesEnvelope());
             case DETECTION_EVENTS -> seedDetectionEventsIfEmpty(buffer);
-            default -> { } // EVENT/TELEMETRY/DETECTIONS/MAP/DISCOVERY: honestly-limited, nothing to seed -- see class javadoc's "Snapshot-on-connect" section for why MAP specifically stays in this bucket
+            default -> { } // EVENT/TELEMETRY/DETECTIONS/MAP/DISCOVERY/ZONES: honestly-limited, nothing to seed -- see class javadoc's "Snapshot-on-connect" section for why MAP specifically stays in this bucket. SYSTEM needs no case either, for a different reason: SystemStatusSampler's first tick runs at startup delay 0, so systemBuffer is populated before any connection can arrive.
         }
     }
 
@@ -1047,6 +1120,8 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
             case DETECTION_EVENTS -> detectionEventsBuffer;
             case MAP -> mapBuffer;
             case DISCOVERY -> discoveryBuffer;
+            case ZONES -> zonesBuffer;
+            case SYSTEM -> systemBuffer;
             case TELEMETRY -> telemetryBuffers.computeIfAbsent(topic.assetId(),
                     id -> new LiveRingBuffer(telemetryBufferCapacity, false));
             case DETECTIONS -> detectionBuffers.computeIfAbsent(topic.assetId(), id -> new LiveRingBuffer(1, true));

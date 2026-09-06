@@ -11,6 +11,7 @@ import com.drones.vision.platform.EventPublisherPort;
 import com.drones.vision.warehouse.domain.port.AssetLiveStatePort;
 import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.flight.domain.port.FlightCommandPort;
+import com.drones.vision.flight.domain.port.GeofenceLiveUpdatePort;
 import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
 import com.drones.vision.flight.domain.port.ManualControlPort;
 import com.drones.vision.flight.domain.port.TelemetryLiveUpdatePort;
@@ -118,14 +119,19 @@ import java.util.function.BiConsumer;
  * server-push data plane (docs/plans/done/REALTIME-PLAN.md
  * §4): {@link #fleetLiveUpdatePort}/{@link #telemetryLiveUpdatePort}/{@link
  * #detectionLiveUpdatePort}/{@link #mapLiveUpdatePort}/{@link #eventLiveUpdatePort}/{@link
- * #trackCorrectionLiveUpdatePort} each select between the real {@code LiveUpdateRegistry}
- * (vision-api, which implements all six — five ports the former god-port {@code
- * LiveUpdatePublisherPort} split into, docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6b, plus a
- * sixth added for visual geolocation's {@code geo:<assetId>} topic,
- * docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4/D11/H5) and {@code NoopLiveUpdatePublisher} (same
- * six-interface shape) per {@link VisionLiveProperties#enabled()} (default {@code true}); when
- * enabled, every one of the six bean methods resolves to the same {@code LiveUpdateRegistry}
- * singleton, so a call through any one port still lands on the one shared dispatcher. {@link
+ * #trackCorrectionLiveUpdatePort}/{@link #geofenceLiveUpdatePort} each select between the real
+ * {@code LiveUpdateRegistry} (vision-api, which implements all seven — five ports the former
+ * god-port {@code LiveUpdatePublisherPort} split into, docs/plans/active/DOMAIN-SEPARATION-W1.md
+ * §15, W1.6b, plus a sixth added for visual geolocation's {@code geo:<assetId>} topic,
+ * docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4/D11/H5, plus a seventh, {@code GeofenceLiveUpdatePort},
+ * for the {@code zones} topic (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md &sect;3 D2/&sect;4.1,
+ * wave L3)) and {@code NoopLiveUpdatePublisher} (same seven-interface shape) per {@link
+ * VisionLiveProperties#enabled()} (default {@code true}); when enabled, every one of the seven bean
+ * methods resolves to the same {@code LiveUpdateRegistry} singleton, so a call through any one port
+ * still lands on the one shared dispatcher. {@code SystemStatusSampler} (vision-api, wave L4) needs
+ * no selector of its own here: it is a plain {@code @Component}, self-gated by the same {@code
+ * vision.live.enabled} condition, with no port/no-op companion, since nothing in this module's
+ * wiring holds a reference to it. {@link
  * #telemetryLiveUpdatePort}/{@link #detectionLiveUpdatePort} are threaded unconditionally into
  * {@link #usageTracker}/{@link #streamService}; {@link #auditTrailPort}/{@link
  * #eventPublisherPort}/{@link #detectionEventRepositoryPort} each gain one more decorator ({@link
@@ -267,6 +273,21 @@ public class ApplicationServiceWiring {
      */
     @Bean
     public TrackCorrectionLiveUpdatePort trackCorrectionLiveUpdatePort(VisionLiveProperties properties,
+                                                    @Qualifier("liveUpdateRegistry") ObjectProvider<LiveUpdateRegistry> registry) {
+        if (properties.enabled()) {
+            return registry.getObject();
+        }
+        return new NoopLiveUpdatePublisher();
+    }
+
+    /**
+     * Selects the {@link GeofenceLiveUpdatePort} implementation — see {@link #fleetLiveUpdatePort};
+     * the seventh selector, added for the {@code zones} topic (docs/plans/active/
+     * LIVE-POLL-RETIREMENT-PLAN.md &sect;3 D2/&sect;4.1, wave L3), gated on the same {@link
+     * VisionLiveProperties#enabled()} flag as the other six.
+     */
+    @Bean
+    public GeofenceLiveUpdatePort geofenceLiveUpdatePort(VisionLiveProperties properties,
                                                     @Qualifier("liveUpdateRegistry") ObjectProvider<LiveUpdateRegistry> registry) {
         if (properties.enabled()) {
             return registry.getObject();
@@ -426,12 +447,16 @@ public class ApplicationServiceWiring {
     /**
      * CRUD/list over geofence zones (docs/plans/done/OPS-CORE-PLAN.md §G) behind {@code GeofenceController}
      * (vision-api, component-scanned) — a one-line assembly, mirroring {@link #replayService}'s
-     * shape.
+     * shape. {@code geofenceLiveUpdatePort} threads through so a create/update/delete announces on
+     * the {@code zones} live topic (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md &sect;3 D2/
+     * &sect;4.1, wave L3), the same {@link #geofenceLiveUpdatePort} selector every other live-update
+     * collaborator in this class resolves through.
      */
     @Bean
     public GeofenceService geofenceService(GeofenceRepositoryPort geofenceRepositoryPort,
-                                            GeofenceMonitor geofenceMonitor) {
-        return new DefaultGeofenceService(geofenceRepositoryPort, geofenceMonitor);
+                                            GeofenceMonitor geofenceMonitor,
+                                            GeofenceLiveUpdatePort geofenceLiveUpdatePort) {
+        return new DefaultGeofenceService(geofenceRepositoryPort, geofenceMonitor, geofenceLiveUpdatePort);
     }
 
     /**

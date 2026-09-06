@@ -43,7 +43,8 @@ public record VisionApiProperties(Snapshot snapshot, HlsProxy hlsProxy, Live liv
             live = new Live(Live.DEFAULT_COALESCE_DURATION, Live.DEFAULT_HEARTBEAT_DURATION,
                     Live.DEFAULT_TELEMETRY_BUFFER_INT, Live.DEFAULT_EVENT_BUFFER_INT,
                     Live.DEFAULT_DETECTION_BUFFER_INT, Live.DEFAULT_MAP_BUFFER_INT,
-                    Live.DEFAULT_SEND_TIMEOUT_DURATION, Live.DEFAULT_BUFFER_EVICTION_DURATION);
+                    Live.DEFAULT_SEND_TIMEOUT_DURATION, Live.DEFAULT_BUFFER_EVICTION_DURATION,
+                    Live.DEFAULT_SYSTEM_SAMPLE_DURATION);
         }
         if (paging == null) {
             paging = new Paging(Paging.DEFAULT_DEFAULT_LIMIT_INT, Paging.DEFAULT_MAX_LIMIT_INT);
@@ -98,6 +99,8 @@ public record VisionApiProperties(Snapshot snapshot, HlsProxy hlsProxy, Live liv
      *                        is unregistered as stalled/dead; default 3s
      * @param bufferEviction  how often per-asset {@code telemetry}/{@code detections} buffers with
      *                        no subscriber left are swept away; default 60s
+     * @param systemSample    how often {@code SystemStatusSampler} samples every subsystem for the
+     *                        {@code system} live topic; default 5s
      */
     public record Live(@DefaultValue("150ms") Duration coalesce, @DefaultValue("15s") Duration heartbeat,
                         @DefaultValue(Live.DEFAULT_TELEMETRY_BUFFER) int telemetryBuffer,
@@ -105,7 +108,8 @@ public record VisionApiProperties(Snapshot snapshot, HlsProxy hlsProxy, Live liv
                         @DefaultValue(Live.DEFAULT_DETECTION_BUFFER) int detectionBuffer,
                         @DefaultValue(Live.DEFAULT_MAP_BUFFER) int mapBuffer,
                         @DefaultValue("3s") Duration sendTimeout,
-                        @DefaultValue("60s") Duration bufferEviction) {
+                        @DefaultValue("60s") Duration bufferEviction,
+                        @DefaultValue("5s") Duration systemSample) {
         static final String DEFAULT_TELEMETRY_BUFFER = "50";
         static final String DEFAULT_EVENT_BUFFER = "300";
         static final String DEFAULT_DETECTION_BUFFER = "300";
@@ -114,6 +118,7 @@ public record VisionApiProperties(Snapshot snapshot, HlsProxy hlsProxy, Live liv
         static final Duration DEFAULT_HEARTBEAT_DURATION = Duration.ofSeconds(15);
         static final Duration DEFAULT_SEND_TIMEOUT_DURATION = Duration.ofSeconds(3);
         static final Duration DEFAULT_BUFFER_EVICTION_DURATION = Duration.ofSeconds(60);
+        static final Duration DEFAULT_SYSTEM_SAMPLE_DURATION = Duration.ofSeconds(5);
         static final int DEFAULT_TELEMETRY_BUFFER_INT = 50;
         static final int DEFAULT_EVENT_BUFFER_INT = 300;
         static final int DEFAULT_DETECTION_BUFFER_INT = 300;

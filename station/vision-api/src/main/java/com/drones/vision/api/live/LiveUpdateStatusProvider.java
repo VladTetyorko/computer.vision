@@ -29,6 +29,15 @@ import org.springframework.stereotype.Component;
 @ConditionalOnProperty(prefix = "vision.live", name = "enabled", matchIfMissing = true)
 public class LiveUpdateStatusProvider implements SubsystemStatusPort {
 
+    /**
+     * This subsystem's id, shared with {@link LiveUpdateStatusDisabledProvider} (the {@code
+     * vision.live.enabled=false} companion) and with {@link SystemStatusSampler}, which excludes
+     * exactly this id from its change-detection comparison to avoid the self-feedback hazard of
+     * broadcasting on the very registry it samples through (docs/plans/active/
+     * LIVE-POLL-RETIREMENT-PLAN.md &sect;3 D3/&sect;4.2, wave L4).
+     */
+    static final String SUBSYSTEM_ID = "live-updates";
+
     private final LiveUpdateRegistry registry;
 
     /**
@@ -53,9 +62,9 @@ public class LiveUpdateStatusProvider implements SubsystemStatusPort {
         String connectionsPhrase = connections + (connections == 1 ? " live connection open" : " live connections open");
         if (registry.anyBufferEverDropped()) {
             String detail = connectionsPhrase + "; a slow consumer has missed at least one update";
-            return new SubsystemStatus("live-updates", "Live updates (SSE)", Health.DEGRADED, detail, null,
+            return new SubsystemStatus(SUBSYSTEM_ID, "Live updates (SSE)", Health.DEGRADED, detail, null,
                     "A client reconnect (or page refresh) resubscribes to a fresh buffer");
         }
-        return new SubsystemStatus("live-updates", "Live updates (SSE)", Health.OK, connectionsPhrase, null, null);
+        return new SubsystemStatus(SUBSYSTEM_ID, "Live updates (SSE)", Health.OK, connectionsPhrase, null, null);
     }
 }

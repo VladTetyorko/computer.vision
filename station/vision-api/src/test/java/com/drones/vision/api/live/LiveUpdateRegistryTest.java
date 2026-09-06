@@ -1,9 +1,14 @@
 package com.drones.vision.api.live;
 
 import com.drones.vision.api.dto.AssetSummaryResponse;
+import com.drones.vision.api.dto.GeofenceZoneEventPayload;
 import com.drones.vision.api.dto.LiveEnvelopeResponse;
 import com.drones.vision.api.dto.MapEventPayload;
 import com.drones.vision.api.support.VisionApiProperties;
+import com.drones.vision.flight.domain.model.GeofenceZone;
+import com.drones.vision.flight.domain.model.GeofenceZoneEvent;
+import com.drones.vision.flight.domain.model.ZoneId;
+import com.drones.vision.flight.domain.model.ZoneKind;
 import com.drones.vision.perception.application.stream.ActiveStream;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
@@ -157,6 +162,12 @@ class LiveUpdateRegistryTest {
         return new Drawing(DrawingId.random(), layerId, DrawKind.LINE,
                 List.of(new GeoPosition(50.0, 30.0, null), new GeoPosition(50.5, 30.5, null)),
                 null, null, new Ownership(UserId.random(), GroupId.random()), Instant.now());
+    }
+
+    private static GeofenceZone zone(String name) {
+        List<GeoPosition> square = List.of(new GeoPosition(10, 10, null), new GeoPosition(10, 20, null),
+                new GeoPosition(20, 20, null), new GeoPosition(20, 10, null));
+        return new GeofenceZone(ZoneId.random(), name, ZoneKind.KEEP_OUT, square, null, true);
     }
 
     private static MapLayer layer(LayerId layerId) {
@@ -482,6 +493,67 @@ class LiveUpdateRegistryTest {
         assertEquals(List.of(), registry.replayFor(LiveTopic.MAP, null));
     }
 
+    /**
+     * L3 (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md &sect;3 D2/&sect;4.1) — create/update/delete
+     * each append one {@code zones} envelope, buffered immediately without waiting for a flush,
+     * exactly like {@link #publishDetectionEventAppendsImmediatelyWithoutWaitingForAFlush}.
+     */
+    @Test
+    void publishZoneEventAppendsAZonesEnvelopeForEachAction() {
+        LiveUpdateRegistry registry = registry();
+        GeofenceZone created = zone("no-fly");
+
+        registry.publishZoneEvent(new GeofenceZoneEvent(GeofenceZoneEvent.Action.CREATED, created));
+
+        List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.ZONES).snapshot();
+        assertEquals(1, buffered.size());
+        assertEquals("zones", buffered.get(0).type());
+        assertNull(buffered.get(0).assetId(), "zones envelopes carry no assetId -- unfiltered, unscoped delivery");
+        GeofenceZoneEventPayload payload = (GeofenceZoneEventPayload) buffered.get(0).payload();
+        assertEquals("CREATED", payload.action());
+        assertEquals(created.id().value().toString(), payload.zone().id());
+        assertEquals("no-fly", payload.zone().name());
+    }
+
+    /**
+     * The wire-level counterpart to {@code DefaultGeofenceServiceTest#deleteRemovesAnExistingZone...}:
+     * a {@code DELETED} envelope's {@code zone} is the zone's last-known state in full, not merely its
+     * id, so a client's own 10s Undo can re-{@code POST} the exact body it just removed.
+     */
+    @Test
+    void deletedZoneEventCarriesTheLastKnownZoneInFullOnTheWire() {
+        LiveUpdateRegistry registry = registry();
+        GeofenceZone lastKnown = zone("to-delete");
+
+        registry.publishZoneEvent(new GeofenceZoneEvent(GeofenceZoneEvent.Action.DELETED, lastKnown));
+
+        GeofenceZoneEventPayload payload =
+                (GeofenceZoneEventPayload) registry.bufferFor(LiveTopic.ZONES).snapshot().get(0).payload();
+        assertEquals("DELETED", payload.action());
+        assertEquals(lastKnown.id().value().toString(), payload.zone().id());
+        assertEquals(lastKnown.name(), payload.zone().name());
+        assertEquals(lastKnown.kind().name(), payload.zone().kind());
+        assertTrue(payload.zone().enabled());
+    }
+
+    /** Proves L3's zones topic actually reaches a subscribed connection, not just the buffer -- the SSE-delivery counterpart to the buffer-only tests above. */
+    @Test
+    void publishZoneEventReachesASubscribedConnection() {
+        LiveUpdateRegistry registry = registry();
+        RecordingSseEmitter emitter = new RecordingSseEmitter();
+        registry.register(emitter, Set.of(LiveTopic.ZONES), UserId.random(), layerId -> true, id -> true);
+        GeofenceZone updated = zone("updated-zone");
+
+        registry.publishZoneEvent(new GeofenceZoneEvent(GeofenceZoneEvent.Action.UPDATED, updated));
+
+        assertTrue(awaitTrue(Duration.ofSeconds(2), () -> emitter.received().size() == 1),
+                "the subscribed connection must receive the zones envelope");
+        String json = emitter.received().get(0);
+        assertTrue(json.contains("\"zones\""), "the envelope's type must be zones");
+        assertTrue(json.contains("UPDATED"));
+        assertTrue(json.contains(updated.id().value().toString()));
+    }
+
     @Test
     void telemetryIsCoalescedIntoOneEnvelopePerAssetOnFlush() {
         AssetId assetId = AssetId.random();
@@ -531,7 +603,7 @@ class LiveUpdateRegistryTest {
         VisionApiProperties.Live defaults = VisionApiProperties.Live.defaults();
         VisionApiProperties.Live smallTelemetryBuffer = new VisionApiProperties.Live(defaults.coalesce(),
                 defaults.heartbeat(), 2, defaults.eventBuffer(), defaults.detectionBuffer(), defaults.mapBuffer(),
-                defaults.sendTimeout(), defaults.bufferEviction());
+                defaults.sendTimeout(), defaults.bufferEviction(), defaults.systemSample());
         LiveUpdateRegistry registry = new LiveUpdateRegistry(provider(assetService), provider(deviceService),
                 provider(streamService), streamPublisherPort, provider(detectionEventRepositoryPort),
                 smallTelemetryBuffer, new ImmediateScheduledExecutorService());
