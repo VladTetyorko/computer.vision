@@ -76,6 +76,7 @@ import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -252,6 +253,84 @@ class LiveUpdateRegistryTest {
         assertEquals(1, payload.size());
         assertEquals(freshAssetId.value().toString(), payload.get(0).assetId(),
                 "the trailing recompute must reflect the newest write, never the one the leading dispatch captured");
+    }
+
+    /**
+     * The fleet-topic scope leak fix: {@link LiveUpdateRegistry#freshFleetEnvelope()} builds its
+     * snapshot from the unscoped {@code AssetService#assets()} overload, so per-connection
+     * filtering has to happen at delivery time ({@link LiveConnection#project}), reusing whatever
+     * {@code assetVisibility} predicate {@code LiveController} handed this connection at connect
+     * time — exactly the same predicate {@code LiveAssetAccess#deliveryPredicate} builds for
+     * telemetry/detections/geo, just supplied directly here rather than through the real
+     * {@code StreamAccess}/{@code ScopeResolver} chain (that chain is exercised end-to-end by
+     * {@code LiveFleetScopingTest}, {@code com.drones.vision.api.live}).
+     */
+    @Test
+    void broadcastNarrowsTheFleetEnvelopesAssetListPerConnectionWhileAnUnboundedViewerKeepsEverything() {
+        AssetId visibleAssetId = AssetId.random();
+        AssetId hiddenAssetId = AssetId.random();
+        when(assetService.assets()).thenReturn(List.of(summary(visibleAssetId), summary(hiddenAssetId)));
+        LiveUpdateRegistry registry = registry();
+        RecordingSseEmitter scoped = new RecordingSseEmitter();
+        RecordingSseEmitter unbounded = new RecordingSseEmitter();
+        registry.register(scoped, Set.of(LiveTopic.FLEET), UserId.random(), layerId -> true, visibleAssetId::equals);
+        registry.register(unbounded, Set.of(LiveTopic.FLEET), UserId.random(), layerId -> true, id -> true);
+
+        registry.publishFleetChanged();
+
+        assertTrue(awaitTrue(Duration.ofSeconds(2), () -> scoped.received().size() == 1 && unbounded.received().size() == 1),
+                "both connections must eventually receive their own fleet envelope");
+        assertEquals(List.of(visibleAssetId.value().toString()), fleetAssetIds(scoped.received().get(0)),
+                "a GROUPS-scoped viewer must only receive assets its own predicate allows");
+        assertEquals(2, fleetAssetIds(unbounded.received().get(0)).size(),
+                "an UNBOUNDED (admin) viewer must still receive every asset -- no regression");
+    }
+
+    @Test
+    void aFleetBroadcastToAConnectionWithNothingVisibleStillDeliversAnEmptyListEnvelopeNotADroppedOne() {
+        when(assetService.assets()).thenReturn(List.of(summary(AssetId.random())));
+        LiveUpdateRegistry registry = registry();
+        RecordingSseEmitter emitter = new RecordingSseEmitter();
+        registry.register(emitter, Set.of(LiveTopic.FLEET), UserId.random(), layerId -> true, id -> false);
+
+        registry.publishFleetChanged();
+
+        assertTrue(awaitTrue(Duration.ofSeconds(2), () -> emitter.received().size() == 1),
+                "an envelope must still be sent -- an empty list is the correct answer, not silence");
+        assertEquals(List.of(), fleetAssetIds(emitter.received().get(0)));
+    }
+
+    /**
+     * SCALE-100-PLAN.md §5 S2's serialize-once optimization, guarded: {@link
+     * LiveUpdateRegistry#broadcast} must still hand the exact same, already-serialized JSON {@code
+     * String} instance to every connection on a topic {@link LiveConnection#project} never narrows
+     * — true for every topic except a genuinely scoped {@code map}/{@code fleet} delivery. {@code
+     * second}'s predicates are maximally restrictive (would drop everything on {@code map}/{@code
+     * fleet}) precisely to prove they are never even consulted for the {@code event} topic.
+     */
+    @Test
+    void nonFleetTopicsReuseTheIdenticalSerializedStringAcrossConnectionsGuardingSerializeOnce() {
+        LiveUpdateRegistry registry = registry();
+        RecordingSseEmitter first = new RecordingSseEmitter();
+        RecordingSseEmitter second = new RecordingSseEmitter();
+        registry.register(first, Set.of(LiveTopic.EVENT), UserId.random(), layerId -> true, id -> true);
+        registry.register(second, Set.of(LiveTopic.EVENT), UserId.random(), layerId -> false, id -> false);
+
+        registry.publishEvent(Event.of(StreamId.random(), EventType.STREAM_STARTED, "started"));
+
+        assertTrue(awaitTrue(Duration.ofSeconds(2), () -> first.received().size() == 1 && second.received().size() == 1));
+        assertSame(first.received().get(0), second.received().get(0),
+                "LiveConnection#project must return the identical envelope instance for a non-fleet/non-map "
+                        + "topic, so broadcast reuses its one shared, already-serialized String instead of "
+                        + "re-serializing per connection");
+    }
+
+    private static List<String> fleetAssetIds(String json) {
+        List<String> ids = new ArrayList<>();
+        for (tools.jackson.databind.JsonNode assetNode : new JsonMapper().readTree(json).get("payload")) {
+            ids.add(assetNode.get("assetId").asString());
+        }
+        return ids;
     }
 
     @Test

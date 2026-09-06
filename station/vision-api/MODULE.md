@@ -403,6 +403,31 @@ TTL — 5s for assets, 10s for map — with no `PATCH` needed to trigger it). Bo
 behind a `Predicate` field is invisible to `EndpointAuthorizationTest`'s static call-graph guard,
 which only recognizes a direct call to `CurrentUser.scope()`/`.viewer()` or a class named `*Access`.
 
+**`fleet` is filtered per connection too (fix/fleet-topic-scope), same mechanism as `map`.**
+`LiveUpdateRegistry#freshFleetEnvelope` builds its snapshot from the unscoped `AssetService#assets()`
+overload and `fleetBuffer` stays deliberately unfiltered (so a `Last-Event-ID` resume can re-filter
+against whatever the resuming viewer may see *now*, exactly like `map`) — narrowing happens only at
+delivery time, in `LiveConnection#project`, which replaced the old `mayReceive(envelope): boolean`.
+`project` returns a `LiveEnvelopeResponse` (nullable), not a `boolean`: a `map` event still resolves
+to either the same envelope or `null` (outright dropped for a connection that may not see its
+`layerId`), but a `fleet` envelope (identified by `type.equals(LiveTopicKind.FLEET.wire())` — never
+`instanceof List`, since the envelope's `payload` is an erased `Object`) is never dropped; its asset
+list is narrowed to `assetVisibility.test(assetId)`, and a viewer whose scope includes nothing still
+gets an envelope carrying an empty list, not silence. `project` returns the identical envelope
+instance when nothing needed filtering — load-bearing for `broadcast`'s serialize-once optimization
+(SCALE-100-PLAN §5 S2): `broadcast` still serializes an envelope exactly once and reuses that one
+`String` for every connection whose `project` returned that same instance back, paying a second,
+per-connection re-serialize only for a connection that actually got a narrower `map`/`fleet` view.
+The same projection now also runs on `connect()`'s snapshot/resume burst and `updateTopics()`'s
+newly-added-topic burst — both used to serialize an unfiltered envelope straight from the buffer,
+which was the actual leak (a fresh connection's seeded `fleet` snapshot, and any later resume, both
+carried every asset regardless of the caller's scope). Covered end-to-end by
+`LiveFleetScopingTest` (connect-time snapshot, broadcast delta, `Last-Event-ID` resume — proving the
+buffer stays unfiltered and is re-filtered per resuming viewer, UNBOUNDED-admin no-regression,
+empty-scope-viewer-gets-empty-list) and by three pure-unit cases in `LiveUpdateRegistryTest`
+(broadcast narrowing + UNBOUNDED no-regression, empty-list-not-dropped, and a same-instance
+assertion on a non-fleet/non-map topic guarding the serialize-once path).
+
 ### Rate limiting (`ratelimit/`)
 
 `RateLimitFilter` (`OncePerRequestFilter`, not a controller) is a **blast-radius bound**, not
@@ -1163,3 +1188,64 @@ under that default — the four pre-existing controller/WS-handler test files ne
 disabled/pass-through `SeatAccess` threaded into their existing construction call sites to keep
 compiling, never a behavioral change. Nothing deferred to a later wave from this module's own scope;
 W3 (crew UI, vision-web) is a separate, concurrently-running agent's file scope, not this one's.
+
+**fix/fleet-topic-scope: closed the `fleet`-topic visibility-scope leak.** `freshFleetEnvelope`'s
+unscoped `AssetService#assets()` snapshot used to reach every connection unfiltered — `mayReceive`
+only ever checked `map` events and per-asset envelopes, so a `fleet` envelope (neither) always
+passed. Replaced `LiveConnection#mayReceive(envelope): boolean` with `project(envelope):
+LiveEnvelopeResponse` (nullable) reusing the connection's existing `assetVisibility` predicate (the
+same one `LiveAssetAccess#deliveryPredicate` builds from `StreamAccess#visibleAsset`, which
+`AssetService#assets(scope, includeDeleted)` — i.e. `GET /api/assets` — already applies): `map`
+unchanged (envelope-or-null by `layerId`), per-asset unchanged (envelope-or-null by `assetId`),
+`fleet` now narrows its `List<AssetSummaryResponse>` to visible entries and **never** returns `null`
+(an empty list is correct for a viewer with nothing visible), everything else passes through as the
+identical instance (load-bearing for `broadcast`'s serialize-once reuse). Fixed all three call sites
+that used to hand a connection an unfiltered envelope: `broadcast` (rewritten to project first, reuse
+the one shared serialized `String` only when `project` returned the same instance back), `connect()`'s
+snapshot/resume burst, and `updateTopics()`'s newly-added-topic burst — the last two are what actually
+leaked in production, since a fresh connection's seeded `fleet` snapshot and any `Last-Event-ID`
+resume both replayed straight from the buffer with no per-viewer narrowing at all. `fleetBuffer`
+itself stays unfiltered by design, matching `map`'s buffer, so resume re-filters against the
+resuming viewer's *current* scope rather than the scope of whoever happened to seed the buffer.
+Fixed every now-false "only `map` is filtered" javadoc claim found by grep (`LiveUpdateRegistry`
+class doc, `broadcast`, the old `mayReceive`, `LiveTopicKind.FLEET`/`MAP`, `LiveTopic.MAP`,
+`LiveAssetAccess`, `LiveEnvelopeResponse`'s `@param payload`) — four more locations than the four
+named going in, since the claim had spread past them.
+
+No new collaborator, query, DTO field, or exception mapping — this is a pure delivery-filtering fix
+using a predicate the connection already carried; `ApiExceptionHandler`'s table is unchanged. No new
+endpoint or wire-shape change either: `fleet`'s envelope shape (`List<AssetSummaryResponse>`) is
+exactly what it always was, only which elements a given connection receives changed — nothing for a
+UI wave to react to beyond "you may now legitimately see fewer/zero assets in a `fleet` envelope,
+which was always the intended scope."
+
+Six required proofs, three end-to-end (`LiveFleetScopingTest`, MockMvc over the real
+`LiveController`/`LiveUpdateRegistry`/`LiveAssetAccess`/`StreamAccess` chain, mirroring
+`LiveAssetScopingTest`'s established pattern) plus three pure-unit (`LiveUpdateRegistryTest`,
+package-private `register()`/`publishFleetChanged()` seam): (1) a GROUPS-scoped viewer's fleet
+broadcast only carries its own visible assets — `aFleetBroadcastDeltaIsAlsoNarrowedToAGroupsScopedViewersScope`
++ the pure-unit `broadcastNarrowsTheFleetEnvelopesAssetListPerConnectionWhileAnUnboundedViewerKeepsEverything`;
+(2) the connect-time seeded snapshot — the actual leak path — is already narrowed —
+`connectsSeededFleetSnapshotIsAlreadyNarrowedToAGroupsScopedViewersScope`; (3) a `Last-Event-ID`
+resume re-filters the buffer per resuming viewer, proving the buffer itself was never filtered —
+`aLastEventIdResumeReplaysTheUnfilteredBufferReFilteredPerViewer` (one admin connect seeds the shared
+buffer with both assets; a GROUPS-scoped resume sees only its own, an UNBOUNDED resume still sees
+both); (4) UNBOUNDED (admin) sees every asset, no regression — covered in both the end-to-end and
+pure-unit tests above; (5) a viewer whose scope includes nothing gets an envelope with an empty list,
+never a dropped one — `aViewerWithNothingVisibleReceivesAnEmptyFleetListNotADroppedEnvelope` +
+`aFleetBroadcastToAConnectionWithNothingVisibleStillDeliversAnEmptyListEnvelopeNotADroppedOne`; (6)
+non-fleet topics are byte-identical to before, guarding serialize-once —
+`nonFleetTopicsReuseTheIdenticalSerializedStringAcrossConnectionsGuardingSerializeOnce` asserts
+`assertSame` on the delivered `String` across two connections with divergent predicates.
+
+`./mvnw -B -pl station/vision-api -am test -DskipWeb` — `station/vision-api` **1060** (before this
+task's 8 new tests: **1052**), 0 failures/errors/skipped; full reactor summary (`kernel` through
+`vision-simulation` plus `vision-api` itself) all `SUCCESS`, `BUILD SUCCESS`, exit 0. No feature flag
+gates this change (it is a straight correctness fix, not opt-in behavior), so there is no
+default-config-off suite to separately hold green — every pre-existing test in this module's scope is
+unmodified and still passing under whatever config it always ran under. Docker not needed/not run —
+this module's tests are pure-unit/MockMvc, no Testcontainers dependency in the touched files.
+Nothing deferred; the fix, its three call sites, its javadoc corrections, and its six required proofs
+are complete in this task's scope (`station/vision-api` only — `vision-web`'s
+`drone-picker-facade.ts` was read for context, per instruction, but not modified, and self-corrects
+once the server stops over-sending).

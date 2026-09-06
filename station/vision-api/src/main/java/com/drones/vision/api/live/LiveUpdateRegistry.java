@@ -98,17 +98,29 @@ import com.drones.vision.api.controller.StreamController;
  * twelve topic kinds, exactly like {@code detection-events} carries OPEN/CLOSED in one topic (see
  * {@link LiveTopicKind#MAP}).
  *
- * <h2>Scoped delivery — {@code map} only</h2>
- * Every topic above {@code map} broadcasts one envelope to every subscribed connection. {@code map}
- * does not: an event is delivered only to connections whose viewer may see its layer
- * (docs/plans/done/MAP-REWORK-PLAN.md §4.3, the security-critical half of the rework). The decision is
- * <strong>not</strong> made here — this class never resolves an identity. {@code LiveController}
- * captures the connecting request's viewer and hands {@link #connect} a predicate over an event's
- * {@code layerId} ({@link MapVisibility#deliveryPredicate}); the predicate rides on the {@link
- * LiveConnection} and is consulted by {@link LiveConnection#mayReceive} on every broadcast
- * <em>and</em> on every snapshot/resume replay. Because the filter keys off the buffered {@code
- * MapEventPayload}'s own {@code layerId}, a {@code Last-Event-ID} resume re-filters against what the
- * viewer may see <em>now</em>, with no parallel per-envelope bookkeeping to keep in step.
+ * <h2>Scoped delivery — {@code map} and {@code fleet}</h2>
+ * Every other topic broadcasts one envelope, unchanged, to every subscribed connection. {@code map}
+ * and {@code fleet} do not: a {@code map} event is delivered only to connections whose viewer may
+ * see its layer (docs/plans/done/MAP-REWORK-PLAN.md §4.3, the security-critical half of the
+ * rework), and a {@code fleet} envelope's asset list is narrowed, per connection, to the assets that
+ * connection's viewer may currently see — the same predicate {@code GET /api/assets} itself applies
+ * ({@code AssetService#assets(VisibilityScope, boolean)}), reused rather than duplicated. Neither
+ * decision is made here — this class never resolves an identity. {@code LiveController} captures the
+ * connecting request's viewer and hands {@link #connect} a predicate over a {@code map} event's
+ * {@code layerId} ({@link MapVisibility#deliveryPredicate}) and a predicate over an {@link AssetId}
+ * ({@code LiveAssetAccess#deliveryPredicate}); both ride on the {@link LiveConnection} and are
+ * consulted by {@link LiveConnection#project} on every broadcast <em>and</em> on every
+ * snapshot/resume replay. Because each filter keys off the buffered envelope's own {@code
+ * layerId}/asset list, a {@code Last-Event-ID} resume re-filters against what the viewer may see
+ * <em>now</em>, with no parallel per-envelope bookkeeping to keep in step — {@link #fleetBuffer}
+ * itself is never filtered at construction, for exactly this reason (see {@link
+ * #freshFleetEnvelope()}).
+ *
+ * <p>{@link #broadcast} still serializes an envelope exactly once and hands that one {@code String}
+ * to every connection whose {@link LiveConnection#project} returned the identical instance back —
+ * true for every connection on every topic except a genuinely narrowed {@code map}/{@code fleet}
+ * delivery, which is the only case that pays a second, per-connection re-serialize. See {@link
+ * #broadcast}'s own javadoc.
  *
  * <h2>Snapshot-on-connect</h2>
  * Every topic is backed by a {@link LiveRingBuffer} (see that class for the FIFO-vs-latest-only
@@ -524,11 +536,13 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
             connection.sendConnected(new LiveConnectedResponse(connectionId, wireTopics(connection.topics())));
             for (LiveTopic topic : connection.topics()) {
                 for (LiveEnvelopeResponse envelope : replayFor(topic, lastEventId)) {
-                    if (connection.mayReceive(envelope)) {
-                        String json = serialize(envelope);
-                        if (json != null) {
-                            connection.send(envelope.seq(), json);
-                        }
+                    LiveEnvelopeResponse projected = connection.project(envelope);
+                    if (projected == null) {
+                        continue;
+                    }
+                    String json = serialize(projected);
+                    if (json != null) {
+                        connection.send(projected.seq(), json);
                     }
                 }
             }
@@ -592,11 +606,13 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
                 LiveTopic topic = LiveTopic.parse(raw);
                 if (connection.topics().add(topic)) {
                     for (LiveEnvelopeResponse envelope : bufferFor(topic).snapshot()) {
-                        if (connection.mayReceive(envelope)) {
-                            String json = serialize(envelope);
-                            if (json != null) {
-                                connection.send(envelope.seq(), json);
-                            }
+                        LiveEnvelopeResponse projected = connection.project(envelope);
+                        if (projected == null) {
+                            continue;
+                        }
+                        String json = serialize(projected);
+                        if (json != null) {
+                            connection.send(projected.seq(), json);
                         }
                     }
                 }
@@ -893,25 +909,42 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
     }
 
     /**
-     * Sends {@code envelope} to every connection subscribed to {@code topic} <em>and</em> permitted
-     * to receive it — the second condition only ever excludes anything on the {@code map} topic (see
-     * {@link LiveConnection#mayReceive}); every other topic's payload passes unconditionally.
+     * Sends {@code envelope} to every connection subscribed to {@code topic}, each first run through
+     * {@link LiveConnection#project} — the only two topics that projection can actually change are
+     * {@code map} (may drop the envelope outright, if the viewer may not see its layer) and {@code
+     * fleet} (may narrow its asset list down to what the viewer may currently see — never dropped
+     * outright, since an empty list is the correct answer for a viewer with nothing visible); every
+     * other topic's payload passes through unchanged.
      *
-     * <p>Serializes {@code envelope} exactly once and dispatches one write per matching connection
-     * onto {@link #connectionWriteExecutor} — see the class javadoc's "Connection writes" section.
-     * This method itself never blocks on a connection's write, so a stalled client cannot delay
-     * delivery to any other connection subscribed to the same topic, nor the next scheduled tick.
+     * <p><b>Serialize-once, preserved</b> (docs/plans/done/SCALE-100-PLAN.md §5 S2 item 1): {@code
+     * envelope} is still serialized exactly once, up front, into {@code shared}. A connection whose
+     * projection returned the identical envelope instance — every connection on every topic except a
+     * genuinely narrowed {@code map}/{@code fleet} delivery, including an unbounded/admin viewer on
+     * {@code fleet} — reuses {@code shared} as-is; only a connection whose projection actually
+     * narrowed the envelope pays a second, per-connection {@link #serialize} call. Dispatches one
+     * write per matching connection onto {@link #connectionWriteExecutor} — see the class javadoc's
+     * "Connection writes" section. This method itself never blocks on a connection's write, so a
+     * stalled client cannot delay delivery to any other connection subscribed to the same topic, nor
+     * the next scheduled tick.
      */
     private void broadcast(LiveTopic topic, LiveEnvelopeResponse envelope) {
-        String json = serialize(envelope);
-        if (json == null) {
+        String shared = serialize(envelope);
+        if (shared == null) {
             return; // already logged in serialize() -- nothing valid to send to anyone
         }
         for (LiveConnection connection : connections.values()) {
-            if (!connection.topics().contains(topic) || !connection.mayReceive(envelope)) {
+            if (!connection.topics().contains(topic)) {
                 continue;
             }
-            dispatchWrite(connection, connection.enqueueSend(envelope.seq(), json, connectionWriteExecutor));
+            LiveEnvelopeResponse projected = connection.project(envelope);
+            if (projected == null) {
+                continue;
+            }
+            String json = (projected == envelope) ? shared : serialize(projected);
+            if (json == null) {
+                continue;
+            }
+            dispatchWrite(connection, connection.enqueueSend(projected.seq(), json, connectionWriteExecutor));
         }
     }
 

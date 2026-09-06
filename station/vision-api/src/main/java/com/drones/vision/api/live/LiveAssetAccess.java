@@ -58,7 +58,7 @@ import java.util.stream.Collectors;
  *       list, not a 403 that would fail an otherwise-legitimate mixed request).</li>
  *   <li><b>At delivery time</b> — {@link #deliveryPredicate(UserId)} is what {@link LiveController}
  *       hands to {@link LiveUpdateRegistry#connect}, stored on the {@link LiveConnection} and
- *       consulted by {@link LiveConnection#mayReceive} on every broadcast <em>and</em> every
+ *       consulted by {@link LiveConnection#project} on every broadcast <em>and</em> every
  *       snapshot/resume replay — exactly how {@link MapVisibility}'s predicate is threaded through
  *       for the {@code map} topic. This is what makes authorization hold for the life of the
  *       connection, not only at the moment a topic was added: a scope can change mid-connection (an

@@ -19,7 +19,14 @@ import java.util.stream.Collectors;
  * not the underscore a lower-cased enum name would produce.
  */
 enum LiveTopicKind {
-    /** Asset-centric fleet snapshot (docs/plans/done/REALTIME-PLAN.md §4) — {@code List<AssetSummaryResponse>}. */
+    /**
+     * Asset-centric fleet snapshot (docs/plans/done/REALTIME-PLAN.md §4) — {@code
+     * List<AssetSummaryResponse>}. Always-on, like {@link #EVENT}/{@link #DEVICES}/{@link
+     * #DETECTION_EVENTS}/{@link #MAP}/{@link #DISCOVERY} — but its payload is filtered per
+     * connection, down to the assets that connection's viewer may currently see, the same policy
+     * {@code GET /api/assets} itself applies (a viewer with nothing visible still receives an empty
+     * list, never a dropped envelope) — see {@link LiveConnection#project}.
+     */
     FLEET("fleet"),
     /** Generic domain {@code Event}s (device online/offline, stream started/stopped, pipeline errors, ...). */
     EVENT("event"),
@@ -48,10 +55,12 @@ enum LiveTopicKind {
      * fields inside {@code MapEventPayload} rather than as twelve topic kinds, mirroring how {@link
      * #DETECTION_EVENTS} carries OPEN/CLOSED in one topic instead of two.
      *
-     * <p><strong>Unlike every other topic here, this one is not broadcast to everyone.</strong>
+     * <p><strong>Unlike most topics here, this one is not broadcast to everyone unchanged.</strong>
      * Delivery is filtered per connection against the viewer captured at connect, by the event's
-     * {@code layerId} — see {@link LiveConnection#mayReceive} and {@link MapVisibility}. Visibility
+     * {@code layerId} — see {@link LiveConnection#project} and {@link MapVisibility}. Visibility
      * is a property of the data, resolved server-side; a client never filters the map itself.
+     * {@link #FLEET} gets the same per-connection treatment for its own reason — see that constant's
+     * own javadoc and {@link LiveConnection#project}.
      */
     MAP("map"),
     /**

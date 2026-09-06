@@ -30,7 +30,7 @@ record LiveTopic(LiveTopicKind kind, AssetId assetId) {
     /** The always-on debounced-detection-event topic (extends the R-c channel — see {@link LiveTopicKind#DETECTION_EVENTS}). */
     static final LiveTopic DETECTION_EVENTS = new LiveTopic(LiveTopicKind.DETECTION_EVENTS, null);
 
-    /** The always-on common-operational-picture topic (docs/plans/done/MAP-REWORK-PLAN.md §4.3 — see {@link LiveTopicKind#MAP}); the only topic whose delivery is filtered per connection. */
+    /** The always-on common-operational-picture topic (docs/plans/done/MAP-REWORK-PLAN.md §4.3 — see {@link LiveTopicKind#MAP}); one of two topics (with {@link #FLEET}) whose delivery is filtered per connection. */
     static final LiveTopic MAP = new LiveTopic(LiveTopicKind.MAP, null);
 
     /** The always-on discovery-inbox delta topic (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.2 C4 — see {@link LiveTopicKind#DISCOVERY}). */
