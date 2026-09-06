@@ -46,7 +46,7 @@ flowchart LR
 
 | Concern | Choice | Reason |
 |---|---|---|
-| Protocol handling, orchestration, APIs | Java (Spring Boot) | Strong typing, concurrency (virtual threads), ecosystem for RTSP/WebRTC/MQTT |
+| Protocol handling, orchestration, APIs | Java (Spring Boot) | Strong typing, mature concurrency, ecosystem for RTSP/WebRTC/MQTT |
 | CV inference & training | Python | Ultralytics/PyTorch/OpenCV ecosystem is unmatched; models are trained where they're served |
 | Boundary | gRPC (protobuf) | Binary-efficient for frames, streaming-native, contract-first (single `.proto` = single source of truth, DRY) |
 
@@ -133,8 +133,11 @@ vision/                                  (parent pom, dependency management)
 │
 └── station/                             How an operator reaches it — the delivery shell
     ├── vision-api/                      Driving adapters: REST + SSE (control plane, live detection
-    │   │                                feed, device management)
-    │   └── openapi.yaml                 Contract-first REST spec
+    │                                    feed, device management) + the /ws/manual-control WebSocket.
+    │                                    NOTE: there is no openapi.yaml and the project is not
+    │                                    contract-first. The REST surface is defined by the
+    │                                    @RestController classes; each module's MODULE.md is the
+    │                                    written contract.
     ├── vision-app/                      Spring Boot assembly: wiring, config, profiles.
     │                                    The ONLY module that knows about all adapters.
     └── vision-web/                      Angular SPA, built into the app jar (META-INF/resources)
@@ -183,7 +186,7 @@ defaulted off. Detection boxes are rendered client-side by the web console again
 Key policies (application layer, protocol-agnostic — KISS):
 - **Frame sampling:** inference runs at e.g. 5–10 FPS while video passes through at full FPS; detections are interpolated onto intermediate frames by the tracker.
 - **Backpressure:** if CV is slow, drop inference candidates (latest-wins), never block the video path.
-- **Isolation:** one stream's failure never affects another (supervised pipeline per stream, virtual threads).
+- **Isolation:** one stream's failure never affects another — `SupervisedPublisher<T>` wraps each source and retries with backoff, so a failing source never propagates a terminal signal downstream. This is the whole isolation mechanism; it is not thread-based. **Serving threads are platform threads, not virtual ones**: `spring.threads.virtual.enabled` is deliberately left unset (see `station/vision-app/src/main/resources/application.yaml`, which reverses SCALE-100-PLAN §4 decision 2 and explains why). On Java 21 a virtual thread blocking inside `synchronized` pins its carrier — JEP 491 fixes that only in Java 24 — and at least two blocking-I/O-under-`synchronized` sites reachable from a request thread are known and unaudited (`ManualControlWebSocketHandler`'s send lock, `MediamtxStreamPublisher`). Virtual threads *are* used, but only via explicit `Thread.ofVirtual()` for one-off fire-and-forget background work (stream/telemetry teardown, discovery scans, tile fetches) — never for request serving.
 
 ---
 
@@ -236,46 +239,83 @@ Adding a new protocol = new module implementing this port + a Spring auto-config
 
 ## 6. Identity & Access Model (Multi-Tenancy)
 
-Three roles, assigned **per group** — the same person can hold different roles in different groups; effective access is the union of all assignments.
+> **Reconciled 2026-09-06** (E2E-FLOW-AUDIT proposal N2). This section previously described a
+> three-role, JWT-bearing design that was never built. What shipped — `AUTH-ROLES-PLAN.md`, merged
+> 2026-09-05 — is described below; the original design is kept only where it still holds.
 
-| Role | Scope |
+Access is decided by **two independent questions**, deliberately not collapsed into one ladder:
+
+| Question | Type | Answers |
+|---|---|---|
+| **What may I do?** (authority) | `Set<Capability>` | `OPERATE_PAYLOAD`, `COMMAND_FLIGHT`, `MANAGE_FLEET`, `MANAGE_ORG` |
+| **What may I see?** (visibility) | `VisibilityScope` | own assets / a group subtree / unbounded |
+
+Both live together in `Authority(VisibilityScope scope, Set<Capability> capabilities)`
+(`core/vision-platform`), which is the value every application service takes as a parameter.
+
+**Roles are a preset over capabilities, not the authorization primitive.** Four ship, assigned per
+group; the same person may hold different roles in different groups and effective access is the
+union:
+
+| Role | Intent |
 |---|---|
-| `USER` | Only devices they own within that group |
-| `MANAGER` | All devices of all users in that group |
-| `SUPERUSER` | Everything in that group **and its descendant groups** — i.e. their managers' groups and those managers' users |
+| `VIEWER` | May never command anything, anywhere — an always-on display, not a person with a stick. Holds **no** capability |
+| `PILOT` | Flies/operates assigned assets |
+| `MANAGER` | Manages a group's assets and pilots |
+| `ADMIN` | Full administrative privilege |
+
+`Role`'s ordinal orders **authority**, never visibility — a `VIEWER` may legitimately see a whole
+group while being permitted to do nothing to it. Do not read the ordinal as scope; that conflation
+is the exact bug the capability split exists to prevent (see `Role`'s own javadoc, and the
+`ops-ux` "authority ≠ visibility" work).
 
 ### Model
 
 ```mermaid
 flowchart TD
-    SU[Superuser<br/>role at parent group] --> G0[(Group: HQ)]
+    A[ADMIN at HQ<br/>MANAGE_ORG] --> G0[(Group: HQ)]
     G0 --> G1[(Group: Team A)]
     G0 --> G2[(Group: Team B)]
-    M1[Manager role at Team A] --> G1
-    M2[Manager role at Team B] --> G2
-    U1[User role at Team A<br/>owns Drone-1, Cam-3] --> G1
-    U2[User role at Team B<br/>owns ESP32-7] --> G2
+    M1[MANAGER at Team A<br/>MANAGE_FLEET] --> G1
+    P1[PILOT at Team A<br/>COMMAND_FLIGHT + OPERATE_PAYLOAD<br/>owns Drone-1, Cam-3] --> G1
+    V1[VIEWER at Team B<br/>no capability, group-wide sight] --> G2
 ```
 
 - `UserAccount(userId, displayName, credentialsRef)`
-- `Group(groupId, name, parentGroupId)` — groups form a tree; `SUPERUSER` scope is the subtree closure (materialized-path or closure-table for cheap subtree queries).
+- `Group(groupId, name, parentGroupId)` — groups form a tree; a subtree scope is the closure.
 - `RoleAssignment(userId, groupId, role)` — many per user.
-- `Ownership(ownerUserId, groupId)` — added to `Device`; every device belongs to exactly one user within one group. Streams, detections, recordings, and events **inherit the scope of their device** — access to derived data is always decided by access to the device.
+- `Ownership(ownerUserId, groupId)` — on `Asset` (**not** `Device`, as this section once said: users
+  interact with assets, and devices inherit their asset's ownership). Streams, detections,
+  recordings and events inherit the scope of their asset.
 
 ### Enforcement (hexagonal placement)
 
-- **Authentication — edge only.** `vision-api` (Spring Security, JWT; OIDC-ready) authenticates requests and builds a `Principal(userId, roleAssignments)`. No security framework below the API adapter.
-- **Authorization — application layer, framework-free.** A pure `AccessPolicy` domain service answers `canView(principal, device)` / `canManage(principal, device)` / `visibleGroups(principal)`. Every use case takes the acting `Principal` as a parameter; repositories expose scope-aware queries (`findAllVisible(principal)`) so filtering happens in the store, not in memory (scales with device count).
-- **Scalability:** role checks are pure functions over `(Principal, Ownership)` — trivially cacheable; the JWT carries role assignments so per-request authorization needs no DB round-trip; subtree resolution is one indexed query.
-- **Until the identity phase** (see roadmap), a single implicit dev principal holds `SUPERUSER` on a root group — early phases stay simple, and retrofitting is just replacing that principal, because use cases take `Principal` from day one of the identity phase.
+- **Authentication — edge only, session-based.** `vision-api` + Spring Security authenticate a
+  request and resolve a `CurrentUser`. **There is no JWT.** Sessions are server-side rows in
+  Postgres via spring-session-jdbc (`SPRING_SESSION`, migration `V34__spring_session.sql`), inside
+  the same volume as the rest of the data — so redeploying the app does not log every operator out.
+  Gated by `vision.auth.enabled`; a first-run `/setup` latch creates the first admin.
+- **Authorization — application layer, framework-free.** Services take `Authority` (or the narrower
+  `VisibilityScope`) as a **method parameter**, never a constructor dependency. Repositories expose
+  scope-aware queries so filtering happens in the store, not in memory.
+- **Seats are a third, orthogonal gate.** Holding `COMMAND_FLIGHT` is not sufficient to fly a
+  particular aircraft: `vision-flight`'s crew `Seat` model (pilot / camera, one each per asset)
+  arbitrates *who has the sticks right now*. Capability answers "may this person ever", the seat
+  answers "is it theirs at this moment". Gated by `vision.crew.enabled`.
+- **Scalability:** capability checks are pure functions over `(Authority, Ownership)`. Unlike the
+  JWT design once sketched here, a session lookup **is** a round-trip — it hits Postgres (or its
+  cache) per request rather than being carried in a self-contained token. That is the accepted cost
+  of server-side revocation.
+- **With `vision.auth.enabled=false`**, a single implicit dev principal holds an unbounded
+  `Authority` with every capability (`Authority`'s own all-caps factory), which is what keeps ~26
+  `@SpringBootTest` classes and a bare `spring-boot:run` working unchanged.
 
-Domain additions land in their own phase (below) — Phase 0–2 domain stays lean (KISS).
 
 ## 7. Technology Choices
 
 | Area | Choice | Notes |
 |---|---|---|
-| Java | 21, virtual threads | one pipeline per stream, cheap concurrency |
+| Java | 21 | one pipeline per stream. **Virtual threads are used only for explicit `Thread.ofVirtual()` background work, not for request serving** — `spring.threads.virtual.enabled` stays unset on purpose, see §3's isolation note |
 | Framework | Spring Boot 4.x (already in pom) | wiring/config only in `vision-app`; domain stays framework-free |
 | Video decode/encode | JavaCV (FFmpeg bindings) | covers RTSP, UDP, MJPEG, UVC, muxing — one dependency for many adapters |
 | Java↔Python | gRPC + protobuf | frame streaming, training control |
