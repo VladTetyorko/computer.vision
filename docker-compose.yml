@@ -534,6 +534,60 @@ services:
       # dropped by the browser -- which would look like login "not sticking". Flip to "true" once
       # this stack sits behind a TLS-terminating reverse proxy.
       VISION_AUTH_SESSION_COOKIE_SECURE: ${VISION_AUTH_SESSION_COOKIE_SECURE:-false}
+
+      # --- Shipped-but-dark features, switched on for this deployment ---
+      # E2E-FLOW-AUDIT-2026-09-05.md proposal U1. Each of these is built, tested and
+      # merged, but its compiled default is `false` so a fresh `mvn` build behaves as
+      # it did before the feature existed. That default is deliberate and stays --
+      # ~26 @SpringBootTest classes and every developer's `mvn spring-boot:run`
+      # depend on it. This file is where the *run* is described (CLAUDE.md
+      # "Deployment maintenance"), so this is the right place to turn them on, and
+      # the only one: leaving them off here meant the audit found eight features
+      # nobody could reach on a real server.
+      #
+      # Env-var spelling: Spring's relaxed binding accepts `_` for `-`
+      # (SystemEnvironmentPropertyMapper's legacy-name candidate), which is the
+      # convention VISION_PERSISTENCE_SEED_DEV_USERS above already relies on.
+
+      # vision.crew.enabled -- two seats (pilot/camera) per aircraft. Its own config
+      # comment requires a second real person to be possible, i.e. auth on: satisfied
+      # by VISION_AUTH_ENABLED above. Off, SeatAccess is a pass-through.
+      VISION_CREW_ENABLED: "true"
+      # vision.onboarding.probe.enabled -- read-only firmware capability/parameter
+      # probes over the link the aircraft already streams telemetry on. Reads only;
+      # enabling this does not let the platform write to an aircraft.
+      VISION_ONBOARDING_PROBE_ENABLED: "true"
+      # vision.onboarding.passport.enabled -- captures a VehicleProfile snapshot at
+      # PREFLIGHT and POSTFLIGHT. Inert without probe.enabled, which is why the two
+      # flip together; the app logs a startup WARNING naming both if they disagree.
+      VISION_ONBOARDING_PASSPORT_ENABLED: "true"
+      # vision.geo.fixed-camera.enabled -- projects a calibrated fixed camera's
+      # tracked objects onto the tactical map (~1 Hz). Off, every camera-pose and
+      # map-tracks endpoint answers 409 naming the flag.
+      VISION_GEO_FIXED_CAMERA_ENABLED: "true"
+      # vision.training.enabled -- the capture -> label -> train -> promote loop.
+      # Off, /api/datasets and the sample/training routes 404 like unmapped ones.
+      VISION_TRAINING_ENABLED: "true"
+
+      # The three below are judgment calls the owner took explicitly, not safe
+      # defaults. Each is flagged here so a future reader knows it was a decision.
+      #
+      # vision.api.rate-limit.enabled -- per-principal token buckets. Its own config
+      # comment says to enable it *together with auth*, never alone: buckets key on
+      # the acting principal, and with auth off that is one shared dev principal for
+      # the whole deployment. Auth is on above, so the precondition holds.
+      VISION_API_RATE_LIMIT_ENABLED: "true"
+      # vision.geo.visual.enabled -- visual geolocation. Ships off by design ("off
+      # means invisible"); it opens a gRPC geo session per flying asset with a
+      # resolvable stream and pulls keyframes from mediamtx, so it is the one flag
+      # here with a real steady-state cost. Watch cv-service load after a redeploy.
+      VISION_GEO_VISUAL_ENABLED: "true"
+      # vision.onboarding.remediate.message-interval.enabled -- the single
+      # deliberate exception to "nothing automatic from discovery": it asks a
+      # vehicle for more message types than a fresh link carries. This TRANSMITS to
+      # the aircraft (session-scoped, nothing persisted, a reboot forgets it), which
+      # is why it is a separate flag from probe.enabled.
+      VISION_ONBOARDING_REMEDIATE_MESSAGE_INTERVAL_ENABLED: "true"
     ports:
       - "8080:8080" # REST + web console + WebSocket (/ws/manual-control) + the HLS proxy
       # MAVLink telemetry AND commands, both directions, on this ONE UDP port. A

@@ -1166,3 +1166,39 @@ domain model it consumes). All green, 0 failures/errors. Docker ran for real (Te
 `vision.crew.enabled` defaults `false`, `seatService` is wired but inert, and every pre-existing test
 across all three modules stayed green unmodified under that default. Nothing deferred from this
 module's own scope; W3 (crew UI, vision-web) is a separate, concurrently-running agent's file scope.
+
+### 2026-09-06, E2E-FLOW-AUDIT U1 — eight shipped-but-dark features switched on in the deployed config
+
+The audit (`docs/plans/active/E2E-FLOW-AUDIT-2026-09-05.md`, proposal U1) found eight features that
+are built, tested and merged but unreachable on any real server: their compiled defaults in
+`application.yaml` are `false`, and nothing in `docker-compose.yml` overrode them. `docker-compose.yml`
+now sets all eight — `VISION_CREW_ENABLED`, `VISION_ONBOARDING_PROBE_ENABLED`,
+`VISION_ONBOARDING_PASSPORT_ENABLED`, `VISION_GEO_FIXED_CAMERA_ENABLED`, `VISION_TRAINING_ENABLED`,
+plus the three the owner took as explicit judgment calls: `VISION_API_RATE_LIMIT_ENABLED`,
+`VISION_GEO_VISUAL_ENABLED`, `VISION_ONBOARDING_REMEDIATE_MESSAGE_INTERVAL_ENABLED`.
+
+**No compiled default changed, and no test was touched.** That split is the point: `application.yaml`
+describes what a fresh build does (~26 `@SpringBootTest` classes and every `mvn spring-boot:run`
+depend on those `false`s), while `docker-compose.yml` describes what the *run* does — CLAUDE.md's
+"Deployment maintenance" rule. Flipping the compiled defaults instead would have re-armed a large
+test surface for no deployment benefit.
+
+Two preconditions were checked against the same file rather than assumed, since both are stated in
+`application.yaml`'s own comments: `crew` and `api.rate-limit` each require `vision.auth.enabled=true`
+(rate limiting keys buckets on the acting principal, so with auth off the whole deployment shares one
+bucket) — satisfied by the pre-existing `VISION_AUTH_ENABLED: "true"`; and `onboarding.passport` is
+inert without `onboarding.probe`, so the two flip together and the app's own
+"never silently inert" startup WARNING stays quiet.
+
+**Env-var spelling gotcha.** Three of these keys are hyphenated (`vision.geo.fixed-camera.enabled`,
+`vision.api.rate-limit.enabled`, `vision.onboarding.remediate.message-interval.enabled`). Spring maps
+a hyphenated property to *two* env-var candidates — `Form.UNIFORM` (dashes removed:
+`VISION_API_RATELIMIT_ENABLED`) and the legacy name (dashes → underscores:
+`VISION_API_RATE_LIMIT_ENABLED`). Both bind; this file uses the second, the convention the
+pre-existing `VISION_PERSISTENCE_SEED_DEV_USERS` → `vision.persistence.seed-dev-users` mapping
+already established. Guessing here is how a flag ships green but inert, so the precedent was verified
+before writing rather than after.
+
+`vision.geo.visual.enabled` is the one flag with a real steady-state cost — it opens a gRPC geo
+session per flying asset with a resolvable stream and pulls keyframes from mediamtx — so cv-service
+load is worth watching after the first redeploy with this config.
