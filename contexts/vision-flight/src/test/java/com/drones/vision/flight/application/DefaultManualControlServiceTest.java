@@ -111,11 +111,16 @@ class DefaultManualControlServiceTest {
     }
 
     private void stubDetails(Device... devices) {
-        Asset asset = Asset.register(assetId, "Drone 1", DRONE, new Ownership(actor, GroupId.random()),
+        stubDetailsFor(assetId, "Drone 1", devices);
+    }
+
+    /** Second-asset overload: the per-asset exclusivity tests need two distinct assets on one service. */
+    private void stubDetailsFor(AssetId id, String name, Device... devices) {
+        Asset asset = Asset.register(id, name, DRONE, new Ownership(actor, GroupId.random()),
                 Set.of(devices[0].id()), Map.of(), Identity.NONE, Custody.NONE);
         AssetSummary summary = new AssetSummary(asset, "Drone", AssetStatus.OFFLINE, null, null,
                 InventoryState.IN_STOCK, Identity.NONE, Custody.NONE);
-        when(assetService.details(assetId)).thenReturn(new AssetDetails(summary, List.of(devices), List.of()));
+        when(assetService.details(id)).thenReturn(new AssetDetails(summary, List.of(devices), List.of()));
     }
 
     // -- engage ---------------------------------------------------------------
@@ -225,18 +230,61 @@ class DefaultManualControlServiceTest {
     }
 
     @Test
-    void secondEngageOnTheSameHandleThrowsIllegalStateWithoutTouchingThePort() {
+    void secondEngageOnTheSameAssetThrowsIllegalStateWithoutTouchingThePort() {
         stubDetails(device);
         service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { });
 
-        assertThrows(IllegalStateException.class,
+        IllegalStateException refusal = assertThrows(IllegalStateException.class,
                 () -> service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }));
+        // vision-api's ManualControlWebSocketHandler.mapIllegalState matches this substring to emit
+        // ALREADY_ENGAGED; renaming the message silently downgrades the operator's denial code.
+        assertTrue(refusal.getMessage().contains("already active"));
         assertEquals(1, manualControlPort.engagedDevices.size());
         assertEquals(1, auditTrail.recorded.size()); // only the first ENGAGE
     }
 
     @Test
-    void engageIsAllowedAgainAfterTheFirstSessionIsReleased() {
+    void engagingASecondAssetWhileTheFirstIsLiveIsAllowed() {
+        // E2E-FLOW-AUDIT S1: exclusivity is physical (one set of sticks per airframe), so two pilots
+        // on two drones must both fly. Before S1 the single activeSession field made the shared
+        // singleton refuse this, capping the whole fleet at one manual-control session.
+        AssetId otherAssetId = AssetId.random();
+        Device otherDevice = new Device(DeviceId.random(), "FC-2", Set.of(Capability.TELEMETRY),
+                new StreamDescriptor("mavlink", URI.create("udp://127.0.0.1:14551"), Map.of()));
+        stubDetails(device);
+        stubDetailsFor(otherAssetId, "Drone 2", otherDevice);
+
+        ManualControlSession first = service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { });
+        ManualControlSession second = service.engage(otherAssetId, actor, VisibilityScope.unbounded(), () -> { });
+
+        assertTrue(first.active());
+        assertTrue(second.active());
+        assertEquals(2, manualControlPort.engagedDevices.size());
+        assertEquals(2, auditTrail.recorded.size());
+    }
+
+    @Test
+    void releasingOneAssetsSessionLeavesTheOtherAssetsSessionEngaged() {
+        AssetId otherAssetId = AssetId.random();
+        Device otherDevice = new Device(DeviceId.random(), "FC-2", Set.of(Capability.TELEMETRY),
+                new StreamDescriptor("mavlink", URI.create("udp://127.0.0.1:14551"), Map.of()));
+        stubDetails(device);
+        stubDetailsFor(otherAssetId, "Drone 2", otherDevice);
+        ManualControlSession first = service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { });
+        ManualControlSession second = service.engage(otherAssetId, actor, VisibilityScope.unbounded(), () -> { });
+
+        first.release();
+
+        assertFalse(first.active());
+        assertTrue(second.active());
+        // ...and the freed slot is re-engageable while the other asset stays untouched.
+        assertTrue(service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { }).active());
+        assertThrows(IllegalStateException.class,
+                () -> service.engage(otherAssetId, actor, VisibilityScope.unbounded(), () -> { }));
+    }
+
+    @Test
+    void engageIsAllowedAgainOnTheSameAssetAfterTheFirstSessionIsReleased() {
         stubDetails(device);
         ManualControlSession first = service.engage(assetId, actor, VisibilityScope.unbounded(), () -> { });
         first.release();
