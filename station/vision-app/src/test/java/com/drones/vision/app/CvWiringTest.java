@@ -3,8 +3,11 @@ package com.drones.vision.app;
 import com.drones.vision.adapter.cvgrpc.CvChannelSupervisor;
 import com.drones.vision.api.live.LiveAndPollDetectionDemand;
 import com.drones.vision.api.support.StreamDetectionSupport;
+import com.drones.vision.app.cv.DetectionPolicyCache;
 import com.drones.vision.app.devsupport.LoggingEventPublisher;
 import com.drones.vision.app.devsupport.NoopDetectionPort;
+import com.drones.vision.kernel.AssetId;
+import com.drones.vision.perception.domain.port.DetectionPolicyPort;
 import com.drones.vision.perception.domain.port.DetectionPort;
 import com.drones.vision.platform.EventPublisherPort;
 import io.grpc.ManagedChannel;
@@ -14,6 +17,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -92,5 +96,32 @@ class CvWiringTest {
     @Test
     void defaultConfigurationBuildsNoCvChannelSupervisor() {
         assertTrue(applicationContext.getBeansOfType(CvChannelSupervisor.class).isEmpty());
+    }
+
+    /**
+     * docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave D1: {@link CvWiring#detectionPolicyCache} is
+     * gated on the same "CV switched on at all" expression {@link #defaultConfigurationBuildsNoCvChannelSupervisor}
+     * exercises for {@link CvChannelSupervisor} — with every property at its default, that background
+     * poller does not exist at all, not merely inert, so a deployment with CV entirely off pays zero
+     * cost for a feature it never uses. See {@link CvEnabledWiringTest} for the {@code true} counterpart.
+     */
+    @Test
+    void defaultConfigurationBuildsNoDetectionPolicyCache() {
+        assertTrue(applicationContext.getBeansOfType(DetectionPolicyCache.class).isEmpty());
+    }
+
+    /**
+     * {@link CvWiring#detectionPolicyPort}, unlike {@link CvWiring#detectionPolicyCache}, is wired
+     * unconditionally (it costs nothing — no background thread, just a lambda over an {@code
+     * ObjectProvider}) so {@code DefaultStreamService} always has something to consult; with the
+     * cache absent, it must read every asset as {@code DetectionPolicy.ON_VIEW} (fail-closed, not
+     * fail-open like {@link LiveAndPollDetectionDemand}) — the D1 acceptance bar that {@code ALWAYS}
+     * stays strictly opt-in even in a deployment that never wires the cache at all.
+     */
+    @Test
+    void defaultConfigurationWiresAnInertDetectionPolicyPort() {
+        assertEquals(1, applicationContext.getBeansOfType(DetectionPolicyPort.class).size());
+        DetectionPolicyPort policyPort = applicationContext.getBean(DetectionPolicyPort.class);
+        assertFalse(policyPort.alwaysOn(AssetId.random()));
     }
 }

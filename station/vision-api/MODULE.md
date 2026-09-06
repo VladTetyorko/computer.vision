@@ -568,6 +568,12 @@ on anything else), never a body field, so there is exactly one place a client ca
   body, not just the caller. `AssetEdit#changesManagedFields()` decides — a body touching only
   `displayName`/`attributes` needs `scope` alone (so a PILOT may rename their own assigned aircraft);
   a body touching `category` needs `manage`. Every other asset mutation always requires `manage`.
+  **ALWAYS-ON-FLOW-PLAN.md wave D1 (2026-09-06) confirmed this endpoint needed no change**: a
+  per-asset `DetectionPolicy` opt-in (`contexts/vision-perception`'s new
+  `DetectionPolicy.ATTRIBUTE_KEY = "cv.detection-policy"`, values `"on-view"`/`"always"`) is stored
+  under this same free-form `attributes` map — this generic PATCH already round-trips it, so setting
+  an asset's policy is just `PATCH {"attributes":{"cv.detection-policy":"always"}}` under the
+  `scope`-only authority level above, no new endpoint/DTO/wire contract added.
 - Logging: `System.Logger`, not SLF4J — matches every other adapter/domain class in this codebase;
   SLF4J appears only in `vision-app`'s Spring-only devsupport beans.
 - **`AssetRowFacts` (`support/`, WAREHOUSE-UX W8) bundles two cross-context reads behind one

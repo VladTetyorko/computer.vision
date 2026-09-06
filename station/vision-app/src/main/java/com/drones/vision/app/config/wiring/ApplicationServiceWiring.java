@@ -1,6 +1,7 @@
 package com.drones.vision.app.config.wiring;
 
 import com.drones.vision.perception.domain.port.DetectionDemandPort;
+import com.drones.vision.perception.domain.port.DetectionPolicyPort;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
@@ -665,6 +666,13 @@ public class ApplicationServiceWiring {
      * when that flag is {@code false} reproduces {@code DefaultStreamService}'s pre-wave-D2 constructor
      * exactly: the demand-poll task is never scheduled, and every stream stays fail-open on demand.
      *
+     * <p>{@code detectionPolicyPort} (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave D1) is likewise
+     * an {@link ObjectProvider} — {@code CvWiring#detectionPolicyPort} is wired unconditionally, but
+     * the same defensive shape is used here so the two optional demand-poll inputs stay symmetric and
+     * independently absent-able (a unit test wiring {@link DefaultStreamServiceSettings} directly may
+     * legitimately want one without the other). Absent means every stream's {@code DetectionPolicy}
+     * reads as {@code ON_VIEW} forever — no behavior change from before this port existed.
+     *
      * <p>{@code cvProfileResolver} (docs/plans/active/CV-SETTINGS-PLAN.md §3.1/§5.4,
      * CV-SETTINGS-CONTEXT.md's W2 &rarr; W5 handoff) is {@code CvProfileWiringConfiguration}'s
      * unconditional bean — {@code DefaultStreamService#start} applies the same asset &rarr; category
@@ -689,6 +697,7 @@ public class ApplicationServiceWiring {
                                         ObjectProvider<PulledDetectionPort> pulledDetectionPort,
                                         MediamtxLiveFrameGrabber mediamtxLiveFrameGrabber,
                                         ObjectProvider<DetectionDemandPort> detectionDemandPort,
+                                        ObjectProvider<DetectionPolicyPort> detectionPolicyPort,
                                         CvProfileResolver cvProfileResolver,
                                         StreamStateObserver streamStateObserver) {
         Optional<PullDetectionSettings> pullDetectionSettings = cvProperties.pullEnabled()
@@ -700,7 +709,7 @@ public class ApplicationServiceWiring {
                         Optional.of(detectionLiveUpdatePort),
                         streamPipelineSettings(applicationProperties, trackingProperties, cvProperties),
                         pullDetectionSettings, Optional.ofNullable(detectionDemandPort.getIfAvailable()),
-                        streamStateObserver),
+                        Optional.ofNullable(detectionPolicyPort.getIfAvailable()), streamStateObserver),
                 cvProfileResolver);
         if (publishProperties.sourceProxy().enabled()) {
             return new LiveFrameFallbackStreamService(defaultStreamService, mediamtxLiveFrameGrabber);

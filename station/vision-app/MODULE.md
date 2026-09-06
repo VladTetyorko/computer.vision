@@ -33,6 +33,7 @@ com.drones.vision.app
                          LiveUpdateDetectionEventRepository, LiveUpdateDiscoveryInboxService
                          (decorator chains)
   onboarding/            PassportCaptureObserver (UsagePhaseObserver impl)
+  cv/                    DetectionPolicyCache (self-scheduled AssetId snapshot, ALWAYS-ON-FLOW wave D1)
   geo/                   TrackProjectionRunner, VisualGeoRunner (poller ApplicationRunners)
   usage/                 UsageIdleCloseRunner, TelemetryPinRunner (self-scheduled sweeps, same shape as geo/'s runners)
   discovery/             DiscoveryInboxRunner (self-scheduled sweep, same shape as usage/'s runner)
@@ -51,7 +52,7 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 | `VideoSourceWiring` | Simulation, Rtsp, Mjpeg, V4l2 | `simulatedVideoSource`/`ffmpegVideoSource`/`mjpegVideoSource`/`v4l2VideoSource` (all unconditional `VideoSourcePort`), `videoSourceRegistry`. Exposes static `toFfmpegSettings`/`toMjpegSettings` mappers reused by `FeedTransmitterWiring` |
 | `TelemetryWiring` | Simulation, Mavlink, Rc, Onboarding | `simulatedTelemetrySource`, `mavlinkTelemetrySource`, `mavlinkFlightCommander`, `mavlinkManualControlSender` — all unconditional. Static `toMavlinkSettings(...)` reused by `FeedTransmitterWiring`/`DiscoveryWiringConfiguration`/`OnboardingWiringConfiguration`. **MAVLINK-COMMANDS-PLAN P4** rewired `mavlinkFlightCommander` off the 2-arg `(MavlinkTelemetrySource, Duration)` back-compat constructor onto `MavlinkFlightCommander`'s canonical `(MavlinkTelemetrySource, MavlinkSettings)` one, reusing `toMavlinkSettings(...)` a fourth time (now takes `VisionRcProperties`/`VisionOnboardingProperties` too, matching `mavlinkTelemetrySource`'s own parameter list) |
 | `PublishWiring` | Publish, Api, Cv, Media | `mediamtxStreamPublisher` (COP `vision.publish.enabled`, default true — own bean so `SystemStatusWiring` observes the *same* instance `streamPublisherPort` routes through), `streamPublisherPort` (unconditional `StreamPublisherPort`; `NoopStreamPublisher` if disabled, else a `PublisherRouter` wrapping the direct publisher + a `MediamtxProxyPublisher`, routed by `vision.publish.source-proxy.enabled`; **fails fast** if source-proxy is on while `vision.cv.frame-transport` is still `push` — see Gotchas), `mediamtxLiveFrameGrabber` (unconditional, cheap/lazy), `replayFrameExtractionPort` (unconditional; `NoopReplayFrameExtractor` if publish disabled), `hlsProxyUpstreamBase: URI`, `snapshotJpegEncoder`, `hlsProxySettings`, `liveSettings` (last 3 bridge Spring-bound `VisionApiProperties` → vision-api's plain mirror of the same simple name — see Gotchas). **ASSET-FLOWS-PLAN §2 S6**: every bean method above that builds a mediamtx URL now additionally takes `VisionMediaProperties mediaProperties`, converted once per call via the new private `toMediaCredentials(VisionMediaProperties)` helper into `adapter-publish-hls`'s `MediaCredentials` — `mediamtxLiveFrameGrabber` embeds the viewer credential in its RTSP read URL, `toPublishSettings`/`toProxySettings` thread it into `PublishSettings#auth`/`MediamtxProxySettings#media` (so `whepUrl`/`playbackUrl`/the RTSP push URL all carry credentials — see adapter-publish-hls/MODULE.md), and `toApiSupportProperties` appends `auth.viewerUsername()`/`auth.viewerPassword()` as `VisionApiProperties.HlsProxy`'s two new trailing components, which `HlsProxyController` (vision-api) sends as an outbound `Authorization: Basic` header (see that module's own MODULE.md Gotchas) |
-| `CvWiring` | Cv | `cvGrpcChannel: ManagedChannel` `@Primary` (COE: `cv.enabled` OR `training.enabled` OR `frame-transport=pull` OR `geo.visual.enabled`; built via `CvChannels.forTargets`), `cvTrainingChannel` (COP `vision.cv.training.target` present — independent shutdown), `cvChannelSupervisor` (COE = cvGrpcChannel's expression AND `cv.reconnect.enabled` default true; `@Qualifier("cvGrpcChannel")`), `detectionPort` (unconditional bean, internal branch on `enabled`: `GrpcDetectionPort` w/ `@Qualifier("cvGrpcChannel")` else `NoopDetectionPort`; `destroyMethod=""`), `pulledDetectionPort` (COE `frame-transport=pull`; `@Qualifier("cvGrpcChannel")`), `cvModelRoster` (static constant), `detectionDemandPort` (COE default true, returns concrete `LiveAndPollDetectionDemand`), `streamDefaultConfig`, `streamDetectionSupport`. Static `toGrpcCvSettings(...)` and package-private `controlPlaneChannel(cvTrainingChannel, cvGrpcChannel)` (= training channel if present else falls back to inference channel) shared by `TrainingWiringConfiguration`/`VisualGeoWiringConfiguration` |
+| `CvWiring` | Cv | `cvGrpcChannel: ManagedChannel` `@Primary` (COE: `cv.enabled` OR `training.enabled` OR `frame-transport=pull` OR `geo.visual.enabled`; built via `CvChannels.forTargets`), `cvTrainingChannel` (COP `vision.cv.training.target` present — independent shutdown), `cvChannelSupervisor` (COE = cvGrpcChannel's expression AND `cv.reconnect.enabled` default true; `@Qualifier("cvGrpcChannel")`), `detectionPort` (unconditional bean, internal branch on `enabled`: `GrpcDetectionPort` w/ `@Qualifier("cvGrpcChannel")` else `NoopDetectionPort`; `destroyMethod=""`), `pulledDetectionPort` (COE `frame-transport=pull`; `@Qualifier("cvGrpcChannel")`), `cvModelRoster` (static constant), `detectionDemandPort` (COE default true, returns concrete `LiveAndPollDetectionDemand`), `streamDefaultConfig`, `streamDetectionSupport`. **ALWAYS-ON-FLOW-PLAN.md wave D1** added `detectionPolicyCache` (`initMethod="start"`/`destroyMethod="close"`, COE = `cvGrpcChannel`'s own "CV switched on at all" expression minus the reconnect AND-clause, mirroring `cvChannelSupervisor`'s precedent for self-scheduled background beans — absent, not merely inert, when CV is entirely off) and `detectionPolicyPort` (unconditional, a lambda over `ObjectProvider<DetectionPolicyCache>` whose `.getIfAvailable()` is deferred inside the lambda body exactly like `hasCameraPose`'s own `TrackProjectionRunner` consumption, avoiding a circular-dependency hazard; reads every asset as `DetectionPolicy.ON_VIEW`/`false` when the cache is absent — fail-closed, unlike `detectionDemandPort`'s fail-open). Static `toGrpcCvSettings(...)` and package-private `controlPlaneChannel(cvTrainingChannel, cvGrpcChannel)` (= training channel if present else falls back to inference channel) shared by `TrainingWiringConfiguration`/`VisualGeoWiringConfiguration` |
 | `TrainingWiringConfiguration` | Training, Cv | `datasetUploadPort`, `trainingStores`, `replaySources`, `datasetService`, `labelingService` (takes `AssetDirectoryService`, not `AssetService`), `trainingPort`, `trainingJobService` all `@ConditionalOnProperty(vision.training.enabled=true)`, no fallback. `modelRegistryPort`/`modelRegistryService` are a **separate** switch since CV-SETTINGS-PLAN §5 (CV-SETTINGS-CONTEXT.md's W4-app → W5 handoff decoupled the registry from training): `@ConditionalOnProperty(vision.cv.registry.enabled=true)`, whose own `application.yaml` default follows `vision.cv.enabled` via the `${vision.cv.enabled:false}` placeholder — a CV-only deployment gets the registry for free unless it explicitly opts out (`vision.cv.registry.enabled=false`); a training-only deployment does **not** get it for free any more. Channel-consuming beans route through `CvWiring.controlPlaneChannel(...)` |
 | `CvProfileWiringConfiguration` | — | **Every bean unconditional**, no `@Conditional*` at all (CV-SETTINGS-PLAN §3.1/§5, CV-SETTINGS-CONTEXT.md's W2 → W5 handoff): `cvProfileCacheSettings` (from `VisionCvProperties.Profiles#cacheTtl()`, default 60s), `cvProfileCache` (write-through, lazy-TTL-reload), `cvProfileResolver` (asset→category→organization→platform fold, shared with `ApplicationServiceWiring#streamService` and `CvWiring#streamDetectionSupport`), `cvProfileService` (`DefaultCvProfileService`, behind `CvProfileController`) — profiles ship built-in (4 seeded rows, `V29__cv_profiles.sql`) regardless of `vision.cv.enabled`/`vision.cv.registry.enabled`, the same "ships built-in" posture `TrackingWiring#cvTrackerRoster` takes |
 | `DiscoveryWiringConfiguration` | Discovery, Mavlink | `onvifWsDiscoveryScanner`/`mdnsScanner`/`v4l2Scanner`/`mavlinkHeartbeatScanner` — each COP `vision.discovery.enabled` default true. `mediamtxPathScanner` (ZERO-CONFIG-ONBOARDING Z3) is the fifth scanner, COP `name = {"enabled", "mediamtx.enabled"}` under the `vision.discovery` prefix — Spring ANDs the array together, so it needs **both** `vision.discovery.enabled` and `vision.discovery.mediamtx.enabled` (default true, its own independent off-switch since it is the one scanner that depends on another subsystem, mediamtx/`vision.publish.enabled`, being present at all). Built from `MediamtxScannerSettings(publishProperties.mediamtx().apiBase(), publishProperties.mediamtx().rtspBase(), properties.mediamtx().pathPrefix())` — takes `VisionPublishProperties` as a plain constructor param (registered by `PublishWiring`'s own `@EnableConfigurationProperties`, not this class's; autowires here as an ordinary bean regardless of `vision.publish.enabled` since only the publisher beans themselves are conditional on that flag) rather than inventing a parallel `vision.discovery.mediamtx.api-url`/`rtsp-base` pair, so the two consumers of "where mediamtx is" can never disagree. `discoveryService` and `mavlinkPort` **unconditional** (`DiscoveryController` needs the service regardless; `DefaultDiscoveryService` tolerates an empty port list). `mavlinkHeartbeatScanner` lives in adapter-mavlink, not adapter-discovery like its other 3 siblings, because it borrows `mavlinkTelemetrySource`'s open socket and adapters can't depend on each other. **SOURCE-ONBOARDING-2 wave C** added three more beans, all consumed by `vision-api`'s `SystemNetworkController`/`DiscoveryStatusController`: `videoPushPort`/`videoPushPathPrefix` (both `@Bean` methods COP `vision.publish.enabled=true`, matchIfMissing=true — genuinely absent, not null-valued, when mediamtx publish is off, since a required `@Autowired` constructor parameter elsewhere cannot accept a null-valued bean; see `vision-api`'s MODULE.md Conventions for why the consumer takes these through `ObjectProvider<T>`) and `discoveryStatusFacts` (unconditional `Supplier<DiscoveryStatusFacts>`, taking `MavlinkTelemetrySource`/`VisionDiscoveryProperties`/`VisionPublishProperties` plus two `ObjectProvider`s — `DiscoveryInboxRunner` and `MediamtxPathScanner` — since either may be conditionally absent; an absent runner reports `lastSweepAt` as `null`, an absent scanner reports `readyPaths` as empty, both honestly rather than fabricated) |
@@ -101,7 +102,7 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 | `VisionPersistenceProperties` | `vision.persistence` | `adapter-persistence`'s `PersistenceUnit`/pool/telemetry-batch settings |
 | `VisionLiveProperties` | `vision.live` | selects `LiveUpdateRegistry` vs. `NoopLiveUpdatePublisher` (all 6 ports). **SOURCE-ONBOARDING-2 wave C** widened this from a single-field to a 2-component canonical constructor (`enabled`, `streamStatePush`), gaining a nested `StreamStatePush(boolean enabled)` record (default true) that gates the new `streamStateObserver` selector above; no back-compat 1-arg convenience constructor was added since a repo-wide grep found zero existing `new VisionLiveProperties(...)` call sites to preserve (CLAUDE.md rule 10) |
 | `VisionTrainingProperties` | `vision.training` | gates `TrainingWiringConfiguration`'s whole bean cluster |
-| `VisionCvProperties` | `vision.cv` | `CvWiring`/`adapter-cv-grpc` channel + detection settings |
+| `VisionCvProperties` | `vision.cv` | `CvWiring`/`adapter-cv-grpc` channel + detection settings. **ALWAYS-ON-FLOW-PLAN.md wave D1** added a `Policy policy` component (right after `profiles`, 22nd of the canonical constructor — every pre-existing `new VisionCvProperties(...)` call site with the old 21-arg shape needed a trailing `null` appended, `VisionCvPropertiesTest`'s 5 sites among them), with a null-fallback to `new Policy(Policy.DEFAULT_REFRESH_INTERVAL)` in the compact ctor. `record Policy(Duration refreshInterval)` (`@DefaultValue("15s")`) — `CvWiring#detectionPolicyCache`'s own re-list cadence; the *record* is always present regardless of deployment (no feature flag gates the config shape, and binding the property costs nothing even unused), but the *bean* that consumes it is conditional — see the `CvWiring` row below. No `docker-compose.yml` env var added: like its sibling per-tick tunables (`Profiles.cacheTtl`, `detectionDemandGrace`/`detectionDemandPollInterval`), the 15s default is deployment-topology-independent, so Spring's own relaxed env-var binding (`VISION_CV_POLICY_REFRESH_INTERVAL`) is sufficient without a compose-file line, consistent with the precedent that none of those siblings have one either |
 | `VisionDiscoveryProperties` | `vision.discovery` | `adapter-discovery` scan budgets; ZERO-CONFIG-ONBOARDING Z2c added two nested records to the canonical constructor's 4th/5th components — `Lobby(boolean enabled)` (default `true`, `DiscoveryInboxWiringConfiguration`'s `mavlinkTelemetrySource.holdLobby(...)` gate) and `Inbox(boolean enabled, int sweepSeconds, int scanTimeoutSeconds)` (defaults `true`/`30`/`5`, compact-constructor validated both ints `> 0`) — both default to `true`/on, a deliberate exception to the repo's usual opt-in-guardrail default (see `DiscoveryInboxWiringConfiguration` row above). Z3 added a 6th component, `Mediamtx(boolean enabled, String pathPrefix)` (defaults `true`/`"ingest/"`, compact-constructor rejects a blank `pathPrefix`) — consumed by `DiscoveryWiringConfiguration#mediamtxPathScanner`'s COP and settings-record construction (see that row above); `apiBase`/`rtspBase` are deliberately **not** on this record — they come from `VisionPublishProperties.Mediamtx` instead, so this record only owns the one property that's genuinely this module's own concern. C4 added a 7th component, `Live(boolean enabled)` (default `true`) — gates whether `DiscoveryInboxWiringConfiguration#discoveryInboxService` decorates its delegate with `LiveUpdateDiscoveryInboxService` (see `vision-api`'s MODULE.md Live-updates section for the `discovery` SSE topic this feeds); ships on by default (SOURCE-ONBOARDING-2-PLAN.md §3.2 C4, D8) |
 | `VisionSimulationProperties` | `vision.simulation` | `adapter-simulation` video/telemetry settings + resume-on-boot |
 | `VisionPublishProperties` | `vision.publish` | `PublishWiring`/`adapter-publish-hls` (mediamtx, encoder, resilience, cadence, replay, source-proxy) |
@@ -241,9 +242,12 @@ maps to a real handler, so it can't quietly outlive the gap it records.
   fixed by adding the qualifier pairs.
 - **`ObjectProvider<T>` circular-dependency rule:** resolve it lazily (inside a lambda/predicate
   invoked after full context startup, never eagerly in the `@Bean` method body) whenever `T`'s own
-  construction path loops back to the bean under construction. Two confirmed instances: `CvWiring#detectionDemandPort`'s
+  construction path loops back to the bean under construction. Three confirmed instances: `CvWiring#detectionDemandPort`'s
   `TrackProjectionRunner` (needs `AssetService`, whose path loops back through `detectionDemandPort`),
-  and `ApplicationServiceWiring`/`StreamLifecycleWiring`'s `usageTracker` resolver.
+  `ApplicationServiceWiring`/`StreamLifecycleWiring`'s `usageTracker` resolver, and (ALWAYS-ON-FLOW
+  wave D1) `CvWiring#detectionPolicyPort`'s `ObjectProvider<DetectionPolicyCache>` — the same shape
+  as the `TrackProjectionRunner` case, `.getIfAvailable()` deferred inside the returned
+  `DetectionPolicyPort` lambda's body, not called eagerly while the bean method itself runs.
 - **Security default is condition-exclusivity, not a runtime tie-break.** `securedFilterChain` is
   `@ConditionalOnProperty(vision.auth.enabled, havingValue="true", matchIfMissing=true)`;
   `permitAllFilterChain` has no `matchIfMissing`, so it exists only when the property is explicitly
@@ -326,6 +330,24 @@ maps to a real handler, so it can't quietly outlive the gap it records.
   `@ConditionalOnProperty`/`@ConditionalOnExpression` literally, rather than using
   `@ConditionalOnBean` — the latter is sensitive to `@Bean`-method declaration order within a
   `@Configuration` class and can pass in a narrow test slice while silently failing in full wiring.
+- **`TrackingAssociateE2ETest#aStreamStartedOnTheDefaultsTracksAndTheTracksEndpointReportsStableIdsAcrossFrames`
+  is a read-model *timing* canary, not a flaky test — and it caught a real wave-D regression
+  (ALWAYS-ON-FLOW-PLAN.md D1/D2, 2026-09-06).** It asserts `>=3` detector passes off
+  `$.stats.detectorPasses`, which `StreamPipeline#onDetectionResult` feeds via
+  `trackingStats.accept`. D2's first cut reordered that method to run the durable plane
+  (`detectionRepositoryPort#save`, synchronous database I/O) **before** the live read models. That
+  made every read model a polling client observes lag by one database round trip, and the test read
+  `saw 2` on every full-suite run while passing in isolation — the classic signature of a load-
+  dependent flake, which is exactly how it was first misdiagnosed.
+  **It was not a flake.** A baseline run of the same suite at the immediately preceding commit, under
+  the same load on the same machine, was 350/350 green; the failure appeared only with D2 applied and
+  vanished the moment `onDetectionResult` was restored to live-plane-first. Two ablations had already
+  "ruled out" `detectionPolicyCache` and `DefaultStreamService`'s scheduler-arming condition — both
+  genuinely innocent, which is precisely why ablating them changed nothing while the real cause sat
+  untouched in a third place. **The lesson worth keeping: an ablation that clears its target has
+  narrowed nothing unless the candidate set was complete, and "passes alone, fails under load" is
+  equally consistent with a real ordering regression.** If this assertion drops below 3 again, suspect
+  something moved in `onDetectionResult` before reaching for `@Disabled`.
 
 ## Status
 
@@ -1377,3 +1399,64 @@ isolated "before" count exists for `vision-api`/`vision-app`'s own totals specif
 current green total rather than a before/after delta. `EndpointAuthorizationTest` itself: 2/2,
 confirming `SystemEventsController#recent`'s `@OpenByDesign` is recognized with no new
 `TEMPORARY_UNSCOPED` ledger entry needed.
+
+## ALWAYS-ON-FLOW wave D1/D2 — per-asset `DetectionPolicy` + the three-question gate (2026-09-06)
+
+This module's half of `docs/plans/active/ALWAYS-ON-FLOW-PLAN.md` waves D1 (a per-asset opt-in to
+inference regardless of viewer demand) and D2 (splitting `StreamPipeline`'s single detection gate into
+inference/durable/live) — the domain/application-layer half lives in `contexts/vision-perception`, see
+that module's own MODULE.md Status entry for the gate-mechanics detail. This wave's file scope was
+`contexts/vision-perception`, `station/vision-api`, `station/vision-app`; `vision-api` needed **zero**
+code changes (the existing generic `PATCH /api/assets/{id}` `attributes` map already round-trips
+`DetectionPolicy.ATTRIBUTE_KEY`, so no new endpoint/DTO/exception mapping was added).
+
+**New in this module**: `cv/DetectionPolicyCache` (self-scheduled `AutoCloseable`, mirroring
+`TrackProjectionRunner`'s own caching precedent — `volatile Set<AssetId>` snapshot, refreshed once per
+tick from `AssetService#assets(false)`, filtered by `DetectionPolicy.ATTRIBUTE_KEY`); `CvWiring`'s two
+new beans, `detectionPolicyCache` (conditional, same "CV switched on at all" expression as
+`cvChannelSupervisor`) and `detectionPolicyPort` (unconditional, `ObjectProvider`-lazy lambda, fails
+closed when the cache is absent); `VisionCvProperties.Policy(Duration refreshInterval)` (22nd canonical
+constructor component, default 15s) — see the properties table and `CvWiring` row above for the full
+detail on each.
+
+**The one deliberate deviation from the wave's literal wording, flagged as instructed**: D1's task
+text described the policy check as "a fourth OR-term in `LiveAndPollDetectionDemand`." This was not
+done. `DetectionPolicyPort` is a wholly separate port instead, consulted independently by
+`DefaultStreamService`/`StreamPipeline` — see `vision-perception`'s own MODULE.md Gotchas for the
+reasoning (D2's live-gate-must-close-independently-of-inference requirement cannot be expressed if the
+policy opt-in is folded into the same boolean live already reads). `LiveAndPollDetectionDemand` itself
+is untouched by this wave.
+
+**Deliberately deferred, out of scope**: a fleet-wide inference budget (plan wave D3) —
+`maxInFlightInferences` stays a fixed `2`/stream constant, no new property key. Considered and rejected
+for this pass: adding one without the budget it would feed into would be a knob nobody could safely
+turn, so the constant stays a constant until D3 gives it something to answer to. See
+`vision-perception`'s MODULE.md Gotchas for the capacity risk this leaves open (`ALWAYS` is opt-in per
+asset but not capacity-aware — an operator can drive concurrent inference past one `cv-service`
+instance's ~3-4 stream/10fps ceiling with nothing to warn or throttle across streams).
+
+**A real regression this wave introduced, found and fixed** — `TrackingAssociateE2ETest` was
+initially reported as a pre-existing load-dependent flake, on the strength of two ablations that each
+cleared their target. It was not. D2's first cut ran the durable plane before the live plane in
+`onDetectionResult`, putting a synchronous database write between a detection completing and the read
+models a poll observes; a baseline run at the preceding commit was 350/350 green under identical load,
+and restoring live-plane-first made the failure vanish (353/353). See the Gotchas entry above — both
+for the ordering constraint, which is now load-bearing, and for why the ablations were misleading.
+
+**No docker-compose.yml env var added** for `VisionCvProperties.Policy.refreshInterval` — evaluated
+against the "new behavior changing deployment cost needs a compose env var" convention and found not
+to qualify: the 15s default is deployment-topology-independent (no host/network addressing, unlike
+e.g. `VISION_CV_PULL_RTSP_BASE`), matching the precedent already set by every sibling per-tick tunable
+(`Profiles.cacheTtl`, `detectionDemandGrace`, `detectionDemandPollInterval`) — none of which have a
+compose-file line either. Spring's own relaxed env-var binding
+(`VISION_CV_POLICY_REFRESH_INTERVAL`) still works without one.
+
+`./mvnw -B -pl contexts/vision-perception,station/vision-api,station/vision-app -am test -DskipWeb` —
+per-module results: `vision-perception` **717 → 730, all green** (13 new: 5 `DetectionPolicyTest`, 6
+`StreamPipelineTest`, 2 `DefaultStreamServiceTest`); `vision-api` **1052/1052, unchanged** (no code
+touched); `vision-app` **350 → 353, all green** (3 new: `CvWiringTest` ×2 — `DetectionPolicyCache`
+absent by default, `DetectionPolicyPort` present and reading `false` for every asset by default —
+`CvEnabledWiringTest` ×1 — `DetectionPolicyCache` present when CV is switched on). Green only after
+the `onDetectionResult` ordering fix above; the run before it failed `TrackingAssociateE2ETest`.
+Docker ran, not skipped (real Testcontainers `postgres:16`, Flyway through `V35`, same as every other
+wave in this file).

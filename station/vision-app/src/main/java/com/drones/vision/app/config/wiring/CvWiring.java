@@ -11,6 +11,7 @@ import com.drones.vision.api.live.LiveAndPollDetectionDemand;
 import com.drones.vision.api.live.LiveUpdateRegistry;
 import com.drones.vision.api.support.StreamDetectionSupport;
 import com.drones.vision.app.config.properties.VisionCvProperties;
+import com.drones.vision.app.cv.DetectionPolicyCache;
 import com.drones.vision.app.devsupport.NoopDetectionPort;
 import com.drones.vision.app.geo.TrackProjectionRunner;
 import com.drones.vision.kernel.AssetId;
@@ -23,8 +24,10 @@ import com.drones.vision.learning.domain.model.ModelStatus;
 import com.drones.vision.learning.domain.model.ModelTaskType;
 import com.drones.vision.perception.application.profile.CvProfileService;
 import com.drones.vision.perception.domain.model.PipelineConfig;
+import com.drones.vision.perception.domain.port.DetectionPolicyPort;
 import com.drones.vision.perception.domain.port.DetectionPort;
 import com.drones.vision.perception.domain.port.PulledDetectionPort;
+import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.api.security.CurrentUser;
 import io.grpc.ManagedChannel;
@@ -372,6 +375,67 @@ public class CvWiring {
             return runner != null && runner.hasCameraPose(assetId);
         };
         return new LiveAndPollDetectionDemand(watchingDetections, cvProperties.demand().pollTtl(), hasCameraPose);
+    }
+
+    /**
+     * D1's self-scheduled per-asset {@code DetectionPolicy} cache (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md
+     * wave D1) — see {@link DetectionPolicyCache}'s own javadoc for the staleness/fail-closed
+     * contract. No dedicated {@code vision.cv.policy.enabled} escape hatch: this bean's own existence
+     * is instead gated on the same "is CV switched on at all in this deployment" expression {@link
+     * #cvChannelSupervisor} uses (a per-asset {@code DetectionPolicy} attribute is meaningless when
+     * every stream is wired to {@code NoopDetectionPort} anyway), rather than a second flag whose only
+     * job would be re-stating that same condition.
+     *
+     * <p><b>Found empirically, not by design</b>: an earlier, unconditional version of this bean
+     * spun up one {@link DetectionPolicyCache} background thread (each polling {@link AssetService}
+     * every {@link VisionCvProperties.Policy#refreshInterval()}) per Spring test context — and
+     * Spring's test context cache keeps many contexts, and therefore many such threads, alive
+     * simultaneously across a whole surefire run. That aggregate load intermittently starved {@code
+     * TrackingAssociateE2ETest}'s tight detector-pass timing window (passed in isolation, failed
+     * under the full {@code vision-app} suite) even though {@code TrackingAssociateE2ETest} itself
+     * never touches {@code DetectionPolicy}. Gating this bean the same way {@link
+     * #cvChannelSupervisor} already is removes it from the (large majority of) test contexts that
+     * leave {@link VisionCvProperties#enabled()} at its {@code false} default, exactly as that bean's
+     * own precedent already does for its own background thread.
+     *
+     * <p>Takes {@link AssetService} directly, not deferred behind an {@link ObjectProvider} — unlike
+     * {@link #detectionPolicyPort} below. This bean does not sit on {@code AssetService}'s own
+     * construction path (nothing upstream of {@code AssetService} needs a {@code
+     * DetectionPolicyCache}), so there is no circular-construction hazard here; the hazard only
+     * exists on the <em>consuming</em> side, exactly as {@link #detectionDemandPort}'s own {@code
+     * trackProjectionRunner} parameter documents for {@code TrackProjectionRunner}.
+     */
+    @Bean(initMethod = "start", destroyMethod = "close")
+    @ConditionalOnExpression("${vision.cv.enabled:false} or ${vision.training.enabled:false} "
+            + "or '${vision.cv.frame-transport:push}' == 'pull' or ${vision.geo.visual.enabled:false} "
+            + "or ${vision.cv.registry.enabled:false}")
+    public DetectionPolicyCache detectionPolicyCache(AssetService assetService, VisionCvProperties cvProperties) {
+        return new DetectionPolicyCache(assetService, cvProperties.policy().refreshInterval());
+    }
+
+    /**
+     * Resolves {@link StreamPipeline#updateDetectionPolicy}'s per-tick input from {@link
+     * DetectionPolicyCache}, wired as a wholly separate port from {@link #detectionDemandPort} rather
+     * than folded into {@code LiveAndPollDetectionDemand} as a fourth OR-term — see {@link
+     * DetectionPolicyPort}'s own javadoc for why: {@code StreamPipeline}'s D2 live/inference split
+     * needs a policy signal that widens only the inference+durable gate, never the live gate, and
+     * {@code LiveAndPollDetectionDemand}'s single {@code detectionWanted} boolean feeds live directly
+     * — merging the two would make an {@code ALWAYS} asset's live gate track policy too, exactly the
+     * regression docs/plans/active/ALWAYS-ON-FLOW-PLAN.md §4 warns against.
+     *
+     * <p>{@code detectionPolicyCache.getIfAvailable()} is deliberately called inside the lambda, not
+     * once here at bean-creation time — this bean sits on {@code AssetService}'s own (indirect)
+     * construction path via {@code ApplicationServiceWiring#streamService}, same as {@link
+     * #detectionDemandPort}'s {@code trackProjectionRunner} parameter; eager resolution here would
+     * force {@code AssetService} to construct itself, the same {@code
+     * BeanCurrentlyInCreationException} that parameter's javadoc explains.
+     */
+    @Bean
+    public DetectionPolicyPort detectionPolicyPort(ObjectProvider<DetectionPolicyCache> detectionPolicyCache) {
+        return assetId -> {
+            DetectionPolicyCache cache = detectionPolicyCache.getIfAvailable();
+            return cache != null && cache.alwaysOn(assetId);
+        };
     }
 
     /**

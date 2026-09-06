@@ -85,6 +85,9 @@ import java.util.List;
  * @param profiles               {@code CvProfileCache}'s lazy-reload TTL (docs/plans/active/CV-SETTINGS-PLAN.md
  *                               §3.1, docs/plans/active/CV-SETTINGS-CONTEXT.md's W2 &rarr; W5 handoff);
  *                               defaulted as a whole when absent — see {@link Profiles#cacheTtl()}
+ * @param policy                 {@code DetectionPolicyCache}'s own refresh cadence
+ *                               (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave D1); defaulted as a
+ *                               whole when absent — see {@link Policy#refreshInterval()}
  */
 @ConfigurationProperties(prefix = "vision.cv")
 public record VisionCvProperties(@DefaultValue("false") boolean enabled,
@@ -107,7 +110,8 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
                                   Reconnect reconnect,
                                   Inference inference,
                                   Training training,
-                                  Profiles profiles) {
+                                  Profiles profiles,
+                                  Policy policy) {
 
     static final String DEFAULT_ENDPOINT = "localhost:50051";
     static final String DEFAULT_DETECT_WIDTH = "640";
@@ -169,6 +173,9 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
         if (profiles == null) {
             profiles = new Profiles(Profiles.DEFAULT_CACHE_TTL);
         }
+        if (policy == null) {
+            policy = new Policy(Policy.DEFAULT_REFRESH_INTERVAL);
+        }
         if (!inference.targets().isEmpty()) {
             try {
                 CvTarget.parseAll(inference.targets());
@@ -208,7 +215,7 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
                                Pull pull) {
         this(enabled, endpoint, detectWidth, jpegQuality, wireFormat, frameTransport, responseTimeout,
                 keepAliveTime, keepAliveTimeout, keepAliveWithoutCalls, channelShutdownTimeout, plaintext, upload,
-                registry, pull, false, null, null, null, null, null);
+                registry, pull, false, null, null, null, null, null, null);
     }
 
     /**
@@ -472,5 +479,26 @@ public record VisionCvProperties(@DefaultValue("false") boolean enabled,
      */
     public record Profiles(@DefaultValue("60s") Duration cacheTtl) {
         static final Duration DEFAULT_CACHE_TTL = Duration.ofSeconds(60);
+    }
+
+    /**
+     * {@code DetectionPolicyCache}'s own refresh cadence (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md
+     * wave D1) — this <em>record</em> is always present in {@link VisionCvProperties} regardless of
+     * deployment (no feature flag gates the config shape itself; a per-asset {@code DetectionPolicy}
+     * attribute is behaviourally inert until an operator sets it to {@code always}, so binding the
+     * property costs nothing even when nobody ever touches it). The <em>bean</em> that actually
+     * consumes it, {@code CvWiring#detectionPolicyCache}, is however conditional on CV being switched
+     * on at all in this deployment (mirroring {@code cvChannelSupervisor}'s own precedent) — see that
+     * bean's javadoc. So this record only ever holds the one freshness tunable, same shape as
+     * {@link Profiles}.
+     *
+     * @param refreshInterval how often {@code DetectionPolicyCache} re-lists every asset from {@code
+     *                        AssetService} to refresh which ones have {@code DetectionPolicy.ALWAYS}
+     *                        set; bounds how stale a just-changed policy attribute can be before a
+     *                        stream's next demand-poll tick sees it (see that class's own javadoc for
+     *                        the full staleness accounting). Default 15s
+     */
+    public record Policy(@DefaultValue("15s") Duration refreshInterval) {
+        static final Duration DEFAULT_REFRESH_INTERVAL = Duration.ofSeconds(15);
     }
 }

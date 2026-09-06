@@ -3,6 +3,7 @@ package com.drones.vision.app;
 import com.drones.vision.adapter.cvgrpc.CvChannelSupervisor;
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
 import com.drones.vision.api.controller.ModelRegistryController;
+import com.drones.vision.app.cv.DetectionPolicyCache;
 import com.drones.vision.app.events.DetectionSessionCleanupEventPublisher;
 import com.drones.vision.learning.application.ModelRegistryService;
 import com.drones.vision.perception.domain.port.DetectionPort;
@@ -125,5 +126,18 @@ class CvEnabledWiringTest {
         assertFalse(applicationContext.getBeansOfType(ModelRegistryController.class).isEmpty());
         assertFalse(applicationContext.getBeansOfType(ModelRegistryService.class).isEmpty());
         assertFalse(applicationContext.getBeansOfType(ModelRegistryPort.class).isEmpty());
+    }
+
+    /**
+     * docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave D1: {@code vision.cv.enabled=true} alone is
+     * enough for {@link CvWiring#detectionPolicyCache} to exist — its own {@code
+     * @ConditionalOnExpression} matches the same property this class already turns on, mirroring
+     * {@link #enabledConfigurationBuildsTheCvChannelSupervisorByDefault()}'s own reasoning. See
+     * {@link CvWiringTest#defaultConfigurationBuildsNoDetectionPolicyCache()} for the {@code false}
+     * counterpart.
+     */
+    @Test
+    void enabledConfigurationBuildsTheDetectionPolicyCache() {
+        assertInstanceOf(DetectionPolicyCache.class, applicationContext.getBean(DetectionPolicyCache.class));
     }
 }

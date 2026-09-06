@@ -1,6 +1,6 @@
 # ALWAYS-ON-FLOW — the ingest plane runs, the view plane is asked for
 
-Status: **wave A BUILT 2026-09-06 (ships off); B/C/D SPEC.** Context + verification:
+Status: **waves A, B3 and D1/D2 BUILT 2026-09-06 (all ship off / opt-in); B1/B2, C, D3 SPEC.** Context + verification:
 [`ALWAYS-ON-FLOW-CONTEXT.md`](ALWAYS-ON-FLOW-CONTEXT.md).
 Follows [`E2E-FLOW-AUDIT-2026-09-05.md`](E2E-FLOW-AUDIT-2026-09-05.md), whose S1/U1/N2 shipped the same day.
 
@@ -155,7 +155,18 @@ not a bug fix — so it is recorded here for the owner rather than taken unilate
 |---|---|---|
 | **B1** | Consume the **already-published `fleet` SSE topic**. Retire `/command`'s per-streaming-asset 2 s telemetry poll (`map-store.ts:166`, 200 samples × N assets) — the genuine O(N) loop in the app | Pure win: the server already publishes this and no client listens |
 | **B2** | Add **last-known CV verdict** and a **snapshot reference** to the per-asset state DTO. Today `AssetAttention` carries `openEventCount` — a number, not a label, class, confidence or time — so "what is this camera seeing?" forces a per-stream detections feed | Depends on D2 for the verdict to exist without a viewer |
-| **B3** | **A history endpoint for domain events.** `LiveEvent` (`STREAM_STARTED`, `DEVICE_ONLINE`, `PIPELINE_ERROR`, `LINK_LOST`, `BATTERY_LOW`) has no REST endpoint at all: the bell and `/manage/system` are a pure `computed` over the current `EventSource`'s in-memory log, so they **start empty on every page load and lose everything on an SSE reconnect** | The single biggest blocker to "state and history". An event-based app whose event log dies on F5 is not one |
+| **B3** — **BUILT** | **A history endpoint for domain events.** `LiveEvent` (`STREAM_STARTED`, `DEVICE_ONLINE`, `PIPELINE_ERROR`, `LINK_LOST`, `BATTERY_LOW`) has no REST endpoint at all: the bell and `/manage/system` are a pure `computed` over the current `EventSource`'s in-memory log, so they **start empty on every page load and lose everything on an SSE reconnect** | The single biggest blocker to "state and history". An event-based app whose event log dies on F5 is not one |
+
+**B3 shipped 2026-09-06** — `EventHistoryPort` (vision-platform) + `JpaEventHistory`/`V35` +
+`PersistingEventPublisher` (a decorator, so nothing that raises an event learns a collaborator) +
+`GET /api/system/events?sinceMs&limit`. `DETECTION` is excluded from persistence by volume; the
+durable write runs on a virtual thread and never propagates a failure to the pipeline. Behind
+`vision.events.history.enabled` (default `false`, `true` in docker-compose).
+
+**B3 is capability-only until a web wave consumes it.** Nothing in `vision-web` calls the endpoint,
+so the bell and `/manage/system` still start empty on every page load and still lose everything on
+an SSE reconnect — the defect B3 exists to fix is not yet fixed *for the user*. The remaining work is
+small: backfill on mount and after each SSE reconnect, using `sinceMs` as the cursor.
 
 ### Wave C — the view plane: the UI stops being a live pipe
 
@@ -177,8 +188,8 @@ doing. C is not merely a frontend nicety — it is load shedding.
 
 | # | Change | Note |
 |---|---|---|
-| **D1** | A per-asset **`DetectionPolicy { ON_VIEW, ALWAYS }`**, `ON_VIEW` the default. Implemented as a fourth OR-term in `LiveAndPollDetectionDemand`, structurally identical to the `hasCameraPose` term that already ships | The vocabulary is already specified in `CV-SCALE-PLAN` §S2 (`on-view` / `always`); nothing named that exists in code yet. **Blocker:** `CvProfileRepositoryPort` has zero implementations, so if the policy is to live on `CvProfile` it needs W3 first — hanging it on the asset avoids that dependency |
-| **D2** | **Split the CV gate.** One gate serves both paths today (`StreamPipeline:1200`): with no viewer there is no persistence, no `DETECTION` event and no `DetectionEvent` open/close. Separate them — the **durable** path follows the asset's policy, the **live fan-out** follows viewer demand | This is the actual "event-based application" enabler. Unattended alerting is the whole point of an always-on flow, and today it does not happen |
+| **D1** — **BUILT** | A per-asset **`DetectionPolicy { ON_VIEW, ALWAYS }`**, `ON_VIEW` the default. Implemented as a fourth OR-term in `LiveAndPollDetectionDemand`, structurally identical to the `hasCameraPose` term that already ships | The vocabulary is already specified in `CV-SCALE-PLAN` §S2 (`on-view` / `always`); nothing named that exists in code yet. **Blocker:** `CvProfileRepositoryPort` has zero implementations, so if the policy is to live on `CvProfile` it needs W3 first — hanging it on the asset avoids that dependency |
+| **D2** — **BUILT** | **Split the CV gate.** One gate serves both paths today (`StreamPipeline:1200`): with no viewer there is no persistence, no `DETECTION` event and no `DetectionEvent` open/close. Separate them — the **durable** path follows the asset's policy, the **live fan-out** follows viewer demand | This is the actual "event-based application" enabler. Unattended alerting is the whole point of an always-on flow, and today it does not happen |
 | **D3** | A **fleet-wide inference budget and scheduler**: fair-share, low-rate, round-robin across `ALWAYS` streams, with the budget as configuration and the per-stream achieved rate visible | See §3. Without this, D1/D2 convert a viewer ceiling into a queueing collapse. `maxInFlightInferences` also needs a property key — today it has none |
 
 #### D2 in detail — the gate is three questions, not two
@@ -221,6 +232,33 @@ detection-derived read model on a true→false edge, on the sound reasoning that
 must clear its live read models while its durable path keeps running. Conversely the **inference**
 gate closing must still clear everything, as today. Two edges, two behaviours — the single
 `gateWasOpen` field cannot express that and must become two.
+
+**D1/D2 shipped 2026-09-06.** `DetectionPolicy{ON_VIEW,ALWAYS}` lives in `Asset#attributes` under
+`cv.detection-policy` — no migration, no change to the ArchUnit-pure warehouse leaf, editable through
+the existing `PATCH /api/assets/{id}` and **audited for free** by the attribute diff that endpoint
+already records. `DetectionPolicyPort` is a separate port rather than §4's literal "fourth OR-term in
+`LiveAndPollDetectionDemand`": folding policy into `detectionWanted`'s single boolean would make
+viewer-demand and policy indistinguishable, and D2 requires the live gate to close independently for
+an `ALWAYS` asset. It fails **closed**, opposite to `DetectionDemandPort`'s fail-open — a failed
+policy lookup must never grant free permanent inference fleet-wide.
+
+`ALWAYS` is strictly opt-in and nothing defaults to it, so with no asset opted in the wave is
+behaviourally inert. That inertness is the evidence: every pre-existing test passes unchanged.
+
+**One regression was introduced and caught.** The first cut ran the durable plane before the live
+plane in `onDetectionResult`, putting a synchronous database write between a detection completing and
+the read models a poll observes. It presented as a load-dependent flake (`TrackingAssociateE2ETest`,
+`saw 2` vs `>=3`, passing in isolation) and was briefly diagnosed as pre-existing on the strength of
+two ablations — both of which cleared genuinely innocent targets while the real cause sat elsewhere. A
+baseline run at the preceding commit was green under identical load; restoring live-plane-first fixed
+it. The ordering is now documented as load-bearing in `vision-perception/MODULE.md`.
+
+**D3 remains, and §3 still governs it.** `maxInFlightInferences` is still 2 per stream with no
+property key, and nothing counts inference across streams. `ALWAYS` on more than a handful of streams
+will saturate one cv-service with nothing to warn or throttle. One mitigation fell out for free: an
+`ALWAYS` stream that loses its last viewer has its `rateController` cleared, and `targetFps` floors at
+the configured `inferenceFps`, so an unattended stream runs at its base rate rather than an elevated
+adaptive one.
 
 ---
 

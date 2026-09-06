@@ -216,23 +216,57 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private volatile boolean detectionDemand = true;
 
     /**
-     * Guards {@link #gateWasOpen} (docs/plans/done/CV-DEMAND-PLAN.md &sect;5/&sect;7's gate-close-clearing
-     * correction): {@link #updateConfig} (operator intent, an HTTP-request thread) and {@link
-     * #updateDetectionDemand} (viewer demand, {@code DefaultStreamService}'s demand-poll scheduler
-     * thread) can each close the gate, so the read-compare-write in {@link
-     * #handleDetectionGateTransition()} needs to be atomic across both — without this lock two closes
-     * racing on those threads could each observe the gate as still "open" and both fire the clear, or
-     * an interleaved close/reopen could leave {@link #gateWasOpen} out of sync with reality.
+     * The per-asset {@code DetectionPolicy.ALWAYS} opt-in (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave
+     * D1) — a third, independent OR-term widening {@link #detectionGateOpen()} beyond {@link
+     * #detectionDemand}, deliberately <b>not</b> read by {@link #liveGateOpen()}: this field exists
+     * precisely so inference (and the durable path that follows it) can stay open while nobody is
+     * watching, which is the live plane's whole reason to close. {@code volatile}, written by {@link
+     * #updateDetectionPolicy} from the same {@code DefaultStreamService} demand-poll scheduler thread
+     * {@link #updateDetectionDemand} already writes from, read from the video thread inside {@link
+     * #maybeDetect} via {@link #detectionGateOpen()}.
+     *
+     * <p>Initializes to {@code false} — fail <b>closed</b>, the opposite direction from {@link
+     * #detectionDemand}'s fail-open {@code true}. {@link #detectionDemand}'s default protects
+     * detection that is already running today from stopping if its signal is never wired; this
+     * field's default protects against the opposite mistake — a pipeline whose {@code
+     * DefaultStreamService} was never given a {@code DetectionPolicyPort} (or whose lookup fails)
+     * must fall back to {@code ON_VIEW} (today's only behavior), never to free, uncapped, always-on
+     * inference for every asset. See docs/plans/active/ALWAYS-ON-FLOW-PLAN.md &sect;3: nothing bounds
+     * concurrent inference across streams, so {@code ALWAYS} must stay strictly opt-in.
+     */
+    private volatile boolean detectionPolicyAlwaysOn = false;
+
+    /**
+     * Guards {@link #gateWasOpen}/{@link #liveGateWasOpen} (docs/plans/done/CV-DEMAND-PLAN.md
+     * &sect;5/&sect;7's gate-close-clearing correction, widened by docs/plans/active/ALWAYS-ON-FLOW-PLAN.md
+     * wave D2 to two independently-tracked edges): {@link #updateConfig} (operator intent, an
+     * HTTP-request thread), {@link #updateDetectionDemand} and {@link #updateDetectionPolicy} (both
+     * {@code DefaultStreamService}'s demand-poll scheduler thread) can each close one or both gates,
+     * so the read-compare-write in {@link #handleDetectionGateTransition()} needs to be atomic across
+     * all three — without this lock two closes racing on those threads could each observe a gate as
+     * still "open" and both fire its clear, or an interleaved close/reopen could leave either {@code
+     * *WasOpen} field out of sync with reality.
      */
     private final Object gateLock = new Object();
 
     /**
-     * Last observed value of {@link #detectionGateOpen()}, read/written only under {@link
-     * #gateLock}. Seeded from the constructor's own {@link #config}/{@link #detectionDemand} so the
-     * very first genuine open&rarr;closed edge — not construction itself — is what triggers the
-     * first clear.
+     * Last observed value of {@link #detectionGateOpen()} (the inference/durable gate), read/written
+     * only under {@link #gateLock}. Seeded from the constructor's own {@link #config}/{@link
+     * #detectionDemand}/{@link #detectionPolicyAlwaysOn} so the very first genuine open&rarr;closed
+     * edge — not construction itself — is what triggers the first clear.
      */
     private boolean gateWasOpen;
+
+    /**
+     * Last observed value of {@link #liveGateOpen()} (the live-plane gate, docs/plans/active/
+     * ALWAYS-ON-FLOW-PLAN.md wave D2), read/written only under {@link #gateLock}. Tracked separately
+     * from {@link #gateWasOpen} because the two gates can close on different edges: a {@code
+     * DetectionPolicy.ALWAYS} asset losing its last viewer closes this one while {@link
+     * #gateWasOpen} stays {@code true} (inference/durable keep running) — see {@link
+     * #handleDetectionGateTransition()}. For any asset that has never opted into {@code ALWAYS} (the
+     * default), the two gates always agree and this field simply mirrors {@link #gateWasOpen}.
+     */
+    private boolean liveGateWasOpen;
 
     private final Flow.Publisher<VideoFrame> source;
     private final DetectionPort detectionPort;
@@ -426,9 +460,11 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                 this.pullDetection == null ? DetectionRateWindow.Transport.PUSH : DetectionRateWindow.Transport.PULL);
         this.rateController = new DetectionRateController(settings.adaptiveRate(), settings.cameraHfovDegrees());
         this.backoffNanos = this.detectionBackoffInitialNanos;
-        // Seeded from this.config/this.detectionDemand, both already assigned above -- construction
-        // itself must never look like a close, only a later, genuine open->closed edge should.
+        // Seeded from this.config/this.detectionDemand/this.detectionPolicyAlwaysOn, all already
+        // assigned above -- construction itself must never look like a close, only a later, genuine
+        // open->closed edge should.
         this.gateWasOpen = detectionGateOpen();
+        this.liveGateWasOpen = liveGateOpen();
     }
 
     /**
@@ -568,23 +604,57 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * Which of the two independent detection gates (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.6)
-     * currently explains this stream's boxes-or-no-boxes state — {@link DetectionState#OFF} takes
-     * precedence over {@link DetectionState#IDLE_NO_VIEWERS} when both hold, since the operator's own
-     * choice is the more specific truth: an operator who disabled detection does not need to also be
-     * told nobody is watching. See {@link DetectionState}'s own javadoc for why this reports gating,
-     * never health — a stalled {@code DetectionPort} still reads {@link DetectionState#RUNNING}.
+     * Live-swaps this pipeline's per-asset {@code DetectionPolicy.ALWAYS} opt-in
+     * (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave D1) — the same no-lock, visible-on-the-next-frame
+     * shape as {@link #updateDetectionDemand}, called from the same {@code DefaultStreamService}
+     * demand-poll task, never the video path.
+     *
+     * <p>Unlike {@code demanded}, {@code alwaysOn} going false is <b>never</b> what takes {@link
+     * #liveGateOpen()} from open to closed by itself — it only widens/narrows {@link
+     * #detectionGateOpen()} (the inference/durable gate); see {@link #handleDetectionGateTransition()}
+     * for the two independently-tracked edges this produces.
+     *
+     * @param alwaysOn whether this pipeline's asset currently has {@code DetectionPolicy.ALWAYS} set
+     */
+    public void updateDetectionPolicy(boolean alwaysOn) {
+        this.detectionPolicyAlwaysOn = alwaysOn;
+        handleDetectionGateTransition();
+    }
+
+    /**
+     * @return whether this pipeline's asset currently has {@code DetectionPolicy.ALWAYS} set
+     *         (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave D1) — a volatile read, {@code false}
+     *         until/unless {@link #updateDetectionPolicy} ever says otherwise, so a pipeline whose
+     *         {@code DefaultStreamService} has no {@code DetectionPolicyPort} wired never observes
+     *         this as {@code true}
+     */
+    public boolean detectionPolicyAlwaysOn() {
+        return detectionPolicyAlwaysOn;
+    }
+
+    /**
+     * Which of {@code StreamPipeline}'s detection gates (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.6,
+     * widened by docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave D2) currently explains this stream's
+     * boxes-or-no-boxes state — {@link DetectionState#OFF} takes precedence over the other two when
+     * it holds, since the operator's own choice is the more specific truth: an operator who disabled
+     * detection does not need to also be told nobody is watching. See {@link DetectionState}'s own
+     * javadoc for why this reports gating, never health — a stalled {@code DetectionPort} still reads
+     * {@link DetectionState#RUNNING}/{@link DetectionState#RUNNING_UNWATCHED}.
      *
      * @return {@link DetectionState#OFF} when {@link PipelineConfig#detectionEnabled()} is {@code
-     *         false}; {@link DetectionState#IDLE_NO_VIEWERS} when enabled but {@link
-     *         #detectionDemand()} is currently {@code false}; {@link DetectionState#RUNNING} when
-     *         both gates are open
+     *         false}; {@link DetectionState#RUNNING} when {@link #liveGateOpen()} holds; {@link
+     *         DetectionState#RUNNING_UNWATCHED} when only the wider {@link #detectionGateOpen()}
+     *         holds (a {@code DetectionPolicy.ALWAYS} asset with no current viewer); {@link
+     *         DetectionState#IDLE_NO_VIEWERS} when neither does
      */
     public DetectionState detectionState() {
         if (!config.detectionEnabled()) {
             return DetectionState.OFF;
         }
-        return detectionDemand ? DetectionState.RUNNING : DetectionState.IDLE_NO_VIEWERS;
+        if (liveGateOpen()) {
+            return DetectionState.RUNNING;
+        }
+        return detectionGateOpen() ? DetectionState.RUNNING_UNWATCHED : DetectionState.IDLE_NO_VIEWERS;
     }
 
     /**
@@ -925,28 +995,70 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * The same two-gate conjunction {@link #maybeDetect} and {@link PullResultSubscriber#onNext}
-     * both gate on (docs/plans/done/CV-DEMAND-PLAN.md &sect;1, &sect;3.2): {@link
-     * PipelineConfig#detectionEnabled()} (the operator's own per-stream choice) <b>and</b> {@link
-     * #detectionDemand()} (the system-derived "someone is actually watching" fact). Pulled into one
-     * method, read from both places, so push and pull mode can never drift out of sync about what
-     * "detection is gated off" means — see the class javadoc's pull-mode section and each caller's
-     * own javadoc for what each does once the gate is closed.
+     * The <b>inference</b> gate (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md &sect;4 "the gate is three
+     * questions, not two") — {@link #maybeDetect} and {@link PullResultSubscriber#onNext} both gate
+     * on this, and {@link #onDetectionResult} re-checks it on entry: {@link
+     * PipelineConfig#detectionEnabled()} (the operator's own per-stream choice) <b>and</b> ({@link
+     * #detectionDemand()} (the system-derived "someone is actually watching" fact) <b>or</b> {@link
+     * #detectionPolicyAlwaysOn} (this asset's {@code DetectionPolicy.ALWAYS} opt-in, wave D1)).
+     * A strict superset of the pre-D2 single gate — an asset that has never opted into {@code
+     * ALWAYS} sees {@code detectionPolicyAlwaysOn} permanently {@code false}, so this collapses back
+     * to exactly {@link #liveGateOpen()} and nothing that infers today stops inferring.
+     *
+     * <p>Persistence, the {@code DETECTION} platform event and {@code DetectionEventEngine} — the
+     * <b>durable</b> plane — gate on this same method inside {@link #onDetectionResult} ("durable
+     * follows inference"); the narrower {@link #liveGateOpen()} governs only the live read models a
+     * viewer's screen reads. See that method's own javadoc for exactly where the two are told apart.
      */
     private boolean detectionGateOpen() {
+        return config.detectionEnabled() && (detectionDemand || detectionPolicyAlwaysOn);
+    }
+
+    /**
+     * The <b>live</b> gate (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md &sect;4) — exactly today's single
+     * gate, unchanged: {@link PipelineConfig#detectionEnabled()} <b>and</b> {@link
+     * #detectionDemand()} alone, deliberately never widened by {@link #detectionPolicyAlwaysOn}. A
+     * {@code DetectionPolicy.ALWAYS} asset's whole point is inference that outlives its last viewer,
+     * which means this narrower gate is exactly what must still be able to close for it — see {@link
+     * #onDetectionResult} for where this governs {@link #latestDetections}/{@link #extrapolator}/
+     * {@link #trackBook}/{@link #trackingStats}/{@link #followTracker}/{@link #rateController}/{@link
+     * #liveUpdatePublisherPort}.
+     */
+    private boolean liveGateOpen() {
         return config.detectionEnabled() && detectionDemand;
     }
 
     /**
-     * Detects a true&rarr;false transition of {@link #detectionGateOpen()} and, exactly when one
-     * occurs, clears every piece of detection-derived state a consumer could otherwise keep reading
-     * as fresh ({@link #clearDetectionDerivedState()}) — docs/plans/done/CV-DEMAND-PLAN.md
-     * &sect;5/&sect;7's gate-close-clearing correction: turning detection off (or losing the last
-     * viewer) means there will never be another answer, so holding the last one and re-serving it
-     * forever — the reported "turn on and off doesn't work" complaint — asserts something false.
-     * Called from both {@link #updateConfig} (operator intent) and {@link #updateDetectionDemand}
-     * (viewer demand); the gate has two independent inputs and either can be the one that closes it,
-     * so the transition check lives here once instead of being duplicated at each call site.
+     * Detects a true&rarr;false transition of {@link #detectionGateOpen()} (inference/durable) and of
+     * {@link #liveGateOpen()} (live) independently, and clears exactly the state each one's closing
+     * makes stale (docs/plans/done/CV-DEMAND-PLAN.md &sect;5/&sect;7's gate-close-clearing correction,
+     * widened by docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave D2 to two edges): turning detection off
+     * (or losing the last viewer, or the last thing keeping inference demanded) means there will
+     * never be another answer on that plane, so holding the last one and re-serving it forever — the
+     * reported "turn on and off doesn't work" complaint — asserts something false. Called from
+     * {@link #updateConfig} (operator intent), {@link #updateDetectionDemand} (viewer demand) and
+     * {@link #updateDetectionPolicy} (this asset's {@code ALWAYS} opt-in); any of the three can close
+     * either gate, so the transition check lives here once instead of being duplicated at each call
+     * site.
+     *
+     * <p><b>Two edges, two behaviors, checked in this order:</b>
+     * <ol>
+     *   <li>{@link #gateWasOpen} true&rarr;false (inference closes): {@link
+     *       #clearDetectionDerivedState()} — the full clear. Inference itself is stopping, so
+     *       nothing downstream of it — live <em>or</em> durable — will ever get a fresher answer
+     *       until it reopens. This is the only edge an asset that has never opted into {@code
+     *       ALWAYS} can ever take, so its behavior is byte-identical to before wave D2.</li>
+     *   <li>Otherwise, {@link #liveGateWasOpen} true&rarr;false (live closes while inference stays
+     *       open): {@link #clearLiveDerivedState()} — the live-only clear. This is reachable only for
+     *       a {@code DetectionPolicy.ALWAYS} asset losing its last viewer: durable persistence keeps
+     *       running (inference is still demanded), but there is no screen left to hold a fresh
+     *       answer for, so the live read models are wiped exactly as they would be if inference had
+     *       stopped too.</li>
+     * </ol>
+     * The {@code else} is deliberate, not an optimization: when both gates close on the same call
+     * (the ordinary, non-{@code ALWAYS} case), only the full clear runs — it already covers
+     * everything the live-only clear would, and running both would be a harmless but confusing
+     * double-clear of the same fields.
      *
      * <p>This is genuinely different from an <b>outage</b> ({@link #onDetectionFailure}): during an
      * outage the system is still trying and simply has no fresher answer <i>yet</i>, so holding the
@@ -954,22 +1066,25 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * Gotcha in this module's {@code MODULE.md}). A closed gate has no "yet" — nothing will try again
      * until it reopens — so the two cases clear differently on purpose.
      *
-     * <p>Keyed off {@link #detectionGateOpen()}'s current value compared against the <em>last
-     * observed</em> one ({@link #gateWasOpen}), not "which setter ran": {@link #updateConfig} is
-     * called for plain confidence/fps/label-filter patches too, and {@link #updateDetectionDemand} is
-     * called on every demand-poll tick regardless of whether demand actually changed, so only a
-     * genuine open&rarr;closed <i>edge</i> may clear anything — a repeated {@code false} (an operator
-     * who already turned detection off patching the confidence threshold, or a poll tick
-     * re-confirming "still nobody watching" every 2s) must be a no-op here, not a re-clearing thrash.
-     * {@link #gateLock} makes the read-compare-write atomic across the two callers' different threads.
+     * <p>Keyed off each gate's current value compared against its own <em>last observed</em> one
+     * ({@link #gateWasOpen}/{@link #liveGateWasOpen}), not "which setter ran": {@link #updateConfig}
+     * is called for plain confidence/fps/label-filter patches too, and {@link #updateDetectionDemand}/
+     * {@link #updateDetectionPolicy} are called on every demand-poll tick regardless of whether
+     * anything actually changed, so only a genuine open&rarr;closed <i>edge</i> may clear anything —
+     * a repeated {@code false} must be a no-op here, not a re-clearing thrash. {@link #gateLock}
+     * makes the read-compare-write atomic across the callers' different threads.
      */
     private void handleDetectionGateTransition() {
         boolean open = detectionGateOpen();
+        boolean liveOpen = liveGateOpen();
         synchronized (gateLock) {
             if (gateWasOpen && !open) {
                 clearDetectionDerivedState();
+            } else if (liveGateWasOpen && !liveOpen) {
+                clearLiveDerivedState();
             }
             gateWasOpen = open;
+            liveGateWasOpen = liveOpen;
         }
     }
 
@@ -979,10 +1094,16 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * #extrapolator}), the track book/stats, the follow tracker, and the rate/latency windows.
      * Shared by two call sites that reach it for
      * different reasons — {@link #updateConfig}'s model-id re-arm and {@link
-     * #handleDetectionGateTransition}'s gate close — both boiling down to the same fact: nothing
-     * already held describes what this pipeline is about to (or will never again) produce. A held
-     * {@code FOLLOW} lock is no exception: its bound {@code trackId} was allocated by whatever the
-     * detector was feeding before the re-arm/close, so it means nothing after.
+     * #handleDetectionGateTransition}'s <em>inference</em> gate close — both boiling down to the same
+     * fact: nothing already held describes what this pipeline is about to (or will never again)
+     * produce. A held {@code FOLLOW} lock is no exception: its bound {@code trackId} was allocated by
+     * whatever the detector was feeding before the re-arm/close, so it means nothing after.
+     *
+     * <p>Includes {@link #pipelineLatency}/{@link #detectionRate} — detector-health windows tied to
+     * whether inference itself is running, not to whether anyone is watching it — which is exactly
+     * why {@link #clearLiveDerivedState()} (the narrower, live-only counterpart, wave D2) leaves them
+     * alone: an {@code ALWAYS} asset losing its last viewer keeps inferring, so these two windows keep
+     * being meaningfully written to and must not be wiped out from under that ongoing activity.
      */
     private void clearDetectionDerivedState() {
         extrapolator.reset();
@@ -996,13 +1117,35 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * Gated first — before the outage/in-flight logic below — on {@link #detectionGateOpen()}: either
-     * conjunct being {@code false} returns immediately, so a disabled or undemanded stream spends
-     * zero CPU on inference <i>and</i> stops probing during an outage too — nothing below this check
-     * ever runs. The two gates are deliberately independent conjuncts rather than one merged flag —
-     * see {@code DetectionDemandPort}'s own javadoc for why collapsing them would be wrong. Either
-     * one flipping back resumes detection on the next sampled frame, exactly where the (frozen,
-     * untouched) outage/backoff state left off.
+     * The <b>live-plane-only</b> subset of {@link #clearDetectionDerivedState()}
+     * (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave D2) — everything a viewer's screen reads, minus
+     * {@link #pipelineLatency}/{@link #detectionRate} (see that method's own javadoc for why those
+     * stay untouched here) and minus anything durable (persistence/events are governed by {@link
+     * #detectionGateOpen()} alone — see {@link #onDetectionResult}). Called from {@link
+     * #handleDetectionGateTransition()} on {@link #liveGateOpen()}'s own true&rarr;false edge while
+     * the wider {@link #detectionGateOpen()} stays open: a {@code DetectionPolicy.ALWAYS} stream
+     * losing its last viewer takes exactly this path — durable persistence keeps running, the
+     * screen's own state is wiped because there is no screen left to be wrong on.
+     */
+    private void clearLiveDerivedState() {
+        extrapolator.reset();
+        latestDetections = List.of();
+        trackBook.clear();
+        trackingStats.clear();
+        followTracker.clear();
+        rateController.clear();
+    }
+
+    /**
+     * Gated first — before the outage/in-flight logic below — on {@link #detectionGateOpen()}: {@link
+     * PipelineConfig#detectionEnabled()} being {@code false} returns immediately, and so does neither
+     * {@link #detectionDemand()} nor {@link #detectionPolicyAlwaysOn} holding — so a disabled or
+     * (undemanded and not {@code DetectionPolicy.ALWAYS}) stream spends zero CPU on inference
+     * <i>and</i> stops probing during an outage too — nothing below this check ever runs. These are
+     * deliberately independent inputs rather than one merged flag — see {@code
+     * DetectionDemandPort}'s/{@code DetectionPolicyPort}'s own javadocs for why collapsing them would
+     * be wrong. Any one flipping this gate back open resumes detection on the next sampled frame,
+     * exactly where the (frozen, untouched) outage/backoff state left off.
      *
      * <p>Also gated on {@link #pullDetection} being absent (docs/plans/done/MEDIA-SOT-PLAN.md wave M5): in
      * pull mode the worker runs its own (ported) deadline sampler and decides when to detect, so this
@@ -1171,13 +1314,16 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * Fans out one completed result — after enforcing {@link PipelineConfig#labelFilter()}/{@link
      * PipelineConfig#labelDenyFilter()} exactly once, centrally, here (docs/plans/done/CV-CONTROL-PLAN.md
      * &sect;A, the dormant-field fix; deny-list joined docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2) —
-     * to every downstream consumer: {@link #latestDetections()}, {@link #extrapolator}, {@link
-     * #trackBook}, {@link #trackingStats}, {@link #followTracker}, {@link #eventEngine}, {@link
-     * #liveUpdatePublisherPort}, and persistence/the {@code DETECTION} event. Filtering once here,
-     * before any of those, is what
-     * makes every consumer see the same filtered set uniformly instead of each having to know about
-     * {@code labelFilter}/{@code labelDenyFilter} itself — screen, alerts and recording all stay
-     * consistent because there is exactly one drop site.
+     * to every downstream consumer, split across two independent planes (docs/plans/active/
+     * ALWAYS-ON-FLOW-PLAN.md &sect;4 "the gate is three questions, not two"): <b>durable</b> ({@link
+     * #eventEngine}, persistence/the {@code DETECTION} event), gated on {@link #detectionGateOpen()}
+     * alone ("durable follows inference"), then <b>live</b> ({@link #latestDetections()}, {@link
+     * #extrapolator}, {@link #trackBook}, {@link #trackingStats}, {@link #followTracker}, {@link
+     * #rateController}, {@link #liveUpdatePublisherPort}), additionally gated on {@link
+     * #liveGateOpen()}. Filtering once here, before either plane, is what makes every consumer see
+     * the same filtered set uniformly instead of each having to know about {@code labelFilter}/{@code
+     * labelDenyFilter} itself — screen, alerts and recording all stay consistent because there is
+     * exactly one drop site.
      *
      * <p>This list is a <b>fan-out of consumers by design</b>: adding one is not a new
      * responsibility for this class (TRACKING-ORCHESTRATION.md &sect;2.3). The tracking work
@@ -1185,33 +1331,54 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * DetectionExtrapolator} so the decomposition this class is queued for inherits well-shaped
      * perception stages rather than a fatter method.
      *
-     * <p><b>Re-checks {@link #detectionGateOpen()} on entry</b> (docs/plans/done/CV-DEMAND-PLAN.md
-     * &sect;5/&sect;7): both callers already gate before reaching here — {@link #maybeDetect} before
+     * <p><b>Re-checks both gates on entry, independently</b> (docs/plans/done/CV-DEMAND-PLAN.md
+     * &sect;5/&sect;7, widened by docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave D2): both callers
+     * already gate on {@link #detectionGateOpen()} before reaching here — {@link #maybeDetect} before
      * submitting, {@link PullResultSubscriber#onNext} before forwarding — but a push-mode inference
-     * submitted while the gate was open can complete on an arbitrary executor thread ({@link
-     * #submitDetection}'s {@code whenComplete}) <i>after</i> the gate has since closed and {@link
-     * #handleDetectionGateTransition()} has already cleared this pipeline's state. Applying such a
-     * result here would silently resurrect exactly what was just cleared, so a closed gate drops it
-     * instead — symmetrically with the drop {@link PullResultSubscriber#onNext} already does for the
-     * (much narrower) equivalent window in pull mode. This does not touch the outage/backoff
-     * bookkeeping in {@link #onDetectionSuccess}, which runs before this call regardless of the gate —
-     * detector health is a different, deliberately gate-independent concern (see the outage Gotcha).
+     * submitted while a gate was open can complete on an arbitrary executor thread ({@link
+     * #submitDetection}'s {@code whenComplete}) <i>after</i> that gate has since closed and {@link
+     * #handleDetectionGateTransition()} has already cleared the state it governs. This race now
+     * exists separately for each gate: the leading {@link #detectionGateOpen()} check below drops the
+     * whole result (matching {@link PullResultSubscriber#onNext}'s own drop for pull mode) if
+     * inference itself closed in the meantime, and the {@link #liveGateOpen()} read beside it drops
+     * only the live half if just the viewer left (the {@code DetectionPolicy.ALWAYS} case) — either
+     * way, applying a stale plane's update here would silently resurrect exactly what {@link
+     * #handleDetectionGateTransition()} just cleared.
+     *
+     * <p>Both gates are read <em>once</em>, together, at the top rather than re-read around each
+     * plane. That leaves the same check-then-apply window this method has always had (pre-D2 it read
+     * its single gate once in exactly this position), so the race is no wider than the one already
+     * accepted — whereas re-reading the live gate after the durable write would widen the observable
+     * gap to a whole database round trip, which is the defect the body's own comment records. This does not touch the outage/backoff
+     * bookkeeping in {@link #onDetectionSuccess}, which runs before this call regardless of either
+     * gate — detector health is a different, deliberately gate-independent concern (see the outage
+     * Gotcha).
      */
     private void onDetectionResult(DetectionResult result) {
         if (!detectionGateOpen()) {
             return;
         }
         DetectionResult filtered = applyLabelFilters(result);
-        latestDetections = filtered.detections();
-        extrapolator.accept(filtered);
-        trackBook.accept(filtered);
-        trackingStats.accept(filtered);
-        followTracker.accept(filtered);
-        rateController.observeDetections(filtered.detections(), config.tracking().redetectIouPercent());
+        // Live plane FIRST, durable plane after -- the pre-D2 order, restored deliberately and not
+        // merely for diff minimality. detectionRepositoryPort#save is synchronous I/O, and the live
+        // read models below are what a polling client observes; running the write between a
+        // detection completing and those updates makes every read model lag by one database round
+        // trip. That is observable, not theoretical: it cost TrackingAssociateE2ETest a detector
+        // pass (`saw 2`, expected >=3) on every full-suite run. Both planes gate independently, so
+        // the order between them is free -- and cheap in-memory updates belong before slow I/O.
+        boolean live = liveGateOpen();
+        if (live) {
+            latestDetections = filtered.detections();
+            extrapolator.accept(filtered);
+            trackBook.accept(filtered);
+            trackingStats.accept(filtered);
+            followTracker.accept(filtered);
+            rateController.observeDetections(filtered.detections(), config.tracking().redetectIouPercent());
+        }
         if (eventEngine != null) {
             eventEngine.accept(filtered);
         }
-        if (liveUpdatePublisherPort != null && assetId != null) {
+        if (live && liveUpdatePublisherPort != null && assetId != null) {
             liveUpdatePublisherPort.publishDetections(assetId, filtered);
         }
         if (!filtered.detections().isEmpty()) {
@@ -1293,41 +1460,49 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * time, mirroring this pipeline's own video-path backpressure discipline ({@link #onSubscribe}).
      *
      * <p><b>Gated on {@link #detectionGateOpen()}</b> (docs/plans/done/CV-DEMAND-PLAN.md &sect;5's
-     * "one honest gap", closed at the application layer): in pull mode the worker owns its own
-     * sampling loop, so {@link #maybeDetect} never runs for this pipeline and this is the only place
-     * left to apply the operator/demand gate. Before this gate existed every arriving result was
-     * forwarded unconditionally regardless of {@link PipelineConfig#detectionEnabled()} or {@link
-     * #detectionDemand()} — {@link #detectionState()} could read {@code OFF} while boxes kept
-     * arriving, because nothing between the worker and the consumer ever checked. A gated-off result
-     * is <b>dropped, not buffered</b> — this project's failsafe rule is newest-data-wins (see
-     * CLAUDE.md &sect;9), and a result held during an off period would already be stale by the time
-     * detection resumes, so there is nothing worth keeping it for.
+     * "one honest gap", closed at the application layer; widened to include {@code
+     * DetectionPolicy.ALWAYS} by docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave D2): in pull mode the
+     * worker owns its own sampling loop, so {@link #maybeDetect} never runs for this pipeline and
+     * this is the only place left to apply the operator/demand/policy gate. Before this gate existed
+     * every arriving result was forwarded unconditionally regardless of {@link
+     * PipelineConfig#detectionEnabled()} or {@link #detectionDemand()} — {@link #detectionState()}
+     * could read {@code OFF} while boxes kept arriving, because nothing between the worker and the
+     * consumer ever checked. A gated-off result is <b>dropped, not buffered</b> — this project's
+     * failsafe rule is newest-data-wins (see CLAUDE.md &sect;9), and a result held during an off
+     * period would already be stale by the time detection resumes, so there is nothing worth keeping
+     * it for.
      *
-     * <p><b>{@link #recordPullTelemetry} is skipped along with the forward</b>, not just {@link
-     * #onDetectionResult} — deliberately, not merely for symmetry. The worker genuinely did the
-     * decode/inference work behind a gated-off result, but {@link #detectionRate} is a <i>consumer-
-     * facing</i> read model, the counterpart {@link #detectionState()} sits beside on the same
-     * response: recording it here would report a healthy {@code submittedFps} for a stream the state
-     * says is {@code OFF}, reintroducing the exact class of lie this gate exists to close, just moved
-     * from the video overlay into the rate panel instead of fixed. Push mode already sets this
-     * precedent unprompted — {@link #maybeDetect}'s own early return means {@link #detectionRate}
-     * never observes a single sample while a push stream is gated off, so a gated pull stream now
-     * reports the same "nothing submitted" honesty. The worker still burns the CPU regardless (a
-     * cross-language follow-up wave, not fixable from here — see docs/plans/done/CV-DEMAND-PLAN.md
-     * &sect;5); that cost is real but is not this read model's job to surface.
+     * <p><b>Wave D2 fix (Finding 6):</b> before this gate widened, a {@code DetectionPolicy.ALWAYS}
+     * stream with no current viewer paid for the worker's continuous inference and then discarded
+     * every result here — the cost of always-on with none of the benefit. Because {@link
+     * #detectionGateOpen()} now ORs in {@link #detectionPolicyAlwaysOn}, such a stream's results are
+     * forwarded to {@link #onDetectionResult}, which itself keeps only the durable half open (see
+     * that method's own javadoc) — the JVM finally keeps what it already paid for.
+     *
+     * <p><b>{@link #recordPullTelemetry} runs whenever the forward does</b>, not just when {@link
+     * #liveGateOpen()} also holds — deliberately, not merely for symmetry. The worker genuinely did
+     * the decode/inference work behind a forwarded result, and with the wave D2 fix above that work
+     * is now a legitimately-demanded inference (viewer or {@code ALWAYS} policy), so {@link
+     * #detectionRate}/{@link #pipelineLatency} recording it is honest, not a lie about a stream the
+     * live-facing {@link #detectionState()} may still read as {@link
+     * DetectionState#RUNNING_UNWATCHED} rather than fully {@code RUNNING}. Only a result arriving
+     * while {@link #detectionGateOpen()} itself is closed (genuinely nothing wants inference) is
+     * skipped along with the forward — push mode sets this same precedent via {@link
+     * #maybeDetect}'s own early return.
      *
      * <p><b>{@link #latestDetections}/{@link #extrapolator}/{@link #trackBook} are cleared</b> the
-     * moment the gate closes, in both transports alike — not merely left to freeze. This class's
-     * first cut left them frozen at their last value, reasoning (wrongly) that push mode's own
-     * behavior was the reference to match; it was instead a shared defect, not a precedent, per
-     * CLAUDE.md &sect;9 ("newest data ... should be used, even if previous is still available"). An
-     * outage genuinely differs — the detector is still trying and simply has no fresher answer
-     * <i>yet</i>, so holding the last one there is honest (see the class javadoc's error-handling
-     * section) — but a closed gate has no "yet": nothing will try again until it reopens, so holding
-     * the last result and re-serving it to every poll forever asserts something false. The clearing
-     * itself happens in {@link #handleDetectionGateTransition()}, called from both {@link
-     * #updateConfig} and {@link #updateDetectionDemand} on whichever one detects the open&rarr;closed
-     * edge, so this subscriber does not duplicate it — it only has to stop forwarding.
+     * moment the <em>live</em> gate closes, in both transports alike — not merely left to freeze.
+     * This class's first cut left them frozen at their last value, reasoning (wrongly) that push
+     * mode's own behavior was the reference to match; it was instead a shared defect, not a
+     * precedent, per CLAUDE.md &sect;9 ("newest data ... should be used, even if previous is still
+     * available"). An outage genuinely differs — the detector is still trying and simply has no
+     * fresher answer <i>yet</i>, so holding the last one there is honest (see the class javadoc's
+     * error-handling section) — but a closed gate has no "yet": nothing will try again until it
+     * reopens, so holding the last result and re-serving it to every poll forever asserts something
+     * false. The clearing itself happens in {@link #handleDetectionGateTransition()}, called from
+     * {@link #updateConfig}, {@link #updateDetectionDemand} and {@link #updateDetectionPolicy} on
+     * whichever one detects an open&rarr;closed edge on either gate, so this subscriber does not
+     * duplicate it — it only has to stop forwarding.
      *
      * <p>{@code onError}/{@code onComplete} reuse {@link #handleError}/{@link #close()} exactly as the
      * video-path {@link Flow.Subscriber} methods do — in practice these fire only when {@link

@@ -6,6 +6,7 @@ import com.drones.vision.perception.application.pipeline.UsageTracker;
 import com.drones.vision.perception.domain.port.DetectionDemandPort;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
+import com.drones.vision.perception.domain.port.DetectionPolicyPort;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -38,6 +39,13 @@ import java.util.Optional;
  *                                      detection (docs/plans/done/MEDIA-SOT-PLAN.md wave M5, switch B)
  * @param detectionDemandPort          empty means the demand-poll task is never scheduled, so every
  *                                      stream is fail-open on demand (docs/plans/done/CV-DEMAND-PLAN.md §3.3)
+ * @param detectionPolicyPort          empty means every stream's {@code DetectionPolicy} reads as
+ *                                      {@code ON_VIEW} forever — no asset can ever widen its
+ *                                      inference gate to {@code ALWAYS} (docs/plans/active/
+ *                                      ALWAYS-ON-FLOW-PLAN.md wave D1). Consulted on the same
+ *                                      demand-poll tick as {@link #detectionDemandPort} when either
+ *                                      is present — the two are independently optional, so either
+ *                                      one alone still schedules the poll task
  * @param streamStateObserver           notified on every computed {@code StreamState} transition
  *                                      (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.2 C6);
  *                                      never {@code null} — {@link StreamStateObserver#NOOP} is the
@@ -50,6 +58,7 @@ public record DefaultStreamServiceSettings(Optional<UsageTracker> usageTracker,
                                             StreamPipelineSettings pipelineSettings,
                                             Optional<PullDetectionSettings> pullDetectionSettings,
                                             Optional<DetectionDemandPort> detectionDemandPort,
+                                            Optional<DetectionPolicyPort> detectionPolicyPort,
                                             StreamStateObserver streamStateObserver) {
 
     public DefaultStreamServiceSettings {
@@ -59,6 +68,7 @@ public record DefaultStreamServiceSettings(Optional<UsageTracker> usageTracker,
         Objects.requireNonNull(pipelineSettings, "pipelineSettings must not be null");
         Objects.requireNonNull(pullDetectionSettings, "pullDetectionSettings must not be null");
         Objects.requireNonNull(detectionDemandPort, "detectionDemandPort must not be null");
+        Objects.requireNonNull(detectionPolicyPort, "detectionPolicyPort must not be null");
         Objects.requireNonNull(streamStateObserver, "streamStateObserver must not be null");
     }
 
@@ -68,6 +78,7 @@ public record DefaultStreamServiceSettings(Optional<UsageTracker> usageTracker,
      */
     public static DefaultStreamServiceSettings defaults() {
         return new DefaultStreamServiceSettings(Optional.empty(), Optional.empty(), Optional.empty(),
-                StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty(), StreamStateObserver.NOOP);
+                StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty(), Optional.empty(),
+                StreamStateObserver.NOOP);
     }
 }
