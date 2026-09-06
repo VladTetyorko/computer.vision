@@ -609,5 +609,50 @@ describe('MarksStore', () => {
       expect(api.listMapMarks).toHaveBeenCalledTimes(1);
       expect(scheduleFn).not.toHaveBeenCalled(); // no safety-net poll needed — live is already open
     });
+
+    /**
+     * The gap the D1 table does not describe, and the reason `applyTransport`'s zero-consumer
+     * branch clears `liveGated` rather than only stopping the poll.
+     *
+     * A live outage that begins *and ends* while nothing is mounted delivers no deltas and leaves
+     * no trace: the unconditional fold never runs (there was nothing on the wire), and the poll is
+     * legitimately stopped. If the store still remembered "we were live", the next `activate()`
+     * would take the `>0 | true | live → nothing` row and skip its reconcile, leaving the operator
+     * looking at data missing everything the outage swallowed, with no repair until the *next*
+     * disconnect. Clearing the flag on deactivate also restores `activate()`'s own documented
+     * "first consumer since the last release re-fetches" contract.
+     */
+    it('reconciles on the next activate() when an outage began and ended while released', async () => {
+      const api = stubApi({ listMapMarks: vi.fn().mockResolvedValue([mark()]) });
+      const { store, live } = create(api);
+      await flush();
+      TestBed.tick();
+
+      live.connectionState.set('open');
+      TestBed.tick();
+      await flush();
+
+      store.release();
+      api.listMapMarks.mockClear();
+
+      // The whole outage happens with nothing mounted — no deltas are delivered, and a released
+      // store must stay silent throughout.
+      live.connectionState.set('closed');
+      TestBed.tick();
+      await flush();
+      live.connectionState.set('open');
+      TestBed.tick();
+      await flush();
+      expect(api.listMapMarks).not.toHaveBeenCalled();
+
+      store.activate();
+      TestBed.tick();
+      await flush();
+
+      expect(api.listMapMarks).toHaveBeenCalledTimes(1);
+
+      store.release();
+    });
+
   });
 });

@@ -282,6 +282,12 @@ export class MarksStore {
   private applyTransport(liveAvailable: boolean): void {
     if (this.activeConsumers === 0) {
       this.stopPolling();
+      // Forget the transport mode too. A live outage that starts *and ends* while nothing is
+      // mounted delivers no deltas and leaves no trace, so a stale `liveGated` would make the next
+      // `activate()` skip its reconcile and show data missing everything the outage swallowed.
+      // Clearing it here also restores `activate()`'s documented "first consumer re-fetches"
+      // contract, which the live gate would otherwise have quietly weakened.
+      this.liveGated = false;
       return;
     }
     if (liveAvailable) {
