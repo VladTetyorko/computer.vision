@@ -1,7 +1,11 @@
 package com.drones.vision.app.config.wiring;
 
+import com.drones.vision.app.config.properties.VisionTelemetryProperties;
 import com.drones.vision.app.config.properties.VisionUsageProperties;
+import com.drones.vision.app.usage.TelemetryPinRunner;
 import com.drones.vision.app.usage.UsageIdleCloseRunner;
+import com.drones.vision.perception.application.pipeline.UsageTracker;
+import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.usage.DefaultUsageIdleCloseService;
 import com.drones.vision.warehouse.application.usage.IdleUsageCloseSettings;
 import com.drones.vision.warehouse.application.usage.UsageIdleCloseService;
@@ -27,7 +31,7 @@ import org.springframework.context.annotation.Configuration;
  * fix carries no enable flag.
  */
 @Configuration
-@EnableConfigurationProperties(VisionUsageProperties.class)
+@EnableConfigurationProperties({VisionUsageProperties.class, VisionTelemetryProperties.class})
 public class UsageWiringConfiguration {
 
     @Bean
@@ -48,5 +52,23 @@ public class UsageWiringConfiguration {
     public UsageIdleCloseRunner usageIdleCloseRunner(UsageIdleCloseService usageIdleCloseService,
                                                        VisionUsageProperties properties) {
         return new UsageIdleCloseRunner(usageIdleCloseService, properties);
+    }
+
+    /**
+     * ALWAYS-ON-FLOW wave A1 — keeps every in-service asset's telemetry claimed, so a link is live
+     * because the aircraft exists rather than because somebody is watching it.
+     *
+     * <p>{@link UsageTracker} is injected directly rather than through an {@code ObjectProvider}
+     * (the defensive idiom {@code StreamLifecycleWiring#idleStreamReaper} uses): that guard exists
+     * because the reaper depends on {@code StreamService}, and {@code UsageTracker} sits on {@code
+     * StreamService}'s own construction path, so resolving it mid-construction closed a cycle. This
+     * bean is a pure leaf — it depends on {@link AssetService} and {@link UsageTracker} and nothing
+     * depends back on it — so there is no cycle to break, and a lazy provider here would only hide
+     * a wiring mistake instead of failing fast at startup.
+     */
+    @Bean(initMethod = "start", destroyMethod = "close")
+    public TelemetryPinRunner telemetryPinRunner(AssetService assetService, UsageTracker usageTracker,
+                                                   VisionTelemetryProperties properties) {
+        return new TelemetryPinRunner(assetService, usageTracker, properties);
     }
 }

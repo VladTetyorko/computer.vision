@@ -33,7 +33,7 @@ com.drones.vision.app
                          LiveUpdateDiscoveryInboxService (decorator chains)
   onboarding/            PassportCaptureObserver (UsagePhaseObserver impl)
   geo/                   TrackProjectionRunner, VisualGeoRunner (poller ApplicationRunners)
-  usage/                 UsageIdleCloseRunner (self-scheduled sweep, same shape as geo/'s runners)
+  usage/                 UsageIdleCloseRunner, TelemetryPinRunner (self-scheduled sweeps, same shape as geo/'s runners)
   discovery/             DiscoveryInboxRunner (self-scheduled sweep, same shape as usage/'s runner)
   stream/                LiveFrameFallbackStreamService (StreamService decorator)
   bootstrap/             SimulationResumeRunner (the one remaining ApplicationRunner-as-bean)
@@ -67,7 +67,7 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 | `VisualGeoWiringConfiguration` | GeoVisual | `visualGeoApiProperties`, `referenceTileSourcePort` (`WaybackTileSource` vs `HttpTileSource` by `tiles.waybackMultiDate()`), `referenceRegionService`, `geolocationSessionService`, `trackCorrectionService` unconditional. `pulledGeolocationPort`/`referenceIndexPort` unconditional beans that self-branch on `enabled()` (real gRPC impl via `CvWiring.controlPlaneChannel` vs. `Noop*`) — both take **two `@Qualifier`-annotated `ObjectProvider<ManagedChannel>` params** (`cvTrainingChannel`, `cvGrpcChannel`), required once `cvGrpcChannel` is `@Primary` alongside a second channel bean (see Gotchas). `visualGeoRunner` (`initMethod="start"`/`destroyMethod="close"`) is the only truly gated bean, COP `vision.geo.visual.enabled=true` |
 | `ControlProfileWiring` | Control | `controlProfileService`, `auxFunctionCatalog` (`AuxFunctionCatalog.defaults()` unless `properties.auxFunctions()` configured) — unconditional; the catalog is display-only, never a whitelist |
 | `AfterActionWiringConfiguration` | — | `afterActionProperties`, `afterActionSources`, `afterActionAssembler` — unconditional, no flag. `maxPoints` is derived from `vision.application.replay.max-points-ceiling`, not its own key |
-| `UsageWiringConfiguration` | Usage | `usageIdleCloseService(AssetUsageRepositoryPort, AssetLiveStatePort, UsageSessionService, VisionUsageProperties)` (warehouse's `DefaultUsageIdleCloseService`), `usageIdleCloseRunner` (`initMethod="start"`, `destroyMethod="close"`) — both **unconditional, no enable flag** (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U1, wave W1: a data-correctness fix, not an optional feature). Pure downstream leaf — composes three already-unconditional beans from `PersistenceWiringConfiguration`/`ApplicationServiceWiring`, no new bean-cycle risk |
+| `UsageWiringConfiguration` | Usage | `usageIdleCloseService(AssetUsageRepositoryPort, AssetLiveStatePort, UsageSessionService, VisionUsageProperties)` (warehouse's `DefaultUsageIdleCloseService`), `usageIdleCloseRunner` (`initMethod="start"`, `destroyMethod="close"`) — both **unconditional, no enable flag** (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U1, wave W1: a data-correctness fix, not an optional feature). Pure downstream leaf — composes three already-unconditional beans from `PersistenceWiringConfiguration`/`ApplicationServiceWiring`, no new bean-cycle risk. **ALWAYS-ON-FLOW-PLAN wave A1** added a second runner here, `telemetryPinRunner(AssetService, UsageTracker, VisionTelemetryProperties)` (`initMethod="start"`, `destroyMethod="close"`), and a second `@EnableConfigurationProperties` entry (`VisionTelemetryProperties`). Also **unconditional as a bean** — the enable flag lives inside `TelemetryPinRunner#start()`, not on the `@Bean`, following `IdleStreamReaper`'s idiom rather than `@ConditionalOnProperty`: "always-on telemetry is off" then reads as a state of a present object (`pinnedCount()==0`, `lastSweepAt()==null`) rather than an absent one, which is what makes it diagnosable from `GET`-able status rather than only from a bean listing |
 | `OpsWiringConfiguration` | Ops | `opsThresholds(VisionOpsProperties)` → `OpsThresholdsResponse` (vision-api DTO), **unconditional, no enable flag** — display config, not a feature. Same "plain config-backed DTO bean, no service layer" shape `TrackingWiring#cvTrackerRoster` established (ASSET-FLOWS-PLAN §2/BK3). FLY-CONTROL-UX-PLAN §2/BK1 widened the built response with `RcThresholdsResponse(properties.rc().neutralTolerancePercent())`, mirroring the `battery` mapping verbatim — no new bean, no constructor overload |
 | `SeatWiringConfiguration` | Crew | `seatService(AuditTrailPort, VisionCrewProperties)` → `DefaultSeatService` (contexts/vision-flight), **unconditional** — cheap in-heap registry, inert until something calls `take`/`preempt`/`forceRelease`. `seatAccessSettings(VisionCrewProperties)` → `SeatAccessSettings`, the framework-free bridge-properties mirror `com.drones.vision.api.security.SeatAccess` consumes (vision-api may not depend on `@ConfigurationProperties`), same shape `OpsWiringConfiguration#opsThresholds` already establishes |
 | `ApplicationServiceWiring` | Cv, Live, Rc, Application, Publish, Simulation | The largest class — every `vision-application`/context `DefaultXService` bean. See "Application-service beans" below |
@@ -117,6 +117,7 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 | `VisionStreamsProperties` | `vision.streams` | `StreamLifecycleWiring`'s idle-stream reaper |
 | `VisionTrackingProperties` | `vision.tracking` | `TrackingWiring` seed + per-stream read-model windows |
 | `VisionUsageProperties` | `vision.usage` | `UsageWiringConfiguration`'s idle-usage-close sweep (`idleClose` default 10m, `sweepPeriod` default 60s) |
+| `VisionTelemetryProperties` | `vision.telemetry` | **ALWAYS-ON-FLOW-PLAN wave A1.** `record VisionTelemetryProperties(AlwaysOn alwaysOn)`, one nested `AlwaysOn(boolean enabled, Duration sweepInterval)` — `enabled` defaults **`false`** (ships invisible; on in `docker-compose.yml`), `sweepInterval` defaults `30s`, compact-constructor validated positive. Absent `always-on` block falls back to `new AlwaysOn(false, null)` under the same whole-block-absent rule as `VisionOpsProperties.Battery`. Consumed only by `UsageWiringConfiguration#telemetryPinRunner`. **Its own root, deliberately not under `vision.streams.*`**: those keys decide whether a video *stream* should exist, this one decides whether a *link* should be claimed — conflating the two is the defect wave A closes, so co-locating the keys would re-suggest exactly the wrong mental model |
 | `VisionOpsProperties` | `vision.ops` | `OpsWiringConfiguration`'s `opsThresholds` bean, behind `GET /api/ops/thresholds` (vision-api). Nested `Battery(int warningPercent, int criticalPercent)`, defaults 25/10, compact-constructor validated (`critical < warning`, both `[0,100]`); absent `battery` block falls back to `Battery.defaults()` since Spring relaxed binding does not apply a nested record's own `@DefaultValue`s when the whole block is missing (`VisionMavlinkProperties`'s `Scan`/`Transmit` precedent). `ApplicationServiceWiring#batteryMonitor` (BK2, this same cycle) independently reads the identical `vision.ops.battery.critical-percent`/`warning-percent` keys via raw `@Value`, by deliberate design (see that bean's own javadoc) rather than by accident — it carries the same 10/25 defaults inline so it behaves correctly whether or not this record/its `application.yaml` block exists yet, and now that both do, an operator override of the yaml block reaches **both** consumers identically since they bind the same property keys, which is the actual "one configured severity source" ASSET-FLOWS-PLAN §2 asks for. The two Java binding mechanisms (this `@ConfigurationProperties` record vs. `batteryMonitor`'s two `@Value`s) staying separate rather than both consuming this one record is a minor follow-up cleanup, not a config-drift risk. FLY-CONTROL-UX-PLAN §2/BK1 added a second nested record, `Rc(int neutralTolerancePercent)`, default **5**, compact-constructor validated `[1,25]`, absent `rc` block falling back to `Rc.defaults()` under the exact same whole-block-absent rule as `Battery` — the web cockpit's neutral-stick arm gate's tolerance, read off `GET /api/ops/thresholds`'s new `rc` field. |
 | `VisionAuthProperties` | `vision.auth` | **AUTH-ROLES-PLAN §3.6, wave B5.** `record VisionAuthProperties(Session session)`, one nested record `Session(Duration idleTimeout, Duration kioskIdleTimeout, boolean cookieSecure)` — defaults `12h`/`365d`/`false`, compact-constructor validated (both durations positive). Consumed by `AuthWiringConfiguration#securitySessionAuthenticator` → `SecuritySessionAuthenticator`'s constructor (idle/kiosk timeouts, replacing two bare `@Value`s) and by `application.yaml`'s `server.servlet.session.cookie.secure` (placeholder interpolation onto `vision.auth.session.cookie-secure`, not Java). **Scope note**: this record covers only the `session.*` block, deliberately narrower than §3.6/D2's full target shape (`enabled`+`session.*`+`password.*` in one record) — `vision.auth.enabled` (`SecurityConfig`'s/`AuthWiringConfiguration`'s own `@ConditionalOnProperty`s) and `password.*` (`AuthController`/`BootstrapController`/`AuthPasswordController`/`PasswordPolicy`'s scattered `@Value`s) are untouched, deferred to a later wave — see the record's own javadoc. |
 | `VisionCrewProperties` | `vision.crew` | **CREW-CONTROL-PLAN.md §3.6, wave W2.** `record VisionCrewProperties(boolean enabled, long seatTtlMs)` — `enabled` defaults `false` (the opt-in guardrail, §3.8: off, `SeatAccess` is a pass-through and every default-config test suite observes no change at all), `seatTtlMs` defaults `15000`, compact-constructor validated positive. Consumed by `SeatWiringConfiguration#seatService`/`#seatAccessSettings` and (for the gate flag only) `ApplicationServiceWiring#manualControlService`'s RC-release-hook registration. |
@@ -1202,3 +1203,62 @@ before writing rather than after.
 `vision.geo.visual.enabled` is the one flag with a real steady-state cost — it opens a gRPC geo
 session per flying asset with a resolvable stream and pulls keyframes from mediamtx — so cv-service
 load is worth watching after the first redeploy with this config.
+
+---
+
+## ALWAYS-ON-FLOW wave A — `TelemetryPinRunner` (2026-09-06)
+
+`docs/plans/active/ALWAYS-ON-FLOW-PLAN.md` wave A1's scheduling half. The owner's report was that
+*stopping a stream stops the telemetry*; verified exactly (`ALWAYS-ON-FLOW-CONTEXT.md` findings 1–2),
+and worse than reported — `IdleStreamReaper` makes the teardown automatic after 10 minutes with no
+viewer, with defaults live in production because `vision.streams.*` is overridden nowhere.
+
+`usage.TelemetryPinRunner` is this module's **third** hand-rolled sweep runner, built to the same
+shape as `usage.UsageIdleCloseRunner` and `discovery.DiscoveryInboxRunner` (own single-thread daemon
+`ScheduledExecutorService`, `AtomicBoolean` start/close latches, `lastSweepAt()` stamped only on a
+sweep that completed, every sweep body wrapped so one throw cannot cancel `scheduleAtFixedRate`).
+This codebase still uses no `@Scheduled`/`@EnableScheduling` anywhere.
+
+**What one sweep does:** lists `AssetService#assets()`, calls `UsageTracker#pinTelemetry` for every
+`isActive()` asset, and `#unpinTelemetry` for everything it had pinned that no longer qualifies.
+
+**Why a reconciler and not an event listener.** The desired set changes for reasons this class cannot
+observe — an asset registered, deactivated, deleted, or a telemetry-capable device attached. A
+periodic diff converges on all of them through one code path and, unlike a subscription, self-heals
+after a missed event, a restart, or a source that failed to open on an earlier tick. Deletion in
+particular is observed as an *absence* from the listing, never as an event. `#pinTelemetry` is
+idempotent precisely so this can run every sweep; re-pinning is also how a newly attached device is
+picked up.
+
+**The distinction that makes this safe: pinning opens a LINK, never a FLIGHT.** No `AssetUsage` is
+opened, so a pinned-but-unengaged aircraft writes no per-usage telemetry rows — its samples update
+`latestTelemetry`, publish to whoever is watching, and are evaluated for geofence breaches, and
+nothing else. Opening a session stays explicit (`POST /api/assets/{id}/session`) or stream-triggered,
+unchanged. Unpinning is likewise conservative — it tears nothing down that an active device or an
+`OPERATOR`-origin usage still needs, so an asset deactivated mid-flight keeps its telemetry until the
+flight ends.
+
+**Cost.** One telemetry subscription per `TELEMETRY`-capable device of an in-service asset. The UDP
+socket layer is shared and already always-on and reference-counted (`DiscoveryInboxRunner` holds the
+`:14550` lobby at boot; `MavlinkGateway#unregister` refuses to close a held socket), so this adds
+*claims*, not sockets — which is why wave A is M-effort rather than a rewrite. One asset listing per
+tick, in-memory once the sources are up.
+
+`./mvnw -B -pl station/vision-app -am test -DskipWeb` — `TelemetryPinRunnerTest` 6 tests, all green
+(one sweep pins every in-service asset; repeated sweeps re-pin idempotently and never unpin; an asset
+that leaves the listing is unpinned; a deactivated asset is unpinned; a throwing sweep is swallowed
+and stamps no timestamp; `start()` is a no-op while disabled). Each test drives one deterministic
+`sweepSafely()` rather than racing the scheduler — this runner's contract is entirely about *which*
+assets a pass pins, so the background timing `UsageIdleCloseRunnerTest` exercises would add only
+flakiness.
+
+**Config.** `vision.telemetry.always-on.{enabled,sweep-interval}`, documented block in
+`application.yaml` with the compiled default `false` preserved, and `VISION_TELEMETRY_ALWAYS_ON_ENABLED:
+"true"` in `docker-compose.yml` — same split the U1 flag wave above established. The env-var spelling
+gotcha above applies: `always-on` is hyphenated, and this file uses the legacy dashes-to-underscores
+form (`..._ALWAYS_ON_ENABLED`), not `Form.UNIFORM`'s `..._ALWAYSON_ENABLED`. Both bind; the legacy
+form is this repo's convention.
+
+The context-module half (`UsageTracker#pinTelemetry`/`#unpinTelemetry`, the `#applySample` sink split,
+and the `deviceStreamStopped` teardown guard) is in `contexts/vision-perception/MODULE.md`, including
+the **doctrine change** wave A2 makes. Waves B/C/D of the plan are not started.

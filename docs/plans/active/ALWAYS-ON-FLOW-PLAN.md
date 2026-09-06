@@ -1,6 +1,7 @@
 # ALWAYS-ON-FLOW — the ingest plane runs, the view plane is asked for
 
-Status: **SPEC** (2026-09-06). Context + verification: [`ALWAYS-ON-FLOW-CONTEXT.md`](ALWAYS-ON-FLOW-CONTEXT.md).
+Status: **wave A BUILT 2026-09-06 (ships off); B/C/D SPEC.** Context + verification:
+[`ALWAYS-ON-FLOW-CONTEXT.md`](ALWAYS-ON-FLOW-CONTEXT.md).
 Follows [`E2E-FLOW-AUDIT-2026-09-05.md`](E2E-FLOW-AUDIT-2026-09-05.md), whose S1/U1/N2 shipped the same day.
 
 Owner ask, in one line: *telemetry must be an always-on flow; the app should show state and history
@@ -97,9 +98,15 @@ the worker to stop.
 
 Ordered by (value × reach) ÷ effort. Each wave is one branch.
 
-### Wave A — telemetry becomes a fact about the world, not a side effect of video
+### Wave A — telemetry becomes a fact about the world, not a side effect of video — **BUILT**
 
 *The reported defect. Domain: `vision-perception`, `vision-warehouse`, `vision-app`.* **Effort: M**
+
+**Shipped 2026-09-06**, behind `vision.telemetry.always-on.enabled` (compiled default `false`, set
+`true` in `docker-compose.yml`). `UsageTracker#pinTelemetry`/`#unpinTelemetry` + `Tracking#telemetryPinned`
+in `vision-perception`; `TelemetryPinRunner` + `VisionTelemetryProperties` in `vision-app`. 717 + 6
+tests green. `vision-warehouse` needed no change — `AssetService#assets()` already answers "which
+assets are in service". Details and the A2 doctrine change: the two modules' `MODULE.md`s.
 
 | # | Change | Note |
 |---|---|---|

@@ -431,7 +431,14 @@ public final class UsageTracker {
             result = usageSessionService.save(demoted);
         }
         if (usageToClose != null) {
-            unsubscribeTelemetry(tracking);
+            // ALWAYS-ON-FLOW A3: disengaging ends the flight, never the link, on a pinned asset.
+            boolean pinned;
+            synchronized (tracking) {
+                pinned = tracking.telemetryPinned;
+            }
+            if (!pinned) {
+                unsubscribeTelemetry(tracking);
+            }
             result = usageSessionService.close(usageToClose, closedPhase, endedAt);
             if (closedPhaseFired != null) {
                 notifyPhaseObserver(assetId, closedUsageId, previousPhase, closedPhaseFired);
@@ -594,6 +601,69 @@ public final class UsageTracker {
         }
     }
 
+    /**
+     * Claims {@code assetId}'s telemetry by deployment policy, so it flows from the moment the
+     * platform knows about the aircraft rather than from the moment somebody watches it
+     * (ALWAYS-ON-FLOW A1). Idempotent: safe to call on every reconciler tick.
+     *
+     * <p>This is the third way telemetry can be opened, alongside a device's first video stream
+     * starting and an operator {@link #engage}-ing. It differs from both in what ends it: a pinned
+     * asset's subscriptions survive every stream stopping and every usage closing, and are released
+     * only by {@link #unpinTelemetry}. That is the whole point — a link is a fact about the world,
+     * and whether anyone is looking is not part of it.
+     *
+     * <p>Opening a subscription deliberately does <strong>not</strong> open an {@link AssetUsage}.
+     * A flight stays explicit ({@link #engage}) or stream-triggered; samples arriving on a pinned
+     * but unengaged asset update the live-link facts and {@link #latestTelemetry} without
+     * fabricating a session — see {@code applySample}'s own javadoc for that split.
+     *
+     * @param assetId the asset to claim; unknown ids are ignored, since a reconciler racing a
+     *                deletion is ordinary rather than exceptional
+     */
+    public void pinTelemetry(AssetId assetId) {
+        Objects.requireNonNull(assetId, "assetId must not be null");
+        Optional<Asset> asset = assetDirectory.find(assetId);
+        if (asset.isEmpty()) {
+            return;
+        }
+        Tracking tracking = trackingByAsset.computeIfAbsent(assetId, id -> new Tracking());
+        synchronized (tracking) {
+            tracking.telemetryPinned = true;
+        }
+        // Outside the lock, exactly as #engage and #deviceStreamStarted call it: subscribeTelemetry
+        // claims each DeviceId under the same monitor first, so concurrent callers cannot
+        // double-open a device, and a device added to the asset since the last tick is picked up.
+        subscribeTelemetry(asset.get(), tracking);
+    }
+
+    /**
+     * Releases a {@link #pinTelemetry} claim — an asset left service, was deleted, or the policy
+     * stopped covering it. Idempotent.
+     *
+     * <p>Releasing the pin does not by itself close anything: the subscriptions are torn down only
+     * if nothing else still needs them, applying the same test {@code deviceStreamStopped} uses (no
+     * active device, and no {@link UsageOrigin#OPERATOR} usage still open). Unpinning an aircraft
+     * somebody is actively flying therefore leaves their telemetry alone.
+     *
+     * @param assetId the asset to release; unknown ids are ignored
+     */
+    public void unpinTelemetry(AssetId assetId) {
+        Objects.requireNonNull(assetId, "assetId must not be null");
+        Tracking tracking = trackingByAsset.get(assetId);
+        if (tracking == null) {
+            return;
+        }
+        boolean nowUnused;
+        synchronized (tracking) {
+            tracking.telemetryPinned = false;
+            nowUnused = tracking.activeDevices == 0
+                    && !(tracking.usage != null && tracking.usage.origin() == UsageOrigin.OPERATOR);
+        }
+        if (nowUnused) {
+            unsubscribeTelemetry(tracking);
+        }
+    }
+
     private void deviceStreamStarted(Asset asset, StreamId streamId) {
         Tracking tracking = trackingByAsset.computeIfAbsent(asset.id(), id -> new Tracking());
         boolean usageOpenedNow;
@@ -682,7 +752,12 @@ public final class UsageTracker {
             // CURRENT state (after the branch above may have nulled it) -- telemetry only tears down
             // once nothing needs it any more: no active device AND no surviving OPERATOR-origin
             // (#engage'd) usage. Only #disengage ever closes an OPERATOR usage's telemetry.
+            // ALWAYS-ON-FLOW A3: the policy pin is a third, independent reason to keep telemetry
+            // open. Without it, an operator pressing Stop -- or, far more often, IdleStreamReaper
+            // stopping a stream nobody has watched for ten minutes -- silently ends the aircraft's
+            // telemetry too, which is the defect this wave exists to fix.
             tearDownTelemetry = allDevicesStopped
+                    && !tracking.telemetryPinned
                     && !(tracking.usage != null && tracking.usage.origin() == UsageOrigin.OPERATOR);
         }
         if (tearDownTelemetry) {
@@ -803,7 +878,14 @@ public final class UsageTracker {
         UsagePhase observedNextPhase = null;
         synchronized (tracking) {
             if (tracking.usage == null) {
-                return; // usage already closed: drop a straggling sample rather than reopen it
+                // ALWAYS-ON-FLOW A2: no usage is open, so nothing may be *recorded* -- a straggler
+                // must never reopen a closed usage, and a live link must never fabricate a flight.
+                // But the sample is still true, so the live-link facts below still apply. This is
+                // the split between "a flight" (a session, always explicit) and "a link" (a fact
+                // about the world, which needs no session to be true).
+                tracking.lastSample = sample;
+                publishLiveLinkFacts(assetId, sample);
+                return;
             }
             usageId = tracking.usage.id();
             GeoPosition position = toPosition(sample);
@@ -826,14 +908,33 @@ public final class UsageTracker {
         }
         telemetryService.record(usageId, sample);
         registerSummaryUpdate(assetId, tracking, updated);
+        publishLiveLinkFacts(assetId, sample);
+        if (observedNextPhase != null) {
+            notifyPhaseObserver(assetId, usageId, observedPreviousPhase, observedNextPhase);
+        }
+    }
+
+    /**
+     * The half of a telemetry sample that is true whether or not a usage is open (ALWAYS-ON-FLOW
+     * A2): the live push to whoever is watching, and the geofence evaluation.
+     *
+     * <p>Both are statements about the aircraft, not about a session. A geofence breach is a breach
+     * whether or not anyone opened a flight, and a position pushed to a watching client is the
+     * freshest truth either way — CLAUDE.md rule 9. Keeping them behind the usage check (as they
+     * were until A2) is what made an unengaged, un-streamed aircraft invisible even while its link
+     * was live and its samples were arriving.
+     *
+     * <p>Deliberately <strong>not</strong> here, and still gated on an open usage: {@link
+     * TelemetryService#record} (a per-usage durable row has nowhere to go without a usage), the
+     * summary fold, and the flight-phase state machine — phases describe a flight's progress, so
+     * advancing one with no flight open would be meaningless.
+     */
+    private void publishLiveLinkFacts(AssetId assetId, Telemetry sample) {
         if (liveUpdatePublisherPort != null) { // docs/plans/done/REALTIME-PLAN.md §4
             liveUpdatePublisherPort.publishTelemetryAppended(assetId, sample);
         }
         if (telemetryObserver != null) { // docs/plans/done/OPS-CORE-PLAN.md §G — geofence, wired in vision-app
             telemetryObserver.accept(assetId, sample);
-        }
-        if (observedNextPhase != null) {
-            notifyPhaseObserver(assetId, usageId, observedPreviousPhase, observedNextPhase);
         }
     }
 
@@ -984,6 +1085,8 @@ public final class UsageTracker {
         private final List<TelemetrySubscription> telemetrySubscriptions = new ArrayList<>();
         /** docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P4: device ids currently claimed/open for telemetry -- guards {@code UsageTracker#subscribeTelemetry} against opening the same device's {@code TelemetrySourcePort} twice when {@code #engage} and a device stream starting race for the same asset. Cleared alongside {@link #telemetrySubscriptions} by {@code UsageTracker#unsubscribeTelemetry}. */
         private final Set<DeviceId> telemetryDeviceIds = new HashSet<>();
+        /** ALWAYS-ON-FLOW A1: this asset's telemetry is claimed by deployment policy, so it outlives every stream and every usage. A third, independent reason to keep {@link #telemetrySubscriptions} open, alongside "a device is active" and "an OPERATOR usage is open". */
+        private boolean telemetryPinned;
         /** docs/plans/done/SCALE-100-PLAN.md S4: folds into {@link #usage} not yet written via {@code usageSessionService.save}. */
         private int unflushedSummaryUpdates;
         /** docs/plans/done/SCALE-100-PLAN.md S4: the armed time-bound summary flush, if any — see {@code UsageTracker#registerSummaryUpdate}. */

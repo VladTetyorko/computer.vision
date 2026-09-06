@@ -188,6 +188,31 @@ vision:
     idle-close: 10m
     sweep-period: 60s
 
+  # --- Telemetry flow policy (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave A) ---
+  # Its own root, deliberately NOT under vision.streams.* -- those keys decide whether a video
+  # STREAM should exist, these decide whether a LINK should be claimed. Conflating the two is what
+  # let the idle-stream sweep below silently end an aircraft's telemetry: a stream nobody had
+  # watched for 10 minutes was stopped, its usage closed, and its MAVLink subscription torn down
+  # with it. Telemetry is a fact about the world; whether anyone is looking is not part of it.
+  telemetry:
+    always-on:
+      # false (default): no TelemetryPinRunner sweep is scheduled, nothing is pinned, and telemetry
+      # opens exactly where it always did -- a device's first video stream (UsageTracker
+      # #deviceStreamStarted) or an explicit operator engage. true: every in-service asset's
+      # TELEMETRY-capable devices are claimed continuously, and those subscriptions survive every
+      # stream stopping and every usage closing; only leaving service releases them.
+      #
+      # Pinning opens a LINK, never a FLIGHT. No AssetUsage is opened, so a pinned-but-unengaged
+      # aircraft records no per-usage telemetry rows -- its samples update latestTelemetry, push to
+      # whoever is watching, and are evaluated for geofence breaches, and nothing else. Opening a
+      # flight stays explicit (POST /api/assets/{id}/session) or stream-triggered, unchanged.
+      enabled: false
+      # How often the desired pin set is reconciled against what is actually open. One asset listing
+      # per tick plus an idempotent pin call per in-service asset, both in-memory once the sources
+      # are up. It is a convergence loop, not a latency budget -- a newly registered aircraft's link
+      # comes up within one sweep, well inside the time it takes an operator to walk to it.
+      sweep-interval: 30s
+
   # --- Two seats on one aircraft (docs/plans/active/CREW-CONTROL-PLAN.md §3.6, wave W2) ---
   crew:
     # false (default): SeatAccess is a pass-through -- no verb is seat-guarded, no 409/403 from a

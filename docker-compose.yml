@@ -588,6 +588,24 @@ services:
       # the aircraft (session-scoped, nothing persisted, a reboot forgets it), which
       # is why it is a separate flag from probe.enabled.
       VISION_ONBOARDING_REMEDIATE_MESSAGE_INTERVAL_ENABLED: "true"
+
+      # --- Always-on telemetry (ALWAYS-ON-FLOW-PLAN.md wave A) ---
+      # vision.telemetry.always-on.enabled -- claims every in-service asset's telemetry
+      # continuously, so a link is live because the aircraft exists rather than
+      # because somebody has a browser tab open on it.
+      #
+      # Without this, stopping a stream stops telemetry -- and far more often, the
+      # idle-stream reaper (vision.streams.idle.*, ON by default and overridden
+      # nowhere) stops a stream nobody has watched for ten minutes, closes its usage
+      # and tears the MAVLink subscription down with it. On a deployment this is
+      # never what is wanted: the aircraft is still flying whether or not anyone is
+      # looking at its video.
+      #
+      # Cost is one telemetry subscription per TELEMETRY-capable device of an
+      # in-service asset. The UDP socket layer is shared and already always-on (the
+      # discovery lobby holds :14550 at boot), so this adds claims, not sockets.
+      # It opens no AssetUsage, so it writes no telemetry rows on its own.
+      VISION_TELEMETRY_ALWAYS_ON_ENABLED: "true"
     ports:
       - "8080:8080" # REST + web console + WebSocket (/ws/manual-control) + the HLS proxy
       # MAVLink telemetry AND commands, both directions, on this ONE UDP port. A
