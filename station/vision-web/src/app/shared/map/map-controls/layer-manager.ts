@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { LayersStore } from '../../../core/map-data/layers-store';
 import { AuthStore } from '../../../core/auth/auth-store';
@@ -82,6 +82,12 @@ export class LayerManager {
   protected readonly layers = inject(LayersStore);
   private readonly auth = inject(AuthStore);
   protected readonly org = inject(OrgStore);
+
+  constructor() {
+    // ALWAYS-ON-FLOW-PLAN.md §4 Wave C3 — see `MarksPanel`'s identical constructor comment.
+    this.layers.activate();
+    inject(DestroyRef).onDestroy(() => this.layers.release());
+  }
 
   // --- "Show on map" / "Basemap" (M1 fold) --------------------------------------------------------
   // These mirror `<vision-tactical-map>`'s own public `builtinLayerRows`/`dataRows`/`basemaps`/

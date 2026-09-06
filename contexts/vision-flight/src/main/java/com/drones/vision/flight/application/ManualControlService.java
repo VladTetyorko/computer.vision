@@ -26,10 +26,9 @@ public interface ManualControlService {
      * @throws IllegalStateException  no active device {@code ManualControlPort} supports, or the
      *                                 one found is not currently reachable — vision-api maps this
      *                                 to a {@code denied} frame; also thrown if a session is
-     *                                 already active on this service handle (one engage at a time
-     *                                 per handle — see {@code DefaultManualControlService}'s own
-     *                                 javadoc for what "handle" means when it is wired as a shared
-     *                                 singleton); also thrown (audited {@code
+     *                                 already active <em>on this asset</em> (one set of sticks per
+     *                                 airframe; engaging a different asset concurrently is
+     *                                 expected and allowed); also thrown (audited {@code
      *                                 REFUSED:not-ready:rc-relay}) when the vehicle's last-probed
      *                                 profile shows its {@code rc-relay} feature {@code MISSING} —
      *                                 a GCS-sysid mismatch or {@code RC_OPTIONS} ignoring overrides,

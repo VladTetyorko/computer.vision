@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, linkedSignal, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, linkedSignal, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { MarksStore } from '../../../core/map-data/marks-store';
 import { LayersStore } from '../../../core/map-data/layers-store';
@@ -66,6 +66,21 @@ export class MarkPalette {
   protected readonly marks = inject(MarksStore);
   protected readonly layers = inject(LayersStore);
   private readonly drawings = inject(DrawingsStore);
+
+  constructor() {
+    // ALWAYS-ON-FLOW-PLAN.md §4 Wave C3 — see `MarksPanel`'s identical constructor comment. `drawings`
+    // here is only ever used to call `stopDrawing()` (a local mutation, no read), but it is still a
+    // direct injector of the store, so it activates/releases alongside `marks`/`layers` for the same
+    // uniform reason: no direct injector should free-ride on some other page's demand.
+    this.marks.activate();
+    this.layers.activate();
+    this.drawings.activate();
+    inject(DestroyRef).onDestroy(() => {
+      this.marks.release();
+      this.layers.release();
+      this.drawings.release();
+    });
+  }
 
   protected readonly kinds = TACTICAL_MARK_KINDS;
   protected readonly affiliations = AFFILIATIONS;

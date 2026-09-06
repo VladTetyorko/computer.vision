@@ -21,6 +21,7 @@ import com.drones.vision.perception.domain.model.TrackedObject;
 import com.drones.vision.perception.domain.model.TrackingConfig;
 import com.drones.vision.perception.domain.model.VideoFrame;
 import com.drones.vision.perception.domain.port.DetectionDemandPort;
+import com.drones.vision.perception.domain.port.DetectionPolicyPort;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionPort;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
@@ -138,6 +139,16 @@ public final class DefaultStreamService implements StreamService {
     private final DetectionDemandPort detectionDemandPort;
 
     /**
+     * Per-asset {@code DetectionPolicy} evaluator (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave D1) —
+     * {@code null} means every stream's policy reads as {@code ON_VIEW} forever, exactly as before
+     * this port existed; a stream's {@link StreamPipeline} then only ever infers on viewer demand,
+     * unchanged. Non-null is consulted on the same {@link #pollDetectionDemand} tick as {@link
+     * #detectionDemandPort} — the two collaborators are independently optional (see {@link
+     * #evaluateDetectionDemand}), so either one alone still arms the poll task in this constructor.
+     */
+    private final DetectionPolicyPort detectionPolicyPort;
+
+    /**
      * Notified on every computed {@link StreamState} transition (docs/plans/active/
      * SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C6) — never {@code null}, defaults to {@link
      * StreamStateObserver#NOOP}; see {@link #notifyStreamStateChanged} for where it is invoked and
@@ -220,8 +231,10 @@ public final class DefaultStreamService implements StreamService {
                 serviceSettings.pullDetectionSettings().orElse(null); // nullable: every stream uses push detection when absent
         this.detectionDemandPort =
                 serviceSettings.detectionDemandPort().orElse(null); // nullable: demand-poll task never scheduled when absent
+        this.detectionPolicyPort =
+                serviceSettings.detectionPolicyPort().orElse(null); // nullable: every stream reads ON_VIEW forever when absent
         this.streamStateObserver = serviceSettings.streamStateObserver();
-        if (this.detectionDemandPort != null) {
+        if (this.detectionDemandPort != null || this.detectionPolicyPort != null) {
             long intervalNanos = this.settings.detectionDemandPollInterval().toNanos();
             retryScheduler.scheduleAtFixedRate(this::pollDetectionDemand, intervalNanos, intervalNanos,
                     TimeUnit.NANOSECONDS);
@@ -623,10 +636,11 @@ public final class DefaultStreamService implements StreamService {
     }
 
     /**
-     * The demand-poll task (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.3), scheduled on {@link #retryScheduler}
-     * at {@link StreamPipelineSettings#detectionDemandPollInterval()} only when {@link
-     * #detectionDemandPort} is non-null — see the constructor. Re-evaluates every currently running
-     * stream once per tick.
+     * The demand-poll task (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.3, widened by docs/plans/active/
+     * ALWAYS-ON-FLOW-PLAN.md wave D1), scheduled on {@link #retryScheduler} at {@link
+     * StreamPipelineSettings#detectionDemandPollInterval()} only when {@link #detectionDemandPort} or
+     * {@link #detectionPolicyPort} is non-null — see the constructor. Re-evaluates every currently
+     * running stream once per tick.
      *
      * <p><b>Each stream's evaluation is individually wrapped in {@code catch (Throwable)}.</b> {@link
      * java.util.concurrent.ScheduledExecutorService#scheduleAtFixedRate} silently cancels every
@@ -650,14 +664,25 @@ public final class DefaultStreamService implements StreamService {
     }
 
     /**
-     * Evaluates and applies one stream's detection demand (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.3):
-     * resolves the stream's owning asset (mirroring {@link #start}'s own {@code ownerAssetId}
-     * resolution — {@code null} when {@link #usageTracker} is absent or the device has no owning
-     * asset), asks {@link #detectionDemandPort}, stamps {@code lastDemandAt} when wanted, and
-     * computes whether the stream is still within {@link
-     * StreamPipelineSettings#detectionDemandGrace()} of its last observed demand either way — a
-     * stream just stamped is trivially within grace of itself, so this single computation covers
-     * both the "wanted now" and "wanted recently" cases without a separate branch.
+     * Evaluates and applies one stream's detection demand and {@code DetectionPolicy}
+     * (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.3, widened by docs/plans/active/ALWAYS-ON-FLOW-PLAN.md
+     * wave D1): resolves the stream's owning asset (mirroring {@link #start}'s own {@code
+     * ownerAssetId} resolution — {@code null} when {@link #usageTracker} is absent or the device has
+     * no owning asset), then — independently, each guarded on its own collaborator being non-null —
+     * asks {@link #detectionDemandPort}, stamps {@code lastDemandAt} when wanted, and computes
+     * whether the stream is still within {@link StreamPipelineSettings#detectionDemandGrace()} of its
+     * last observed demand either way (a stream just stamped is trivially within grace of itself, so
+     * this single computation covers both the "wanted now" and "wanted recently" cases without a
+     * separate branch), pushing the result to {@link StreamPipeline#updateDetectionDemand}; and asks
+     * {@link #detectionPolicyPort}, pushing its answer straight to {@link
+     * StreamPipeline#updateDetectionPolicy} with no grace window — an asset's policy attribute is an
+     * operator's own deliberate, infrequent choice, not a transient viewer-presence signal, so there
+     * is nothing to debounce.
+     *
+     * <p>The two collaborators are independently optional (see {@link DefaultStreamServiceSettings}):
+     * either one alone still arms {@link #pollDetectionDemand} (the constructor's own condition), and
+     * this method only ever touches the one(s) actually wired, leaving the other's {@code
+     * StreamPipeline} field at its own safe default untouched.
      *
      * <p>Package-private, taking an explicit {@code now} rather than reading {@link Instant#now()}
      * itself, so the same-package test can drive the grace period deterministically — stamping a
@@ -674,13 +699,18 @@ public final class DefaultStreamService implements StreamService {
             return;
         }
         AssetId assetId = usageTracker == null ? null : usageTracker.resolveAsset(active.deviceId()).orElse(null);
-        boolean wanted = detectionDemandPort.detectionWanted(streamId, assetId);
-        if (wanted) {
-            active.lastDemandAt().set(now);
+        if (detectionDemandPort != null) {
+            boolean wanted = detectionDemandPort.detectionWanted(streamId, assetId);
+            if (wanted) {
+                active.lastDemandAt().set(now);
+            }
+            Duration sinceLastDemand = Duration.between(active.lastDemandAt().get(), now);
+            boolean effective = sinceLastDemand.compareTo(settings.detectionDemandGrace()) < 0;
+            active.pipeline().updateDetectionDemand(effective);
         }
-        Duration sinceLastDemand = Duration.between(active.lastDemandAt().get(), now);
-        boolean effective = sinceLastDemand.compareTo(settings.detectionDemandGrace()) < 0;
-        active.pipeline().updateDetectionDemand(effective);
+        if (detectionPolicyPort != null) {
+            active.pipeline().updateDetectionPolicy(detectionPolicyPort.alwaysOn(assetId));
+        }
     }
 
     /**

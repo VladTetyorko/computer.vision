@@ -16,9 +16,10 @@ All version pins come from `spring-boot-dependencies` (this module's grandparent
 
 **Used by:** vision-app (`PersistenceWiringConfiguration`, unconditional).
 
-**Build/test:** `./mvnw -B -pl storage/persistence test` — 276 tests (unchanged since AUTH-ROLES B3,
-confirmed again after AUTH-ROLES B5 — B5 touched this module only with a new migration + an
-`EXCLUDED_TABLES` classification, no new test method; up from 274 after COMMAND-MAP-FLOW B1, 269 after
+**Build/test:** `./mvnw -B -pl storage/persistence test` — 283 tests (up from 277 immediately before
+ALWAYS-ON-FLOW wave B3, +6 for `EventHistoryRepositoryTests`; the branch this wave landed on had
+already moved past the 276 recorded at AUTH-ROLES B5 via other concurrent work, so 277 — not 276 — is
+this wave's own true baseline; up from 274 after COMMAND-MAP-FLOW B1, 269 after
 ASSET-FLOWS BK4, 267 after ZERO-CONFIG-ONBOARDING Z2c, 260 before that — count from Maven's own summary
 line, see Gotchas), one shared `postgres:16`
 Testcontainers container per test class. Requires a running Docker daemon — there is no non-Docker
@@ -32,10 +33,10 @@ resolves the just-installed jars instead of recompiling upstream).
 
 ## API surface
 
-Package layout: `repository/` (32 `Jpa*Repository`/`Jpa*Store` classes + `TelemetryBatchSettings`),
-`mapper/` (30 mapper classes — one `toEntity`/`toDomain` pair per aggregate, `public static` methods
+Package layout: `repository/` (33 `Jpa*Repository`/`Jpa*Store` classes + `TelemetryBatchSettings`),
+`mapper/` (31 mapper classes — one `toEntity`/`toDomain` pair per aggregate, `public static` methods
 on a `public final class` with a private constructor), `config/` (`PersistenceUnit`, `JpaOperations`,
-`PersistencePoolSettings`, `ClosingDatasourceConnectionProvider`), `entity/` (38 classes/records: 33
+`PersistencePoolSettings`, `ClosingDatasourceConnectionProvider`), `entity/` (39 classes/records: 34
 `@Entity` types, `AssignmentId`/`CvProfileBindingId`/`CvModelId` (`@IdClass`), `LayerGrantEmbeddable`
 (`@Embeddable`), `DbAuditOperation` (plain enum)). No `controller/`, `dto/`, or `service/` package —
 this module is a driven adapter only.
@@ -80,6 +81,7 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 | `JpaCvModelRepository` | `CvModelRepositoryPort` | `merge` upsert on composite `(model_id, version)`; `findLive` does not itself enforce "exactly one LIVE row" — that invariant is `ModelRegistryService`'s job (W4-app); audited (CV-SETTINGS-PLAN.md §5.3, `V30`) |
 | `JpaTrainingRunRepository` | `TrainingRunRepositoryPort` | `merge` upsert by `runId` (written once at start, again as `TrainingProgress` arrives); `findAll(limit)` orders newest-first by `started_at`, the column `idx_cv_training_runs_started_at` indexes; audited (CV-SETTINGS-PLAN.md §5.3, `V30`, fixes H7: "training metrics evaporate") |
 | `JpaDiscoveryCandidateRepository` | `DiscoveryCandidateRepositoryPort` | `merge` upsert by `DiscoveryCandidateId` (a re-reported identity mutates `lastSeen`/`status` in place rather than inserting a new row); `findByIdentityKey` is the upsert-target lookup the inbox sweep uses every cycle — backed by the unique index on `identity_key`, not a table scan; `findAll` orders `lastSeen desc` (newest-reported first, the inbox's natural read order); audited (ZERO-CONFIG-ONBOARDING-CONTEXT.md §11 Z2c, `V31`) |
+| `JpaEventHistory` | `EventHistoryPort` (`vision-platform`) | always `persist` (append-only); **table-wide** prune-on-write (default 20,000 rows total, not per-stream — see Retention and batching), unlike every other pruned repository in this table; **single constructor** `(EntityManagerFactory, int retentionLimit)` — deliberately no 1-arg/baked-default overload, since `vision-app`'s `VisionEventHistoryProperties.Retention` is the one source of truth for the default (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave B3); excluded from the audit log (`V35`) |
 
 ### `entity` — mapping conventions (not repeated per class)
 
@@ -174,7 +176,7 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
   (mode 2, forward-up), the same "every existing row already has an arrangement" reasoning
   `AssetUsageEntity#origin` (`V26`) uses.
 
-## Schema (`src/main/resources/db/migration`) — migration ledger, V1 through V34
+## Schema (`src/main/resources/db/migration`) — migration ledger, V1 through V35
 
 | Migration | What it does |
 |---|---|
@@ -212,6 +214,7 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 | `V32__control_profile_transmitter_view.sql` | `control_profiles` += `stick_mode SMALLINT NOT NULL DEFAULT 2`, `forward_is_up BOOLEAN NOT NULL DEFAULT TRUE`, `ck_control_profiles_stick_mode CHECK (stick_mode BETWEEN 1 AND 4)` — how the owner's transmitter is arranged (CONTROLLER-SETUP-CONTEXT.md wave C15); defaults rather than nullable since every existing row already has an arrangement (the platform's); **renumbered from the branch's own `V25` during the `feat/controller-setup-c15` merge** — see the Gotchas entry below for the collision this replaced |
 | `V33__assignment_roles.sql` | `pilot_assignments.role` (`VARCHAR(16) NOT NULL DEFAULT 'PILOT'`), `users.must_change_password` (`BOOLEAN NOT NULL DEFAULT FALSE`) — the per-asset seat (`AssignmentRole`, PILOT/CREW) and the forced-password-change latch (AUTH-ROLES-PLAN.md §3.4/D13, wave B3); purely additive, no backfill logic needed beyond the column defaults; no trigger changes — `V21`'s `audit_row_change()` resolves every column via `to_jsonb(NEW/OLD)`, not a fixed list |
 | `V34__spring_session.sql` | `spring_session`/`spring_session_attributes` — a **byte-for-byte copy** of Spring Session JDBC 4.1.0's own official `org/springframework/session/jdbc/schema-postgresql.sql` (extracted from the jar, not hand-transcribed), so sessions survive an app restart (AUTH-ROLES-PLAN.md §3.6, wave B5); no entity/mapper/repository — this table is read/written entirely by Spring Session's own `JdbcIndexedSessionRepository`, wired in `vision-app`'s `PersistenceWiringConfiguration`/`AuthWiringConfiguration`, not by anything in this module; both tables added to `PostgresDockerIntegrationTest`'s `EXCLUDED_TABLES` (infrastructure, same classification as `flyway_schema_history`) |
+| `V35__event_history.sql` | `event_history` table (`EventHistoryPort`, `vision-platform`): domain-owned `id VARCHAR(64)` PK (`Event.id()` is a plain `String`, not a UUID-wrapper), nullable `stream_id UUID` (device-level events have none), `occurred_at TIMESTAMPTZ NOT NULL`, `type VARCHAR(32) NOT NULL`, `message TEXT NOT NULL`, `attributes JSONB NOT NULL DEFAULT '{}'::jsonb` (free-form `Map<String,String>`, same jsonb convention as every other map-typed column in this module); one index, `idx_event_history_occurred_at ON event_history (occurred_at DESC)`, for `findRecent`/`findSince`'s newest-first scan and the table-wide retention prune's `ORDER BY occurred_at DESC LIMIT`; no foreign key (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave B3) |
 
 A second, conditional Flyway location, `src/main/resources/db/seed/dev`, holds
 `V90001__dev_accounts.sql` (the `admin`/`manager`/`pilot` DEV-ONLY accounts) — it only joins Flyway's
@@ -255,7 +258,10 @@ automatically.**
   audit trail buys nothing), `db_audit_log` itself (would recurse), `flyway_schema_history`,
   `projected_track_points`, `track_corrections`, `spring_session`/`spring_session_attributes` (`V34`,
   wave B5 — this table's own infrastructure, same classification as `flyway_schema_history`; not
-  domain data, and neither has a Java entity in this module for a trigger to be redundant against).
+  domain data, and neither has a Java entity in this module for a trigger to be redundant against),
+  `event_history` (`V35`, ALWAYS-ON-FLOW-PLAN wave B3 — same character as `detection_events`/
+  `telemetry_samples`: machine-generated, append-only, self-pruning platform-event history, not
+  operator-authored control-plane state).
 
 Coverage is tested against the **live schema** (`information_schema.tables`/`pg_trigger`), not
 trusted from a migration comment — `DbAuditLogCoverageTests` fails if a new table is added without
@@ -336,6 +342,18 @@ default cap is 100,000 rows for each. The `flush()` is required — without it t
 against the pre-insert view of the table and could prune the row just appended. `JpaAuditTrail` and
 `JpaAssetUsageRepository` have no pruning at all (immutable facts / low write volume respectively).
 Retention caps are constructor arguments, not yet bound to a `vision.persistence.*` Spring property.
+
+`JpaEventHistory` (ALWAYS-ON-FLOW-PLAN wave B3) prunes the same way — `persist` → `flush()` → native
+bulk `DELETE` — but with **no grouping key at all**: the cap (default 20,000 rows, bound via
+`vision-app`'s `VisionEventHistoryProperties.Retention`, not a raw constructor default — see the API
+surface table above) is table-wide, `DELETE FROM event_history WHERE id NOT IN (SELECT id FROM
+event_history ORDER BY occurred_at DESC LIMIT ?1)`. Deliberately unlike `usage_id`/`stream_id`
+grouping: most `Event`s persisted here (device online/offline, battery, link-lost) carry a `null
+stream_id` and are asset-scoped only via their `attributes` map, so a per-stream cap would leave the
+majority of rows uncapped — see `EventHistoryPort`'s own javadoc (`core/vision-platform`) for the full
+reasoning. `EventType.DETECTION` — the one high-volume type — is never even offered to this
+repository; that filtering happens one layer up, in `vision-app`'s `PersistingEventPublisher`
+decorator, before `record` is ever called, so the write this class does see is already low-frequency.
 
 `repository.TelemetryBatchSettings(int batchSizeSamples, long batchWindowMillis)` governs an optional
 batched-write mode for `JpaTelemetryRepository`: **immediate mode** (`immediate()` → `(1, 0)`, the
@@ -521,7 +539,32 @@ including `everyPublicBaseTableIsEitherAuditedOrExplicitlyExcluded` and
 (not skipped — Testcontainers started a real `postgres:16`, Flyway migrated through `V34`, all 230
 nested-class test methods inside `PostgresDockerIntegrationTest` executed and passed).
 
+**ALWAYS-ON-FLOW wave B3 done.** New `V35__event_history.sql` + `EventHistoryEntity`/
+`mapper.EventHistoryMapper`/`repository.JpaEventHistory` implementing `vision-platform`'s new
+`EventHistoryPort` — the durable home for platform `Event`s the notification bell/`/manage/system`
+never had (own API-surface/ledger/retention entries above). `PostgresDockerIntegrationTest` gained
+one `EventHistoryRepositoryTests` nested class (6 cases: round-trip including a null `streamId`,
+round-trip with a real `StreamId`, `findRecent` newest-first across every type, `findSince`'s cursor
+inclusivity, `findSince` with a null cursor applying no lower bound, and the table-wide retention
+prune) plus `event_history` added to `EXCLUDED_TABLES`. One test-design defect found and fixed during
+this wave, not a production defect: the first draft of three of those six cases assumed the table held
+only that test's own rows (asserting on `findRecent`'s full result / its first element / an exact
+`List.of(...)` equality) — wrong, since `entityManagerFactory` and therefore `event_history` are
+shared static state across every `@Nested` class and test method in this one file, exactly the
+constraint `AuditTrailRepositoryTests` already documents and defends against. Fixed by filtering
+`findRecent`/`findSince` results down to each test's own inserted ids before asserting (the established
+precedent) and, for the retention-prune case specifically, using timestamps far enough in the future
+that this test's own rows are unambiguously the newest in the *entire* shared table regardless of
+execution order — a per-key cap could tolerate sharing the table loosely, but a genuinely table-wide
+cap cannot.
+
+`./mvnw -B -pl storage/persistence,station/vision-api,station/vision-app test -DskipWeb` — this
+module: **283** tests (277 immediately before this wave, +6), `BUILD SUCCESS`, Docker ran (not skipped
+— real Testcontainers `postgres:16`, Flyway migrated through `V35`). Full three-module command green;
+see `station/vision-app/MODULE.md`'s own wave B3 section for the cross-module report (wiring,
+retention/scoping reasoning, per-module before/after counts).
+
 See `docs/plans/README.md` for the plan-status authority behind the phase references throughout this
 file (MVP2, POSTGRES-ONLY-CONTEXT, SCALE-100, FIXED-CAMERA-GEO, VISUAL-GEO-V2, DRONE-ONBOARDING,
 CONTROLLER-SETUP-CONTEXT, ARCHITECTURE-AUDIT-2026-08-26, CV-SETTINGS, ZERO-CONFIG-ONBOARDING-CONTEXT,
-ASSET-FLOWS, AUTH-ROLES).
+ASSET-FLOWS, AUTH-ROLES, ALWAYS-ON-FLOW).

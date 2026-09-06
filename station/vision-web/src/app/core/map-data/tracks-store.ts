@@ -37,11 +37,17 @@ const TRACKS_POLL_INTERVAL_MS = 30_000;
  * There is nothing to mutate here from this wave — pose/calibration writes live on
  * `core/camera-geo/camera-pose-panel.ts`'s own per-asset calls, not this shared read model — so,
  * unlike `LayersStore`, this store has no `run()`/toast seam of its own.
+ *
+ * <h2>Polling is demand-gated (ALWAYS-ON-FLOW-PLAN.md §4 Wave C3)</h2>
+ * See `MarksStore`'s identical doc section — same defect, same fix: {@link activate}/{@link release}.
+ * Today's only confirmed direct injector is `AssetDetailFacade`; kept as an explicit ref-count (not a
+ * bespoke one-consumer flag) so a future second consumer composes for free.
  */
 @Injectable({ providedIn: 'root' })
 export class TracksStore {
   private readonly api = inject(VisionApi);
   private readonly live = inject(LiveStore);
+  private readonly scheduler = inject(PollScheduler);
 
   private readonly tracksSignal = signal<readonly ProjectedTrackResponse[]>([]);
   /** Every projected track on a layer this viewer may see (D10) — already scoped server-side. */
@@ -54,10 +60,12 @@ export class TracksStore {
   /** How many live map deltas (`LiveStore.mapEvents()`) this store has folded in — see the class doc's cursor note. */
   private processedLiveEventCount = 0;
 
-  constructor() {
-    void this.refresh();
-    inject(PollScheduler).schedule(TRACKS_POLL_INTERVAL_MS, () => this.refresh());
+  /** Ref-count of live consumers — see {@link activate}/{@link release}. */
+  private activeConsumers = 0;
+  /** The safety-net poll's own unsubscribe, held only while `activeConsumers > 0`. */
+  private stopPollFn: (() => void) | null = null;
 
+  constructor() {
     effect(() => {
       const events = this.live.mapEvents();
       if (events.length <= this.processedLiveEventCount) {
@@ -67,6 +75,32 @@ export class TracksStore {
       this.processedLiveEventCount = events.length;
       this.tracksSignal.update((tracks) => newEvents.reduce(applyTrackEvent, tracks));
     });
+  }
+
+  /**
+   * Registers demand — see `MarksStore.activate`'s identical doc comment for the full rationale.
+   * The first `activate()` since the last full `release()` triggers a fresh `GET` and starts the
+   * safety-net poll; further concurrent consumers just bump the count.
+   */
+  activate(): void {
+    this.activeConsumers++;
+    if (this.activeConsumers > 1) {
+      return;
+    }
+    void this.refresh();
+    this.stopPollFn = this.scheduler.schedule(TRACKS_POLL_INTERVAL_MS, () => this.refresh());
+  }
+
+  /** The matching teardown — call from the consumer's own `DestroyRef.onDestroy`. */
+  release(): void {
+    if (this.activeConsumers === 0) {
+      return; // defensive — a mismatched release should never go negative
+    }
+    this.activeConsumers--;
+    if (this.activeConsumers === 0 && this.stopPollFn !== null) {
+      this.stopPollFn();
+      this.stopPollFn = null;
+    }
   }
 
   async refresh(): Promise<void> {

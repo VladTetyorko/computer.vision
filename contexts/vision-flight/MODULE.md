@@ -99,7 +99,7 @@ Flight sessions, telemetry transport, geofencing, and guarded flight command/man
     - **WAREHOUSE-UX W5 — `requireNotMaintenanceGrounded`, checked first.** If `report.blockers()` carries any `DefaultReadinessService.MAINTENANCE_BLOCKER_PREFIX`-prefixed entry, `engage` audits `REFUSED:maintenance-grounded` and throws `IllegalStateException` naming every blocking record's own summary. This is the "may this asset fly / engage" predicate WAREHOUSE-UX-CONTEXT.md's OQ1 asks for; a manager's `AssetCustodyService#release` (warehouse) clears it in one click. **Does not gate** `DefaultFlightCommandService#arm`/`disarm` (the MAVLink command path) or perception's `UsageTracker` (which opens the underlying `AssetUsage`) — out of this wave's scope, see Gotchas.
     - **FLEET-RADIO R6 — `requireRcRelayReady`, checked second.** Re-evaluates the `rc-relay` `FeatureReadiness` row from the same report. Only `FeatureStatus.MISSING` refuses (audited `REFUSED:not-ready:rc-relay`, plain `IllegalStateException` carrying the row's own detail sentence); `UNKNOWN`/`DEGRADED`/`READY` all let `engage` proceed — a never-probed vehicle must still be able to engage, matching `ReadinessService`'s own "absence of evidence is not evidence of readiness" rule.
   - `VehicleUnidentifiedException` (`application`, `final`, extends `IllegalStateException`) — chosen as an `IllegalStateException` subtype specifically so it satisfies `engage`'s pre-existing throws contract with no signature change, and so `vision-api`'s WS handler can catch it ahead of the generic `IllegalStateException` clause and map it to its own wire code instead of sniffing the message. Carries `UnidentifiedReason reason()`.
-  - **One session per service handle**: a second `engage()` while one is active throws `IllegalStateException` without touching the port. `vision-app` wires exactly one singleton bean, so this in practice serializes manual-control relaying app-wide.
+  - **One session per _asset_ (E2E-FLOW-AUDIT S1)**: a second `engage()` on an asset that already has a live session throws `IllegalStateException` without touching the port; an `engage()` on any *other* asset proceeds normally. Backed by a `Map<AssetId, DefaultManualControlSession>` guarded by the existing global `sessionLock` — engage is a once-per-flight event and the ~30 Hz `onChannels` hot path never takes that lock, so one coarse lock buys atomicity across the whole check→resolve→open→register sequence for free. **Before S1 this was a single `activeSession` field**, which — since `vision-app` wires exactly one singleton bean — serialized manual-control relaying to *one connection across the entire fleet*: a second operator engaging a different drone was refused "already active". The refusal message **must keep the literal substring `already active`** (see Gotchas).
   - `ManualControlSession#onChannels(axes, buttons, seq, tSent)` — maps through the session's `ControlProfile`'s `ChannelMap` and forwards to `ManualControlPort#send` (latest-wins), resets the watchdog deadline. `#release()` — idempotent, cancels the watchdog, audits `RELEASE`. `#controlProfile()` — `ControlProfile.forKind(link.vehicleKind())`, resolved once at engage and fixed for the session; `#active()`; `#rateHz()` — delegates to the engaged `ManualControlLink`.
   - **Watchdog**: a single self-rescheduling `ScheduledFuture` per session, not cancel-and-reschedule-per-`onChannels` — `armWatchdog()` schedules once; each firing re-reads `lastInput` and either releases (audits `WATCHDOG`, calls `WatchdogListener#watchdogTripped()`) or reschedules for the remaining time.
   - **Concurrency**: `onChannels`/`release()`/a scheduled watchdog check can each run on a different thread; one `AtomicBoolean released` (`compareAndSet(false,true)`) gates the single `doRelease` exit path; `lastInput` is `volatile` for single-writer/single-reader visibility only.
@@ -172,6 +172,8 @@ invoked; this service only tracks *who currently does*, never *who may*.
 - **Audit shape**: `AuditEntry.of(actor, action, targetType, targetId, summary, attrs)` with a short `result` token (`ACCEPTED`/`NO_ACK`/`REFUSED:<msg>`/`REFUSED:unidentified-vehicle:<reason>` (FLEET-RADIO R2, `DefaultManualControlService#engage`)/`REFUSED:not-ready:<featureKey>` (FLEET-RADIO R6, same method)/`REFUSED:maintenance-grounded` (WAREHOUSE-UX W5, same method)/`DENIED:out of scope`/`ENGAGE`/`RELEASE`/`WATCHDOG`) plus a human `summary`.
 
 ## Gotchas
+
+- **`DefaultManualControlService#engage`'s "already active" refusal text is a wire contract, not prose.** `station/vision-api`'s `ManualControlWebSocketHandler#mapIllegalState` matches the substring `already active` to emit the frozen `ALREADY_ENGAGED` denial code; every other `IllegalStateException` from `engage` falls through to `NOT_COMMANDABLE`. Rewording that message without updating the matcher silently downgrades the operator's denial to the wrong code — the exception type alone cannot distinguish the cases, since `engage` throws plain `IllegalStateException` for four different causes. `DefaultManualControlServiceTest` asserts the substring directly so a rename fails a test rather than a live flight.
 - **`GeofenceZone.contains` is a planar approximation, not spherical geometry** — accurate at the scale a geofence actually operates at (tens of meters to a few km), **not** valid near the poles or across the antimeridian. No attempt is made to detect/reject a pathological polygon spanning either.
 - **`ControlBinding#toMicros` ignores `centerMicros` entirely for `Source.BUTTON`** — a button's mapping is a straight 2-point line from `minMicros` to `maxMicros`.
 - **`ChannelMap#apply` never throws on missing input** — an unreported/`null`/short `axes`/`buttons` list reads as `0.0` for whichever bindings fall outside it (a browser gamepad frame that hasn't yet reported every axis/button must not crash the relay).
@@ -395,3 +397,29 @@ vision-api`'s `AssetAuthority`/`ScopeAssetAuthority`/`SeatController`/`SeatAcces
 must wire this service in, write the `FORCE:<KIND>` audit entry `forceRelease` cannot, and map the
 `IllegalStateException` `take` throws when held ("... seat is held by ...") to the frozen 409
 conflict body (§3.6).
+
+### 2026-09-06, E2E-FLOW-AUDIT S1 — manual control is exclusive per asset, not per JVM
+
+`DefaultManualControlService`'s single `activeSession` field became
+`Map<AssetId, DefaultManualControlSession> activeSessions`, still guarded by the pre-existing
+`sessionLock`. The audit (`docs/plans/active/E2E-FLOW-AUDIT-2026-09-05.md`, proposal S1) measured
+this as the platform's hardest concurrency ceiling: because `ApplicationServiceWiring` registers
+one singleton bean, **the whole fleet supported exactly one manual-control pilot at a time** — a
+second operator engaging a completely different aircraft was refused "already active". The old
+class javadoc called this "an intentional Phase 1 simplification (single SITL operator)" and
+predicted a fix would need per-connection service instances; it did not — the state was simply
+unkeyed.
+
+A plain `HashMap` (not `ConcurrentHashMap`) is correct here: every read and write happens inside
+`synchronized (sessionLock)`, engage/release are once-per-flight events, and the ~30 Hz
+`onChannels` hot path never touches this lock. `onSessionEnded` uses `remove(key, value)` so a
+session that already lost its slot to a newer engage on the same asset cannot evict the newer one
+while unwinding.
+
+Two call-site contracts had to move with it: `ManualControlService#engage`'s `@throws` javadoc
+(which described the limit as per-handle) and `ManualControlWebSocketHandler`'s class javadoc
+(which explained cross-connection refusal as a singleton artifact — now correctly per-asset). The
+handler's `mapIllegalState` matcher was **not** changed, and the new message deliberately retains
+the `already active` substring it keys on; a test now asserts that substring so the coupling fails
+loudly. `./mvnw -B -pl contexts/vision-flight -am test` — green, +2 tests (two assets engage
+concurrently; releasing one leaves the other engaged and re-engageable).

@@ -83,6 +83,28 @@ const MARKS_POLL_INTERVAL_MS = 30_000;
  * `CommandFacade`'s `?asset=` sync, does not — see `resetOnRouteChange`'s own doc comment). Modeled on
  * `core/ui/overlay-store.ts#GlobalOverlayStore`'s identical `Router.events` + `NavigationEnd` seam, the
  * only other place in this app a `root` store has to fence its own state off from routing.
+ *
+ * <h2>Polling is demand-gated (ALWAYS-ON-FLOW-PLAN.md §4 Wave C3), never "since app boot"</h2>
+ * `providedIn: 'root'` means this store, once constructed, outlives every route — but before this
+ * wave its constructor started the 30s safety-net poll unconditionally, so visiting **any** map
+ * surface once left it polling for the rest of the browser session, on every later route, including
+ * ones with no map on screen at all (the defect this wave fixes: `/command`, `/fly`, `/live`,
+ * `/assets/:assetId` and `/crew/:assetId` all inject this store — directly, or via
+ * `shared/map/map-controls/**` — and none of them previously released it). {@link activate}/
+ * {@link release} are the fix: every direct injector of this store (a routed page's own facade *and*
+ * a non-routed presentational child like `MarksPanel`/`MarkPalette`, per this file's own "why
+ * selection + palette live here" doc section above) calls `activate()` in its constructor and
+ * `release()` from its own `DestroyRef.onDestroy` — mirroring `core/events/events-store.ts#activate`'s
+ * identical ref-counted shape (the nearest existing precedent for a `providedIn:'root'` store whose
+ * poll must track live demand rather than run forever) and `core/live/live-store.ts`'s per-topic
+ * ref-counting for the counting idiom itself. The initial `GET` **moves under `activate()` too, not
+ * just the poll** — a `void refresh()` in the constructor would still fire once per first-ever
+ * construction regardless of whether anything is mounted to show the result, and would give a
+ * consumer that activates long after boot (e.g. the first time `/crew/:assetId`'s Map tools drawer is
+ * ever opened in a session) an arbitrarily stale list instead of a fresh one. Folding live `map`-topic
+ * deltas (the `effect()` below) stays unconditional regardless of `activeConsumers` — it's an
+ * in-memory fold with no network cost, and keeping the cursor advancing means a consumer that
+ * reactivates after a long gap doesn't replay deltas `refresh()`'s own fresh `GET` already supersedes.
  */
 @Injectable({ providedIn: 'root' })
 export class MarksStore {
@@ -90,6 +112,7 @@ export class MarksStore {
   private readonly toasts = inject(ToastService);
   private readonly live = inject(LiveStore);
   private readonly layers = inject(LayersStore);
+  private readonly scheduler = inject(PollScheduler);
 
   private readonly marksSignal = signal<readonly MapMark[]>([]);
   /** Every ACTIVE mark on a layer this viewer may see, newest first. */
@@ -129,10 +152,11 @@ export class MarksStore {
   /** The last `NavigationEnd`'s path (no query/hash) — `null` until the first event. See `resetOnRouteChange`. */
   private lastRoutePath: string | null = null;
 
-  constructor() {
-    void this.refresh();
-    inject(PollScheduler).schedule(MARKS_POLL_INTERVAL_MS, () => this.refresh());
+  /** How many live consumers currently need this store's data — see the class doc's "Polling is demand-gated". */
+  private activeConsumers = 0;
+  private stopPollFn: (() => void) | null = null;
 
+  constructor() {
     effect(() => {
       const events = this.live.mapEvents();
       if (events.length <= this.processedLiveEventCount) {
@@ -178,6 +202,34 @@ export class MarksStore {
       this.paletteSignal.set(DEFAULT_MARK_PALETTE);
     }
     this.lastRoutePath = path;
+  }
+
+  /**
+   * Registers demand — call once from a consumer's own constructor (a routed page's facade, or a
+   * non-routed presentational child like `MarksPanel` that injects this store directly). The first
+   * `activate()` since the last full `release()` triggers an immediate re-fetch (this store never
+   * destructs, so nothing else would ever refresh a long-stale list) and starts the safety-net poll;
+   * any further concurrent consumer just bumps the count.
+   */
+  activate(): void {
+    this.activeConsumers++;
+    if (this.activeConsumers > 1) {
+      return;
+    }
+    void this.refresh();
+    this.stopPollFn = this.scheduler.schedule(MARKS_POLL_INTERVAL_MS, () => this.refresh());
+  }
+
+  /** The matching teardown — call from the consumer's own `DestroyRef.onDestroy`. Stops the poll once nothing is left. */
+  release(): void {
+    if (this.activeConsumers === 0) {
+      return; // defensive — a mismatched release should never go negative
+    }
+    this.activeConsumers--;
+    if (this.activeConsumers === 0 && this.stopPollFn !== null) {
+      this.stopPollFn();
+      this.stopPollFn = null;
+    }
   }
 
   async refresh(): Promise<void> {

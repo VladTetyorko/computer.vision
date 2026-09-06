@@ -1,7 +1,15 @@
 # AUTH-ROLES — who this station belongs to, and what each person may do
 
-Status: ACTIVE (spec only — nothing here is built) · owner request 2026-09-04: *"authentication +
-roles — think the WHOLE FLOW from the user's perspective before any implementation."*
+Status: **BUILT and MERGED to master 2026-09-05** (branch `feat/auth-roles`, live-verified; merged
+inside the four-feature stack `auth-roles` → `source-onboarding-2` → `track-follow` → `crew-control`).
+Header corrected 2026-09-06 by E2E-FLOW-AUDIT proposal N2 — it still read *"spec only — nothing here
+is built"* a day after the code shipped, which is exactly the kind of stale status line that audit
+warns not to trust. The body below is the **as-built** spec; `ARCHITECTURE.md` §6 was reconciled
+against it in the same pass and now describes capabilities + Postgres-backed sessions rather than the
+three-role/JWT design that was never built.
+
+Owner request 2026-09-04: *"authentication + roles — think the WHOLE FLOW from the user's perspective
+before any implementation."*
 
 This is the MVP4 candidate [`MVP3-PLAN.md`](../done/MVP3-PLAN.md) §Deferred named and never
 scheduled (*"Auth/login + operator-vs-manager as real roles"*). It finishes what

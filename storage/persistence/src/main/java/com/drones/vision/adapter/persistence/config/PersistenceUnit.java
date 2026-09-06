@@ -16,6 +16,7 @@ import com.drones.vision.adapter.persistence.entity.DetectionEventEntity;
 import com.drones.vision.adapter.persistence.entity.DetectionResultEntity;
 import com.drones.vision.adapter.persistence.entity.DeviceEntity;
 import com.drones.vision.adapter.persistence.entity.DiscoveryCandidateEntity;
+import com.drones.vision.adapter.persistence.entity.EventHistoryEntity;
 import com.drones.vision.adapter.persistence.entity.FeatureRequirementEntity;
 import com.drones.vision.adapter.persistence.entity.GeofenceZoneEntity;
 import com.drones.vision.adapter.persistence.entity.GroupEntity;
@@ -297,6 +298,9 @@ public final class PersistenceUnit {
         // docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §11, Z2c (V31__discovery_inbox.sql) --
         // the discovery inbox's persisted "found devices" rows.
         configuration.addAnnotatedClass(DiscoveryCandidateEntity.class);
+        // docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave B3 (V35__event_history.sql) -- the durable
+        // home for platform Events the notification bell/`/manage/system` replay from.
+        configuration.addAnnotatedClass(EventHistoryEntity.class);
         return configuration.buildSessionFactory();
     }
 

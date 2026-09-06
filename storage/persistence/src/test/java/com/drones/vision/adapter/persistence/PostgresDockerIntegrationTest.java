@@ -98,6 +98,9 @@ import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditId;
 import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.platform.Event;
+import com.drones.vision.platform.EventHistoryPort;
+import com.drones.vision.platform.EventType;
 import com.drones.vision.identity.domain.model.Role;
 import com.drones.vision.learning.domain.model.SampleImage;
 import com.drones.vision.learning.domain.model.SampleStatus;
@@ -180,6 +183,7 @@ import com.drones.vision.adapter.persistence.repository.JpaDetectionRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDeviceRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDiscoveryCandidateRepository;
 import com.drones.vision.adapter.persistence.repository.JpaDrawingRepository;
+import com.drones.vision.adapter.persistence.repository.JpaEventHistory;
 import com.drones.vision.adapter.persistence.repository.JpaFeatureRequirementRepository;
 import com.drones.vision.adapter.persistence.repository.JpaGeofenceRepository;
 import com.drones.vision.adapter.persistence.repository.JpaGroupRepository;
@@ -328,13 +332,17 @@ class PostgresDockerIntegrationTest {
      * join for the same reason as {@code flyway_schema_history}: this table's own infrastructure
      * (Spring Session JDBC's row-per-HttpSession store), not domain data an operator ever asks "who
      * changed this" about — and Postgres folds the migration's unquoted upper-case identifiers to
-     * lower-case, so the live schema's actual names are these two.
+     * lower-case, so the live schema's actual names are these two. {@code event_history}, added by
+     * {@code V35__event_history.sql} (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave B3), is the same
+     * classification as {@code detection_events}/{@code telemetry_samples}: machine-generated,
+     * append-only, self-pruning platform-event history, not operator-authored control-plane
+     * configuration.
      */
     private static final Set<String> EXCLUDED_TABLES = Set.of(
             "telemetry_samples", "detection_results", "detection_events",
             "training_samples", "sample_images", "asset_images",
             "audit_entries", "db_audit_log", "flyway_schema_history", "projected_track_points",
-            "track_corrections", "spring_session", "spring_session_attributes");
+            "track_corrections", "spring_session", "spring_session_attributes", "event_history");
 
     private static EntityManagerFactory entityManagerFactory;
 
@@ -2884,6 +2892,141 @@ class PostgresDockerIntegrationTest {
             List<AuditEntry> found = repository.findByActor(actor, 10);
 
             assertEquals(List.of(newest.id(), oldest.id()), found.stream().map(AuditEntry::id).toList());
+        }
+    }
+
+    /**
+     * docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave B3 — the durable home for platform {@link
+     * Event}s: append-only record, newest-first {@code findRecent}/{@code findSince}, and the
+     * table-wide retention prune (keyed by nothing, unlike {@link JpaDetectionRepository}'s
+     * per-stream cap, since most persisted event types carry no {@code streamId} at all).
+     */
+    @Nested
+    class EventHistoryRepositoryTests {
+
+        private final EventHistoryPort repository = new JpaEventHistory(entityManagerFactory, 10_000);
+
+        @Test
+        void recordedEventRoundTripsEveryFieldIncludingNullStreamId() {
+            // findRecent is table-wide (see the class javadoc), so this also holds rows from every
+            // other test in this class -- fetch a large-enough page and pick out this test's own
+            // row by id, same technique as AuditTrailRepositoryTests#findRecentReturnsNewest....
+            Event event = new Event(UUID.randomUUID().toString(), null, NOW, EventType.BATTERY_LOW,
+                    "battery critical", Map.of("assetId", UUID.randomUUID().toString(), "batteryPercent", "8"));
+
+            repository.record(event);
+
+            List<Event> found = repository.findRecent(10_000).stream()
+                    .filter(e -> e.id().equals(event.id()))
+                    .toList();
+
+            assertEquals(List.of(event), found);
+        }
+
+        @Test
+        void recordedEventRoundTripsAWireStreamId() {
+            StreamId streamId = StreamId.random();
+            Event event = new Event(UUID.randomUUID().toString(), streamId, NOW, EventType.STREAM_STARTED,
+                    "stream started", Map.of());
+
+            repository.record(event);
+
+            Event found = repository.findRecent(10_000).stream()
+                    .filter(e -> e.id().equals(event.id()))
+                    .findFirst()
+                    .orElseThrow();
+
+            assertEquals(streamId, found.streamId());
+        }
+
+        @Test
+        void findRecentReturnsNewestFirstAcrossEveryTypeBoundedByLimit() {
+            // Table-wide, so this also holds rows from every other test in this class -- assert
+            // relative order among *this test's own* rows (identified by id) within a
+            // large-enough fetch, same technique as AuditTrailRepositoryTests#findRecent....
+            Event oldest = new Event(UUID.randomUUID().toString(), null, NOW, EventType.DEVICE_ONLINE,
+                    "oldest", Map.of());
+            Event middle = new Event(UUID.randomUUID().toString(), null, NOW.plusSeconds(10),
+                    EventType.DEVICE_OFFLINE, "middle", Map.of());
+            Event newest = new Event(UUID.randomUUID().toString(), null, NOW.plusSeconds(20),
+                    EventType.LINK_LOST, "newest", Map.of());
+            repository.record(oldest);
+            repository.record(newest);
+            repository.record(middle);
+            Set<String> ours = Set.of(oldest.id(), middle.id(), newest.id());
+
+            List<String> ourOrder = repository.findRecent(10_000).stream()
+                    .map(Event::id)
+                    .filter(ours::contains)
+                    .toList();
+
+            assertEquals(List.of(newest.id(), middle.id(), oldest.id()), ourOrder,
+                    "findRecent must span every type (not just one) and stay newest-first");
+        }
+
+        @Test
+        void findSinceExcludesEventsStrictlyBeforeTheCursorAndStaysNewestFirst() {
+            Event before = new Event(UUID.randomUUID().toString(), null, NOW, EventType.PIPELINE_ERROR,
+                    "before cursor", Map.of());
+            Event atCursor = new Event(UUID.randomUUID().toString(), null, NOW.plusSeconds(10),
+                    EventType.PIPELINE_ERROR, "at cursor", Map.of());
+            Event after = new Event(UUID.randomUUID().toString(), null, NOW.plusSeconds(20),
+                    EventType.PIPELINE_ERROR, "after cursor", Map.of());
+            repository.record(before);
+            repository.record(after);
+            repository.record(atCursor);
+
+            List<Event> found = repository.findSince(NOW.plusSeconds(10), 10_000).stream()
+                    .filter(e -> Set.of(before.id(), atCursor.id(), after.id()).contains(e.id()))
+                    .toList();
+
+            assertEquals(List.of(after.id(), atCursor.id()), found.stream().map(Event::id).toList(),
+                    "sinceInclusive must exclude the strictly-older row and include the cursor row itself");
+        }
+
+        @Test
+        void findSinceWithNullCursorAppliesNoLowerBound() {
+            Event event = new Event(UUID.randomUUID().toString(), null, NOW, EventType.TRAINING, "no bound",
+                    Map.of());
+            repository.record(event);
+
+            assertTrue(repository.findSince(null, 10_000).stream().anyMatch(e -> e.id().equals(event.id())));
+        }
+
+        @Test
+        void retentionPrunesOldestEventsOnceCapExceededAcrossTheWholeTableNotPerStream() {
+            // The prune is genuinely table-wide (see the class javadoc), and this table is shared
+            // with every sibling test in this class -- so these five rows must be unambiguously the
+            // newest in the *entire* table (not just relative to each other) for a cap-to-3 to
+            // deterministically keep exactly these three and none of another test's rows. A far-future
+            // offset guarantees that regardless of test execution order or what NOW.plusSeconds(<=30)
+            // offsets sibling tests elsewhere in this class use.
+            Instant farFuture = NOW.plusSeconds(1_000_000L);
+            EventHistoryPort capped = new JpaEventHistory(entityManagerFactory, 3);
+            StreamId streamA = StreamId.random();
+            StreamId streamB = StreamId.random();
+            capped.record(new Event(UUID.randomUUID().toString(), streamA, farFuture, EventType.STREAM_STARTED,
+                    "1", Map.of()));
+            capped.record(new Event(UUID.randomUUID().toString(), streamB, farFuture.plusSeconds(1),
+                    EventType.STREAM_STARTED, "2", Map.of()));
+            capped.record(new Event(UUID.randomUUID().toString(), streamA, farFuture.plusSeconds(2),
+                    EventType.STREAM_STOPPED, "3", Map.of()));
+            capped.record(new Event(UUID.randomUUID().toString(), streamB, farFuture.plusSeconds(3),
+                    EventType.STREAM_STOPPED, "4", Map.of()));
+            capped.record(new Event(UUID.randomUUID().toString(), streamA, farFuture.plusSeconds(4),
+                    EventType.STREAM_STOPPED, "5", Map.of()));
+
+            List<Event> remaining = capped.findRecent(10);
+            Set<String> ourMessages = Set.of("1", "2", "3", "4", "5");
+            List<String> ourRemaining = remaining.stream()
+                    .map(Event::message)
+                    .filter(ourMessages::contains)
+                    .toList();
+
+            assertEquals(3, remaining.size(), "the cap is table-wide -- five rows across two streams "
+                    + "prune down to three total, not three per stream, and no other test's rows can "
+                    + "outrank these far-future timestamps");
+            assertEquals(List.of("5", "4", "3"), ourRemaining);
         }
     }
 

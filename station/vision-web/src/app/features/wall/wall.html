@@ -66,8 +66,10 @@
           [tile]="tile"
           [boxesMode]="facade.boxesMode()"
           [cropFollowEnabled]="facade.cropFollowEnabled()"
+          [videoUp]="facade.isVideoUp(tile.streamId)"
           (cropFollowEnabledChange)="facade.cropFollowEnabled.set($event)"
           (focused)="facade.focus($event)"
+          (videoToggled)="facade.toggleVideo($event)"
         />
       }
     </div>

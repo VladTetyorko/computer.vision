@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { GeofenceStore } from '../../core/geofence/geofence-store';
 import { zoneKindLabel } from '../../core/geofence/geofence-logic';
@@ -62,6 +62,17 @@ export class ZonesPanel {
   protected readonly renameDraft = signal('');
 
   protected readonly sortedZones = computed(() => [...this.geofence.zones()].sort((a, b) => a.name.localeCompare(b.name)));
+
+  constructor() {
+    // ALWAYS-ON-FLOW-PLAN.md §4 Wave C3: this drawer section is a direct injector of the
+    // `providedIn: 'root'` store, so it must hold its own demand rather than free-riding on whatever
+    // host facade happened to activate it first — `/crew/:assetId`'s Map tools drawer mounts this
+    // panel with no host-facade activation of `GeofenceStore` at all (`CrewFacade` injects none of
+    // the five map-data stores), so skipping this would leave that route's zones section silently
+    // dependent on some *other* page having been visited first in the same session.
+    this.geofence.activate();
+    inject(DestroyRef).onDestroy(() => this.geofence.release());
+  }
 
   protected startDraw(kind: ZoneKind): void {
     this.drawKind.set(kind);

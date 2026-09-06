@@ -194,6 +194,22 @@ export class LiveFacade {
   readonly modelOptions = computed(() => this.fleet.models());
 
   constructor() {
+    // ALWAYS-ON-FLOW-PLAN.md §4 Wave C3: `/live` renders `<vision-tactical-map>` (behind the map
+    // inset toggle) — this facade holds demand for all four map-data stores for its own lifetime
+    // regardless of the inset's own visibility, matching `CommandFacade`/`CockpitFacade`'s identical
+    // posture (a route-lifetime hold, not a toggle-lifetime one — the inset can be shown/hidden many
+    // times per visit and re-fetching on every toggle would defeat the point of caching at all).
+    this.geofence.activate();
+    this.marks.activate();
+    this.layers.activate();
+    this.drawings.activate();
+    inject(DestroyRef).onDestroy(() => {
+      this.geofence.release();
+      this.marks.release();
+      this.layers.release();
+      this.drawings.release();
+    });
+
     // Panel state memory (docs/plans/done/UX-REWORK-PLAN.md §U-b item 7) — persists whenever either toggle
     // actually changes; the initial `signal()` value above already restored whatever was last
     // saved (or the existing default, on a first visit).

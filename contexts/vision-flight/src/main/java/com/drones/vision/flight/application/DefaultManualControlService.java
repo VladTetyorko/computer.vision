@@ -20,6 +20,7 @@ import com.drones.vision.flight.domain.port.ManualControlPort;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -68,15 +69,20 @@ import com.drones.vision.platform.VisibilityScope;
  * UnidentifiedReason} causes applied. See that enum's own javadoc and {@link #refusalMessage} for why
  * the three read differently to the operator instead of collapsing into one "cannot engage" text.
  *
- * <h2>One session per handle</h2>
- * This instance holds at most one active {@link ManualControlSession} at a time; a second {@link
- * #engage} while one is still active throws {@link IllegalStateException} without touching the
- * port. Because {@code vision-app}'s wiring is expected to construct exactly one {@code
- * ManualControlService} bean (a singleton, like every other service in this package), this in
- * practice serializes manual-control relaying to one connection at a time across the whole
- * application — an intentional Phase 1 simplification (single SITL operator), not an oversight; a
- * later phase wanting concurrent multi-operator relays would need a per-connection service instance
- * instead of a shared singleton.
+ * <h2>One session per asset, not one per service</h2>
+ * This instance holds at most one active {@link ManualControlSession} <em>per asset</em>; a second
+ * {@link #engage} on an asset that already has a live session throws {@link IllegalStateException}
+ * without touching the port, while an engage on any <em>other</em> asset proceeds normally. Two
+ * pilots flying two aircraft is the ordinary case, so the exclusivity that matters is the physical
+ * one — one set of sticks per airframe — not a limit inherited from the bean being a singleton.
+ * <p>
+ * Until E2E-FLOW-AUDIT S1 this was a single {@code activeSession} field, which made the singleton
+ * bean serialize manual control to <em>one connection across the entire fleet</em>: a second
+ * operator engaging a different drone was refused with "already active". The registry below is
+ * keyed by {@link AssetId} instead. {@code engage} still runs entirely under one lock rather than a
+ * concurrent map, because engaging is a once-per-flight event while the hot path ({@link
+ * ManualControlSession#onChannels}, ~30&nbsp;Hz) never touches this lock at all — so a global lock
+ * on the rare path buys atomicity across the whole check-resolve-open-register sequence for free.
  *
  * <h2>Watchdog</h2>
  * Each session keeps at most one outstanding {@link ScheduledFuture} at a time rather than
@@ -152,7 +158,8 @@ public final class DefaultManualControlService implements ManualControlService {
     private final ControlProfileSelector profileSelector;
 
     private final Object sessionLock = new Object();
-    private DefaultManualControlSession activeSession;
+    /** Keyed by asset: manual control is exclusive per aircraft, never across the fleet. Guarded by {@link #sessionLock}. */
+    private final Map<AssetId, DefaultManualControlSession> activeSessions = new HashMap<>();
 
     /** Production convenience ctor: {@link Clock#systemUTC()}, a fresh daemon watchdog scheduler, the default timeout. */
     public DefaultManualControlService(AssetService assetService, ManualControlPort manualControlPort,
@@ -227,9 +234,11 @@ public final class DefaultManualControlService implements ManualControlService {
         Objects.requireNonNull(onWatchdog, "onWatchdog must not be null");
 
         synchronized (sessionLock) {
-            if (activeSession != null) {
-                throw new IllegalStateException(
-                        "A manual-control session is already active on this handle; release it first");
+            if (activeSessions.containsKey(assetId)) {
+                // Keeps the literal "already active" substring: ManualControlWebSocketHandler maps
+                // this message to its ALREADY_ENGAGED denial code by matching on it.
+                throw new IllegalStateException("A manual-control session is already active on asset "
+                        + assetId.value() + "; release it first");
             }
 
             AssetDetails details = assetService.details(assetId); // NoSuchElementException -> unknown asset
@@ -285,7 +294,7 @@ public final class DefaultManualControlService implements ManualControlService {
 
             DefaultManualControlSession session =
                     new DefaultManualControlSession(assetId, actor, link, onWatchdog, this::onSessionEnded);
-            activeSession = session;
+            activeSessions.put(assetId, session);
             audit(actor, assetId, RESULT_ENGAGE);
             session.armWatchdog();
             return session;
@@ -294,9 +303,9 @@ public final class DefaultManualControlService implements ManualControlService {
 
     private void onSessionEnded(DefaultManualControlSession session) {
         synchronized (sessionLock) {
-            if (activeSession == session) {
-                activeSession = null;
-            }
+            // remove(key, value) so a session that already lost its slot to a newer engage on the
+            // same asset cannot evict the newer one on its way out.
+            activeSessions.remove(session.assetId, session);
         }
     }
 

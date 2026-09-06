@@ -46,8 +46,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * while one is already active is denied {@code ALREADY_ENGAGED} without calling {@link
  * #manualControlService} again. {@link #manualControlService} itself is wired as one app-wide
  * singleton (see {@code WiringConfiguration}), so a <em>different</em> connection trying to engage
- * while another connection's session is still active hits {@code
- * DefaultManualControlService}'s own one-session-per-handle guard — surfacing as an {@link
+ * <em>the same asset</em> while another connection's session is still active hits {@code
+ * DefaultManualControlService}'s own one-session-per-asset guard (E2E-FLOW-AUDIT S1 keyed that
+ * registry by asset; before it, any second connection was refused regardless of which drone it
+ * asked for) — surfacing as an {@link
  * IllegalStateException} this handler also maps to {@code ALREADY_ENGAGED} (see {@link
  * #mapIllegalState}).
  *
@@ -73,7 +75,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * distinction between "never identified", "a real airframe we don't support" and "not a vehicle at
  * all" carried entirely in its own message, not in the code — see that exception's javadoc for why
  * a dedicated exception type exists here instead of a fourth message-sniffed case; and the plain
- * {@link IllegalStateException} for the three remaining causes ("already active on this handle", "no
+ * {@link IllegalStateException} for the three remaining causes ("already active on asset ...", "no
  * active manual-control-capable device", or the port's own "not currently reachable"/"does not
  * support device" messages) that the application layer does not distinguish by exception type —
  * only by message text. {@link #mapIllegalState} matches on message substrings in priority order;
@@ -396,7 +398,8 @@ public class ManualControlWebSocketHandler extends TextWebSocketHandler {
      * Best-effort message-substring mapping from {@link ManualControlService#engage}'s
      * undifferentiated {@link IllegalStateException} to one of the three remaining frozen {@code
      * denied} codes (see class javadoc). {@code DefaultManualControlService}'s own "already active
-     * on this handle" message is checked first (unambiguous); {@code
+     * on asset ..." message is checked first (unambiguous — and that service deliberately keeps the
+     * literal "already active" substring for this matcher's sake); {@code
      * MavlinkManualControlSender.engage}'s own "does not support device" message (a defensive check
      * that should never actually fire, since {@code supports()} is checked first) maps to {@code
      * UNSUPPORTED}; everything else — notably "no active manual-control-capable device" (no device

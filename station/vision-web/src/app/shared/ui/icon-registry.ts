@@ -24,6 +24,7 @@ export type IconName =
   | 'home'
   | 'cockpit'
   | 'eye'
+  | 'eye-off'
   | 'scan'
   | 'layers'
   | 'list'
@@ -86,6 +87,11 @@ export const ICONS: Record<IconName, string> = {
   home: '<path d="M4 11.5 12 4l8 7.5"/><path d="M6 10.5V19a1 1 0 0 0 1 1h4v-6h2v6h4a1 1 0 0 0 1-1v-8.5"/>',
   cockpit: '<path d="M4 15a8 8 0 0 1 16 0"/><line x1="2" y1="15" x2="22" y2="15"/><circle cx="12" cy="12" r="1.4"/>',
   eye: '<path d="M2 12S5.6 5 12 5s10 7 10 7-3.6 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/>',
+  // Added for `wall-tile.ts`'s video-on-request toggle (ALWAYS-ON-FLOW-PLAN.md §4 Wave C1/C2) — the
+  // "hide video" half `eye` alone has no way to express; a slashed eye is the universal visibility-off
+  // mark, additive to the frozen launch set per this file's own header note.
+  'eye-off':
+    '<path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c6.4 0 10 7 10 7a17.24 17.24 0 0 1-2.94 4.06M6.42 6.42C3.5 8.24 2 12 2 12s3.6 7 10 7a9.5 9.5 0 0 0 5.08-1.42M2 2l20 20"/><path d="M9.53 9.53A3 3 0 0 0 12 15a3 3 0 0 0 2.47-1.29"/>',
   scan:
     '<path d="M4 8V5a1 1 0 0 1 1-1h3"/><path d="M16 4h3a1 1 0 0 1 1 1v3"/><path d="M20 16v3a1 1 0 0 1-1 1h-3"/>' +
     '<path d="M8 20H5a1 1 0 0 1-1-1v-3"/><line x1="4" y1="12" x2="20" y2="12"/>',

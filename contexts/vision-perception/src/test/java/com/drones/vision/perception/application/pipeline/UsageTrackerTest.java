@@ -1393,6 +1393,133 @@ class UsageTrackerTest {
                 "the idle-close sweep's activity signal must reflect engage-opened telemetry traffic too");
     }
 
+    // -- ALWAYS-ON-FLOW wave A: telemetry is a fact about the world, not a side effect of video --
+
+    @Test
+    void pinnedTelemetrySurvivesTheLastStreamStopping() {
+        // The reported defect: an operator pressing Stop -- or, far more often, IdleStreamReaper
+        // stopping a stream nobody has watched for ten minutes -- used to end telemetry too.
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        UsageTracker tracker = tracker(List.of(source));
+
+        tracker.pinTelemetry(asset.id());
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+        tracker.onStreamStopped(telemetryDevice.id());
+
+        assertTrue(source.closedDevices.isEmpty(),
+                "a pinned asset's telemetry source must outlive its last video stream");
+    }
+
+    @Test
+    void pinIsIdempotentAndOpensTheSourceExactlyOnce() {
+        // A reconciler calls this on every tick, so re-pinning must never open a second source.
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        UsageTracker tracker = tracker(List.of(source));
+
+        tracker.pinTelemetry(asset.id());
+        tracker.pinTelemetry(asset.id());
+        tracker.pinTelemetry(asset.id());
+
+        assertEquals(List.of(telemetryDevice.id()), source.openedDevices);
+    }
+
+    @Test
+    void pinningOpensTelemetryWithoutOpeningAUsage() {
+        // A link is not a flight. Pinning must never fabricate a session -- #engage stays the
+        // explicit verb for that.
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        UsageTracker tracker = tracker(List.of(source));
+
+        tracker.pinTelemetry(asset.id());
+
+        assertEquals(List.of(telemetryDevice.id()), source.openedDevices);
+        verify(usageRepository, never()).save(any());
+    }
+
+    @Test
+    void aSampleOnAPinnedButUnengagedAssetPublishesLiveAndEvaluatesGeofenceButRecordsNothing() {
+        // ALWAYS-ON-FLOW A2, the doctrine split: with no usage open there is nowhere to record a
+        // per-usage row, but the sample is still true -- a breach is a breach whether or not
+        // anybody opened a flight, and a watching client must still see the freshest position.
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        GeofenceMonitor geofenceMonitor = mock(GeofenceMonitor.class);
+        UsageTracker tracker = tracker(List.of(source), geofenceMonitor);
+
+        tracker.pinTelemetry(asset.id());
+        Telemetry sample = telemetry(telemetryDevice.id(), 50.0, 30.0, 95.0);
+        source.emit(telemetryDevice.id(), sample);
+
+        verify(geofenceMonitor).evaluate(asset.id(), sample);
+        verify(telemetryRepository, never()).save(any(), any());
+        verify(usageRepository, never()).save(any());
+        assertEquals(Optional.of(sample), tracker.latestTelemetry(asset.id()),
+                "latestTelemetry must answer for a live link even with no usage open");
+    }
+
+    @Test
+    void unpinningReleasesTelemetryOnlyWhenNothingElseNeedsIt() {
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findByDeviceId(telemetryDevice.id())).thenReturn(Optional.of(asset));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        UsageTracker tracker = tracker(List.of(source));
+
+        tracker.pinTelemetry(asset.id());
+        tracker.onStreamStarted(telemetryDevice.id(), StreamId.random());
+
+        tracker.unpinTelemetry(asset.id()); // a device is still active -- must not tear down
+        assertTrue(source.closedDevices.isEmpty(),
+                "unpinning must not close telemetry an active device still needs");
+    }
+
+    @Test
+    void unpinningAnIdleAssetReleasesItsTelemetry() throws InterruptedException {
+        Device telemetryDevice = telemetryDevice("tel-1");
+        Asset asset = asset(Set.of(telemetryDevice.id()));
+        when(assetRepository.findById(asset.id())).thenReturn(Optional.of(asset));
+        when(deviceRepository.findById(telemetryDevice.id())).thenReturn(Optional.of(telemetryDevice));
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        UsageTracker tracker = tracker(List.of(source));
+
+        tracker.pinTelemetry(asset.id());
+        tracker.unpinTelemetry(asset.id());
+
+        // close() is deferred to a virtual thread (MVP2 §S, S-a), so await the latch.
+        assertTrue(source.closeLatch.await(2, TimeUnit.SECONDS), "telemetry source must be closed");
+        assertEquals(List.of(telemetryDevice.id()), source.closedDevices);
+    }
+
+    @Test
+    void pinningAnUnknownAssetIsIgnored() {
+        // A reconciler racing a deletion is ordinary, not exceptional.
+        ScriptedTelemetrySource source = new ScriptedTelemetrySource(d -> true);
+        UsageTracker tracker = tracker(List.of(source));
+
+        tracker.pinTelemetry(AssetId.random());
+        tracker.unpinTelemetry(AssetId.random());
+
+        assertTrue(source.openedDevices.isEmpty());
+    }
+
     private static Telemetry telemetry(DeviceId deviceId, double lat, double lon, double battery) {
         return new Telemetry(deviceId, Instant.now(), lat, lon, null, 0.0, battery, Map.of());
     }

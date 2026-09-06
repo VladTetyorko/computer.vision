@@ -188,6 +188,56 @@ vision:
     idle-close: 10m
     sweep-period: 60s
 
+  # --- Telemetry flow policy (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave A) ---
+  # Its own root, deliberately NOT under vision.streams.* -- those keys decide whether a video
+  # STREAM should exist, these decide whether a LINK should be claimed. Conflating the two is what
+  # let the idle-stream sweep below silently end an aircraft's telemetry: a stream nobody had
+  # watched for 10 minutes was stopped, its usage closed, and its MAVLink subscription torn down
+  # with it. Telemetry is a fact about the world; whether anyone is looking is not part of it.
+  telemetry:
+    always-on:
+      # false (default): no TelemetryPinRunner sweep is scheduled, nothing is pinned, and telemetry
+      # opens exactly where it always did -- a device's first video stream (UsageTracker
+      # #deviceStreamStarted) or an explicit operator engage. true: every in-service asset's
+      # TELEMETRY-capable devices are claimed continuously, and those subscriptions survive every
+      # stream stopping and every usage closing; only leaving service releases them.
+      #
+      # Pinning opens a LINK, never a FLIGHT. No AssetUsage is opened, so a pinned-but-unengaged
+      # aircraft records no per-usage telemetry rows -- its samples update latestTelemetry, push to
+      # whoever is watching, and are evaluated for geofence breaches, and nothing else. Opening a
+      # flight stays explicit (POST /api/assets/{id}/session) or stream-triggered, unchanged.
+      enabled: false
+      # How often the desired pin set is reconciled against what is actually open. One asset listing
+      # per tick, plus one asset lookup per in-service asset (UsageTracker#pinTelemetry re-reads the
+      # asset so a device attached since the last sweep is picked up). At this default that is N/30
+      # lookups per second -- negligible at this platform's scale, but it is database work, not
+      # purely in-memory. It is a convergence loop, not a latency budget: a newly registered
+      # aircraft's link comes up within one sweep, well inside the time it takes an operator to
+      # walk to it.
+      sweep-interval: 30s
+
+  # --- Durable platform-event history (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave B3) ---
+  # EventPublisherPort's delivery is fire-and-forget (logging + the always-on `event` SSE topic) with
+  # no store behind it at all -- the notification bell and /manage/system were a pure `computed` over
+  # the live feed's in-memory log, so they started empty on every page load and lost everything on an
+  # SSE reconnect. This block controls whether a durable copy is kept behind GET /api/system/events.
+  events:
+    history:
+      # false (default): no PersistingEventPublisher decorator is added -- eventPublisherPort behaves
+      # exactly as it did before this wave, and GET /api/system/events always returns an empty list
+      # (the endpoint exists either way; only its content depends on this flag). true: every event
+      # except DETECTION (already durable elsewhere, and this pipeline's highest-volume event by a
+      # wide margin -- see PersistingEventPublisher's own javadoc) is additionally recorded, off the
+      # calling thread, to Postgres.
+      enabled: false
+      retention:
+        # Total rows kept across the whole table, oldest pruned first on every write -- a single
+        # table-wide cap, not per-stream/per-type, since most persisted event types (device/battery/
+        # link/geofence/divergence) carry no streamId to group by at all. At one row per edge-
+        # triggered occurrence (never per detection), this is generous for a single-deployment fleet
+        # without being unbounded.
+        max-rows: 20000
+
   # --- Two seats on one aircraft (docs/plans/active/CREW-CONTROL-PLAN.md §3.6, wave W2) ---
   crew:
     # false (default): SeatAccess is a pass-through -- no verb is seat-guarded, no 409/403 from a

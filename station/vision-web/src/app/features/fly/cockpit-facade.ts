@@ -893,6 +893,14 @@ export class CockpitFacade {
     // pages that keeps the shared global events poll alive while mounted.
     this.events.activate();
 
+    // ALWAYS-ON-FLOW-PLAN.md §4 Wave C3: the cockpit renders `<vision-tactical-map>` directly
+    // (the map inset) plus the Map/Marks drawers built from the same stores — this facade holds
+    // demand for all four for its own lifetime, released alongside `events` below.
+    this.geofence.activate();
+    this.marks.activate();
+    this.layers.activate();
+    this.drawings.activate();
+
     // `PollScheduler.schedule`'s own contract is "starting one `periodMs` from now" — it never
     // fires immediately itself, by design (every consumer is expected to do its own first fetch,
     // see that method's own doc comment). The pre-split `FlyFacade` got this for free: `FlyPage`'s
@@ -986,6 +994,10 @@ export class CockpitFacade {
 
     inject(DestroyRef).onDestroy(() => {
       this.events.release();
+      this.geofence.release();
+      this.marks.release();
+      this.layers.release();
+      this.drawings.release();
       this.stopAssetPolling();
     });
   }

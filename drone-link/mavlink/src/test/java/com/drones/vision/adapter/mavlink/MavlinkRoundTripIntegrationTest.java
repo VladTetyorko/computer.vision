@@ -102,7 +102,17 @@ class MavlinkRoundTripIntegrationTest {
             awaitAtLeast(collected, monitor, 10, java.time.Duration.ofSeconds(20));
             assertNull(errorRef.get(), "a real TX->wire->RX round trip must not error");
 
-            List<Telemetry> withPosition = collected.stream().filter(t -> t.latitude() != null).toList();
+            // Collections.synchronizedList requires manual sync while iterating (its own javadoc) --
+            // the RX subscriber thread is still appending, so an unsynchronized stream() here races
+            // it into a ConcurrentModificationException. Snapshot all three views under one lock.
+            List<Telemetry> withPosition;
+            List<Telemetry> withBattery;
+            List<Telemetry> withFlightState;
+            synchronized (collected) {
+                withPosition = collected.stream().filter(t -> t.latitude() != null).toList();
+                withBattery = collected.stream().filter(t -> t.batteryPercent() != null).toList();
+                withFlightState = collected.stream().filter(t -> t.flightState() != null).toList();
+            }
             assertTrue(withPosition.size() >= 2, "expected at least two position-bearing samples");
 
             double firstLatitude = withPosition.get(0).latitude();
@@ -110,11 +120,9 @@ class MavlinkRoundTripIntegrationTest {
             assertTrue(Math.abs(lastLatitude - firstLatitude) > 1e-6,
                     "expected the drone to actually move: first=" + firstLatitude + " last=" + lastLatitude);
 
-            List<Telemetry> withBattery = collected.stream().filter(t -> t.batteryPercent() != null).toList();
             assertTrue(!withBattery.isEmpty(), "expected at least one battery-reporting sample (SYS_STATUS)");
 
             // docs/plans/done/FC-INTEGRATIONS-PLAN.md F-a: the nominal (non-failsafe) heartbeat reports armed + Loiter.
-            List<Telemetry> withFlightState = collected.stream().filter(t -> t.flightState() != null).toList();
             assertTrue(!withFlightState.isEmpty(), "expected at least one flight-state-bearing sample (HEARTBEAT)");
             assertTrue(withFlightState.stream().anyMatch(t -> Boolean.TRUE.equals(t.flightState().armed())
                             && "Loiter".equals(t.flightState().mode())),
@@ -181,9 +189,11 @@ class MavlinkRoundTripIntegrationTest {
             long deadline = System.currentTimeMillis() + 20_000L;
             synchronized (monitor) {
                 while (!sawFailsafeRtl && System.currentTimeMillis() < deadline) {
-                    sawFailsafeRtl = collected.stream().anyMatch(t -> t.flightState() != null
-                            && Boolean.TRUE.equals(t.flightState().failsafe())
-                            && "RTL".equals(t.flightState().mode()));
+                    synchronized (collected) { // Collections.synchronizedList requires manual sync while iterating
+                        sawFailsafeRtl = collected.stream().anyMatch(t -> t.flightState() != null
+                                && Boolean.TRUE.equals(t.flightState().failsafe())
+                                && "RTL".equals(t.flightState().mode()));
+                    }
                     if (!sawFailsafeRtl) {
                         monitor.wait(500);
                     }

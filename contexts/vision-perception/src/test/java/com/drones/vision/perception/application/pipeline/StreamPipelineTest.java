@@ -216,6 +216,20 @@ class StreamPipelineTest {
     }
 
     /**
+     * @see #manualPipeline(PipelineConfig, LongSupplier) -- the wave D1/D2 policy tests below need an
+     *      {@code assetId}/{@code liveUpdatePublisherPort} pair to observe the live plane
+     *      (publishDetections) independently of the durable plane (detectionRepositoryPort).
+     */
+    private StreamPipeline manualPipeline(PipelineConfig config, LongSupplier clock, AssetId assetId,
+                                           DetectionLiveUpdatePort liveUpdatePublisherPort) {
+        StreamPipeline pipeline = new StreamPipeline(streamId, device, config, NO_OP_SOURCE, detectionPort,
+                streamPublisherPort, detectionRepositoryPort, eventPublisher, collaborators(Optional.empty(),
+                        Optional.of(assetId), Optional.of(liveUpdatePublisherPort), Optional.empty(), clock));
+        pipeline.onSubscribe(NOOP_SUBSCRIPTION);
+        return pipeline;
+    }
+
+    /**
      * Drives the pipeline with a scripted <b>latency</b> clock (the package-private seam), leaving
      * the cadence clock at its default so the sampling behaviour under test elsewhere is untouched.
      */
@@ -1302,6 +1316,175 @@ class StreamPipelineTest {
         assertTrue(pipeline.latestDetections().isEmpty(),
                 "a result computed before the gate closed must not resurrect the state the close just cleared");
         verify(detectionRepositoryPort, times(1)).save(any());
+    }
+
+    // --- docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave D1/D2: DetectionPolicy.ALWAYS -- a third,
+    // independent widener of the inference+durable gate that must never widen the live gate -------
+
+    @Test
+    void detectionPolicyAlwaysOnDefaultsToFalseAndIsInertWithoutIt() {
+        StreamPipeline pipeline = pipeline(new ScriptedVideoPublisher(List.of()), config(30, 2));
+
+        assertFalse(pipeline.detectionPolicyAlwaysOn(),
+                "fail-closed default: a pipeline with no DetectionPolicyPort ever wired must not widen the gate");
+
+        pipeline.updateDetectionDemand(false);
+        assertEquals(DetectionState.IDLE_NO_VIEWERS, pipeline.detectionState(),
+                "an inert (false) policy must leave the pre-existing demand-only truth table untouched");
+    }
+
+    /**
+     * The D1 widening itself: {@code ALWAYS} with nobody watching still runs inference and still
+     * persists, but must not touch anything the live gate governs -- {@link #latestDetections()}
+     * stays empty and {@link DetectionLiveUpdatePort#publishDetections} is never called.
+     */
+    @Test
+    void detectionPolicyAlwaysOnWidensTheInferenceAndDurableGateWhenDemandIsFalse() {
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
+        AssetId assetId = AssetId.random();
+        DetectionLiveUpdatePort liveUpdatePublisherPort = mock(DetectionLiveUpdatePort.class);
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L, assetId, liveUpdatePublisherPort);
+        pipeline.updateDetectionDemand(false);
+        pipeline.updateDetectionPolicy(true);
+
+        assertEquals(DetectionState.RUNNING_UNWATCHED, pipeline.detectionState(),
+                "ALWAYS with nobody watching is a third, distinct state -- inference runs, but no viewer");
+
+        pipeline.onNext(frame(0));
+
+        verify(detectionPort, times(1)).detect(any(), any());
+        verify(detectionRepositoryPort, times(1)).save(any());
+        assertTrue(pipeline.latestDetections().isEmpty(),
+                "the live gate stayed closed (no demand) -- live read models must not populate for an unwatched stream");
+        verify(liveUpdatePublisherPort, never()).publishDetections(any(), any());
+    }
+
+    /**
+     * The hardest part (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md &sect;4): an {@code ALWAYS} asset's
+     * last viewer leaving is the live-gate-only edge -- {@link StreamPipeline#handleDetectionGateTransition}
+     * must clear exactly the live-plane read models (mirroring {@link
+     * #closingTheDetectionDemandGateClearsEstablishedBoxesAndTheRateWindowThenReopeningResumesFreshDetection}),
+     * while leaving {@link #pipelineLatency()}/{@link #detectionRate()} alone and continuing to submit
+     * inference and persist -- because inference itself never stopped.
+     */
+    @Test
+    void alwaysPolicyKeepsDetectionRunningAfterTheLastViewerLeavesButClearsOnlyLiveReadModels() {
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
+        AssetId assetId = AssetId.random();
+        DetectionLiveUpdatePort liveUpdatePublisherPort = mock(DetectionLiveUpdatePort.class);
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L, assetId, liveUpdatePublisherPort);
+        pipeline.updateDetectionPolicy(true); // opted into ALWAYS
+
+        pipeline.onNext(frame(0)); // demand still true (the default) -- a viewer is watching
+        assertFalse(pipeline.latestDetections().isEmpty(), "boxes must be established while watched, before the edge under test");
+        assertEquals(1L, pipeline.detectionRate().submitted());
+        assertEquals(1L, pipeline.pipelineLatency().samples());
+        verify(liveUpdatePublisherPort, times(1)).publishDetections(eq(assetId), any());
+
+        pipeline.updateDetectionDemand(false); // the last viewer leaves; ALWAYS keeps inference open
+
+        assertEquals(DetectionState.RUNNING_UNWATCHED, pipeline.detectionState(),
+                "ALWAYS keeps inference running even though the live gate just closed");
+        assertTrue(pipeline.latestDetections().isEmpty(), "live read models clear on the live-only edge");
+        assertTrue(pipeline.tracks().isEmpty());
+        assertEquals(1L, pipeline.detectionRate().submitted(),
+                "detector-health windows are tied to inference, not viewership -- they must survive a live-only close");
+        assertEquals(1L, pipeline.pipelineLatency().samples());
+
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(1)));
+        pipeline.onNext(frame(1));
+
+        verify(detectionPort, times(2)).detect(any(), any());
+        verify(detectionRepositoryPort, times(2)).save(any());
+        assertTrue(pipeline.latestDetections().isEmpty(),
+                "durable keeps saving for the unwatched ALWAYS stream, but live read models stay empty");
+        verify(liveUpdatePublisherPort, times(1)).publishDetections(eq(assetId), any());
+        // still only once -- the second (post-edge) detection must never reach the live publisher
+    }
+
+    /**
+     * The mirror of {@link #closingTheDetectionEnabledGateClearsEstablishedBoxesAndTheRateWindowThenReopeningResumesFreshDetection}
+     * for the wider D2 gate: with {@code ALWAYS} set, demand alone going false must NOT do the full
+     * clear (that would wipe {@link #detectionRate()}/{@link #pipelineLatency()} out from under an
+     * inference loop that is still running) -- only {@link PipelineConfig#detectionEnabled()} going
+     * false, or {@code ALWAYS} itself being revoked, closes the wider inference gate and triggers the
+     * full clear.
+     */
+    @Test
+    void revokingAlwaysPolicyWithDemandAlreadyFalseClosesTheInferenceGateAndDoesTheFullClear() {
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L);
+        pipeline.updateDetectionPolicy(true);
+        pipeline.updateDetectionDemand(false);
+        pipeline.onNext(frame(0));
+        assertEquals(1L, pipeline.detectionRate().submitted(), "inference must still be running: ALWAYS, no viewer");
+
+        pipeline.updateDetectionPolicy(false); // the operator revokes ALWAYS; demand is already false
+
+        assertEquals(DetectionState.IDLE_NO_VIEWERS, pipeline.detectionState(),
+                "with ALWAYS gone and demand already false, the wider gate is now closed too");
+        assertEquals(0L, pipeline.detectionRate().submitted(),
+                "the inference gate itself closed this time -- the full clear must run, unlike the live-only edge");
+        assertEquals(0L, pipeline.pipelineLatency().samples());
+    }
+
+    @Test
+    void repeatedlyConfirmingAlwaysPolicyIsStillSetDoesNotCorruptTheLiveEdgeTracking() {
+        // Mirrors repeatedlyConfirmingDemandIsStillGoneDoesNotCorruptTheEdgeTrackingNeededToReopenLater:
+        // a policy-poll scheduler calls updateDetectionPolicy(true) on every tick, not just once on the
+        // transition -- handleDetectionGateTransition() must key off the edge for EACH gate, not the level.
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L);
+        pipeline.updateDetectionPolicy(true);
+        pipeline.onNext(frame(0));
+
+        pipeline.updateDetectionDemand(false);
+        pipeline.updateDetectionPolicy(true);
+        pipeline.updateDetectionPolicy(true);
+        pipeline.updateDetectionPolicy(true);
+        assertTrue(pipeline.latestDetections().isEmpty(), "the live-only edge already fired once");
+        assertEquals(1L, pipeline.detectionRate().submitted(), "repeated true confirmations must not re-clear durable state");
+
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(1)));
+        pipeline.updateDetectionDemand(true);
+        pipeline.onNext(frame(1));
+
+        assertFalse(pipeline.latestDetections().isEmpty(),
+                "repeated ALWAYS confirmations must not prevent the live gate from recognising demand's later true");
+    }
+
+    /**
+     * The live-gate race, independent of the inference-gate race {@link
+     * #aResultCompletingAfterTheGateClosedIsDroppedNotResurrectingTheStateTheCloseJustCleared} already
+     * covers: a result submitted while a viewer was watching an {@code ALWAYS} stream can complete
+     * <em>after</em> that viewer has since left. {@link StreamPipeline#onDetectionResult} must still
+     * save it durably (the inference gate never closed) but must not resurrect the live read models
+     * the live-only edge already cleared.
+     */
+    @Test
+    void aResultCompletingAfterOnlyTheLiveGateClosedIsStillSavedDurablyButDoesNotResurrectLiveState() {
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(nonEmptyResult(0)));
+        AssetId assetId = AssetId.random();
+        DetectionLiveUpdatePort liveUpdatePublisherPort = mock(DetectionLiveUpdatePort.class);
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L, assetId, liveUpdatePublisherPort);
+        pipeline.updateDetectionPolicy(true);
+        pipeline.onNext(frame(0));
+        assertFalse(pipeline.latestDetections().isEmpty(), "boxes must be established before the race is exercised");
+
+        CompletableFuture<DetectionResult> pending = new CompletableFuture<>();
+        when(detectionPort.detect(any(), any())).thenReturn(pending);
+        pipeline.onNext(frame(1)); // submitted while the live gate is still open; its completion is delayed
+
+        pipeline.updateDetectionDemand(false); // the viewer leaves -- live-only edge clears latestDetections
+        assertTrue(pipeline.latestDetections().isEmpty());
+
+        pending.complete(nonEmptyResult(1)); // the in-flight inference, submitted before the viewer left, lands late
+
+        assertTrue(pipeline.latestDetections().isEmpty(),
+                "a result computed before the live-only close must not resurrect the live state that close cleared");
+        verify(detectionRepositoryPort, times(2)).save(any());
+        verify(liveUpdatePublisherPort, times(1)).publishDetections(eq(assetId), any());
+        // still only once -- the durable save for the late result must happen, but never its live counterpart
     }
 
     @Test

@@ -318,6 +318,15 @@ export class AssetDetailFacade {
     // keeps the shared global events poll alive.
     this.events.activate();
 
+    // ALWAYS-ON-FLOW-PLAN.md §4 Wave C3: this is the one facade that injects all five map-data
+    // stores (it is also the only routed page that renders the projected-track layer), so it holds
+    // demand for every one of them for its own lifetime.
+    this.geofence.activate();
+    this.marks.activate();
+    this.layers.activate();
+    this.drawings.activate();
+    this.tracks.activate();
+
     // Every poll registration below returns its own promise so `PollScheduler`'s in-flight guard can
     // skip a tick while the previous one is still pending (docs/plans/done/MVP2-PLAN.md §S, S-b).
     const scheduler = inject(PollScheduler);
@@ -329,6 +338,11 @@ export class AssetDetailFacade {
     });
     inject(DestroyRef).onDestroy(() => {
       this.events.release();
+      this.geofence.release();
+      this.marks.release();
+      this.layers.release();
+      this.drawings.release();
+      this.tracks.release();
       stopAssetPoll();
       stopClock();
       stopStreamEventsPoll();
