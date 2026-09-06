@@ -4,6 +4,7 @@ import { describeHttpError } from '../api-error';
 import { PollScheduler } from '../poll-scheduler';
 import { ToastService } from '../toast.service';
 import { LiveStore } from '../live/live-store';
+import { isLiveAvailable } from '../live/live-fallback-logic';
 import { applyDiscoveryEvents } from './discovery-inbox-logic';
 import type {
   DiscoveryCandidate,
@@ -14,7 +15,15 @@ import type {
 } from '../api/models';
 
 /** Matches the backend sweep's own cadence (`vision.discovery.inbox.sweep-seconds=30`,
- *  ZERO-CONFIG-ONBOARDING-CONTEXT.md §11 Z2c) — polling faster would never see anything newer. */
+ *  ZERO-CONFIG-ONBOARDING-CONTEXT.md §11 Z2c) — polling faster would never see anything newer.
+ *
+ *  **Gated on live, not unconditional** (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1) —
+ *  runs **only** while `activeConsumers > 0` **and** `LiveStore` is not `'open'`; see
+ *  `applyTransport`'s own doc comment for the state table (the same one `MarksStore`/`FleetStore`/
+ *  `EventsStore` each implement). **`sources` is the one thing this poll alone still populates** —
+ *  the `discovery` topic carries only candidates, never sources — so the reconcile this gate
+ *  performs on every genuine reconnect is not a nicety here, it is the only thing that keeps
+ *  `sources` from going stale forever once live is up. */
 const POLL_INTERVAL_MS = 30_000;
 
 /**
@@ -54,14 +63,22 @@ const POLL_INTERVAL_MS = 30_000;
  *
  * **The `discovery` SSE topic (W1, docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.2 C4)** now
  * layers on top of that poll, exactly like `MarksStore` layers `map` on top of its own `GET
- * /api/map/marks` — the poll stays the safety net (still the only thing that ever populates
- * `sources`, and what a viewer who mounts after a topic-blip reconciles against), while the
- * always-on, delta-only feed (`LiveStore.discoveryEvents`) folds in near-instant `REPORTED`/
- * `REGISTERED`/`DISMISSED`/`RESTORED` changes via `discovery-inbox-logic.ts#applyDiscoveryEvents`.
- * This fold runs unconditionally from construction (not gated by `activate`/`release`) — it costs
- * nothing but an array upsert against a signal the shared `/api/live` connection already carries
- * regardless of whether this store has an active consumer right now, and keeps `candidates` warm
- * for the next `activate()` instead of every mount starting from a stale poll.
+ * /api/map/marks` — the poll is now the fallback rather than an unconditional safety net (see
+ * `POLL_INTERVAL_MS`'s own doc comment on the D1 gate and the `sources` gap it exists to cover),
+ * while the always-on, delta-only feed (`LiveStore.discoveryEvents`) folds in near-instant
+ * `REPORTED`/`REGISTERED`/`DISMISSED`/`RESTORED` *candidate* changes via
+ * `discovery-inbox-logic.ts#applyDiscoveryEvents`. This fold runs unconditionally from construction
+ * (not gated by `activate`/`release`) — it costs nothing but an array upsert against a signal the
+ * shared `/api/live` connection already carries regardless of whether this store has an active
+ * consumer right now, and keeps `candidates` warm for the next `activate()` instead of every mount
+ * starting from a stale poll.
+ *
+ * **Polling is gated on live too now (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1, L2)** —
+ * `activeConsumers > 0 && !isLiveAvailable(...)` is the only state that runs the 30s poll; see
+ * {@link applyTransport} for the exact table (identical shape to `MarksStore`/`FleetStore`/
+ * `EventsStore`, copied rather than shared per that plan's own D1 reasoning). Note this store keeps
+ * its pre-existing `=== 1`/`stopPollingFn` naming rather than the `core/map-data/**` stores'
+ * `> 1`/`stopPollFn` — a pre-existing, harmless divergence, left as found.
  */
 @Injectable({ providedIn: 'root' })
 export class DiscoveryInboxStore {
@@ -84,6 +101,14 @@ export class DiscoveryInboxStore {
   private activeConsumers = 0;
   private stopPollingFn: (() => void) | null = null;
 
+  /**
+   * `false` while this store is (or should be) relying on the poll rather than live — see
+   * {@link applyTransport}'s own doc comment for the full state table this tracks. Starts `false`
+   * so this store's very first `applyTransport` call — whichever way `liveAvailable` resolves — is
+   * always treated as a genuine transition, never a spurious no-op.
+   */
+  private liveGated = false;
+
   /** How many live `discovery` deltas this store has already folded in — see `MarksStore`'s identical cursor. */
   private processedLiveEventCount = 0;
 
@@ -97,15 +122,21 @@ export class DiscoveryInboxStore {
       this.processedLiveEventCount = events.length;
       this.candidatesSignal.update((candidates) => applyDiscoveryEvents(candidates, newEvents));
     });
+
+    // Re-evaluates poll-vs-live whenever `LiveStore` (re)connects or drops
+    // (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1) — mirrors `FleetStore`/
+    // `EventsStore`'s identical reconnect-driven effect.
+    effect(() => {
+      this.applyTransport(isLiveAvailable(this.live.connectionState()));
+    });
   }
 
   /** Registers interest — call once from a consumer's constructor. The first `activate()` since
-   *  the last full `release()` triggers an immediate fetch and starts the shared 30s cadence. */
+   *  the last full `release()` routes through {@link applyTransport} with the current transport. */
   activate(): void {
     this.activeConsumers++;
     if (this.activeConsumers === 1) {
-      void this.refresh();
-      this.stopPollingFn = this.scheduler.schedule(POLL_INTERVAL_MS, () => this.refresh());
+      this.applyTransport(isLiveAvailable(this.live.connectionState()));
     }
   }
 
@@ -119,6 +150,40 @@ export class DiscoveryInboxStore {
       this.stopPollingFn?.();
       this.stopPollingFn = null;
     }
+  }
+
+  /**
+   * D1's frozen gate (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3) — see
+   * `MarksStore.applyTransport`'s own doc comment for the full state table; this is the identical
+   * shape. Called both by the reconnect-driven `effect()` above and by `activate()` itself. The
+   * refresh this performs on every genuine reconnect (poll → live) is what keeps `sources` from
+   * going stale forever, since the `discovery` topic never carries it — see this class's own
+   * `POLL_INTERVAL_MS` doc comment.
+   */
+  private applyTransport(liveAvailable: boolean): void {
+    if (this.activeConsumers === 0) {
+      this.stopPolling();
+      return;
+    }
+    if (liveAvailable) {
+      if (!this.liveGated) {
+        this.stopPolling();
+        void this.refresh();
+        this.liveGated = true;
+      }
+      return;
+    }
+    this.liveGated = false;
+    if (this.stopPollingFn !== null) {
+      return; // already polling
+    }
+    void this.refresh();
+    this.stopPollingFn = this.scheduler.schedule(POLL_INTERVAL_MS, () => this.refresh());
+  }
+
+  private stopPolling(): void {
+    this.stopPollingFn?.();
+    this.stopPollingFn = null;
   }
 
   /** Silent-degrade poll fetch — a failed read keeps the last-known list rather than toasting on

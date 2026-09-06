@@ -9,6 +9,7 @@ import { VisionApi } from '../api/vision-api';
 import { ToastService } from '../toast.service';
 import { PollScheduler } from '../poll-scheduler';
 import { LiveStore } from '../live/live-store';
+import type { LiveConnectionState } from '../live/live-fallback-logic';
 import type { MapEventPayload, MapLayer, MapMark } from '../api/models';
 
 /** Routed stand-in for BUG 3's `resetOnRouteChange` coverage — `create()` always provides a router now. */
@@ -66,13 +67,21 @@ function stubApi(overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
   };
 }
 
-/** Real Angular signal so the store's own `effect()` reacts exactly as it would to the real `LiveStore`. */
+/**
+ * Real Angular signals so the store's own `effect()`s react exactly as they would to the real
+ * `LiveStore`. `connectionState` seeded `'closed'` — reproduces today's (pre-D1) behaviour exactly,
+ * so every existing assertion in this file stays green untouched
+ * (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §5 L1b); tests that care about the live gate drive
+ * it explicitly via `connectionState.set(...)`.
+ */
 function stubLiveStore() {
   const events = signal<readonly MapEventPayload[]>([]);
+  const connectionState = signal<LiveConnectionState>('closed');
   return {
     mapEvents: events.asReadonly(),
     /** Appends, oldest-first — mirrors `LiveStore.mapEvents`'s own accumulation contract. */
     push: (incoming: readonly MapEventPayload[]) => events.update((existing) => [...existing, ...incoming]),
+    connectionState,
   };
 }
 
@@ -526,6 +535,79 @@ describe('MarksStore', () => {
       store.activate();
       await flush();
       expect(scheduleFn).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('live gate (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1)', () => {
+    /**
+     * The plan's own frozen acceptance criterion (§5): a poll that stops must still reconcile on
+     * reconnect. With the store active and live open, driving `connectionState` through
+     * `open → closed → open` must issue **exactly one** REST refresh on (re-)entering `open`, and
+     * **zero** REST requests for as long as `open` persists.
+     */
+    it('reconciles exactly once on reconnect, and stays silent for as long as live holds', async () => {
+      const api = stubApi({ listMapMarks: vi.fn().mockResolvedValue([mark()]) });
+      const { store, live } = create(api);
+      await flush();
+      TestBed.tick();
+
+      // Reach a known "active, live open" baseline first — this transition's own reconcile fetch is
+      // not what's under test.
+      live.connectionState.set('open');
+      TestBed.tick();
+      await flush();
+      // (the first entry into live already reconciled once here — not the segment under test)
+
+      live.connectionState.set('closed');
+      TestBed.tick();
+      await flush();
+      // Falling back to polling refreshes immediately too (the D1 table's own
+      // `>0 | false | live → refresh once, then start poll` row) — a separate, legitimate call,
+      // also not the segment under test. Only now do we isolate "entering open".
+      api.listMapMarks.mockClear();
+
+      live.connectionState.set('open');
+      TestBed.tick();
+      await flush();
+
+      expect(api.listMapMarks).toHaveBeenCalledTimes(1); // exactly one refresh, entering 'open'
+
+      // Zero further REST requests while 'open' persists — a second concurrent consumer activating
+      // (row ">0, true, live -> nothing") and an equal-value re-write (signals don't re-notify on an
+      // equal write) must both be no-ops.
+      store.activate();
+      live.connectionState.set('open');
+      TestBed.tick();
+      await flush();
+      expect(api.listMapMarks).toHaveBeenCalledTimes(1);
+
+      store.release();
+    });
+
+    it('a store that activates while already live does one initial GET, not zero', async () => {
+      const api = stubApi({ listMapMarks: vi.fn().mockResolvedValue([mark()]) });
+      const toasts = { ok: vi.fn(), error: vi.fn(), info: vi.fn(), notify: vi.fn(), warn: vi.fn() };
+      const live = stubLiveStore();
+      live.connectionState.set('open');
+      const scheduleFn = vi.fn().mockReturnValue(vi.fn());
+      TestBed.configureTestingModule({
+        providers: [
+          MarksStore,
+          { provide: VisionApi, useValue: api },
+          { provide: ToastService, useValue: toasts },
+          { provide: PollScheduler, useValue: { schedule: scheduleFn } },
+          { provide: LiveStore, useValue: live },
+          { provide: LayersStore, useValue: stubLayersStore() },
+          provideRouter([{ path: 'command', component: StubPage }]),
+        ],
+      });
+      const store = TestBed.inject(MarksStore);
+
+      store.activate();
+      await flush();
+
+      expect(api.listMapMarks).toHaveBeenCalledTimes(1);
+      expect(scheduleFn).not.toHaveBeenCalled(); // no safety-net poll needed — live is already open
     });
   });
 });

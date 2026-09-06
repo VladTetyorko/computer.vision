@@ -5,6 +5,7 @@ import { describeHttpError } from '../api-error';
 import { ToastService } from '../toast.service';
 import { PollScheduler } from '../poll-scheduler';
 import { LiveStore } from '../live/live-store';
+import { isLiveAvailable } from '../live/live-fallback-logic';
 import {
   applyLayerEvents,
   accessTo,
@@ -21,10 +22,25 @@ import {
 /**
  * Safety-net only, like `GeofenceStore`'s own 30s cadence: the `map` live topic is always-on and
  * this store folds every layer delta in as it arrives, so this poll exists purely to reconcile a
- * connection that was briefly down — and, unlike marks/drawings, to re-read the `grants` lists that
- * deliberately never travel over SSE (docs/plans/done/MAP-REWORK-PLAN.md §4.3).
+ * connection that is genuinely down.
+ *
+ * **Gated on live, not unconditional** (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1) — runs
+ * **only** while `activeConsumers > 0` **and** `LiveStore` is not `'open'`; see
+ * `MarksStore.applyTransport`'s identical state table (`applyTransport` below implements the same
+ * one). **Grants are the one thing this poll alone used to repair** — they deliberately never
+ * travel over SSE (docs/plans/done/MAP-REWORK-PLAN.md §4.3) — so retiring it outright would leave a
+ * revoked grant invisible for as long as live stays up; {@link scheduleGrantsReconcile} is the
+ * targeted fix that replaces it (see that method's own doc comment).
  */
 const LAYERS_POLL_INTERVAL_MS = 30_000;
+
+/**
+ * How long {@link scheduleGrantsReconcile} waits for a *quiet* period after the last `layer`-entity
+ * live delta before re-reading grants — long enough to coalesce a burst of edits (e.g. a manager
+ * re-granting several subjects in a row) into one `GET`, short enough that a solitary revocation
+ * still converges in about a second rather than riding out to the next 30s poll tick.
+ */
+const GRANTS_RECONCILE_DEBOUNCE_MS = 1_000;
 
 /**
  * `LayersStore` — the app's one source of truth for the map's data layers and, crucially, **the
@@ -45,8 +61,10 @@ const LAYERS_POLL_INTERVAL_MS = 30_000;
  * Same posture as every other map-data store: `GET /api/map/layers` first, then fold
  * `LiveStore.mapEvents()` on top (`layers-logic.ts#applyLayerEvents`). The one wrinkle is that a
  * layer arriving over SSE never carries `grants` (§4.3) — `applyLayerEvents` therefore preserves the
- * previously-known list rather than blanking a manager's open grants editor, and the safety-net poll
- * is what eventually re-reads them authoritatively.
+ * previously-known list rather than blanking a manager's open grants editor. That fold is correct
+ * for every change *except* a grant **revocation**, which it cannot represent (there is no "grants
+ * shrank" delta to apply) — {@link scheduleGrantsReconcile} is what eventually re-reads them
+ * authoritatively now that the poll no longer runs unconditionally (see D1 below).
  *
  * <h2>Polling is demand-gated (ALWAYS-ON-FLOW-PLAN.md §4 Wave C3)</h2>
  * See `MarksStore`'s identical doc section — same defect (a `root`-provided 30s poll that, once
@@ -57,6 +75,14 @@ const LAYERS_POLL_INTERVAL_MS = 30_000;
  * map of its own and depends entirely on the latter for its Map tools drawer, so skipping those would
  * leave that route's drawer polling on borrowed demand from whichever *other* page happened to be
  * visited first).
+ *
+ * <h2>...and now also gated on live itself (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1)</h2>
+ * Same composition as `MarksStore.applyTransport` — `activeConsumers > 0 && !isLiveAvailable(...)`
+ * is the only state that runs the 30s poll. Since a genuine revocation would otherwise be invisible
+ * for as long as live stays open (the safety-net poll used to be the *only* thing that ever repaired
+ * it), this store additionally schedules a short debounced `refresh()` off of `layer`-entity live
+ * deltas themselves — {@link scheduleGrantsReconcile} — independent of `activeConsumers`, so grants
+ * still converge in about a second even while live is open, instead of never.
  */
 @Injectable({ providedIn: 'root' })
 export class LayersStore {
@@ -93,6 +119,17 @@ export class LayersStore {
   /** The safety-net poll's own unsubscribe, held only while `activeConsumers > 0`. */
   private stopPollFn: (() => void) | null = null;
 
+  /**
+   * `false` while this store is (or should be) relying on the safety-net poll rather than live —
+   * see {@link applyTransport}'s own doc comment for the full state table this tracks. Starts
+   * `false` so this store's very first `applyTransport` call — whichever way `liveAvailable`
+   * resolves — is always treated as a genuine transition, never a spurious no-op.
+   */
+  private liveGated = false;
+
+  /** {@link scheduleGrantsReconcile}'s own debounce handle — `null` while no reconcile is pending. */
+  private grantsReconcileTimer: ReturnType<typeof setTimeout> | null = null;
+
   constructor() {
     // Mirrors `MarksStore`/`DrawingsStore`'s identical cursor over the same shared arrival log — see
     // `core/live/live-store.ts#mapEvents`' own doc comment for why three consumers read one signal.
@@ -106,21 +143,30 @@ export class LayersStore {
       const newEvents = events.slice(this.processedLiveEventCount);
       this.processedLiveEventCount = events.length;
       this.layersSignal.update((layers) => applyLayerEvents(layers, newEvents));
+      if (newEvents.some((event) => event.entity === 'layer')) {
+        this.scheduleGrantsReconcile();
+      }
+    });
+
+    // Re-evaluates poll-vs-live whenever `LiveStore` (re)connects or drops
+    // (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1) — mirrors `FleetStore`/
+    // `EventsStore`'s identical reconnect-driven effect.
+    effect(() => {
+      this.applyTransport(isLiveAvailable(this.live.connectionState()));
     });
   }
 
   /**
    * Registers demand — see `MarksStore.activate`'s identical doc comment for the full rationale.
-   * The first `activate()` since the last full `release()` triggers a fresh `GET` and starts the
-   * safety-net poll; further concurrent consumers just bump the count.
+   * The first `activate()` since the last full `release()` routes through {@link applyTransport}
+   * with the current transport; further concurrent consumers just bump the count.
    */
   activate(): void {
     this.activeConsumers++;
     if (this.activeConsumers > 1) {
       return;
     }
-    void this.refresh();
-    this.stopPollFn = this.scheduler.schedule(LAYERS_POLL_INTERVAL_MS, () => this.refresh());
+    this.applyTransport(isLiveAvailable(this.live.connectionState()));
   }
 
   /** The matching teardown — call from the consumer's own `DestroyRef.onDestroy`. */
@@ -133,6 +179,57 @@ export class LayersStore {
       this.stopPollFn();
       this.stopPollFn = null;
     }
+  }
+
+  /**
+   * D1's frozen gate (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3) — see
+   * `MarksStore.applyTransport`'s own doc comment for the full state table; this is the identical
+   * shape. Called both by the reconnect-driven `effect()` above and by `activate()` itself.
+   */
+  private applyTransport(liveAvailable: boolean): void {
+    if (this.activeConsumers === 0) {
+      this.stopPolling();
+      return;
+    }
+    if (liveAvailable) {
+      if (!this.liveGated) {
+        this.stopPolling();
+        void this.refresh();
+        this.liveGated = true;
+      }
+      return;
+    }
+    this.liveGated = false;
+    if (this.stopPollFn !== null) {
+      return; // already polling
+    }
+    void this.refresh();
+    this.stopPollFn = this.scheduler.schedule(LAYERS_POLL_INTERVAL_MS, () => this.refresh());
+  }
+
+  private stopPolling(): void {
+    this.stopPollFn?.();
+    this.stopPollFn = null;
+  }
+
+  /**
+   * The L1c fix (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §5 L1): a layer arriving over SSE
+   * never carries `grants` (§4.3), and `applyLayerEvents` compensates by preserving the
+   * previously-known list — correct for every change except a **revocation**, which that fold
+   * cannot represent. Debounced (not fired per event) so a burst of grant edits costs one `GET`, not
+   * N; deliberately independent of `activeConsumers` — a layer changing is rare enough that always
+   * reconciling it costs nothing, and other stores (`MarksStore`'s palette, `DrawingsStore`'s
+   * `targetLayerId`) read this store's access decisions even on a page that never itself calls
+   * `LayersStore.activate()`.
+   */
+  private scheduleGrantsReconcile(): void {
+    if (this.grantsReconcileTimer !== null) {
+      clearTimeout(this.grantsReconcileTimer);
+    }
+    this.grantsReconcileTimer = setTimeout(() => {
+      this.grantsReconcileTimer = null;
+      void this.refresh();
+    }, GRANTS_RECONCILE_DEBOUNCE_MS);
   }
 
   async refresh(): Promise<void> {

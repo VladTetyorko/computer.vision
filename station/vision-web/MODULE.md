@@ -44,7 +44,7 @@ Angular 21 SPA (driving adapter): the whole product UI — operator cockpit, man
 | fleet | `FleetStore` (devices+streams, 5s poll; `run()` is the toast boundary) |
 | live | `LiveStore` — one SSE connection, topic subscribe/unsubscribe, append-only log w/ per-consumer cursors |
 | telemetry / detections | `TelemetryStore`, `DetectionsStore` (`DETECTIONS_LIMIT=50` retained batches; **`followTracks(streamId, wanted: boolean)`**, docs/plans/active/TRACK-FOLLOW-PLAN.md §3.5, wave W4 — a thin `wanted`-boolean wrapper over `trackTracks`/`untrackTracks`, now driven by `CockpitFacade`'s own `wantsTracksPoll`-gated effect rather than by `CvControlPanel`'s mounted lifetime, so the `GET .../tracks` poll — and with it, the only way to observe a `LOST→HOLDING` recovery — survives a closed Vision drawer; see the `fly/` bullet below for D1). `telemetry-logic.ts#freshness(age)` → `'live'\|'aging'\|'stale'\|'none'` (wave H1, docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1) is now the one source of truth for "is this sample too old to act on", a thin relabel of the pre-existing `telemetryAgeSeverity` tiers (`fresh→live`, `amber→aging`, `red→stale`, `undefined→none`) — callers that need a UI-facing tri-state read this, not `telemetryAgeSeverity` directly. `humanAge(seconds)` → `12s` / `3m 10s` / `4h 2m` / `4d 2h` (always both units of its tier, including a zero remainder) is the one duration formatter for telemetry age across the OSD, the Controller drawer, and the cockpit's not-streaming card. |
-| map-data | `LayersStore`, `MarksStore`, `DrawingsStore`, `TracksStore` — **all four are ref-counted `activate()`/`release()` since ALWAYS-ON-FLOW wave C3 (2026-09-06): the initial `GET` *and* the 30s poll both live under `activate()`, so nothing fetches until a consumer is mounted and nothing polls after the last one leaves. Every direct injector — a routed facade *or* a presentational child under `shared/map/map-controls/**` — must `activate()` in its constructor and `release()` from its own `DestroyRef.onDestroy`.** + `layers-logic`/`mark-logic`/`drawings-logic`/`map-event-logic`. **`RouteStore` (new, docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.4, wave W3)** is page-provided, **not** `providedIn: 'root'` — an on-demand two-hop fetch (`listUsages` → `usageTimeline`, never `.../telemetry`), same posture as `FleetMapStore`/`WeatherStore` below, not the always-on/live-folding shape every other row in this line has; `route-logic.ts` (pure: `AssetRoute`/`RouteSpan`/`buildAssetRoute`/`routeUsageLimit`) |
+| map-data | `LayersStore`, `MarksStore`, `DrawingsStore`, `TracksStore` — **all four are ref-counted `activate()`/`release()` since ALWAYS-ON-FLOW wave C3 (2026-09-06): the initial `GET` *and* the 30s poll both live under `activate()`, so nothing fetches until a consumer is mounted and nothing polls after the last one leaves. Every direct injector — a routed facade *or* a presentational child under `shared/map/map-controls/**` — must `activate()` in its constructor and `release()` from its own `DestroyRef.onDestroy`.** **Also gated on live itself since LIVE-POLL-RETIREMENT waves L1a/L1b/L1c (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1, 2026-09-06): each store's own `private applyTransport(liveAvailable: boolean)` composes `activeConsumers`-demand with `isLiveAvailable(LiveStore.connectionState())` — the 30s poll now runs only while a consumer is active *and* live is unavailable; a genuine transition into live does exactly one reconcile `GET`, a transition out immediately re-fetches once then resumes polling. `applyTransport` is copied into each store (not a shared helper — deliberate, keeps wave file scopes disjoint), each carrying a private `liveGated: boolean` field that starts `false` so the very first transport call is never treated as a spurious no-op (the boot-time double-fetch this guards against). **L1c, `LayersStore` only:** a layer arriving over the `map` SSE topic never carries `grants` (§4.3) — `applyLayerEvents` preserves the previously-known list, correct for everything except a grant **revocation**, which that fold cannot represent. `LayersStore` compensates with `scheduleGrantsReconcile()`, a raw-`setTimeout` ~1s debounce (not `PollScheduler` — matches `toast.service.ts`'s own precedent) fired off any `layer`-entity live delta, independent of `activeConsumers`.** + `layers-logic`/`mark-logic`/`drawings-logic`/`map-event-logic`. **`RouteStore` (new, docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.4, wave W3)** is page-provided, **not** `providedIn: 'root'` — an on-demand two-hop fetch (`listUsages` → `usageTimeline`, never `.../telemetry`), same posture as `FleetMapStore`/`WeatherStore` below, not the always-on/live-folding shape every other row in this line has; `route-logic.ts` (pure: `AssetRoute`/`RouteSpan`/`buildAssetRoute`/`routeUsageLimit`) |
 | map / geofence / weather | `FleetMapStore`, `GeofenceStore` (**ref-counted `activate()`/`release()`, wave C3 — same contract as the `map-data` row above**), `WeatherStore` |
 | identity | `AuthStore`, `OrgStore`, `SettingsStore` |
 | geo | `GeoStore` (visual-geo correction), `camera-geo/` (fixed-camera pose, pure) |
@@ -52,7 +52,7 @@ Angular 21 SPA (driving adapter): the whole product UI — operator cockpit, man
 | rc | `RcInputService`, `VirtualRcInputService`, `KeyboardRcInputService`, `RcSource`, `ManualControlClient`, `ControlActionDispatcher`, `ControlProfileStore`; `keyboard-action-logic.ts` (pure, MAVLINK-COMMANDS-PLAN.md D3) — action-key chord parsing (`actionKeyIdFor`), catalogue-driven resolution (`resolveActionKey`), live-armed-state verb (`toggleArmVerb`), edge detection (`newActionKeyPresses`), hold-cancellation (`holdContinues`), and the shared `isTypingTarget` guard |
 | events | `EventsStore` (`GET /api/events`), `SystemEventsStore` (`core/system-events/system-events-logic.ts` — maps the generic `LiveEvent`/`event` SSE feed to bell rows + severities; **S4, docs/plans/active/ASSET-FLOWS-PLAN.md §2**: `SEVERITY_BY_TYPE`/`TITLE_BY_TYPE` gained `LINK_LOST`/`BATTERY_LOW`, both `danger`, feeding `NotificationBell` — nine event kinds now render with a real label/icon/severity instead of falling through to any generic default), `TracksStore`, `TrainingStore`, `SystemStatusStore` |
 | ops | **`ThresholdsStore` (new, S3, docs/plans/active/ASSET-FLOWS-PLAN.md §2)** — `core/ops/thresholds-store.ts`, `providedIn: 'root'`, fetch-once on construction (no `PollScheduler` — served battery thresholds change rarely enough that a page refresh is an acceptable staleness bound, unlike the 5-30s pollers elsewhere in this table). `GET /api/ops/thresholds` → `battery: BatteryThresholds`; a failed fetch leaves the signal at `core/ops/thresholds-logic.ts#DEFAULT_BATTERY_THRESHOLDS` (`{warningPercent: 25, criticalPercent: 10}`, frozen) rather than blocking or fabricating a value — CLAUDE.md's degrade-honestly rule applied to config, not just data. **One severity source**: `core/fleet/attention-logic.ts#batteryAttentionSeverity`/`attentionReasons` and `core/telemetry/telemetry-logic.ts#batterySeverity` both now take an optional `thresholds: BatteryThresholds` parameter (defaulting to `DEFAULT_BATTERY_THRESHOLDS` — every existing call site compiles unchanged), and `features/fly/fly-osd.ts` is the one live consumer wiring `ThresholdsStore.battery()` through to `batterySeverity`, replacing the OSD's own previously-hardcoded 20/45 pair. **Boundaries are inclusive (`<=`)** on both functions, matching the backend's own `BatteryThresholdsResponse`/`EventType#BATTERY_LOW` javadoc ("at/below") — `attention-logic.ts` used to be strict-`<`, now unified. **Residual, named honestly**: Command (`AssetPanel`/`CommandFacade`) and Inventory's own `attention-logic.ts` consumers are not yet wired to `ThresholdsStore` — they still resolve through the default-parameter fallback (functionally identical to their pre-S3 hardcoded 20/10, now just centrally defined instead of locally duplicated), not a live served value. Wiring them is a small follow-up (inject `ThresholdsStore`, thread `.battery()` through the existing calls) intentionally left out of this wave's file scope. |
-| discovery | `DiscoveryInboxStore` (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P2/§11, wave Z2d) — `GET /api/discovery/inbox` on a 30s `PollScheduler` cadence, refcounted `activate()`/`release()` (poll runs only while `<vision-found-devices>` is mounted); `discovery-inbox-logic.ts` (pure: method labels, `humanAge`-based age text, NEW/REGISTERED/DISMISSED visibility+sort, per-candidate action availability, register/attach request builders). **A3 (docs/plans/active/ASSET-FLOWS-PLAN.md §2)**: the store's `sources` signal now mirrors the response envelope's `sources: DiscoverySource[]`; `discovery-inbox-logic.ts#sourceUnreachableWarnings(sources)` turns each `UNREACHABLE` source into "`<Method>` unreachable — found devices may be incomplete." (reusing `discoveryMethodLabel`) — see the `inventory/` → `<vision-found-devices>` bullet below for how that renders. |
+| discovery | `DiscoveryInboxStore` (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P2/§11, wave Z2d) — `GET /api/discovery/inbox` on a 30s `PollScheduler` cadence, refcounted `activate()`/`release()` (poll runs only while `<vision-found-devices>` is mounted); `discovery-inbox-logic.ts` (pure: method labels, `humanAge`-based age text, NEW/REGISTERED/DISMISSED visibility+sort, per-candidate action availability, register/attach request builders). **A3 (docs/plans/active/ASSET-FLOWS-PLAN.md §2)**: the store's `sources` signal now mirrors the response envelope's `sources: DiscoverySource[]`; `discovery-inbox-logic.ts#sourceUnreachableWarnings(sources)` turns each `UNREACHABLE` source into "`<Method>` unreachable — found devices may be incomplete." (reusing `discoveryMethodLabel`) — see the `inventory/` → `<vision-found-devices>` bullet below for how that renders. **Also gated on live itself since LIVE-POLL-RETIREMENT wave L2a (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1/§5 L2, 2026-09-06)** — identical `applyTransport`/`liveGated` shape to the `map-data` row above, this store's own pre-existing `=== 1`/`stopPollingFn` naming left as-is rather than churned to match the map stores' `> 1`/`stopPollFn`. **The L2b gotcha**: the `discovery` SSE topic (`LiveStore.discoveryEvents()`) carries only candidate deltas, never `sources` — so once live is up and the 30s poll has stopped, `sources` can only ever change on the one reconcile `GET` a genuine reconnect (`poll → live` transition) triggers; it is not a nicety, it is the only channel `sources` has left. `discovery-inbox-store.spec.ts` (new — this store's first spec) asserts this explicitly. |
 | shell/ui | `SidebarStore`, `ThemeStore`, `UiStore` (exclusive overlays), `GlobalOverlayStore`, `ToastService`, `PollScheduler`, `IdlePreload`, `LeafletWarmup`, `panel-state.ts` |
 | pure-logic only (no store) | `audit/` (+ `audit/summary-logic.ts` — `humanizeSummary`/`actorLabel`/`buildNameMap`, shared with `features/activity/`), `after-action/`, `readiness/` (`readiness-logic.ts` gained a "Maintenance grounding" section, S1/wave WB1 — `parseGroundingBlocker`/`groundingBlocker`/`groundedBannerText`/`featureBlockers`, the one parser every grounded surface — cockpit banner, Arm gate, both readiness pages — renders from), `roster/`, `activity/`, `command/`, `maintenance/` (`core/maintenance/maintenance-logic.ts`), `stream-info-logic.ts` |
 
@@ -909,3 +909,114 @@ get marks that render fine but a contribution target resolved against an empty l
 `npm run test:ci` — **192/192 files, 3825/3825 tests green** (up from 190/3793: new `layers-store.spec.ts`
 and `tracks-store.spec.ts`, plus ref-count and video-toggle cases added to the existing store and wall
 specs). `npx tsc --noEmit` clean on both `tsconfig.app.json` and `tsconfig.spec.json`.
+
+## Status — LIVE-POLL-RETIREMENT waves L1+L2: the safety-net polls stop being unconditional too (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1, §5 waves L1a/L1b/L1c/L2a/L2b/L2c) — 2026-09-06
+
+ALWAYS-ON-FLOW wave C3 (directly above) made each map-data poll track **demand** — nothing fetches or
+polls with zero active consumers. It left a second axis alone: with at least one consumer mounted, the
+30s safety-net poll ran unconditionally even while the `map`/`discovery` SSE topics were already
+delivering every delta for free over an open live connection. This pair of waves makes the poll also
+track **transport** — D1's frozen rule, verbatim: *"poll runs ⟺ `activeConsumers > 0` AND live is not
+open."*
+
+### The `applyTransport` idiom, copied five times on purpose
+
+`MarksStore`, `LayersStore`, `DrawingsStore`, `TracksStore` (L1a/L1b/L1c) and `DiscoveryInboxStore`
+(L2a) each gained a private `applyTransport(liveAvailable: boolean)` method, called both by a new
+reconnect-driven `effect(() => this.applyTransport(isLiveAvailable(this.live.connectionState())))` in
+the constructor and by `activate()` itself (which used to schedule the poll directly). Full state table
+(identical in all five, matching `core/events/events-store.ts#applyTransport`'s pre-existing shape,
+extended with the `liveGated` field below):
+
+| `activeConsumers` | `liveAvailable` | previous (`liveGated`) | Action |
+|---|---|---|---|
+| `0` | any | any | stop poll; no refresh |
+| `>0` | `true` | `false` (was polling) | stop poll; refresh once (the reconcile) |
+| `>0` | `true` | `true` (already live) | nothing |
+| `>0` | `false` | `true` (was live) | refresh once, then start poll |
+| `>0` | `false` | `false` (already polling) | nothing |
+
+Each store carries its own private `liveGated: boolean` field (starts `false`) rather than a new signal
+on `LiveStore` — it exists purely to suppress the boot-time double-fetch (constructing while already
+`'open'` must not both `activate()`-refresh *and* effect-reconcile). **Deliberately not extracted into
+a shared helper** — the plan's own call: copying this ~15-line idiom five times keeps each wave's file
+scope disjoint (no store waits on a shared `core/live/*` file another wave might be mid-editing).
+`core/live/live-store.ts` itself is untouched by this pair of waves.
+
+### L1c — the one fold `applyTransport` alone can't fix: grant revocation
+
+A layer arriving over the `map` SSE topic never carries `grants` (`LayerResponse.forEvent` strips them,
+§4.3) — `layers-logic.ts#applyLayerEvents` compensates by preserving the previously-known grants list on
+a fold, correct for every change except a **revocation**, which a "grants shrank" delta cannot express
+at all. Before this wave the unconditional 30s poll was the only thing that ever repaired that gap;
+retiring it outright would have left a revoked grant invisible for as long as live stayed open.
+`LayersStore` now schedules a short, debounced reconcile off `layer`-entity live deltas themselves
+(`scheduleGrantsReconcile`, `GRANTS_RECONCILE_DEBOUNCE_MS = 1_000`, raw `setTimeout`/`clearTimeout` —
+not `PollScheduler`, mirroring `toast.service.ts`'s own precedent for a one-shot debounce), independent
+of `activeConsumers`: a burst of edits coalesces into one `GET`, a solitary revocation still converges
+in about a second, and this runs even on a page that never itself calls `LayersStore.activate()` (other
+stores read its access decisions unconditionally).
+
+### L2b — `DiscoveryInboxStore.sources` has no SSE channel at all
+
+The `discovery` SSE topic (`DiscoveryEventPayload`) carries only candidate deltas — no `sources` field
+exists on it. Once live is up and the 30s poll has stopped, `sources` can *only* ever change on the one
+reconcile `GET` a genuine reconnect (`poll → live` transition) triggers; that reconcile is not a nicety
+here the way it is for the other four stores, it is the *only* remaining path. `discovery-inbox-store.ts`
+gained this D1 gate with the same `applyTransport`/`liveGated` shape as the map stores, deliberately
+keeping its own pre-existing `=== 1`/`stopPollingFn` naming (vs. the map stores' `> 1`/`stopPollFn`) —
+left as found, not churned. `discovery-inbox-store.spec.ts` is a **new file** (this store had no spec at
+all before this wave) covering construction, `activate()`/`release()` ref-counting, the `discovery`
+topic's candidate-only fold, the D1 reconnect acceptance test, and — explicitly — a test that drives a
+poll→live reconcile then floods the store with live candidate deltas while asserting `sources` never
+moves again except on that one reconcile call.
+
+### The frozen acceptance test, on all five stores
+
+Per store: with the store active and live already `'open'`, drive the stubbed `connectionState` through
+`open → closed → open` and assert **exactly one** REST refresh on (re-)entering `'open'`, and **zero**
+REST requests for as long as `'open'` persists (a second concurrent `activate()` while live holds proves
+the latter). Each spec's `stubLiveStore()` now also returns a writable `connectionState` signal, seeded
+`'closed'` in every case — reproducing pre-D1 behaviour exactly, so every pre-existing assertion in the
+four L1 spec files kept passing untouched. One easy mistake worth naming: the `closed` leg of that
+sequence *also* legitimately fires its own refresh (the table's own `>0 | false | was-live → refresh
+once, then start poll` row) — a test that clears the mock before driving `closed` and asserts exactly
+one call across the whole `closed → open` round-trip will flake with "expected 1, got 2". The fix is to
+clear the mock *after* the `closed` leg's own refresh has fired, isolating only the `entering 'open'`
+transition.
+
+### Docs updated alongside the code
+
+Every touched store's own class doc and its `*_POLL_INTERVAL_MS` constant's doc comment were rewritten
+— the old "safety-net poll, runs unconditionally once a consumer is active" framing was no longer true
+and would have misled the next reader. `MARKS_POLL_INTERVAL_MS`, `LAYERS_POLL_INTERVAL_MS`,
+`DRAWINGS_POLL_INTERVAL_MS`, `TRACKS_POLL_INTERVAL_MS` and `DiscoveryInboxStore`'s `POLL_INTERVAL_MS`
+all now state the D1 gate explicitly instead of describing an unconditional cadence.
+
+### Tests / build
+
+`npm run test:ci` — **193/193 files, 3845/3845 tests green** (up from 192/3825: this pair of waves adds
+20 new cases across the four `core/map-data/**` spec files — 2 live-gate cases each on `MarksStore`/
+`DrawingsStore`/`TracksStore`, 2 live-gate + 3 grants-revocation cases on `LayersStore` — plus a brand
+new `discovery-inbox-store.spec.ts`, 9 cases, the first spec this store has ever had). `npx tsc --noEmit`
+clean on both `tsconfig.app.json` and `tsconfig.spec.json`. `ng build --configuration production` green,
+same two pre-existing budget warnings only (the 390 kB initial-bundle warning and `tactical-map.css`'s
+own, both long-standing and unrelated to this pair of waves — see the "Initial-bundle budget" note
+under the main `## Status` section above before treating either as this wave's own). Bundle delta
+measured via `git stash push -u` on this wave's own 10 files (9 tracked + the new, then-untracked
+`discovery-inbox-store.spec.ts`; package.json/lock untouched, so a re-run of `npm ci` was not needed to
+reproduce the baseline): initial bundle **435.22 kB → 435.22 kB raw (flat,
+0.00 kB)**, transfer 122.03 kB → 122.02 kB (a 0.01 kB rounding difference, not a real change) — expected,
+since this pair of waves adds a handful of private methods/fields to five already-shipped stores and no
+new imports.
+
+### Left undone, named honestly
+
+- **No shared `applyTransport` helper** — by design, see above; a future wave (L3+) touching a sixth
+  store repeats the idiom a sixth time rather than reaching for an extraction that would re-couple these
+  waves' file scopes.
+- **D2 (the `zones` SSE topic) and D3 (the system sampler)** are out of this pair of waves' scope — see
+  the plan's own §3 for their own rules, untouched here.
+- **`core/live/live-store.ts` is untouched**, per the plan's own instruction — `applyTransport`'s
+  `isLiveAvailable(this.live.connectionState())` read is the only new coupling to it, and that read
+  already existed in `EventsStore`'s pre-existing implementation this pair of waves mirrors.
