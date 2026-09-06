@@ -2,8 +2,10 @@ package com.drones.vision.flight.application.geofence;
 
 import com.drones.vision.kernel.GeoPosition;
 import com.drones.vision.flight.domain.model.GeofenceZone;
+import com.drones.vision.flight.domain.model.GeofenceZoneEvent;
 import com.drones.vision.flight.domain.model.ZoneId;
 import com.drones.vision.flight.domain.model.ZoneKind;
+import com.drones.vision.flight.domain.port.GeofenceLiveUpdatePort;
 import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,13 +30,15 @@ class DefaultGeofenceServiceTest {
 
     private GeofenceRepositoryPort geofenceRepository;
     private GeofenceMonitor geofenceMonitor;
+    private GeofenceLiveUpdatePort geofenceLiveUpdatePort;
     private GeofenceService service;
 
     @BeforeEach
     void setUp() {
         geofenceRepository = mock(GeofenceRepositoryPort.class);
         geofenceMonitor = mock(GeofenceMonitor.class);
-        service = new DefaultGeofenceService(geofenceRepository, geofenceMonitor);
+        geofenceLiveUpdatePort = mock(GeofenceLiveUpdatePort.class);
+        service = new DefaultGeofenceService(geofenceRepository, geofenceMonitor, geofenceLiveUpdatePort);
         when(geofenceRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
@@ -92,6 +96,10 @@ class DefaultGeofenceServiceTest {
         assertTrue(created.enabled());
         verify(geofenceRepository).save(any());
         verify(geofenceMonitor, times(1)).refresh();
+        ArgumentCaptor<GeofenceZoneEvent> eventCaptor = ArgumentCaptor.forClass(GeofenceZoneEvent.class);
+        verify(geofenceLiveUpdatePort).publishZoneEvent(eventCaptor.capture());
+        assertEquals(GeofenceZoneEvent.Action.CREATED, eventCaptor.getValue().action());
+        assertEquals(created, eventCaptor.getValue().zone());
     }
 
     @Test
@@ -111,6 +119,10 @@ class DefaultGeofenceServiceTest {
         verify(geofenceRepository).save(captor.capture());
         assertEquals(existing.id(), captor.getValue().id());
         verify(geofenceMonitor, times(1)).refresh();
+        ArgumentCaptor<GeofenceZoneEvent> eventCaptor = ArgumentCaptor.forClass(GeofenceZoneEvent.class);
+        verify(geofenceLiveUpdatePort).publishZoneEvent(eventCaptor.capture());
+        assertEquals(GeofenceZoneEvent.Action.UPDATED, eventCaptor.getValue().action());
+        assertEquals(updated, eventCaptor.getValue().zone());
     }
 
     @Test
@@ -121,6 +133,7 @@ class DefaultGeofenceServiceTest {
         assertThrows(NoSuchElementException.class, () -> service.update(unknown, spec("zone")));
         verify(geofenceRepository, never()).save(any());
         verify(geofenceMonitor, never()).refresh();
+        verify(geofenceLiveUpdatePort, never()).publishZoneEvent(any());
     }
 
     @Test
@@ -132,6 +145,10 @@ class DefaultGeofenceServiceTest {
 
         verify(geofenceRepository).deleteById(existing.id());
         verify(geofenceMonitor, times(1)).refresh();
+        ArgumentCaptor<GeofenceZoneEvent> eventCaptor = ArgumentCaptor.forClass(GeofenceZoneEvent.class);
+        verify(geofenceLiveUpdatePort).publishZoneEvent(eventCaptor.capture());
+        assertEquals(GeofenceZoneEvent.Action.DELETED, eventCaptor.getValue().action());
+        assertEquals(existing, eventCaptor.getValue().zone(), "DELETED must carry the last-known zone in full");
     }
 
     @Test
@@ -142,11 +159,16 @@ class DefaultGeofenceServiceTest {
         assertThrows(NoSuchElementException.class, () -> service.delete(unknown));
         verify(geofenceRepository, never()).deleteById(any());
         verify(geofenceMonitor, never()).refresh();
+        verify(geofenceLiveUpdatePort, never()).publishZoneEvent(any());
     }
 
     @Test
     void constructorRejectsNullCollaborators() {
-        assertThrows(NullPointerException.class, () -> new DefaultGeofenceService(null, geofenceMonitor));
-        assertThrows(NullPointerException.class, () -> new DefaultGeofenceService(geofenceRepository, null));
+        assertThrows(NullPointerException.class,
+                () -> new DefaultGeofenceService(null, geofenceMonitor, geofenceLiveUpdatePort));
+        assertThrows(NullPointerException.class,
+                () -> new DefaultGeofenceService(geofenceRepository, null, geofenceLiveUpdatePort));
+        assertThrows(NullPointerException.class,
+                () -> new DefaultGeofenceService(geofenceRepository, geofenceMonitor, null));
     }
 }

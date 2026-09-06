@@ -18,7 +18,7 @@ public class LiveUpdateStatusDisabledProvider implements SubsystemStatusPort {
 
     @Override
     public SubsystemStatus status() {
-        return new SubsystemStatus("live-updates", "Live updates (SSE)", Health.DISABLED,
+        return new SubsystemStatus(LiveUpdateStatusProvider.SUBSYSTEM_ID, "Live updates (SSE)", Health.DISABLED,
                 "Live updates are disabled (vision.live.enabled=false)", null,
                 "Set vision.live.enabled=true to enable /api/live");
     }

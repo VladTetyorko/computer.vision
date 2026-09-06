@@ -1,7 +1,9 @@
 package com.drones.vision.flight.application.geofence;
 
 import com.drones.vision.flight.domain.model.GeofenceZone;
+import com.drones.vision.flight.domain.model.GeofenceZoneEvent;
 import com.drones.vision.flight.domain.model.ZoneId;
+import com.drones.vision.flight.domain.port.GeofenceLiveUpdatePort;
 import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
 
 import java.util.Comparator;
@@ -16,7 +18,11 @@ import java.util.Optional;
  * <p>Every mutation (create/update/delete) refreshes {@link GeofenceMonitor}'s enabled-zone cache
  * immediately afterward, so a zone change is visible to the very next telemetry sample evaluated —
  * per docs/plans/done/OPS-CORE-PLAN.md §G's "cheap: zones cached in the monitor, refreshed on CRUD" design
- * note.
+ * note — and then announces the same change on {@link GeofenceLiveUpdatePort} (docs/plans/active/
+ * LIVE-POLL-RETIREMENT-PLAN.md &sect;3 D2/&sect;4.1, wave L3), so a connected viewer's {@code
+ * GeofenceStore} sees it without polling {@code GET /api/geofences} again. {@code delete} publishes
+ * the zone it just removed, in full — not merely its id — so a client's own 10s Undo can re-{@code
+ * POST} the exact body it received.
  *
  * <h2>Threading</h2>
  * Holds no mutable state of its own — all shared state is reached through the injected port/monitor.
@@ -25,10 +31,14 @@ public final class DefaultGeofenceService implements GeofenceService {
 
     private final GeofenceRepositoryPort geofenceRepository;
     private final GeofenceMonitor geofenceMonitor;
+    private final GeofenceLiveUpdatePort geofenceLiveUpdatePort;
 
-    public DefaultGeofenceService(GeofenceRepositoryPort geofenceRepository, GeofenceMonitor geofenceMonitor) {
+    public DefaultGeofenceService(GeofenceRepositoryPort geofenceRepository, GeofenceMonitor geofenceMonitor,
+                                   GeofenceLiveUpdatePort geofenceLiveUpdatePort) {
         this.geofenceRepository = Objects.requireNonNull(geofenceRepository, "geofenceRepository must not be null");
         this.geofenceMonitor = Objects.requireNonNull(geofenceMonitor, "geofenceMonitor must not be null");
+        this.geofenceLiveUpdatePort =
+                Objects.requireNonNull(geofenceLiveUpdatePort, "geofenceLiveUpdatePort must not be null");
     }
 
     @Override
@@ -51,6 +61,7 @@ public final class DefaultGeofenceService implements GeofenceService {
                 spec.maxAltitudeMeters(), spec.enabled());
         GeofenceZone saved = geofenceRepository.save(zone);
         geofenceMonitor.refresh();
+        geofenceLiveUpdatePort.publishZoneEvent(new GeofenceZoneEvent(GeofenceZoneEvent.Action.CREATED, saved));
         return saved;
     }
 
@@ -63,15 +74,17 @@ public final class DefaultGeofenceService implements GeofenceService {
                 spec.maxAltitudeMeters(), spec.enabled());
         GeofenceZone saved = geofenceRepository.save(updated);
         geofenceMonitor.refresh();
+        geofenceLiveUpdatePort.publishZoneEvent(new GeofenceZoneEvent(GeofenceZoneEvent.Action.UPDATED, saved));
         return saved;
     }
 
     @Override
     public void delete(ZoneId id) {
         Objects.requireNonNull(id, "id must not be null");
-        require(id);
+        GeofenceZone existing = require(id);
         geofenceRepository.deleteById(id);
         geofenceMonitor.refresh();
+        geofenceLiveUpdatePort.publishZoneEvent(new GeofenceZoneEvent(GeofenceZoneEvent.Action.DELETED, existing));
     }
 
     private GeofenceZone require(ZoneId id) {

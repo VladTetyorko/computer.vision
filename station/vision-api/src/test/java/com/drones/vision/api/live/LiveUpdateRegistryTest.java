@@ -1,9 +1,14 @@
 package com.drones.vision.api.live;
 
 import com.drones.vision.api.dto.AssetSummaryResponse;
+import com.drones.vision.api.dto.GeofenceZoneEventPayload;
 import com.drones.vision.api.dto.LiveEnvelopeResponse;
 import com.drones.vision.api.dto.MapEventPayload;
 import com.drones.vision.api.support.VisionApiProperties;
+import com.drones.vision.flight.domain.model.GeofenceZone;
+import com.drones.vision.flight.domain.model.GeofenceZoneEvent;
+import com.drones.vision.flight.domain.model.ZoneId;
+import com.drones.vision.flight.domain.model.ZoneKind;
 import com.drones.vision.perception.application.stream.ActiveStream;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.asset.AssetStatus;
@@ -76,6 +81,7 @@ import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -156,6 +162,12 @@ class LiveUpdateRegistryTest {
         return new Drawing(DrawingId.random(), layerId, DrawKind.LINE,
                 List.of(new GeoPosition(50.0, 30.0, null), new GeoPosition(50.5, 30.5, null)),
                 null, null, new Ownership(UserId.random(), GroupId.random()), Instant.now());
+    }
+
+    private static GeofenceZone zone(String name) {
+        List<GeoPosition> square = List.of(new GeoPosition(10, 10, null), new GeoPosition(10, 20, null),
+                new GeoPosition(20, 20, null), new GeoPosition(20, 10, null));
+        return new GeofenceZone(ZoneId.random(), name, ZoneKind.KEEP_OUT, square, null, true);
     }
 
     private static MapLayer layer(LayerId layerId) {
@@ -252,6 +264,84 @@ class LiveUpdateRegistryTest {
         assertEquals(1, payload.size());
         assertEquals(freshAssetId.value().toString(), payload.get(0).assetId(),
                 "the trailing recompute must reflect the newest write, never the one the leading dispatch captured");
+    }
+
+    /**
+     * The fleet-topic scope leak fix: {@link LiveUpdateRegistry#freshFleetEnvelope()} builds its
+     * snapshot from the unscoped {@code AssetService#assets()} overload, so per-connection
+     * filtering has to happen at delivery time ({@link LiveConnection#project}), reusing whatever
+     * {@code assetVisibility} predicate {@code LiveController} handed this connection at connect
+     * time — exactly the same predicate {@code LiveAssetAccess#deliveryPredicate} builds for
+     * telemetry/detections/geo, just supplied directly here rather than through the real
+     * {@code StreamAccess}/{@code ScopeResolver} chain (that chain is exercised end-to-end by
+     * {@code LiveFleetScopingTest}, {@code com.drones.vision.api.live}).
+     */
+    @Test
+    void broadcastNarrowsTheFleetEnvelopesAssetListPerConnectionWhileAnUnboundedViewerKeepsEverything() {
+        AssetId visibleAssetId = AssetId.random();
+        AssetId hiddenAssetId = AssetId.random();
+        when(assetService.assets()).thenReturn(List.of(summary(visibleAssetId), summary(hiddenAssetId)));
+        LiveUpdateRegistry registry = registry();
+        RecordingSseEmitter scoped = new RecordingSseEmitter();
+        RecordingSseEmitter unbounded = new RecordingSseEmitter();
+        registry.register(scoped, Set.of(LiveTopic.FLEET), UserId.random(), layerId -> true, visibleAssetId::equals);
+        registry.register(unbounded, Set.of(LiveTopic.FLEET), UserId.random(), layerId -> true, id -> true);
+
+        registry.publishFleetChanged();
+
+        assertTrue(awaitTrue(Duration.ofSeconds(2), () -> scoped.received().size() == 1 && unbounded.received().size() == 1),
+                "both connections must eventually receive their own fleet envelope");
+        assertEquals(List.of(visibleAssetId.value().toString()), fleetAssetIds(scoped.received().get(0)),
+                "a GROUPS-scoped viewer must only receive assets its own predicate allows");
+        assertEquals(2, fleetAssetIds(unbounded.received().get(0)).size(),
+                "an UNBOUNDED (admin) viewer must still receive every asset -- no regression");
+    }
+
+    @Test
+    void aFleetBroadcastToAConnectionWithNothingVisibleStillDeliversAnEmptyListEnvelopeNotADroppedOne() {
+        when(assetService.assets()).thenReturn(List.of(summary(AssetId.random())));
+        LiveUpdateRegistry registry = registry();
+        RecordingSseEmitter emitter = new RecordingSseEmitter();
+        registry.register(emitter, Set.of(LiveTopic.FLEET), UserId.random(), layerId -> true, id -> false);
+
+        registry.publishFleetChanged();
+
+        assertTrue(awaitTrue(Duration.ofSeconds(2), () -> emitter.received().size() == 1),
+                "an envelope must still be sent -- an empty list is the correct answer, not silence");
+        assertEquals(List.of(), fleetAssetIds(emitter.received().get(0)));
+    }
+
+    /**
+     * SCALE-100-PLAN.md §5 S2's serialize-once optimization, guarded: {@link
+     * LiveUpdateRegistry#broadcast} must still hand the exact same, already-serialized JSON {@code
+     * String} instance to every connection on a topic {@link LiveConnection#project} never narrows
+     * — true for every topic except a genuinely scoped {@code map}/{@code fleet} delivery. {@code
+     * second}'s predicates are maximally restrictive (would drop everything on {@code map}/{@code
+     * fleet}) precisely to prove they are never even consulted for the {@code event} topic.
+     */
+    @Test
+    void nonFleetTopicsReuseTheIdenticalSerializedStringAcrossConnectionsGuardingSerializeOnce() {
+        LiveUpdateRegistry registry = registry();
+        RecordingSseEmitter first = new RecordingSseEmitter();
+        RecordingSseEmitter second = new RecordingSseEmitter();
+        registry.register(first, Set.of(LiveTopic.EVENT), UserId.random(), layerId -> true, id -> true);
+        registry.register(second, Set.of(LiveTopic.EVENT), UserId.random(), layerId -> false, id -> false);
+
+        registry.publishEvent(Event.of(StreamId.random(), EventType.STREAM_STARTED, "started"));
+
+        assertTrue(awaitTrue(Duration.ofSeconds(2), () -> first.received().size() == 1 && second.received().size() == 1));
+        assertSame(first.received().get(0), second.received().get(0),
+                "LiveConnection#project must return the identical envelope instance for a non-fleet/non-map "
+                        + "topic, so broadcast reuses its one shared, already-serialized String instead of "
+                        + "re-serializing per connection");
+    }
+
+    private static List<String> fleetAssetIds(String json) {
+        List<String> ids = new ArrayList<>();
+        for (tools.jackson.databind.JsonNode assetNode : new JsonMapper().readTree(json).get("payload")) {
+            ids.add(assetNode.get("assetId").asString());
+        }
+        return ids;
     }
 
     @Test
@@ -403,6 +493,67 @@ class LiveUpdateRegistryTest {
         assertEquals(List.of(), registry.replayFor(LiveTopic.MAP, null));
     }
 
+    /**
+     * L3 (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md &sect;3 D2/&sect;4.1) — create/update/delete
+     * each append one {@code zones} envelope, buffered immediately without waiting for a flush,
+     * exactly like {@link #publishDetectionEventAppendsImmediatelyWithoutWaitingForAFlush}.
+     */
+    @Test
+    void publishZoneEventAppendsAZonesEnvelopeForEachAction() {
+        LiveUpdateRegistry registry = registry();
+        GeofenceZone created = zone("no-fly");
+
+        registry.publishZoneEvent(new GeofenceZoneEvent(GeofenceZoneEvent.Action.CREATED, created));
+
+        List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.ZONES).snapshot();
+        assertEquals(1, buffered.size());
+        assertEquals("zones", buffered.get(0).type());
+        assertNull(buffered.get(0).assetId(), "zones envelopes carry no assetId -- unfiltered, unscoped delivery");
+        GeofenceZoneEventPayload payload = (GeofenceZoneEventPayload) buffered.get(0).payload();
+        assertEquals("CREATED", payload.action());
+        assertEquals(created.id().value().toString(), payload.zone().id());
+        assertEquals("no-fly", payload.zone().name());
+    }
+
+    /**
+     * The wire-level counterpart to {@code DefaultGeofenceServiceTest#deleteRemovesAnExistingZone...}:
+     * a {@code DELETED} envelope's {@code zone} is the zone's last-known state in full, not merely its
+     * id, so a client's own 10s Undo can re-{@code POST} the exact body it just removed.
+     */
+    @Test
+    void deletedZoneEventCarriesTheLastKnownZoneInFullOnTheWire() {
+        LiveUpdateRegistry registry = registry();
+        GeofenceZone lastKnown = zone("to-delete");
+
+        registry.publishZoneEvent(new GeofenceZoneEvent(GeofenceZoneEvent.Action.DELETED, lastKnown));
+
+        GeofenceZoneEventPayload payload =
+                (GeofenceZoneEventPayload) registry.bufferFor(LiveTopic.ZONES).snapshot().get(0).payload();
+        assertEquals("DELETED", payload.action());
+        assertEquals(lastKnown.id().value().toString(), payload.zone().id());
+        assertEquals(lastKnown.name(), payload.zone().name());
+        assertEquals(lastKnown.kind().name(), payload.zone().kind());
+        assertTrue(payload.zone().enabled());
+    }
+
+    /** Proves L3's zones topic actually reaches a subscribed connection, not just the buffer -- the SSE-delivery counterpart to the buffer-only tests above. */
+    @Test
+    void publishZoneEventReachesASubscribedConnection() {
+        LiveUpdateRegistry registry = registry();
+        RecordingSseEmitter emitter = new RecordingSseEmitter();
+        registry.register(emitter, Set.of(LiveTopic.ZONES), UserId.random(), layerId -> true, id -> true);
+        GeofenceZone updated = zone("updated-zone");
+
+        registry.publishZoneEvent(new GeofenceZoneEvent(GeofenceZoneEvent.Action.UPDATED, updated));
+
+        assertTrue(awaitTrue(Duration.ofSeconds(2), () -> emitter.received().size() == 1),
+                "the subscribed connection must receive the zones envelope");
+        String json = emitter.received().get(0);
+        assertTrue(json.contains("\"zones\""), "the envelope's type must be zones");
+        assertTrue(json.contains("UPDATED"));
+        assertTrue(json.contains(updated.id().value().toString()));
+    }
+
     @Test
     void telemetryIsCoalescedIntoOneEnvelopePerAssetOnFlush() {
         AssetId assetId = AssetId.random();
@@ -452,7 +603,7 @@ class LiveUpdateRegistryTest {
         VisionApiProperties.Live defaults = VisionApiProperties.Live.defaults();
         VisionApiProperties.Live smallTelemetryBuffer = new VisionApiProperties.Live(defaults.coalesce(),
                 defaults.heartbeat(), 2, defaults.eventBuffer(), defaults.detectionBuffer(), defaults.mapBuffer(),
-                defaults.sendTimeout(), defaults.bufferEviction());
+                defaults.sendTimeout(), defaults.bufferEviction(), defaults.systemSample());
         LiveUpdateRegistry registry = new LiveUpdateRegistry(provider(assetService), provider(deviceService),
                 provider(streamService), streamPublisherPort, provider(detectionEventRepositoryPort),
                 smallTelemetryBuffer, new ImmediateScheduledExecutorService());

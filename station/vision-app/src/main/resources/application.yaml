@@ -1163,6 +1163,7 @@ vision:
     #     map-buffer: 300
     #     send-timeout: 3s
     #     buffer-eviction: 60s
+    #     system-sample: 5s
     #   Shared default/max page size for list endpoints that accept a limit query parameter (e.g.
     #   ActivityController's GET /api/me/activity).
     #   paging:
