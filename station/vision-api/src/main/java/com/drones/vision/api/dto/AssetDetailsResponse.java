@@ -39,6 +39,10 @@ import java.util.Map;
  *                           AssetSummaryResponse#firmware()}
  * @param totalFlightSeconds cumulative flight seconds, or absent — see {@link
  *                           AssetSummaryResponse#totalFlightSeconds()}
+ * @param deviceCount        how many devices this asset owns — see {@link
+ *                           AssetSummaryResponse#deviceCount()}. Redundant with {@code devices.size()}
+ *                           here and carried anyway, so one row shape reads the same whether it came
+ *                           from the list or the detail endpoint
  * @param devices            the asset's resolved devices
  * @param recentUsages       the asset's recent usage history, newest first
  */
@@ -48,7 +52,7 @@ public record AssetDetailsResponse(String assetId, String displayName, String ca
                                     GeoPositionResponse lastKnownPosition, Map<String, String> attributes,
                                     boolean hasImage, IdentityResponse identity, CustodyResponse custody,
                                     String inventoryState, Instant createdAt, Instant updatedAt,
-                                    FirmwareResponse firmware, Long totalFlightSeconds,
+                                    FirmwareResponse firmware, Long totalFlightSeconds, int deviceCount,
                                     List<DeviceResponse> devices, List<AssetUsageResponse> recentUsages) {
 
     /**
@@ -61,12 +65,14 @@ public record AssetDetailsResponse(String assetId, String displayName, String ca
      *                           offer — see {@link AssetSummaryResponse#firmware()}
      * @param totalFlightSeconds the joined flight-hours fact, or {@code null} if the caller has none
      *                           to offer — see {@link AssetSummaryResponse#totalFlightSeconds()}
+     * @param custodianName      the custodian's resolved display name, or {@code null} if the caller
+     *                           has no name lookup to offer — see {@link AssetSummaryResponse#from}
      * @return the response body for {@code details}
      */
     public static AssetDetailsResponse from(AssetDetails details, boolean hasImage, FirmwareResponse firmware,
-                                             Long totalFlightSeconds) {
+                                             Long totalFlightSeconds, String custodianName) {
         AssetSummaryResponse summary = AssetSummaryResponse.from(details.summary(), hasImage, firmware,
-                totalFlightSeconds);
+                totalFlightSeconds, custodianName);
         List<DeviceResponse> devices = details.devices().stream().map(DeviceResponse::from).toList();
         List<AssetUsageResponse> usages = details.recentUsages().stream().map(AssetUsageResponse::from).toList();
         return new AssetDetailsResponse(
@@ -88,6 +94,7 @@ public record AssetDetailsResponse(String assetId, String displayName, String ca
                 summary.updatedAt(),
                 summary.firmware(),
                 summary.totalFlightSeconds(),
+                summary.deviceCount(),
                 devices,
                 usages);
     }

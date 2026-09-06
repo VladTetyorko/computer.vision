@@ -51,6 +51,13 @@ import com.drones.vision.api.controller.AssetController;
  *                           absent only when the caller has no join to offer, never when the true
  *                           value is a genuine zero (a never-flown asset reports {@code 0}, not
  *                           absence)
+ * @param deviceCount        how many devices this asset owns ({@code Asset#devices().size()},
+ *                           docs/plans/active/INVENTORY-REWORK-PLAN.md §6) — always present, always
+ *                           accurate, since it is read straight off the same {@link AssetSummary}
+ *                           this row is built from. It exists so a Links column can be rendered from
+ *                           the list alone: the web used to fetch {@code GET /api/assets/{id}} once
+ *                           per row to count them, turning a 20-asset page into 25 requests
+ *                           (docs/plans/active/INVENTORY-REWORK-CONTEXT.md §3, defect D)
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record AssetSummaryResponse(String assetId, String displayName, String category, String categoryName,
@@ -58,7 +65,7 @@ public record AssetSummaryResponse(String assetId, String displayName, String ca
                                     GeoPositionResponse lastKnownPosition, Map<String, String> attributes,
                                     boolean hasImage, IdentityResponse identity, CustodyResponse custody,
                                     String inventoryState, Instant createdAt, Instant updatedAt,
-                                    FirmwareResponse firmware, Long totalFlightSeconds) {
+                                    FirmwareResponse firmware, Long totalFlightSeconds, int deviceCount) {
 
     /**
      * Maps an {@link AssetSummary} read model to its wire representation.
@@ -71,10 +78,16 @@ public record AssetSummaryResponse(String assetId, String displayName, String ca
      *                           offer (see this record's own javadoc)
      * @param totalFlightSeconds the joined flight-hours fact, or {@code null} if the caller has none
      *                           to offer (see this record's own javadoc)
+     * @param custodianName      the custodian's resolved display name, or {@code null} if the caller
+     *                           has no name lookup to offer — the same "no join available" convention
+     *                           {@code firmware}/{@code totalFlightSeconds} already use here, and the
+     *                           reason {@code com.drones.vision.api.support.AssetRowFacts} exists;
+     *                           ignored entirely for an in-stock asset (see {@link
+     *                           CustodyResponse#from})
      * @return the response body element for {@code summary}
      */
     public static AssetSummaryResponse from(AssetSummary summary, boolean hasImage, FirmwareResponse firmware,
-                                             Long totalFlightSeconds) {
+                                             Long totalFlightSeconds, String custodianName) {
         return new AssetSummaryResponse(
                 summary.asset().id().value().toString(),
                 summary.asset().displayName(),
@@ -88,11 +101,12 @@ public record AssetSummaryResponse(String assetId, String displayName, String ca
                 summary.asset().attributes(),
                 hasImage,
                 IdentityResponse.from(summary.identity()),
-                CustodyResponse.from(summary.custody()),
+                CustodyResponse.from(summary.custody(), custodianName),
                 summary.inventoryState().name(),
                 summary.asset().createdAt(),
                 summary.asset().updatedAt(),
                 firmware,
-                totalFlightSeconds);
+                totalFlightSeconds,
+                summary.asset().devices().size());
     }
 }

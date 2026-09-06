@@ -1,8 +1,10 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
+import com.drones.vision.identity.application.AuthService;
 import com.drones.vision.identity.domain.model.Assignment;
 import com.drones.vision.identity.domain.model.AssignmentRole;
+import com.drones.vision.identity.domain.model.User;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.identity.application.AssignmentService;
@@ -46,12 +48,14 @@ class AssignmentControllerTest {
     private final AssignmentService assignmentService = mock(AssignmentService.class);
     private final AssignmentRepositoryPort assignmentRepository = mock(AssignmentRepositoryPort.class);
     private final AssetService assetService = mock(AssetService.class);
+    private final AuthService authService = mock(AuthService.class);
 
     private final UserId actor = UserId.random();
     private final CurrentUser currentUser = new CurrentUser(new Ownership(actor, com.drones.vision.kernel.GroupId.random()));
 
     private final MockMvc mockMvc = MockMvcBuilders
-            .standaloneSetup(new AssignmentController(assignmentService, assignmentRepository, assetService, currentUser))
+            .standaloneSetup(new AssignmentController(assignmentService, assignmentRepository, assetService,
+                    authService, currentUser))
             .setControllerAdvice(new ApiExceptionHandler())
             .build();
 
@@ -102,15 +106,52 @@ class AssignmentControllerTest {
     }
 
     @Test
-    void pilotsListsAssignedPilotsWithTheirSeatWhenInScope() throws Exception {
+    void pilotsListsAssignedPilotsWithTheirSeatAndNamesWhenInScope() throws Exception {
         UserId one = UserId.random();
         when(assignmentRepository.assignmentsForAsset(AssetId.of(assetId)))
                 .thenReturn(List.of(new Assignment(one, AssetId.of(assetId), AssignmentRole.CREW)));
+        when(authService.find(one))
+                .thenReturn(Optional.of(new User(one, "anna", "Anna Kovalenko", "anna@vision.local", "hash", true)));
 
         mockMvc.perform(get("/api/assets/{a}/pilots", assetId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].userId").value(one.value().toString()))
-                .andExpect(jsonPath("$[0].role").value("CREW"));
+                .andExpect(jsonPath("$[0].role").value("CREW"))
+                .andExpect(jsonPath("$[0].username").value("anna"))
+                .andExpect(jsonPath("$[0].displayName").value("Anna Kovalenko"));
+    }
+
+    /**
+     * The names are resolved by id, not by listing — so a caller whose {@code UserService#list} would
+     * answer empty (a pilot's {@code ASSIGNED_ASSETS} scope) still reads a name here
+     * (docs/plans/active/INVENTORY-REWORK-PLAN.md D3). This asserts the mechanism: nothing but
+     * {@link AuthService#find} is consulted.
+     */
+    @Test
+    void pilotsResolvesNamesByIdWithoutListingUsers() throws Exception {
+        UserId one = UserId.random();
+        when(assignmentRepository.assignmentsForAsset(AssetId.of(assetId)))
+                .thenReturn(List.of(new Assignment(one, AssetId.of(assetId), AssignmentRole.PILOT)));
+        when(authService.find(one))
+                .thenReturn(Optional.of(new User(one, "bohdan", "Bohdan", "b@vision.local", "hash", true)));
+
+        mockMvc.perform(get("/api/assets/{a}/pilots", assetId)).andExpect(status().isOk());
+
+        verify(authService).find(one);
+    }
+
+    @Test
+    void pilotsOmitsBothNamesWhenTheUserRecordNoLongerResolves() throws Exception {
+        UserId gone = UserId.random();
+        when(assignmentRepository.assignmentsForAsset(AssetId.of(assetId)))
+                .thenReturn(List.of(new Assignment(gone, AssetId.of(assetId), AssignmentRole.PILOT)));
+        when(authService.find(gone)).thenReturn(Optional.empty());
+
+        mockMvc.perform(get("/api/assets/{a}/pilots", assetId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].userId").value(gone.value().toString()))
+                .andExpect(jsonPath("$[0].username").doesNotExist())
+                .andExpect(jsonPath("$[0].displayName").doesNotExist());
     }
 
     @Test

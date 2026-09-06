@@ -57,10 +57,12 @@ import com.drones.vision.api.security.CurrentUser;
  * AssetImageRepositoryPort} (populating {@code hasImage} on every summary/detail response —
  * docs/plans/done/UX-REWORK-PLAN.md §U-d item 3, CONTRACT 2 — via its cheap {@code
  * existsByAssetId} check; the image bytes themselves are served by {@link AssetImageController}),
- * and {@link AssetRowFacts} (populating {@code firmware}/{@code totalFlightSeconds}, joined from
- * vision-flight and warehouse's own usage repository respectively — docs/plans/active/
- * WAREHOUSE-UX-PLAN.md D5; bundled into one collaborator, not two more constructor parameters, to
- * stay at the five-parameter ceiling — see that class's own javadoc). Per the hexagonal dependency
+ * and {@link AssetRowFacts} (populating {@code firmware}/{@code totalFlightSeconds}/{@code
+ * custody.custodianName}, joined from vision-flight, warehouse's own usage repository, and
+ * vision-identity respectively — docs/plans/active/WAREHOUSE-UX-PLAN.md D5 and
+ * docs/plans/active/INVENTORY-REWORK-PLAN.md D3; bundled into one collaborator, not three more
+ * constructor parameters, to stay at the five-parameter ceiling — see that class's own javadoc).
+ * Per the hexagonal dependency
  * rule (ARCHITECTURE.md §2, enforced by ArchUnit), this module depends only on {@code
  * vision-domain} and {@code vision-application} — never on an adapter.
  *
@@ -228,7 +230,7 @@ public class AssetController {
         FirmwareResponse firmware = assetRowFacts.firmwareOf(asset).map(FirmwareResponse::from).orElse(null);
         long totalFlightSeconds = flightSecondsByAsset.getOrDefault(asset.id(), 0L);
         return AssetSummaryResponse.from(summary, assetImageRepositoryPort.existsByAssetId(asset.id()), firmware,
-                totalFlightSeconds);
+                totalFlightSeconds, assetRowFacts.custodianNameOf(summary.custody()));
     }
 
     /**
@@ -310,10 +312,11 @@ public class AssetController {
 
     /**
      * Fetches {@code id}'s detail view plus its {@code hasImage}/{@code firmware}/{@code
-     * totalFlightSeconds} facts in one call, scoped to the caller — an asset outside {@link
-     * CurrentUser#scope()} 404s exactly as an unknown id does. {@code totalFlightSeconds} runs {@link
-     * AssetRowFacts#totalFlightSecondsByAsset()}'s fleet-wide aggregate for a single-asset read too —
-     * one grouped query, not a wasteful full scan; see that method's own javadoc.
+     * totalFlightSeconds}/{@code custody.custodianName} facts in one call, scoped to the caller — an
+     * asset outside {@link CurrentUser#scope()} 404s exactly as an unknown id does. {@code
+     * totalFlightSeconds} runs {@link AssetRowFacts#totalFlightSecondsByAsset()}'s fleet-wide
+     * aggregate for a single-asset read too — one grouped query, not a wasteful full scan; see that
+     * method's own javadoc.
      */
     private AssetDetailsResponse detailsResponse(AssetId id) {
         AssetDetails details = assetService.details(currentUser.scope(), id);
@@ -321,7 +324,7 @@ public class AssetController {
                 .map(FirmwareResponse::from).orElse(null);
         long totalFlightSeconds = assetRowFacts.totalFlightSecondsByAsset().getOrDefault(id, 0L);
         return AssetDetailsResponse.from(details, assetImageRepositoryPort.existsByAssetId(id), firmware,
-                totalFlightSeconds);
+                totalFlightSeconds, assetRowFacts.custodianNameOf(details.summary().custody()));
     }
 
     /**
