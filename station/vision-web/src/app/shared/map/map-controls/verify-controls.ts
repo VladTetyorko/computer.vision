@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
 import { MarksStore } from '../../../core/map-data/marks-store';
 import { LayersStore } from '../../../core/map-data/layers-store';
 import { verificationChipClass, verificationLabel } from '../../../core/map-data/mark-logic';
@@ -33,6 +33,18 @@ export class VerifyControls {
 
   private readonly marks = inject(MarksStore);
   private readonly layers = inject(LayersStore);
+
+  constructor() {
+    // ALWAYS-ON-FLOW-PLAN.md §4 Wave C3 — see `MarksPanel`'s identical constructor comment. One
+    // instance exists per unverified mark row, so this fires once per row mounted; ref-counting on
+    // the store side means that is exactly as correct (and as cheap) as one activation per row.
+    this.marks.activate();
+    this.layers.activate();
+    inject(DestroyRef).onDestroy(() => {
+      this.marks.release();
+      this.layers.release();
+    });
+  }
 
   protected readonly verificationLabel = verificationLabel;
   protected readonly verificationChipClass = verificationChipClass;

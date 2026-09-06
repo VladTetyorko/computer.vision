@@ -73,7 +73,10 @@ function create(api: ReturnType<typeof stubApi>) {
       ]),
     ],
   });
-  return TestBed.inject(DrawingsStore);
+  const store = TestBed.inject(DrawingsStore);
+  // ALWAYS-ON-FLOW-PLAN.md §4 Wave C3: see `marks-store.spec.ts`'s identical `create()` comment.
+  store.activate();
+  return store;
 }
 
 function flush(): Promise<void> {
@@ -114,6 +117,61 @@ describe('DrawingsStore', () => {
 
       await router.navigateByUrl('/fly/asset-1');
       expect(store.mode()).toBeNull();
+    });
+  });
+
+  describe('activate/release (ALWAYS-ON-FLOW-PLAN.md §4 Wave C3)', () => {
+    function createInactive(api: ReturnType<typeof stubApi>) {
+      const scheduleFn = vi.fn().mockReturnValue(vi.fn());
+      TestBed.configureTestingModule({
+        providers: [
+          DrawingsStore,
+          { provide: VisionApi, useValue: api },
+          { provide: ToastService, useValue: { ok: vi.fn(), error: vi.fn(), info: vi.fn(), notify: vi.fn(), warn: vi.fn() } },
+          { provide: PollScheduler, useValue: { schedule: scheduleFn } },
+          { provide: LiveStore, useValue: stubLiveStore() },
+          { provide: LayersStore, useValue: stubLayersStore() },
+          provideRouter([{ path: 'command', component: StubPage }]),
+        ],
+      });
+      return { store: TestBed.inject(DrawingsStore), scheduleFn };
+    }
+
+    it('never fetches or schedules a poll until the first activate()', async () => {
+      const api = stubApi();
+      const { store, scheduleFn } = createInactive(api);
+      await flush();
+      expect(api.listMapDrawings).not.toHaveBeenCalled();
+      expect(scheduleFn).not.toHaveBeenCalled();
+
+      store.activate();
+      await flush();
+      expect(api.listMapDrawings).toHaveBeenCalledTimes(1);
+      expect(scheduleFn).toHaveBeenCalledTimes(1);
+    });
+
+    it('stops the poll only once every consumer has released, then refreshes again on reactivation', async () => {
+      const api = stubApi();
+      const stopFn = vi.fn();
+      const { store, scheduleFn } = createInactive(api);
+      scheduleFn.mockReturnValue(stopFn);
+
+      store.activate();
+      store.activate();
+      await flush();
+      store.release();
+      expect(stopFn).not.toHaveBeenCalled();
+      store.release();
+      expect(stopFn).toHaveBeenCalledTimes(1);
+
+      store.activate();
+      await flush();
+      expect(api.listMapDrawings).toHaveBeenCalledTimes(2);
+    });
+
+    it('an unmatched release is a defensive no-op, never going negative', () => {
+      const { store } = createInactive(stubApi());
+      expect(() => store.release()).not.toThrow();
     });
   });
 });

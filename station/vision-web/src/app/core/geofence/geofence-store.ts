@@ -39,12 +39,23 @@ const ZONES_POLL_INTERVAL_MS = 30_000;
  * mirrors `features/devices/devices.ts#archiveAssetNow`'s own "the mutation already happened,
  * Undo re-creates via the API" idiom exactly (the recreated zone gets a new id; nothing in this
  * app's own UI is keyed on a zone id surviving a delete/undo round trip).
+ *
+ * <h2>Polling is demand-gated (ALWAYS-ON-FLOW-PLAN.md §4 Wave C3), never "since app boot"</h2>
+ * See `MarksStore`'s identical doc section for the shared defect/fix. This store's own above
+ * "deliberately not gated on `isLiveAvailable()`" note is a *different* axis and stays true: while
+ * ≥1 consumer is active the poll never pauses for connectivity reasons, for the safety-adjacent
+ * reason already given there. Demand-gating is orthogonal — when `activeConsumers === 0` nobody has
+ * any zone layer mounted to show stale data on in the first place, so there is no correctness cost
+ * to stopping, only the same cross-page-forever-poll waste every other `core/map-data/**` store had.
+ * {@link activate}/{@link release}, called by every direct injector (`ZonesPanel` plus the four
+ * routed pages' own facades that render a map — matching `MarksStore`'s consumer list exactly).
  */
 @Injectable({ providedIn: 'root' })
 export class GeofenceStore {
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
   private readonly undoToast = inject(UndoToastService);
+  private readonly scheduler = inject(PollScheduler);
 
   private readonly zonesSignal = signal<readonly GeofenceZone[]>([]);
   readonly zones = this.zonesSignal.asReadonly();
@@ -53,12 +64,37 @@ export class GeofenceStore {
   /** `true` once the first `refresh()` has settled (success or failure) — distinguishes "loading" from "genuinely empty". */
   readonly loaded = this.loadedSignal.asReadonly();
 
-  constructor() {
-    void this.refresh(); // one-time initial fetch, mirrors `FleetStore`'s own constructor precedent.
-    // Poll-while-visible off the app's one shared timer (`PollScheduler`) — no `DestroyRef` needed,
-    // this store is `providedIn: 'root'` and never destroyed during a session, same posture as
-    // `FleetStore`'s own always-on poll.
-    inject(PollScheduler).schedule(ZONES_POLL_INTERVAL_MS, () => this.refresh());
+  /** Ref-count of live consumers — see {@link activate}/{@link release}. */
+  private activeConsumers = 0;
+  /** The poll's own unsubscribe, held only while `activeConsumers > 0`. */
+  private stopPollFn: (() => void) | null = null;
+
+  /**
+   * Registers demand — call once from a consumer's own constructor (a routed page's facade, or a
+   * non-routed presentational child like `ZonesPanel` that injects this store directly). The first
+   * `activate()` since the last full `release()` triggers an immediate re-fetch (this store never
+   * destructs, so nothing else would ever refresh a long-stale list) and starts the poll; any
+   * further concurrent consumer just bumps the count.
+   */
+  activate(): void {
+    this.activeConsumers++;
+    if (this.activeConsumers > 1) {
+      return;
+    }
+    void this.refresh();
+    this.stopPollFn = this.scheduler.schedule(ZONES_POLL_INTERVAL_MS, () => this.refresh());
+  }
+
+  /** The matching teardown — call from the consumer's own `DestroyRef.onDestroy`. Stops the poll once nothing is left. */
+  release(): void {
+    if (this.activeConsumers === 0) {
+      return; // defensive — a mismatched release should never go negative
+    }
+    this.activeConsumers--;
+    if (this.activeConsumers === 0 && this.stopPollFn !== null) {
+      this.stopPollFn();
+      this.stopPollFn = null;
+    }
   }
 
   async refresh(): Promise<void> {

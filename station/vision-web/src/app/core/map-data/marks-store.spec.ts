@@ -109,7 +109,13 @@ function create(api: ReturnType<typeof stubApi>, options: { layers?: readonly Ma
       ]),
     ],
   });
-  return { store: TestBed.inject(MarksStore), toasts, live };
+  const store = TestBed.inject(MarksStore);
+  // ALWAYS-ON-FLOW-PLAN.md §4 Wave C3: `refresh()`/the poll now only start once something calls
+  // `activate()` (see `MarksStore`'s own doc comment) — every test in this file exercises an
+  // already-active store, mirroring what every real consumer does in its own constructor, so this
+  // one call here stands in for all of them rather than repeating it at every call site.
+  store.activate();
+  return { store, toasts, live };
 }
 
 /** Lets the fire-and-forget promise chain inside the constructor's `refresh()` settle. */
@@ -425,6 +431,101 @@ describe('MarksStore', () => {
 
       await router.navigateByUrl('/fly/asset-1');
       expect(store.palette()).toMatchObject({ kind: 'TARGET', affiliation: 'HOSTILE' });
+    });
+  });
+
+  describe('activate/release (ALWAYS-ON-FLOW-PLAN.md §4 Wave C3)', () => {
+    /** Bypasses the shared `create()` helper's own `activate()` call — these tests need to observe
+     *  the pre-activation state, which every other test in this file deliberately skips past. */
+    function createInactive(api: ReturnType<typeof stubApi>) {
+      const toasts = { ok: vi.fn(), error: vi.fn(), info: vi.fn(), notify: vi.fn(), warn: vi.fn() };
+      const live = stubLiveStore();
+      const scheduleFn = vi.fn().mockReturnValue(vi.fn());
+      TestBed.configureTestingModule({
+        providers: [
+          MarksStore,
+          { provide: VisionApi, useValue: api },
+          { provide: ToastService, useValue: toasts },
+          { provide: PollScheduler, useValue: { schedule: scheduleFn } },
+          { provide: LiveStore, useValue: live },
+          { provide: LayersStore, useValue: stubLayersStore() },
+          provideRouter([{ path: 'command', component: StubPage }]),
+        ],
+      });
+      return { store: TestBed.inject(MarksStore), scheduleFn };
+    }
+
+    it('never fetches or schedules a poll until the first activate()', async () => {
+      const api = stubApi();
+      const { store, scheduleFn } = createInactive(api);
+      await flush();
+      expect(api.listMapMarks).not.toHaveBeenCalled();
+      expect(scheduleFn).not.toHaveBeenCalled();
+
+      store.activate();
+      await flush();
+      expect(api.listMapMarks).toHaveBeenCalledTimes(1);
+      expect(scheduleFn).toHaveBeenCalledTimes(1);
+    });
+
+    it('a second concurrent consumer neither re-fetches nor re-schedules', async () => {
+      const api = stubApi();
+      const { store, scheduleFn } = createInactive(api);
+      store.activate();
+      await flush();
+      store.activate();
+      await flush();
+      expect(api.listMapMarks).toHaveBeenCalledTimes(1);
+      expect(scheduleFn).toHaveBeenCalledTimes(1);
+    });
+
+    it('stops the poll only once every consumer has released', async () => {
+      const api = stubApi();
+      const stopFn = vi.fn();
+      const scheduleFn = vi.fn().mockReturnValue(stopFn);
+      const toasts = { ok: vi.fn(), error: vi.fn(), info: vi.fn(), notify: vi.fn(), warn: vi.fn() };
+      TestBed.configureTestingModule({
+        providers: [
+          MarksStore,
+          { provide: VisionApi, useValue: api },
+          { provide: ToastService, useValue: toasts },
+          { provide: PollScheduler, useValue: { schedule: scheduleFn } },
+          { provide: LiveStore, useValue: stubLiveStore() },
+          { provide: LayersStore, useValue: stubLayersStore() },
+          provideRouter([{ path: 'command', component: StubPage }]),
+        ],
+      });
+      const store = TestBed.inject(MarksStore);
+
+      store.activate();
+      store.activate();
+      await flush();
+      store.release();
+      expect(stopFn).not.toHaveBeenCalled();
+      store.release();
+      expect(stopFn).toHaveBeenCalledTimes(1);
+    });
+
+    it('reactivating after a full release triggers a fresh fetch', async () => {
+      const api = stubApi();
+      const { store } = createInactive(api);
+      store.activate();
+      await flush();
+      store.release();
+      expect(api.listMapMarks).toHaveBeenCalledTimes(1);
+
+      store.activate();
+      await flush();
+      expect(api.listMapMarks).toHaveBeenCalledTimes(2);
+    });
+
+    it('an unmatched release is a defensive no-op, never going negative', async () => {
+      const api = stubApi();
+      const { store, scheduleFn } = createInactive(api);
+      expect(() => store.release()).not.toThrow();
+      store.activate();
+      await flush();
+      expect(scheduleFn).toHaveBeenCalledTimes(1);
     });
   });
 });

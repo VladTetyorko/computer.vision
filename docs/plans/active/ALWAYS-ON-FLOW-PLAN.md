@@ -1,6 +1,6 @@
 # ALWAYS-ON-FLOW — the ingest plane runs, the view plane is asked for
 
-Status: **waves A, B3 and D1/D2 BUILT 2026-09-06 (all ship off / opt-in); B1/B2, C, D3 SPEC.** Context + verification:
+Status: **waves A, B3, C and D1/D2 BUILT 2026-09-06; B1/B2 and D3 SPEC.** Context + verification:
 [`ALWAYS-ON-FLOW-CONTEXT.md`](ALWAYS-ON-FLOW-CONTEXT.md).
 Follows [`E2E-FLOW-AUDIT-2026-09-05.md`](E2E-FLOW-AUDIT-2026-09-05.md), whose S1/U1/N2 shipped the same day.
 
@@ -174,9 +174,9 @@ small: backfill on mount and after each SSE reconnect, using `sinceMs` as the cu
 
 | # | Change | Note |
 |---|---|---|
-| **C1** | `/wall` defaults to **state tiles, no players**. Video becomes an explicit per-tile gesture | `buildWallTiles` already produces the full state model and renders without a player. This is mostly deletion |
-| **C2** | **Cap concurrent players** and make the rest opt-in. Today `/wall` mounts one per running stream, uncapped, and `/fly` mounts one per video device, uncapped; `@defer` appears **zero times** in the app. The only mitigation is an `IntersectionObserver` that suspends off-screen tiles — defeated by a grid that fits on one screen, i.e. exactly the case that matters | Directly answers "mediamtx can take many streams, the UI cannot" |
-| **C3** | Fix five root-provided stores that register a 30 s poll and discard the unsubscribe (`marks`, `layers`, `drawings`, `tracks`, `geofence`) — they leak across every route for the whole session | Free win, independent of everything else |
+| **C1** — **BUILT** | `/wall` defaults to **state tiles, no players**. Video becomes an explicit per-tile gesture | `buildWallTiles` already produces the full state model and renders without a player. This is mostly deletion |
+| **C2** — **BUILT for `/wall`, NOT for `/fly`** | **Cap concurrent players** and make the rest opt-in. Today `/wall` mounts one per running stream, uncapped, and `/fly` mounts one per video device, uncapped; `@defer` appears **zero times** in the app. The only mitigation is an `IntersectionObserver` that suspends off-screen tiles — defeated by a grid that fits on one screen, i.e. exactly the case that matters | Directly answers "mediamtx can take many streams, the UI cannot" |
+| **C3** — **BUILT** | Fix five root-provided stores that register a 30 s poll and discard the unsubscribe (`marks`, `layers`, `drawings`, `tracks`, `geofence`) — they leak across every route for the whole session | Free win, independent of everything else |
 
 **A coupling worth stating:** polling `GET /api/streams/{id}/detections` *is* backend CV demand
 (`StreamController:444` stamps it). So every feed the UI stops opening is CV work the backend stops
@@ -259,6 +259,25 @@ will saturate one cv-service with nothing to warn or throttle. One mitigation fe
 `ALWAYS` stream that loses its last viewer has its `rateController` cleared, and `targetFps` floors at
 the configured `inferenceFps`, so an unattended stream runs at its base rate rather than an elevated
 adaptive one.
+
+**Wave C shipped 2026-09-06.** `/wall` video is now an explicit per-tile gesture capped wall-wide at
+`MAX_CONCURRENT_WALL_PLAYERS = 6`, evicting least-recently-raised rather than refusing a fresh click;
+`videoUp` gates not just the picture but `DetectionsStore.track`/`followTracks`, so an unmounted tile
+stops asserting **CV demand on the backend** — the load-shedding half that matters more than the
+pixels. C3's five root stores (`marks`, `layers`, `drawings`, `tracks`, `geofence`) moved their initial
+`GET` *and* their 30s poll under ref-counted `activate()`/`release()`.
+
+A `critical` tile deliberately does **not** auto-raise its video. §1's plane table gives the View plane
+one governor — genuine viewer demand — and severity is a State-plane fact the wall already escalates
+without pixels. Auto-raising would spend decode cost on an unwatched screen and let an alarm burst
+evict tiles the operator explicitly chose, reintroducing exactly the state-drives-view coupling this
+wave removes.
+
+**C2's `/fly` half is not built**, and this is a deferral rather than an oversight: `cockpit.html` still
+mounts one player per secondary-device thumbnail. That count is bounded by a single aircraft's cameras,
+not by the fleet, and the thumbnails exist so an operator can *see* which camera to switch to —
+replacing them with posters is a UX call for the owner, not a mechanical cap. The cap number 6 is
+likewise **reasoned, not measured**: no multi-stream decode load test backs it.
 
 ---
 

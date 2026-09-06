@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
 import { MarksStore } from '../../../../core/map-data/marks-store';
 import { LayersStore } from '../../../../core/map-data/layers-store';
 import {
@@ -65,6 +65,18 @@ export class MarksPanel {
 
   protected readonly store = inject(MarksStore);
   protected readonly layers = inject(LayersStore);
+
+  constructor() {
+    // ALWAYS-ON-FLOW-PLAN.md §4 Wave C3: a non-routed presentational child that injects these
+    // `providedIn: 'root'` stores directly must hold its own demand — see `ZonesPanel`'s identical
+    // constructor for why (`/crew/:assetId`'s Map tools drawer has no host-facade activation at all).
+    this.store.activate();
+    this.layers.activate();
+    inject(DestroyRef).onDestroy(() => {
+      this.store.release();
+      this.layers.release();
+    });
+  }
 
   protected readonly markKindLabel = markKindLabel;
   protected readonly markKindIcon = markKindIcon;

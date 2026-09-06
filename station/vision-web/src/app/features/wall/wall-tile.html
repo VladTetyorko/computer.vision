@@ -8,16 +8,27 @@
   [title]="reasonsTooltip() || null"
   (click)="onActivate()"
 >
-  <vision-player
-    [src]="tile().viewUrl ?? null"
-    [whepUrl]="tile().whepUrl ?? null"
-    [suspended]="!visible()"
-    [compact]="true"
-    [detections]="detections.results()"
-    [boxesMode]="boxesMode()"
-    [lockedTrackId]="lockedTrackId()"
-    [cropFollowEnabled]="cropFollowEnabled()"
-  />
+  @if (videoUp()) {
+    <vision-player
+      [src]="tile().viewUrl ?? null"
+      [whepUrl]="tile().whepUrl ?? null"
+      [suspended]="!visible()"
+      [compact]="true"
+      [detections]="detections.results()"
+      [boxesMode]="boxesMode()"
+      [lockedTrackId]="lockedTrackId()"
+      [cropFollowEnabled]="cropFollowEnabled()"
+    />
+  } @else {
+    <!-- State-only default (§4 Wave C1/C2) — no player instance at all, not merely a suspended one
+         (see wall-tile.ts's own "Video is opt-in" doc section for why). The identity/severity/pulse/
+         detail chrome below renders exactly the same either way; only the picture itself is absent.
+         `.surface-dark` mirrors `<vision-player>`'s own `.frame` (`player.ts`'s doc comment) — a
+         video-off tile should still read as a dark "no signal" slot, not a theme-light empty box. -->
+    <div class="placeholder surface-dark">
+      <vision-icon name="eye-off" [size]="20" />
+    </div>
+  }
 
   @if (tile().severity !== 'ok') {
     <span
@@ -62,6 +73,21 @@
     }
   </div>
 </button>
+
+<!-- ---- Video-on-request toggle (§4 Wave C1/C2) — a DOM SIBLING of `.tile` above, never a
+     descendant: `.tile` is itself a `<button>`, and `vision-icon-button` renders its own `<button>`,
+     which nested inside `.tile` would be invalid, click-bubbling HTML (the exact reason
+     `<vision-follow-hud>` below is already a sibling). Always rendered, never hover/focus-only — the
+     task's own "unmistakable per-tile affordance" requirement, and a hover-only control would be
+     unreachable on a touch wall display. -->
+<vision-icon-button
+  class="video-toggle"
+  [icon]="videoUp() ? 'eye-off' : 'eye'"
+  [label]="(videoUp() ? 'Hide video — ' : 'Show video — ') + tile().title"
+  [active]="videoUp()"
+  variant="hud"
+  (activated)="onToggleVideo()"
+/>
 
 <!-- ---- Follow, read-only (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.3, wave W5; WALL-FLOW-PLAN §5
      — the Wall is a watch surface, not a control surface) — a DOM SIBLING of `.tile` above, never a

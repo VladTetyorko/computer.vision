@@ -57,6 +57,9 @@ function stubDrawingsStore(initial: MapDrawingResponse) {
       selectedId.set(next.drawingId);
       selectedDrawing.set(next);
     },
+    // ALWAYS-ON-FLOW-PLAN.md §4 Wave C3 — `DrawingToolbar`'s constructor now calls these directly.
+    activate: vi.fn(),
+    release: vi.fn(),
   };
 }
 
@@ -64,6 +67,8 @@ function stubLayersStore() {
   return {
     loaded: signal(true).asReadonly(),
     contributable: signal([]).asReadonly(),
+    activate: vi.fn(),
+    release: vi.fn(),
   };
 }
 
@@ -73,7 +78,7 @@ async function create(initial: MapDrawingResponse) {
     providers: [
       { provide: DrawingsStore, useValue: drawingsStore },
       { provide: LayersStore, useValue: stubLayersStore() },
-      { provide: MarksStore, useValue: { disarm: vi.fn() } },
+      { provide: MarksStore, useValue: { disarm: vi.fn(), activate: vi.fn(), release: vi.fn() } },
     ],
   });
   const fixture = TestBed.createComponent(DrawingToolbar);

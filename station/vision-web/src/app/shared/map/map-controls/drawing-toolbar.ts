@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, inject, input, linkedSignal, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, linkedSignal, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { DrawingsStore } from '../../../core/map-data/drawings-store';
 import { LayersStore } from '../../../core/map-data/layers-store';
@@ -45,6 +45,18 @@ export class DrawingToolbar {
   protected readonly drawings = inject(DrawingsStore);
   protected readonly layers = inject(LayersStore);
   private readonly marks = inject(MarksStore);
+
+  constructor() {
+    // ALWAYS-ON-FLOW-PLAN.md §4 Wave C3 — see `MarksPanel`'s identical constructor comment.
+    this.drawings.activate();
+    this.layers.activate();
+    this.marks.activate();
+    inject(DestroyRef).onDestroy(() => {
+      this.drawings.release();
+      this.layers.release();
+      this.marks.release();
+    });
+  }
 
   protected readonly kinds = DRAW_KINDS;
   protected readonly drawKindLabel = drawKindLabel;

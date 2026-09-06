@@ -55,6 +55,12 @@ const DRAWINGS_POLL_INTERVAL_MS = 30_000;
  * `?asset=` URL sync, does not — see `resetOnRouteChange`), mirroring `MarksStore`'s identical fix and
  * `core/ui/overlay-store.ts#GlobalOverlayStore`'s `Router.events` seam. Drawing *data* (`drawings`)
  * stays exactly as shared as before — only this transient interaction flag resets.
+ *
+ * <h2>Polling is demand-gated (ALWAYS-ON-FLOW-PLAN.md §4 Wave C3)</h2>
+ * See `MarksStore`'s identical doc section — same defect, same fix: {@link activate}/{@link release},
+ * called by every direct injector of this store. The route-reset subscription above and the live-fold
+ * effect below stay unconditional regardless of activation: the former is dormant until `mode` is
+ * non-null (which only an *active* drawing toolbar can set) and the latter is a free in-memory fold.
  */
 @Injectable({ providedIn: 'root' })
 export class DrawingsStore {
@@ -62,6 +68,7 @@ export class DrawingsStore {
   private readonly toasts = inject(ToastService);
   private readonly live = inject(LiveStore);
   private readonly layers = inject(LayersStore);
+  private readonly scheduler = inject(PollScheduler);
 
   private readonly drawingsSignal = signal<readonly MapDrawingResponse[]>([]);
   /** Every drawing on a layer this viewer may see — already scoped server-side. */
@@ -113,10 +120,12 @@ export class DrawingsStore {
   /** The last `NavigationEnd`'s path (no query/hash) — `null` until the first event. See `resetOnRouteChange`. */
   private lastRoutePath: string | null = null;
 
-  constructor() {
-    void this.refresh();
-    inject(PollScheduler).schedule(DRAWINGS_POLL_INTERVAL_MS, () => this.refresh());
+  /** Ref-count of live consumers — see {@link activate}/{@link release}. */
+  private activeConsumers = 0;
+  /** The safety-net poll's own unsubscribe, held only while `activeConsumers > 0`. */
+  private stopPollFn: (() => void) | null = null;
 
+  constructor() {
     effect(() => {
       const events = this.live.mapEvents();
       if (events.length <= this.processedLiveEventCount) {
@@ -148,6 +157,32 @@ export class DrawingsStore {
       this.modeSignal.set(null);
     }
     this.lastRoutePath = path;
+  }
+
+  /**
+   * Registers demand — see `MarksStore.activate`'s identical doc comment for the full rationale.
+   * The first `activate()` since the last full `release()` triggers a fresh `GET` and starts the
+   * safety-net poll; further concurrent consumers just bump the count.
+   */
+  activate(): void {
+    this.activeConsumers++;
+    if (this.activeConsumers > 1) {
+      return;
+    }
+    void this.refresh();
+    this.stopPollFn = this.scheduler.schedule(DRAWINGS_POLL_INTERVAL_MS, () => this.refresh());
+  }
+
+  /** The matching teardown — call from the consumer's own `DestroyRef.onDestroy`. */
+  release(): void {
+    if (this.activeConsumers === 0) {
+      return; // defensive — a mismatched release should never go negative
+    }
+    this.activeConsumers--;
+    if (this.activeConsumers === 0 && this.stopPollFn !== null) {
+      this.stopPollFn();
+      this.stopPollFn = null;
+    }
   }
 
   async refresh(): Promise<void> {

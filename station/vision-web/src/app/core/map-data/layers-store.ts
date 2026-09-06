@@ -47,12 +47,23 @@ const LAYERS_POLL_INTERVAL_MS = 30_000;
  * layer arriving over SSE never carries `grants` (§4.3) — `applyLayerEvents` therefore preserves the
  * previously-known list rather than blanking a manager's open grants editor, and the safety-net poll
  * is what eventually re-reads them authoritatively.
+ *
+ * <h2>Polling is demand-gated (ALWAYS-ON-FLOW-PLAN.md §4 Wave C3)</h2>
+ * See `MarksStore`'s identical doc section — same defect (a `root`-provided 30s poll that, once
+ * started by any map surface, never stopped for the rest of the session), same fix: {@link activate}/
+ * {@link release}, called by every direct injector of this store (the four routed pages' own facades
+ * that render `<vision-tactical-map>`, plus `MarksPanel`/`MarkPalette`/`DrawingToolbar`/
+ * `VerifyControls`/`LayerManager` as non-routed presentational children — `/crew/:assetId` mounts no
+ * map of its own and depends entirely on the latter for its Map tools drawer, so skipping those would
+ * leave that route's drawer polling on borrowed demand from whichever *other* page happened to be
+ * visited first).
  */
 @Injectable({ providedIn: 'root' })
 export class LayersStore {
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
   private readonly live = inject(LiveStore);
+  private readonly scheduler = inject(PollScheduler);
 
   private readonly layersSignal = signal<readonly MapLayer[]>([]);
   /** Every layer this viewer may see, COP first then by name — already scoped server-side. */
@@ -77,12 +88,16 @@ export class LayersStore {
   /** How many live map deltas (`LiveStore.mapEvents()`, a chronological append-only log) this store has folded in. */
   private processedLiveEventCount = 0;
 
-  constructor() {
-    void this.refresh();
-    inject(PollScheduler).schedule(LAYERS_POLL_INTERVAL_MS, () => this.refresh());
+  /** Ref-count of live consumers — see {@link activate}/{@link release}. */
+  private activeConsumers = 0;
+  /** The safety-net poll's own unsubscribe, held only while `activeConsumers > 0`. */
+  private stopPollFn: (() => void) | null = null;
 
+  constructor() {
     // Mirrors `MarksStore`/`DrawingsStore`'s identical cursor over the same shared arrival log — see
     // `core/live/live-store.ts#mapEvents`' own doc comment for why three consumers read one signal.
+    // Left unconditional (unlike the GET + poll below): folding an already-arrived SSE event is an
+    // in-memory reduction with no network cost, so there is nothing to gate on demand.
     effect(() => {
       const events = this.live.mapEvents();
       if (events.length <= this.processedLiveEventCount) {
@@ -92,6 +107,32 @@ export class LayersStore {
       this.processedLiveEventCount = events.length;
       this.layersSignal.update((layers) => applyLayerEvents(layers, newEvents));
     });
+  }
+
+  /**
+   * Registers demand — see `MarksStore.activate`'s identical doc comment for the full rationale.
+   * The first `activate()` since the last full `release()` triggers a fresh `GET` and starts the
+   * safety-net poll; further concurrent consumers just bump the count.
+   */
+  activate(): void {
+    this.activeConsumers++;
+    if (this.activeConsumers > 1) {
+      return;
+    }
+    void this.refresh();
+    this.stopPollFn = this.scheduler.schedule(LAYERS_POLL_INTERVAL_MS, () => this.refresh());
+  }
+
+  /** The matching teardown — call from the consumer's own `DestroyRef.onDestroy`. */
+  release(): void {
+    if (this.activeConsumers === 0) {
+      return; // defensive — a mismatched release should never go negative
+    }
+    this.activeConsumers--;
+    if (this.activeConsumers === 0 && this.stopPollFn !== null) {
+      this.stopPollFn();
+      this.stopPollFn = null;
+    }
   }
 
   async refresh(): Promise<void> {

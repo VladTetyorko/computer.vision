@@ -5,7 +5,10 @@ import {
   ACTIVITY_WINDOW_MS,
   buildWallTiles,
   DENSITY_STOPS,
+  MAX_CONCURRENT_WALL_PLAYERS,
   PULSE_WINDOW_MS,
+  releaseWallVideo,
+  requestWallVideo,
   tileMinPx,
   wallActivityRows,
   type BuildWallTilesInput,
@@ -403,5 +406,48 @@ describe('wallActivityRows', () => {
     const newer = event({ id: 'e-newer', lastSeen: new Date(NOW - 5_000).toISOString() });
     const rows = wallActivityRows([older, newer], tiles, NOW);
     expect(rows.map((r) => r.event.id)).toEqual(['e-newer', 'e-older']);
+  });
+});
+
+describe('requestWallVideo / releaseWallVideo (§4 Wave C1/C2)', () => {
+  it('raises a stream by appending it', () => {
+    expect(requestWallVideo(['s1'], 's2')).toEqual(['s1', 's2']);
+  });
+
+  it('re-raising an already-up stream moves it to the back rather than duplicating it', () => {
+    expect(requestWallVideo(['s1', 's2', 's3'], 's1')).toEqual(['s2', 's3', 's1']);
+  });
+
+  it('stays under the cap with no eviction while there is room', () => {
+    const raised = requestWallVideo(['s1', 's2'], 's3', 3);
+    expect(raised).toEqual(['s1', 's2', 's3']);
+  });
+
+  it('evicts the least-recently-raised stream once the cap is exceeded, never refusing the new one', () => {
+    const raised = requestWallVideo(['s1', 's2', 's3'], 's4', 3);
+    expect(raised).toEqual(['s2', 's3', 's4']);
+  });
+
+  it('a burst of new requests evicts in strict LRU order, oldest first', () => {
+    let raised: readonly string[] = ['s1', 's2', 's3'];
+    raised = requestWallVideo(raised, 's4', 3);
+    raised = requestWallVideo(raised, 's5', 3);
+    expect(raised).toEqual(['s3', 's4', 's5']);
+  });
+
+  it('defaults to MAX_CONCURRENT_WALL_PLAYERS when no explicit cap is passed', () => {
+    const full = Array.from({ length: MAX_CONCURRENT_WALL_PLAYERS }, (_, i) => `s${i}`);
+    const raised = requestWallVideo(full, 'extra');
+    expect(raised).toHaveLength(MAX_CONCURRENT_WALL_PLAYERS);
+    expect(raised).not.toContain('s0');
+    expect(raised.at(-1)).toBe('extra');
+  });
+
+  it('releaseWallVideo drops the stream', () => {
+    expect(releaseWallVideo(['s1', 's2'], 's1')).toEqual(['s2']);
+  });
+
+  it('releaseWallVideo on a stream that was never raised is a no-op', () => {
+    expect(releaseWallVideo(['s1'], 's-never-raised')).toEqual(['s1']);
   });
 });

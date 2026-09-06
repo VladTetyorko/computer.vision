@@ -44,8 +44,8 @@ Angular 21 SPA (driving adapter): the whole product UI — operator cockpit, man
 | fleet | `FleetStore` (devices+streams, 5s poll; `run()` is the toast boundary) |
 | live | `LiveStore` — one SSE connection, topic subscribe/unsubscribe, append-only log w/ per-consumer cursors |
 | telemetry / detections | `TelemetryStore`, `DetectionsStore` (`DETECTIONS_LIMIT=50` retained batches; **`followTracks(streamId, wanted: boolean)`**, docs/plans/active/TRACK-FOLLOW-PLAN.md §3.5, wave W4 — a thin `wanted`-boolean wrapper over `trackTracks`/`untrackTracks`, now driven by `CockpitFacade`'s own `wantsTracksPoll`-gated effect rather than by `CvControlPanel`'s mounted lifetime, so the `GET .../tracks` poll — and with it, the only way to observe a `LOST→HOLDING` recovery — survives a closed Vision drawer; see the `fly/` bullet below for D1). `telemetry-logic.ts#freshness(age)` → `'live'\|'aging'\|'stale'\|'none'` (wave H1, docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1) is now the one source of truth for "is this sample too old to act on", a thin relabel of the pre-existing `telemetryAgeSeverity` tiers (`fresh→live`, `amber→aging`, `red→stale`, `undefined→none`) — callers that need a UI-facing tri-state read this, not `telemetryAgeSeverity` directly. `humanAge(seconds)` → `12s` / `3m 10s` / `4h 2m` / `4d 2h` (always both units of its tier, including a zero remainder) is the one duration formatter for telemetry age across the OSD, the Controller drawer, and the cockpit's not-streaming card. |
-| map-data | `LayersStore`, `MarksStore`, `DrawingsStore` + `layers-logic`/`mark-logic`/`drawings-logic`/`map-event-logic`. **`RouteStore` (new, docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.4, wave W3)** is page-provided, **not** `providedIn: 'root'` — an on-demand two-hop fetch (`listUsages` → `usageTimeline`, never `.../telemetry`), same posture as `FleetMapStore`/`WeatherStore` below, not the always-on/live-folding shape every other row in this line has; `route-logic.ts` (pure: `AssetRoute`/`RouteSpan`/`buildAssetRoute`/`routeUsageLimit`) |
-| map / geofence / weather | `FleetMapStore`, `GeofenceStore`, `WeatherStore` |
+| map-data | `LayersStore`, `MarksStore`, `DrawingsStore`, `TracksStore` — **all four are ref-counted `activate()`/`release()` since ALWAYS-ON-FLOW wave C3 (2026-09-06): the initial `GET` *and* the 30s poll both live under `activate()`, so nothing fetches until a consumer is mounted and nothing polls after the last one leaves. Every direct injector — a routed facade *or* a presentational child under `shared/map/map-controls/**` — must `activate()` in its constructor and `release()` from its own `DestroyRef.onDestroy`.** + `layers-logic`/`mark-logic`/`drawings-logic`/`map-event-logic`. **`RouteStore` (new, docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.4, wave W3)** is page-provided, **not** `providedIn: 'root'` — an on-demand two-hop fetch (`listUsages` → `usageTimeline`, never `.../telemetry`), same posture as `FleetMapStore`/`WeatherStore` below, not the always-on/live-folding shape every other row in this line has; `route-logic.ts` (pure: `AssetRoute`/`RouteSpan`/`buildAssetRoute`/`routeUsageLimit`) |
+| map / geofence / weather | `FleetMapStore`, `GeofenceStore` (**ref-counted `activate()`/`release()`, wave C3 — same contract as the `map-data` row above**), `WeatherStore` |
 | identity | `AuthStore`, `OrgStore`, `SettingsStore` |
 | geo | `GeoStore` (visual-geo correction), `camera-geo/` (fixed-camera pose, pure) |
 | seat | **`SeatStore` (new, docs/plans/active/CREW-CONTROL-PLAN.md §3.6, wave W3)** — page-provided, not `providedIn:'root'`; `seat-logic.ts` (pure: `singleOperatorSeats`, `seatFor`, `renewalIntervalMs`). See the `features/` → `crew/`/`core/seat/` bullets below for the full renew-while-mine cadence. |
@@ -831,3 +831,81 @@ eager growth, within budget.
 **Gotcha worth keeping:** `npm-build` binds to `process-classes`, which runs **before** the `test` phase, so a
 bundle-budget failure means `npm run test:ci` **never runs** in a reactor build. A red `vision-web` therefore
 proves nothing about the web tests — run them directly before concluding anything.
+
+---
+
+## Status — ALWAYS-ON-FLOW wave C: the UI stops being a live pipe (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md §4 waves C1/C2/C3) — 2026-09-06
+
+The owner's third statement, verbatim: *"the mediamtx is capable of getting many streams, but the UI -
+is not."* Before this wave the UI was the thing that decided how much the whole platform ran: `/wall`
+mounted one `<vision-player>` per running stream with no cap, and five `providedIn:'root'` map stores
+started a 30 s poll in their constructors and never stopped it. This wave makes video an explicit
+gesture and makes poll lifetime track actual demand.
+
+### C1 + C2 — `/wall` video is opt-in per tile, capped wall-wide
+
+`wall-logic.ts` gains the pure half: `MAX_CONCURRENT_WALL_PLAYERS` (6) plus `requestWallVideo` /
+`releaseWallVideo`, both plain array transforms with no Angular in sight. `WallFacade` owns the raised
+set (`isVideoUp` / `toggleVideo`, backed by a `Set` computed so a `@for` over every tile stays O(1)),
+and `wall-tile.ts` gains a required `videoUp` input plus a `videoToggled` output; `false` renders a
+state-only placeholder and mounts **no player at all** — `@if`, not `[suspended]`, because a suspended
+player still runs its RAF loop and `ResizeObserver`.
+
+Two decisions worth keeping, both argued in `requestWallVideo`'s own doc comment:
+
+- **Full cap evicts LRU rather than refusing.** A wall exists so an operator can act on whatever just
+  became relevant; refusing a fresh explicit click in favour of a tile that has sat live and unattended
+  the longest would silently block the gesture the wall promises to honour.
+- **`severity === 'critical'` deliberately does NOT auto-raise video.** §1's own plane table says the
+  View plane's governor is genuine viewer demand, full stop — severity is a State-plane fact, and the
+  wall already escalates it without pixels (border colour, health line, reasons, pulse chip). Auto-raising
+  would spend decode cost on a screen nobody may be watching and let an alarm burst evict tiles the
+  operator explicitly chose.
+
+The load-shedding that matters most is not the pixels: `videoUp` also gates `DetectionsStore.track` and
+`followTracks`, and every detections feed a tile opens **is CV demand on the backend**. A tile with no
+player must not keep one warm either. A raised tile whose stream leaves `tiles()` is pruned by an
+effect, mirroring the existing focus-pruning effect — otherwise it would occupy a capped slot forever.
+
+### C3 — five root stores stop polling for the whole session
+
+`MarksStore`, `LayersStore`, `DrawingsStore`, `TracksStore` and `GeofenceStore` each gain ref-counted
+`activate()` / `release()`, modelled on `EventsStore#activate`'s existing shape. **The initial `GET`
+moved under `activate()` too, not just the poll** — a constructor `void refresh()` still fires once per
+first-ever construction whether or not anything is mounted to show it, and would hand a consumer that
+activates much later an arbitrarily stale list instead of a fresh one. Folding live `map`-topic deltas
+stays unconditional: it is an in-memory fold with no network cost, and keeping the cursor advancing
+means a reactivating consumer does not replay deltas its own fresh `GET` already supersedes.
+
+Every direct injector now activates in its constructor and releases from `DestroyRef.onDestroy` —
+the four routed facades (`command`, `live`, `fly/cockpit`, `asset-detail`) *and* the non-routed
+presentational children under `shared/map/map-controls/**` (`MarksPanel`, `MarkPalette`,
+`DrawingToolbar`, `LayerManager`, `VerifyControls`) plus `command/zones-panel.ts`.
+
+### Left undone, named honestly
+
+- **C2's `/fly` half is not built.** `cockpit.html` still mounts one player per secondary device
+  thumbnail, uncapped. Unlike the wall this is bounded by one aircraft's own camera count, and the
+  thumbnails exist precisely so an operator can *see* which camera to switch to — making them static
+  would remove their reason to exist. That is a UX decision, not a mechanical cap, and it was left for
+  the owner rather than taken unilaterally.
+- **No bundle-size measurement.** The production-build delta was never captured (the baseline attempt
+  needed a tree-wide `git stash`, correctly refused while other waves were uncommitted). The 440 kB
+  budget gate is unchanged and still enforced by `ng build`.
+- **`MAX_CONCURRENT_WALL_PLAYERS = 6` is reasoned, not measured.** No multi-stream decode load test
+  backs the number; it is sized to cover the `Comfortable` density stop. Say so rather than implying
+  it is tuned.
+
+### Gotcha this wave introduces
+
+**A store that reads another store's data does not activate it.** `MarksStore` and `DrawingsStore`
+both inject `LayersStore` (for `contributable()` / `defaultLayerId()`, i.e. which layer a *new* mark or
+drawing targets) but deliberately do not `activate()` it — that stays the consumer's job. Every current
+call site activates both, so nothing is broken; a future consumer that activates only `MarksStore` would
+get marks that render fine but a contribution target resolved against an empty layer list. Activate both.
+
+### Tests / build
+
+`npm run test:ci` — **192/192 files, 3825/3825 tests green** (up from 190/3793: new `layers-store.spec.ts`
+and `tracks-store.spec.ts`, plus ref-count and video-toggle cases added to the existing store and wall
+specs). `npx tsc --noEmit` clean on both `tsconfig.app.json` and `tsconfig.spec.json`.

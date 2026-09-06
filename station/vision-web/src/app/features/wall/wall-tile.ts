@@ -12,6 +12,7 @@ import {
 } from '@angular/core';
 import { Player, type BoxesMode } from '../../shared/player/player';
 import { Icon } from '../../shared/ui/icon';
+import { IconButton } from '../../shared/ui/icon-button';
 import { FollowHud } from '../../shared/player/follow-hud/follow-hud';
 import { DetectionsStore } from '../../core/detections/detections-store';
 import type { FollowStatus } from '../../core/api/models';
@@ -41,6 +42,22 @@ const PREROLL_MARGIN = '250px';
  * passing `assetId` (when the tile has one) lets it use the free asset-scoped live SSE transport
  * instead of a poll (D4's other half).
  *
+ * **Video is opt-in, not just off-screen-suspended** (ALWAYS-ON-FLOW-PLAN.md §4 Wave C1/C2): before
+ * this wave every tile mounted a `<vision-player>` unconditionally and only `IntersectionObserver`
+ * decided whether it decoded — which does nothing for a grid that fits on one screen, i.e. every wall
+ * an operator actually watches. {@link videoUp} (owned by `WallFacade.isVideoUp`, capped wall-wide —
+ * see `wall-logic.ts#requestWallVideo`) now gates whether a player exists **at all**; `false` renders
+ * `wall-tile.html`'s state-only placeholder instead, identity/severity/battery/telemetry-age chrome
+ * unchanged either way. `@if`, not a `[suspended]` toggle: `player.ts` already tears down WebRTC/HLS
+ * decode fully on `[suspended]`, but still runs its own RAF loop and `ResizeObserver` while merely
+ * suspended — a tile with video-off has no player instance at all, not a suspended one. `(videoToggled)`
+ * is the explicit per-tile gesture that flips it — never anything driven by `tile().severity` (see
+ * `requestWallVideo`'s own doc comment for why `critical` deliberately does not auto-raise this).
+ * `DetectionsStore.track`/`followTracks` below now also require {@link videoUp}: boxes drawn over a
+ * picture nobody asked to see would be pure waste, and — the load-shedding half that matters more
+ * than the pixels — every detections feed this tile can open is CV demand on the backend
+ * (`StreamController:444`), so an unmounted player must not keep one warm either.
+ *
  * **Follow, read-only** (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.3, wave W5; WALL-FLOW-PLAN §5 —
  * "the Wall is a watch surface", no per-tile control surface): a lock elsewhere (Fly, `/live`) is
  * peripheral awareness here, same as everything else this tile shows at rest. {@link lockedTrackId}
@@ -54,7 +71,7 @@ const PREROLL_MARGIN = '250px';
  */
 @Component({
   selector: 'vision-wall-tile',
-  imports: [Player, Icon, FollowHud],
+  imports: [Player, Icon, IconButton, FollowHud],
   changeDetection: ChangeDetectionStrategy.OnPush,
   providers: [DetectionsStore],
   templateUrl: './wall-tile.html',
@@ -66,6 +83,13 @@ export class WallTile {
   /** F2 crop-follow (per-viewer, facade-owned like {@link boxesMode}); echoed, never stored here. */
   readonly cropFollowEnabled = input<boolean>(false);
   readonly cropFollowEnabledChange = output<boolean>();
+
+  /** Whether `WallFacade` currently counts this tile among its capped, raised set — see this class's
+   *  own "Video is opt-in" doc section. Facade-owned, like {@link boxesMode}: this component never
+   *  decides the cap or the eviction rule itself, it only renders whichever side of the toggle it's on. */
+  readonly videoUp = input.required<boolean>();
+  /** The tile's own "Show/Hide video" gesture — `WallFacade.toggleVideo(streamId)` on the other end. */
+  readonly videoToggled = output<string>();
 
   readonly focused = output<string>();
 
@@ -102,6 +126,12 @@ export class WallTile {
     this.focused.emit(this.tile().streamId);
   }
 
+  /** The video-toggle button is a DOM sibling of `.tile` (see `wall-tile.html`'s own comment,
+   *  mirroring `<vision-follow-hud>`'s identical reason) so it never fires `onActivate` above. */
+  protected onToggleVideo(): void {
+    this.videoToggled.emit(this.tile().streamId);
+  }
+
   constructor() {
     const host = inject(ElementRef<HTMLElement>).nativeElement;
     const observer = new IntersectionObserver(
@@ -111,12 +141,14 @@ export class WallTile {
     observer.observe(host);
     inject(DestroyRef).onDestroy(() => observer.disconnect());
 
-    // On-screen only (docs/main/CYCLES-PLAN.md §11 item 4/6) — off-screen tiles already stop
-    // decoding video (above), so they stop polling/subscribing for detections too. `assetId` is
-    // passed whenever the tile has one, so an on-wall asset with `LiveStore` already open gets the
-    // live SSE transport for free (D4).
+    // On-screen AND video-up only (§4 Wave C1/C2 — this class's own "Video is opt-in" doc section):
+    // off-screen tiles already stopped decoding video before this wave; now a tile that is on-screen
+    // but has no player mounted at all (the new default) must stop just as completely, since there is
+    // no picture for a detection box to draw over and no reason to keep the backend's CV demand warm
+    // for it. `assetId` is passed whenever the tile has one, so an on-wall asset with `LiveStore`
+    // already open gets the live SSE transport for free (D4).
     effect(() => {
-      if (this.visible()) {
+      if (this.visible() && this.videoUp()) {
         this.detections.track(this.tile().streamId, this.tile().assetId);
       } else {
         this.detections.reset();
@@ -125,11 +157,10 @@ export class WallTile {
 
     // Follow's own tracks poll (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.5, wave W5) — a fully
     // independent lifecycle from `track()`/`reset()` above (`DetectionsStore`'s own doc comment), so
-    // it needs its own on/off-screen gate rather than inheriting the effect above's. Off-screen
-    // always wins (`this.visible() && …`), matching the box-overlay feed's identical off-screen
-    // teardown.
+    // it needs its own on/off-screen-and-video-up gate rather than inheriting the effect above's.
+    // Off-screen or video-down always wins, matching the box-overlay feed's identical teardown.
     effect(() => {
-      this.detections.followTracks(this.tile().streamId, this.visible() && this.wantsTracksPoll());
+      this.detections.followTracks(this.tile().streamId, this.visible() && this.videoUp() && this.wantsTracksPoll());
     });
   }
 }

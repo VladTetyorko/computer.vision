@@ -277,6 +277,63 @@ export function buildWallTiles(input: BuildWallTilesInput): readonly WallTileMod
   });
 }
 
+// --- Video-on-request (§4 Wave C1/C2, ALWAYS-ON-FLOW-PLAN.md) ------------------------------------
+
+/**
+ * How many wall tiles may have a `<vision-player>` mounted at once, wall-wide. A tile's own picture
+ * is real, continuous decode/render cost (WebRTC/HLS) — the exact "mediamtx can take many streams,
+ * the UI cannot" asymmetry ALWAYS-ON-FLOW-PLAN.md opens with (§1). Before this wave `wall.ts` mounted
+ * one player per running stream, uncapped (C2); the existing `IntersectionObserver` off-screen
+ * suspension (`wall-tile.ts`'s `PREROLL_MARGIN`) does nothing for a grid that fits on one screen —
+ * exactly the case that matters, and exactly what this cap now bounds instead.
+ *
+ * `6` is a **reasoned, not measured** default — no multi-stream decode load test backs this number
+ * (report this honestly rather than implying it is tuned). It is chosen to comfortably cover the
+ * `Comfortable` density stop (`DENSITY_STOPS[0]`, 480px tiles — a typical operator monitor fits
+ * roughly 4-6 of those at once) so a wall viewed at its least-dense setting can go fully live from a
+ * single "watch everything" gesture, while `Dense` (240px, potentially dozens of tiles) cannot and is
+ * not meant to: dense mode is for triage-by-state across many assets, not simultaneous video.
+ */
+export const MAX_CONCURRENT_WALL_PLAYERS = 6;
+
+/**
+ * Raises `streamId`'s video. **Evicts the least-recently-raised tile rather than refusing** once the
+ * cap ({@link MAX_CONCURRENT_WALL_PLAYERS}) is already full — the deliberate choice, not an
+ * oversight: a wall exists so an operator can act on whatever just became relevant, and refusing a
+ * fresh, explicit click in favor of a tile that has been sitting live and unattended for longest
+ * would silently block the very gesture the wall promises to honor (CLAUDE.md's own "never silently
+ * do nothing"). Eviction always frees exactly the tile that has waited longest since it was last
+ * (re)raised — the standard LRU rule — so a burst of new requests never evicts something an operator
+ * only just switched to. Re-raising an already-up tile moves it to the back (freshest) rather than
+ * being a no-op, so re-clicking a live tile can never be the thing that evicts it a moment later.
+ *
+ * **Deliberately never auto-called for a `severity === 'critical'` tile.** ALWAYS-ON-FLOW-PLAN.md §6
+ * is explicit: *"It does not remove viewer demand. Demand is correct — it is applied to the wrong
+ * planes."* Video is the View plane; §1's own table says the View plane's governor is "genuine
+ * viewer demand", full stop — a severity condition is a STATE-plane fact, and the wall already
+ * surfaces it without pixels (the severity border colour, the health line, the reasons list, the
+ * pulse chip all update with no player mounted at all). Auto-raising video on `critical` would (a)
+ * spend real decode/network cost on a screen nobody may be looking at (the literal use case a video
+ * *wall* implies), (b) let a burst of simultaneous alarms silently evict tiles an operator explicitly
+ * chose to watch, competing for the same capped slots against their own deliberate clicks, and (c)
+ * reintroduce exactly the "state driving the view plane automatically" coupling this whole wave
+ * exists to remove. The severity dot and pulse chip are the escalation signal; raising the picture
+ * stays the operator's own next click.
+ */
+export function requestWallVideo(
+  raised: readonly string[],
+  streamId: string,
+  maxConcurrent: number = MAX_CONCURRENT_WALL_PLAYERS,
+): readonly string[] {
+  const next = [...raised.filter((id) => id !== streamId), streamId];
+  return next.length > maxConcurrent ? next.slice(next.length - maxConcurrent) : next;
+}
+
+/** Lowers `streamId`'s video — a no-op (same array-shape-wise; a fresh array either way) if it wasn't raised. */
+export function releaseWallVideo(raised: readonly string[], streamId: string): readonly string[] {
+  return raised.filter((id) => id !== streamId);
+}
+
 /**
  * The activity drawer's rows (§3.2 A4, W4) — newest-first, scoped to *this wall's* tiles, inside
  * {@link ACTIVITY_WINDOW_MS}. Frozen matching rule: **by `assetId` when the event and a tile both

@@ -9,7 +9,15 @@ import { PollScheduler } from '../../core/poll-scheduler';
 import { activeGeofenceBreaches } from '../../core/geofence/geofence-logic';
 import { activePipelineErrorMessagesByStreamId } from '../../core/system-events/system-events-logic';
 import { cycleBoxesMode, type BoxesMode } from '../../shared/player/detection-overlay-logic';
-import { buildWallTiles, tileMinPx, wallActivityRows, type WallActivityRow, type WallTileModel } from './wall-logic';
+import {
+  buildWallTiles,
+  releaseWallVideo,
+  requestWallVideo,
+  tileMinPx,
+  wallActivityRows,
+  type WallActivityRow,
+  type WallTileModel,
+} from './wall-logic';
 
 /** Matches `command-facade.ts#SUMMARY_POLL_INTERVAL_MS` verbatim — this is the same fleet-summary
  *  read, on the same cadence, just consumed by the wall instead of Command. */
@@ -31,6 +39,13 @@ const SUMMARY_POLL_INTERVAL_MS = 5_000;
  * pair `WallTile` used to stand up itself (D5). `DetectionsStore` still lives in `wall-tile.ts` (W2
  * scope) — per-frame detection *boxes* cannot come from a summary; only the *event* feed that drives
  * health/attention/pulses centralizes here.
+ *
+ * **Video is opt-in per tile, capped wall-wide** (ALWAYS-ON-FLOW-PLAN.md §4 Wave C1/C2) —
+ * `videoUpStreamIds`/{@link isVideoUp}/{@link toggleVideo} own which tiles currently have a
+ * `<vision-player>` mounted at all; `wall-tile.ts` renders a state-only placeholder otherwise. See
+ * `wall-logic.ts#requestWallVideo`'s own doc comment for the cap number and the evict-vs-refuse and
+ * no-auto-raise-on-critical decisions — this facade only ever calls it from an explicit tile click,
+ * never from a `tiles()` severity read.
  *
  * **Degrades honestly, matching `command-facade.ts#refreshSummary` byte-for-byte**: a failed poll
  * (backend down, a forbidden org) simply keeps the last-known summary; when there has never been one
@@ -142,6 +157,24 @@ export class WallFacade {
   );
   readonly activityCount = computed(() => this.activity().length);
 
+  // --- Video-on-request (§4 Wave C1/C2 — see `wall-logic.ts#requestWallVideo`'s own doc comment for
+  // the cap number and the evict-vs-refuse and no-auto-raise-on-critical decisions) ----------------
+
+  private readonly videoUpStreamIdsSignal = signal<readonly string[]>([]);
+  /** O(1) membership for `wall-tile.ts`'s per-tile `[videoUp]` binding — a `@for` over every tile
+   *  checking this on every tick makes an array `.includes()` the wrong shape once the wall is busy. */
+  private readonly videoUpSet = computed(() => new Set(this.videoUpStreamIdsSignal()));
+  isVideoUp(streamId: string): boolean {
+    return this.videoUpSet().has(streamId);
+  }
+
+  /** The tile's own "Show/Hide video" toggle (`wall-tile.ts`'s `(videoToggled)`). */
+  toggleVideo(streamId: string): void {
+    this.videoUpStreamIdsSignal.update((raised) =>
+      this.isVideoUp(streamId) ? releaseWallVideo(raised, streamId) : requestWallVideo(raised, streamId),
+    );
+  }
+
   constructor() {
     // "O(visible) discipline" (docs/plans/done/MVP2-PLAN.md §E, E-b bullet 5) — see `EventsStore`'s own
     // doc comment: the header bell has held a refcount since app boot, so this call is honest about
@@ -159,6 +192,18 @@ export class WallFacade {
     effect(() => {
       if (this.focusedStreamIdSignal() !== null && this.focusedTile() === null) {
         this.clearFocus();
+      }
+    });
+
+    // Mirrors the focus-pruning effect above for the same reason: a raised tile whose stream has
+    // stopped (or dropped out of the fleet-summary join) would otherwise sit in `videoUpStreamIds`
+    // forever, permanently occupying one of `MAX_CONCURRENT_WALL_PLAYERS`' slots for a tile that no
+    // longer renders at all.
+    effect(() => {
+      const liveStreamIds = new Set(this.tiles().map((tile) => tile.streamId));
+      const raised = this.videoUpStreamIdsSignal();
+      if (raised.some((streamId) => !liveStreamIds.has(streamId))) {
+        this.videoUpStreamIdsSignal.set(raised.filter((streamId) => liveStreamIds.has(streamId)));
       }
     });
   }

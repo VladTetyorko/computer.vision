@@ -40,6 +40,19 @@
   border-radius: 0;
 }
 
+/* The video-off default (§4 Wave C1/C2) — same box (aspect ratio, dark treatment) `vision-player`'s
+   own `.frame` would occupy, so toggling video never reflows the tile. `.surface-dark` (applied in
+   the template) is what makes `--black`/`--text-faint` resolve dark here regardless of the app's own
+   light/dark theme, mirroring `.frame`'s identical reasoning (`player.ts`'s doc comment). */
+.placeholder {
+  aspect-ratio: 16 / 9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--black);
+  color: var(--text-faint);
+}
+
 /* Attention (A2) — a border tint, never a second dot vocabulary; the reason list rides the
    button's own `title` tooltip. */
 .tile.severity-warning {
@@ -150,4 +163,18 @@
   bottom: var(--space-8);
   left: var(--space-8);
   max-width: calc(100% - var(--space-16));
+}
+
+/* The video toggle (§4 Wave C1/C2) — the last free corner (severity-dot top-left, pulse-chip
+   top-right, follow-hud bottom-left), same absolute-badge idiom as both. Always rendered (not
+   hover-only, unlike `.detail`) per the "unmistakable affordance" requirement, and sized above
+   `vision-icon-button`'s own 2.25rem default so it stays a comfortable touch target at `Dense`
+   density's smallest tile width (frontend-style's large-touch-target rule) without needing its own
+   bespoke button markup. */
+:host ::ng-deep .video-toggle .icon-btn {
+  position: absolute;
+  bottom: var(--space-8);
+  right: var(--space-8);
+  width: 2.5rem;
+  height: 2.5rem;
 }

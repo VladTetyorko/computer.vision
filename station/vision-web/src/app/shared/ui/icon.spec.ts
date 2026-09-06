@@ -22,6 +22,8 @@ const FROZEN_NAMES: readonly IconName[] = [
   'shield',
   // docs/plans/done/OPS-UX-PLAN.md §3 B2 — the setup checklist's own "done" tick.
   'check',
+  // docs/plans/active/ALWAYS-ON-FLOW-PLAN.md §4 Wave C1/C2 — the wall tile's video-on-request toggle.
+  'eye-off',
 ];
 
 describe('ICONS registry', () => {

@@ -415,6 +415,20 @@ export class CommandFacade {
     const stopPoll = inject(PollScheduler).schedule(SUMMARY_POLL_INTERVAL_MS, () => this.refreshSummary());
     inject(DestroyRef).onDestroy(stopPoll);
 
+    // ALWAYS-ON-FLOW-PLAN.md §4 Wave C3: `/command` renders `<vision-tactical-map>`, so this facade
+    // is a direct consumer of all four map-data poll stores for its own lifetime — see each store's
+    // own "polling is demand-gated" doc section for why this is now required, not optional.
+    this.geofence.activate();
+    this.marks.activate();
+    this.layers.activate();
+    this.drawings.activate();
+    inject(DestroyRef).onDestroy(() => {
+      this.geofence.release();
+      this.marks.release();
+      this.layers.release();
+      this.drawings.release();
+    });
+
     effect(() => writePersistedFlag(RAIL_OPEN_KEY, this.railOpenSignal()));
     effect(() => writePersistedFlag(PANEL_OPEN_KEY, this.panelOpenPreferenceSignal()));
     effect(() => writePersistedFlag(HIDE_SIMULATED_KEY, this.hideSimulated()));

@@ -49,6 +49,9 @@ function stubMarksStore() {
     cancelDraft: vi.fn(),
     annotate: vi.fn().mockResolvedValue(true),
     confirmDraft: vi.fn().mockResolvedValue(true),
+    // ALWAYS-ON-FLOW-PLAN.md §4 Wave C3 — `MarkPalette`'s constructor now calls these directly.
+    activate: vi.fn(),
+    release: vi.fn(),
   };
 }
 
@@ -58,11 +61,13 @@ function stubLayersStore() {
   return {
     loaded: signal(true).asReadonly(),
     contributable: signal([]).asReadonly(),
+    activate: vi.fn(),
+    release: vi.fn(),
   };
 }
 
 function stubDrawingsStore() {
-  return { stopDrawing: vi.fn() };
+  return { stopDrawing: vi.fn(), activate: vi.fn(), release: vi.fn() };
 }
 
 function create() {
