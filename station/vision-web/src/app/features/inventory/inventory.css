@@ -5,7 +5,8 @@
    independent page-bar + filters, mounted a level below this one. -------------------------------- */
 
 .inv-search {
-    width: 16rem;
+    width: 18rem;
+    max-width: 100%;
 }
 
 .inv-filter {
@@ -21,15 +22,154 @@
     width: auto;
 }
 
-/* ---- "Fleet at a glance" KPI strip (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3) — the exact grid
-   `features/reports/reports.css`'s own `.kpi-tiles` used (that page is deleted this wave; this is
-   its one surviving section, not a second copy of it). -------------------------------------------- */
+/* ---- "More filters" disclosure (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.1, wave W4) — the
+   three filters an operator sets once a week, folded away so the two they set constantly stay on one
+   line. A `<details>` popover, the same idiom `shared/ui/kebab-menu.ts` uses. ------------------- */
 
-.kpi-tiles {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+.more-filters {
+    position: relative;
+}
+
+/* The summary *is* the button — `.btn.secondary.small` is a global primitive, so all that is left is
+   removing the native disclosure triangle (two vendors' worth) and making it lay out its badge. */
+.more-filters > summary {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-8);
+    list-style: none;
+    cursor: pointer;
+}
+
+.more-filters > summary::-webkit-details-marker {
+    display: none;
+}
+
+.more-filters > summary::marker {
+    content: '';
+}
+
+/* "Something you can't see right now is hiding rows" — the only reason this badge exists, so it is
+   absent, not zero, when nothing behind the disclosure is active (`InventoryFacade#moreFilterCount`). */
+.filter-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 1.15rem;
+    height: 1.15rem;
+    padding: 0 var(--space-4);
+    border-radius: var(--radius-pill);
+    background: var(--color-info);
+    color: var(--color-on-info);
+    font-size: 0.68rem;
+    font-weight: 600;
+}
+
+.more-filters-panel {
+    position: absolute;
+    z-index: 40;
+    top: calc(100% + var(--space-4));
+    left: 0;
+    width: 15rem;
+    max-width: calc(100vw - var(--space-32));
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+    padding: var(--space-16);
+    background: var(--panel-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow);
+}
+
+.more-filters-panel .field {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+.more-filters-panel .field-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+/* ---- The view row: five stats that are also the filter (docs/plans/active/INVENTORY-REWORK-PLAN.md
+   §5.1, decision D7). Replaces the old read-only `.kpi-tiles` strip. ---------------------------- */
+
+.view-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
     gap: var(--space-16);
     margin-bottom: var(--space-16);
+}
+
+.view-tiles {
+    flex: 1 1 30rem;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(8.5rem, 1fr));
+    gap: var(--space-8);
+}
+
+/* A tile is a button, so it has to shed the UA's own button skin — the tile's whole visual is the
+   `vision-stat` inside it, which already carries the panel surface, border and radius. */
+.view-tile {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    text-align: left;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+}
+
+.view-tile:focus-visible {
+    outline: 2px solid var(--color-info);
+    outline-offset: 2px;
+}
+
+/* `::ng-deep` reaches into the shared `vision-stat` primitive rather than forking it into a
+   selectable variant (the same tactic `features/command/tactical-map.css` and
+   `features/fly/flight-plan-dialog.css` already use). Selection is the codebase's own convention —
+   a 2px inset rule on the leading edge plus a soft tint, identical to the selected table row in
+   `vehicles-table.css` — so a selected tile and a selected row read as the same idea. */
+.view-tile:hover ::ng-deep .stat-tile {
+    border-color: var(--border-strong);
+}
+
+.view-tile.selected ::ng-deep .stat-tile {
+    background: var(--color-info-soft);
+    border-color: var(--color-info);
+    box-shadow: inset 2px 0 0 0 var(--color-info);
+}
+
+.view-toggles {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-16);
+}
+
+/* Phone: the toggles get their own full-width line under the tiles rather than being squeezed beside
+   them, and each stays a comfortable tap target. */
+@media (max-width: 48rem) {
+    .view-toggles {
+        flex: 1 1 100%;
+        gap: var(--space-24);
+    }
+
+    .view-toggles .toggle {
+        min-height: 2.75rem;
+    }
 }
 
 /* ---- Tab bar (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1 rule 3) — `.segmented`/`.btn` are global

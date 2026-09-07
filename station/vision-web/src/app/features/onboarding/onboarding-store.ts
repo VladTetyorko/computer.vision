@@ -79,12 +79,9 @@ import {
   buildVerifyRequest,
   canAdvanceFromIdentify,
   composePushAddress,
-  creatorOwnershipGroup,
-  defaultPilotSelection,
   isEquipmentPath,
   isTelemetryOnlyProtocol,
   nextStep,
-  pilotsInGroup,
   prefillFromDiscoveryCandidate,
   prevStep,
   type IdentifyDraft,
@@ -92,6 +89,9 @@ import {
   type StepContext,
   type WizardStep,
 } from './onboarding-logic';
+// The Hand-over step's own roster rule lives in `core/` since it grew a second consumer —
+// the Inventory page's Issue dialog (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.5, wave W4).
+import { creatorOwnershipGroup, defaultPilotSelection, pilotsInGroup } from '../../core/org/pilot-logic';
 
 /** Scan durations worth offering — mirrors the pre-wizard Devices page's own choice exactly. */
 const SCAN_TIMEOUTS = [2_000, 4_000, 8_000] as const;

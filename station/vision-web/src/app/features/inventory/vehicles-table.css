@@ -89,17 +89,38 @@ tbody tr.row-selectable.archived {
     text-align: right;
 }
 
-/* ---- Detail panel (same anatomy as `features/assets/assets.css`'s own copy) ------------------ */
+/* ---- Detail drawer — the triage sheet (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.3) ------ */
 
-.detail-chips {
+.drawer-title {
+    margin-bottom: var(--space-8);
+}
+
+.drawer-name {
+    margin: 0;
+    font-size: 1.05rem;
+    line-height: 1.3;
+}
+
+/* Category and the "Simulated" origin ride together as one muted line rather than becoming a second
+   chip beside the state one — frontend-style §5 allows exactly one chip here, and the state is the
+   one that matters. */
+.drawer-origin {
+    margin: var(--space-2) 0 0;
+    font-size: 0.8rem;
+}
+
+.drawer-chips {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: var(--space-8);
     margin-bottom: var(--space-16);
+    font-size: 0.85rem;
 }
 
-.detail-fields {
+/* One fact grid, not three — a fixed muted label column so every value starts on the same x, which
+   is what makes eleven facts scannable instead of eleven lines to read. */
+.facts {
     display: grid;
     grid-template-columns: 6rem 1fr;
     column-gap: var(--space-8);
@@ -107,11 +128,11 @@ tbody tr.row-selectable.archived {
     margin: 0 0 var(--space-16);
 }
 
-.detail-field {
+.fact {
     display: contents;
 }
 
-.detail-field dt {
+.fact dt {
     padding-top: var(--space-2);
     font-size: 0.72rem;
     font-weight: 600;
@@ -120,18 +141,25 @@ tbody tr.row-selectable.archived {
     color: var(--text-muted);
 }
 
-.detail-field dd {
+.fact dd {
     margin: 0;
     min-width: 0;
     font-size: 0.85rem;
     color: var(--text);
 }
 
-.detail-section {
+/* Custody / identity / flight are three thoughts in one grid — a little air between them, no rule:
+   a hairline per group would out-shout the state chip above. */
+.fact.group-start dt,
+.fact.group-start dd {
+    margin-top: var(--space-8);
+}
+
+.drawer-section {
     margin-bottom: var(--space-16);
 }
 
-.detail-heading {
+.drawer-heading {
     margin: 0 0 var(--space-8);
     font-size: 0.78rem;
     font-weight: 600;
@@ -140,57 +168,69 @@ tbody tr.row-selectable.archived {
     color: var(--text-muted);
 }
 
-.detail-empty {
+.drawer-line {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-8);
+    min-width: 0;
+    margin: 0 0 var(--space-4);
     font-size: 0.85rem;
 }
 
-.detail-device-list {
+.drawer-line .truncate {
+    min-width: 0;
+}
+
+.drawer-section .btn {
+    margin-top: var(--space-8);
+}
+
+/* The blocker list is ordered by severity already (`fleetRowBlockers`); the first is the one to fix
+   first, so it carries the weight and the rest stay quiet. No bullets — this is a short stack of
+   facts, not prose. */
+.blockers {
     list-style: none;
-    margin: 0 0 var(--space-8);
+    margin: 0;
     padding: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--space-8);
-}
-
-.detail-device-row {
-    display: flex;
-    align-items: center;
-    gap: var(--space-8);
-    min-width: 0;
+    gap: var(--space-4);
     font-size: 0.85rem;
 }
 
-.detail-device-row .truncate {
+.blocker-first {
+    font-weight: 600;
+}
+
+.record-kind {
+    font-weight: 600;
+}
+
+.pilots {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    font-size: 0.85rem;
+}
+
+.pilots li {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-8);
     min-width: 0;
 }
 
-/* Maintenance row spends its middle slot on the summary, not a fixed-width column — a record's own
-   free-text summary is the whole point of the row, so it gets `flex: 1` rather than truncating like
-   the plain two-column device row above. */
-.maintenance-row {
-    justify-content: space-between;
+.pilots .truncate {
+    min-width: 0;
 }
 
-.maintenance-row .truncate {
-    flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.new-record-form {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-8);
-}
-
-.new-record-form input[type='text'] {
-    flex: 1;
-    min-width: 8rem;
-}
-
-.detail-actions {
+/* Exactly one primary button lives here (`primaryVehicleVerb`); the rest are ghosts. Stacked, so a
+   narrow docked pane never puts half a label on a second line. */
+.drawer-actions {
     display: flex;
     flex-direction: column;
     gap: var(--space-8);
@@ -200,7 +240,7 @@ tbody tr.row-selectable.archived {
 
 /* A disabled verb explains itself right under its own button (poka-yoke rule 1) — the pane is a
    single column, so the reason sits between the button and the next action rather than beside it. */
-.detail-actions .disabled-reason {
+.drawer-actions .disabled-reason {
     margin-top: calc(-1 * var(--space-4));
 }
 
@@ -256,4 +296,17 @@ tbody tr.row-selectable.archived {
 .create-actions {
     display: flex;
     gap: var(--space-8);
+}
+
+/* The Issue dialog's "Show everyone" disclosure — a checkbox rather than a `<details>` because the
+   list it reveals is a third `<optgroup>` inside the same native `<select>`, which stays the right
+   control on a phone (the OS picker, full-height, one tap per row). */
+.toggle {
+    gap: var(--space-8);
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+
+.toggle input {
+    width: auto;
 }

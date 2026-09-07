@@ -18,6 +18,15 @@
             Add the simulated source
           </button>
         </vision-empty>
+      } @else if (facade.view(); as view) {
+        <!-- An empty *view* is not an empty inventory — name the way back rather than showing the
+             "no vehicles" state, which would imply the fleet itself is gone. -->
+        <vision-empty
+          title="Nothing in this view"
+          message="Everything on this tab sits outside the view selected above."
+        >
+          <button type="button" class="btn secondary" (click)="facade.selectView(view)">Show all</button>
+        </vision-empty>
       } @else {
         <vision-empty
           [title]="connected() ? 'No vehicles' : 'No equipment'"
@@ -208,12 +217,24 @@
     }
   </section>
 
-  <!-- ---- Detail panel — Identity + Custody fact groups, then a Maintenance drawer
-       (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3's "Detail pane gains Identity and Custody fact
-       groups and a Maintenance drawer"). -->
+  <!-- ---- Detail drawer — a triage sheet, read top to bottom (docs/plans/active/INVENTORY-REWORK-PLAN.md
+       §5.3, wave W4): what is it → what state → the facts → why not ready → maintenance → pilots →
+       act. Every absent value is an em dash; nothing here is fabricated when a read fails. -->
   @if (facade.selectedRow(); as row) {
     <div twoPaneDetail>
-      <div class="detail-chips">
+      <div class="drawer-title">
+        <h2 class="drawer-name">{{ row.asset.displayName }}</h2>
+        <p class="drawer-origin muted">
+          {{ row.asset.categoryName }}
+          @if (row.simulated) {
+            · Simulated
+          }
+        </p>
+      </div>
+
+      <!-- One state chip, plus the readiness verdict as a dot + word — never a second chip
+           (frontend-style §5: one chip per row). -->
+      <div class="drawer-chips">
         <span
           class="chip"
           [class.faded]="row.stateChip.tone === 'muted'"
@@ -225,108 +246,194 @@
           }
           {{ row.stateChip.label }}
         </span>
+        @if (connected()) {
+          @if (row.readinessVerdict; as verdict) {
+            <span class="row-state">
+              <span class="dot" [class.ok]="verdictTone(verdict) === 'ok'" [class.danger]="verdictTone(verdict) === 'danger'"></span>
+              <span>{{ verdictLabel(verdict) }}</span>
+            </span>
+          } @else {
+            <span class="muted">Readiness not evaluated</span>
+          }
+        }
       </div>
 
-      <h3 class="detail-heading">Identity</h3>
-      <dl class="detail-fields">
-        <div class="detail-field">
-          <dt>Serial</dt>
-          <dd>{{ row.asset.identity?.serialNumber ?? '—' }}</dd>
-        </div>
-        <div class="detail-field">
-          <dt>Make</dt>
-          <dd>{{ row.asset.identity?.make ?? '—' }}</dd>
-        </div>
-        <div class="detail-field">
-          <dt>Model</dt>
-          <dd>{{ row.asset.identity?.model ?? '—' }}</dd>
-        </div>
-        <div class="detail-field">
-          <dt>Registration</dt>
-          <dd>{{ row.registration ?? '—' }}</dd>
-        </div>
-      </dl>
-
-      <h3 class="detail-heading">Custody</h3>
-      <dl class="detail-fields">
-        <div class="detail-field">
+      <dl class="facts">
+        <div class="fact">
           <dt>Custodian</dt>
           <dd class="truncate" [title]="row.custodianTitle ?? row.custodianName ?? ''">{{ row.custodianName ?? '—' }}</dd>
         </div>
-        <div class="detail-field">
+        <div class="fact">
           <dt>Location</dt>
           <dd>{{ row.location ?? '—' }}</dd>
         </div>
-        <div class="detail-field">
+        <div class="fact">
           <dt>Since</dt>
-          <dd>{{ row.asset.custody?.since ?? '—' }}</dd>
+          <dd>{{ row.sinceLabel }}</dd>
         </div>
-        <div class="detail-field">
-          <dt>Category</dt>
-          <dd>{{ row.asset.categoryName }}</dd>
+
+        <div class="fact group-start">
+          <dt>Serial</dt>
+          <dd class="mono">{{ row.asset.identity?.serialNumber ?? '—' }}</dd>
         </div>
+        <div class="fact">
+          <dt>Make</dt>
+          <dd>{{ row.asset.identity?.make ?? '—' }}</dd>
+        </div>
+        <div class="fact">
+          <dt>Model</dt>
+          <dd>{{ row.asset.identity?.model ?? '—' }}</dd>
+        </div>
+        <div class="fact">
+          <dt>Registration</dt>
+          <dd>{{ row.registration ?? '—' }}</dd>
+        </div>
+
+        <!-- Firmware/Hours/Last flown/Links describe *flying*, so they are hidden on Equipment for
+             the same reason their columns are — four rows of em dashes for a whole tab is noise,
+             not honesty. -->
+        @if (connected()) {
+          <div class="fact group-start">
+            <dt>Firmware</dt>
+            <dd>{{ row.firmware }}</dd>
+          </div>
+          <div class="fact">
+            <dt>Hours</dt>
+            <dd class="mono">{{ row.hours }}</dd>
+          </div>
+          <div class="fact">
+            <dt>Last flown</dt>
+            <dd>{{ row.lastFlownLabel }}</dd>
+          </div>
+          <div class="fact">
+            <dt>Links</dt>
+            <dd class="mono">{{ row.links }}</dd>
+          </div>
+        }
       </dl>
 
-      <div class="detail-section">
-        <h3 class="detail-heading">Maintenance</h3>
+      @if (connected()) {
+        <section class="drawer-section">
+          <h3 class="drawer-heading">Why not ready</h3>
+          @if (row.readinessBlockers.length > 0) {
+            <!-- The full list, in the same order and wording the table cell's own summary uses
+                 (`core/readiness/readiness-logic.ts#fleetRowBlockers`) — the first one is the one to
+                 fix first, so it is the one set in bold. -->
+            <ul class="blockers">
+              @for (blocker of row.readinessBlockers; track blocker; let first = $first) {
+                <li [class.blocker-first]="first">{{ blocker }}</li>
+              }
+            </ul>
+          } @else if (row.readinessVerdict === 'GO') {
+            <p class="drawer-line">GO — no blockers</p>
+          } @else {
+            <p class="drawer-line muted">Not evaluated yet — nothing has reported on this vehicle.</p>
+          }
+        </section>
+      }
+
+      <section class="drawer-section">
+        <h3 class="drawer-heading">Maintenance</h3>
         @if (facade.loadingMaintenance()) {
-          <p class="muted detail-empty">Loading…</p>
-        } @else if (facade.maintenanceRecords().length === 0) {
-          <p class="muted detail-empty">No maintenance history.</p>
+          <p class="drawer-line muted">Loading…</p>
+        } @else if (facade.openMaintenance(); as record) {
+          <p class="drawer-line">
+            <span class="record-kind">{{ record.kindLabel }}</span>
+            <span class="truncate" [title]="record.summary">{{ record.summary }}</span>
+          </p>
+          <p class="drawer-line muted">Opened by {{ record.openedByLabel }} · {{ record.ageLabel }}</p>
+          @if (facade.actor().canManageFleet) {
+            <!-- Closing a record is a MANAGE_FLEET write (`AssetInventoryController`); anyone else
+                 reads that it is open, without a button that 403s. It is kept beside the record (and
+                 not folded into Release) because a NOTE/REPAIR record can be open on a vehicle that
+                 is not grounded at all, where Release is not offered. -->
+            <button
+              type="button"
+              class="btn secondary small"
+              [disabled]="facade.submitting()"
+              (click)="facade.closeMaintenanceRecordNow(row.asset.assetId, record.recordId)"
+            >
+              Close record
+            </button>
+          }
         } @else {
-          <ul class="detail-device-list">
-            @for (record of facade.maintenanceRecords(); track record.id) {
-              <li class="detail-device-row maintenance-row">
-                <span class="muted">{{ record.kind }}</span>
-                <span class="truncate" [title]="record.summary">{{ record.summary }}</span>
-                @if (!record.closedAt) {
-                  <!-- Closing a record is a MANAGE_FLEET write (`AssetInventoryController`); anyone
-                       else reads the record and sees that it is open, without a button that 403s. -->
-                  @if (facade.actor().canManageFleet) {
-                    <button type="button" class="btn secondary small" (click)="facade.closeMaintenanceRecordNow(row.asset.assetId, record.id)">
-                      Close
-                    </button>
-                  } @else {
-                    <span class="muted">Open</span>
-                  }
-                } @else {
-                  <span class="muted">Closed</span>
-                }
+          <p class="drawer-line muted">No open records</p>
+        }
+      </section>
+
+      <section class="drawer-section">
+        <h3 class="drawer-heading">Pilots</h3>
+        @if (facade.loadingPilots() && facade.selectedPilots().length === 0) {
+          <p class="drawer-line muted">Loading…</p>
+        } @else if (facade.selectedPilotsUnavailable()) {
+          <!-- The read failed. "Nobody is assigned" would be a claim this session cannot make. -->
+          <p class="drawer-line muted">—</p>
+        } @else if (facade.selectedPilots().length === 0) {
+          <p class="drawer-line muted">Nobody is assigned to fly this.</p>
+        } @else {
+          <ul class="pilots">
+            @for (pilot of facade.selectedPilots(); track pilot.userId) {
+              <li>
+                <span class="truncate">{{ pilotName(pilot) }}</span>
+                <span class="muted">{{ assignmentRoleLabel(pilot.role) }}</span>
               </li>
             }
           </ul>
         }
-
-        <!-- Opening a record is a MANAGE_FLEET write today. Wave W2 of
-             docs/plans/active/INVENTORY-REWORK-PLAN.md (decision D4) widens the server gate to a
-             COMMAND_FLIGHT holder in scope; until it lands, offering the form to a pilot would be
-             offering a 403. -->
-        @if (facade.actor().canManageFleet) {
-        <form class="new-record-form" (submit)="$event.preventDefault(); openNewRecord(row.asset.assetId)">
-          <select name="newRecordKind" [ngModel]="newRecordKind()" (ngModelChange)="newRecordKind.set($event)">
-            <option value="NOTE">Note</option>
-            <option value="REPAIR">Repair</option>
-            <option value="INSPECTION_DUE">Inspection due</option>
-            <option value="GROUNDING">Grounding</option>
-          </select>
-          <input
-            type="text"
-            name="newRecordSummary"
-            placeholder="Summary…"
-            [ngModel]="newRecordSummary()"
-            (ngModelChange)="newRecordSummary.set($event)"
-          />
-          <button type="submit" class="btn secondary small" [disabled]="!newRecordSummary().trim() || facade.submitting()">Open record</button>
-        </form>
+        @if (facade.canManageOrg()) {
+          <!-- Assigning is the asset page's own roster card (`features/asset-detail/pilots-card.ts`),
+               which fetches its own pilots + user list and gates itself on MANAGE_ORG. Mounting it
+               here would mean a second component injecting `VisionApi` under a routed page and a
+               duplicate of every read this facade already caches — so the drawer links to it rather
+               than growing a second assign flow that could drift from it. Gated on MANAGE_ORG, not
+               MANAGE_FLEET, precisely because that is what the destination requires: a link to a
+               drawer that would refuse to render is the same broken promise as a button that 403s. -->
+          <a class="btn secondary small" [routerLink]="['/assets', row.asset.assetId]">+ Assign…</a>
         }
-      </div>
+      </section>
 
+      <!-- Exactly one primary button — `core/fleet/inventory-logic.ts#primaryVehicleVerb` decides
+           which (frontend-style §6). Everything else this session may do is a ghost; "Open full ›"
+           is always last. -->
       @let detailVerbs = rowActions(row);
-      <div class="detail-actions">
+      <div class="drawer-actions">
+        @if (detailVerbs.issue.shown) {
+          <button
+            type="button"
+            [class]="verbClass(row, 'issue')"
+            [disabled]="detailVerbs.issue.disabled || facade.busyAssetId() === row.asset.assetId"
+            [title]="detailVerbs.issue.reason ?? ''"
+            (click)="openIssue(row)"
+          >
+            Issue to…
+          </button>
+        }
+        @if (detailVerbs.return.shown) {
+          <button
+            type="button"
+            [class]="verbClass(row, 'return')"
+            [disabled]="detailVerbs.return.disabled || facade.busyAssetId() === row.asset.assetId"
+            [title]="detailVerbs.return.reason ?? ''"
+            (click)="facade.returnAsset(row.asset.assetId)"
+          >
+            Return to stock
+          </button>
+        }
+        @if (detailVerbs.release.shown) {
+          <button
+            type="button"
+            [class]="verbClass(row, 'release')"
+            [disabled]="detailVerbs.release.disabled || facade.busyAssetId() === row.asset.assetId"
+            [title]="detailVerbs.release.reason ?? ''"
+            (click)="facade.release(row.asset.assetId)"
+          >
+            Release
+          </button>
+        }
         @if (detailVerbs.fly.shown) {
           <button
             type="button"
-            class="btn"
+            [class]="verbClass(row, 'fly')"
             [disabled]="detailVerbs.fly.disabled"
             [title]="detailVerbs.fly.reason ?? ''"
             (click)="facade.openCockpitFor(row.asset.assetId)"
@@ -338,7 +445,42 @@
           }
         }
         @if (detailVerbs.watchLive.shown) {
-          <button type="button" class="btn secondary" (click)="facade.watchLive(row.asset.assetId)">Watch live</button>
+          <button type="button" [class]="verbClass(row, 'watchLive')" (click)="facade.watchLive(row.asset.assetId)">Watch live</button>
+        }
+        @if (detailVerbs.restore.shown) {
+          <button
+            type="button"
+            [class]="verbClass(row, 'restore')"
+            [disabled]="facade.busyAssetId() === row.asset.assetId"
+            (click)="facade.restoreAssetNow(row.asset.assetId, row.asset.displayName)"
+          >
+            Restore
+          </button>
+        }
+        @if (detailVerbs.ground.shown) {
+          <button
+            type="button"
+            class="btn secondary"
+            [disabled]="detailVerbs.ground.disabled"
+            [title]="detailVerbs.ground.reason ?? ''"
+            (click)="openGround(row)"
+          >
+            Ground…
+          </button>
+        }
+        @if (detailVerbs.retire.shown) {
+          <button
+            type="button"
+            class="btn secondary danger-action"
+            [disabled]="detailVerbs.retire.disabled"
+            [title]="detailVerbs.retire.reason ?? ''"
+            (click)="openRetire(row)"
+          >
+            Retire…
+          </button>
+          @if (detailVerbs.retire.disabled && detailVerbs.retire.reason) {
+            <span class="disabled-reason">{{ detailVerbs.retire.reason }}</span>
+          }
         }
         <a class="btn secondary" [routerLink]="['/assets', row.asset.assetId]">Open full ›</a>
       </div>
@@ -346,35 +488,73 @@
   }
 </vision-two-pane>
 
-<!-- ---- Issue to… (custom modal — vision-confirm-dialog can't hold a picker) -->
+<!-- ---- Issue to… (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.5 — a custom modal, since
+     `vision-confirm-dialog` can't hold a picker). The roster is grouped rather than flat: the people
+     who can already fly this aircraft first, the group's other pilots next, and everyone else only
+     if asked for (`core/org/pilot-logic.ts#custodianPickerGroups`). -->
 @if (issueTarget(); as row) {
   <div class="backdrop" (click)="cancelIssue()">
     <div class="dialog" role="dialog" aria-modal="true" [attr.aria-label]="'Issue ' + row.asset.displayName" (click)="$event.stopPropagation()">
       <div class="dialog-head">
         <h2>Issue "{{ row.asset.displayName }}"</h2>
       </div>
+      @let groups = issueGroups();
       <label class="field">
-        <span class="field-label">To</span>
+        <span class="field-label">Who takes it</span>
         <select name="issueCustodianId" [ngModel]="issueCustodianId()" (ngModelChange)="issueCustodianId.set($event)">
           <option value="">Select a person…</option>
-          @for (user of facade.custodianDirectory(); track user.userId) {
-            <option [value]="user.userId">{{ user.displayName }}</option>
+          @if (groups.assigned.length > 0) {
+            <optgroup label="Assigned pilots">
+              @for (candidate of groups.assigned; track candidate.userId) {
+                <option [value]="candidate.userId">{{ candidate.name }}</option>
+              }
+            </optgroup>
+          }
+          @if (groups.pilots.length > 0) {
+            <optgroup label="Other pilots">
+              @for (candidate of groups.pilots; track candidate.userId) {
+                <option [value]="candidate.userId">{{ candidate.name }}</option>
+              }
+            </optgroup>
+          }
+          @if (everyoneShown() && groups.everyone.length > 0) {
+            <optgroup label="Everyone else">
+              @for (candidate of groups.everyone; track candidate.userId) {
+                <option [value]="candidate.userId">{{ candidate.name }}</option>
+              }
+            </optgroup>
           }
         </select>
       </label>
+      @if (groups.everyone.length > 0) {
+        <label class="row toggle">
+          <input type="checkbox" name="issueShowEveryone" [ngModel]="everyoneShown()" (ngModelChange)="everyoneShown.set($event)" />
+          <span>Show everyone ({{ groups.everyone.length }})</span>
+        </label>
+      }
+      @if (groups.assigned.length === 0 && groups.pilots.length === 0 && groups.everyone.length === 0) {
+        <p class="muted">No people to issue to — this session can't list users.</p>
+      }
       <label class="field">
         <span class="field-label">Location (optional)</span>
-        <input type="text" name="issueLocation" [ngModel]="issueLocation()" (ngModelChange)="issueLocation.set($event)" />
+        <input type="text" name="issueLocation" placeholder="Hangar 2, north pad…" [ngModel]="issueLocation()" (ngModelChange)="issueLocation.set($event)" />
       </label>
       <div class="create-actions">
-        <button type="button" class="btn" [disabled]="!issueCustodianId() || facade.submitting()" (click)="confirmIssue()">Issue</button>
+        <button type="button" class="btn" [disabled]="!issueCustodianId() || facade.submitting()" (click)="confirmIssue()">
+          @if (issueCustodianName(); as name) {
+            Issue to {{ name }}
+          } @else {
+            Issue
+          }
+        </button>
         <button type="button" class="btn secondary" (click)="cancelIssue()">Cancel</button>
       </div>
     </div>
   </div>
 }
 
-<!-- ---- Ground (custom modal) -->
+<!-- ---- Ground (custom modal). Also the drawer's only way to open a maintenance record: grounding
+     *is* opening one, with a kind and a reason, and it moves the vehicle's state with it. -->
 @if (groundTarget(); as row) {
   <div class="backdrop" (click)="cancelGround()">
     <div class="dialog" role="dialog" aria-modal="true" [attr.aria-label]="'Ground ' + row.asset.displayName" (click)="$event.stopPropagation()">

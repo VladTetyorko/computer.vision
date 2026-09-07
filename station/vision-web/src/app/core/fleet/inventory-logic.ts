@@ -310,6 +310,24 @@ export function vehicleRowActions(row: InventoryActionRow, actor: InventoryActor
 }
 
 /**
+ * Which single verb a surface may render as its **primary** control — frontend-style §6's "max one
+ * primary `.btn`" applied to the matrix above, so the detail drawer
+ * (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.3, wave W4) and W5's "My vehicles" card can never
+ * disagree about which button is the loud one for a given state.
+ *
+ * The order below *is* §5.2's own bolding, read top to bottom: the custody verb the state is waiting
+ * for first (Issue to… → Return to stock → Release), then flying it, then watching it. A verb that
+ * is `shown` but `disabled` is deliberately skipped — a greyed-out control is not this row's primary
+ * action, and promoting it would push the verb that *is* usable down into the ghost row. `undefined`
+ * means this session has no primary verb for this row at all (a viewer, an archived asset); the
+ * caller then renders only ghost buttons and "Open full ›", never a lone loud button it invented.
+ */
+export function primaryVehicleVerb(actions: VehicleRowActions): VehicleVerb | undefined {
+  const order: readonly VehicleVerb[] = ['issue', 'return', 'release', 'fly', 'watchLive', 'restore'];
+  return order.find((verb) => actions[verb].shown && !actions[verb].disabled);
+}
+
+/**
  * A raw id rendered short enough for a table cell — the first segment of a UUID with an ellipsis
  * (`3f2a91c4…`). The **last** fallback for a name (`custodianName` → user-list join → this), used
  * only when neither the wire nor the org listing can name the account; the caller always pairs it

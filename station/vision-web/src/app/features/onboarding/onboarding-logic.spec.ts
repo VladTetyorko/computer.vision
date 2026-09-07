@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { DiscoveryCandidate, Membership, NetworkAddress, ProbeDeviceResult, UserSummary, VehicleProfile } from '../../core/api/models';
+import type { DiscoveryCandidate, NetworkAddress, ProbeDeviceResult, VehicleProfile } from '../../core/api/models';
 import { emptyFitOutRows, type FitOutRowDraft, type FitOutRows } from '../../core/onboarding/fit-out-logic';
 import {
   buildCreateAssetRequest,
@@ -9,12 +9,9 @@ import {
   buildVerifyRequest,
   canAdvanceFromIdentify,
   composePushAddress,
-  creatorOwnershipGroup,
-  defaultPilotSelection,
   isEquipmentPath,
   isTelemetryOnlyProtocol,
   nextStep,
-  pilotsInGroup,
   prefillFromDiscoveryCandidate,
   prevStep,
   relativeAge,
@@ -351,83 +348,9 @@ describe('buildPostSimulationAssetEdit', () => {
   });
 });
 
-// --- Hand over: "Who takes this?" (docs/plans/done/OPS-UX-PLAN.md §2 A3) -------------------------------
-
-function membership(partial: Partial<Membership> = {}): Membership {
-  return { groupId: 'group-1', groupName: 'Alpha Squad', role: 'PILOT', ...partial };
-}
-
-function user(partial: Partial<UserSummary> = {}): UserSummary {
-  return {
-    userId: 'user-1',
-    username: 'user1',
-    displayName: 'User One',
-    email: 'user1@example.com',
-    enabled: true,
-    memberships: [],
-    ...partial,
-  };
-}
-
-describe('creatorOwnershipGroup', () => {
-  it('is undefined for a membership-less account', () => {
-    expect(creatorOwnershipGroup([])).toBeUndefined();
-  });
-
-  it('picks the single membership when there is only one', () => {
-    const m = membership({ role: 'MANAGER' });
-    expect(creatorOwnershipGroup([m])).toBe(m);
-  });
-
-  it('picks the highest-role membership across several groups (mirrors the backend\'s own max-by-Role rule)', () => {
-    const pilot = membership({ groupId: 'g-pilot', role: 'PILOT' });
-    const manager = membership({ groupId: 'g-manager', role: 'MANAGER' });
-    const admin = membership({ groupId: 'g-admin', role: 'ADMIN' });
-    expect(creatorOwnershipGroup([pilot, manager])).toBe(manager);
-    expect(creatorOwnershipGroup([manager, admin, pilot])).toBe(admin);
-  });
-
-  it('keeps the first-encountered membership on a tie', () => {
-    const first = membership({ groupId: 'g-1', role: 'MANAGER' });
-    const second = membership({ groupId: 'g-2', role: 'MANAGER' });
-    expect(creatorOwnershipGroup([first, second])).toBe(first);
-  });
-});
-
-describe('pilotsInGroup', () => {
-  const pilotHere = user({ userId: 'p1', memberships: [{ groupId: 'g-1', role: 'PILOT' }] });
-  const pilotElsewhere = user({ userId: 'p2', memberships: [{ groupId: 'g-2', role: 'PILOT' }] });
-  const managerHere = user({ userId: 'm1', memberships: [{ groupId: 'g-1', role: 'MANAGER' }] });
-  const disabledPilotHere = user({ userId: 'p3', enabled: false, memberships: [{ groupId: 'g-1', role: 'PILOT' }] });
-
-  it('returns only enabled pilots whose membership matches the given group', () => {
-    expect(pilotsInGroup([pilotHere, pilotElsewhere, managerHere, disabledPilotHere], 'g-1')).toEqual([pilotHere]);
-  });
-
-  it('is empty when the group is unresolved — never falls back to every pilot app-wide', () => {
-    expect(pilotsInGroup([pilotHere, pilotElsewhere], undefined)).toEqual([]);
-  });
-
-  it('is empty when nobody in the group is a pilot', () => {
-    expect(pilotsInGroup([managerHere], 'g-1')).toEqual([]);
-  });
-});
-
-describe('defaultPilotSelection', () => {
-  it('preselects the creator when their own ownership-group role is PILOT (the solo self-registration case)', () => {
-    const group = membership({ groupId: 'g-1', role: 'PILOT' });
-    expect(defaultPilotSelection('user-1', group)).toEqual(['user-1']);
-  });
-
-  it('selects nobody when the creator\'s ownership-group role is MANAGER/ADMIN (the common case)', () => {
-    expect(defaultPilotSelection('user-1', membership({ role: 'MANAGER' }))).toEqual([]);
-    expect(defaultPilotSelection('user-1', membership({ role: 'ADMIN' }))).toEqual([]);
-  });
-
-  it('selects nobody when no group could be resolved at all', () => {
-    expect(defaultPilotSelection('user-1', undefined)).toEqual([]);
-  });
-});
+// The Hand-over roster cases (`creatorOwnershipGroup`, `pilotsInGroup`, `defaultPilotSelection`)
+// moved with their functions to `core/org/pilot-logic.spec.ts`
+// (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.5, wave W4).
 
 // --- Terminal Ready screen: the two-half proof (D9) -----------------------------------------------
 

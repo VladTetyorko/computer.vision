@@ -8,6 +8,7 @@ import {
   inventoryExportFilename,
   isInventoryTabVisible,
   parseInventoryTab,
+  primaryVehicleVerb,
   shortIdLabel,
   vehicleRowActions,
   visibleInventoryTabs,
@@ -234,6 +235,36 @@ describe('vehicleRowActions — Fly (COMMAND_FLIGHT, §5.2 column 2)', () => {
       expect(vehicleRowActions(inState(state), VIEWER).fly.shown).toBe(false);
       expect(vehicleRowActions(inState(state), FLEET_MANAGER).fly.shown).toBe(false);
     }
+  });
+});
+
+describe('primaryVehicleVerb', () => {
+  it('gives a manager the custody verb the state is waiting for', () => {
+    expect(primaryVehicleVerb(vehicleRowActions(inState('IN_STOCK'), FLEET_MANAGER))).toBe('issue');
+    expect(primaryVehicleVerb(vehicleRowActions(inState('ISSUED'), FLEET_MANAGER))).toBe('return');
+    expect(primaryVehicleVerb(vehicleRowActions(inState('MAINTENANCE'), FLEET_MANAGER))).toBe('release');
+  });
+
+  it('gives a pilot Fly wherever the vehicle is in service', () => {
+    for (const state of ['IN_STOCK', 'ISSUED', 'IN_FIELD'] as const) {
+      expect(primaryVehicleVerb(vehicleRowActions(inState(state), PILOT))).toBe('fly');
+    }
+  });
+
+  it('never promotes a disabled verb — a grounded vehicle offers no primary at all to a pilot', () => {
+    const actions = vehicleRowActions(inState('MAINTENANCE'), PILOT);
+    expect(actions.fly).toEqual({ shown: true, disabled: true, reason: FLY_WHILE_GROUNDED_REASON });
+    expect(primaryVehicleVerb(actions)).toBeUndefined();
+  });
+
+  it('offers a viewer nothing loud, even on a streaming vehicle they may watch', () => {
+    expect(primaryVehicleVerb(vehicleRowActions(inState('IN_STOCK'), VIEWER))).toBeUndefined();
+    expect(primaryVehicleVerb(vehicleRowActions(inState('IN_FIELD', { streaming: true }), VIEWER))).toBe('watchLive');
+  });
+
+  it('promotes Restore on an archived row, and nothing on a row whose state was never fetched', () => {
+    expect(primaryVehicleVerb(vehicleRowActions(actionRow({ archived: true, lifecycle: 'DELETED' }), FLEET_MANAGER))).toBe('restore');
+    expect(primaryVehicleVerb(vehicleRowActions(actionRow(), FLEET_MANAGER))).toBeUndefined();
   });
 });
 

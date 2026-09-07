@@ -4,15 +4,18 @@ import type {
   Firmware,
   InventoryState,
   LifecycleState,
+  MaintenanceRecord,
   ReadinessRow,
   ReadinessVerdict,
   UserSummary,
 } from '../../core/api/models';
+import { actorLabel } from '../../core/audit/summary-logic';
+import { MAINTENANCE_KIND_LABELS } from '../../core/maintenance/maintenance-logic';
 import { effectiveRegistration } from '../../core/fleet/asset-attributes';
 import { formatFlightTime } from '../../core/fleet/asset-stats-logic';
-import { triageOrder } from '../../core/fleet/triage-logic';
+import { isSimulated, triageOrder } from '../../core/fleet/triage-logic';
 import { humanAge } from '../../core/telemetry/telemetry-logic';
-import { fleetRowAttention } from '../../core/readiness/readiness-logic';
+import { fleetRowAttention, fleetRowBlockers } from '../../core/readiness/readiness-logic';
 import { effectiveInventoryStateChip, shortIdLabel, type InventoryStateChip } from '../../core/fleet/inventory-logic';
 
 /**
@@ -69,6 +72,10 @@ export interface VehicleRow {
   readonly custodianTitle?: string;
   /** Where it physically is (`custody.location`) — INVENTORY-REWORK-PLAN.md §5.1's new column. */
   readonly location?: string;
+  /** How long the current custodian has held it, as a human reads it (`3h ago`); `'—'` while it is in stock ({@link custodySinceLabel}). */
+  readonly sinceLabel: string;
+  /** `core/fleet/triage-logic.ts#isSimulated` — the drawer's muted origin line, never a chip (one chip per row). */
+  readonly simulated: boolean;
   /** `identity.registration`, falling back to the legacy `attributes.registrationNumber` key
    *  (`core/fleet/asset-attributes.ts#effectiveRegistration` — the same fallback the asset detail
    *  page's own Identity fact group uses, so a pre-D1 asset's registration reads identically in both
@@ -80,6 +87,10 @@ export interface VehicleRow {
    *  (`core/readiness/readiness-logic.ts#fleetRowAttention`). `undefined` for a GO row and for one
    *  never evaluated: a verdict with no cause is the honest render of both. */
   readonly readinessCause?: string;
+  /** Every blocker behind {@link readinessCause}, uncapped and in the same order
+   *  (`fleetRowBlockers`) — the drawer's *Why not ready* list (INVENTORY-REWORK-PLAN.md §5.3);
+   *  empty for a GO row and for one never evaluated alike. */
+  readonly readinessBlockers: readonly string[];
   /** `{@link firmwareLabel}` of `asset.firmware` — `'—'` when never probed. */
   readonly firmware: string;
   /** `formatFlightTime` of `asset.totalFlightSeconds` — `'—'` when absent (no join to offer), never for a genuine zero (renders `'0m'`). */
@@ -122,6 +133,23 @@ export function vehicleLastFlownLabel(lastUsedAt: string | undefined, nowMs: num
   }
   const ageSeconds = Math.max(0, (nowMs - Date.parse(lastUsedAt)) / 1000);
   return `${humanAge(ageSeconds)} ago`;
+}
+
+/**
+ * How long a custody has stood, as a human reads it — `'3h ago'` (docs/plans/active/INVENTORY-REWORK-PLAN.md
+ * §5.3's `SINCE` fact). `'—'` for an asset in stock, and for a `since` the backend sent in a shape
+ * this build can't parse: the drawer's own em-dash convention, never a raw ISO timestamp in a fact
+ * grid (which is what that cell rendered before this wave) and never a fabricated "just now".
+ */
+export function custodySinceLabel(since: string | undefined, nowMs: number): string {
+  if (!since) {
+    return '—';
+  }
+  const parsed = Date.parse(since);
+  if (Number.isNaN(parsed)) {
+    return '—';
+  }
+  return `${humanAge(Math.max(0, (nowMs - parsed) / 1000))} ago`;
 }
 
 /** The Links column's own render (docs/plans/active/INVENTORY-REWORK-PLAN.md §6 row 3, context §3
@@ -186,9 +214,12 @@ export function buildVehicleRows(input: BuildVehicleRowsInput): readonly Vehicle
       custodianName: custodian.name,
       custodianTitle: custodian.title,
       location: asset.custody?.location,
+      sinceLabel: custodySinceLabel(asset.custody?.since, input.nowMs),
+      simulated: isSimulated(asset),
       registration: effectiveRegistration(asset),
       readinessVerdict: readiness?.verdict,
       readinessCause: readiness ? (fleetRowAttention(readiness, 1) ?? undefined) : undefined,
+      readinessBlockers: readiness ? fleetRowBlockers(readiness) : [],
       firmware: firmwareLabel(asset.firmware),
       hours: formatFlightTime(asset.totalFlightSeconds ?? null),
       lastFlownLabel: vehicleLastFlownLabel(asset.lastUsedAt, input.nowMs),
@@ -275,10 +306,28 @@ export function filterVehicleRowsByReadiness(rows: readonly VehicleRow[], filter
   return rows.filter((row) => row.readinessVerdict === filter);
 }
 
-/** Case-insensitive substring match on the asset's display name. */
-export function searchVehicleRowsByName(rows: readonly VehicleRow[], query: string): readonly VehicleRow[] {
+/**
+ * Case-insensitive substring match across the three things a manager actually searches an inventory
+ * by (docs/plans/active/INVENTORY-REWORK-PLAN.md §3.1 "Where is X / who has it", §5.1's search
+ * placeholder): the **display name**, the **serial** (`identity.serialNumber`) and the
+ * **registration** (`identity.registration`, falling back to the legacy attribute key through
+ * {@link VehicleRow.registration}). It used to be name-only, which meant the one identifier
+ * physically painted on the aircraft — its registration — could not be typed into the box above the
+ * column that shows it.
+ *
+ * Renamed from `searchVehicleRowsByName` deliberately: a function that also matches serials must not
+ * keep a name that says otherwise.
+ */
+export function searchVehicleRows(rows: readonly VehicleRow[], query: string): readonly VehicleRow[] {
   const q = query.trim().toLowerCase();
-  return q ? rows.filter((row) => row.asset.displayName.toLowerCase().includes(q)) : rows;
+  if (!q) {
+    return rows;
+  }
+  return rows.filter((row) =>
+    [row.asset.displayName, row.asset.identity?.serialNumber, row.registration].some((field) =>
+      field ? field.toLowerCase().includes(q) : false,
+    ),
+  );
 }
 
 /** Resolves the two-pane detail panel's row from `?sel=<assetId>`, against every loaded row (not the
@@ -307,4 +356,46 @@ export function custodianFilterOptions(rows: readonly VehicleRow[]): readonly Cu
     }
   }
   return [...byId.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+}
+
+// --- The drawer's Maintenance line (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.3) -------------
+
+/** The one open record a drawer names: `kind · summary · opened by <name> · <age>`, already rendered. */
+export interface OpenMaintenanceSummary {
+  readonly recordId: string;
+  readonly kindLabel: string;
+  readonly summary: string;
+  /** The opener's display name, `'Station'` for the system principal, a truncated id when no name reached (`core/audit/summary-logic.ts#actorLabel`). */
+  readonly openedByLabel: string;
+  readonly ageLabel: string;
+}
+
+/**
+ * The **oldest still-open** record for an asset, as the drawer prints it — oldest because that is
+ * the one that has been holding the vehicle down longest, and the only one a manager needs named
+ * before pressing Release. `undefined` when nothing is open (the drawer then says "No open records"
+ * rather than showing a closed record's history, which belongs on the full asset page).
+ *
+ * The kind reads through `core/maintenance/maintenance-logic.ts#MAINTENANCE_KIND_LABELS` and the
+ * opener through `core/audit/summary-logic.ts#actorLabel` — the same two maps `/fleet/maintenance`
+ * uses, so one record never reads "Grounded, opened by Station" on one page and
+ * "GROUNDING, opened by 00000000" on another.
+ */
+export function openMaintenanceSummary(
+  records: readonly MaintenanceRecord[],
+  nameById: ReadonlyMap<string, string>,
+  nowMs: number,
+): OpenMaintenanceSummary | undefined {
+  const open = records.filter((record) => !record.closedAt);
+  if (open.length === 0) {
+    return undefined;
+  }
+  const oldest = open.reduce((a, b) => (Date.parse(a.openedAt) <= Date.parse(b.openedAt) ? a : b));
+  return {
+    recordId: oldest.id,
+    kindLabel: MAINTENANCE_KIND_LABELS[oldest.kind] ?? oldest.kind,
+    summary: oldest.summary,
+    openedByLabel: actorLabel(oldest.openedBy, nameById),
+    ageLabel: custodySinceLabel(oldest.openedAt, nowMs),
+  };
 }

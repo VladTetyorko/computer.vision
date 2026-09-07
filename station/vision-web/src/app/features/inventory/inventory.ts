@@ -1,8 +1,10 @@
 import { ChangeDetectionStrategy, Component, effect, inject, input } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { RouterLink } from '@angular/router';
 import { CategoriesPage } from '../categories/categories';
 import { DevicesPage } from '../devices/devices';
 import { FoundDevices } from './found-devices';
+import { EmptyState } from '../../shared/ui/empty-state';
 import { Notice } from '../../shared/ui/notice';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { Stat } from '../../shared/ui/stat';
@@ -25,11 +27,23 @@ import type { VehicleInventoryStateFilter, VehicleReadinessFilter } from './vehi
  * the title/tab bar, so the pre-W9 double sticky header (WAREHOUSE-UX-CONTEXT.md's W4 status section)
  * is gone; see `devices.ts`/`categories.ts`'s own `embedded` doc comments.
  *
- * **KPI strip + Export**: the old Reports page's "Fleet at a glance" KPI tiles sit above the tab bar
- * (only functional section that page had — see `features/reports/reports.routes.ts`'s own doc
- * comment for what wasn't carried forward), and Export CSV — Reports' one other surviving idea —
- * is a page-bar action, a plain `<a [href]>` download following the after-action-archive pattern
- * (`VisionApi.inventoryExportUrl`/`afterActionArchiveUrl`'s own doc comment).
+ * **The stats are the view switcher** (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.1, decision D7,
+ * wave W4): the five tiles above the tab bar — Needs attention · In field · Issued · In stock ·
+ * Maintenance — are buttons, and the selected one filters the table beneath them. They replaced the
+ * old Reports-page "Fleet at a glance" strip (Total/Streaming/Active/Deactivated/Needs attention),
+ * which occupied the widest band on the page to answer a question nobody in a hangar asks and could
+ * not be acted on at all. Counts come from `InventoryFacade#viewTiles`, computed over the same
+ * filtered rows the table renders. The pick survives a reload (`InventoryViewStore`).
+ *
+ * **Export** — Reports' one other surviving idea — is a page-bar action, a plain `<a [href]>`
+ * download following the after-action-archive pattern (`VisionApi.inventoryExportUrl`/
+ * `afterActionArchiveUrl`'s own doc comment). It is labelled *Export all (CSV)* because the endpoint
+ * takes no filter: see `InventoryFacade#exportUrl`.
+ *
+ * **Manager view vs. "My vehicles"**: everything from the view row down is wrapped in
+ * `InventoryFacade#showsManagerView`. A genuinely `ASSIGNED_ASSETS`-scoped pilot gets the `@else`
+ * branch, which wave W5 fills with the card view §4 specifies; until then it is an honest empty
+ * state pointing at Fly, never a dense eleven-column table of two aircraft.
  *
  * **Role gate lives in the tab bar, not the route** (`/assets` itself is ungated, always has been):
  * `InventoryFacade#visibleTabs` hides Links/Categories from a pilot outright — the tab button never
@@ -45,7 +59,7 @@ import type { VehicleInventoryStateFilter, VehicleReadinessFilter } from './vehi
  */
 @Component({
   selector: 'vision-inventory',
-  imports: [FormsModule, PageBar, Stat, Notice, VehiclesTable, DevicesPage, CategoriesPage, FoundDevices],
+  imports: [FormsModule, RouterLink, PageBar, Stat, Notice, EmptyState, VehiclesTable, DevicesPage, CategoriesPage, FoundDevices],
   templateUrl: './inventory.html',
   styleUrl: './inventory.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

@@ -1,8 +1,11 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
-import type { MaintenanceKind } from '../../core/api/models';
+import type { AssignedPilot, MaintenanceKind } from '../../core/api/models';
+import { primaryVehicleVerb, type VehicleVerb } from '../../core/fleet/inventory-logic';
+import { assignedPilotName, custodianCandidateName } from '../../core/org/pilot-logic';
 import { verdictLabel, verdictTone } from '../../core/readiness/readiness-logic';
+import { assignmentRoleLabel } from '../../core/roster/roster-pivot-logic';
 import { ConfirmDialog } from '../../shared/ui/confirm-dialog';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { KebabMenu } from '../../shared/ui/kebab-menu';
@@ -37,6 +40,15 @@ import type { VehicleRow } from './vehicles-logic';
  * `formatFlightTime`) — `'—'` only for a genuinely never-probed/never-flown asset, never a
  * whole-column absence.
  *
+ * **The drawer is a triage sheet** (INVENTORY-REWORK-PLAN.md §5.3, wave W4), read top to bottom:
+ * *what is this* (name, category, simulated origin) → *what state is it in* (one state chip + the
+ * readiness verdict) → *the facts* (one fact grid, fixed-width muted labels, `—` for anything
+ * absent) → *why not ready* (the full blocker list, `VehicleRow#readinessBlockers`, first one bold)
+ * → *maintenance* (the one open record, named) → *pilots* (who may fly it) → *act* (**exactly one**
+ * primary button — `core/fleet/inventory-logic.ts#primaryVehicleVerb` picks it, the rest are ghosts,
+ * `Open full ›` last). It replaced two unlabelled fact groups, a raw ISO `since` timestamp, a
+ * full maintenance-history list and a second "open a record" form that duplicated Ground.
+ *
  * **Kebab verbs** are gated by `core/fleet/inventory-logic.ts#vehicleRowActions` through
  * `InventoryFacade#actionsFor` (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.2, wave W3) — the
  * matrix, not this template, decides. A verb this session's capabilities would have the server
@@ -65,21 +77,52 @@ export class VehiclesTable {
   protected readonly pluralize = pluralize;
   protected readonly verdictLabel = verdictLabel;
   protected readonly verdictTone = verdictTone;
+  protected readonly assignmentRoleLabel = assignmentRoleLabel;
   /** The one authority-aware verb matrix (`core/fleet/inventory-logic.ts#vehicleRowActions`, via the facade's own `actor`) — this template never decides for itself what may be rendered. */
   protected readonly rowActions = (row: VehicleRow) => this.facade.actionsFor(row);
 
+  /** `displayName ?? username ?? user-list join ?? short id` — the drawer's Pilots list never prints a bare UUID. */
+  protected pilotName(pilot: AssignedPilot): string {
+    return assignedPilotName(pilot, this.facade.userNameById());
+  }
+
+  /**
+   * Which of the drawer's action buttons is the loud one (frontend-style §6: max one primary `.btn`
+   * per surface). The choice is `core/fleet/inventory-logic.ts#primaryVehicleVerb`'s, so the drawer
+   * and W5's card cannot disagree; every other shown verb renders `.btn.secondary`.
+   */
+  protected verbClass(row: VehicleRow, verb: VehicleVerb, extra = ''): string {
+    const primary = primaryVehicleVerb(this.rowActions(row)) === verb;
+    return `${primary ? 'btn' : 'btn secondary'}${extra ? ` ${extra}` : ''}`;
+  }
+
   protected readonly noun = computed(() => (this.connected() ? 'vehicle' : 'item'));
 
-  // --- Issue to… dialog --------------------------------------------------------------------------
+  // --- Issue to… dialog (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.5, context §3 defect E) ----
 
   protected readonly issueTarget = signal<VehicleRow | undefined>(undefined);
   protected readonly issueCustodianId = signal('');
   protected readonly issueLocation = signal('');
+  /** The "Show everyone" disclosure — off by default, so the picker opens on the two short lists that answer the question. */
+  protected readonly everyoneShown = signal(false);
+
+  /** Assigned pilots → other pilots → everyone else, from `core/org/pilot-logic.ts#custodianPickerGroups`. */
+  protected readonly issueGroups = computed(() => this.facade.custodianGroupsFor(this.issueTarget()?.asset.assetId));
+
+  /** The name on the primary button — the dialog says who it is about to hand the aircraft to, by name. */
+  protected readonly issueCustodianName = computed(() => {
+    const id = this.issueCustodianId();
+    return id ? custodianCandidateName(this.issueGroups(), id) : undefined;
+  });
 
   protected openIssue(row: VehicleRow): void {
     this.issueTarget.set(row);
     this.issueCustodianId.set('');
     this.issueLocation.set('');
+    this.everyoneShown.set(false);
+    // The "Assigned pilots" group needs this asset's own roster; it is cached, so re-opening the
+    // dialog for a row the drawer already visited costs nothing.
+    void this.facade.ensurePilots(row.asset.assetId);
   }
 
   protected cancelIssue(): void {
@@ -92,8 +135,8 @@ export class VehiclesTable {
     if (!row || !custodianId) {
       return;
     }
-    await this.facade.issueTo(row.asset.assetId, custodianId, this.issueLocation());
     this.issueTarget.set(undefined);
+    await this.facade.issueTo(row.asset.assetId, custodianId, this.issueLocation());
   }
 
   // --- Ground dialog -------------------------------------------------------------------------------
@@ -137,19 +180,5 @@ export class VehiclesTable {
     }
     await this.facade.retire(row.asset.assetId);
     this.retireTarget.set(undefined);
-  }
-
-  // --- Maintenance drawer (detail pane) — new-record form -------------------------------------
-
-  protected readonly newRecordKind = signal<MaintenanceKind>('NOTE');
-  protected readonly newRecordSummary = signal('');
-
-  protected async openNewRecord(assetId: string): Promise<void> {
-    const summary = this.newRecordSummary().trim();
-    if (!summary) {
-      return;
-    }
-    await this.facade.openMaintenanceRecord(assetId, this.newRecordKind(), summary);
-    this.newRecordSummary.set('');
   }
 }

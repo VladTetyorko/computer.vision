@@ -23,10 +23,21 @@ import {
   type VehicleRowActions,
 } from '../../core/fleet/inventory-logic';
 import { findVideoDevice } from '../../core/fleet/device-logic';
-import { inventoryKpis, type InventoryKpis } from './inventory-page-logic';
+import { creatorOwnershipGroup, custodianPickerGroups, type CustodianPickerGroups } from '../../core/org/pilot-logic';
+import { InventoryViewStore } from './inventory-view-store';
+import {
+  defaultInventoryView,
+  filterRowsByInventoryView,
+  inventoryViewTiles,
+  toggleInventoryView,
+  type InventoryView,
+  type InventoryViewSelection,
+  type InventoryViewTile,
+} from './inventory-page-logic';
 import {
   buildVehicleRows,
   custodianFilterOptions,
+  custodianLabel,
   filterVehicleRowsByArchived,
   filterVehicleRowsByCategory,
   filterVehicleRowsByConnected,
@@ -35,9 +46,11 @@ import {
   filterVehicleRowsByReadiness,
   filterVehicleRowsByRetired,
   findVehicleRowById,
-  searchVehicleRowsByName,
+  openMaintenanceSummary,
+  searchVehicleRows,
   sortVehicleRowsByTriage,
   type CustodianOption,
+  type OpenMaintenanceSummary,
   type VehicleInventoryStateFilter,
   type VehicleReadinessFilter,
   type VehicleRow,
@@ -45,8 +58,8 @@ import {
 import type {
   AssetDetails,
   AssetSummary,
+  AssignedPilot,
   Category,
-  FleetSummary,
   MaintenanceKind,
   MaintenanceRecord,
   ReadinessRow,
@@ -69,10 +82,14 @@ import type {
  * `listAssets` response this facade already fetches, no second call. See `vehicles-logic.ts`'s own
  * module doc comment for the render (`firmwareLabel`/`formatFlightTime`).
  *
- * **Five requests, not `5 + N`** (docs/plans/active/INVENTORY-REWORK-PLAN.md wave W3): {@link loadAll}
+ * **Four requests, not `5 + N`** (docs/plans/active/INVENTORY-REWORK-PLAN.md wave W3): {@link loadAll}
  * builds every row from `GET /api/assets` alone; the per-asset `GET /api/assets/{id}` runs only when
- * a row is *selected* ({@link ensureDetails}, cached per id) or when the *Watch live* verb needs a
- * device id.
+ * a row is *selected* ({@link ensureDetails}, cached per id), when the *Watch live* verb needs a
+ * device id, or once after a custody/inventory write ({@link refreshAsset}).
+ *
+ * **The stats are the filter** (plan §5.1, D7, wave W4): {@link viewTiles} counts the five views over
+ * the tab's rows *after* every other filter and *before* {@link view} narrows them, so a tile reading
+ * `3` always yields exactly three rows. The pick persists per browser through `InventoryViewStore`.
  *
  * **Every verb on screen is one this session may actually use** — {@link actor} × {@link actionsFor}
  * (`core/fleet/inventory-logic.ts#vehicleRowActions`, plan §5.2). No template in this feature makes
@@ -92,6 +109,7 @@ export class InventoryFacade {
   private readonly route = inject(ActivatedRoute);
   private readonly auth = inject(AuthStore);
   private readonly settings = inject(SettingsStore);
+  private readonly viewStore = inject(InventoryViewStore);
 
   readonly fleet = inject(FleetStore);
 
@@ -140,13 +158,15 @@ export class InventoryFacade {
   private readonly categories = signal<readonly Category[]>([]);
   private readonly users = signal<readonly UserSummary[]>([]);
   private readonly readinessByAssetId = signal<ReadonlyMap<string, ReadinessRow>>(new Map());
-  private readonly fleetSummaryData = signal<FleetSummary | undefined>(undefined);
   /** `GET /api/assets/{id}` responses fetched **on selection**, keyed by asset id — see {@link ensureDetails}. */
   private readonly detailsByAssetId = signal<ReadonlyMap<string, AssetDetails>>(new Map());
 
-  /** "Fleet at a glance" KPI strip above the Vehicles tab (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3)
-   *  — ported from the deleted Reports page's own KPI-only section, see `inventory-page-logic.ts`. */
-  readonly kpis = computed<InventoryKpis>(() => inventoryKpis(this.fleetSummaryData()));
+  /** `userId → displayName` for every user this session may list — the fallback join behind
+   *  {@link custodianLabel} and the *opened by* name in the drawer's Maintenance line. Empty for a
+   *  pilot's `ASSIGNED_ASSETS` scope, where `GET /api/users` is never issued (see {@link loadAll}). */
+  readonly userNameById = computed<ReadonlyMap<string, string>>(
+    () => new Map(this.users().map((user) => [user.userId, user.displayName])),
+  );
 
   readonly connectedCategorySlugs = computed(
     () => new Set(this.categories().filter((category) => category.connected).map((category) => category.slug)),
@@ -161,13 +181,22 @@ export class InventoryFacade {
   readonly readinessFilter = signal<VehicleReadinessFilter>('all');
   readonly showRetired = signal(false);
 
-  readonly hasActiveFilters = computed(
+  /**
+   * How many of the three filters that now live behind the page bar's **More filters** disclosure
+   * are actually narrowing the list (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.1, wave W4) — the
+   * badge on the collapsed summary. Search and Category stay on the bar itself and are deliberately
+   * *not* counted: a badge exists to say "something you cannot see right now is hiding rows", and
+   * those two are always visible.
+   */
+  readonly moreFilterCount = computed(
     () =>
-      this.searchQuery().trim().length > 0 ||
-      this.categoryFilter().length > 0 ||
-      this.inventoryStateFilter() !== 'all' ||
-      this.custodianFilter().length > 0 ||
-      this.readinessFilter() !== 'all',
+      (this.inventoryStateFilter() !== 'all' ? 1 : 0) +
+      (this.custodianFilter().length > 0 ? 1 : 0) +
+      (this.readinessFilter() !== 'all' ? 1 : 0),
+  );
+
+  readonly hasActiveFilters = computed(
+    () => this.searchQuery().trim().length > 0 || this.categoryFilter().length > 0 || this.moreFilterCount() > 0,
   );
 
   /** Every loaded asset as a row, unsorted-by-filter, sorted-by-triage once — both tab views and the
@@ -185,6 +214,12 @@ export class InventoryFacade {
     ),
   );
 
+  /**
+   * Everything the tab's filters do **except** the view row — the row set the five view tiles count
+   * over (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.1, D7). Counting here rather than over the
+   * raw fleet is what makes the tiles trustworthy: a tile reading `3` always yields exactly three
+   * rows when clicked, because it counted the same rows the click will leave standing.
+   */
   private filteredRows(connected: boolean): readonly VehicleRow[] {
     const byConnected = filterVehicleRowsByConnected(this.allRows(), this.connectedCategorySlugs(), connected);
     const byArchived = filterVehicleRowsByArchived(byConnected, this.showArchived());
@@ -193,14 +228,79 @@ export class InventoryFacade {
     const byState = filterVehicleRowsByInventoryState(byCategory, this.inventoryStateFilter());
     const byCustodian = filterVehicleRowsByCustodian(byState, this.custodianFilter() || undefined);
     const byReadiness = filterVehicleRowsByReadiness(byCustodian, this.readinessFilter());
-    return searchVehicleRowsByName(byReadiness, this.searchQuery());
+    return searchVehicleRows(byReadiness, this.searchQuery());
   }
 
-  readonly vehicleRows = computed<readonly VehicleRow[]>(() => this.filteredRows(true));
-  readonly equipmentRows = computed<readonly VehicleRow[]>(() => this.filteredRows(false));
+  private readonly preViewVehicleRows = computed<readonly VehicleRow[]>(() => this.filteredRows(true));
+  private readonly preViewEquipmentRows = computed<readonly VehicleRow[]>(() => this.filteredRows(false));
+
+  /** The tab's own pre-view rows — what the view tiles count, and what the view then narrows. */
+  private readonly preViewActiveRows = computed<readonly VehicleRow[]>(() =>
+    this.tab() === 'equipment' ? this.preViewEquipmentRows() : this.preViewVehicleRows(),
+  );
+
+  // --- The view row: five stats that are also the filter (INVENTORY-REWORK-PLAN.md §5.1, D7) ------
+
+  /**
+   * What this browser last chose — `undefined` until somebody chooses (or when storage is blocked),
+   * which is what lets {@link view} fall through to §5.1's own default. Seeded once, from
+   * `InventoryViewStore`, so a reload lands the operator back on the view they were working in.
+   */
+  private readonly viewSelection = signal<InventoryViewSelection>(this.viewStore.read());
+
+  /**
+   * The five stat tiles that *are* the view switcher — label, count and tone, computed over the
+   * tab's own pre-view rows ({@link preViewActiveRows}) so every count matches what selecting it
+   * shows. `inventory-page-logic.ts#inventoryViewTiles` owns the predicates; nothing here decides.
+   */
+  readonly viewTiles = computed<readonly InventoryViewTile[]>(() => inventoryViewTiles(this.preViewActiveRows()));
+
+  private readonly needsAttentionCount = computed(
+    () => this.viewTiles().find((tile) => tile.view === 'needs-attention')?.count ?? 0,
+  );
+
+  /**
+   * The active view; `null` is All. Deliberately *not* a computed that keeps re-deriving §5.1's
+   * default — that would move the table under whoever is reading it every time a vehicle went NO_GO.
+   * The default is latched exactly once, by {@link latchDefaultView}, when the first fleet read lands
+   * with nothing yet chosen.
+   */
+  readonly view = computed<InventoryView | null>(() => this.viewSelection() ?? null);
+
+  /**
+   * §5.1's opening view — **Needs attention while anything is in it, All otherwise** — applied once,
+   * only for a session that has never picked one (a fresh browser, or one whose storage is blocked).
+   * The latch is not written back to storage: a default this page chose is not a preference the
+   * operator expressed, and persisting it would make the very next load look like a deliberate pick.
+   */
+  private latchDefaultView(): void {
+    if (this.viewSelection() === undefined) {
+      this.viewSelection.set(defaultInventoryView(this.needsAttentionCount()));
+    }
+  }
+
+  /** Clicking a tile selects it; clicking the selected one deselects back to All. Persisted either way. */
+  selectView(view: InventoryView): void {
+    const next = toggleInventoryView(this.view(), view);
+    this.viewSelection.set(next);
+    this.viewStore.write(next);
+  }
+
+  readonly vehicleRows = computed<readonly VehicleRow[]>(() => filterRowsByInventoryView(this.preViewVehicleRows(), this.view()));
+  readonly equipmentRows = computed<readonly VehicleRow[]>(() => filterRowsByInventoryView(this.preViewEquipmentRows(), this.view()));
 
   /** The currently-active tab's own row set — what the visible `<vision-vehicles-table>` renders. */
   readonly activeRows = computed<readonly VehicleRow[]>(() => (this.tab() === 'equipment' ? this.equipmentRows() : this.vehicleRows()));
+
+  /**
+   * Whether this session gets the manager's table at all (docs/plans/active/INVENTORY-REWORK-PLAN.md
+   * §4, wave W5's slot). A `MANAGE_FLEET` holder always does; so does anyone whose visibility scope
+   * is wider than their own assignments (a viewer reads the same table, read-only — the verb matrix
+   * already leaves their kebab with nothing loud in it). Only a genuinely `ASSIGNED_ASSETS`-scoped
+   * pilot falls through to the "My vehicles" cards W5 builds — for them a dense eleven-column
+   * inventory table of the two aircraft they fly is the wrong shape entirely.
+   */
+  readonly showsManagerView = computed(() => this.actor().canManageFleet || this.auth.scopeKind() !== 'ASSIGNED_ASSETS');
 
   readonly hasAnyAssets = computed(() => this.assets().length > 0);
 
@@ -216,14 +316,35 @@ export class InventoryFacade {
 
   readonly custodianOptions = computed<readonly CustodianOption[]>(() => custodianFilterOptions(this.allRows()));
 
-  /** The full "Issue to…" picker — every *enabled* org user, not just today's existing custodians
-   *  ({@link custodianOptions} is a filter's own narrower list, drawn only from rows that already
-   *  have one). Not role-restricted to PILOT: a manager/admin can also carry equipment (the
-   *  Equipment tab's own custodians are frequently not pilots at all), so this offers the whole
-   *  enabled directory rather than guessing a role cutoff the plan never specified. */
-  readonly custodianDirectory = computed<readonly UserSummary[]>(() =>
-    [...this.users()].filter((user) => user.enabled).sort((a, b) => a.displayName.localeCompare(b.displayName)),
+  /**
+   * The session's own ownership group — the best stand-in this client has for *the asset's* group,
+   * which never reaches the wire (`AssetSummaryResponse.owner` is the owning **user** id; nothing
+   * serialises `Ownership#groupId`). `core/org/pilot-logic.ts#custodianPickerGroups` is built around
+   * exactly that limitation: an unresolved or mismatched group costs a *less sorted* picker, never a
+   * shorter one.
+   */
+  readonly ownershipGroupId = computed<string | undefined>(
+    () => creatorOwnershipGroup(this.auth.user()?.memberships ?? [])?.groupId,
   );
+
+  /**
+   * The Issue dialog's grouped picker for one asset — **Assigned pilots** → **Other pilots** →
+   * everyone else (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.5; context §3 defect E was a flat
+   * 36-row directory). The grouping rule itself lives in `core/org/pilot-logic.ts`, lifted there from
+   * the onboarding wizard's Hand-over step so both pickers answer "is Anna a pilot?" identically.
+   *
+   * Reads the asset's pilots out of the same cache the drawer's *Pilots* section uses
+   * ({@link pilotsFor}) — the dialog calls {@link ensurePilots} when it opens, and renders the
+   * two-group shape as soon as that lands. Until then "Assigned pilots" is simply empty and everyone
+   * is reachable under the other two headings: never a blocked dialog.
+   */
+  custodianGroupsFor(assetId: string | undefined): CustodianPickerGroups {
+    return custodianPickerGroups({
+      users: this.users(),
+      assignedPilots: assetId ? this.pilotsFor(assetId) : [],
+      groupId: this.ownershipGroupId(),
+    });
+  }
 
   // --- Two-pane selection (`?sel=<assetId>`, mirrors `AssetsFacade`) ------------------------------
 
@@ -279,6 +400,72 @@ export class InventoryFacade {
   readonly maintenanceRecords = signal<readonly MaintenanceRecord[]>([]);
   readonly loadingMaintenance = signal(false);
 
+  /** The one open record the drawer names, already rendered (`vehicles-logic.ts#openMaintenanceSummary`);
+   *  `undefined` when nothing is open — the drawer then says "No open records" rather than listing a
+   *  closed record's history, which belongs on the full asset page. */
+  readonly openMaintenance = computed<OpenMaintenanceSummary | undefined>(() =>
+    openMaintenanceSummary(this.maintenanceRecords(), this.userNameById(), Date.now()),
+  );
+
+  // --- Pilots, on selection (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.3's `Pilots` section) ---
+
+  /**
+   * `GET /api/assets/{id}/pilots` responses, keyed by asset id — cached exactly like
+   * {@link detailsByAssetId}. **`null` is a third state, not an empty list**: it records that the
+   * read was attempted and failed, so the drawer can say "couldn't load" instead of the *claim*
+   * "nobody is assigned to fly this", which a failed request has no standing to make.
+   */
+  private readonly pilotsByAssetId = signal<ReadonlyMap<string, readonly AssignedPilot[] | null>>(new Map());
+  readonly loadingPilots = signal(false);
+
+  /** One asset's assigned pilots as far as this session knows them — `[]` while unfetched or if the read failed. */
+  pilotsFor(assetId: string): readonly AssignedPilot[] {
+    return this.pilotsByAssetId().get(assetId) ?? [];
+  }
+
+  /** The open drawer's own pilots — `[]` with nothing selected, so the section renders its empty line, never a spinner that never ends. */
+  readonly selectedPilots = computed<readonly AssignedPilot[]>(() => {
+    const id = this.selectedId();
+    return id ? this.pilotsFor(id) : [];
+  });
+
+  /** Whether the open drawer's pilot read actually failed — see {@link pilotsByAssetId}'s third state. */
+  readonly selectedPilotsUnavailable = computed(() => {
+    const id = this.selectedId();
+    return id ? this.pilotsByAssetId().get(id) === null : false;
+  });
+
+  /**
+   * One asset's pilot list, fetched at most once per id and reused thereafter. The read is
+   * scope-gated only (`AssignmentController#pilots` 404s an out-of-scope asset and requires no
+   * capability), so a pilot sees the crew of the aircraft they fly. A failure is recorded as `null`
+   * and degrades to a "couldn't load" line — never a blocked drawer and never an invented roster.
+   * {@link invalidatePilots} drops one entry after an Issue, whose server side also grants a seat.
+   */
+  async ensurePilots(assetId: string): Promise<void> {
+    if (this.pilotsByAssetId().has(assetId)) {
+      return;
+    }
+    this.loadingPilots.set(true);
+    try {
+      const pilots = await this.api.listAssetPilots(assetId);
+      this.pilotsByAssetId.update((map) => new Map(map).set(assetId, pilots));
+    } catch {
+      this.pilotsByAssetId.update((map) => new Map(map).set(assetId, null));
+    } finally {
+      this.loadingPilots.set(false);
+    }
+  }
+
+  private async invalidatePilots(assetId: string): Promise<void> {
+    this.pilotsByAssetId.update((map) => {
+      const next = new Map(map);
+      next.delete(assetId);
+      return next;
+    });
+    await this.ensurePilots(assetId);
+  }
+
   // --- Details, on selection (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.3, context §3 defect D) --
 
   readonly loadingDetails = signal(false);
@@ -327,6 +514,7 @@ export class InventoryFacade {
       if (assetId) {
         void this.ensureDetails(assetId);
         void this.loadMaintenance(assetId);
+        void this.ensurePilots(assetId);
       } else {
         this.maintenanceRecords.set([]);
       }
@@ -344,18 +532,12 @@ export class InventoryFacade {
     }
   }
 
-  async openMaintenanceRecord(assetId: string, kind: MaintenanceKind, summary: string): Promise<void> {
-    this.submitting.set(true);
-    try {
-      await this.api.createMaintenanceRecord(assetId, { kind, summary });
-      await this.loadMaintenance(assetId);
-      this.toasts.ok('Maintenance record opened.');
-    } catch (error) {
-      this.toasts.error(describeHttpError(error));
-    } finally {
-      this.submitting.set(false);
-    }
-  }
+  // The drawer's own "open a record" form is gone (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.3,
+  // wave W4): grounding a vehicle already *is* opening a record, through the Ground modal that names
+  // a kind and a reason and moves the vehicle's state with it. A second, near-identical form in the
+  // drawer offered a record that changed nothing and a `NOTE` kind nothing on this page could read —
+  // so `createMaintenanceRecord` is no longer called from Inventory at all (the full asset page keeps
+  // its own history editor). Closing one stays here: it is the counterpart to Release.
 
   async closeMaintenanceRecordNow(assetId: string, recordId: string): Promise<void> {
     this.submitting.set(true);
@@ -392,12 +574,46 @@ export class InventoryFacade {
     });
   }
 
+  /**
+   * One asset's full record, re-read after a custody/inventory write and spliced back in
+   * (docs/plans/active/INVENTORY-REWORK-PLAN.md wave W1's wire note). {@link patchAsset} alone is not
+   * enough for the *nested* records: `AssetInventoryController#detailsResponse` builds its
+   * `CustodyResponse` without the name join, so the object that replaces `custody` carries a
+   * `custodianId` and **no `custodianName`** — the row would fall straight back to a truncated id the
+   * instant somebody pressed Issue, on a station where the fleet listing had just rendered the real
+   * name. One `GET /api/assets/{id}` per action, on the one asset that changed, restores it.
+   *
+   * A failed re-read is silent on purpose: the mutation itself succeeded and is already reflected;
+   * the row simply keeps the shorter-labelled version until the next refresh, which is a degraded
+   * label, not a wrong one.
+   */
+  private async refreshAsset(assetId: string): Promise<void> {
+    try {
+      this.patchAsset(await this.api.getAsset(assetId));
+    } catch {
+      // Keep the mutation response's own picture — see above.
+    }
+  }
+
+  /**
+   * Issue (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.5) — custody **and**, server-side, a `PILOT`
+   * assignment. The confirmation says so only when it is true: W1's `HandoverService` skips the grant
+   * whenever the asset already has any seat, so this compares the asset's pilot list either side of
+   * the write and appends `· assigned as pilot` only when a `PILOT` seat genuinely appeared for this
+   * person. Undo returns it to stock — the reverse of the custody half; a seat the server granted
+   * stays granted, which is why the toast never promises to take one back.
+   */
   async issueTo(assetId: string, custodianId: string, location: string): Promise<void> {
     this.busyAssetId.set(assetId);
+    await this.ensurePilots(assetId);
+    const hadSeat = this.pilotsFor(assetId).some((pilot) => pilot.userId === custodianId && pilot.role === 'PILOT');
     try {
       const updated = await this.api.setAssetCustody(assetId, { action: 'ISSUE', custodianId, location: location.trim() || undefined });
       this.patchAsset(updated);
-      this.toasts.ok(`Issued "${updated.displayName}".`);
+      await Promise.all([this.refreshAsset(assetId), this.invalidatePilots(assetId)]);
+      const gotSeat = !hadSeat && this.pilotsFor(assetId).some((pilot) => pilot.userId === custodianId && pilot.role === 'PILOT');
+      const name = this.custodianNameFor(assetId, custodianId);
+      this.undoToast.showUndo(`Issued to ${name}${gotSeat ? ' · assigned as pilot' : ''}`, () => void this.returnAsset(assetId, { quiet: true }));
     } catch (error) {
       this.toasts.error(describeHttpError(error));
     } finally {
@@ -405,12 +621,39 @@ export class InventoryFacade {
     }
   }
 
-  async returnAsset(assetId: string): Promise<void> {
+  /** The name a custody confirmation calls somebody — the wire's own resolved name, else the user-list
+   *  join, else a truncated id (`vehicles-logic.ts#custodianLabel`, the exact rule the table cell uses). */
+  private custodianNameFor(assetId: string, custodianId: string): string {
+    const custody = this.assets().find((asset) => asset.assetId === assetId)?.custody;
+    const resolved = custody?.custodianId === custodianId ? custody : { custodianId };
+    return custodianLabel(resolved, this.userNameById()).name ?? custodianId;
+  }
+
+  /**
+   * Return to stock. Undo re-issues to **the same person, at the same location** — captured before
+   * the write, since the response deliberately clears both. An asset that somehow had no custodian
+   * recorded gets a plain toast with nothing to undo: offering an Undo that would re-issue to nobody
+   * is worse than offering none.
+   *
+   * `quiet` suppresses the toast for the one caller that already has one on screen — Issue's own
+   * Undo, which must not answer a click on "Undo" by opening a second undo window offering to redo it.
+   */
+  async returnAsset(assetId: string, options?: { readonly quiet?: boolean }): Promise<void> {
     this.busyAssetId.set(assetId);
+    const previous = this.assets().find((asset) => asset.assetId === assetId)?.custody;
     try {
       const updated = await this.api.setAssetCustody(assetId, { action: 'RETURN' });
       this.patchAsset(updated);
-      this.toasts.ok(`Returned "${updated.displayName}" to stock.`);
+      await this.refreshAsset(assetId);
+      if (options?.quiet) {
+        return;
+      }
+      const custodianId = previous?.custodianId;
+      if (custodianId) {
+        this.undoToast.showUndo('Returned to stock', () => void this.issueTo(assetId, custodianId, previous?.location ?? ''));
+      } else {
+        this.toasts.ok('Returned to stock.');
+      }
     } catch (error) {
       this.toasts.error(describeHttpError(error));
     } finally {
@@ -423,6 +666,7 @@ export class InventoryFacade {
     try {
       const updated = await this.api.setAssetInventory(assetId, { action: 'GROUND', kind, summary });
       this.patchAsset(updated);
+      await this.refreshAsset(assetId);
       this.toasts.ok(`Grounded "${updated.displayName}".`);
       if (this.selectedId() === assetId) {
         await this.loadMaintenance(assetId);
@@ -439,7 +683,11 @@ export class InventoryFacade {
     try {
       const updated = await this.api.setAssetInventory(assetId, { action: 'RELEASE' });
       this.patchAsset(updated);
+      await this.refreshAsset(assetId);
       this.toasts.ok(`Released "${updated.displayName}" back to stock.`);
+      if (this.selectedId() === assetId) {
+        await this.loadMaintenance(assetId);
+      }
     } catch (error) {
       this.toasts.error(describeHttpError(error));
     } finally {
@@ -452,6 +700,7 @@ export class InventoryFacade {
     try {
       const updated = await this.api.setAssetInventory(assetId, { action: 'RETIRE' });
       this.patchAsset(updated);
+      await this.refreshAsset(assetId);
       this.toasts.ok(`Retired "${updated.displayName}".`);
     } catch (error) {
       this.toasts.error(describeHttpError(error));
@@ -495,6 +744,13 @@ export class InventoryFacade {
 
   // --- CSV export (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3's Export action) -------------------
 
+  /**
+   * **Whole scope, always.** `InventoryExportController` takes exactly one parameter — `format` — and
+   * exports every asset the session may see; there is no filter to pass, so passing one would be a
+   * lie told by a query string. Rather than silently exporting more than the screen shows, the button
+   * says what it does: `Export all (CSV)` (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.1, wave W4).
+   * A filtered export needs a server change, and is not one this wave invents client-side.
+   */
   exportUrl(): string {
     return this.api.inventoryExportUrl('csv');
   }
@@ -506,11 +762,15 @@ export class InventoryFacade {
   // --- Load ---------------------------------------------------------------------------------------
 
   /**
-   * The page's whole fleet read — **five requests, flat, regardless of fleet size**
+   * The page's whole fleet read — **four requests, flat, regardless of fleet size**
    * (docs/plans/active/INVENTORY-REWORK-PLAN.md wave W3, context §3 defect D: this used to be
    * `5 + one GET /api/assets/{id} per asset`, 25 requests for the dev fleet's 20 vehicles, every one
    * of them re-fetching data `GET /api/assets` had already returned). Per-asset details now load on
    * selection ({@link ensureDetails}).
+   *
+   * `GET /api/fleet/summary` is gone with the KPI strip it fed (wave W4, D7): the five tiles above
+   * the table are now views over *these* rows, so a fleet-wide count computed a second time
+   * server-side could only disagree with what the table underneath it shows.
    *
    * `GET /api/users` is skipped entirely for an `ASSIGNED_ASSETS` scope — a pilot-only session, for
    * which `UserAdminController` answers `[]` by design (context §3). It is a *fallback* join now
@@ -521,12 +781,11 @@ export class InventoryFacade {
     this.loading.set(true);
     this.error.set(null);
     try {
-      const [summaries, categories, users, readiness, summary] = await Promise.all([
+      const [summaries, categories, users, readiness] = await Promise.all([
         this.showArchived() ? this.fleet.listAssetsIncludingArchived() : this.api.listAssets(),
         this.api.listCategories(),
         this.loadUserNames(),
         this.api.fleetReadiness(),
-        this.api.fleetSummary(),
       ]);
       if (summaries) {
         this.assets.set(summaries);
@@ -534,13 +793,15 @@ export class InventoryFacade {
       this.categories.set(categories);
       this.users.set(users);
       this.readinessByAssetId.set(new Map(readiness.assets.map((row) => [row.assetId, row])));
-      this.fleetSummaryData.set(summary);
-      // A refresh must not leave a stale device/usage picture behind the pane; re-fetch only the one
-      // asset that is actually open, if any.
+      this.latchDefaultView();
+      // A refresh must not leave a stale device/usage/pilot picture behind the pane; re-fetch only
+      // the one asset that is actually open, if any.
       this.detailsByAssetId.set(new Map());
+      this.pilotsByAssetId.set(new Map());
       const selected = this.selectedId();
       if (selected) {
         void this.ensureDetails(selected);
+        void this.ensurePilots(selected);
       }
     } catch (error) {
       this.error.set(describeHttpError(error));

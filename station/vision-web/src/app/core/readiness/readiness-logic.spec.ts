@@ -7,6 +7,7 @@ import {
   featureStatusLabel,
   featureStatusTone,
   fleetRowAttention,
+  fleetRowBlockers,
   groundedBannerText,
   groundingBlocker,
   hasBeenProbed,
@@ -172,6 +173,32 @@ describe('fleetRowAttention', () => {
 
   it('falls back to the raw key for an unrecognised feature in the rollup', () => {
     expect(fleetRowAttention(row({ features: { 'future-feature': 'MISSING' } }))).toBe('future-feature');
+  });
+});
+
+describe('fleetRowBlockers', () => {
+  it('is empty when every evaluated feature is READY, and for a row with none evaluated at all', () => {
+    expect(fleetRowBlockers(row({ features: { battery: 'READY' } }))).toEqual([]);
+    expect(fleetRowBlockers(row({ features: {} }))).toEqual([]);
+  });
+
+  it('names every blocker, uncapped, in the same frozen order the rollup uses', () => {
+    const blockers = fleetRowBlockers(
+      row({
+        features: {
+          'visual-geolocation': 'MISSING',
+          battery: 'MISSING',
+          'map-position': 'DEGRADED',
+          'ground-speed': 'UNKNOWN',
+        },
+      }),
+    );
+    expect(blockers).toEqual(['Map position', 'Ground speed', 'Battery', 'Visual geolocation']);
+  });
+
+  it('agrees with fleetRowAttention on which blocker comes first', () => {
+    const r = row({ features: { battery: 'MISSING', 'map-position': 'DEGRADED' } });
+    expect(fleetRowAttention(r, 1)).toBe(`${fleetRowBlockers(r)[0]} +1 more`);
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { AssetDetails, AssetSummary, ReadinessRow, UserSummary } from '../../core/api/models';
+import type { AssetDetails, AssetSummary, MaintenanceRecord, ReadinessRow, UserSummary } from '../../core/api/models';
 import {
   buildVehicleRows,
   custodianFilterOptions,
@@ -13,8 +13,10 @@ import {
   filterVehicleRowsByRetired,
   findVehicleRowById,
   firmwareLabel,
+  custodySinceLabel,
   linksLabel,
-  searchVehicleRowsByName,
+  openMaintenanceSummary,
+  searchVehicleRows,
   sortVehicleRowsByTriage,
   vehicleLastFlownLabel,
   type BuildVehicleRowsInput,
@@ -74,6 +76,9 @@ function row(partial: Partial<VehicleRow> = {}): VehicleRow {
     streaming: false,
     links: '—',
     stateChip: { kind: 'unknown', label: '—', tone: 'muted', live: false },
+    sinceLabel: '—',
+    simulated: false,
+    readinessBlockers: [],
     firmware: '—',
     hours: '—',
     lastFlownLabel: 'Never flown',
@@ -90,6 +95,22 @@ describe('vehicleLastFlownLabel', () => {
     const now = Date.parse('2026-08-29T12:00:00Z');
     const lastUsedAt = new Date(now - 3_600_000).toISOString();
     expect(vehicleLastFlownLabel(lastUsedAt, now)).toMatch(/ago$/);
+  });
+});
+
+describe('custodySinceLabel', () => {
+  const now = Date.parse('2026-09-06T12:00:00Z');
+
+  it('is an em dash for an asset nobody holds', () => {
+    expect(custodySinceLabel(undefined, now)).toBe('—');
+  });
+
+  it('is an em dash for a timestamp this build cannot parse — never a fabricated "just now"', () => {
+    expect(custodySinceLabel('not-a-date', now)).toBe('—');
+  });
+
+  it('renders how long the custody has stood', () => {
+    expect(custodySinceLabel('2026-09-06T09:00:00Z', now)).toBe('3h ago');
   });
 });
 
@@ -155,6 +176,28 @@ describe('custodianLabel', () => {
 });
 
 describe('buildVehicleRows', () => {
+  it('carries the drawer\'s own three derived facts: since, simulated origin and the full blocker list', () => {
+    const nowMs = Date.parse('2026-09-06T12:00:00Z');
+    const rows = rowsFor(
+      [
+        asset({ assetId: 'a-1', custody: { custodianId: 'u-1', since: '2026-09-06T10:00:00Z' } }),
+        asset({ assetId: 'a-2', category: 'simulated' }),
+      ],
+      {
+        readinessByAssetId: new Map([
+          ['a-1', readinessRow({ assetId: 'a-1', verdict: 'NO_GO', features: { battery: 'MISSING', 'map-position': 'DEGRADED' } })],
+        ]),
+        nowMs,
+      },
+    );
+    expect(rows.find((r) => r.asset.assetId === 'a-1')?.sinceLabel).toBe('2h ago');
+    expect(rows.find((r) => r.asset.assetId === 'a-1')?.readinessBlockers).toEqual(['Map position', 'Battery']);
+    expect(rows.find((r) => r.asset.assetId === 'a-1')?.simulated).toBe(false);
+    expect(rows.find((r) => r.asset.assetId === 'a-2')?.simulated).toBe(true);
+    expect(rows.find((r) => r.asset.assetId === 'a-2')?.sinceLabel).toBe('—');
+    expect(rows.find((r) => r.asset.assetId === 'a-2')?.readinessBlockers).toEqual([]);
+  });
+
   it('resolves the custodian id to a display name when found', () => {
     const rows = rowsFor([asset({ assetId: 'a-1', custody: { custodianId: 'u-1', since: '2026-08-01T00:00:00Z' } })], {
       users: [user({ userId: 'u-1', displayName: 'Jane Pilot' })],
@@ -340,10 +383,73 @@ describe('filterVehicleRowsByReadiness', () => {
   });
 });
 
-describe('searchVehicleRowsByName', () => {
-  it('matches case-insensitively', () => {
-    const rows = [row({ asset: asset({ displayName: 'Falcon One' }) }), row({ asset: asset({ displayName: 'Rover' }) })];
-    expect(searchVehicleRowsByName(rows, 'falcon')).toHaveLength(1);
+describe('searchVehicleRows', () => {
+  const falcon = row({ asset: asset({ displayName: 'Falcon One', identity: { serialNumber: 'SN-4417' } }), registration: 'UR-1234' });
+  const rover = row({ asset: asset({ displayName: 'Rover' }) });
+  const rows = [falcon, rover];
+
+  it('matches the display name, case-insensitively', () => {
+    expect(searchVehicleRows(rows, 'falcon')).toEqual([falcon]);
+  });
+
+  it('matches the serial and the registration — the two identifiers painted on the airframe', () => {
+    expect(searchVehicleRows(rows, 'sn-44')).toEqual([falcon]);
+    expect(searchVehicleRows(rows, 'ur-1234')).toEqual([falcon]);
+  });
+
+  it('leaves every row for a blank query and drops every row for a miss', () => {
+    expect(searchVehicleRows(rows, '   ')).toBe(rows);
+    expect(searchVehicleRows(rows, 'nothing')).toEqual([]);
+  });
+
+  it('never matches a row whose serial/registration are simply absent', () => {
+    expect(searchVehicleRows([rover], 'sn')).toEqual([]);
+  });
+});
+
+describe('openMaintenanceSummary', () => {
+  const nowMs = Date.parse('2026-09-06T12:00:00Z');
+
+  function record(partial: Partial<MaintenanceRecord> = {}): MaintenanceRecord {
+    return {
+      id: 'r-1',
+      assetId: 'a-1',
+      kind: 'GROUNDING',
+      openedAt: '2026-09-06T09:00:00Z',
+      openedBy: 'u-1',
+      summary: 'Cracked arm',
+      ...partial,
+    };
+  }
+
+  it('has nothing to show when every record is closed', () => {
+    expect(openMaintenanceSummary([record({ closedAt: '2026-09-06T10:00:00Z' })], new Map(), nowMs)).toBeUndefined();
+    expect(openMaintenanceSummary([], new Map(), nowMs)).toBeUndefined();
+  });
+
+  it('names the oldest open record, its kind label, its opener and its age', () => {
+    const summary = openMaintenanceSummary(
+      [
+        record({ id: 'r-new', openedAt: '2026-09-06T11:00:00Z', summary: 'Newer' }),
+        record({ id: 'r-old', openedAt: '2026-09-06T09:00:00Z', summary: 'Cracked arm' }),
+      ],
+      new Map([['u-1', 'Mo Manager']]),
+      nowMs,
+    );
+    expect(summary).toEqual({
+      recordId: 'r-old',
+      kindLabel: 'Grounded',
+      summary: 'Cracked arm',
+      openedByLabel: 'Mo Manager',
+      ageLabel: '3h ago',
+    });
+  });
+
+  it('reads the system principal as Station and an unresolvable id as a truncation', () => {
+    const station = openMaintenanceSummary([record({ openedBy: '00000000-0000-0000-0000-000000000000' })], new Map(), nowMs);
+    expect(station?.openedByLabel).toBe('Station');
+    const unknown = openMaintenanceSummary([record({ openedBy: '3f2a91c4-1111-2222-3333-444444444444' })], new Map(), nowMs);
+    expect(unknown?.openedByLabel).toBe('3f2a91c4');
   });
 });
 
