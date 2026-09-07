@@ -21,6 +21,13 @@ import { resolveInteractionMode } from '../../core/map-data/drawings-logic';
 import { EventsStore } from '../../core/events/events-store';
 import { selectEventMarkers } from '../../core/events/events-logic';
 import { LiveStore } from '../../core/live/live-store';
+import { isLiveAvailable } from '../../core/live/live-fallback-logic';
+import {
+  SUMMARY_FLOOR_INTERVAL_MS,
+  anyNamesListedAsset,
+  invalidationDelayMs,
+  listedAssetIds,
+} from '../../core/fleet/summary-refresh-logic';
 import { WeatherStore } from '../../core/weather/weather-store';
 import { fleetCentroid } from '../../core/weather/weather-logic';
 import { buildEntityRows, buildRailGroups, commandGridColumns, type AttentionReason, type DetailPanelState, type EntityRow, type RailRow } from './command-logic';
@@ -29,8 +36,23 @@ import { buildSetupChecklist, isFreshStation, type SetupChecklistRow } from '../
 import type { DrawingDraft } from '../../shared/map/tactical-map/tactical-map-logic';
 import type { AssetAttention, FleetSummary, GroupSummary, UserSummary } from '../../core/api/models';
 
-/** The one poll driving the entity rail and the selected asset's Status/Telemetry facts alike. */
+/**
+ * The fleet-summary read's **not-open fallback** cadence (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md
+ * §5 L8a) — unchanged from the unconditional timer this wave retired, but now reached only while
+ * `LiveStore` is not `'open'`. While it is, the summary refetches on *invalidation* instead: a
+ * `fleet`/`devices` arrival, or a `detection-events` arrival naming an asset this summary lists,
+ * debounced to at most one request per `SUMMARY_INVALIDATION_DEBOUNCE_MS`, with
+ * `SUMMARY_FLOOR_INTERVAL_MS` as the floor for the telemetry-derived fields that ride no topic.
+ */
 const SUMMARY_POLL_INTERVAL_MS = 5_000;
+
+/**
+ * The rail's age text and the pipeline-error decay window tick on this, independent of any fetch.
+ * It matches the cadence those readouts already had when they piggybacked `refreshSummary()`'s own
+ * 5s poll — which wave L8a turned event-driven, so the clock had to stop inheriting the transport's
+ * cadence or the rail's "n seconds ago" would have quietly slowed to the 10s floor. Local, no requests.
+ */
+const CLOCK_TICK_MS = 5_000;
 
 const RAIL_OPEN_KEY = 'vision.command.railOpen';
 const PANEL_OPEN_KEY = 'vision.command.panelOpen';
@@ -94,6 +116,7 @@ export class CommandFacade {
   private readonly geofence = inject(GeofenceStore);
   private readonly events = inject(EventsStore);
   private readonly liveStore = inject(LiveStore);
+  private readonly scheduler = inject(PollScheduler);
   private readonly weather = inject(WeatherStore);
   /** §3.4's on-demand route fetch — page-provided alongside `FleetMapStore`/`WeatherStore` in
    *  `CommandPage`'s own `providers` (see `RouteStore`'s own class doc comment for why). */
@@ -176,12 +199,17 @@ export class CommandFacade {
   );
 
   /**
-   * Wall-clock ms, ticked from `refreshSummary()`'s own 5s poll (below) rather than a second timer —
+   * Wall-clock ms on its own {@link CLOCK_TICK_MS} tick —
    * `activePipelineErrorMessagesByStreamId`'s 15-minute decay window (docs/plans/done/SYSTEM-STATUS-PLAN.md
    * §3.4) needs *some* source of "time is passing" independent of new `LiveEvent`s arriving, or a
    * stream that errored once and then went silent would stay flagged forever until the next
-   * unrelated live event happened to re-run this computed. Piggybacking on the poll this page
-   * already runs avoids adding a dedicated interval for one derived value.
+   * unrelated live event happened to re-run this computed.
+   *
+   * This used to piggyback `refreshSummary()`'s own unconditional 5s poll, which was the cheaper
+   * arrangement while that poll existed. Wave L8a made the fetch event-driven with a 10s floor, so
+   * the piggyback would have silently halved the rail's age-text refresh rate — a UI regression
+   * bought by a request saving nobody asked for. The clock is now its own thing, at the cadence it
+   * always effectively had.
    */
   private readonly nowSignal = signal(Date.now());
 
@@ -411,9 +439,45 @@ export class CommandFacade {
   private appliedDeepLink = false;
 
   constructor() {
-    void this.refreshSummary();
-    const stopPoll = inject(PollScheduler).schedule(SUMMARY_POLL_INTERVAL_MS, () => this.refreshSummary());
-    inject(DestroyRef).onDestroy(stopPoll);
+    // No `refreshSummary()` here: `applySummaryTransport` below fetches once on its own first run,
+    // whichever transport it resolves to. Calling it here as well would double-fetch at construction
+    // -- the same reason `MarksStore.activate()` routes through `applyTransport` instead of
+    // refreshing directly.
+    const stopClock = this.scheduler.schedule(CLOCK_TICK_MS, () => this.nowSignal.set(Date.now()));
+    inject(DestroyRef).onDestroy(stopClock);
+
+    // D1 + L8a: while live is open the summary refetches on invalidation plus a floor; while it is
+    // not, the original 5s poll is the fallback. Same `liveGated` shape as every store this plan
+    // gates — see `core/map-data/marks-store.ts#applyTransport` for the frozen table.
+    effect(() => {
+      this.applySummaryTransport(isLiveAvailable(this.liveStore.connectionState()));
+    });
+
+    // The invalidation itself. `fleet`/`devices` arrivals are structural by definition; a
+    // `detection-events` arrival only counts if it names an asset this summary already lists
+    // (`openEventCount` is the only summary field it can move). The first run is swallowed — the
+    // constructor's own `refreshSummary()` above already covers construction.
+    effect(() => {
+      const detectionEvents = this.liveStore.detectionEvents();
+      const structural = this.liveStore.fleet() !== undefined || this.liveStore.devices() !== undefined;
+      untracked(() => {
+        const newEvents = detectionEvents.slice(this.processedDetectionEventCount);
+        this.processedDetectionEventCount = detectionEvents.length;
+        if (!this.summaryBootstrapped) {
+          this.summaryBootstrapped = true;
+          return;
+        }
+        if (!isLiveAvailable(this.liveStore.connectionState())) {
+          return; // the 5s fallback poll already covers this case
+        }
+        if (!structural && !anyNamesListedAsset(newEvents, listedAssetIds(this.summary()))) {
+          return;
+        }
+        this.invalidateSummary();
+      });
+    });
+
+    inject(DestroyRef).onDestroy(() => this.teardownSummaryTransport());
 
     // ALWAYS-ON-FLOW-PLAN.md §4 Wave C3: `/command` renders `<vision-tactical-map>`, so this facade
     // is a direct consumer of all four map-data poll stores for its own lifetime — see each store's
@@ -543,10 +607,101 @@ export class CommandFacade {
     });
   }
 
+  /** Cursor into `LiveStore.detectionEvents()` — the same idiom `MarksStore` uses for `map`. */
+  private processedDetectionEventCount = 0;
+  /** Swallows the invalidation effect's own first run; the constructor already fetched. */
+  private summaryBootstrapped = false;
+  /** `true` while the summary is on live+invalidation rather than the fallback poll (D1's `liveGated`). */
+  private summaryLiveGated = false;
+  /** The fallback poll's unsubscribe, held only while it is actually running. */
+  private stopSummaryPollFn: (() => void) | null = null;
+  /** The floor timer's unsubscribe, held only while live is open. */
+  private stopSummaryFloorFn: (() => void) | null = null;
+  /** A queued debounced refetch, or `null` when none is pending. */
+  private summaryInvalidationHandle: ReturnType<typeof setTimeout> | null = null;
+  /** When the most recent `refreshSummary()` started — the debounce's own reference point. */
+  private lastSummaryFetchAtMs = 0;
+
+  /**
+   * D1's frozen gate for the fleet-summary read (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3,
+   * wave L8a), live axis only — this facade is page-provided, so its lifetime already is its demand
+   * signal, exactly like `FleetMapStore`'s.
+   *
+   * | `liveAvailable` | previous | Action |
+   * |---|---|---|
+   * | `true` | poll | stop poll; refresh once; start the floor timer |
+   * | `true` | live | nothing |
+   * | `false` | live | stop floor + any pending invalidation; refresh once; start poll |
+   * | `false` | poll | nothing |
+   */
+  private applySummaryTransport(liveAvailable: boolean): void {
+    if (liveAvailable) {
+      if (this.summaryLiveGated) {
+        return;
+      }
+      this.stopSummaryPoll();
+      void this.refreshSummary();
+      this.stopSummaryFloorFn = this.scheduler.schedule(SUMMARY_FLOOR_INTERVAL_MS, () => this.refreshSummary());
+      this.summaryLiveGated = true;
+      return;
+    }
+    this.summaryLiveGated = false;
+    this.stopSummaryFloor();
+    this.cancelPendingInvalidation();
+    if (this.stopSummaryPollFn !== null) {
+      return; // already polling
+    }
+    void this.refreshSummary();
+    this.stopSummaryPollFn = this.scheduler.schedule(SUMMARY_POLL_INTERVAL_MS, () => this.refreshSummary());
+  }
+
+  /**
+   * Queues one debounced refetch. A second invalidation arriving while one is already queued is
+   * folded into it rather than adding a request — the debounce bounds the *rate*, so a burst of
+   * arrivals costs exactly one fetch. Raw `setTimeout` rather than `PollScheduler`, matching
+   * `LayersStore#scheduleGrantsReconcile`'s own one-shot-debounce precedent (that scheduler is a
+   * fixed-cadence heartbeat, not a one-shot timer).
+   */
+  private invalidateSummary(): void {
+    if (this.summaryInvalidationHandle !== null) {
+      return;
+    }
+    const delay = invalidationDelayMs(this.lastSummaryFetchAtMs, Date.now());
+    this.summaryInvalidationHandle = setTimeout(() => {
+      this.summaryInvalidationHandle = null;
+      void this.refreshSummary();
+    }, delay);
+  }
+
+  private cancelPendingInvalidation(): void {
+    if (this.summaryInvalidationHandle !== null) {
+      clearTimeout(this.summaryInvalidationHandle);
+      this.summaryInvalidationHandle = null;
+    }
+  }
+
+  private stopSummaryPoll(): void {
+    this.stopSummaryPollFn?.();
+    this.stopSummaryPollFn = null;
+  }
+
+  private stopSummaryFloor(): void {
+    this.stopSummaryFloorFn?.();
+    this.stopSummaryFloorFn = null;
+  }
+
+  private teardownSummaryTransport(): void {
+    this.stopSummaryPoll();
+    this.stopSummaryFloor();
+    this.cancelPendingInvalidation();
+  }
+
   private async refreshSummary(): Promise<void> {
-    // Piggybacked tick for `pipelineErrorMessagesByStreamId`'s decay window — see `nowSignal`'s own
-    // doc comment. Set unconditionally, on both success and failure paths, since decay should keep
-    // advancing even while the summary itself is failing to refresh.
+    this.lastSummaryFetchAtMs = Date.now();
+    // Also ticks the shared clock, on both success and failure paths. `nowSignal` has its own
+    // CLOCK_TICK_MS timer since wave L8a and no longer depends on this, but a fetch is still a
+    // genuine "time has passed" moment, and advancing it here keeps every derived age recomputing
+    // against the same snapshot the summary itself just produced.
     this.nowSignal.set(Date.now());
     try {
       const data = await this.api.fleetSummary(this.includeArchivedSignal());
