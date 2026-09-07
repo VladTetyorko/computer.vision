@@ -56,9 +56,11 @@ import {
   type VehicleRow,
 } from './vehicles-logic';
 import type {
+  Assignment,
   AssetDetails,
   AssetSummary,
   AssignedPilot,
+  AssignmentRole,
   Category,
   MaintenanceKind,
   MaintenanceRecord,
@@ -94,6 +96,12 @@ import type {
  * **Every verb on screen is one this session may actually use** — {@link actor} × {@link actionsFor}
  * (`core/fleet/inventory-logic.ts#vehicleRowActions`, plan §5.2). No template in this feature makes
  * its own authority decision.
+ *
+ * **"My vehicles" (plan §5.4, wave W5)** — a genuinely `ASSIGNED_ASSETS`-scoped session
+ * (`showsManagerView() === false`) reads {@link myVehicleRows}/{@link myEquipmentRows}, deliberately
+ * the *pre-view* rows (see their own doc comments for why), and {@link myRoleFor} for the one
+ * additional per-asset fact the cards need that the table never did: this session's own
+ * `AssignmentRole` on the asset, so a `CREW`-assigned card can never offer Fly.
  *
  * **Mutations patch in place.** `setAssetCustody`/`setAssetInventory` both return the asset's full,
  * updated `AssetDetails` — {@link patchAsset} splices it back into `assets()` directly rather than
@@ -293,6 +301,26 @@ export class InventoryFacade {
   readonly activeRows = computed<readonly VehicleRow[]>(() => (this.tab() === 'equipment' ? this.equipmentRows() : this.vehicleRows()));
 
   /**
+   * "My vehicles" cards' own row sets (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.4, wave W5) —
+   * deliberately the **pre-view** rows ({@link preViewVehicleRows}/{@link preViewEquipmentRows}),
+   * never {@link vehicleRows}/{@link equipmentRows}. The view row (Needs attention/In field/…) is a
+   * manager-only control, rendered only inside `showsManagerView()` in `inventory.html` — a pilot or
+   * crew session has no way to see or change it, yet `view()`'s own default-view latch
+   * (`latchDefaultView`) still runs unconditionally in {@link loadAll}. Reading the post-view signals
+   * here would silently hide a pilot's own *fine* vehicles the moment any one of theirs needed
+   * attention (the tile that would explain why is a control they never see), and worse, `view()` is
+   * remembered per **browser** (`InventoryViewStore`), not per session — a manager's last pick on a
+   * shared station would leak into whatever a pilot logging in next sees. Search/category still
+   * apply (both tabs' filter pipeline runs before the view split), so the page bar's search box
+   * (§5's own gate) narrows these exactly as it narrows the manager's table.
+   */
+  readonly myVehicleRows = computed<readonly VehicleRow[]>(() => this.preViewVehicleRows());
+  readonly myEquipmentRows = computed<readonly VehicleRow[]>(() => this.preViewEquipmentRows());
+
+  /** The page bar's own count for a "My vehicles" session — vehicles **and** equipment together, since both render as one stacked card list (§5.4), not a tab switch. */
+  readonly myRowsCount = computed(() => this.myVehicleRows().length + this.myEquipmentRows().length);
+
+  /**
    * Whether this session gets the manager's table at all (docs/plans/active/INVENTORY-REWORK-PLAN.md
    * §4, wave W5's slot). A `MANAGE_FLEET` holder always does; so does anyone whose visibility scope
    * is wider than their own assignments (a viewer reads the same table, read-only — the verb matrix
@@ -464,6 +492,42 @@ export class InventoryFacade {
       return next;
     });
     await this.ensurePilots(assetId);
+  }
+
+  // --- My own assignments (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.4, wave W5) --------------
+
+  /** `GET /api/me/assignments` by asset id — the acting user's **own** `AssignmentRole`, read once
+   *  for a genuinely `ASSIGNED_ASSETS`-scoped session (a pilot/crew member; see {@link loadMyAssignments}).
+   *  A manager/viewer session never reads this — they never render "My vehicles" cards at all. */
+  private readonly myAssignmentRoleByAssetId = signal<ReadonlyMap<string, AssignmentRole>>(new Map());
+
+  /** This session's own `AssignmentRole` for one asset — `undefined` when unassigned or not yet
+   *  loaded. "My vehicles" cards read this to decide the crew-seat gate (§5.4: "Crew never gets
+   *  Fly") — `my-vehicles-logic.ts#myVehicleActions`. */
+  myRoleFor(assetId: string): AssignmentRole | undefined {
+    return this.myAssignmentRoleByAssetId().get(assetId);
+  }
+
+  /**
+   * Self-scoped, `@OpenByDesign` (INVENTORY-REWORK-PLAN.md §6) — read once per {@link loadAll},
+   * **only** for a session whose visibility scope is `ASSIGNED_ASSETS` (the only persona "My
+   * vehicles" ever renders for; a manager/viewer's own assignments, if any, are not this page's
+   * concern). Not part of the four-request `Promise.all` in {@link loadAll}: it is a fifth request
+   * that exists for a different persona than the one that comment describes, and keeping it separate
+   * means a slow/failed assignments read can never hold up the manager table's own load. A failure
+   * degrades to an empty map — every card then falls through to the plain pilot verb set, never a
+   * blocked page.
+   */
+  private async loadMyAssignments(): Promise<void> {
+    if (this.auth.scopeKind() !== 'ASSIGNED_ASSETS') {
+      return;
+    }
+    try {
+      const assignments = await this.api.myAssignments();
+      this.myAssignmentRoleByAssetId.set(new Map(assignments.map((assignment: Assignment) => [assignment.assetId, assignment.role])));
+    } catch {
+      this.myAssignmentRoleByAssetId.set(new Map());
+    }
   }
 
   // --- Details, on selection (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.3, context §3 defect D) --
@@ -776,6 +840,11 @@ export class InventoryFacade {
    * which `UserAdminController` answers `[]` by design (context §3). It is a *fallback* join now
    * anyway: names travel on the wire (`AssetCustody#custodianName`, D3), so this only backfills a
    * pre-W1 backend, and it is allowed to fail without failing the page.
+   *
+   * **A fifth, persona-scoped request rides alongside these four, not inside their `Promise.all`**
+   * (wave W5): {@link loadMyAssignments} — `GET /api/me/assignments` — fires only for an
+   * `ASSIGNED_ASSETS` session ("My vehicles" cards' own crew-seat gate), fire-and-forget, so it can
+   * never slow down or fail the manager table's own four-request load.
    */
   async loadAll(): Promise<void> {
     this.loading.set(true);
@@ -794,6 +863,7 @@ export class InventoryFacade {
       this.users.set(users);
       this.readinessByAssetId.set(new Map(readiness.assets.map((row) => [row.assetId, row])));
       this.latchDefaultView();
+      void this.loadMyAssignments();
       // A refresh must not leave a stale device/usage/pilot picture behind the pane; re-fetch only
       // the one asset that is actually open, if any.
       this.detailsByAssetId.set(new Map());

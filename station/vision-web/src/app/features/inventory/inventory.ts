@@ -1,15 +1,14 @@
 import { ChangeDetectionStrategy, Component, effect, inject, input } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
 import { CategoriesPage } from '../categories/categories';
 import { DevicesPage } from '../devices/devices';
 import { FoundDevices } from './found-devices';
-import { EmptyState } from '../../shared/ui/empty-state';
 import { Notice } from '../../shared/ui/notice';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { Stat } from '../../shared/ui/stat';
 import { pluralize } from '../../shared/ui/text-logic';
 import { InventoryFacade } from './inventory-facade';
+import { MyVehicles } from './my-vehicles';
 import { VehiclesTable } from './vehicles-table';
 import type { InventoryTab } from '../../core/fleet/inventory-logic';
 import type { VehicleInventoryStateFilter, VehicleReadinessFilter } from './vehicles-logic';
@@ -41,9 +40,11 @@ import type { VehicleInventoryStateFilter, VehicleReadinessFilter } from './vehi
  * takes no filter: see `InventoryFacade#exportUrl`.
  *
  * **Manager view vs. "My vehicles"**: everything from the view row down is wrapped in
- * `InventoryFacade#showsManagerView`. A genuinely `ASSIGNED_ASSETS`-scoped pilot gets the `@else`
- * branch, which wave W5 fills with the card view §4 specifies; until then it is an honest empty
- * state pointing at Fly, never a dense eleven-column table of two aircraft.
+ * `InventoryFacade#showsManagerView`. A genuinely `ASSIGNED_ASSETS`-scoped pilot/crew session gets
+ * the `@else` branch — `<vision-my-vehicles>` (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.4, wave
+ * W5), never the manager's dense table. The page bar itself narrows for that branch too: Category,
+ * More filters, Export all (CSV) and the view/stat row are manager tools and stay behind
+ * `showsManagerView()`; search and Refresh are the two controls every persona gets.
  *
  * **Role gate lives in the tab bar, not the route** (`/assets` itself is ungated, always has been):
  * `InventoryFacade#visibleTabs` hides Links/Categories from a pilot outright — the tab button never
@@ -59,7 +60,7 @@ import type { VehicleInventoryStateFilter, VehicleReadinessFilter } from './vehi
  */
 @Component({
   selector: 'vision-inventory',
-  imports: [FormsModule, RouterLink, PageBar, Stat, Notice, EmptyState, VehiclesTable, DevicesPage, CategoriesPage, FoundDevices],
+  imports: [FormsModule, PageBar, Stat, Notice, VehiclesTable, MyVehicles, DevicesPage, CategoriesPage, FoundDevices],
   templateUrl: './inventory.html',
   styleUrl: './inventory.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

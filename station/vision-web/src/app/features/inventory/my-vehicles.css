@@ -1,0 +1,97 @@
+/* ---- Card grid (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.4, wave W5) — 1-3 columns,
+   responsive by content width rather than a breakpoint list; the 8px scale throughout. */
+
+.card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+    gap: var(--space-16);
+    margin-bottom: var(--space-16);
+}
+
+/* `.card` (global, src/styles.css) already gives the panel/border/radius/padding; a grid item needs
+   no margin-bottom of its own — the grid's own `gap` spaces cards both ways. */
+.vehicle-card {
+    margin-bottom: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+}
+
+.vehicle-card.archived {
+    opacity: 0.6;
+}
+
+.card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-8);
+    min-width: 0;
+}
+
+.card-title {
+    min-width: 0;
+    font-weight: 500;
+    color: var(--text);
+    text-decoration: none;
+}
+
+.card-title:hover,
+.card-title:focus-visible {
+    text-decoration: underline;
+}
+
+/* Category + "Simulated" origin, muted, on the right of the title — one line, never a second chip
+   (frontend-style §5: one chip per row/card). */
+.card-origin {
+    flex: none;
+    max-width: 45%;
+    font-size: 0.78rem;
+}
+
+.card-readiness {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-4);
+    min-width: 0;
+    font-size: 0.85rem;
+}
+
+.card-readiness .muted {
+    min-width: 0;
+    max-width: 12rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.card-line {
+    margin: 0;
+    font-size: 0.82rem;
+}
+
+.equipment-heading {
+    margin: var(--space-8) 0;
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Exactly one primary button per card (`myVehiclePrimaryVerb`); the rest are ghosts. Wraps on a
+   narrow phone rather than shrinking touch targets. */
+.card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: var(--space-8);
+    margin-top: var(--space-8);
+    padding-top: var(--space-8);
+    border-top: 1px solid var(--border);
+}
+
+.card-actions .disabled-reason {
+    flex-basis: 100%;
+    margin-top: 0;
+}

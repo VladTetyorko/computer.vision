@@ -2,20 +2,22 @@
   <vision-page-bar
     title="Inventory"
     icon="warehouse"
-    [count]="facade.activeRows().length"
+    [count]="facade.showsManagerView() ? facade.activeRows().length : facade.myRowsCount()"
     countNoun="item"
   >
-    @if (facade.showsManagerView() && (facade.tab() === 'vehicles' || facade.tab() === 'equipment')) {
-      <!-- One `<ng-container pageBarFilters>` around the whole group, not one attribute per element
-           (NG8011) — an `@if` wrapping more than one projectable root node can't be split across a
-           slot's individual children; `<ng-container>` renders no element of its own, so this is
-           purely a projection-grouping fix, not a layout change (every child below is still its own
-           flex item inside the bar's filter row, exactly as if each carried the attribute itself).
+    <!-- One `<ng-container pageBarFilters>` around the whole group, not one attribute per element
+         (NG8011) — an `@if` wrapping more than one projectable root node can't be split across a
+         slot's individual children; `<ng-container>` renders no element of its own, so this is
+         purely a projection-grouping fix, not a layout change (every child below is still its own
+         flex item inside the bar's filter row, exactly as if each carried the attribute itself).
 
-           The bar carries only the two controls an operator reaches for constantly — the search box
-           and Category (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.1, wave W4). State, Custodian
-           and Readiness moved behind "More filters" below: five side-by-side selects wrapped onto
-           three lines on a laptop and pushed the table below the fold. -->
+         **Search is the one filter every persona gets** (docs/plans/active/INVENTORY-REWORK-PLAN.md
+         §5.4/wave W5): a pilot/crew session's own "My vehicles" cards have no tabs and no view row of
+         their own, but the search box still narrows both their card lists exactly as it narrows the
+         manager's table (`InventoryFacade#myVehicleRows`/`#myEquipmentRows` run the same filter
+         pipeline). Category and More filters stay manager-only tools — a pilot's own fleet is a
+         handful of assigned assets, not a directory that needs slicing. -->
+    @if (!facade.showsManagerView() || facade.tab() === 'vehicles' || facade.tab() === 'equipment') {
       <ng-container pageBarFilters>
         <input
           type="search"
@@ -26,89 +28,96 @@
           (ngModelChange)="facade.searchQuery.set($event)"
         />
 
-        <select
-          name="invCategoryFilter"
-          class="inv-filter"
-          aria-label="Filter by category"
-          [ngModel]="facade.categoryFilter()"
-          (ngModelChange)="facade.categoryFilter.set($event)"
-        >
-          <option value="">All categories</option>
-          @for (option of facade.categoryOptions(); track option.slug) {
-            <option [value]="option.slug">{{ option.name }}</option>
-          }
-        </select>
-
-        <!-- `<details>`/`<summary>` is this codebase's own disclosure idiom (`shared/ui/kebab-menu.ts`
-             uses exactly this): it needs no open-state signal on the page, which `core/ui/architecture.spec.ts`
-             forbids a routed page from holding, and it closes on Escape without a keyboard handler. -->
-        <details class="more-filters">
-          <summary class="btn secondary small">
-            More filters
-            @if (facade.moreFilterCount(); as active) {
-              <span class="filter-badge">{{ active }}</span>
+        @if (facade.showsManagerView()) {
+          <select
+            name="invCategoryFilter"
+            class="inv-filter"
+            aria-label="Filter by category"
+            [ngModel]="facade.categoryFilter()"
+            (ngModelChange)="facade.categoryFilter.set($event)"
+          >
+            <option value="">All categories</option>
+            @for (option of facade.categoryOptions(); track option.slug) {
+              <option [value]="option.slug">{{ option.name }}</option>
             }
-          </summary>
-          <div class="more-filters-panel">
-            <label class="field">
-              <span class="field-label">State</span>
-              <select
-                name="invStateFilter"
-                aria-label="Filter by inventory state"
-                [ngModel]="facade.inventoryStateFilter()"
-                (ngModelChange)="onInventoryStateFilterChange($event)"
-              >
-                <option value="all">Any state</option>
-                <option value="IN_STOCK">In stock</option>
-                <option value="ISSUED">Issued</option>
-                <option value="IN_FIELD">In field</option>
-                <option value="MAINTENANCE">Maintenance</option>
-                <option value="RETIRED">Retired</option>
-              </select>
-            </label>
+          </select>
 
-            <label class="field">
-              <span class="field-label">Custodian</span>
-              <select
-                name="invCustodianFilter"
-                aria-label="Filter by custodian"
-                [ngModel]="facade.custodianFilter()"
-                (ngModelChange)="facade.custodianFilter.set($event)"
-              >
-                <option value="">Any custodian</option>
-                @for (option of facade.custodianOptions(); track option.id) {
-                  <option [value]="option.id">{{ option.name }}</option>
-                }
-              </select>
-            </label>
+          <!-- `<details>`/`<summary>` is this codebase's own disclosure idiom (`shared/ui/kebab-menu.ts`
+               uses exactly this): it needs no open-state signal on the page, which `core/ui/architecture.spec.ts`
+               forbids a routed page from holding, and it closes on Escape without a keyboard handler. -->
+          <details class="more-filters">
+            <summary class="btn secondary small">
+              More filters
+              @if (facade.moreFilterCount(); as active) {
+                <span class="filter-badge">{{ active }}</span>
+              }
+            </summary>
+            <div class="more-filters-panel">
+              <label class="field">
+                <span class="field-label">State</span>
+                <select
+                  name="invStateFilter"
+                  aria-label="Filter by inventory state"
+                  [ngModel]="facade.inventoryStateFilter()"
+                  (ngModelChange)="onInventoryStateFilterChange($event)"
+                >
+                  <option value="all">Any state</option>
+                  <option value="IN_STOCK">In stock</option>
+                  <option value="ISSUED">Issued</option>
+                  <option value="IN_FIELD">In field</option>
+                  <option value="MAINTENANCE">Maintenance</option>
+                  <option value="RETIRED">Retired</option>
+                </select>
+              </label>
 
-            <label class="field">
-              <span class="field-label">Readiness</span>
-              <select
-                name="invReadinessFilter"
-                aria-label="Filter by readiness"
-                [ngModel]="facade.readinessFilter()"
-                (ngModelChange)="onReadinessFilterChange($event)"
-              >
-                <option value="all">Any readiness</option>
-                <option value="GO">Go</option>
-                <option value="NO_GO">No-go</option>
-                <option value="UNEVALUATED">Unevaluated</option>
-              </select>
-            </label>
+              <label class="field">
+                <span class="field-label">Custodian</span>
+                <select
+                  name="invCustodianFilter"
+                  aria-label="Filter by custodian"
+                  [ngModel]="facade.custodianFilter()"
+                  (ngModelChange)="facade.custodianFilter.set($event)"
+                >
+                  <option value="">Any custodian</option>
+                  @for (option of facade.custodianOptions(); track option.id) {
+                    <option [value]="option.id">{{ option.name }}</option>
+                  }
+                </select>
+              </label>
 
-            @if (facade.hasActiveFilters()) {
-              <button type="button" class="btn secondary small" (click)="facade.clearFilters()">Clear filters</button>
-            }
-          </div>
-        </details>
+              <label class="field">
+                <span class="field-label">Readiness</span>
+                <select
+                  name="invReadinessFilter"
+                  aria-label="Filter by readiness"
+                  [ngModel]="facade.readinessFilter()"
+                  (ngModelChange)="onReadinessFilterChange($event)"
+                >
+                  <option value="all">Any readiness</option>
+                  <option value="GO">Go</option>
+                  <option value="NO_GO">No-go</option>
+                  <option value="UNEVALUATED">Unevaluated</option>
+                </select>
+              </label>
+
+              @if (facade.hasActiveFilters()) {
+                <button type="button" class="btn secondary small" (click)="facade.clearFilters()">Clear filters</button>
+              }
+            </div>
+          </details>
+        }
       </ng-container>
     }
 
-    <!-- `InventoryExportController` takes a format and nothing else — it exports everything this
-         session may see, not what the table currently shows. The label says so rather than letting
-         a filtered screen imply a filtered file (`InventoryFacade#exportUrl`). -->
-    <a pageBarActions class="btn secondary" [href]="facade.exportUrl()" [download]="facade.exportFilename()">Export all (CSV)</a>
+    @if (facade.showsManagerView()) {
+      <!-- `InventoryExportController` takes a format and nothing else — it exports everything this
+           session may see, not what the table currently shows. The label says so rather than letting
+           a filtered screen imply a filtered file (`InventoryFacade#exportUrl`). A pilot/crew session
+           never sees this: their own "export the fleet" has no meaning over two assigned vehicles,
+           and the endpoint's own scope already limits it to their own assets anyway
+           (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.4, wave W5 — a manager-only tool). -->
+      <a pageBarActions class="btn secondary" [href]="facade.exportUrl()" [download]="facade.exportFilename()">Export all (CSV)</a>
+    }
     <!-- `POST /api/assets` requires MANAGE_ORG (`AssetController#register`), and `/add-source` is
          already behind `orgGuard` — so this button used to bounce a pilot straight off that guard
          (docs/plans/active/INVENTORY-REWORK-CONTEXT.md §3 defect A). Not rendered rather than
@@ -221,12 +230,10 @@
       }
     }
   } @else {
-    <!-- W5: My vehicles cards render here -->
-    <vision-empty
-      title="My vehicles"
-      message="The card view for the vehicles assigned to you is not built yet. Open one from Fly, or ask a manager for the full inventory."
-    >
-      <a class="btn" routerLink="/fly">Go to Fly</a>
-    </vision-empty>
+    <!-- "My vehicles" (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.4, wave W5) — a genuinely
+         `ASSIGNED_ASSETS`-scoped pilot/crew session's own card view, in place of the manager's table.
+         No tabs, no view row, no drawer: `<vision-my-vehicles>` reads `InventoryFacade` directly for
+         everything it needs. -->
+    <vision-my-vehicles />
   }
 </div>
