@@ -223,4 +223,25 @@ commit; commit on `feat/inventory-rework` with a `feat(inventory-rework Wn): …
 
 ## 9. Close-out (filled by W6)
 
-_Empty until the waves land._
+### 9.1 Landed (2026-09-06/07, `feat/inventory-rework`)
+
+| Wave | Commit | Verdict |
+|---|---|---|
+| W0 docs | `f6382db4`, `bc41aad8` | context + plan + R1 analogs; README row INV |
+| W1 hand-over + names | `49a6411b` | identity 153→162, api 1052→1059, app 353 (Docker ran); `HandoverService` skips assign when *any* role exists (never promotes a CREW seat), compensates with `returnToStock` on a failed grant, 409 on the failure path |
+| W3 web gates + row model | `5f98f834` | 3825→3860 tests; `vehicleRowActions(row, actor)` spec per cell; `loadAll` = 5 flat requests, details/pilots on selection |
+| W4 views + drawer + dialog | `9587405e` | 3860→3906 tests; view predicates read the row's own state chip; default view latched once per load; `Export all (CSV)` (endpoint exports whole scope); pilot picker rules lifted to `core/org/pilot-logic.ts` |
+| W5 My vehicles cards | _in flight_ | |
+| W2 pilot self-service | **parked — owner decision D4/D5** | |
+| W6 live matrix | _pending_ | |
+
+### 9.2 Found while building (not in the spec; owner decides where they go)
+
+| # | Finding | Wave | Proposed home |
+|---|---|---|---|
+| F1 | The asset's **ownership group is not on the wire** (`AssetSummaryResponse.owner` is the owning *user*; nothing serialises `Ownership#groupId`), so the Issue dialog's "Other pilots" rung uses the session's own group as a stand-in and widens to every scoped pilot when that finds nobody. Honest fix: `groupId` on the summary | W4 | small vision-api follow-up; then §5.5 rung 1 becomes exact |
+| F2 | `AssetInventoryController` now takes **six** constructor collaborators (ceiling is five); `HandoverService` joined `AssetCustodyService` because ground/release/retire stay warehouse verbs. Fix: split the four `/maintenance` handlers into their own controller | W1 | vision-api hygiene wave |
+| F3 | Custody/inventory **mutation responses carry no `custodianName`** (no name join in that controller) — the web re-fetches `GET /api/assets/{id}` after every verb (one request). Either join there too or accept the re-fetch as the contract | W1/W4 | accept; documented on `AssetSummaryResponse` |
+| F4 | `+ Assign…` in the drawer is a **link** to `/assets/:id` — `pilots-card` owns its own fetches and cannot be mounted under the facade without a refactor to inputs | W4 | later, with F1 |
+| F5 | `InventoryExportController` exports the whole scope; a per-view export needs a filter parameter | W4 | deferred with W7 bulk actions |
+| F6 | `DEACTIVATED` lifecycle had no row in §5.2 — treated as ARCHIVED (Restore only); an unfetched `inventoryState` offers no mutating verb | W3 | spec amended by this row |
