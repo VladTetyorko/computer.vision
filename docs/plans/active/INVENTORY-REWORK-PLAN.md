@@ -231,7 +231,7 @@ commit; commit on `feat/inventory-rework` with a `feat(inventory-rework Wn): …
 | W1 hand-over + names | `49a6411b` | identity 153→162, api 1052→1059, app 353 (Docker ran); `HandoverService` skips assign when *any* role exists (never promotes a CREW seat), compensates with `returnToStock` on a failed grant, 409 on the failure path |
 | W3 web gates + row model | `5f98f834` | 3825→3860 tests; `vehicleRowActions(row, actor)` spec per cell; `loadAll` = 5 flat requests, details/pilots on selection |
 | W4 views + drawer + dialog | `9587405e` | 3860→3906 tests; view predicates read the row's own state chip; default view latched once per load; `Export all (CSV)` (endpoint exports whole scope); pilot picker rules lifted to `core/org/pilot-logic.ts` |
-| W5 My vehicles cards | _in flight_ | |
+| W5 My vehicles cards | `479faf93` | 3906→3925 tests; `<vision-my-vehicles>` mounts only in the `showsManagerView()` else-branch; rows come from the facade's **pre-view** computeds (a manager's persisted view must never hide a pilot's vehicle); `GET /api/me/assignments` gives `myRoleFor(assetId)` — a CREW seat drops Fly; verbs render generically from `MY_VEHICLE_VERB_ORDER` + one label map |
 | W2 pilot self-service | **parked — owner decision D4/D5** | |
 | W6 live matrix | _pending_ | |
 
@@ -245,3 +245,4 @@ commit; commit on `feat/inventory-rework` with a `feat(inventory-rework Wn): …
 | F4 | `+ Assign…` in the drawer is a **link** to `/assets/:id` — `pilots-card` owns its own fetches and cannot be mounted under the facade without a refactor to inputs | W4 | later, with F1 |
 | F5 | `InventoryExportController` exports the whole scope; a per-view export needs a filter parameter | W4 | deferred with W7 bulk actions |
 | F6 | `DEACTIVATED` lifecycle had no row in §5.2 — treated as ARCHIVED (Restore only); an unfetched `inventoryState` offers no mutating verb | W3 | spec amended by this row |
+| F7 | **`vision.crew.enabled` is not readable by the web** (`MeResponse` has no feature flags; the `Crew seat` nav entry is ungated), so §3.3's `Open crew seat` primary verb could not be gated — a CREW card falls back to `Watch live`. Fix: expose enabled features on `/api/auth/me` (or a `/api/system/features` read) and add the verb | W5 | small vision-api + web follow-up; also fixes the ungated nav entry |
