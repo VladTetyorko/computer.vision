@@ -25,6 +25,22 @@ const ASSET_POLL_INTERVAL_MS = 5_000;
 /** Matches `AssetController#telemetry`'s own default-overriding call site, same as `TelemetryStore`. */
 const TELEMETRY_LIMIT = 200;
 
+/**
+ * How often a streaming asset's telemetry is re-read **while live is unavailable** — the not-open
+ * fallback for the `telemetry:<assetId>` topic, gated per D1 exactly like {@link
+ * ASSET_POLL_INTERVAL_MS} above (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1).
+ *
+ * <p>Wave L7b originally deleted this poll outright rather than gating it, because the plan's own
+ * L7b row said only "retire … in favour of `trackTelemetry`/`telemetryFor`" while its L7a
+ * neighbour said "gate per D1; the REST call stays as the not-open fallback". The plan's §7
+ * acceptance measurement (`core/live/poll-rate.spec.ts`) caught the consequence: with SSE down, a
+ * streaming asset's marker froze at whatever position its one-time backfill happened to capture and
+ * still reported `live: true`, while the 5s asset poll went on delivering fresher
+ * `lastKnownPosition` values that {@link markers} then outranked with the stale trail. D1 is the
+ * frozen rule and it wins: the poll exists, and runs only when live does not.
+ */
+const TELEMETRY_POLL_INTERVAL_MS = 2_000;
+
 /** How often the "n seconds ago" readout ticks, independent of any poll/live cadence (L7d — stays a local timer). */
 const CLOCK_TICK_MS = 1_000;
 
@@ -48,6 +64,14 @@ interface AssetTracker {
   readonly backfill: ReturnType<typeof signal<readonly TelemetrySample[]>>;
   /** Bumped whenever this asset's tracker restarts, so a superseded async lookup can no-op. */
   generation: number;
+  /**
+   * The open usage {@link backfill} was read from, once resolved — the fallback poll's own target,
+   * and `undefined` until {@link initTracker} has found one (a streaming asset with no open usage
+   * yet has nothing to poll, exactly as it has nothing to backfill).
+   */
+  usageId: string | undefined;
+  /** The fallback poll's unsubscribe, held only while it is actually running (live unavailable). */
+  stopPolling: (() => void) | null;
 }
 
 /**
@@ -253,10 +277,15 @@ export class FleetMapStore {
         this.stopPolling();
         void this.refresh();
         this.liveGated = true;
+        this.applyTrackerTransports();
       }
       return;
     }
+    const wasLive = this.liveGated;
     this.liveGated = false;
+    if (wasLive) {
+      this.applyTrackerTransports();
+    }
     if (this.stopAssetPolling !== null) {
       return; // already polling
     }
@@ -269,6 +298,43 @@ export class FleetMapStore {
   private stopPolling(): void {
     this.stopAssetPolling?.();
     this.stopAssetPolling = null;
+  }
+
+  /** Re-applies D1's live axis to every live tracker — the telemetry counterpart of {@link stopPolling}. */
+  private applyTrackerTransports(): void {
+    for (const tracker of this.trackers.values()) {
+      this.applyTrackerTransport(tracker);
+    }
+  }
+
+  /**
+   * D1 for one tracker's telemetry: poll iff live is unavailable and an open usage is known.
+   * Idempotent in both directions, so it is safe to call from {@link initTracker} (a tracker that
+   * has only just learned its usage) and from {@link applyTransport} (every tracker, on a
+   * transition) without tracking which of the two got there first.
+   */
+  private applyTrackerTransport(tracker: AssetTracker): void {
+    if (this.liveGated || tracker.usageId === undefined) {
+      tracker.stopPolling?.();
+      tracker.stopPolling = null;
+      return;
+    }
+    if (tracker.stopPolling !== null) {
+      return; // already polling
+    }
+    const usageId = tracker.usageId;
+    // Returns the promise so `PollScheduler`'s in-flight guard applies, as everywhere else here.
+    tracker.stopPolling = this.scheduler.schedule(TELEMETRY_POLL_INTERVAL_MS, () =>
+      this.pollTelemetry(tracker, usageId),
+    );
+  }
+
+  /** One fallback telemetry read, folded into the same signal {@link markers} already merges. */
+  private async pollTelemetry(tracker: AssetTracker, usageId: string): Promise<void> {
+    const samples = await this.fetchBackfill(usageId);
+    if (tracker.stopPolling !== null) {
+      tracker.backfill.set(samples); // still the live tracker for this asset, still degraded
+    }
   }
 
   private reconcileTrackers(assets: readonly AssetSummary[]): void {
@@ -286,7 +352,12 @@ export class FleetMapStore {
   }
 
   private startTracker(assetId: string): void {
-    const tracker: AssetTracker = { backfill: signal<readonly TelemetrySample[]>([]), generation: 0 };
+    const tracker: AssetTracker = {
+      backfill: signal<readonly TelemetrySample[]>([]),
+      generation: 0,
+      usageId: undefined,
+      stopPolling: null,
+    };
     this.trackers.set(assetId, tracker);
     this.publishTrackedIds();
     // Subscribes immediately — before the usage lookup/backfill below even starts — so live samples
@@ -313,6 +384,8 @@ export class FleetMapStore {
         return;
       }
       tracker.backfill.set(samples);
+      tracker.usageId = usageId;
+      this.applyTrackerTransport(tracker);
     } catch {
       // best-effort — see class doc; this asset's marker just falls back to lastKnownPosition
     }
@@ -328,6 +401,11 @@ export class FleetMapStore {
   }
 
   private stopTracker(assetId: string): void {
+    const tracker = this.trackers.get(assetId);
+    tracker?.stopPolling?.();
+    if (tracker !== undefined) {
+      tracker.stopPolling = null;
+    }
     this.trackers.delete(assetId);
     this.publishTrackedIds();
     this.live.untrackTelemetry(assetId);

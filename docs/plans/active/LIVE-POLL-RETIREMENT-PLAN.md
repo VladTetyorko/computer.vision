@@ -593,6 +593,7 @@ task rather than this plan's close-out.
 | L5 · web side of `zones`+`system` | `1db1df00` | 193 files / 3858 tests |
 | L7 · `FleetMapStore` | `f78656ec` | 193 files / 3853 tests |
 | L8a · fleet-summary invalidation | `8b10a23f` | 194 files / 3876 tests |
+| L7 fix · telemetry fallback re-gated | close-out | `map-store.spec.ts` +5, `poll-rate.spec.ts` |
 
 ### Findings the waves produced that the plan did not predict
 
@@ -629,11 +630,66 @@ task rather than this plan's close-out.
    connect-time replay (which is also the seeded-snapshot path), the PATCH-topics add path, and
    broadcast. The buffer stays unfiltered; every viewer re-filters on read.
 
+7. **This plan's own L7b row contradicted D1, and the acceptance measurement is what caught it.**
+   L7a says *"gate per D1; the REST call stays as the not-open fallback"*. L7b, one row below, says
+   only *"retire the 2s per-streaming-asset `GET /api/usages/{id}/telemetry`"* — no gate clause, no
+   fallback. The wave implemented L7b exactly as written, which deleted the poll outright and left
+   `FleetMapStore` the only store in this plan with no fallback for its data. **Consequence, shown
+   empirically before it was fixed:** with SSE down, a streaming asset's marker froze at whatever
+   position its one-time backfill captured and went on reporting `live: true`, while the 5s asset
+   poll delivered fresher `lastKnownPosition` values that `markers` then outranked with the stale
+   trail. D1 is the frozen rule and wins; the poll is back, gated on the live axis, and pinned by
+   five tests in `map-store.spec.ts`. **The general lesson: a "retire X" instruction is not the same
+   instruction as "gate X", and a plan that says both in adjacent rows will get the one it wrote.**
+
+### §7 acceptance — status
+
+| # | Criterion | Status |
+|---|---|---|
+| 1 | Every poll-retiring wave carries the §5 reconnect criterion as a passing test | **met** — incl. the L1 hole above |
+| 2 | A clean re-measurement, compared against §2 | **met** — see below |
+| 3 | `vision.live.enabled=false` still boots and still works | **met** — `LiveDisabledWiringTest` 5/5 |
+| 4 | `./mvnw -B -pl station/vision-app -am -DskipWeb test` green, incl. `ContextArchitectureTest` | **met** — BUILD SUCCESS, 0 failures |
+
+### The re-measurement (criterion 2)
+
+**It is a test, not a browser session:** `station/vision-web/src/app/core/live/poll-rate.spec.ts`.
+The 2026-09-06 browser attempt was voided by a backend death mid-window and a Chrome-throttled tab,
+and a second attempt hit both hazards again — the automated tab reported
+`document.visibilityState === "hidden"`, and `PollScheduler` pauses every task while hidden, so a
+background tab measures a flattering **zero regardless of the code**. The harness is immune to both
+by construction: the transport is an *input* (`connectionState`), and `measure()` asserts
+`document.hidden === false` before it counts anything. It also measures what a browser cannot — the
+counterfactual, i.e. today's behaviour on the same commit, rather than a number recovered from a
+different build.
+
+Requests made by `/command`'s store set over one minute of steady state, counted per endpoint:
+
+| Source | poll (live unavailable) | **live open** |
+|---|---|---|
+| `GET /api/map/marks` | 2 | **0** |
+| `GET /api/map/layers` | 2 | **0** |
+| `GET /api/map/drawings` | 2 | **0** |
+| `GET /api/geofences` | 2 | **0** |
+| `GET /api/system/status` | 4 | **0** |
+| `GET /api/assets` | 12 | **0** |
+| **subtotal** | **24** | **0** |
+| *per streaming asset:* `GET /api/usages/{id}/telemetry` | 30 | **0** |
+| `GET /api/fleet/summary` — *arithmetic, not measured; see below* | 12 | 0 idle, ≤6 under sustained invalidation |
+
+The poll column reproduces §2's cadence arithmetic **exactly**, which is what makes the harness
+credible: §2's own numbers are the control. With live open the whole set costs **one request per
+endpoint at startup and nothing thereafter** — `/command` at N=3 streaming assets goes from
+**~126 req/min to ~0**, the fleet-summary row aside.
+
+**The one row that is still arithmetic** is `/api/fleet/summary`: `CommandFacade` has no TestBed
+harness in this repo (only `command-logic.spec.ts`, a pure-logic file), and standing one up would
+mean faking `Router`/`ActivatedRoute`/`AuthStore`/`WeatherStore`/`RouteStore` for a single number.
+Its retirement is pinned by `features/fleet/summary-refresh-logic.spec.ts` instead, and its bound
+comes from `SUMMARY_FLOOR_INTERVAL_MS = 10_000` — at most 6 req/min, and only while invalidations
+keep arriving; an idle dashboard pays nothing.
+
 ### Still open
 
-- **The clean re-measurement** (§7). The original browser measurement was voided — it spanned a
-  backend death and a Chrome-throttled tab — so the ~38 req/min baseline in §2 is cadence-derived
-  arithmetic, not observation. Measuring the *result* requires a backend built from this branch,
-  since a client that subscribes to `zones`/`system` against an older build gets neither.
 - **L8b**, by recommendation, not by omission.
 - **The `everDropped` false `DEGRADED`**, §8, with the correction noted there.

@@ -91,10 +91,14 @@ function stubLiveStore(initialState: LiveConnectionState = 'closed') {
  * `telemetry-store.spec.ts`'s own `stubScheduler` helper.
  */
 function stubScheduler() {
-  const calls: { periodMs: number; stop: ReturnType<typeof vi.fn> }[] = [];
-  const schedule = vi.fn((periodMs: number) => {
+  const calls: {
+    periodMs: number;
+    stop: ReturnType<typeof vi.fn>;
+    run: () => void | Promise<void>;
+  }[] = [];
+  const schedule = vi.fn((periodMs: number, callback: () => void | Promise<void>) => {
     const stop = vi.fn();
-    calls.push({ periodMs, stop });
+    calls.push({ periodMs, stop, run: callback });
     return stop;
   });
   return { schedule, calls, forPeriod: (periodMs: number) => calls.filter((call) => call.periodMs === periodMs) };
@@ -443,6 +447,109 @@ describe('FleetMapStore', () => {
         { latitude: 10, longitude: 11 },
       ]);
       expect(marker?.position).toEqual({ latitude: 10, longitude: 11, altitudeMeters: undefined }); // latest sample wins
+    });
+  });
+
+  /**
+   * The per-streaming-asset telemetry fallback (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3
+   * D1). Wave L7b first deleted this poll outright instead of gating it — the plan's own L7b row
+   * said "retire", where its L7a neighbour said "gate per D1; the REST call stays as the not-open
+   * fallback" — and the §7 acceptance measurement (`core/live/poll-rate.spec.ts`) caught what that
+   * cost: with SSE down, a marker froze at whatever position its one-time backfill captured while
+   * still reporting `live: true`.
+   */
+  describe('telemetry fallback poll (D1, live axis)', () => {
+    const openUsage = { usageId: 'u-1', startedAt: 't0', sampleCount: 1 };
+
+    function streamingApi(samples: readonly TelemetrySample[]) {
+      return stubApi({
+        listAssets: vi.fn().mockResolvedValue([
+          summary({ assetId: 's-1', status: 'STREAMING', lastKnownPosition: { latitude: 1, longitude: 2 } }),
+        ]),
+        getAsset: vi.fn().mockResolvedValue(details({ status: 'STREAMING' }, { recentUsages: [openUsage] })),
+        usageTelemetry: vi.fn().mockResolvedValue(samples),
+      });
+    }
+
+    it('registers a 2s telemetry poll per tracked asset while live is unavailable', async () => {
+      const { scheduler } = create(streamingApi([]), { live: stubLiveStore('closed') });
+      await flush();
+      await flush();
+      await flush();
+
+      expect(scheduler.forPeriod(2_000)).toHaveLength(1);
+    });
+
+    it('registers no telemetry poll at all while live is open', async () => {
+      const { scheduler } = create(streamingApi([]), { live: stubLiveStore('open') });
+      await flush();
+      await flush();
+      await flush();
+
+      expect(scheduler.forPeriod(2_000)).toHaveLength(0);
+    });
+
+    it('stops the telemetry poll when live comes back, and starts one when live drops', async () => {
+      const live = stubLiveStore('closed');
+      const { scheduler } = create(streamingApi([]), { live });
+      await flush();
+      await flush();
+      await flush();
+      const [degraded] = scheduler.forPeriod(2_000);
+      expect(degraded).toBeDefined();
+
+      live.connectionState.set('open');
+      TestBed.tick();
+      await flush();
+      expect(degraded.stop).toHaveBeenCalled();
+      expect(scheduler.forPeriod(2_000)).toHaveLength(1); // still just the one, now stopped
+
+      live.connectionState.set('closed');
+      TestBed.tick();
+      await flush();
+      expect(scheduler.forPeriod(2_000)).toHaveLength(2); // a fresh registration for the new outage
+    });
+
+    it('keeps the marker current off the fallback poll instead of freezing at the backfill', async () => {
+      const backfill: TelemetrySample = { deviceId: 'dev-0', at: '2026-07-22T00:00:00Z', latitude: 9, longitude: 8 };
+      const api = streamingApi([backfill]);
+      const { store, scheduler } = create(api, { live: stubLiveStore('closed') });
+      await flush();
+      await flush();
+      await flush();
+      expect(store.markers().find((m) => m.assetId === 's-1')?.position).toEqual({
+        latitude: 9,
+        longitude: 8,
+        altitudeMeters: undefined,
+      });
+
+      // The aircraft moves; the next fallback tick must be what tells the map about it.
+      const moved: TelemetrySample = { deviceId: 'dev-0', at: '2026-07-22T00:00:02Z', latitude: 11, longitude: 12 };
+      api.usageTelemetry.mockResolvedValue([backfill, moved]);
+      await scheduler.forPeriod(2_000)[0].run();
+      await flush();
+
+      const marker = store.markers().find((m) => m.assetId === 's-1');
+      expect(marker?.position).toEqual({ latitude: 11, longitude: 12, altitudeMeters: undefined });
+      expect(marker?.trail).toEqual([
+        { latitude: 9, longitude: 8 },
+        { latitude: 11, longitude: 12 },
+      ]);
+    });
+
+    it('stops the fallback poll when the asset stops streaming', async () => {
+      const api = streamingApi([]);
+      const { scheduler } = create(api, { live: stubLiveStore('closed') });
+      await flush();
+      await flush();
+      await flush();
+      const [poll] = scheduler.forPeriod(2_000);
+
+      api.listAssets.mockResolvedValue([summary({ assetId: 's-1', status: 'OFFLINE', lastKnownPosition: { latitude: 1, longitude: 2 } })]);
+      await TestBed.inject(FleetMapStore).refresh();
+      await flush();
+
+      expect(poll.stop).toHaveBeenCalled();
     });
   });
 });
