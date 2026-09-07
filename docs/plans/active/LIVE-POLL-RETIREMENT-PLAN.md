@@ -554,7 +554,13 @@ L7 is where the reported complaint actually lives.
 ## 8. Non-goals — named, not silently dropped
 
 - **The `everDropped`-on-collapse defect** (§D3). Real, pre-existing, mislabels `live-updates` as
-  `DEGRADED` in every deployment. Its own task — fixing it here would change `/api/system/status`
+  `DEGRADED` in every deployment. **Correction after L4 shipped:** the §D3 wording "from the second
+  fleet change onward" now under-describes it. `LiveRingBuffer#append` sets `everDropped` on the
+  second append to *any* collapse-to-latest buffer, and L4 added a second one (`systemBuffer =
+  new LiveRingBuffer(1, true)`), so there are now two independent triggers. The observable outcome is
+  unchanged — `fleetBuffer` already latched it permanently — and D3's fingerprint correctly excludes
+  the `live-updates` subsystem, so this cannot cause a broadcast storm. It is still a false
+  `DEGRADED`. Its own task — fixing it here would change `/api/system/status`
   output mid-plan and confuse L4's guardrail.
 - **`GET /api/events` history backfill.** ALWAYS-ON-FLOW B3 shipped the endpoint; nothing consumes
   it, so the bell still starts empty on every reload. Adjacent, genuinely useful, and not this plan.
@@ -568,3 +574,66 @@ L7 is where the reported complaint actually lives.
 - **`includeArchived` over SSE.** Never; §4.3 and L8b. The toggle stays a REST read.
 - **Any change to what a topic *means*.** This plan adds two topics, narrows one, and teaches ten
   stores when not to ask. It changes no existing payload shape and no existing endpoint's output.
+
+---
+
+## 9. Build record — what actually shipped (2026-09-07)
+
+All nine waves are built and green. **L8b is the one deliberate exclusion**, per §5 L8's own
+recommendation: it is a genuinely new per-connection aggregate mechanism, and it belongs to its own
+task rather than this plan's close-out.
+
+| Wave | Landed as | Verification |
+|---|---|---|
+| L1 · four `map-data` stores | `5544d319` | web suite green |
+| L2 · discovery inbox | `5544d319` | web suite green |
+| L6 · scope the `fleet` topic | `21c445f5` | `LiveFleetScopingTest`, MockMvc end-to-end through the real access chain |
+| L3 · `zones` topic | `03d0273a` | `vision-api` + full `vision-app` reactor green |
+| L4 · `system` topic | `03d0273a` | `SystemStatusSamplerTest`; D3 self-feedback closed |
+| L5 · web side of `zones`+`system` | `1db1df00` | 193 files / 3858 tests |
+| L7 · `FleetMapStore` | `f78656ec` | 193 files / 3853 tests |
+| L8a · fleet-summary invalidation | `8b10a23f` | 194 files / 3876 tests |
+
+### Findings the waves produced that the plan did not predict
+
+1. **L1's `applyTransport` had a hole the plan's own acceptance criterion did not cover.** The
+   zero-consumer branch stopped the poll but left `liveGated` set. A live outage that begins *and
+   ends* while every consumer is released delivers no deltas and leaves no trace, so the next
+   `activate()` took the `>0 | true | live → nothing` row and skipped its reconcile. Proven by
+   running the new test against the unfixed code (`expected 1 call, got 0`), fixed across all five
+   stores, and now pinned in `MarksStore` and `GeofenceStore` alike.
+
+2. **L6b's "one genuinely open choice" was not open.** `StreamAccess#visibleAsset` and
+   `AssetService#assets(scope, …)` both reduce to `scope.includes(id, ownership)` and differ only for
+   a nonexistent asset. The two policies are the same policy, which made the fix far smaller than
+   the plan budgeted: reuse the connection's existing `assetVisibility` predicate — no new
+   collaborator, no extra query, no DTO change.
+
+3. **The plan claimed the `fleet` topic had no consumers.** It has three
+   (`drone-picker-facade.ts:152`, `cockpit-facade.ts:937`, `notification-bell.ts:319`). §1, L6c and
+   L7a were corrected before implementation; L6 is a visible behaviour change, not a latent fix.
+
+4. **L3/L4 did not repeat L6's leak, for two different reasons.** Checked deliberately, since an
+   unscoped topic that means more than its REST counterpart is exactly what L6 existed to fix.
+   `zones` is unscoped and so is `GeofenceController#list`, which is marked `@OpenByDesign` — zones
+   are deployment-wide reference data. `system` is unscoped and `GET /api/system/status` carries no
+   `@PreAuthorize` and no path rule in `SecurityConfig`, so both sit behind the same default
+   authenticated gate. Each topic means exactly what its endpoint means.
+
+5. **L8a had a coupling the plan did not mention.** Both facades' `nowSignal` — the rail's age text
+   and the pipeline-error decay window — piggybacked `refreshSummary()`'s 5s poll. Making the fetch
+   event-driven with a 10s floor would have silently halved that refresh rate. Both facades now own
+   a dedicated 5s clock.
+
+6. **L6's projection covers all three delivery paths**, verified rather than assumed:
+   connect-time replay (which is also the seeded-snapshot path), the PATCH-topics add path, and
+   broadcast. The buffer stays unfiltered; every viewer re-filters on read.
+
+### Still open
+
+- **The clean re-measurement** (§7). The original browser measurement was voided — it spanned a
+  backend death and a Chrome-throttled tab — so the ~38 req/min baseline in §2 is cadence-derived
+  arithmetic, not observation. Measuring the *result* requires a backend built from this branch,
+  since a client that subscribes to `zones`/`system` against an older build gets neither.
+- **L8b**, by recommendation, not by omission.
+- **The `everDropped` false `DEGRADED`**, §8, with the correction noted there.
