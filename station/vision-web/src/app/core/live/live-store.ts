@@ -7,10 +7,12 @@ import type {
   DetectionResult,
   DevicesSnapshot,
   DiscoveryEventPayload,
+  GeofenceZoneEventPayload,
   LiveConnected,
   LiveEnvelope,
   LiveEvent,
   MapEventPayload,
+  SystemStatus,
   TelemetrySample,
 } from '../api/models';
 import {
@@ -56,12 +58,20 @@ const MAX_LIVE_MAP_EVENTS = 300;
 const MAX_LIVE_DISCOVERY_EVENTS = 200;
 
 /**
+ * How many `zones` arrivals `zoneEvents` retains — mirrors `MAX_LIVE_DISCOVERY_EVENTS`'s own
+ * reasoning, not a server-buffer-matched cap: an operator edits a geofence zone about as rarely as a
+ * discovery candidate changes state (a handful of creates/renames/toggles in a session, never a
+ * volume feed like `detection-events`/`map`), so this is generous headroom rather than a tuned size.
+ */
+const MAX_LIVE_ZONE_EVENTS = 200;
+
+/**
  * Owns the app's **one** `GET /api/live` connection (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) — the
  * server-push replacement for steady-state polling. `TelemetryStore`/`DetectionsStore` project this
  * store's per-asset signals when live, falling back to their own polling otherwise (see their own
  * doc comments and `live-fallback-logic.ts#resolveAssetScopedTransport`).
  *
- * <h2>Nine topics now, nine projected stores — read before wiring a new consumer</h2>
+ * <h2>Eleven topics now, eleven projected stores — read before wiring a new consumer</h2>
  * The backend started with four topics (`fleet`, `event`, `telemetry:<assetId>`,
  * `detections:<assetId>`) and grew three more, always-on like `fleet`/`event`: `devices` and
  * `detection-events` (docs/plans/done/REALTIME-PLAN.md §4's backend follow-up batch), then `map`
@@ -113,6 +123,25 @@ const MAX_LIVE_DISCOVERY_EVENTS = 200;
  *   picture, this feed is deltas only). `DiscoveryInboxStore` keeps its existing poll as the safety
  *   net and folds this log on top via the same `processedLiveEventCount` cursor idiom `MarksStore`
  *   established for `map`.
+ * - `zones` ↔ `core/geofence/geofence-store.ts#GeofenceStore` (docs/plans/active/
+ *   LIVE-POLL-RETIREMENT-PLAN.md §3 D2/§4.1, waves L3/L5) — the 10th topic, always-on like
+ *   `discovery`, carrying {@link GeofenceZoneEventPayload}s (FIFO, **not** snapshot-on-connect —
+ *   `GeofenceStore`'s own `GET /api/geofences` on `activate()` is the snapshot). `action` is
+ *   `CREATED`/`UPDATED`/`DELETED`; a `DELETED` payload's `zone` is the last-known body in full, which
+ *   is what lets that store's existing 10s Undo re-`POST` it. `GeofenceStore` folds this log on top
+ *   of its own kept 30s poll via the identical cursor idiom, and now also gates that poll on
+ *   `isLiveAvailable()` for the first time (D1) — see that store's own class doc for why its former
+ *   "deliberately not gated" stance is obsolete rather than reversed.
+ * - `system` ↔ `core/system-status/system-status-store.ts#SystemStatusStore` (docs/plans/active/
+ *   LIVE-POLL-RETIREMENT-PLAN.md §3 D3/§4.2, waves L4/L5) — the 11th topic, always-on, but
+ *   **latest-value-only** like `detections`/`geo` rather than a FIFO log: a server-side sampler
+ *   broadcasts the verbatim `GET /api/system/status` body only when it actually changes, never on a
+ *   fixed cadence regardless of content. Payload is {@link SystemStatus}, reused as-is — no new type
+ *   needed. Unlike every other topic in this list, `system` *does* effectively arrive on connect: the
+ *   sampler's first tick runs at server startup, delay 0, so its ring buffer is already populated
+ *   before any connection can exist (see `systemStatus`'s own doc comment below). `SystemStatusStore`
+ *   has no `activate()`/`release()` (the shell health dot needs `overall` on every page), so its own
+ *   D1 gate is the live axis only — no demand axis to compose it with.
  *
  * `fleet`'s own {@link AssetSummary} polling is still done ad hoc by several pages (`fly.ts`'s own
  * picker refresh, `core/map/map-store.ts`, `asset-detail.ts`), with no single existing store class —
@@ -228,6 +257,31 @@ export class LiveStore {
   private readonly discoveryEventsSignal = signal<readonly DiscoveryEventPayload[]>([]);
   /** `core/discovery/discovery-inbox-store.ts#DiscoveryInboxStore`'s own projection source — see this field's own doc comment above. */
   readonly discoveryEvents = this.discoveryEventsSignal.asReadonly();
+
+  /**
+   * Every `zones` arrival this connection has seen, chronological (oldest-first, true FIFO append —
+   * same "later must not be clobbered by earlier" reasoning as `discoveryEventsSignal` above).
+   * Always-on (`LiveTopicKind.ZONES`, docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §4.1, wave L3),
+   * delta-only like `map`/`discovery` — no snapshot-on-connect, since `GeofenceStore`'s own `GET
+   * /api/geofences` (at `activate()`, and on its own D1 reconcile) already gives a full picture;
+   * this feed is purely incremental `CREATED`/`UPDATED`/`DELETED` deltas layered on top.
+   */
+  private readonly zoneEventsSignal = signal<readonly GeofenceZoneEventPayload[]>([]);
+  /** `core/geofence/geofence-store.ts#GeofenceStore`'s own projection source — see this field's own doc comment above. */
+  readonly zoneEvents = this.zoneEventsSignal.asReadonly();
+
+  /**
+   * The latest `system` sample (always-on) — mirrors `devicesSignal` above: a full snapshot, never a
+   * diff. `undefined` only until the very first envelope of this type ever arrives on this
+   * connection, which in practice is close to immediately — the server-side sampler's ring buffer is
+   * seeded at startup (delay 0), before any connection can exist, so a fresh connect's replay burst
+   * carries a `system` envelope essentially right away (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md
+   * §4.2, wave L4). `core/system-status/system-status-store.ts#SystemStatusStore` projects this
+   * directly onto its own `status` signal rather than folding a log, since there is nothing to fold —
+   * latest always wins (CLAUDE.md rule 9).
+   */
+  private readonly systemStatusSignal = signal<SystemStatus | undefined>(undefined);
+  readonly systemStatus = this.systemStatusSignal.asReadonly();
 
   private readonly telemetrySignals = new Map<string, ReturnType<typeof signal<readonly TelemetrySample[]>>>();
   private readonly detectionsSignals = new Map<string, ReturnType<typeof signal<DetectionResult | undefined>>>();
@@ -475,6 +529,15 @@ export class LiveStore {
         this.discoveryEventsSignal.update((events) =>
           [...events, envelope.payload].slice(-MAX_LIVE_DISCOVERY_EVENTS),
         );
+        return;
+      case 'zones':
+        // Chronological append — identical reasoning to `map`/`discovery` above.
+        this.zoneEventsSignal.update((events) => [...events, envelope.payload].slice(-MAX_LIVE_ZONE_EVENTS));
+        return;
+      case 'system':
+        // Latest-wins, like `devices`/`detections` above — the server's own ring capacity 1 means
+        // this is never a batch to merge, just the freshest sample replacing the last one.
+        this.systemStatusSignal.set(envelope.payload);
         return;
     }
   }

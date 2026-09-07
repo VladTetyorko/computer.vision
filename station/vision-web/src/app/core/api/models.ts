@@ -2088,6 +2088,19 @@ export interface DevicesSnapshot {
  * once per sweep regardless of content — a quiet lab produces zero `discovery` traffic. Payload is
  * {@link DiscoveryEventPayload}; `core/discovery/discovery-inbox-store.ts` folds each arrival on top
  * of its own kept 30s poll, the same append-log pattern `core/map-data/marks-store.ts` uses for `map`.
+ *
+ * **`zones` and `system` are the 10th and 11th, from docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md
+ * §4.1/§4.2 (waves L3/L4/L5)** — both always-on, both gate a poll that used to run unconditionally
+ * (D1). `zones` is delta-only like `discovery`/`map` (no snapshot-on-connect — `core/geofence/
+ * geofence-store.ts#GeofenceStore`'s own `GET /api/geofences` on `activate()` is the snapshot),
+ * payload {@link GeofenceZoneEventPayload}; `action` is `CREATED`/`UPDATED`/`DELETED`, and `DELETED`
+ * carries the zone's **last-known full body**, not just its id — that store's existing 10s Undo
+ * re-`POST`s it. `system` is latest-value-only (ring capacity 1, like `detections`/`geo`) — a
+ * server-side sampler broadcasts the verbatim `GET /api/system/status` body only when it actually
+ * changes; payload is {@link SystemStatus}, reused as-is (no new type). Unlike every other
+ * "honestly-limited" topic above, `system` *does* effectively arrive on connect — the sampler's
+ * first tick runs at server startup, delay 0, so its ring buffer is already populated before any
+ * connection can exist. `core/system-status/system-status-store.ts#SystemStatusStore` projects it.
  */
 export type LiveEnvelope =
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'fleet'; readonly payload: readonly AssetSummary[] }
@@ -2098,7 +2111,9 @@ export type LiveEnvelope =
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'detection-events'; readonly payload: DetectionEvent }
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'map'; readonly payload: MapEventPayload }
   | { readonly seq: number; readonly assetId: string; readonly type: 'geo'; readonly payload: CorrectionResponse }
-  | { readonly seq: number; readonly assetId?: undefined; readonly type: 'discovery'; readonly payload: DiscoveryEventPayload };
+  | { readonly seq: number; readonly assetId?: undefined; readonly type: 'discovery'; readonly payload: DiscoveryEventPayload }
+  | { readonly seq: number; readonly assetId?: undefined; readonly type: 'zones'; readonly payload: GeofenceZoneEventPayload }
+  | { readonly seq: number; readonly assetId?: undefined; readonly type: 'system'; readonly payload: SystemStatus };
 
 /**
  * Mirrors `dto.UpdateLiveTopicsRequest` — the body of `PATCH /api/live/{connectionId}/topics`
@@ -2152,6 +2167,19 @@ export interface GeofenceZoneRequest {
   readonly polygon: readonly GeoPosition[];
   readonly maxAltitudeMeters?: number;
   readonly enabled: boolean;
+}
+
+/**
+ * Mirrors `dto.GeofenceZoneEventPayload` — the payload of a {@link LiveEnvelope} whose `type` is
+ * `'zones'` (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §4.1, wave L3). `zone` is today's
+ * {@link GeofenceZone} shape, verbatim — the same DTO `GET /api/geofences` already returns per
+ * element, so `core/geofence/geofence-store.ts` needs no new mapping code. On `'DELETED'`, `zone` is
+ * still the zone **in full** (its last-known state, not merely its id) — that store's existing 10s
+ * Undo re-`POST`s the exact body it just removed.
+ */
+export interface GeofenceZoneEventPayload {
+  readonly action: 'CREATED' | 'UPDATED' | 'DELETED';
+  readonly zone: GeofenceZone;
 }
 
 // --- The map as a Common Operational Picture (docs/plans/done/MAP-REWORK-PLAN.md §4's frozen wire contract) -

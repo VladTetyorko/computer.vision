@@ -1,10 +1,12 @@
-import { Injectable, inject, signal } from '@angular/core';
+import { Injectable, effect, inject, signal } from '@angular/core';
 import { VisionApi } from '../api/vision-api';
-import type { GeoPosition, GeofenceZone, GeofenceZoneRequest, ZoneKind } from '../api/models';
+import type { GeoPosition, GeofenceZone, GeofenceZoneEventPayload, GeofenceZoneRequest, ZoneKind } from '../api/models';
 import { describeHttpError } from '../api-error';
 import { ToastService } from '../toast.service';
 import { UndoToastService } from '../../shared/ui/undo-toast.service';
 import { PollScheduler } from '../poll-scheduler';
+import { LiveStore } from '../live/live-store';
+import { isLiveAvailable } from '../live/live-fallback-logic';
 
 /**
  * Zones are near-static reference data, not a hot poll target — refreshed on mount, on every
@@ -12,12 +14,14 @@ import { PollScheduler } from '../poll-scheduler';
  * this same operator's own Command tab open twice) eventually shows up on `/fly`'s read-only layer
  * too, without needing FleetStore's 5s cadence.
  *
- * Deliberately **not** gated on `isLiveAvailable()` the way the fly pollers are (SCALE-100 §5 S6):
- * gating trades correctness for almost nothing here. `LiveEnvelope` has no zone topic to project
- * while the poll is paused (zone *breaches* ride the generic `event` topic and are a different
- * signal), so pausing would leave a second operator's newly drawn no-fly zone invisible for the
- * whole session — on a safety-adjacent layer — to save 0.033 req/s against a 0.2 req/s budget.
- * Adding a zones topic to the live stream is the fix that would make gating this correct.
+ * **Gated on live, not unconditional** (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1, wave
+ * L5) — this poll now runs **only** while `activeConsumers > 0` **and** `LiveStore` is not `'open'`.
+ * While live is open, the `zones` topic (added in wave L3) already delivers every
+ * created/updated/deleted delta for free, so scheduling this poll on top of it would just be a
+ * redundant `GET` every 30s; see {@link applyTransport} for the exact state table. This supersedes
+ * this constant's own former doc comment, which argued gating was *unsafe* because `LiveEnvelope`
+ * had no zone topic to project onto while paused — wave L3 gave it exactly that topic, so the
+ * argument is answered, not overridden; see the class doc's own "gated on live itself" section.
  */
 const ZONES_POLL_INTERVAL_MS = 30_000;
 
@@ -41,14 +45,36 @@ const ZONES_POLL_INTERVAL_MS = 30_000;
  * app's own UI is keyed on a zone id surviving a delete/undo round trip).
  *
  * <h2>Polling is demand-gated (ALWAYS-ON-FLOW-PLAN.md §4 Wave C3), never "since app boot"</h2>
- * See `MarksStore`'s identical doc section for the shared defect/fix. This store's own above
- * "deliberately not gated on `isLiveAvailable()`" note is a *different* axis and stays true: while
- * ≥1 consumer is active the poll never pauses for connectivity reasons, for the safety-adjacent
- * reason already given there. Demand-gating is orthogonal — when `activeConsumers === 0` nobody has
- * any zone layer mounted to show stale data on in the first place, so there is no correctness cost
- * to stopping, only the same cross-page-forever-poll waste every other `core/map-data/**` store had.
- * {@link activate}/{@link release}, called by every direct injector (`ZonesPanel` plus the four
- * routed pages' own facades that render a map — matching `MarksStore`'s consumer list exactly).
+ * See `MarksStore`'s identical doc section for the shared defect/fix: when `activeConsumers === 0`
+ * nobody has any zone layer mounted to show stale data on in the first place, so there is no
+ * correctness cost to stopping, only the same cross-page-forever-poll waste every other
+ * `core/map-data/**` store had. {@link activate}/{@link release}, called by every direct injector
+ * (`ZonesPanel` plus the four routed pages' own facades that render a map — matching `MarksStore`'s
+ * consumer list exactly).
+ *
+ * <h2>...and now also gated on live itself (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1,
+ * wave L5)</h2>
+ * The two axes are orthogonal and compose in one method, {@link applyTransport}, exactly like
+ * `MarksStore`'s own: **demand** (`activeConsumers > 0`) says whether anyone needs zone data at all;
+ * **transport** (`isLiveAvailable(...)`) says whether the `zones` topic (wave L3) is already
+ * delivering it for free. The poll now runs only when demand says yes *and* transport says no. This
+ * is what makes this class's former "deliberately not gated on `isLiveAvailable()`" stance (SCALE-100
+ * §5 S6) **obsolete, not overridden**: that note's whole argument was that gating would leave a
+ * newly-drawn zone invisible for a whole session because `LiveEnvelope` had no zone topic to project
+ * onto while paused — wave L3 gave it exactly that topic, so the objection is answered by the thing
+ * it asked for. `liveGated` remembers which side of the live/poll line this store was last actually
+ * on, so a genuine transition into live reconciles once (deltas alone would miss whatever changed
+ * before this store's first activation, or while it was polling), while a call that finds nothing
+ * changed is a pure no-op — see {@link applyTransport}'s own doc comment for the full table.
+ *
+ * <h2>Initial GET + live deltas, not poll-only (wave L3/L5)</h2>
+ * The `zones` topic is deliberately not snapshot-on-connect (§4.1) — a fresh connection sees nothing
+ * until the next edit — so this store always does its own initial `GET` (`refresh()`, on
+ * `activate()` and on the safety-net poll) and folds `LiveStore.zoneEvents()` arrivals on top via
+ * this file's own `applyZoneEvents`: `CREATED`/`UPDATED` upsert by id, `DELETED` removes by id. Both
+ * halves are idempotent by construction — the same event replayed across a reconnect (a real
+ * possibility given `LiveStore`'s own at-least-once framing) just re-applies the same upsert or
+ * removal — so a double delivery can never duplicate a zone or resurrect one already deleted.
  */
 @Injectable({ providedIn: 'root' })
 export class GeofenceStore {
@@ -56,6 +82,7 @@ export class GeofenceStore {
   private readonly toasts = inject(ToastService);
   private readonly undoToast = inject(UndoToastService);
   private readonly scheduler = inject(PollScheduler);
+  private readonly live = inject(LiveStore);
 
   private readonly zonesSignal = signal<readonly GeofenceZone[]>([]);
   readonly zones = this.zonesSignal.asReadonly();
@@ -70,19 +97,54 @@ export class GeofenceStore {
   private stopPollFn: (() => void) | null = null;
 
   /**
+   * `false` while this store is (or should be) relying on the safety-net poll rather than live —
+   * see {@link applyTransport}'s own doc comment for the full state table this tracks. Starts
+   * `false` so this store's very first `applyTransport` call — whichever way `liveAvailable`
+   * resolves — is always treated as a genuine transition (never a spurious no-op before this store
+   * has ever actually fetched anything).
+   */
+  private liveGated = false;
+
+  /** How many live `zones` deltas this store has already folded in — see `MarksStore`'s identical cursor. */
+  private processedLiveZoneEventCount = 0;
+
+  constructor() {
+    // Folds every `zones` arrival into `zonesSignal` — runs unconditionally from construction (not
+    // gated by activate/release), mirroring `MarksStore`'s own `mapEvents` fold: it's an in-memory
+    // upsert/remove with no network cost, and keeping the cursor advancing means a consumer that
+    // (re)activates after a gap doesn't replay deltas the next `refresh()` GET already supersedes.
+    effect(() => {
+      const events = this.live.zoneEvents();
+      if (events.length <= this.processedLiveZoneEventCount) {
+        return;
+      }
+      const newEvents = events.slice(this.processedLiveZoneEventCount);
+      this.processedLiveZoneEventCount = events.length;
+      this.zonesSignal.update((zones) => applyZoneEvents(zones, newEvents));
+    });
+
+    // Re-evaluates poll-vs-live whenever `LiveStore` (re)connects or drops
+    // (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1) — mirrors `MarksStore`/
+    // `DiscoveryInboxStore`'s identical reconnect-driven effect.
+    effect(() => {
+      this.applyTransport(isLiveAvailable(this.live.connectionState()));
+    });
+  }
+
+  /**
    * Registers demand — call once from a consumer's own constructor (a routed page's facade, or a
    * non-routed presentational child like `ZonesPanel` that injects this store directly). The first
-   * `activate()` since the last full `release()` triggers an immediate re-fetch (this store never
-   * destructs, so nothing else would ever refresh a long-stale list) and starts the poll; any
-   * further concurrent consumer just bumps the count.
+   * `activate()` since the last full `release()` routes through {@link applyTransport} with the
+   * current transport (this store never destructs, so nothing else would ever refresh a long-stale
+   * list) — a fresh `GET` happens immediately unless live is already open, in which case there is
+   * nothing to poll for yet. Any further concurrent consumer just bumps the count.
    */
   activate(): void {
     this.activeConsumers++;
     if (this.activeConsumers > 1) {
       return;
     }
-    void this.refresh();
-    this.stopPollFn = this.scheduler.schedule(ZONES_POLL_INTERVAL_MS, () => this.refresh());
+    this.applyTransport(isLiveAvailable(this.live.connectionState()));
   }
 
   /** The matching teardown — call from the consumer's own `DestroyRef.onDestroy`. Stops the poll once nothing is left. */
@@ -95,6 +157,51 @@ export class GeofenceStore {
       this.stopPollFn();
       this.stopPollFn = null;
     }
+  }
+
+  /**
+   * D1's frozen gate (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3): the safety-net poll runs
+   * **only** while `activeConsumers > 0` **and** live is unavailable — identical shape to
+   * `MarksStore.applyTransport`'s own doc comment.
+   *
+   * | `activeConsumers` | `liveAvailable` | previous (`liveGated`) | Action |
+   * |---|---|---|---|
+   * | `0` | any | any | stop poll; no refresh |
+   * | `>0` | `true` | `false` (poll) | stop poll; refresh once (the reconcile) |
+   * | `>0` | `true` | `true` (live) | nothing |
+   * | `>0` | `false` | `true` (live) | refresh once, then start poll |
+   * | `>0` | `false` | `false` (poll) | nothing (already polling) |
+   *
+   * Called both by the reconnect-driven `effect()` in the constructor and by `activate()` itself.
+   */
+  private applyTransport(liveAvailable: boolean): void {
+    if (this.activeConsumers === 0) {
+      this.stopPolling();
+      // Forget the transport mode too. A live outage that starts *and ends* while nothing is
+      // mounted delivers no deltas and leaves no trace, so a stale `liveGated` would make the next
+      // `activate()` skip its reconcile and show data missing everything the outage swallowed.
+      this.liveGated = false;
+      return;
+    }
+    if (liveAvailable) {
+      if (!this.liveGated) {
+        this.stopPolling();
+        void this.refresh();
+        this.liveGated = true;
+      }
+      return;
+    }
+    this.liveGated = false;
+    if (this.stopPollFn !== null) {
+      return; // already polling
+    }
+    void this.refresh();
+    this.stopPollFn = this.scheduler.schedule(ZONES_POLL_INTERVAL_MS, () => this.refresh());
+  }
+
+  private stopPolling(): void {
+    this.stopPollFn?.();
+    this.stopPollFn = null;
   }
 
   async refresh(): Promise<void> {
@@ -186,4 +293,30 @@ export class GeofenceStore {
       enabled: zone.enabled,
     });
   }
+}
+
+/**
+ * Folds new `zones` SSE deltas onto the current zone list — the same "poll gives the full picture,
+ * live deltas are incremental on top" pattern `mark-logic.ts#applyMarkEvents`/
+ * `discovery-inbox-logic.ts#applyDiscoveryEvents` establish for `map`/`discovery`. `CREATED` and
+ * `UPDATED` are handled identically, an upsert by id (replace if already present, insert if not) —
+ * treating them the same is what makes a double-delivered event (a real possibility across a
+ * reconnect, per `LiveStore`'s own at-least-once framing) idempotent: replaying the same `CREATED` a
+ * second time just replaces the entry with an identical copy of itself. `DELETED` removes by id; a
+ * second `DELETED` for an already-absent id is a no-op filter, equally safe to repeat.
+ */
+function applyZoneEvents(
+  zones: readonly GeofenceZone[],
+  events: readonly GeofenceZoneEventPayload[],
+): readonly GeofenceZone[] {
+  let result = zones;
+  for (const event of events) {
+    if (event.action === 'DELETED') {
+      result = result.filter((zone) => zone.id !== event.zone.id);
+      continue;
+    }
+    const index = result.findIndex((zone) => zone.id === event.zone.id);
+    result = index === -1 ? [...result, event.zone] : result.map((zone, i) => (i === index ? event.zone : zone));
+  }
+  return result;
 }

@@ -1,11 +1,14 @@
 import { TestBed } from '@angular/core/testing';
+import { signal } from '@angular/core';
 import { describe, expect, it, vi } from 'vitest';
 import { GeofenceStore } from './geofence-store';
 import { VisionApi } from '../api/vision-api';
 import { ToastService } from '../toast.service';
 import { UndoToastService } from '../../shared/ui/undo-toast.service';
 import { PollScheduler } from '../poll-scheduler';
-import type { GeofenceZone } from '../api/models';
+import { LiveStore } from '../live/live-store';
+import type { LiveConnectionState } from '../live/live-fallback-logic';
+import type { GeofenceZone, GeofenceZoneEventPayload } from '../api/models';
 
 function zone(partial: Partial<GeofenceZone> = {}): GeofenceZone {
   return {
@@ -36,13 +39,27 @@ function stubScheduler() {
   return { schedule: vi.fn().mockReturnValue(() => undefined) };
 }
 
+/** `connectionState` seeded `'closed'` — reproduces today's (pre-D1) behaviour exactly, see
+ *  `marks-store.spec.ts`'s identical `stubLiveStore` doc comment. */
+function stubLiveStore() {
+  const events = signal<readonly GeofenceZoneEventPayload[]>([]);
+  const connectionState = signal<LiveConnectionState>('closed');
+  return {
+    zoneEvents: events.asReadonly(),
+    push: (incoming: readonly GeofenceZoneEventPayload[]) => events.update((existing) => [...existing, ...incoming]),
+    connectionState,
+  };
+}
+
 function create(api: ReturnType<typeof stubApi>): {
   store: GeofenceStore;
   toasts: { ok: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
   undoToast: { showUndo: ReturnType<typeof vi.fn> };
+  live: ReturnType<typeof stubLiveStore>;
 } {
   const toasts = { ok: vi.fn(), error: vi.fn(), info: vi.fn(), notify: vi.fn() };
   const undoToast = { showUndo: vi.fn() };
+  const live = stubLiveStore();
   TestBed.configureTestingModule({
     providers: [
       GeofenceStore,
@@ -50,12 +67,13 @@ function create(api: ReturnType<typeof stubApi>): {
       { provide: ToastService, useValue: toasts },
       { provide: UndoToastService, useValue: undoToast },
       { provide: PollScheduler, useValue: stubScheduler() },
+      { provide: LiveStore, useValue: live },
     ],
   });
   const store = TestBed.inject(GeofenceStore);
   // ALWAYS-ON-FLOW-PLAN.md §4 Wave C3: see `marks-store.spec.ts`'s identical `create()` comment.
   store.activate();
-  return { store, toasts, undoToast };
+  return { store, toasts, undoToast, live };
 }
 
 /** Lets the fire-and-forget promise chain inside the constructor's `refresh()` settle. */
@@ -203,6 +221,7 @@ describe('GeofenceStore', () => {
   describe('activate/release (ALWAYS-ON-FLOW-PLAN.md §4 Wave C3)', () => {
     function createInactive(api: ReturnType<typeof stubApi>) {
       const scheduleFn = vi.fn().mockReturnValue(vi.fn());
+      const live = stubLiveStore();
       TestBed.configureTestingModule({
         providers: [
           GeofenceStore,
@@ -210,9 +229,10 @@ describe('GeofenceStore', () => {
           { provide: ToastService, useValue: { ok: vi.fn(), error: vi.fn(), info: vi.fn(), notify: vi.fn() } },
           { provide: UndoToastService, useValue: { showUndo: vi.fn() } },
           { provide: PollScheduler, useValue: { schedule: scheduleFn } },
+          { provide: LiveStore, useValue: live },
         ],
       });
-      return { store: TestBed.inject(GeofenceStore), scheduleFn };
+      return { store: TestBed.inject(GeofenceStore), scheduleFn, live };
     }
 
     it('never fetches or schedules a poll until the first activate()', async () => {
@@ -250,6 +270,204 @@ describe('GeofenceStore', () => {
     it('an unmatched release is a defensive no-op, never going negative', () => {
       const { store } = createInactive(stubApi());
       expect(() => store.release()).not.toThrow();
+    });
+  });
+
+  describe('the `zones` SSE topic', () => {
+    it('CREATED inserts a new zone the poll has not seen yet', async () => {
+      const api = stubApi();
+      const { store, live } = create(api);
+      await flush();
+      TestBed.tick();
+
+      live.push([{ action: 'CREATED', zone: zone({ id: 'z-live', name: 'Live zone' }) }]);
+      TestBed.tick();
+
+      expect(store.zones().map((z) => z.id)).toEqual(['z-live']);
+    });
+
+    it('UPDATED replaces the existing zone in place, by id', async () => {
+      const api = stubApi({ listGeofences: vi.fn().mockResolvedValue([zone()]) });
+      const { store, live } = create(api);
+      await flush();
+      TestBed.tick();
+
+      live.push([{ action: 'UPDATED', zone: zone({ name: 'Renamed via live' }) }]);
+      TestBed.tick();
+
+      expect(store.zones()).toEqual([zone({ name: 'Renamed via live' })]);
+    });
+
+    it('DELETED removes the zone by id', async () => {
+      const api = stubApi({ listGeofences: vi.fn().mockResolvedValue([zone(), zone({ id: 'z-2' })]) });
+      const { store, live } = create(api);
+      await flush();
+      TestBed.tick();
+
+      live.push([{ action: 'DELETED', zone: zone() }]);
+      TestBed.tick();
+
+      expect(store.zones().map((z) => z.id)).toEqual(['z-2']);
+    });
+
+    it('a double-delivered CREATED/UPDATED never duplicates the zone (idempotent upsert)', async () => {
+      const api = stubApi();
+      const { store, live } = create(api);
+      await flush();
+      TestBed.tick();
+
+      live.push([{ action: 'CREATED', zone: zone({ id: 'z-live' }) }]);
+      TestBed.tick();
+      live.push([{ action: 'CREATED', zone: zone({ id: 'z-live' }) }]); // the same event, replayed
+      TestBed.tick();
+
+      expect(store.zones().map((z) => z.id)).toEqual(['z-live']);
+    });
+
+    it('a double-delivered DELETED is a safe no-op the second time', async () => {
+      const api = stubApi({ listGeofences: vi.fn().mockResolvedValue([zone()]) });
+      const { store, live } = create(api);
+      await flush();
+      TestBed.tick();
+
+      live.push([{ action: 'DELETED', zone: zone() }]);
+      TestBed.tick();
+      live.push([{ action: 'DELETED', zone: zone() }]); // the same delete, replayed
+      TestBed.tick();
+
+      expect(store.zones()).toEqual([]);
+    });
+
+    it('runs the fold unconditionally, even with no active consumer', () => {
+      const api = stubApi();
+      const live = stubLiveStore();
+      TestBed.configureTestingModule({
+        providers: [
+          GeofenceStore,
+          { provide: VisionApi, useValue: api },
+          { provide: ToastService, useValue: { ok: vi.fn(), error: vi.fn(), info: vi.fn(), notify: vi.fn() } },
+          { provide: UndoToastService, useValue: { showUndo: vi.fn() } },
+          { provide: PollScheduler, useValue: { schedule: vi.fn().mockReturnValue(vi.fn()) } },
+          { provide: LiveStore, useValue: live },
+        ],
+      });
+      const store = TestBed.inject(GeofenceStore);
+      // deliberately never activate() — the fold is documented as running from construction alone.
+
+      live.push([{ action: 'CREATED', zone: zone() }]);
+      TestBed.tick();
+
+      expect(store.zones()).toEqual([zone()]);
+    });
+  });
+
+  describe('live gate (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1)', () => {
+    function createInactive(api: ReturnType<typeof stubApi>) {
+      const live = stubLiveStore();
+      const scheduleFn = vi.fn().mockReturnValue(vi.fn());
+      TestBed.configureTestingModule({
+        providers: [
+          GeofenceStore,
+          { provide: VisionApi, useValue: api },
+          { provide: ToastService, useValue: { ok: vi.fn(), error: vi.fn(), info: vi.fn(), notify: vi.fn() } },
+          { provide: UndoToastService, useValue: { showUndo: vi.fn() } },
+          { provide: PollScheduler, useValue: { schedule: scheduleFn } },
+          { provide: LiveStore, useValue: live },
+        ],
+      });
+      return { store: TestBed.inject(GeofenceStore), live, scheduleFn };
+    }
+
+    /**
+     * The plan's own frozen acceptance criterion (§5): a poll that stops must still reconcile on
+     * reconnect. With the store active and live open, driving `connectionState` through
+     * `open → closed → open` must issue **exactly one** REST refresh on (re-)entering `open`, and
+     * **zero** REST requests for as long as `open` persists.
+     */
+    it('reconciles exactly once on reconnect, and stays silent for as long as live holds', async () => {
+      const api = stubApi({ listGeofences: vi.fn().mockResolvedValue([zone()]) });
+      const { store, live } = createInactive(api);
+      store.activate();
+      await flush();
+      TestBed.tick();
+
+      live.connectionState.set('open');
+      TestBed.tick();
+      await flush();
+      // (the first entry into live already reconciled once here — not the segment under test)
+
+      live.connectionState.set('closed');
+      TestBed.tick();
+      await flush();
+      // Falling back to polling refreshes immediately too (the D1 table's own
+      // `>0 | false | live → refresh once, then start poll` row) — a separate, legitimate call,
+      // also not the segment under test. Only now do we isolate "entering open".
+      api.listGeofences.mockClear();
+
+      live.connectionState.set('open');
+      TestBed.tick();
+      await flush();
+
+      expect(api.listGeofences).toHaveBeenCalledTimes(1); // exactly one refresh, entering 'open'
+
+      store.activate(); // a second concurrent consumer while already live — no further request
+      TestBed.tick();
+      await flush();
+      expect(api.listGeofences).toHaveBeenCalledTimes(1);
+    });
+
+    /**
+     * The companion to the criterion above, and the exact defect wave L1 found in the four
+     * `core/map-data/**` stores: with `activeConsumers === 0` this store keeps folding `zones`
+     * deltas but receives none during an outage, so a `liveGated` left stale at `true` would send
+     * the next `activate()` down `applyTransport`'s `>0 | true | live → nothing` row and skip its
+     * reconcile — leaving the operator looking at a zone list missing everything the outage
+     * swallowed, on a safety-adjacent layer, with no repair until the next disconnect. The
+     * zero-consumer branch clears the flag, which is what makes the final `activate()` re-fetch.
+     */
+    it('reconciles on the next activate() when an outage began and ended while released', async () => {
+      const api = stubApi({ listGeofences: vi.fn().mockResolvedValue([zone()]) });
+      const { store, live } = createInactive(api);
+      store.activate();
+      await flush();
+      TestBed.tick();
+
+      live.connectionState.set('open');
+      TestBed.tick();
+      await flush();
+
+      store.release();
+      api.listGeofences.mockClear();
+
+      // The whole outage happens with nothing mounted — no deltas are delivered, and a released
+      // store must stay silent throughout.
+      live.connectionState.set('closed');
+      TestBed.tick();
+      await flush();
+      live.connectionState.set('open');
+      TestBed.tick();
+      await flush();
+      expect(api.listGeofences).not.toHaveBeenCalled();
+
+      store.activate();
+      TestBed.tick();
+      await flush();
+
+      expect(api.listGeofences).toHaveBeenCalledTimes(1);
+
+      store.release();
+    });
+
+    it('a store that activates while already live does one initial GET, not zero, and never schedules the poll', async () => {
+      const api = stubApi({ listGeofences: vi.fn().mockResolvedValue([zone()]) });
+      const { store, live, scheduleFn } = createInactive(api);
+      live.connectionState.set('open');
+
+      store.activate();
+      await flush();
+
+      expect(api.listGeofences).toHaveBeenCalledTimes(1);
+      expect(scheduleFn).not.toHaveBeenCalled();
     });
   });
 });
