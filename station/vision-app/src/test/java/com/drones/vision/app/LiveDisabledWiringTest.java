@@ -4,8 +4,10 @@ import com.drones.vision.adapter.persistence.repository.JpaAuditTrail;
 import com.drones.vision.adapter.persistence.repository.JpaDetectionEventRepository;
 import com.drones.vision.api.controller.LiveController;
 import com.drones.vision.api.live.LiveUpdateRegistry;
+import com.drones.vision.api.live.SystemStatusSampler;
 import com.drones.vision.app.devsupport.LoggingEventPublisher;
 import com.drones.vision.app.devsupport.NoopLiveUpdatePublisher;
+import com.drones.vision.flight.domain.port.GeofenceLiveUpdatePort;
 import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
@@ -24,20 +26,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Context test for {@code vision.live.enabled=false} (docs/plans/done/REALTIME-PLAN.md §4, item 4): asserts
- * the context still loads cleanly but with every one of the five live-update ports ({@link
+ * the context still loads cleanly but with every one of the seven live-update ports ({@link
  * FleetLiveUpdatePort}, {@link TelemetryLiveUpdatePort}, {@link DetectionLiveUpdatePort}, {@link
  * MapLiveUpdatePort}, {@link EventLiveUpdatePort} — the ports the former god-port {@code
- * LiveUpdatePublisherPort} split into, docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6b) falling
+ * LiveUpdatePublisherPort} split into, docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6b, plus
+ * {@link GeofenceLiveUpdatePort} added for the {@code zones} topic, docs/plans/active/
+ * LIVE-POLL-RETIREMENT-PLAN.md &sect;3 D2/&sect;4.1, wave L3) falling
  * back to {@link NoopLiveUpdatePublisher}, {@code GET /api/live}'s {@link LiveController}/{@link
- * LiveUpdateRegistry} beans entirely absent (so the endpoint 404s, same as any other unmapped
- * route), and neither {@link EventPublisherPort} nor {@link AuditTrailPort} wrapped in their
+ * LiveUpdateRegistry}/{@link SystemStatusSampler} beans entirely absent (so the endpoint 404s, same
+ * as any other unmapped route, and nothing samples for the {@code system} topic that has nowhere to
+ * broadcast), and neither {@link EventPublisherPort} nor {@link AuditTrailPort} wrapped in their
  * live-update decorators — i.e. the plain {@link JpaAuditTrail}/{@link
  * JpaDetectionEventRepository} delegates (docs/plans/done/POSTGRES-ONLY-CONTEXT.md W2b —
  * Postgres-backed unconditionally now, not the old devsupport in-memory fallbacks) — see {@link
  * LiveWiringTest} for the opposite (enabled/default) counterpart.
  *
- * <p>Looks up {@link LiveController}/{@link LiveUpdateRegistry} via {@link
- * ApplicationContext#getBeansOfType} rather than {@code @Autowired}, mirroring {@link
+ * <p>Looks up {@link LiveController}/{@link LiveUpdateRegistry}/{@link SystemStatusSampler} via
+ * {@link ApplicationContext#getBeansOfType} rather than {@code @Autowired}, mirroring {@link
  * DiscoveryDisabledWiringTest}'s own reasoning: a plain {@code @Autowired} field is required by
  * default and would fail the context entirely if the bean is genuinely absent, defeating the
  * point of this test.
@@ -67,6 +72,9 @@ class LiveDisabledWiringTest {
     private EventLiveUpdatePort eventLiveUpdatePort;
 
     @Autowired
+    private GeofenceLiveUpdatePort geofenceLiveUpdatePort;
+
+    @Autowired
     private EventPublisherPort eventPublisherPort;
 
     @Autowired
@@ -82,12 +90,15 @@ class LiveDisabledWiringTest {
         assertInstanceOf(NoopLiveUpdatePublisher.class, detectionLiveUpdatePort);
         assertInstanceOf(NoopLiveUpdatePublisher.class, mapLiveUpdatePort);
         assertInstanceOf(NoopLiveUpdatePublisher.class, eventLiveUpdatePort);
+        assertInstanceOf(NoopLiveUpdatePublisher.class, geofenceLiveUpdatePort);
     }
 
     @Test
-    void noLiveControllerOrRegistryBeanExistsWhenDisabled() {
+    void noLiveControllerOrRegistryOrSamplerBeanExistsWhenDisabled() {
         assertTrue(applicationContext.getBeansOfType(LiveController.class).isEmpty());
         assertTrue(applicationContext.getBeansOfType(LiveUpdateRegistry.class).isEmpty());
+        assertTrue(applicationContext.getBeansOfType(SystemStatusSampler.class).isEmpty(),
+                "the system-status sampler must be gated off too -- it would have nowhere to broadcast");
     }
 
     @Test

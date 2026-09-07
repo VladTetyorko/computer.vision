@@ -23,11 +23,16 @@ CREW-CONTROL W2 added `SeatsResponse`/`SeatHolderResponse`/`TakeSeatRequest`) ·
 `PrincipalResolver`/`StreamAccess`/`OpenByDesign`/`AssetAuthority`/`CapabilityAssetAuthority`/
 `SeatAccess`/`SeatAccessSettings` — the
 authorization seam, see Conventions) ·
-`live/` (SSE connection registry, per-topic ring buffers, per-connection visibility filtering) ·
+`live/` (SSE connection registry, per-topic ring buffers, per-connection visibility filtering,
+`SystemStatusSampler` — LIVE-POLL-RETIREMENT-PLAN wave L4, the server-side change-detecting sampler
+that owns the `system` topic's schedule, see "Live updates" below) ·
 `ws/` (`/ws/manual-control` raw `WebSocketHandler`) · `proxy/` (`HlsProxyController` — a pass-through
 edge owning no application service) · `ratelimit/` (`RateLimitFilter`/`TokenBucket`, per-principal
 `/api/**` token bucket) · `support/` (edge-local helpers: `SnapshotJpegEncoder`, `CapabilityParsing`,
-`DeviceOriginParsing`, `RemediationOrchestrator`, `VisionApiProperties`, `DiscoveryStatusFacts` — the
+`DeviceOriginParsing`, `RemediationOrchestrator`, `VisionApiProperties`, `SystemStatusReader` — LIVE-POLL-RETIREMENT
+wave L4a, `safeStatus`/`overall`/`worstHealth` extracted from `SystemStatusController` so
+`SystemStatusSampler` can reuse the exact same rollup logic, see "Live updates" below —
+`DiscoveryStatusFacts` — the
 plain (non-DTO) crossing-seam payload behind `GET /api/discovery/status`, `InventoryExportService` —
 WAREHOUSE-UX W3, the hand-rolled CSV behind `GET /api/inventory/export`; `AssetRowFacts` — WAREHOUSE-UX
 W8, bundles the `firmware`/`totalFlightSeconds` cross-context joins `AssetController` needs, see
@@ -225,7 +230,7 @@ the full mechanism.
 | UsageTimelineController | GET | `/api/usages/by-stream/{streamId}` | "What happened to stream X" | scope |
 | AfterActionController | GET | `/api/assets/{assetId}/usages/{usageId}/after-action` | JSON manifest of the evidence package | scope + export authority (`AccessDeniedException`→403 if visible but not exportable) |
 | AfterActionController | GET | `/api/assets/{assetId}/usages/{usageId}/after-action/archive` | The ZIP archive, streamed (never buffered whole) | scope + export authority |
-| SystemStatusController | GET | `/api/system/status` | Subsystem health rollup; never errors | **unscoped** (ledger — deliberately: no secrets exposed) |
+| SystemStatusController | GET | `/api/system/status` | Subsystem health rollup; never errors — rollup logic now lives in `support/SystemStatusReader#read` (LIVE-POLL-RETIREMENT wave L4a), this controller's wire output unchanged; the same reader backs the `system` SSE topic's server-side sampler (see "Live updates" below) | **unscoped** (ledger — deliberately: no secrets exposed) |
 | SystemNetworkController | GET | `/api/system/network` | Host's site-local IPv4 addresses (each now carrying a `kind` — `LAN`/`VIRTUAL`/`UNKNOWN`, sorted kind-first) plus `mavlinkPort` and, when mediamtx publish is configured, `videoPushPort`/`videoPushPathPrefix` (SOURCE-ONBOARDING-2-PLAN.md §3.2 C3) | **unscoped** (ledger) |
 | SystemEventsController | GET | `/api/system/events?sinceMs&limit` | Durable platform-`Event` history, newest-first (ALWAYS-ON-FLOW-PLAN wave B3) — the notification bell/`/manage/system`'s reconnect backfill; empty unless `vision.events.history.enabled` | `@OpenByDesign` (see class javadoc — durably replays exactly what the already-unscoped `event` SSE topic broadcasts) |
 | DemoController | GET | `/api/demo` | Demo-button availability probe | **unscoped** (ledger); gated by `vision.demo.enabled` (default on) |
@@ -349,16 +354,68 @@ because none was needed.
 
 ### Live updates (`com.drones.vision.api.live`)
 
-One `LiveUpdateRegistry` implements all five per-context live-update ports (`FleetLiveUpdatePort`,
-`TelemetryLiveUpdatePort`, `DetectionLiveUpdatePort`, `MapLiveUpdatePort`, `EventLiveUpdatePort`) and
-owns every SSE connection, process-local/single-instance only. Topics: `fleet`, `event`, `devices`,
-`detection-events`, `discovery` (all always-on, no auth needed beyond the connection itself — see
-below for `discovery`'s own delta-only semantics), `map` and per-asset
-`telemetry:<id>`/`detections:<id>`/`geo:<id>` (individually authorized — see below). Delivery is
-coalesced (leading+trailing, ~150ms default) per topic, not per connection, so exactly one resumable
-`seq` exists per topic; `Last-Event-ID` resumes from a per-topic ring buffer (FIFO or latest-only
-depending on topic). Tunables live in `VisionApiProperties.Live` (coalesce/heartbeat/buffer
-sizes/send-timeout/buffer-eviction), bound from `vision.api.live.*`.
+One `LiveUpdateRegistry` implements all seven per-context live-update ports (`FleetLiveUpdatePort`,
+`TelemetryLiveUpdatePort`, `DetectionLiveUpdatePort`, `MapLiveUpdatePort`, `EventLiveUpdatePort`,
+`TrackCorrectionLiveUpdatePort`, and — LIVE-POLL-RETIREMENT-PLAN wave L3 — `GeofenceLiveUpdatePort`,
+`contexts/vision-flight`'s new port) and owns every SSE connection, process-local/single-instance
+only. Topics: `fleet`, `event`, `devices`, `detection-events`, `discovery`, `zones` (all always-on, no
+auth needed beyond the connection itself — see below for `discovery`'s own delta-only semantics), plus
+a tenth always-on topic `system` that carries no per-context port at all (see below), `map` and
+per-asset `telemetry:<id>`/`detections:<id>`/`geo:<id>` (individually authorized — see below).
+Delivery is coalesced (leading+trailing, ~150ms default) per topic, not per connection, so exactly one
+resumable `seq` exists per topic; `Last-Event-ID` resumes from a per-topic ring buffer (FIFO or
+latest-only depending on topic). Tunables live in `VisionApiProperties.Live` (coalesce/heartbeat/buffer
+sizes/send-timeout/buffer-eviction/`systemSample`), bound from `vision.api.live.*`.
+
+**`zones` (LIVE-POLL-RETIREMENT-PLAN §3 D2/§4.1, wave L3) — geofence create/update/delete, never
+riding `map`.** Zones deliberately do not ride the pre-existing `map` topic: no `map -> flight`
+architecture edge exists (`ContextArchitectureTest`, vision-app), and zones are
+`contexts/vision-flight`'s own concept, not `vision-map`'s. Follows the one-port-per-context idiom
+exactly like `MapLiveUpdatePort`/`MapEvent`: `contexts/vision-flight` gained `GeofenceZoneEvent`
+(`Action{CREATED,UPDATED,DELETED}` + `GeofenceZone`) and `GeofenceLiveUpdatePort`
+(`publishZoneEvent(GeofenceZoneEvent)`), and `DefaultGeofenceService` publishes on every
+create/update/delete, immediately after `GeofenceMonitor#refresh()`. The envelope is
+`GeofenceZoneEventPayload{action, zone}` — `action` one of `"CREATED"`/`"UPDATED"`/`"DELETED"`, `zone`
+the same `GeofenceZoneResponse` shape `GET /api/geofences` already returns. **`DELETED` carries the
+last-known zone in full** — `DefaultGeofenceService#delete` captures `require(id)`'s return value
+before removing it, rather than discarding it, specifically so a subscriber can render "zone X was
+deleted" without a separate lookup. Buffer capacity mirrors `discoveryBuffer` (shares
+`eventBufferCapacity`, FIFO, not latest-only — a `DELETED` a resuming viewer missed must still be
+delivered, not collapsed away by a later `UPDATED` to a different zone).
+
+**`system` (LIVE-POLL-RETIREMENT-PLAN §3 D3/§4.2, wave L4) — a server-side sampler, not a port.**
+Unlike every other topic, nothing calls `LiveUpdateRegistry` through a per-context port to publish
+`system`; `live/SystemStatusSampler` (a plain `@Component`, gated the same way `LiveUpdateRegistry`
+itself is — `@ConditionalOnProperty(prefix="vision.live", name="enabled", matchIfMissing=true)`) owns
+its own `ScheduledExecutorService` and calls `LiveUpdateRegistry#publishSystemStatus(SystemStatusResponse)`
+— one new public method, no new port interface, no new constructor collaborator on the registry
+itself (`systemBuffer` is inline-field-initialized `new LiveRingBuffer(1, true)`, exactly like
+`fleetBuffer`). The envelope's payload is the verbatim `SystemStatusResponse` `GET /api/system/status`
+already returns — same shape `support/SystemStatusReader#read` builds for both callers (wave L4a
+extracted `safeStatus`/`overall`/`worstHealth` out of `SystemStatusController` for this reuse; that
+controller's own wire output is unchanged, guarded by its pre-existing, untouched test suite). The
+sampler ticks on its own schedule (`vision.api.live.systemSample`, default 5s, first tick at delay
+`0` so the buffer is populated before any connection can possibly arrive — `LiveUpdateRegistry` needs
+no `seedIfEmpty` case for `system` because of this) and broadcasts **only on change** — a genuine
+poll-to-push conversion, not a fixed-cadence relay.
+
+**Self-feedback hazard and its frozen mitigation.** `live/LiveUpdateStatusProvider` reports on the
+`live-updates` subsystem (connection count, `LiveRingBuffer#everDropped()` across every buffer) — the
+very registry the sampler broadcasts through. Broadcasting on *every* `live-updates` change would
+create feedback (a broadcast changes connection/delivery state, which the next sample would see as a
+change, triggering another broadcast). The sampler's change detection (`SystemStatusSampler.Fingerprint`)
+compares `overall` plus each subsystem's `(id, health, detail, hint)`, **ignoring `checkedAt` entirely**
+and **excluding the `live-updates` subsystem from the comparison entirely** (`LiveUpdateStatusProvider.SUBSYSTEM_ID`,
+a shared constant so the exclusion can't drift from the id it excludes) — `live-updates`'s own value
+still rides in the broadcast payload (a subscriber still sees it), it just never *triggers* one on its
+own. Critically, `Fingerprint.overall` is **recomputed** via `SystemStatusReader#worstHealth` over the
+filtered (live-updates-excluded) list, never copied from `SystemStatusResponse#overall()` — so a
+`live-updates`-only health flip can't move the comparison's overall either. **Known, deliberately
+unfixed defect this mitigation route around**: `fleetBuffer` is `new LiveRingBuffer(1, true)`
+(latest-only), and `LiveRingBuffer#everDropped()` is set by collapse-to-latest replacement, so
+`live-updates` already reports `DEGRADED` from the second fleet change onward with a misleading
+detail — exactly why the exclusion above is necessary, not merely a change-detection convenience. Out
+of scope for this wave to fix; see `LiveRingBuffer`'s own javadoc.
 
 **Discovery now also has a `discovery` SSE topic, added on top of the still-pollable inbox
 (SOURCE-ONBOARDING-2-PLAN.md §3.2 C4 — supersedes the Z2c "poll-only" call below for the delta
@@ -402,6 +459,31 @@ TTL — 5s for assets, 10s for map — with no `PATCH` needed to trigger it). Bo
 **directly** in `LiveController`'s handler body, not only stored as a `Predicate` — a check hidden
 behind a `Predicate` field is invisible to `EndpointAuthorizationTest`'s static call-graph guard,
 which only recognizes a direct call to `CurrentUser.scope()`/`.viewer()` or a class named `*Access`.
+
+**`fleet` is filtered per connection too (fix/fleet-topic-scope), same mechanism as `map`.**
+`LiveUpdateRegistry#freshFleetEnvelope` builds its snapshot from the unscoped `AssetService#assets()`
+overload and `fleetBuffer` stays deliberately unfiltered (so a `Last-Event-ID` resume can re-filter
+against whatever the resuming viewer may see *now*, exactly like `map`) — narrowing happens only at
+delivery time, in `LiveConnection#project`, which replaced the old `mayReceive(envelope): boolean`.
+`project` returns a `LiveEnvelopeResponse` (nullable), not a `boolean`: a `map` event still resolves
+to either the same envelope or `null` (outright dropped for a connection that may not see its
+`layerId`), but a `fleet` envelope (identified by `type.equals(LiveTopicKind.FLEET.wire())` — never
+`instanceof List`, since the envelope's `payload` is an erased `Object`) is never dropped; its asset
+list is narrowed to `assetVisibility.test(assetId)`, and a viewer whose scope includes nothing still
+gets an envelope carrying an empty list, not silence. `project` returns the identical envelope
+instance when nothing needed filtering — load-bearing for `broadcast`'s serialize-once optimization
+(SCALE-100-PLAN §5 S2): `broadcast` still serializes an envelope exactly once and reuses that one
+`String` for every connection whose `project` returned that same instance back, paying a second,
+per-connection re-serialize only for a connection that actually got a narrower `map`/`fleet` view.
+The same projection now also runs on `connect()`'s snapshot/resume burst and `updateTopics()`'s
+newly-added-topic burst — both used to serialize an unfiltered envelope straight from the buffer,
+which was the actual leak (a fresh connection's seeded `fleet` snapshot, and any later resume, both
+carried every asset regardless of the caller's scope). Covered end-to-end by
+`LiveFleetScopingTest` (connect-time snapshot, broadcast delta, `Last-Event-ID` resume — proving the
+buffer stays unfiltered and is re-filtered per resuming viewer, UNBOUNDED-admin no-regression,
+empty-scope-viewer-gets-empty-list) and by three pure-unit cases in `LiveUpdateRegistryTest`
+(broadcast narrowing + UNBOUNDED no-regression, empty-list-not-dropped, and a same-instance
+assertion on a non-fleet/non-map topic guarding the serialize-once path).
 
 ### Rate limiting (`ratelimit/`)
 
@@ -640,8 +722,11 @@ on anything else), never a body field, so there is exactly one place a client ca
   (`.claude/skills/java-clean-code/SKILL.md` §3). A viewer that needs an accurate `hasImage` must read
   `GET /api/assets`/`GET /api/assets/{id}` instead.
 - **`LiveController`'s constructor needs `@Qualifier("liveUpdateRegistry")`** — `vision-app` exposes
-  the same `LiveUpdateRegistry` singleton under five more bean names (one per `*LiveUpdatePort` it
-  implements), so a plain by-type autowire finds six candidates and fails at context startup.
+  the same `LiveUpdateRegistry` singleton under seven more bean names (one per `*LiveUpdatePort` it
+  implements, `GeofenceLiveUpdatePort` now the seventh, LIVE-POLL-RETIREMENT wave L3), so a plain
+  by-type autowire finds eight candidates and fails at context startup. `SystemStatusSampler`'s own
+  constructor needs the same qualifier for the same reason — it depends on the concrete
+  `LiveUpdateRegistry` type directly (there is no port for `system`, see "Live updates" above).
 - **`LiveUpdateRegistry`'s constructor takes `ObjectProvider<AssetService>`/`ObjectProvider<DeviceService>`/
   `ObjectProvider<StreamService>`/`ObjectProvider<DetectionEventRepositoryPort>`, not the plain types**
   — a genuine circular bean dependency (each of those services' `AuditTrailPort`/live-update port
@@ -1163,3 +1248,118 @@ under that default — the four pre-existing controller/WS-handler test files ne
 disabled/pass-through `SeatAccess` threaded into their existing construction call sites to keep
 compiling, never a behavioral change. Nothing deferred to a later wave from this module's own scope;
 W3 (crew UI, vision-web) is a separate, concurrently-running agent's file scope, not this one's.
+
+**fix/fleet-topic-scope: closed the `fleet`-topic visibility-scope leak.** `freshFleetEnvelope`'s
+unscoped `AssetService#assets()` snapshot used to reach every connection unfiltered — `mayReceive`
+only ever checked `map` events and per-asset envelopes, so a `fleet` envelope (neither) always
+passed. Replaced `LiveConnection#mayReceive(envelope): boolean` with `project(envelope):
+LiveEnvelopeResponse` (nullable) reusing the connection's existing `assetVisibility` predicate (the
+same one `LiveAssetAccess#deliveryPredicate` builds from `StreamAccess#visibleAsset`, which
+`AssetService#assets(scope, includeDeleted)` — i.e. `GET /api/assets` — already applies): `map`
+unchanged (envelope-or-null by `layerId`), per-asset unchanged (envelope-or-null by `assetId`),
+`fleet` now narrows its `List<AssetSummaryResponse>` to visible entries and **never** returns `null`
+(an empty list is correct for a viewer with nothing visible), everything else passes through as the
+identical instance (load-bearing for `broadcast`'s serialize-once reuse). Fixed all three call sites
+that used to hand a connection an unfiltered envelope: `broadcast` (rewritten to project first, reuse
+the one shared serialized `String` only when `project` returned the same instance back), `connect()`'s
+snapshot/resume burst, and `updateTopics()`'s newly-added-topic burst — the last two are what actually
+leaked in production, since a fresh connection's seeded `fleet` snapshot and any `Last-Event-ID`
+resume both replayed straight from the buffer with no per-viewer narrowing at all. `fleetBuffer`
+itself stays unfiltered by design, matching `map`'s buffer, so resume re-filters against the
+resuming viewer's *current* scope rather than the scope of whoever happened to seed the buffer.
+Fixed every now-false "only `map` is filtered" javadoc claim found by grep (`LiveUpdateRegistry`
+class doc, `broadcast`, the old `mayReceive`, `LiveTopicKind.FLEET`/`MAP`, `LiveTopic.MAP`,
+`LiveAssetAccess`, `LiveEnvelopeResponse`'s `@param payload`) — four more locations than the four
+named going in, since the claim had spread past them.
+
+No new collaborator, query, DTO field, or exception mapping — this is a pure delivery-filtering fix
+using a predicate the connection already carried; `ApiExceptionHandler`'s table is unchanged. No new
+endpoint or wire-shape change either: `fleet`'s envelope shape (`List<AssetSummaryResponse>`) is
+exactly what it always was, only which elements a given connection receives changed — nothing for a
+UI wave to react to beyond "you may now legitimately see fewer/zero assets in a `fleet` envelope,
+which was always the intended scope."
+
+Six required proofs, three end-to-end (`LiveFleetScopingTest`, MockMvc over the real
+`LiveController`/`LiveUpdateRegistry`/`LiveAssetAccess`/`StreamAccess` chain, mirroring
+`LiveAssetScopingTest`'s established pattern) plus three pure-unit (`LiveUpdateRegistryTest`,
+package-private `register()`/`publishFleetChanged()` seam): (1) a GROUPS-scoped viewer's fleet
+broadcast only carries its own visible assets — `aFleetBroadcastDeltaIsAlsoNarrowedToAGroupsScopedViewersScope`
++ the pure-unit `broadcastNarrowsTheFleetEnvelopesAssetListPerConnectionWhileAnUnboundedViewerKeepsEverything`;
+(2) the connect-time seeded snapshot — the actual leak path — is already narrowed —
+`connectsSeededFleetSnapshotIsAlreadyNarrowedToAGroupsScopedViewersScope`; (3) a `Last-Event-ID`
+resume re-filters the buffer per resuming viewer, proving the buffer itself was never filtered —
+`aLastEventIdResumeReplaysTheUnfilteredBufferReFilteredPerViewer` (one admin connect seeds the shared
+buffer with both assets; a GROUPS-scoped resume sees only its own, an UNBOUNDED resume still sees
+both); (4) UNBOUNDED (admin) sees every asset, no regression — covered in both the end-to-end and
+pure-unit tests above; (5) a viewer whose scope includes nothing gets an envelope with an empty list,
+never a dropped one — `aViewerWithNothingVisibleReceivesAnEmptyFleetListNotADroppedEnvelope` +
+`aFleetBroadcastToAConnectionWithNothingVisibleStillDeliversAnEmptyListEnvelopeNotADroppedOne`; (6)
+non-fleet topics are byte-identical to before, guarding serialize-once —
+`nonFleetTopicsReuseTheIdenticalSerializedStringAcrossConnectionsGuardingSerializeOnce` asserts
+`assertSame` on the delivered `String` across two connections with divergent predicates.
+
+`./mvnw -B -pl station/vision-api -am test -DskipWeb` — `station/vision-api` **1060** (before this
+task's 8 new tests: **1052**), 0 failures/errors/skipped; full reactor summary (`kernel` through
+`vision-simulation` plus `vision-api` itself) all `SUCCESS`, `BUILD SUCCESS`, exit 0. No feature flag
+gates this change (it is a straight correctness fix, not opt-in behavior), so there is no
+default-config-off suite to separately hold green — every pre-existing test in this module's scope is
+unmodified and still passing under whatever config it always ran under. Docker not needed/not run —
+this module's tests are pure-unit/MockMvc, no Testcontainers dependency in the touched files.
+Nothing deferred; the fix, its three call sites, its javadoc corrections, and its six required proofs
+are complete in this task's scope (`station/vision-api` only — `vision-web`'s
+`drone-picker-facade.ts` was read for context, per instruction, but not modified, and self-corrects
+once the server stops over-sending).
+
+**LIVE-POLL-RETIREMENT-PLAN.md waves L3+L4 done (2026-09-06, branch `feat/live-topics-zones-system`,
+uncommitted at time of writing).** L3: new `zones` SSE topic — `GeofenceLiveUpdatePort`/
+`GeofenceZoneEvent` (`contexts/vision-flight`), `GeofenceZoneEventPayload` (`dto/`), `LiveTopicKind.ZONES`/
+`LiveTopic.ZONES`, a `zonesBuffer` (FIFO, shares `eventBufferCapacity`) and `publishZoneEvent` on
+`LiveUpdateRegistry` (now implementing seven ports). L4: new `system` SSE topic backed by
+`live/SystemStatusSampler` (a fellow vision-api class, not a per-context port) — `LiveUpdateRegistry`
+gained one public method (`publishSystemStatus`) and one inline-initialized buffer (`systemBuffer`,
+capacity-1 latest-only), **no new constructor collaborator**. L4a: `support/SystemStatusReader`
+extracted `safeStatus`/`overall`(now `worstHealth`, made public for reuse) out of
+`SystemStatusController` — that controller's wire output is unchanged, its own pre-existing test
+suite (`SystemStatusControllerTest`, untouched) is the guardrail. See "Live updates" above for the
+full topic/self-feedback-mitigation writeup, "Package layout" for the new
+`live/SystemStatusSampler`/`support/SystemStatusReader` classes, and "Gotchas" for the widened
+`@Qualifier("liveUpdateRegistry")` note.
+
+No new `ApiExceptionHandler` mapping — neither wave introduces a new HTTP-facing failure mode
+(`GeofenceLiveUpdatePort`/`SystemStatusSampler` are both fire-and-forget from the caller's point of
+view). No new REST endpoint — both waves are pure SSE-topic additions; `GET /api/geofences`'s existing
+CRUD endpoints are unchanged (see the endpoint table above), and `system`'s payload is the same
+`SystemStatusResponse` `GET /api/system/status` already returns.
+
+Tests added: `LiveUpdateRegistryTest` gained 3 (`publishZoneEventAppendsAZonesEnvelopeForEachAction`,
+`deletedZoneEventCarriesTheLastKnownZoneInFullOnTheWire`,
+`publishZoneEventReachesASubscribedConnection` — the last an end-to-end SSE-delivery proof via
+`register`); `LiveTopicTest` gained 1 (`parsesZonesAndSystemAsTheSharedConstants`); new
+`SystemStatusSamplerTest` (5 cases) proves the three L4d requirements plus one extra: (1)
+`unchangedStatusSampledRepeatedlyBroadcastsExactlyOnce`, (2)
+`aLiveUpdatesOnlyChangeNeverTriggersAnAdditionalBroadcast` (the self-feedback proof — `live-updates`
+moves its connection count then flips `OK`→`DEGRADED`, zero additional broadcasts), (3)
+`aRealSubsystemHealthChangeTriggersOneAdditionalBroadcast` (contrast case), plus
+`checkedAtAloneNeverTriggersABroadcast` and `constructorRejectsNullCollaborators`.
+`contexts/vision-flight`'s `DefaultGeofenceServiceTest` was widened in place (not new test methods) to
+assert publish-on-create/update/delete and the `DELETED`-carries-last-known-zone contract — see that
+module's own MODULE.md entry.
+
+`./mvnw -B -pl station/vision-api -am test -DskipWeb` — **1069/1069** green (1060 → 1069, +9: 3+1+5
+above). `./mvnw -B -pl core/vision-kernel,core/vision-platform,contexts/vision-warehouse,contexts/vision-identity,
+contexts/vision-flight,contexts/vision-perception,contexts/vision-map,contexts/vision-events,
+contexts/vision-learning,contexts/vision-simulation install -DskipTests` then `./mvnw -B -pl
+storage/persistence,station/vision-api,station/vision-app test -DskipWeb` (the `-am`-on-`vision-app`
+form was tried first and pulled in `adapter-rtsp` as a reactor dependency, whose
+`MediamtxDockerIntegrationTest` hit a genuine, pre-existing, unrelated Docker/network flake — RX side
+never connected to a real mediamtx container within its 1-minute bound; switched to the
+install-then-`-pl`-without-`-am` recipe instead, which reuses `adapter-rtsp`'s already-installed
+`~/.m2` jar untouched, since this task's file scope never touched that module) — `storage/persistence`
+**283/283** (unchanged, read-only this wave; Postgres Testcontainers ran for real), `station/vision-api`
+**1069/1069**, `station/vision-app` **354/354** (`LiveWiringTest` 5→6, `+systemStatusSamplerBeanExists`;
+`LiveDisabledWiringTest` renamed one test in place to also assert `SystemStatusSampler`'s bean absence
+— see that module's own MODULE.md entry) — all green, `BUILD SUCCESS`, default-config bar held
+throughout both `vision.live.enabled=true` (default) and `=false` wiring tests. Docker ran for real
+(not skipped). Nothing deferred except the pre-existing `everDropped`/`live-updates` `DEGRADED` defect,
+explicitly out of scope per this wave's own task spec (see "Live updates" above for why the L4
+mitigation routes around it rather than fixing it).

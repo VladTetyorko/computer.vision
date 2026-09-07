@@ -1,5 +1,6 @@
 package com.drones.vision.api.live;
 
+import com.drones.vision.api.dto.AssetSummaryResponse;
 import com.drones.vision.api.dto.LiveConnectedResponse;
 import com.drones.vision.api.dto.LiveEnvelopeResponse;
 import com.drones.vision.api.dto.MapEventPayload;
@@ -10,6 +11,7 @@ import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
@@ -101,37 +103,79 @@ final class LiveConnection {
     }
 
     /**
-     * Whether this connection should receive {@code envelope} at all.
+     * Projects {@code envelope} to what this connection's viewer may actually see, or {@code null}
+     * if nothing should be sent at all.
      *
-     * <p>Two independent filters, keyed off what the envelope actually carries rather than which
+     * <p>Three independent rules, keyed off what the envelope actually carries rather than which
      * topic it arrived on — so a buffered envelope carries its own filtering information with it,
      * which is what makes {@code Last-Event-ID} resume re-filterable with no parallel bookkeeping:
      * <ul>
      *   <li>a {@link MapEventPayload} is gated by {@link #mapVisibility} on its {@code layerId}
-     *       (docs/plans/done/MAP-REWORK-PLAN.md §4.3);</li>
+     *       (docs/plans/done/MAP-REWORK-PLAN.md §4.3) — {@code null} if the viewer may not see that
+     *       layer, {@code envelope} unchanged otherwise;</li>
      *   <li>anything else carrying a non-null {@link LiveEnvelopeResponse#assetId()} (a {@code
      *       telemetry}/{@code detections}/{@code geo} envelope) is gated by {@link #assetVisibility}
-     *       (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W3) — this is the defense against a scope
-     *       changing mid-connection (an assignment revoked) after a topic was legitimately
+     *       (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W3) the same way — this is the defense against a
+     *       scope changing mid-connection (an assignment revoked) after a topic was legitimately
      *       subscribed to: {@code LiveController}/{@code LiveAssetAccess} already keep an
      *       unauthorized topic from ever being added (see their own javadoc), so this check is what
      *       keeps enforcing that decision for the rest of the connection's life, not only at the
-     *       moment the topic was added.</li>
+     *       moment the topic was added;</li>
+     *   <li>a {@code fleet} envelope (identified by its {@code type}, {@link LiveTopicKind#FLEET}'s
+     *       own wire string — the payload is a raw {@link Object} at this point, so {@code instanceof
+     *       List} would not tell one topic's payload from another once erasure strips the element
+     *       type) is <b>never dropped</b>: its {@code List<AssetSummaryResponse>} payload is instead
+     *       filtered down to the elements whose {@code assetId} passes {@link #assetVisibility} —
+     *       reusing the exact same predicate {@code GET /api/assets} itself applies ({@code
+     *       AssetService#assets(VisibilityScope, boolean)}'s own filter), so this connection sees
+     *       exactly the fleet rows that endpoint would answer. A viewer with no visible assets still
+     *       receives an envelope, carrying an empty list — the correct answer, not a dropped update
+     *       that would leave the client on stale data.</li>
      * </ul>
-     * Everything else (no asset id, not a map payload — {@code fleet}/{@code event}/{@code
-     * devices}/{@code detection-events}) passes unconditionally.
+     * Everything else ({@code event}/{@code devices}/{@code detection-events}/{@code discovery})
+     * passes through unchanged.
+     *
+     * <p><b>Identity is load-bearing.</b> When nothing was actually filtered, this method returns
+     * the exact same {@code envelope} instance it was given (not an equal copy) — {@code
+     * LiveUpdateRegistry#broadcast} relies on that {@code ==} to know whether it can keep reusing its
+     * one shared, already-serialized JSON {@code String} for this connection, or must re-serialize
+     * the narrowed result (docs/plans/done/SCALE-100-PLAN.md §5 S2's serialize-once optimization —
+     * see that method's own javadoc).
      *
      * @param envelope the envelope about to be sent
-     * @return {@code true} if this connection's viewer may see it
+     * @return the envelope this connection's viewer may see (narrowed, for a scoped {@code fleet}
+     *         viewer), or {@code null} to send nothing
      */
-    boolean mayReceive(LiveEnvelopeResponse envelope) {
+    LiveEnvelopeResponse project(LiveEnvelopeResponse envelope) {
         if (envelope.payload() instanceof MapEventPayload payload) {
-            return mapVisibility.test(payload.layerId());
+            return mapVisibility.test(payload.layerId()) ? envelope : null;
         }
         if (envelope.assetId() != null) {
-            return assetVisibility.test(AssetId.of(envelope.assetId()));
+            return assetVisibility.test(AssetId.of(envelope.assetId())) ? envelope : null;
         }
-        return true;
+        if (LiveTopicKind.FLEET.wire().equals(envelope.type())) {
+            return projectFleet(envelope);
+        }
+        return envelope;
+    }
+
+    /**
+     * Narrows a {@code fleet} envelope's asset list to what {@link #assetVisibility} allows — see
+     * {@link #project}'s own javadoc. Returns {@code envelope} itself, unchanged, when every element
+     * survived the filter (the common case: an unbounded/admin viewer, or simply no out-of-scope
+     * asset in this particular snapshot), so {@code LiveUpdateRegistry#broadcast}'s identity check
+     * still finds a reason to reuse the shared serialized string.
+     */
+    private LiveEnvelopeResponse projectFleet(LiveEnvelopeResponse envelope) {
+        @SuppressWarnings("unchecked") // the fleet envelope's payload is always List<AssetSummaryResponse> -- see LiveUpdateRegistry#freshFleetEnvelope
+        List<AssetSummaryResponse> assets = (List<AssetSummaryResponse>) envelope.payload();
+        List<AssetSummaryResponse> visible = assets.stream()
+                .filter(asset -> assetVisibility.test(AssetId.of(asset.assetId())))
+                .toList();
+        if (visible.size() == assets.size()) {
+            return envelope;
+        }
+        return new LiveEnvelopeResponse(envelope.seq(), envelope.assetId(), envelope.type(), visible);
     }
 
     /**

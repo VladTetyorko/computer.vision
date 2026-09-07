@@ -8,6 +8,7 @@ import { describeHttpError } from '../api-error';
 import { ToastService } from '../toast.service';
 import { PollScheduler } from '../poll-scheduler';
 import { LiveStore } from '../live/live-store';
+import { isLiveAvailable } from '../live/live-fallback-logic';
 import { LayersStore } from './layers-store';
 import type { DrawingDraft } from '../../shared/map/tactical-map/tactical-map-logic';
 import {
@@ -18,7 +19,15 @@ import {
   toMapDrawings,
 } from './drawings-logic';
 
-/** Safety-net only — same reasoning and cadence as `MarksStore`/`LayersStore`; the `map` topic is the primary path. */
+/**
+ * Safety-net only — same reasoning and cadence as `MarksStore`/`LayersStore`; the `map` topic is the
+ * primary path.
+ *
+ * **Gated on live, not unconditional** (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1) — runs
+ * **only** while `activeConsumers > 0` **and** `LiveStore` is not `'open'`; see
+ * `MarksStore.applyTransport`'s identical state table (`applyTransport` below implements the same
+ * one).
+ */
 const DRAWINGS_POLL_INTERVAL_MS = 30_000;
 
 /**
@@ -61,6 +70,10 @@ const DRAWINGS_POLL_INTERVAL_MS = 30_000;
  * called by every direct injector of this store. The route-reset subscription above and the live-fold
  * effect below stay unconditional regardless of activation: the former is dormant until `mode` is
  * non-null (which only an *active* drawing toolbar can set) and the latter is a free in-memory fold.
+ *
+ * <h2>...and now also gated on live itself (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1)</h2>
+ * Same composition as `MarksStore.applyTransport` — `activeConsumers > 0 && !isLiveAvailable(...)`
+ * is the only state that runs the 30s poll; see that method's own doc comment for the full table.
  */
 @Injectable({ providedIn: 'root' })
 export class DrawingsStore {
@@ -125,6 +138,14 @@ export class DrawingsStore {
   /** The safety-net poll's own unsubscribe, held only while `activeConsumers > 0`. */
   private stopPollFn: (() => void) | null = null;
 
+  /**
+   * `false` while this store is (or should be) relying on the safety-net poll rather than live —
+   * see {@link applyTransport}'s own doc comment for the full state table this tracks. Starts
+   * `false` so this store's very first `applyTransport` call — whichever way `liveAvailable`
+   * resolves — is always treated as a genuine transition, never a spurious no-op.
+   */
+  private liveGated = false;
+
   constructor() {
     effect(() => {
       const events = this.live.mapEvents();
@@ -134,6 +155,13 @@ export class DrawingsStore {
       const newEvents = events.slice(this.processedLiveEventCount);
       this.processedLiveEventCount = events.length;
       this.drawingsSignal.update((drawings) => applyDrawingEvents(drawings, newEvents));
+    });
+
+    // Re-evaluates poll-vs-live whenever `LiveStore` (re)connects or drops
+    // (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1) — mirrors `FleetStore`/
+    // `EventsStore`'s identical reconnect-driven effect.
+    effect(() => {
+      this.applyTransport(isLiveAvailable(this.live.connectionState()));
     });
 
     inject(Router)
@@ -161,16 +189,15 @@ export class DrawingsStore {
 
   /**
    * Registers demand — see `MarksStore.activate`'s identical doc comment for the full rationale.
-   * The first `activate()` since the last full `release()` triggers a fresh `GET` and starts the
-   * safety-net poll; further concurrent consumers just bump the count.
+   * The first `activate()` since the last full `release()` routes through {@link applyTransport}
+   * with the current transport; further concurrent consumers just bump the count.
    */
   activate(): void {
     this.activeConsumers++;
     if (this.activeConsumers > 1) {
       return;
     }
-    void this.refresh();
-    this.stopPollFn = this.scheduler.schedule(DRAWINGS_POLL_INTERVAL_MS, () => this.refresh());
+    this.applyTransport(isLiveAvailable(this.live.connectionState()));
   }
 
   /** The matching teardown — call from the consumer's own `DestroyRef.onDestroy`. */
@@ -183,6 +210,43 @@ export class DrawingsStore {
       this.stopPollFn();
       this.stopPollFn = null;
     }
+  }
+
+  /**
+   * D1's frozen gate (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3) — see
+   * `MarksStore.applyTransport`'s own doc comment for the full state table; this is the identical
+   * shape. Called both by the reconnect-driven `effect()` above and by `activate()` itself.
+   */
+  private applyTransport(liveAvailable: boolean): void {
+    if (this.activeConsumers === 0) {
+      this.stopPolling();
+      // Forget the transport mode too. A live outage that starts *and ends* while nothing is
+      // mounted delivers no deltas and leaves no trace, so a stale `liveGated` would make the next
+      // `activate()` skip its reconcile and show data missing everything the outage swallowed.
+      // Clearing it here also restores `activate()`'s documented "first consumer re-fetches"
+      // contract, which the live gate would otherwise have quietly weakened.
+      this.liveGated = false;
+      return;
+    }
+    if (liveAvailable) {
+      if (!this.liveGated) {
+        this.stopPolling();
+        void this.refresh();
+        this.liveGated = true;
+      }
+      return;
+    }
+    this.liveGated = false;
+    if (this.stopPollFn !== null) {
+      return; // already polling
+    }
+    void this.refresh();
+    this.stopPollFn = this.scheduler.schedule(DRAWINGS_POLL_INTERVAL_MS, () => this.refresh());
+  }
+
+  private stopPolling(): void {
+    this.stopPollFn?.();
+    this.stopPollFn = null;
   }
 
   async refresh(): Promise<void> {

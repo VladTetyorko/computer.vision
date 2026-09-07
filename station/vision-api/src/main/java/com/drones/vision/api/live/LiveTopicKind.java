@@ -4,11 +4,13 @@ import java.util.Arrays;
 import java.util.stream.Collectors;
 
 /**
- * The eight kinds of {@link LiveTopic} (docs/plans/done/REALTIME-PLAN.md §4; {@link #DEVICES}/{@link
+ * The ten kinds of {@link LiveTopic} (docs/plans/done/REALTIME-PLAN.md §4; {@link #DEVICES}/{@link
  * #DETECTION_EVENTS} extend the channel for the fleet/warehouse and events UIs; {@link #MAP}
  * extends it again for the common operational picture, docs/plans/done/MAP-REWORK-PLAN.md
  * §4.3; {@link #GEO} extends it again for visual geolocation's corrected track,
- * docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4/D11) — {@link #wire()}
+ * docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4/D11; {@link #ZONES}/{@link #SYSTEM} extend it again
+ * for geofence-zone deltas and a server-side system-health sampler, docs/plans/active/
+ * LIVE-POLL-RETIREMENT-PLAN.md §3 D2/D3 &amp; §4.1/§4.2, waves L3/L4) — {@link #wire()}
  * is both the topic-string prefix (e.g. {@code "telemetry:<assetId>"}) and the {@code
  * com.drones.vision.api.dto.LiveEnvelopeResponse#type()} value for envelopes of that kind, since
  * the two are deliberately the same vocabulary.
@@ -19,7 +21,14 @@ import java.util.stream.Collectors;
  * not the underscore a lower-cased enum name would produce.
  */
 enum LiveTopicKind {
-    /** Asset-centric fleet snapshot (docs/plans/done/REALTIME-PLAN.md §4) — {@code List<AssetSummaryResponse>}. */
+    /**
+     * Asset-centric fleet snapshot (docs/plans/done/REALTIME-PLAN.md §4) — {@code
+     * List<AssetSummaryResponse>}. Always-on, like {@link #EVENT}/{@link #DEVICES}/{@link
+     * #DETECTION_EVENTS}/{@link #MAP}/{@link #DISCOVERY} — but its payload is filtered per
+     * connection, down to the assets that connection's viewer may currently see, the same policy
+     * {@code GET /api/assets} itself applies (a viewer with nothing visible still receives an empty
+     * list, never a dropped envelope) — see {@link LiveConnection#project}.
+     */
     FLEET("fleet"),
     /** Generic domain {@code Event}s (device online/offline, stream started/stopped, pipeline errors, ...). */
     EVENT("event"),
@@ -48,10 +57,12 @@ enum LiveTopicKind {
      * fields inside {@code MapEventPayload} rather than as twelve topic kinds, mirroring how {@link
      * #DETECTION_EVENTS} carries OPEN/CLOSED in one topic instead of two.
      *
-     * <p><strong>Unlike every other topic here, this one is not broadcast to everyone.</strong>
+     * <p><strong>Unlike most topics here, this one is not broadcast to everyone unchanged.</strong>
      * Delivery is filtered per connection against the viewer captured at connect, by the event's
-     * {@code layerId} — see {@link LiveConnection#mayReceive} and {@link MapVisibility}. Visibility
+     * {@code layerId} — see {@link LiveConnection#project} and {@link MapVisibility}. Visibility
      * is a property of the data, resolved server-side; a client never filters the map itself.
+     * {@link #FLEET} gets the same per-connection treatment for its own reason — see that constant's
+     * own javadoc and {@link LiveConnection#project}.
      */
     MAP("map"),
     /**
@@ -69,7 +80,25 @@ enum LiveTopicKind {
      * {@code ReportOutcome.changed()} is {@code true}, or on an operator verb (attach/register/
      * dismiss/restore) — never once per sweep regardless of content.
      */
-    DISCOVERY("discovery");
+    DISCOVERY("discovery"),
+    /**
+     * Geofence-zone deltas — created/updated/deleted (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md
+     * &sect;3 D2/&sect;4.1, wave L3). Always-on, like {@link #FLEET}/{@link #EVENT}/{@link
+     * #DEVICES}/{@link #DETECTION_EVENTS}/{@link #MAP}/{@link #DISCOVERY}. Deliberately its own
+     * topic rather than riding {@link #MAP}: a geofence zone is {@code vision-flight} domain, and
+     * {@code vision-map} has no declared dependency edge on {@code vision-flight} (see {@code
+     * ContextArchitectureTest}) — carrying it as a {@code MapEvent} entity kind would require one.
+     * Not filtered per connection: every zone is visible to every caller, matching {@code
+     * GeofenceController#list}'s {@code @OpenByDesign} REST read.
+     */
+    ZONES("zones"),
+    /**
+     * Server-sampled subsystem health, broadcast only when it changes (docs/plans/active/
+     * LIVE-POLL-RETIREMENT-PLAN.md &sect;3 D3/&sect;4.2, wave L4) — the same {@code
+     * com.drones.vision.api.dto.SystemStatusResponse} shape {@code GET /api/system/status} already
+     * returns. Always-on. Ring-buffer capacity 1: only the latest sample matters (CLAUDE.md rule 9).
+     */
+    SYSTEM("system");
 
     private final String wire;
 

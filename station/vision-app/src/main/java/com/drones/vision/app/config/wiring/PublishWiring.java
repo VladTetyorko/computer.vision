@@ -249,7 +249,9 @@ public class PublishWiring {
     /**
      * {@link LiveUpdateRegistry}'s coalesce/heartbeat cadence, per-topic ring-buffer capacities, and
      * per-connection dispatch bounds (docs/plans/done/SCALE-100-PLAN.md §5 S7) — mapped from {@link
-     * VisionApiProperties#live()}, same shape as {@link #hlsProxySettings}.
+     * VisionApiProperties#live()}, same shape as {@link #hlsProxySettings}. Also feeds {@code
+     * SystemStatusSampler}'s {@code systemSample} cadence (docs/plans/active/
+     * LIVE-POLL-RETIREMENT-PLAN.md &sect;3 D3/&sect;4.2, wave L4) — one bean, two consumers.
      */
     @Bean
     public com.drones.vision.api.support.VisionApiProperties.Live liveSettings(VisionApiProperties properties,
@@ -280,7 +282,7 @@ public class PublishWiring {
                         auth.viewerUsername(), auth.viewerPassword()),
                 new com.drones.vision.api.support.VisionApiProperties.Live(live.coalesce(), live.heartbeat(),
                         live.telemetryBuffer(), live.eventBuffer(), live.detectionBuffer(), live.mapBuffer(),
-                        live.sendTimeout(), live.bufferEviction()),
+                        live.sendTimeout(), live.bufferEviction(), live.systemSample()),
                 new com.drones.vision.api.support.VisionApiProperties.Paging(paging.defaultLimit(), paging.maxLimit()),
                 new com.drones.vision.api.support.VisionApiProperties.Upload(upload.maxImageBytes()));
     }

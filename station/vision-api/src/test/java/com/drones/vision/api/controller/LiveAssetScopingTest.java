@@ -265,7 +265,7 @@ class LiveAssetScopingTest {
      * {@code telemetry:<alphaAsset>} subscription throughout -- there is no {@code PATCH}, no
      * reconnect, nothing that would give {@code LiveController} another chance to re-run {@link
      * LiveAssetAccess#filterTopicsParam}. Only the caller's underlying scope changes, and only
-     * {@link com.drones.vision.api.live.LiveConnection#mayReceive}'s independent per-envelope
+     * {@link com.drones.vision.api.live.LiveConnection#project}'s independent per-envelope
      * re-check is what stops the next sample.
      */
     @Test

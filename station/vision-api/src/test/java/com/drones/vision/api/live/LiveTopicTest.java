@@ -20,6 +20,14 @@ class LiveTopicTest {
     }
 
     @Test
+    void parsesZonesAndSystemAsTheSharedConstants() {
+        assertEquals(LiveTopic.ZONES, LiveTopic.parse("zones"));
+        assertEquals(LiveTopic.SYSTEM, LiveTopic.parse("system"));
+        assertEquals("zones", LiveTopic.ZONES.wire());
+        assertEquals("system", LiveTopic.SYSTEM.wire());
+    }
+
+    @Test
     void parsesATelemetryTopicWithItsAssetId() {
         AssetId assetId = AssetId.random();
 

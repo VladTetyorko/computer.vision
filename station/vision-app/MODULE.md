@@ -76,7 +76,8 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 
 ### Application-service beans (`ApplicationServiceWiring`)
 
-- **Live server-push selectors (6, not 5):** `fleetLiveUpdatePort`/`telemetryLiveUpdatePort`/`detectionLiveUpdatePort`/`mapLiveUpdatePort`/`eventLiveUpdatePort`/`trackCorrectionLiveUpdatePort` — each takes `VisionLiveProperties` + `@Qualifier("liveUpdateRegistry") ObjectProvider<LiveUpdateRegistry>`; returns the registry if `properties.enabled()` (default true) else `new NoopLiveUpdatePublisher()`. `trackCorrectionLiveUpdatePort` backs the `geo:<assetId>` topic (visual-geo), same flag.
+- **Live server-push selectors (7, not 6):** `fleetLiveUpdatePort`/`telemetryLiveUpdatePort`/`detectionLiveUpdatePort`/`mapLiveUpdatePort`/`eventLiveUpdatePort`/`trackCorrectionLiveUpdatePort`/`geofenceLiveUpdatePort` — each takes `VisionLiveProperties` + `@Qualifier("liveUpdateRegistry") ObjectProvider<LiveUpdateRegistry>`; returns the registry if `properties.enabled()` (default true) else `new NoopLiveUpdatePublisher()`. `trackCorrectionLiveUpdatePort` backs the `geo:<assetId>` topic (visual-geo), same flag. `geofenceLiveUpdatePort` (LIVE-POLL-RETIREMENT-PLAN.md §3 D2, wave L3) is byte-identical in shape to the six preceding it — added because `contexts/vision-flight`'s `GeofenceLiveUpdatePort` backs the new `zones` SSE topic (see `station/vision-api/MODULE.md`'s "Live updates" section); `geofenceService`'s bean method now also takes it, passed as the 3rd constructor arg to `DefaultGeofenceService`.
+- **The `system` SSE topic (LIVE-POLL-RETIREMENT-PLAN.md §3 D3, wave L4) needs no selector bean at all.** `vision-api`'s `live/SystemStatusSampler` is a plain `@Component` (self-gated by the same `@ConditionalOnProperty(vision.live.enabled)` `LiveUpdateRegistry`/`LiveController` already use), picked up by ordinary component scan — there is no per-context port for it to select between, and no `Noop*` companion is needed either: nothing else depends on it, so a disabled deployment simply has zero instances of the bean, not an inert stand-in. `LiveWiringTest`/`LiveDisabledWiringTest` (this module) assert its presence/absence directly via `ApplicationContext#getBeansOfType(SystemStatusSampler.class)`, the same idiom already used for `LiveController`/`LiveUpdateRegistry` themselves.
 - **`streamStateObserver` (SOURCE-ONBOARDING-2 wave C) is a seventh selector alongside those six, but not a seventh `*LiveUpdatePort`** — `LiveUpdateRegistry` implements no such port for this. Gated on **both** `VisionLiveProperties#enabled()` and the new nested `VisionLiveProperties.StreamStatePush#enabled()` (both default true); with either off it's `StreamStateObserver.NOOP`, otherwise a lambda calling `LiveUpdateRegistry#publishDevicesSnapshot()` on every computed `StreamState` transition — the same `devices` snapshot `fleetLiveUpdatePort`'s sibling `publishFleetChanged` already coalesces into on asset/device/stream lifecycle changes, here additionally fired directly on a stream-state transition. Threaded into `streamService`'s `DefaultStreamServiceSettings` as its (now 7th) `StreamStateObserver` field.
 - `eventPublisherPort` — `LoggingEventPublisher`, wrapped in `DetectionSessionCleanupEventPublisher` if CV enabled and `detectionPort` is a real `GrpcDetectionPort`, then (ALWAYS-ON-FLOW-PLAN wave B3) wrapped in `events.PersistingEventPublisher` if `vision.events.history.enabled`, finally wrapped in `LiveUpdateEventPublisher` if live enabled. Durability wraps before the live announcement — a caller-visible ordering choice only in that `PersistingEventPublisher`'s async durable write and `LiveUpdateEventPublisher`'s SSE fan-out race independently either way, but placing the pure decorator (no I/O on the calling thread) closer to the raw publisher keeps `LiveUpdateEventPublisher` — which SSE-fans-out synchronously — as the outermost, most failure-visible layer.
 - `eventHistoryPort(EntityManagerFactory, VisionEventHistoryProperties)` (wave B3) → `JpaEventHistory`, **unconditional** (adapter-persistence is the only store, same posture as `auditTrailPort`/`detectionEventRepositoryPort` below) — resolved regardless of `vision.events.history.enabled`; only the *decorator* that writes to it is gated, following the "flag gates the write path, the port itself always exists" convention `NoopLiveUpdatePublisher`'s sibling ports do not need here since there is no in-memory fallback for this port at all (see `storage/persistence/MODULE.md`).
@@ -112,7 +113,7 @@ swapped for a no-op) when their condition is false, unless a Noop fallback is na
 | `VisionMjpegProperties` | `vision.mjpeg` | `adapter-mjpeg`'s `MjpegSettings` |
 | `VisionV4l2Properties` | `vision.v4l2` | `V4l2VideoSource` directly (no adapter settings record) |
 | `VisionMavlinkProperties` | `vision.mavlink` | `adapter-mavlink`'s `MavlinkSettings` (minus `Rc`); **FLEET-RADIO R4/D7** adds `dropRateWarnPercent`/`dropRateAlarmPercent`/`linkFailureGrace` (defaults 5.0/20.0/2s, compact-constructor validated: both percents 0..100, alarm>=warn, grace positive) — consumed by `TelemetryWiring#toMavlinkSettings` (into `MavlinkSettings.LinkStatus`) and directly by `SystemStatusWiring#mavlinkLinkStatus`. **MAVLINK-COMMANDS-PLAN P4** re-scoped `ackTimeout`'s `@DefaultValue` from `2s` to `700ms` (now byte-identical to `MavlinkSettings.DEFAULT_ACK_TIMEOUT_MILLIS`, the per-*attempt* wait) and added `commandRetries` (11th canonical-constructor component, right after `ackTimeout`; `@DefaultValue` `2`, compact-constructor validated `>= 0`, byte-identical to `MavlinkSettings.DEFAULT_COMMAND_RETRIES`) — both threaded through `TelemetryWiring#toMavlinkSettings` via `MavlinkSettings.withCommandRetries(...)`, closing the P1-documented production gap (see Gotchas) |
-| `VisionApiProperties` | `vision.api` | bridges to vision-api's plain mirror (same simple name, see Gotchas); snapshot/hlsProxy/live/paging/upload/rateLimit |
+| `VisionApiProperties` | `vision.api` | bridges to vision-api's plain mirror (same simple name, see Gotchas); snapshot/hlsProxy/live/paging/upload/rateLimit. **LIVE-POLL-RETIREMENT-PLAN.md §3 D3, wave L4**: the nested `Live` record gained a 9th component, `Duration systemSample` (`@DefaultValue("5s")`, compact-ctor validated positive) — `PublishWiring#toApiSupportProperties`/`#liveSettings` both bridge it through unchanged shape (just a 9th positional arg); consumed by `vision-api`'s `SystemStatusSampler` (its own `@Autowired` constructor takes the plain-mirror `VisionApiProperties.Live` directly, same bean `liveSettings()` already builds for `LiveController`) |
 | `VisionOnboardingProperties` | `vision.onboarding` | probe/remediate/passport flags → `OnboardingWiringConfiguration` + `TelemetryWiring#toMavlinkSettings`. `probe.parameters` (list, default empty) **replaces** the adapter's firmware-verified probe list rather than adding to it; empty keeps it |
 | `VisionControlProperties` | `vision.control` | `ControlProfileWiring`'s aux-function catalog |
 | `VisionGeoProperties` | `vision.geo.fixed-camera` | `FixedCameraGeoWiringConfiguration` |
@@ -147,7 +148,7 @@ feature no-ops:
 | `NoopDetectionPort` | `DetectionPort` | `vision.cv.enabled=false` |
 | `NoopStreamPublisher` | `StreamPublisherPort` | `vision.publish.enabled=false` |
 | `NoopReplayFrameExtractor` | `ReplayFrameExtractionPort` | `vision.publish.enabled=false` |
-| `NoopLiveUpdatePublisher` | all 6 live-update ports on one class | `vision.live.enabled=false` |
+| `NoopLiveUpdatePublisher` | all 7 live-update ports on one class (`GeofenceLiveUpdatePort` added LIVE-POLL-RETIREMENT wave L3) | `vision.live.enabled=false` |
 | `NoopReferenceIndexPort` | `ReferenceIndexPort` | `vision.geo.visual.enabled=false` |
 | `NoopVehicleConfigPort` | `VehicleConfigPort` | `vision.onboarding.probe.enabled=false` (default) |
 
@@ -231,10 +232,11 @@ maps to a real handler, so it can't quietly outlive the gap it records.
   one would produce a method with exactly one caller). The list is not exact-equality — shrinking it
   silently is fine — but adding an entry requires the same "genuinely bulk/historical" justification,
   not a way to silence a new violation.
-- **`@Qualifier("liveUpdateRegistry")` on all 6 live-update selector beans is not decorative.** Remove
-  it from any one and, once ≥2 of the six are resolved together, an unqualified `ObjectProvider<LiveUpdateRegistry>`
+- **`@Qualifier("liveUpdateRegistry")` on all 7 live-update selector beans is not decorative.** Remove
+  it from any one and, once ≥2 of the seven are resolved together, an unqualified `ObjectProvider<LiveUpdateRegistry>`
   lookup sees two candidates (the component-scanned bean + the already-resolved sibling) and throws
-  `NoSuchBeanDefinitionException`.
+  `NoSuchBeanDefinitionException`. `vision-api`'s own `LiveUpdateStatusProvider`/`SystemStatusSampler`
+  need the identical qualifier for the identical reason — see that module's own MODULE.md Gotchas.
 - **`@Primary` does not help an `ObjectProvider` consumer.** `cvGrpcChannel` is `@Primary`, but once
   `cvTrainingChannel` also exists as a bean, every multi-channel consumer still needs explicit
   `@Qualifier("cvGrpcChannel")`/`@Qualifier("cvTrainingChannel")` — `@Primary` only resolves ambiguity
@@ -1460,3 +1462,56 @@ absent by default, `DetectionPolicyPort` present and reading `false` for every a
 the `onDetectionResult` ordering fix above; the run before it failed `TrackingAssociateE2ETest`.
 Docker ran, not skipped (real Testcontainers `postgres:16`, Flyway through `V35`, same as every other
 wave in this file).
+
+## LIVE-POLL-RETIREMENT-PLAN waves L3+L4 — this module's wiring half (2026-09-06, branch `feat/live-topics-zones-system`)
+
+This module's file scope was the wiring/devsupport half of both waves — the domain/port/service
+changes live in `contexts/vision-flight` (L3) and `station/vision-api` (both), see those modules' own
+MODULE.md entries for the full topic/self-feedback-mitigation writeup.
+
+**L3 (`zones` topic)**: `ApplicationServiceWiring` gained a seventh live-server-push selector,
+`geofenceLiveUpdatePort(VisionLiveProperties, @Qualifier("liveUpdateRegistry") ObjectProvider<LiveUpdateRegistry>)`
+— byte-identical in shape to the six preceding it, `NoopLiveUpdatePublisher` fallback when
+`vision.live.enabled=false`; the `geofenceService` bean now passes it as `DefaultGeofenceService`'s
+3rd constructor argument. `NoopLiveUpdatePublisher` gained a matching no-op `publishZoneEvent`
+override (now implementing seven `*LiveUpdatePort`s). No new properties record and no new
+`application.yaml` block — `VisionLiveProperties#enabled()` already governs this selector exactly like
+its six siblings.
+
+**L4 (`system` topic)**: needed **no new selector bean at all** — `vision-api`'s `SystemStatusSampler`
+is picked up by ordinary component scan, self-gated by the same `@ConditionalOnProperty` its sibling
+live-update beans use (see "Application-service beans" above). The one properties change on this
+module's side: `config/properties/VisionApiProperties.Live` (the Spring-bound mirror) gained a 9th
+component, `@DefaultValue("5s") Duration systemSample`, threaded through `PublishWiring#toApiSupportProperties`/
+`#liveSettings` to the plain vision-api mirror `SystemStatusSampler` actually consumes (see the
+properties table above). `application.yaml`'s documented `vision.api.live.*` block gained a commented
+`# system-sample: 5s` line alongside its siblings (`coalesce`, `buffer-eviction`, …).
+
+**Test wiring, both waves**: `LiveWiringTest` (the enabled/default counterpart) gained
+`geofenceLiveUpdatePort`/`assertInstanceOf(LiveUpdateRegistry.class, ...)` inside its existing
+all-ports assertion, plus a new `systemStatusSamplerBeanExists` test asserting the bean is present.
+`LiveDisabledWiringTest` gained the matching `Noop` assertion inside its existing test (renamed
+`noLiveControllerOrRegistryOrSamplerBeanExistsWhenDisabled`, widened to also assert
+`applicationContext.getBeansOfType(SystemStatusSampler.class).isEmpty()` — the sampler must be gated
+off too, since with live disabled it would have nowhere to broadcast).
+
+**Docker/build note**: the first attempt used `./mvnw -B -pl station/vision-app -am test -DskipWeb`
+per this task's own build instructions, but `-am` pulled `adapter-rtsp` into the reactor as a build
+dependency of `vision-app`, and its `MediamtxDockerIntegrationTest` hit a genuine, pre-existing,
+unrelated Docker/network flake (RX side never connected to a real mediamtx container within its
+1-minute bound) — a module this task's file scope never touches. Switched to the standard
+install-then-`-pl`-without-`-am` recipe instead (`./mvnw -B -pl core/vision-kernel,core/vision-platform,
+contexts/vision-warehouse,contexts/vision-identity,contexts/vision-flight,contexts/vision-perception,
+contexts/vision-map,contexts/vision-events,contexts/vision-learning,contexts/vision-simulation install
+-DskipTests` then `./mvnw -B -pl storage/persistence,station/vision-api,station/vision-app test
+-DskipWeb`), which reuses `adapter-rtsp`'s already-installed `~/.m2` jar untouched while still
+refreshing `vision-flight`'s (this wave's own changed module).
+
+`storage/persistence` **283/283** (unchanged, read-only this wave; Postgres Testcontainers ran for
+real), `station/vision-api` **1069/1069** (+9 — see that module's own MODULE.md entry), `station/vision-app`
+**353 → 354, all green** (+1: `LiveWiringTest#systemStatusSamplerBeanExists`; `LiveDisabledWiringTest`
+widened one existing test in place, no new test method there) — all green, `BUILD SUCCESS`, default-config
+bar held throughout both `vision.live.enabled=true` (default) and `=false` wiring tests. Docker ran for
+real, not skipped. No new `ApiExceptionHandler` mapping, no new REST endpoint (both waves are pure
+SSE-topic additions — see `station/vision-api/MODULE.md`). Nothing deferred except the pre-existing
+`everDropped`/`live-updates` `DEGRADED` defect, explicitly out of scope per this wave's own task spec.
