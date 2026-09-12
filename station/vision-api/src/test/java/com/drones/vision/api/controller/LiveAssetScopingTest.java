@@ -176,7 +176,7 @@ class LiveAssetScopingTest {
         assertTrue(patchResponse.get("topics").toString().contains("detections:" + alphaAsset.value()),
                 "PATCH must grant a topic naming the caller's own assigned asset");
 
-        registry.publishDetections(alphaAsset, detectionResult(StreamId.random(), 0));
+        registry.publishDetections(alphaAsset, detectionResult(StreamId.random(), 0), List.of());
         awaitEnvelope(stream, "detections", alphaAsset);
 
         MvcResult resumed = alphaMvc.perform(get("/api/live")
@@ -216,7 +216,7 @@ class LiveAssetScopingTest {
         MvcResult bravoStream = connect(bravoMvc, "detections:" + bravoAsset.value());
         int alphaCountBefore = dataLines(alphaStream).size();
 
-        registry.publishDetections(bravoAsset, detectionResult(StreamId.random(), 0));
+        registry.publishDetections(bravoAsset, detectionResult(StreamId.random(), 0), List.of());
         awaitEnvelope(bravoStream, "detections", bravoAsset); // proves this flush cycle actually ran
 
         assertEquals(alphaCountBefore, dataLines(alphaStream).size(),

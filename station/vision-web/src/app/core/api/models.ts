@@ -942,6 +942,7 @@ export interface StreamTracksResponse {
   readonly rate?: DetectionRate;
   readonly detectionState?: DetectionState;
   readonly follow?: FollowStatus;
+  readonly objects: readonly WorldObject[];
 }
 
 /**
@@ -1122,6 +1123,68 @@ export interface ObjectState {
   readonly memory?: ObjectMemoryFacts;
   readonly lock?: ObjectLockFacts;
   readonly timing?: ObjectTiming;
+}
+
+/**
+ * The runtime value list `RenderTier` is derived from, in the same declaration order as the Java
+ * enum (`contexts/vision-perception/.../domain/model/RenderTier.java`) — see `OBJECT_LIFECYCLES`'s
+ * own comment for why this is a pinned tuple rather than an inline union.
+ */
+export const RENDER_TIERS = ['HIDDEN', 'T0', 'T1', 'T2', 'T3'] as const;
+
+/**
+ * Mirrors `domain.model.RenderTier` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6, wave W2.8) —
+ * what tier a viewer should render one world object at. `'T0'`/`'T1'`/`'T2'`/`'T3'` are
+ * byte-identical to the frozen client vocabulary this app already renders with,
+ * {@link DetectionTier} (`shared/player/detection-overlay-logic.ts`) — the point of freezing that
+ * vocabulary in the first place, so the server can eventually take over tier assignment with no
+ * translation layer at this boundary. `'HIDDEN'` is server-only and has no {@link DetectionTier}
+ * counterpart: the object exists in the world model but is suppressed from every viewer read model
+ * (today: its label is deny-filtered). Wave W3's job, not this wave's: nothing in this app reads
+ * `RenderTier` yet.
+ */
+export type RenderTier = (typeof RENDER_TIERS)[number];
+
+/**
+ * Mirrors `WorldObjectResponse.Operator` (JSON key `operator`) — the FOLLOW relation this platform
+ * holds over one world object, on top of the wire mirror `state` carries. `follow` is optional for
+ * the same "absence of a relation" reason as every other Jackson `NON_NULL` group in this file: no
+ * FOLLOW lock in play on this object is a missing key, never a null/zeroed one.
+ */
+export interface WorldObjectOperator {
+  readonly followed: boolean;
+  readonly denied: boolean;
+  readonly follow?: FollowState;
+}
+
+/**
+ * Mirrors `WorldObjectResponse.EventLink` (JSON key `event`) — the currently-open detection event
+ * this object belongs to, if any. `openEventId` absent means no event is open for this object right
+ * now, not a zeroed id.
+ */
+export interface WorldObjectEventLink {
+  readonly openEventId?: string;
+}
+
+/** Mirrors `WorldObjectResponse.Render` (JSON key `render`) — `tier` is never absent: an object
+ *  with nothing to render answers with {@link RenderTier} `'HIDDEN'`, not a missing group. */
+export interface WorldObjectRender {
+  readonly tier: RenderTier;
+}
+
+/**
+ * Mirrors `WorldObjectResponse` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6, wave W2.8) — the
+ * shape `StreamTracksResponse.objects` and `CvTraceResponse.world` actually carry on the wire,
+ * distinct from the flat {@link ObjectState} mirror `DetectionResultResponse.objects` (the
+ * `detections:` topic and durable path) still uses. `state` is that same wire mirror verbatim;
+ * `operator`/`event`/`render` are platform-owned relations folded on top of it by `WorldModel`
+ * (server-side) that cv-service's own wire shape never carries — see `WorldObject`'s own javadoc.
+ */
+export interface WorldObject {
+  readonly state: ObjectState;
+  readonly operator: WorldObjectOperator;
+  readonly event: WorldObjectEventLink;
+  readonly render: WorldObjectRender;
 }
 
 /**

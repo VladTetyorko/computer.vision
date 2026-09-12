@@ -102,11 +102,11 @@ the full mechanism.
 | StreamController | POST | `/api/devices/{deviceId}/stream` | Start a stream on a device | scope |
 | StreamController | GET | `/api/streams` | List active streams | scope (filtered) |
 | StreamController | DELETE | `/api/streams/{streamId}` | Stop (idempotent no-op if unknown/stopped) | scope |
-| StreamController | GET | `/api/streams/{streamId}/detections?limit=` | Recent per-frame detections, each now also carrying `objects` (CV-ORCHESTRATION wave W1 step 5 — the per-identity mirror, `ObjectStateResponse`, never omitted, empty when no mirror was produced) | scope |
+| StreamController | GET | `/api/streams/{streamId}/detections?limit=` | Recent per-frame detections, each now also carrying `objects` (CV-ORCHESTRATION wave W1 step 5 — the per-identity mirror, `ObjectStateResponse`, never omitted, empty when no mirror was produced) — **deliberately still the flat mirror as of wave W2.8**, not `WorldObjectResponse`: the operator/event/render relations are a platform concern this durable/detections path must never carry, see `WorldObjectResponse`'s own javadoc | scope |
 | StreamController | GET | `/api/streams/{streamId}/snapshot` | Latest frame as downscaled JPEG (only binary, non-JSON response besides the HLS proxy) | scope |
 | StreamController | PATCH | `/api/streams/{streamId}/config` | Hot-patch confidence/fps/labelFilter/model/tracking — never interrupts video | scope |
-| StreamController | GET | `/api/streams/{streamId}/tracks` | Track book + duty-cycle stats + the held `FOLLOW` lock's own lifecycle (`follow`, TRACK-FOLLOW-PLAN §3.1 — omitted until a lock is issued) + `objects` (CV-ORCHESTRATION wave W1 step 5 — the current object mirror, `ObjectStateResponse`, sourced from `StreamService#objects`; unlike `stats`/`latency`/`rate`/`follow`, always a JSON array, never omitted); never errors on unknown stream (empty `tracks`/`objects`) | scope |
-| StreamController | GET | `/api/streams/{streamId}/cv/trace?last=N` | CV-ORCHESTRATION wave W2.5, docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4 — the warm trace tier's three ledgers side by side (`CvTraceResponse{streamId, gate, frame, world}`): `gate` (`GateDecisionResponse[]`, `contexts/vision-perception`'s `FrameGateLedger`, coalesced), `frame` (`FrameLedgerResponse[]`, `FrameLedgerRing`, empty unless tracing was ever requested for this stream), `world` (`ObjectStateResponse[]`, the same live object mirror `/tracks` exposes, **not** windowed by `last`). `last` defaults to `DEFAULT_TRACE_LAST=50` when absent. **This read is itself trace demand** — polling this endpoint counts toward `TraceDemandPort#traceWanted` exactly like an open `cv-trace:<assetId>` SSE subscription (`StreamDetectionSupport#touchedTrace`). Never errors — unknown/stopped stream reads every list empty, same idiom as `/tracks` | scope |
+| StreamController | GET | `/api/streams/{streamId}/tracks` | Track book + duty-cycle stats + the held `FOLLOW` lock's own lifecycle (`follow`, TRACK-FOLLOW-PLAN §3.1 — omitted until a lock is issued) + `objects` — **as of wave W2.8, `List<WorldObjectResponse>`** (`{state, operator, event, render}`, sourced from `StreamService#worldObjects`, built from the same `WorldModel` fold `onDetectionResult` already ran; previously the flat `ObjectStateResponse` mirror, CV-ORCHESTRATION wave W1 step 5 — see `WorldObjectResponse`'s own javadoc for why `/detections` did **not** move with it); unlike `stats`/`latency`/`rate`/`follow`, always a JSON array, never omitted; never errors on unknown stream (empty `tracks`/`objects`) | scope |
+| StreamController | GET | `/api/streams/{streamId}/cv/trace?last=N` | CV-ORCHESTRATION wave W2.5, docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4 — the warm trace tier's three ledgers side by side (`CvTraceResponse{streamId, gate, frame, world}`): `gate` (`GateDecisionResponse[]`, `contexts/vision-perception`'s `FrameGateLedger`, coalesced), `frame` (`FrameLedgerResponse[]`, `FrameLedgerRing`, empty unless tracing was ever requested for this stream), `world` (**as of wave W2.8, `List<WorldObjectResponse>`**, previously `ObjectStateResponse[]` — same `StreamService#worldObjects` source `/tracks` now uses, **not** windowed by `last`). `last` defaults to `DEFAULT_TRACE_LAST=50` when absent. **This read is itself trace demand** — polling this endpoint counts toward `TraceDemandPort#traceWanted` exactly like an open `cv-trace:<assetId>` SSE subscription (`StreamDetectionSupport#touchedTrace`). Never errors — unknown/stopped stream reads every list empty, same idiom as `/tracks` | scope |
 | HlsProxyController | GET | `/hls/{streamId}/**` | Reverse-proxy this asset's live HLS bytes to the mediamtx sidecar | scope (`StreamAccess#requireVisibleForHlsProxy`, checked **before** the upstream is ever contacted; fails closed on an unknown/stopped id — AUTH-ROLES-PLAN.md D10, wave B4 — unlike the other `StreamAccess`-gated rows above, which keep `requireVisible`'s no-op) — also now behind `SecurityConfig`'s secured chain's `authenticated()` rule (`/hls/**` joined `/api/**`/`/ws/**`) |
 | CvModelsController | GET | `/api/cv/models` | Detection-model roster — widened (CV-SETTINGS-PLAN §5.2) to serve the registry's live roster (`registrySource: true`) when `vision.cv.registry.enabled`, else the static config catalogue; never errors | open |
 | CvTrackersController | GET | `/api/cv/trackers` | Static tracker-engine roster | open |
@@ -386,17 +386,24 @@ deleted" without a separate lookup. Buffer capacity mirrors `discoveryBuffer` (s
 `eventBufferCapacity`, FIFO, not latest-only — a `DELETED` a resuming viewer missed must still be
 delivered, not collapsed away by a later `UPDATED` to a different zone).
 
-**`tracks:<assetId>`/`cv-trace:<assetId>` (CV-ORCHESTRATION-PLAN.md §4.4/§4.5/§5, wave W2.5) — the
-live halves of `GET /api/streams/{id}/tracks`'s `objects` and `GET /api/streams/{id}/cv/trace`'s
-`frame`, piggybacked onto the existing `pendingDetections` drain loop rather than a new publish call
-site.** Every time a `DetectionResult` is drained for the `detections:<assetId>` topic, `flushPending`
-also (a) publishes `List<ObjectStateResponse>` (from `result.objects()`) onto `tracks:<assetId>`
-**whenever `objects()` is non-empty** — `TRACKS` rides the same cadence as `DETECTIONS`, not a
-separate demand signal, since the object mirror is computed for free alongside `detections[]`
-whenever tracking is on; and (b) publishes one `FrameLedgerResponse` (from `result.ledger()`) onto
-`cv-trace:<assetId>` **only when `ledger()` is present** — most ticks carry no ledger at all (tracing
-must have been separately demanded via `TraceDemandPort`), so most ticks publish nothing on this
-topic. Both ring buffers are capacity-1 latest-wins (`LiveRingBuffer(1, true)`), same as `DETECTIONS`.
+**`tracks:<assetId>`/`cv-trace:<assetId>` (CV-ORCHESTRATION-PLAN.md §4.4/§4.5/§4.6/§5, waves
+W2.5/W2.8) — the live halves of `GET /api/streams/{id}/tracks`'s `objects` and
+`GET /api/streams/{id}/cv/trace`'s `frame`, piggybacked onto the existing `pendingDetections` drain
+loop rather than a new publish call site.** `pendingDetections` holds a `PendingDetection(DetectionResult
+result, List<WorldObject> worldObjects)` per asset (wave W2.8) — `publishDetections`'s own 3rd
+parameter (`contexts/vision-perception`'s `DetectionLiveUpdatePort`, extended this wave), carried
+verbatim so `detections`/`tracks`/`cv-trace` all come from one coherent snapshot per result instead
+of three independent reads. Every time one is drained for the `detections:<assetId>` topic,
+`flushPending` also (a) **unconditionally** publishes `List<WorldObjectResponse>` (from
+`pending.worldObjects()`, mapped `WorldObjectResponse::from` — **not** the flat `ObjectStateResponse`
+`DetectionResultResponse#objects` just used for the `detections:` envelope above it, see
+`WorldObjectResponse`'s own javadoc for why) onto `tracks:<assetId>` — `TRACKS` rides the exact same
+cadence as `DETECTIONS`, every drain, empty list included, since the fold is computed for free
+alongside `detections[]` whenever tracking is on; and (b) publishes one `FrameLedgerResponse` (from
+`result.ledger()`) onto `cv-trace:<assetId>` **only when `ledger()` is present** — most ticks carry no
+ledger at all (tracing must have been separately demanded via `TraceDemandPort`), so most ticks
+publish nothing on this topic. Both ring buffers are capacity-1 latest-wins (`LiveRingBuffer(1, true)`),
+same as `DETECTIONS`.
 `LiveUpdateRegistry#watchingTrace(AssetId)` — `true` iff at least one live connection currently
 subscribes to that asset's `cv-trace:<assetId>` topic — is the SSE half of `LiveAndPollTraceDemand`'s
 OR (the poll half is `StreamDetectionSupport#touchedTrace`, a recent `GET .../cv/trace` timestamp).
@@ -1435,6 +1442,19 @@ after this change via `grep -rn "new DetectionResultResponse(\|new StreamTracksR
 surviving call sites are each record's own canonical constructor invocation inside `from()`/
 `StreamController#tracks`. No `ApiExceptionHandler` mapping changed — this wave adds a field, not a
 new failure mode.
+
+**Superseded in part by wave W2.8** (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6): the paragraph
+above describes wave W1's shape, where `StreamTracksResponse#objects` and `CvTraceResponse#world`
+still carried the flat `ObjectStateResponse` mirror. As of W2.8 both are retyped to
+`List<WorldObjectResponse>` (new file, `dto/WorldObjectResponse.java` — `{state, operator, event,
+render}`, `state` the same `ObjectStateResponse` verbatim) and sourced from the new
+`StreamService#worldObjects(StreamId)` rather than `#objects(StreamId)`. `DetectionResultResponse#objects`
+and the `detections:` SSE topic are **unchanged** — they deliberately keep the flat mirror, since the
+operator/event/render relations are a platform concern cv-service's own wire shape (and the durable/
+detections path mirroring it) must never carry. `LiveUpdateRegistry`'s `tracks:` envelope payload
+follows the same retype (see this file's `live` package section below) — it and the `/tracks`/`/cv/trace`
+REST reads now share one `WorldObjectResponse::from` mapping fed by one `WorldModel` fold per result,
+never re-folded per surface.
 
 `./mvnw -B -pl contexts/vision-perception,cv/grpc,station/vision-api,storage/persistence,contexts/vision-events,contexts/vision-learning,station/vision-app -am -DskipWeb test` —
 `station/vision-api` **1069 → 1074 tests, all green** (5 new: 4 `ObjectStateResponseTest` cases —

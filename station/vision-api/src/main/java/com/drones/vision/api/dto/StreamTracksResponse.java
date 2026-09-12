@@ -47,17 +47,19 @@ import java.util.List;
  *                       fact derived from this same source (see {@code StreamController#tracks}),
  *                       not from {@code stats} any more (D4): the two must never be read as
  *                       independent
- * @param objects        this stream's current object mirror (docs/plans/active/CV-ORCHESTRATION-PLAN.md
- *                       §4.5, wave W1) — sourced from {@code StreamService#objects}, the same
- *                       "never null, empty for an unknown/stopped stream" idiom {@code tracks}
- *                       already uses; unlike {@code stats}/{@code latency}/{@code rate}/{@code
- *                       follow}, always present as a JSON array, never omitted
+ * @param objects        this stream's current world-object fold (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+ *                       §4.5/§4.6, waves W1/W2.8) — sourced from {@code StreamService#worldObjects},
+ *                       the same "never null, empty for an unknown/stopped stream" idiom {@code
+ *                       tracks} already uses; unlike {@code stats}/{@code latency}/{@code rate}/
+ *                       {@code follow}, always present as a JSON array, never omitted. Carries the
+ *                       operator/event/render relations {@code DetectionResultResponse#objects}
+ *                       deliberately does not — see {@link WorldObjectResponse}'s own javadoc
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record StreamTracksResponse(String streamId, long lockedTrackId, List<TrackResponse> tracks,
                                     TrackStatsResponse stats, PipelineLatencyResponse latency,
                                     DetectionRateResponse rate, DetectionState detectionState,
-                                    FollowResponse follow, List<ObjectStateResponse> objects) {
+                                    FollowResponse follow, List<WorldObjectResponse> objects) {
 
     public StreamTracksResponse {
         tracks = List.copyOf(tracks);

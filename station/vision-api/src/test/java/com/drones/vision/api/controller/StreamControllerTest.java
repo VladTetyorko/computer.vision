@@ -71,6 +71,8 @@ import com.drones.vision.perception.domain.model.DetectionSource;
 import com.drones.vision.perception.domain.model.DetectorReason;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.perception.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.model.WorldObject;
+import com.drones.vision.perception.domain.model.RenderTier;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import org.junit.jupiter.api.BeforeEach;
@@ -1308,7 +1310,7 @@ class StreamControllerTest {
     void tracksReturnsAnEmptyListAndNoStatsForAnUnknownOrStoppedStream() throws Exception {
         when(streamService.tracks(any())).thenReturn(List.of());
         when(streamService.trackingStats(any())).thenReturn(Optional.empty());
-        when(streamService.objects(any())).thenReturn(List.of());
+        when(streamService.worldObjects(any())).thenReturn(List.of());
 
         mockMvc.perform(get("/api/streams/{streamId}/tracks", StreamId.random().value()))
                 .andExpect(status().isOk())
@@ -1333,22 +1335,32 @@ class StreamControllerTest {
         ObjectState object = new ObjectState(9L, ObjectLifecycle.CONFIRMED, streamId, identity, kinematics, null,
                 new ObjectState.Provenance(EvidenceSource.DETECTOR, List.of("detect.full"), 0.0, false), null, null,
                 null);
-        when(streamService.objects(streamId)).thenReturn(List.of(object));
+        WorldObject worldObject = new WorldObject(object, new WorldObject.Operator(true, false, null),
+                new WorldObject.EventLink(null), new WorldObject.Render(RenderTier.T1));
+        when(streamService.worldObjects(streamId)).thenReturn(List.of(worldObject));
 
         mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.objects", hasSize(1)))
-                .andExpect(jsonPath("$.objects[0].id").value(9))
-                .andExpect(jsonPath("$.objects[0].lifecycle").value("CONFIRMED"))
-                .andExpect(jsonPath("$.objects[0].streamId").value(streamId.value().toString()))
-                .andExpect(jsonPath("$.objects[0].identity.label").value("person"))
-                .andExpect(jsonPath("$.objects[0].kinematics.box.x").value(0.1))
-                .andExpect(jsonPath("$.objects[0].kinematics.detectorBox").doesNotExist())
-                .andExpect(jsonPath("$.objects[0].provenance.source").value("DETECTOR"))
-                .andExpect(jsonPath("$.objects[0].belief").doesNotExist())
-                .andExpect(jsonPath("$.objects[0].memory").doesNotExist())
-                .andExpect(jsonPath("$.objects[0].lock").doesNotExist())
-                .andExpect(jsonPath("$.objects[0].timing").doesNotExist());
+                .andExpect(jsonPath("$.objects[0].state.id").value(9))
+                .andExpect(jsonPath("$.objects[0].state.lifecycle").value("CONFIRMED"))
+                .andExpect(jsonPath("$.objects[0].state.streamId").value(streamId.value().toString()))
+                .andExpect(jsonPath("$.objects[0].state.identity.label").value("person"))
+                .andExpect(jsonPath("$.objects[0].state.kinematics.box.x").value(0.1))
+                .andExpect(jsonPath("$.objects[0].state.kinematics.detectorBox").doesNotExist())
+                .andExpect(jsonPath("$.objects[0].state.provenance.source").value("DETECTOR"))
+                .andExpect(jsonPath("$.objects[0].state.belief").doesNotExist())
+                .andExpect(jsonPath("$.objects[0].state.memory").doesNotExist())
+                .andExpect(jsonPath("$.objects[0].state.lock").doesNotExist())
+                .andExpect(jsonPath("$.objects[0].state.timing").doesNotExist())
+                // The operator/event/render facets DetectionResultResponse#objects deliberately never
+                // carries (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6, wave W2.8) -- proving these
+                // three groups actually reach the wire is the whole point of this endpoint's objects[].
+                .andExpect(jsonPath("$.objects[0].operator.followed").value(true))
+                .andExpect(jsonPath("$.objects[0].operator.denied").value(false))
+                .andExpect(jsonPath("$.objects[0].operator.follow").doesNotExist())
+                .andExpect(jsonPath("$.objects[0].event.openEventId").doesNotExist())
+                .andExpect(jsonPath("$.objects[0].render.tier").value("T1"));
     }
 
     @Test
@@ -1719,7 +1731,9 @@ class StreamControllerTest {
 
         ObjectState object = new ObjectState(9L, ObjectLifecycle.CONFIRMED, streamId, null, null, null, null, null,
                 null, null);
-        when(streamService.objects(streamId)).thenReturn(List.of(object));
+        WorldObject worldObject = new WorldObject(object, new WorldObject.Operator(false, false, null),
+                new WorldObject.EventLink(null), new WorldObject.Render(RenderTier.T1));
+        when(streamService.worldObjects(streamId)).thenReturn(List.of(worldObject));
 
         mockMvc.perform(get("/api/streams/{streamId}/cv/trace", streamId.value()))
                 .andExpect(status().isOk())
@@ -1738,8 +1752,10 @@ class StreamControllerTest {
                 .andExpect(jsonPath("$.frame[0].objects['9'][0].contributorId").value("detect.full"))
                 .andExpect(jsonPath("$.frame[0].objects['9'][0].claim.label").value("person"))
                 .andExpect(jsonPath("$.world", hasSize(1)))
-                .andExpect(jsonPath("$.world[0].id").value(9))
-                .andExpect(jsonPath("$.world[0].lifecycle").value("CONFIRMED"));
+                .andExpect(jsonPath("$.world[0].state.id").value(9))
+                .andExpect(jsonPath("$.world[0].state.lifecycle").value("CONFIRMED"))
+                .andExpect(jsonPath("$.world[0].operator.followed").value(false))
+                .andExpect(jsonPath("$.world[0].render.tier").value("T1"));
     }
 
     @Test

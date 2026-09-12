@@ -839,8 +839,8 @@ class StreamPipelineTest {
 
         pipeline(publisher, config(30, 2), assetId, liveUpdatePublisherPort, 30.0).start();
 
-        verify(liveUpdatePublisherPort).publishDetections(assetId, nonEmpty);
-        verify(liveUpdatePublisherPort).publishDetections(assetId, empty);
+        verify(liveUpdatePublisherPort).publishDetections(eq(assetId), eq(nonEmpty), any());
+        verify(liveUpdatePublisherPort).publishDetections(eq(assetId), eq(empty), any());
     }
 
     @Test
@@ -861,7 +861,7 @@ class StreamPipelineTest {
         pipeline(publisher, config(30, 2), assetId, liveUpdatePublisherPort, 30.0).start();
 
         InOrder inOrder = inOrder(liveUpdatePublisherPort, detectionRepositoryPort);
-        inOrder.verify(liveUpdatePublisherPort).publishDetections(assetId, result);
+        inOrder.verify(liveUpdatePublisherPort).publishDetections(eq(assetId), eq(result), any());
         inOrder.verify(detectionRepositoryPort).save(result);
     }
 
@@ -894,7 +894,7 @@ class StreamPipelineTest {
 
         pipeline.start();
 
-        verify(liveUpdatePublisherPort).publishDetections(assetId, result);
+        verify(liveUpdatePublisherPort).publishDetections(eq(assetId), eq(result), any());
         assertFalse(pipeline.detectionDemand(), "the demand flip must actually have landed for this test to mean anything");
     }
 
@@ -1438,7 +1438,7 @@ class StreamPipelineTest {
         verify(detectionRepositoryPort, times(1)).save(any());
         assertTrue(pipeline.latestDetections().isEmpty(),
                 "the live gate stayed closed (no demand) -- live read models must not populate for an unwatched stream");
-        verify(liveUpdatePublisherPort, never()).publishDetections(any(), any());
+        verify(liveUpdatePublisherPort, never()).publishDetections(any(), any(), any());
     }
 
     /**
@@ -1461,7 +1461,7 @@ class StreamPipelineTest {
         assertFalse(pipeline.latestDetections().isEmpty(), "boxes must be established while watched, before the edge under test");
         assertEquals(1L, pipeline.detectionRate().submitted());
         assertEquals(1L, pipeline.pipelineLatency().samples());
-        verify(liveUpdatePublisherPort, times(1)).publishDetections(eq(assetId), any());
+        verify(liveUpdatePublisherPort, times(1)).publishDetections(eq(assetId), any(), any());
 
         pipeline.updateDetectionDemand(false); // the last viewer leaves; ALWAYS keeps inference open
 
@@ -1480,7 +1480,7 @@ class StreamPipelineTest {
         verify(detectionRepositoryPort, times(2)).save(any());
         assertTrue(pipeline.latestDetections().isEmpty(),
                 "durable keeps saving for the unwatched ALWAYS stream, but live read models stay empty");
-        verify(liveUpdatePublisherPort, times(1)).publishDetections(eq(assetId), any());
+        verify(liveUpdatePublisherPort, times(1)).publishDetections(eq(assetId), any(), any());
         // still only once -- the second (post-edge) detection must never reach the live publisher
     }
 
@@ -1565,7 +1565,7 @@ class StreamPipelineTest {
         assertTrue(pipeline.latestDetections().isEmpty(),
                 "a result computed before the live-only close must not resurrect the live state that close cleared");
         verify(detectionRepositoryPort, times(2)).save(any());
-        verify(liveUpdatePublisherPort, times(1)).publishDetections(eq(assetId), any());
+        verify(liveUpdatePublisherPort, times(1)).publishDetections(eq(assetId), any(), any());
         // still only once -- the durable save for the late result must happen, but never its live counterpart
     }
 
@@ -1612,7 +1612,7 @@ class StreamPipelineTest {
         assertEquals(List.of("person"), engineCaptor.getValue().detections().stream().map(Detection::label).toList());
 
         ArgumentCaptor<DetectionResult> liveCaptor = ArgumentCaptor.forClass(DetectionResult.class);
-        verify(liveUpdatePublisherPort).publishDetections(eq(assetId), liveCaptor.capture());
+        verify(liveUpdatePublisherPort).publishDetections(eq(assetId), liveCaptor.capture(), any());
         assertEquals(List.of("person"), liveCaptor.getValue().detections().stream().map(Detection::label).toList());
     }
 

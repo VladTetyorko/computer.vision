@@ -22,6 +22,7 @@ import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.perception.domain.model.TrackedObject;
 import com.drones.vision.perception.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.model.WorldObject;
 
 import java.util.List;
 import java.util.Objects;
@@ -124,6 +125,11 @@ public final class LiveFrameFallbackStreamService implements StreamService {
     @Override
     public List<ObjectState> objects(StreamId streamId) {
         return delegate.objects(streamId);
+    }
+
+    @Override
+    public List<WorldObject> worldObjects(StreamId streamId) {
+        return delegate.worldObjects(streamId);
     }
 
     @Override

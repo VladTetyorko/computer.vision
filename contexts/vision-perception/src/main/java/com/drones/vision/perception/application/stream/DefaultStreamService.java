@@ -14,6 +14,7 @@ import com.drones.vision.platform.Event;
 import com.drones.vision.platform.EventType;
 import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.perception.domain.model.ObjectState;
+import com.drones.vision.perception.domain.model.WorldObject;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.model.StopReason;
 import com.drones.vision.perception.domain.model.StreamState;
@@ -622,6 +623,13 @@ public final class DefaultStreamService implements StreamService {
         Objects.requireNonNull(streamId, "streamId must not be null");
         RunningStream active = activeStreams.get(streamId);
         return active == null ? List.of() : active.pipeline().latestObjects();
+    }
+
+    @Override
+    public List<WorldObject> worldObjects(StreamId streamId) {
+        Objects.requireNonNull(streamId, "streamId must not be null");
+        RunningStream active = activeStreams.get(streamId);
+        return active == null ? List.of() : active.pipeline().worldObjects();
     }
 
     @Override

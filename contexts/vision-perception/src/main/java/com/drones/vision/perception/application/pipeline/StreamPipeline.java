@@ -1519,12 +1519,19 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         // pass (`saw 2`, expected >=3) on every full-suite run. Both planes gate independently, so
         // the order between them is free -- and cheap in-memory updates belong before slow I/O.
         boolean live = liveGateOpen();
+        // Captured here, immediately after world.accept, rather than re-read from world.objects() at
+        // the publish call below: that read is a second, later snapshot of the same mutable fold, and
+        // could observe a concurrent stream's own accept() in between on a shared WorldModel instance.
+        // Capturing right after the fold that produced it, once, is what "this result's own world
+        // snapshot" (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6, wave W2.8) actually means.
+        List<WorldObject> foldedWorldObjects = List.of();
         if (live) {
             // world.accept runs where trackBook.accept/followTracker.accept used to, ahead of
             // eventEngine.accept below -- WorldModel's own javadoc "Event link is one frame behind"
             // section is the authoritative note for why that relative order is frozen, not a diff
             // artifact.
             world.accept(filtered, suppressedObjects(result, filtered));
+            foldedWorldObjects = world.objects();
             trackingStats.accept(filtered);
             rateController.observeDetections(filtered.detections(), config.tracking().redetectIouPercent());
         }
@@ -1532,7 +1539,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
             eventEngine.accept(filtered);
         }
         if (live && liveUpdatePublisherPort != null && assetId != null) {
-            liveUpdatePublisherPort.publishDetections(assetId, filtered);
+            liveUpdatePublisherPort.publishDetections(assetId, filtered, foldedWorldObjects);
         }
         if (!filtered.detections().isEmpty()) {
             detectionRepositoryPort.save(filtered);

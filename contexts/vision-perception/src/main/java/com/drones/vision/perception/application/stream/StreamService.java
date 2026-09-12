@@ -12,6 +12,7 @@ import com.drones.vision.perception.domain.model.StreamState;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.perception.domain.model.TrackedObject;
 import com.drones.vision.perception.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.model.WorldObject;
 
 import java.util.List;
 import java.util.NoSuchElementException;
@@ -183,6 +184,24 @@ public interface StreamService {
      *         running on this instance, or no inference has completed yet
      */
     List<ObjectState> objects(StreamId streamId);
+
+    /**
+     * A running stream's world-object fold (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6, wave
+     * W2.8) — exactly {@link StreamPipeline#worldObjects()}: the same identities {@link #objects}
+     * mirrors, plus the operator/event/render relations this platform owns on top of the wire
+     * mirror. Distinct from {@link #objects} on purpose: a caller building the {@code detections}
+     * wire shape (or anything durable) must never see these relations (see {@link WorldObject}'s own
+     * javadoc), while a caller building the {@code tracks}/{@code cv-trace} wire shape needs exactly
+     * them — see {@code station/vision-api}'s {@code WorldObjectResponse}.
+     *
+     * <p><b>Never errors.</b> An unknown or stopped stream reads as an empty list, the same
+     * forgiving idiom {@link #objects} already uses.
+     *
+     * @param streamId the stream to inspect
+     * @return the current world-object fold, or an empty list if {@code streamId} is unknown/not
+     *         running on this instance, or no inference has completed yet
+     */
+    List<WorldObject> worldObjects(StreamId streamId);
 
     /**
      * A running stream's gate-decision history (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.4:

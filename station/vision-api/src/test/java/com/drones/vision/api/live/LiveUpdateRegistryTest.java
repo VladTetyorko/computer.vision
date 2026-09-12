@@ -56,10 +56,12 @@ import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.map.domain.model.Verification;
 import com.drones.vision.api.dto.FrameLedgerResponse;
-import com.drones.vision.api.dto.ObjectStateResponse;
+import com.drones.vision.api.dto.WorldObjectResponse;
 import com.drones.vision.perception.domain.model.FrameLedger;
 import com.drones.vision.perception.domain.model.ObjectLifecycle;
 import com.drones.vision.perception.domain.model.ObjectState;
+import com.drones.vision.perception.domain.model.RenderTier;
+import com.drones.vision.perception.domain.model.WorldObject;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import org.junit.jupiter.api.Test;
@@ -149,6 +151,17 @@ class LiveUpdateRegistryTest {
 
     private static ObjectState objectState(StreamId streamId, long id) {
         return new ObjectState(id, ObjectLifecycle.CONFIRMED, streamId, null, null, null, null, null, null, null);
+    }
+
+    /**
+     * {@link WorldObject}'s own fold (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6, wave W2.8) --
+     * a minimal, valid instance so the {@code tracks}/{@code cv-trace} broadcast tests can exercise
+     * {@link LiveUpdateRegistry#publishDetections}'s own {@code worldObjects} parameter, independent
+     * of {@code detectionResultWithMirror}'s flat {@code ObjectState} list.
+     */
+    private static WorldObject worldObject(StreamId streamId, long id) {
+        return new WorldObject(objectState(streamId, id), new WorldObject.Operator(false, false, null),
+                new WorldObject.EventLink(null), new WorldObject.Render(RenderTier.T1));
     }
 
     /** {@link FrameLedger}'s own trace tier (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4) -- a minimal, valid instance for {@code cv-trace} broadcast tests. */
@@ -666,10 +679,10 @@ class LiveUpdateRegistryTest {
         StreamId streamId = StreamId.random();
         LiveUpdateRegistry registry = registry();
 
-        registry.publishDetections(assetId, detectionResult(streamId, 0));
-        registry.publishDetections(assetId, detectionResult(streamId, 1));
+        registry.publishDetections(assetId, detectionResult(streamId, 0), List.of());
+        registry.publishDetections(assetId, detectionResult(streamId, 1), List.of());
         DetectionResult latest = detectionResult(streamId, 2);
-        registry.publishDetections(assetId, latest);
+        registry.publishDetections(assetId, latest, List.of());
 
         registry.flushPending();
 
@@ -690,16 +703,18 @@ class LiveUpdateRegistryTest {
         StreamId streamId = StreamId.random();
         LiveUpdateRegistry registry = registry();
 
-        registry.publishDetections(assetId, detectionResultWithMirror(streamId, 0, false));
+        registry.publishDetections(assetId, detectionResultWithMirror(streamId, 0, false),
+                List.of(worldObject(streamId, 1)));
         registry.flushPending();
 
         List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.tracks(assetId)).snapshot();
         assertEquals(1, buffered.size(), "a populated object mirror must reach the tracks topic");
         assertEquals("tracks", buffered.get(0).type());
         Object payload = buffered.get(0).payload();
-        assertTrue(payload instanceof List<?>, "tracks payload must be a list of ObjectStateResponse");
+        assertTrue(payload instanceof List<?>, "tracks payload must be a list of WorldObjectResponse");
         assertEquals(1, ((List<?>) payload).size());
-        assertTrue(((List<?>) payload).get(0) instanceof ObjectStateResponse);
+        assertTrue(((List<?>) payload).get(0) instanceof WorldObjectResponse,
+                "tracks must carry the WorldObject fold (operator/event/render), not the flat ObjectState mirror");
     }
 
     /**
@@ -712,7 +727,8 @@ class LiveUpdateRegistryTest {
         StreamId streamId = StreamId.random();
         LiveUpdateRegistry registry = registry();
 
-        registry.publishDetections(assetId, detectionResultWithMirror(streamId, 0, true));
+        registry.publishDetections(assetId, detectionResultWithMirror(streamId, 0, true),
+                List.of(worldObject(streamId, 1)));
         registry.flushPending();
 
         List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.cvTrace(assetId)).snapshot();
@@ -732,7 +748,8 @@ class LiveUpdateRegistryTest {
         StreamId streamId = StreamId.random();
         LiveUpdateRegistry registry = registry();
 
-        registry.publishDetections(assetId, detectionResultWithMirror(streamId, 0, false));
+        registry.publishDetections(assetId, detectionResultWithMirror(streamId, 0, false),
+                List.of(worldObject(streamId, 1)));
         registry.flushPending();
 
         assertEquals(0, registry.bufferFor(LiveTopic.cvTrace(assetId)).snapshot().size(),

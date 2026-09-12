@@ -17,7 +17,7 @@ import com.drones.vision.api.dto.LiveConnectedResponse;
 import com.drones.vision.api.dto.LiveEnvelopeResponse;
 import com.drones.vision.api.dto.LiveSubscriptionResponse;
 import com.drones.vision.api.dto.MapEventPayload;
-import com.drones.vision.api.dto.ObjectStateResponse;
+import com.drones.vision.api.dto.WorldObjectResponse;
 import com.drones.vision.api.dto.SystemStatusResponse;
 import com.drones.vision.api.dto.TelemetrySampleResponse;
 import com.drones.vision.api.dto.UpdateLiveTopicsRequest;
@@ -29,6 +29,7 @@ import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.perception.domain.model.DetectionEvent;
 import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.perception.domain.model.WorldObject;
 import com.drones.vision.platform.Event;
 import com.drones.vision.flight.domain.model.GeofenceZoneEvent;
 import com.drones.vision.map.domain.model.MapEvent;
@@ -359,8 +360,18 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
 
     private final ConcurrentHashMap<AssetId, ConcurrentLinkedQueue<Telemetry>> pendingTelemetry =
             new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<AssetId, DetectionResult> pendingDetections = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<AssetId, PendingDetection> pendingDetections = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<AssetId, TrackCorrection> pendingCorrections = new ConcurrentHashMap<>();
+
+    /**
+     * One asset's latest-only {@link #publishDetections} payload, held together so {@link
+     * #flushPending()} builds the {@code detections}/{@code tracks}/{@code cv-trace} envelopes from
+     * one coherent snapshot instead of three independent reads (docs/plans/active/
+     * CV-ORCHESTRATION-PLAN.md §4.6, wave W2.8). {@code worldObjects} is {@link DetectionLiveUpdatePort
+     * #publishDetections}'s own per-result fold, carried verbatim -- this class never re-folds it.
+     */
+    private record PendingDetection(DetectionResult result, List<WorldObject> worldObjects) {
+    }
 
     /**
      * {@link #publishFleetChanged()}'s coalescing window, in nanoseconds ({@link System#nanoTime()}
@@ -801,10 +812,12 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
     }
 
     @Override
-    public void publishDetections(AssetId assetId, DetectionResult result) {
+    public void publishDetections(AssetId assetId, DetectionResult result, List<WorldObject> worldObjects) {
         Objects.requireNonNull(assetId, "assetId must not be null");
         Objects.requireNonNull(result, "result must not be null");
-        pendingDetections.put(assetId, result); // latest-only: a later put simply overwrites
+        Objects.requireNonNull(worldObjects, "worldObjects must not be null");
+        // latest-only: a later put simply overwrites
+        pendingDetections.put(assetId, new PendingDetection(result, worldObjects));
     }
 
     /**
@@ -969,19 +982,23 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
             broadcast(topic, envelope);
         }
         for (AssetId assetId : List.copyOf(pendingDetections.keySet())) {
-            DetectionResult result = pendingDetections.remove(assetId);
-            if (result == null) {
+            PendingDetection pending = pendingDetections.remove(assetId);
+            if (pending == null) {
                 continue; // another flush already claimed it
             }
+            DetectionResult result = pending.result();
             LiveTopic topic = LiveTopic.detections(assetId);
             LiveEnvelopeResponse envelope = new LiveEnvelopeResponse(sequencer.incrementAndGet(),
                     assetId.value().toString(), LiveTopicKind.DETECTIONS.wire(), DetectionResultResponse.from(result));
             bufferFor(topic).append(envelope);
             broadcast(topic, envelope);
-            // tracks/cv-trace ride the same DetectionResult, never a second port call (docs/plans/active/
-            // CV-ORCHESTRATION-PLAN.md §4.5/§4.4, wave W2) -- see LiveTopicKind#TRACKS/#CV_TRACE's own javadoc.
+            // tracks/cv-trace ride the same PendingDetection, never a second port call (docs/plans/active/
+            // CV-ORCHESTRATION-PLAN.md §4.5/§4.4/§4.6, waves W2/W2.8) -- see LiveTopicKind#TRACKS/#CV_TRACE's
+            // own javadoc. tracks carries WorldObjectResponse (the fold), never the flat ObjectStateResponse
+            // DetectionResultResponse#objects above just used -- see WorldObjectResponse's own javadoc for why.
             LiveTopic tracksTopic = LiveTopic.tracks(assetId);
-            List<ObjectStateResponse> objects = result.objects().stream().map(ObjectStateResponse::from).toList();
+            List<WorldObjectResponse> objects =
+                    pending.worldObjects().stream().map(WorldObjectResponse::from).toList();
             LiveEnvelopeResponse tracksEnvelope = new LiveEnvelopeResponse(sequencer.incrementAndGet(),
                     assetId.value().toString(), LiveTopicKind.TRACKS.wire(), objects);
             bufferFor(tracksTopic).append(tracksEnvelope);

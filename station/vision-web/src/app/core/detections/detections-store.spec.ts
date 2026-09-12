@@ -371,7 +371,7 @@ describe('DetectionsStore', () => {
   // docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3) ---------------------------------------------------
 
   function tracksResponse(partial: Partial<StreamTracksResponse> = {}): StreamTracksResponse {
-    return { streamId: 't-1', lockedTrackId: 0, tracks: [], ...partial };
+    return { streamId: 't-1', lockedTrackId: 0, tracks: [], objects: [], ...partial };
   }
 
   it('trackTracks() polls immediately and on the configured cadence', async () => {

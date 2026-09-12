@@ -6,7 +6,6 @@ import com.drones.vision.api.dto.DetectionResultResponse;
 import com.drones.vision.api.dto.FollowResponse;
 import com.drones.vision.api.dto.FrameLedgerResponse;
 import com.drones.vision.api.dto.GateDecisionResponse;
-import com.drones.vision.api.dto.ObjectStateResponse;
 import com.drones.vision.api.dto.StartStreamRequest;
 import com.drones.vision.api.dto.StartStreamResponse;
 import com.drones.vision.api.dto.DetectionRateResponse;
@@ -17,6 +16,7 @@ import com.drones.vision.api.dto.TrackResponse;
 import com.drones.vision.api.dto.TrackStatsResponse;
 import com.drones.vision.api.dto.UpdateStreamConfigRequest;
 import com.drones.vision.api.dto.UpdateStreamConfigResponse;
+import com.drones.vision.api.dto.WorldObjectResponse;
 import com.drones.vision.api.security.SeatAccess;
 import com.drones.vision.api.security.StreamAccess;
 import com.drones.vision.api.support.StreamDetectionSupport;
@@ -409,7 +409,8 @@ public class StreamController {
                 .map(FollowStatus::trackId)
                 .orElse(0L);
         FollowResponse followResponse = follow.map(status -> FollowResponse.from(status, Instant.now())).orElse(null);
-        List<ObjectStateResponse> objects = streamService.objects(id).stream().map(ObjectStateResponse::from).toList();
+        List<WorldObjectResponse> objects =
+                streamService.worldObjects(id).stream().map(WorldObjectResponse::from).toList();
         return new StreamTracksResponse(id.value().toString(), lockedTrackId, tracks, statsResponse, latencyResponse,
                 rateResponse, detectionState, followResponse, objects);
     }
@@ -451,8 +452,8 @@ public class StreamController {
                 streamService.gateLedger(id, last).stream().map(GateDecisionResponse::from).toList();
         List<FrameLedgerResponse> frame =
                 streamService.frameLedger(id, last).stream().map(FrameLedgerResponse::from).toList();
-        List<ObjectStateResponse> world =
-                streamService.objects(id).stream().map(ObjectStateResponse::from).toList();
+        List<WorldObjectResponse> world =
+                streamService.worldObjects(id).stream().map(WorldObjectResponse::from).toList();
         return new CvTraceResponse(id.value().toString(), gate, frame, world);
     }
 

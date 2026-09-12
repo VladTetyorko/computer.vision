@@ -21,12 +21,14 @@ import java.util.List;
  * @param gate     recent gate decisions, oldest first, coalesced by {@code FrameGateLedger}
  * @param frame    recent frame ledgers, oldest first — empty whenever tracing was never requested
  *                 for this stream, regardless of {@code last}
- * @param world    the current object mirror — not windowed by {@code last}, since {@code
- *                 WorldModel} holds one live fold rather than a history
+ * @param world    the current world-object fold (wave W2.8: {@link WorldObjectResponse}, carrying
+ *                 the operator/event/render relations alongside the wire mirror, the same shape
+ *                 {@code StreamTracksResponse#objects} uses) — not windowed by {@code last}, since
+ *                 {@code WorldModel} holds one live fold rather than a history
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record CvTraceResponse(String streamId, List<GateDecisionResponse> gate, List<FrameLedgerResponse> frame,
-                               List<ObjectStateResponse> world) {
+                               List<WorldObjectResponse> world) {
 
     public CvTraceResponse {
         gate = List.copyOf(gate);

@@ -641,7 +641,7 @@ class DefaultStreamServiceTest {
 
         withLiveUpdates.start(device.id(), detectingDefaults());
 
-        verify(liveUpdatePublisherPort).publishDetections(assetId, result);
+        verify(liveUpdatePublisherPort).publishDetections(eq(assetId), eq(result), any());
     }
 
     @Test
