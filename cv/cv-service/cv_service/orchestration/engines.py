@@ -249,11 +249,17 @@ class EngineSet:
             or params.engine_id != previous.engine_id
             or params.max_age_frames != previous.max_age_frames
         ):
-            # Mode, engine and `max_age_frames` are all baked into the engine
-            # instance (the last is ByteTrack's own lost-track buffer), so
-            # changing any of them rebuilds it. Cadence/IoU/min-hits changes
-            # do not: those are read per frame from `TrackingParams` and must
-            # not cost the operator their track ids.
+            # Mode and engine are baked into the engine instance, so changing
+            # either rebuilds it. `max_age_frames` no longer is, for any
+            # built-in engine -- `bytetrack`, the one that ever read it (for
+            # its own lost-track buffer), was retired in CV-ORCHESTRATION W4
+            # (decision E16), and every engine left ignores it (`registry.py`
+            # factories all take `**_kwargs`) -- but it still triggers a
+            # rebuild here, kept as a forward-looking hook for whichever
+            # future engine reads it next rather than a behaviour this wave
+            # had reason to remove. Cadence/IoU/min-hits changes do not
+            # rebuild: those are read per frame from `TrackingParams` and
+            # must not cost the operator their track ids.
             self.release_engine()
         if params.motion_engine_id != previous.motion_engine_id:
             # A separate check from the block above: the motion compensator
@@ -434,10 +440,12 @@ class EngineSet:
         simpler: an extractor needs no live signal to check like `pose`'s
         `CameraPose` -- constructibility IS availability here, so there is
         no fallback ladder, only "off" or the one thing actually asked for.
-        Only ever reached from `_run_cost_associate` (i.e. only when `cost`
-        is the resolved associator) -- `bytetrack` has no descriptor input to
-        feed, so a stream using it never resolves this and never decodes a
-        frame for appearance purposes either.
+        Only ever reached from `_run_cost_associate` -- `cost` is the only
+        associator left in the roster since CV-ORCHESTRATION W4 (decision
+        E16) retired `bytetrack`, which had no descriptor input to feed and
+        so never resolved this or decoded a frame for appearance purposes at
+        all. That history is why this method still has no fallback ladder of
+        its own: there is no second associator's needs to fall back to.
         """
         if self._appearance_resolved:
             return self._appearance_engine
@@ -544,8 +552,13 @@ class EngineSet:
 
         True on the `cost` path, where a new candidate gets an `object()`
         sentinel from `_run_cost_associate` and a matched one reuses its
-        track's existing key. False for `bytetrack`, which numbers tracks
-        from its own counter and restarts it whenever it is rebuilt.
+        track's existing key. `cost` is the only associator left in the
+        roster (CV-ORCHESTRATION W4, decision E16 retired `bytetrack`, which
+        numbered tracks from its own counter and restarted it whenever it was
+        rebuilt), so False here means either FOLLOW/OFF or a requested
+        `params.engine_id` this host's roster does not know -- `registry.py`'s
+        own fallback still serves `cost` for that last case, but this
+        predicate reads the REQUESTED id, not what actually got constructed.
         """
         return (
             self._params.mode == MODE_ASSOCIATE

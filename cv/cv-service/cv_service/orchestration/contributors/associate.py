@@ -1,21 +1,26 @@
-"""ASSOCIATE -- the two associators, and the cost path's assembly node.
+"""ASSOCIATE -- `cost`'s two-node match, and the assembly node that folds it.
 
 `docs/plans/active/CV-ORCHESTRATION-PLAN.md` §4.1/§4.3.
 
-    assoc.bytetrack   detections -> a proposal, in one step
     assoc.cost        detections -> a ranked ASSIGNMENT (this file)
       detect.roi        one bounded second look at what it left unmatched
       memory.gallery    the dormant gallery's answer for what it never claimed
     propose.cost      all three -> the ONE proposal the aggregator folds
 
-**Why `cost` is two nodes and `bytetrack` is one.** `bytetrack` holds its
-own Kalman state and hands the book finished observations to rename -- there
-is no seam inside it to hang a rescue or a recovery off. `cost` has no state
-of its own at all: the candidates it ranks ARE `TrackBook`'s own tracks, so
-"what did the match leave unexplained" is a readable fact BEFORE anything is
-booked. That is the seam, and splitting the assembly out of the match is what
-turns the rescue and the gallery into contributors instead of two more
-branches inside one 210-line method.
+`cost` is the only associator in the roster -- CV-ORCHESTRATION wave W4
+(decision E16) retired the second one that used to live here, `assoc.
+bytetrack` (single node, no rescue, no recovery, no descriptor: it held its
+own Kalman state behind ultralytics' `BYTETracker` with no seam to hang any
+of those off). `params.py#resolve()` still accepts the id on the wire, but
+aliases it to `cost` before it ever reaches this package, so every stream
+this file sees is on the `cost` path described below.
+
+**Why `cost` is two nodes.** It has no state of its own at all: the
+candidates it ranks ARE `TrackBook`'s own tracks, so "what did the match
+leave unexplained" is a readable fact BEFORE anything is booked. That is the
+seam, and splitting the assembly out of the match is what turns the rescue
+and the gallery into contributors instead of two more branches inside one
+210-line method.
 
 **The order the split has to preserve**, because `ObjectMemory.claim` is
 first-come-first-served and the ROI pass spends a real detector call: match,
@@ -27,7 +32,7 @@ from __future__ import annotations
 
 import dataclasses
 from dataclasses import dataclass, field
-from typing import Any, Optional, Sequence
+from typing import Any, Optional
 
 from cv_service.orchestration.aggregator import Proposal
 from cv_service.orchestration.budget import ASSOC
@@ -38,7 +43,7 @@ from cv_service.orchestration.keys import Key
 from cv_service.orchestration.state import StreamState
 from cv_service.tracking.assign import Assignment, Candidate, CostAssociator, Target
 from cv_service.tracking.engines.base import Box, Descriptor, Observation
-from cv_service.tracking.levels import LEVEL_L1, LEVEL_L3
+from cv_service.tracking.levels import LEVEL_L1
 from cv_service.tracking.memory import Recovery
 from cv_service.tracking.outcome import box_for
 from cv_service.tracking.track import STATE_TENTATIVE, RecoveredIdentity, Track, TrackBook
@@ -77,64 +82,14 @@ class CostAssignment:
     costs: "tuple[float, ...]" = ()
 
 
-class AssociateByteTrack:
-    """`bytetrack` -- the engine owns the identities, the book renames them."""
-
-    id = "assoc.bytetrack"
-    family = ASSOC
-    reads = frozenset({Key.DETECTIONS})
-    writes = frozenset({Key.OBSERVATIONS})
-    min_level = LEVEL_L3
-    phase = PHASE_TRACK
-
-    def __init__(self, engines: EngineSet) -> None:
-        self._engines = engines
-
-    def contribute(self, ctx: FrameContext, budget: Any) -> Contribution:
-        detections = ctx.get(Key.DETECTIONS) or []
-        engine = self._engines.engine
-        # TRACKING-V2-PLAN wave C5c: ROI re-detection is NOT wired into this
-        # branch, and neither is ego-motion. `bytetrack`'s association state
-        # lives inside a third-party engine (its own Kalman filters) with no
-        # seam to warp, predict against or rescue from -- the same reasoning
-        # for both, stated once in `cv/cv-service/MODULE.md`.
-        try:
-            observations = engine.associate(detections, ctx.now)
-        except Exception as exc:  # noqa: BLE001 - one bad frame, not a dead stream
-            self._engines.reset_engine(exc)
-            return Contribution(
-                outputs={
-                    Key.OBSERVATIONS: Proposal(
-                        fold=False,
-                        boxes=tuple(box_for(detection) for detection in detections),
-                        summary={"branch": "engine raised"},
-                    )
-                },
-                reason=f"{type(exc).__name__}: {exc}",
-                summary={"observations": "0"},
-            )
-
-        return Contribution(
-            outputs={
-                Key.OBSERVATIONS: Proposal(
-                    observations=tuple(observations),
-                    detector_ran=True,
-                    settle=lambda tracks: _boxes_by_index(detections, observations, tracks),
-                    summary={"branch": "associate"},
-                )
-            },
-            summary={"observations": str(len(observations))},
-        )
-
-
 class AssociateCost:
     """`cost` -- the platform owns the match, so the match is readable.
 
-    Unlike `bytetrack`, the CANDIDATES this ranks are `TrackBook`'s own live
-    tracks, predicted to `now` and already ego-motion-warped this frame. That
-    is what makes `TrackBook.warp` change the association DECISION here rather
-    than only what a coasting box displays, and it is what gives the ROI
-    rescue and the dormant gallery a seam to hang off.
+    The CANDIDATES this ranks are `TrackBook`'s own live tracks, predicted to
+    `now` and already ego-motion-warped this frame. That is what makes
+    `TrackBook.warp` change the association DECISION here rather than only
+    what a coasting box displays, and it is what gives the ROI rescue and the
+    dormant gallery a seam to hang off.
     """
 
     id = "assoc.cost"
@@ -342,11 +297,11 @@ class ProposeCost:
         for target_index in found.assignment.unmatched_targets:
             target = found.targets[target_index]
             # A fresh, permanently-unique token: `cost` allocates no identity
-            # of its own (unlike `bytetrack`'s own key counter), so a
-            # brand-new candidate needs a key nothing else could ever collide
-            # with. `TrackBook._namespaced` only requires it be hashable and
-            # stable across frames -- an `object()` sentinel satisfies both
-            # with no counter to manage, and it doubles as `recoveries`' key.
+            # of its own, so a brand-new candidate needs a key nothing else
+            # could ever collide with. `TrackBook._namespaced` only requires
+            # it be hashable and stable across frames -- an `object()`
+            # sentinel satisfies both with no counter to manage, and it
+            # doubles as `recoveries`' key.
             key = object()
             observations.append(
                 Observation(
@@ -417,16 +372,3 @@ class ProposeCost:
                 "recovered": str(len(recoveries)),
             },
         )
-
-
-def _boxes_by_index(
-    detections: "Sequence[Any]",
-    observations: "Sequence[Observation]",
-    tracks: "Sequence[Track]",
-) -> "list[Any]":
-    by_index = {
-        observation.det_index: track
-        for observation, track in zip(observations, tracks)
-        if observation.det_index >= 0
-    }
-    return [box_for(detection, by_index.get(index)) for index, detection in enumerate(detections)]

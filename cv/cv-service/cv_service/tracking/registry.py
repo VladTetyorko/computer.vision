@@ -70,12 +70,6 @@ MOTION_ENGINE_FLOW = "flow"
 MOTION_ENGINE_POSE = "pose"
 
 
-def _bytetrack(*, max_age_frames: int) -> Any:
-    from cv_service.tracking.engines.bytetrack import create
-
-    return create(max_age_frames=max_age_frames)
-
-
 def _lk(**_kwargs: Any) -> Any:
     from cv_service.tracking.engines.lk import create
 
@@ -102,15 +96,17 @@ def _pose(**_kwargs: Any) -> Any:
 
 def _cost(**_kwargs: Any) -> Any:
     """Built with NEUTRAL `AssignWeights`/`AssignGates` (`assign.py`'s own
-    dataclass defaults) -- unlike `_bytetrack`, this factory is never handed
-    a stream's resolved cost configuration, because `TrackerRegistry`'s own
-    construction contract (`max_age_frames` only, uniform across every
-    associator) has no place for it. `session.py`'s `_run_cost_associate`
-    retunes the real, resolved `TrackingParams.cost_weights`/`cost_gates`
-    (with appearance further zeroed when no extractor is active) onto the
-    instance this returns, once per call, via `CostAssociator.retune` -- see
-    that method's own docstring for why "on config change" is cheap enough
-    to just always do at the tens-of-boxes scale this operates at."""
+    dataclass defaults) -- this factory is never handed a stream's resolved
+    cost configuration, because `TrackerRegistry`'s own construction contract
+    (`max_age_frames` only, uniform across every associator -- a vestige of
+    the retired `bytetrack` factory, the one built-in that ever read it, see
+    `BUILTIN_ASSOCIATORS`'s own comment) has no place for it. `session.py`'s
+    `_run_cost_associate` retunes the real, resolved `TrackingParams.cost_
+    weights`/`cost_gates` (with appearance further zeroed when no extractor
+    is active) onto the instance this returns, once per call, via
+    `CostAssociator.retune` -- see that method's own docstring for why "on
+    config change" is cheap enough to just always do at the tens-of-boxes
+    scale this operates at."""
     from cv_service.tracking.assign import AssignGates, AssignWeights, CostAssociator
 
     return CostAssociator(weights=AssignWeights(), gates=AssignGates())
@@ -122,7 +118,7 @@ def _histogram(**_kwargs: Any) -> Any:
     return create()
 
 
-BUILTIN_ASSOCIATORS: dict[str, AssociatorFactory] = {"bytetrack": _bytetrack, "cost": _cost}
+BUILTIN_ASSOCIATORS: dict[str, AssociatorFactory] = {"cost": _cost}
 BUILTIN_FOLLOWERS: dict[str, FollowerFactory] = {"lk": _lk, "ncc": _ncc}
 BUILTIN_COMPENSATORS: dict[str, MotionCompensatorFactory] = {
     MOTION_ENGINE_FLOW: _flow,
@@ -137,16 +133,23 @@ BUILTIN_APPEARANCES: dict[str, AppearanceExtractorFactory] = {"histogram": _hist
 # workstation that has `cv2` fully installed must still get exactly what an ARMv6 relay
 # would get. `_create` below filters the candidate roster against these BEFORE calling
 # any factory, so a level-1 stream never even ATTEMPTS `_lk`/`_ncc`/`_flow`/
-# `_histogram`/`_bytetrack` -- which is what keeps L1 provably `cv2`/`numpy`-free
-# (invariant P8) even when this same process also serves higher-level streams.
+# `_histogram` -- which is what keeps L1 provably `cv2`/`numpy`-free (invariant P8) even
+# when this same process also serves higher-level streams.
 #
-# `cost` (`assign.py`, pure stdlib) and `pose` (`engines/pose_gmc.py`, pure trigonometry)
-# are affordable at L1. Everything needing `cv2` waits for L2. `bytetrack` specifically
-# waits for L3 -- decision E11, measured (§5.1): below ~25-30 simultaneous detections
-# `cost` is 5.5x cheaper (154us vs 840us @N=10) for +3.5 MiB against `bytetrack`'s
-# +17 MiB, because `bytetrack` drags `numpy` in on its own; by L3 `numpy` is already
-# resident for the detector, so that +17 MiB is already paid.
-_ASSOCIATOR_MIN_LEVEL: dict[str, int] = {"cost": levels.LEVEL_L1, "bytetrack": levels.LEVEL_L3}
+# `cost` (`assign.py`, pure stdlib) is affordable at L1 and is the ONLY associator left
+# in this roster: CV-ORCHESTRATION wave W4 (decision E16) retired `bytetrack`, which
+# used to wait for L3 (decision E11, measured, §5.1: below ~25-30 simultaneous
+# detections `cost` was already 5.5x cheaper -- 154us vs 840us @N=10 -- for +3.5 MiB
+# against `bytetrack`'s +17 MiB of dragged-in `numpy`). Retirement is not about that
+# measurement: every associator now shares one evidence graph
+# (`cv_service/orchestration/`), and `bytetrack` held its own Kalman state behind
+# ultralytics' `BYTETracker` with no seam to warp, rescue against or hang a descriptor
+# on -- every contributor added after it would have needed a bytetrack-shaped special
+# case. `params.py#resolve()` aliases a wire/env `engine_id="bytetrack"` to `"cost"`
+# (logged once) so a deployment pinned to the old value keeps tracking instead of
+# silently losing every id; that alias is what keeps this roster, and the dict below,
+# free of a `bytetrack` entry for good.
+_ASSOCIATOR_MIN_LEVEL: dict[str, int] = {"cost": levels.LEVEL_L1}
 _FOLLOWER_MIN_LEVEL: dict[str, int] = {"lk": levels.LEVEL_L2, "ncc": levels.LEVEL_L2}
 _COMPENSATOR_MIN_LEVEL: dict[str, int] = {
     MOTION_ENGINE_POSE: levels.LEVEL_L1,
@@ -157,10 +160,13 @@ _APPEARANCE_MIN_LEVEL: dict[str, int] = {"histogram": levels.LEVEL_L2}
 # Probe-time construction arguments. Any positive value works -- the probe
 # only asks "can this be built on this box at all", and the real per-stream
 # construction passes the stream's own resolved `TrackingParams`. Ignored by
-# every factory except `_bytetrack` (`**_kwargs`), including both
-# compensator factories -- a motion engine has no `max_age_frames` concept at
-# all, so the probe passes the same argument to all three rosters uniformly
-# rather than special-casing the third.
+# every factory today (`**_kwargs`): `_bytetrack`, the one built-in factory
+# that ever read `max_age_frames` (for its own lost-track buffer), was
+# retired in CV-ORCHESTRATION W4 (decision E16). Still passed uniformly to
+# all four rosters, including both compensator factories -- a motion engine
+# has no `max_age_frames` concept at all -- as a forward-looking hook for
+# whichever future factory reads it next, rather than a construction
+# argument this wave had any reason to remove.
 _PROBE_MAX_AGE_FRAMES = 1
 
 
@@ -402,8 +408,9 @@ class TrackerRegistry:
 
 
 def build_default_registry(settings: Any, *, probe: bool = True) -> TrackerRegistry:
-    """The production registry: the seven shipped engines (§5.B plus wave
-    C3's `cost`/`histogram`), probed.
+    """The production registry: the six shipped engines (§5.B plus wave C3's
+    `cost`/`histogram`, minus `bytetrack`, retired CV-ORCHESTRATION W4
+    decision E16), probed.
 
     Unlike `inference.registry.build_default_registry` this never returns
     `None`: a registry with an empty roster is still a usable object that

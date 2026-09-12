@@ -9,16 +9,18 @@ membership is a property of mode, engine and the level that resolved.
 configuration COULD use it, and the budget then refuses it per frame with a
 reason (`detect.full` on an off-duty frame, `appearance` when the engine id
 is `off`, `detect.roi` when the rescue is disabled). A contributor the
-configuration can never use is not registered at all: a `bytetrack` stream
-does not grow a `detect.roi` row saying "cost associator only" on every
-frame of its life, because that is noise, not evidence.
+configuration can never use is not registered at all: a FOLLOW stream does
+not grow a `detect.roi` row saying "cost associator only" on every frame of
+its life, because that is noise, not evidence.
 
-**Exclusivity is structural.** `assoc.bytetrack` and `propose.cost` both
-write `Key.OBSERVATIONS`, so registering both would be refused at build time
-by §4.1 rule 2 -- the one-writer rule catching a roster mistake rather than a
-reviewer having to. Likewise FOLLOW writes `Key.FOLLOW_OBS` and never
-`OBSERVATIONS`, so the aggregator's precedence between them is stated rather
-than relied on.
+**Exclusivity is structural.** Only one contributor may ever write
+`Key.OBSERVATIONS` in a build -- CV-ORCHESTRATION wave W4 (decision E16)
+retired `assoc.bytetrack`, the second one that used to exist, leaving
+`propose.cost` the sole writer; a future associator that also wrote it would
+be refused at build time by §4.1 rule 2, the one-writer rule catching a
+roster mistake rather than a reviewer having to. Likewise FOLLOW writes
+`Key.FOLLOW_OBS` and never `OBSERVATIONS`, so the aggregator's precedence
+between them is stated rather than relied on.
 
 **When the roster is rebuilt.** `signature()` is the tuple that decides
 membership and the ids inside it. Engines resolve LAZILY -- the first active
@@ -34,11 +36,7 @@ from typing import Any, Callable, Optional
 
 from cv_service.orchestration.aggregator import Aggregator
 from cv_service.orchestration.contributors.appearance import Appearance
-from cv_service.orchestration.contributors.associate import (
-    AssociateByteTrack,
-    AssociateCost,
-    ProposeCost,
-)
+from cv_service.orchestration.contributors.associate import AssociateCost, ProposeCost
 from cv_service.orchestration.contributors.detect import DetectFull
 from cv_service.orchestration.contributors.egomotion import EgoMotion
 from cv_service.orchestration.contributors.follow import Follow
@@ -109,12 +107,19 @@ def roster(
                     ProposeCost(),
                 ]
             )
-        else:
-            # `bytetrack` holds its own Kalman state with no seam to warp, to
-            # rescue against, or to hang a descriptor on -- the same single
-            # reason every one of the nodes above is absent here, stated once
-            # in `associate.py`'s module docstring.
-            built.append(AssociateByteTrack(engines))
+        # Else: nothing is registered. `cost` is the ONLY associator
+        # `registry.py`'s roster can build since CV-ORCHESTRATION W4
+        # (decision E16) retired `bytetrack` -- `params.py#resolve()` even
+        # aliases a wire/env `"bytetrack"` to `"cost"` before it gets here --
+        # so `engines.engine_id` reaching this branch is dead code against
+        # the real registry. It stays reachable against a `registry_provider`
+        # a test (or a future host) substitutes with a roster of its own,
+        # and registering nothing for it is still CORRECT, not a gap: no
+        # contributor then writes `Key.OBSERVATIONS`/`Key.FOLLOW_OBS`, and
+        # `Aggregator.contribute`'s own "no terminal contributor ran" branch
+        # already echoes the detector's raw boxes and books nothing -- the
+        # same honest outcome the removed `AssociateByteTrack` crash path
+        # produced on a raise, with no special case needed here to get it.
     elif engine is not None and params.mode == MODE_FOLLOW:
         built.extend(
             [
