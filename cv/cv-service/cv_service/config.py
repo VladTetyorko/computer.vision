@@ -295,6 +295,16 @@ DEFAULT_TRACK_SESSION_GRACE_MILLIS = 15_000
 # server's own thread pool (`CV_GRPC_WORKERS`), not by this cap.
 DEFAULT_TRACK_SESSION_CAPACITY = 64
 
+# CV-ORCHESTRATION wave W0 (plan §4.4, tier HOT): how many per-frame
+# `FrameLedger`s one session keeps for the `Inspect` RPC to read back. The
+# ledger is the debug surface, so it has to span a human's reaction time --
+# 64 frames is ~6s at the fleet's 10 fps sampling default
+# (`CV_PULL_TARGET_FPS`), long enough that an operator noticing "the boxes
+# just went away" can still ask why. Bounded by construction
+# (`orchestration/ledger.LedgerRing`): a few KB per stream, no I/O, and
+# nothing is serialised unless somebody actually calls `Inspect`.
+DEFAULT_LEDGER_RING = 64
+
 # TRACKING-V2-PLAN wave C5b (review finding C6): how many tracks FOLLOW
 # holds and emits between verify passes -- the locked target plus up to
 # `follow_top_k - 1` other, non-locked targets, each with its own
@@ -1129,6 +1139,7 @@ class Settings:
     track_memory_min_confidence: float = DEFAULT_TRACK_MEMORY_MIN_CONFIDENCE
     track_session_grace_millis: int = DEFAULT_TRACK_SESSION_GRACE_MILLIS
     track_session_capacity: int = DEFAULT_TRACK_SESSION_CAPACITY
+    ledger_ring: int = DEFAULT_LEDGER_RING
     track_follow_top_k: int = DEFAULT_TRACK_FOLLOW_TOP_K
     track_roi_enabled: bool = DEFAULT_TRACK_ROI_ENABLED
     track_roi_crop_factor: float = DEFAULT_TRACK_ROI_CROP_FACTOR
@@ -1336,6 +1347,11 @@ class Settings:
                 os.environ.get("CV_TRACK_SESSION_CAPACITY"),
                 DEFAULT_TRACK_SESSION_CAPACITY,
                 "CV_TRACK_SESSION_CAPACITY",
+            ),
+            ledger_ring=_parse_positive_int(
+                os.environ.get("CV_LEDGER_RING"),
+                DEFAULT_LEDGER_RING,
+                "CV_LEDGER_RING",
             ),
             track_follow_top_k=_parse_positive_int(
                 os.environ.get("CV_TRACK_FOLLOW_TOP_K"),
