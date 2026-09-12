@@ -27,9 +27,11 @@ from typing import Iterable, Mapping, Optional
 class ObjectEvidence:
     """One contributor's algorithm-shaped claim about one object.
 
-    Predicted box, per-term association cost, memory match distance, label
-    vote tally. These live HERE and never on the object mirror (plan E7):
-    the mirror describes the object, the ledger describes the algorithm.
+    The affine transform, descriptor vectors, per-term cost weights, the raw
+    vote ring. These live HERE and never on the object mirror (plan E7, as
+    clarified by W1): the mirror describes the object -- so the *outcomes*
+    (predicted box, total association cost, match distance, the candidate
+    list) are on `ObjectState`; the ledger describes the algorithm.
     """
 
     contributor_id: str
