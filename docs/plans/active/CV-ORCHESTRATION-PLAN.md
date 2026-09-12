@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **IN PROGRESS** — proposed 2026-09-11, double-checked against `O1-SYNTHESIS.md` (§12); owner said "continue" 2026-09-12, so W-pre + W0 started on `feat/cv-orchestration` sub-branches; §9 decisions still open and needed before W3/W4/W5 |
+| Status | **IN PROGRESS** — proposed 2026-09-11, double-checked against `O1-SYNTHESIS.md` (§12); owner said "continue" 2026-09-12, so W-pre + W0 started on `feat/cv-orchestration` sub-branches; §9 decisions taken 2026-09-12 (E16–E20) |
 | Branch | `docs/cv-orchestration` (docs only). Implementation task branch: `feat/cv-orchestration`, one sub-branch per wave, merged back in order |
 | Context | [CV-ORCHESTRATION-CONTEXT.md](CV-ORCHESTRATION-CONTEXT.md) — the ask, roles, corpus, status log |
 | Evidence | `cv-orchestration/R1..R5` (Sonnet, code-truth with file:line) → `cv-orchestration/O1-SYNTHESIS.md` (Opus) → this plan (Fable) |
@@ -421,9 +421,10 @@ Task branch `feat/cv-orchestration` from master once this plan is accepted; each
 | **W1** wire mirror — **DONE** 2026-09-12 (`700b7834`; pytest 1443 passed, Maven 26/26 green incl. vision-app 355, test:ci 199 files / 3904, golden + BASELINE.md unchanged, round-trip fixture `object-state.wire.json`) | proto `ObjectState*`, fields 27/28/13/12; cv-service aggregator emits `objects`; codec decode/encode + `stream_id` check; Java domain `ObjectState` family; DTO `objects[]`; TS mirrors + enum contract test | domain-modeler → adapter-builder → spring-integrator → web-ui (sequential, disjoint) | round-trip test proto→Java→JSON→TS for every group; `detections[]` unchanged byte-for-byte; a `DORMANT` object appears on the wire in the memory trackeval scenario |
 | **W2** Java world model + trace | `WorldModel`, `WorldObject`, `FrameGateLedger`, `TraceDemand`; retire `TrackBook`/`FollowTracker`/`DetectionExtrapolator`; `/cv/trace`; SSE `tracks:`, `cv-trace:`; `CvStatusProvider` capacity; profile fold patch-over-seed + `intent` (Java side); `MODULE.md`s | application-service + spring-integrator | `TrackingAssociateE2ETest` and follow tests green with `WorldModel`; live-before-durable order asserted by test; gate ledger shows all seven reasons in unit tests; **pays MASTER-MATRIX K3 (StreamPipeline decomposition)** partially — `StreamPipeline` loses the six live-model peers |
 | **W3** one operator act | vision-web only: intent chips on hero; "Tuning" modal with resolved sources; remove mode picker + memory toggle; point lock; delete client extrapolation-for-tracked and `electStickyLabels`; `/vision/profiles` intent + policy ALWAYS control; render tier from server | web-ui | click path to follow = 3 (measured by the e2e spec); no client re-derivation of velocity or label for tracked objects (grep test); `RUNNING_UNWATCHED` renders honestly |
-| **W4** detector role + pool | cv-service `DetectorClient` (`local`, `pool`), `detector` role + `Detector` service, `RESOURCE_EXHAUSTED` admission; compose `cv-detector` profile; `Inspect` capacity | adapter-builder (python) | trackeval identical with `local`; **measured**: 1 tracker + 2 detectors sustains ≥ 2× the streams of 1 all-in-one at 10 fps yolo26n on the same hardware; reconnect test proves affinity holds with the ordered target list |
-| **W5** inspector | vision-web `/manage/cv` (or fly drawer tab): contributor timeline, per-object evidence, gate ledger, process facts; trace demand wiring | web-ui | opening the inspector flips `trace` on and closing flips it off (asserted via `/cv/trace`); a saved trace replays through trackeval |
+| **W4** detector role + pool | cv-service `DetectorClient` (`local`, `pool`), `detector` role + `Detector` service, `RESOURCE_EXHAUSTED` admission; compose `cv-detector` profile; `Inspect` capacity; **`bytetrack` unregistered from the roster (E16)** | adapter-builder (python) | trackeval identical with `local`; **measured**: 1 tracker + 2 detectors sustains ≥ 2× the streams of 1 all-in-one at 10 fps yolo26n on the same hardware; reconnect test proves affinity holds with the ordered target list |
+| **W5** inspector | vision-web `/manage/cv` (decided E18; no fly-drawer tab): contributor timeline, per-object evidence, gate ledger, process facts; trace demand wiring | web-ui | opening the inspector flips `trace` on and closing flips it off (asserted via `/cv/trace`); a saved trace replays through trackeval |
 | **W6** cold ledger | after DOMAIN-SEPARATION W2: ledgers to a U3 history stream | — | deferred; not scheduled here |
+| **W-legacy** retire `detections[]`/`tracks[]` | wire, DTOs, TS; `objects[]` is the only shape | — | two releases after W3 (E20); not scheduled here |
 
 Dependencies: W-pre ∥ W0 → W1 → W2 → W3; W4 after W0, parallel with W2/W3; W5 after W2. W0 is the largest wave and carries the strictest acceptance on purpose: everything after it is additive on an observable core.
 
@@ -468,16 +469,23 @@ Algorithm defects the research found that this plan makes **observable but does 
 | E13 | Ground-object geo joins at the API read model from vision-map | geo in perception or in cv-service | ArchUnit DAG; R4 surprise 9 |
 | E14 | `TrackingConfig` 8/9/10, `TargetLock.box`, response 13/14/15/21 deprecated, never renumbered | re-home as `TrackingTelemetry` scalars | R4 Q1; scalar growth produced the dead fields |
 | E15 | W0 ships zero behavioural delta, proven by golden per-frame outcomes, before any new evidence source | refactor + improve together | P7; the harness is the only ground truth without aerial footage (TRACKING-V3 O1–O5) |
+| E16 | `bytetrack` unregistered from the roster (owner 2026-09-12 #1) | keep as an L3 reference entry | one evidence graph per associator; R3 Q8 |
+| E17 | GB4005 stays all-in-one until W4's measurement (owner #2) | split now | no number yet; §4.9 |
+| E18 | Engineer inspector is `/manage/cv` only (owner #3) | fly-drawer tab | §4.8 audiences |
+| E19 | Mode picker removed; OFF via profile only (owner #4) | keep OFF as an operator control | §4.7 |
+| E20 | `detections[]`/`tracks[]` retired two releases after W3 (owner #5) | keep indefinitely | PLATFORM-AUDIT: closed to integration |
 
 ---
 
-## 9. Open decisions for the owner
+## 9. Owner decisions — **decided 2026-09-12** (all five as recommended)
 
-1. **`bytetrack` roster entry** — keep as an L3 reference (its DAG dead-end becomes visible) or retire so every associator shares one evidence graph (R3 Q8)?
-2. **Detector placement** — is the GB4005 to become a detector-only instance with the tracker next to the app, or stay all-in-one until W4 measures the split?
-3. **Inspector audience** — is the engineer inspector (W5) a product surface on `/fly` or a `/manage/cv` page only?
-4. **Tracking-mode picker** — remove from the operator surface entirely (this plan) or keep OFF reachable for the operator?
-5. **Legacy `detections[]`/`tracks[]`** — retire two releases after W3, or keep indefinitely for integrators (PLATFORM-AUDIT: closed to integration today)?
+| # | Question | Decision | Lands in |
+|---|---|---|---|
+| 1 | `bytetrack` roster entry | **Retire.** Every associator shares one evidence graph; its DAG dead-end is visible now and would cost every future contributor a special case | W4 (cv-service roster; engine module kept as a reference file, unregistered) |
+| 2 | Detector placement | **Stay all-in-one until W4 measures the split.** GB4005 stays an all-in-one instance; the role split is decided on W4's number, not before | W4 measurement → follow-up decision |
+| 3 | Inspector audience | **`/manage/cv` page only.** The fly cockpit gets the one honest status line (§4.8), engineers get the full ledger elsewhere | W5 |
+| 4 | Tracking-mode picker | **Removed from the operator surface.** OFF stays reachable through the profile (asset-level policy), FOLLOW is the tap, ASSOCIATE otherwise | W3 |
+| 5 | Legacy `detections[]` / `tracks[]` | **Retire two releases after W3.** The platform is closed to integrators today (PLATFORM-AUDIT); the retirement is a scheduled row, not a maybe | W-legacy (new row in §6, deferred until two releases after W3) |
 
 ---
 
