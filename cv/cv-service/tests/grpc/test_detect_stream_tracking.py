@@ -841,7 +841,7 @@ def test_a_raising_engine_degrades_one_frame_and_the_stream_survives(clock):
     )
 
     subject._handle_request(frame_request(0, config), session)
-    session._engine.raise_on_update = True
+    session._engines.engine.raise_on_update = True
 
     clock.seconds = 1.0
     degraded = subject._handle_request(frame_request(1, config), session)
@@ -925,7 +925,7 @@ def test_a_reconnect_does_not_resume_the_locked_engines_own_state(clock):
     list(subject.DetectStream(iter([frame_request(0, config)]), None))
     resumed = subject._session_registry.acquire("stream-1")
 
-    assert resumed._engine is None
+    assert resumed._engines.engine is None
     assert resumed._lock.has_target  # the operator's FOLLOW target survives
     assert resumed.tracks  # the book itself was not wiped
     subject._session_registry.release("stream-1", resumed)

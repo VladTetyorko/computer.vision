@@ -36,6 +36,7 @@ from cv_service.tracking.params import (
 )
 from cv_service.tracking.registry import MOTION_ENGINE_FLOW, MOTION_ENGINE_POSE
 from cv_service.tracking.scheduler import REASON_ALWAYS, REASON_CADENCE, REASON_NO_LOCK
+from cv_service.orchestration.budget import FOLLOW as BUDGET_FOLLOW
 from cv_service.tracking.session import StreamTrackingSession, _box_for, _from_track
 from cv_service.tracking.track import STATE_CONFIRMED, Track
 
@@ -952,19 +953,39 @@ def follow_session(
 # that: a SECOND candidate, sourced from the SAME `ObservationRing`/
 # `history_transform` machinery `reupdate.py` reads, offered only when the
 # primary test has already failed.
+#
+# CV-ORCHESTRATION W0: the method lives on the `follow.*` contributor now
+# rather than on the session, so these reach it through the registered
+# roster -- which also asserts, incidentally, that the node IS registered for
+# a FOLLOW stream.
+
+
+def follow_node(subject):
+    """The registered `follow.*` contributor for this session.
+
+    Resolves the engine first, exactly as `process()`'s first two lines do:
+    engines are LAZY, so a session that has not yet run a frame has an
+    untracked roster and no follow node to find.
+    """
+    subject._engines.resolve_capability_level()
+    subject._engines.resolve_engine()
+    for contributor in subject._orchestrator().order:
+        if contributor.family == BUDGET_FOLLOW:
+            return contributor
+    raise AssertionError("no follow contributor registered")
 
 
 def test_select_target_falls_back_to_the_last_real_observation_when_the_prediction_has_drifted():
     subject, engine = follow_session()
     run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1)])
-    followed = subject._followed
+    followed = subject._state.followed
     # An absurd, confidently-wrong velocity -- the constant-velocity
     # PRIMARY prediction will land nowhere near a fresh detection sitting
     # where the track was actually last seen.
     followed.velocity_x = 5.0
     followed.velocity_y = 0.0
 
-    index = subject._select_target([Box(0.1, 0.1, 0.1, 0.1)], now=0.2)
+    index = follow_node(subject)._select_target([Box(0.1, 0.1, 0.1, 0.1)], now=0.2)
 
     assert index == 0
 
@@ -975,7 +996,7 @@ def test_select_target_never_uses_the_fallback_when_the_primary_test_already_suc
     # Velocity stays at its real, tiny (near-zero) measured value -- the
     # primary prediction should already land close to the same spot.
 
-    index = subject._select_target([Box(0.1, 0.1, 0.1, 0.1)], now=0.1)
+    index = follow_node(subject)._select_target([Box(0.1, 0.1, 0.1, 0.1)], now=0.1)
 
     assert index == 0  # unchanged behaviour; the fallback is never consulted
 
@@ -984,12 +1005,12 @@ def test_select_target_fallback_respects_the_reupdate_ceiling():
     subject, engine = follow_session()
     run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1)])
     subject.apply_config(TrackingRequest(mode=MODE_FOLLOW, reupdate_max_gap_millis=100))
-    followed = subject._followed
+    followed = subject._state.followed
     followed.velocity_x = 5.0
 
     # The gap (200ms) exceeds the 100ms ceiling this stream was just given --
     # the fallback must not fire even though the primary test still fails.
-    index = subject._select_target([Box(0.1, 0.1, 0.1, 0.1)], now=0.2)
+    index = follow_node(subject)._select_target([Box(0.1, 0.1, 0.1, 0.1)], now=0.2)
 
     assert index == -1
 
@@ -1008,10 +1029,10 @@ def test_select_target_fallback_is_a_genuine_no_op_when_oru_is_disabled():
         settings=dataclasses.replace(Settings(), track_reupdate_max_gap_millis=0)
     )
     run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1)])
-    followed = subject._followed
+    followed = subject._state.followed
     followed.velocity_x = 5.0
 
-    index = subject._select_target([Box(0.1, 0.1, 0.1, 0.1)], now=0.2)
+    index = follow_node(subject)._select_target([Box(0.1, 0.1, 0.1, 0.1)], now=0.2)
 
     assert index == -1
 
@@ -1024,7 +1045,7 @@ def test_select_target_fallback_is_never_reached_with_nothing_held():
     # unguarded read here would raise `AttributeError` on `None.history`,
     # not return quietly.
 
-    index = subject._select_target([], now=0.0)
+    index = follow_node(subject)._select_target([], now=0.0)
 
     assert index == -1
 
@@ -1898,15 +1919,15 @@ def test_switching_to_off_clears_the_state():
 def test_reconnect_drops_the_engine_but_keeps_the_book_and_the_locks_target():
     subject, _engine = follow_session()
     run(subject, now_millis=0.0, detections=[det()])
-    assert subject._engine is not None
+    assert subject._engines.engine is not None
     assert subject.tracks
     assert subject._lock.bound_track_id != 0
 
     subject.reset_for_reconnect()
 
     # Engine state: NOT resumed -- forces a clean rebuild on the next frame.
-    assert subject._engine is None
-    assert subject._engine_id == ""
+    assert subject._engines.engine is None
+    assert subject._engines.engine_id == ""
     # Identity core: resumed untouched -- the book was not wiped, and the
     # operator's own FOLLOW target survives (only the momentary BOUND track
     # id resets, which correctly asks the next frame to re-verify it).
@@ -1919,12 +1940,15 @@ def test_reconnect_drops_the_motion_compensator():
     compensator = FakeMotionCompensator()
     subject, _engine = follow_session(compensator=compensator)
     run(subject, now_millis=0.0, detections=[det()])
-    assert subject._motion_engine is not None
+    assert subject._engines._motion_engine is not None
 
     subject.reset_for_reconnect()
 
-    assert subject._motion_engine is None
-    assert subject._motion_resolved is False
+    assert subject._engines._motion_engine is None
+    # The ID is cleared too, not just the instance: `release_motion_
+    # compensator` resets the whole resolution, so the next active frame
+    # re-checks pose availability instead of resuming a stale verdict.
+    assert subject._engines.motion_engine_id == ""
 
 
 def test_reconnect_drops_the_appearance_extractor():
@@ -1932,24 +1956,24 @@ def test_reconnect_drops_the_appearance_extractor():
     subject = session(FakeRegistry(associator=cost_engine(), appearance=extractor))
     subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
     run(subject, now_millis=0.0, detections=[det()])
-    assert subject._appearance_engine is not None
+    assert subject._engines.appearance_extractor is not None
 
     subject.reset_for_reconnect()
 
-    assert subject._appearance_engine is None
-    assert subject._appearance_resolved is False
+    assert subject._engines.appearance_extractor is None
+    assert subject._engines.appearance_engine_id == ""
 
 
 def test_reconnect_does_not_rebuild_the_dormant_gallery():
     subject = session(FakeRegistry(associator=cost_engine()))
     subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
     run(subject, now_millis=0.0, detections=[det()])
-    memory_before = subject._memory
+    memory_before = subject._engines.memory
     assert memory_before is not None
 
     subject.reset_for_reconnect()
 
-    assert subject._memory is memory_before  # the SAME gallery object
+    assert subject._engines.memory is memory_before  # the SAME gallery object
 
 
 def test_a_reconnected_stream_re_verifies_and_continues_the_id_counter():

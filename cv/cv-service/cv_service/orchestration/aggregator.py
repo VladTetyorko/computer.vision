@@ -12,7 +12,10 @@ grep-enforced test says so.
   path and zero on a FOLLOW re-anchor failure with nothing held. That is
   today's call-site behaviour exactly, and anything else is a behavioural
   delta (O1 contradiction 7). This class enforces it: one `Proposal` per
-  frame, and a proposal with no observations folds nothing.
+  frame, and a proposal that says `fold=False` books nothing. An EMPTY
+  observation list is NOT that case: both ASSOCIATE paths call `apply([])`
+  on a frame the detector found nothing on, and must keep doing so, or
+  nothing in the scene would ever age.
 * The frame's own clock (`ctx.now`) is the one clock age and death are
   measured against, whatever cadence a contributor ran at (O1 Q20).
 
@@ -33,6 +36,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Mapping, Optional, Sequence
 
+from cv_service.orchestration.budget import AGGREGATE
 from cv_service.orchestration.contract import (
     OUTCOME_RAN,
     PHASE_TRACK,
@@ -43,31 +47,37 @@ from cv_service.orchestration.keys import Key
 from cv_service.tracking.engines.base import Descriptor, Observation
 from cv_service.tracking.track import RecoveredIdentity, Track, TrackBook, observe_descriptor
 
-#: This contributor's own eligibility family. Always allowed: the ledger must
-#: be complete every frame, including the frames that fold nothing.
-AGGREGATE = "aggregate"
 
 
 @dataclass(frozen=True)
 class Proposal:
     """What a terminal contributor asks the aggregator to book.
 
-    `observations` empty means "fold nothing this frame" -- `boxes` is then
-    the response as-is. That is the OFF path, the no-engine path and FOLLOW's
-    nothing-held path, and it is the whole mechanism behind "at most once".
+    `fold=False` means "book nothing this frame" -- `boxes` is then the
+    response as-is. That is the engine-raised path, FOLLOW's nothing-held
+    path and its failed-re-anchor-with-no-target path, and it is the whole
+    mechanism behind "at most once".
+
+    An EMPTY `observations` with `fold=True` is a different thing entirely
+    and both ASSOCIATE paths rely on it: `apply([])` still ages every live
+    track once, which is how a frame the detector found nothing on advances
+    the misses that eventually retire a track. Collapsing the two would
+    freeze a whole scene the moment detections stopped arriving.
     """
 
     observations: "tuple[Observation, ...]" = ()
+    #: Whether to call `TrackBook.apply` at all this frame.
+    fold: bool = True
     #: Positional against `observations`; empty when the path has no
     #: appearance evidence to EMA (every path but `cost` ASSOCIATE).
     descriptors: "tuple[Optional[Descriptor], ...]" = ()
     recoveries: "Optional[dict[object, RecoveredIdentity]]" = None
     captured_at: "Optional[dict[object, float]]" = None
     detector_ran: bool = True
-    #: `tracks -> response boxes`. Required whenever `observations` is
-    #: non-empty; ignored otherwise.
+    #: `tracks -> response boxes`. Required whenever `fold` is True;
+    #: ignored otherwise.
     settle: "Optional[Callable[[list[Track]], list[Any]]]" = None
-    #: The response when nothing is folded.
+    #: The response when `fold` is False.
     boxes: "tuple[Any, ...]" = ()
     #: Free-form ledger facts about the proposal itself (which branch of the
     #: mode ran, how many candidates, and so on).
@@ -126,7 +136,7 @@ class Aggregator:
                 summary={"folded": "0", "boxes": str(len(self._boxes)), "path": "raw"},
             )
 
-        if not proposal.observations:
+        if not proposal.fold:
             self._boxes = list(proposal.boxes)
             return Contribution(
                 outcome=OUTCOME_RAN,

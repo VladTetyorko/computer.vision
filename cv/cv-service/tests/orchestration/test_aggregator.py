@@ -88,13 +88,13 @@ def test_no_proposal_and_no_detections_is_an_empty_response_not_a_crash() -> Non
     assert aggregator.applied is False
 
 
-def test_a_proposal_with_no_observations_folds_nothing_and_keeps_its_boxes() -> None:
+def test_a_proposal_that_refuses_to_fold_keeps_its_boxes_and_ages_nothing() -> None:
     # FOLLOW's re-anchor-failure-with-nothing-held path: the response is
     # empty, the book is untouched, and no track ages on this frame.
     counting = CountingBook()
 
     aggregator, contribution = aggregate(
-        Proposal(observations=(), boxes=(), summary={"branch": "reanchor-failed"}),
+        Proposal(fold=False, boxes=(), summary={"branch": "reanchor-failed"}),
         counting=counting,
     )
 
@@ -130,8 +130,8 @@ def test_the_follow_proposal_wins_over_the_associate_one() -> None:
     counting = CountingBook()
     aggregator = Aggregator(counting, raw_boxes=lambda d: list(d))
     ctx = context()
-    ctx.put(Key.OBSERVATIONS, Proposal(observations=(), boxes=("associate",)), by="assoc.cost")
-    ctx.put(Key.FOLLOW_OBS, Proposal(observations=(), boxes=("follow",)), by="follow.lk")
+    ctx.put(Key.OBSERVATIONS, Proposal(fold=False, boxes=("associate",)), by="assoc.cost")
+    ctx.put(Key.FOLLOW_OBS, Proposal(fold=False, boxes=("follow",)), by="follow.lk")
 
     aggregator.contribute(ctx, budget=None)
 
@@ -193,3 +193,21 @@ def test_the_aggregator_declares_no_writes_so_it_can_never_own_a_key() -> None:
     assert Aggregator.writes == frozenset()
     assert Key.OBSERVATIONS in Aggregator.reads
     assert Key.FOLLOW_OBS in Aggregator.reads
+
+
+def test_an_empty_observation_list_still_ages_the_book() -> None:
+    """The ASSOCIATE paths' own case, and the one this class must not collapse.
+
+    `_run_associate`/`_run_cost_associate` both call `TrackBook.apply()` on a
+    frame the detector found nothing on -- that call is what advances every
+    live track's miss count toward retirement. Treating it as "nothing to
+    fold" would freeze the whole scene the moment detections stopped.
+    """
+    counting = CountingBook()
+
+    aggregator, _ = aggregate(
+        Proposal(observations=(), settle=lambda tracks: []), counting=counting
+    )
+
+    assert counting.applies == 1
+    assert aggregator.applied is True

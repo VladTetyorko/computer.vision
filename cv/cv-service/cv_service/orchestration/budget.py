@@ -42,6 +42,9 @@ ASSOC = "assoc"
 MEMORY_GALLERY = "memory.gallery"
 FOLLOW = "follow"
 EMIT_RAW = "emit.raw"
+#: The fold. Never refused: the ledger must be complete on every frame,
+#: including the frames that book nothing.
+AGGREGATE = "aggregate"
 
 #: `assign.CostAssociator.engine_id`, spelled here to keep this module free
 #: of an import cycle through `session.py`.
@@ -153,6 +156,11 @@ class BudgetPolicy:
         allow(MEMORY_GALLERY, cost_associate, "cost associator only")
         allow(FOLLOW, following, _mode_refusal(mode, state))
         allow(EMIT_RAW, tracking_off, "tracking is active")
+        # Unconditional, and the one row with no refusal reason: a frame
+        # that folds nothing still has to SAY so, and the aggregator is
+        # what says it (`Proposal.fold`, not eligibility, is how "book
+        # nothing" is expressed).
+        eligible.add(AGGREGATE)
 
         return FrameBudget(
             decision=decision, eligible=frozenset(eligible), reasons=dict(reasons)

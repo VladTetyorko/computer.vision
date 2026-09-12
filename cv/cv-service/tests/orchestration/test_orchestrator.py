@@ -104,7 +104,7 @@ def test_two_writers_of_one_key_is_refused_at_build_time() -> None:
 
 def test_declaring_a_seeded_key_as_a_write_is_refused() -> None:
     with pytest.raises(ValueError, match="seeded key"):
-        Orchestrator([Fake("a", writes=[Key.TRACKS_PREV])])
+        Orchestrator([Fake("a", writes=[Key.FRAME])])
 
 
 def test_writing_an_undeclared_key_is_refused_at_run_time() -> None:

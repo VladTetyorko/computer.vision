@@ -10,10 +10,13 @@ Rule 2 -- **a key has exactly one writer per configuration** -- is enforced
 by `Orchestrator` at build time, which is what makes "one owner per
 responsibility" (the plan's A2) structural rather than aspirational.
 
-Four keys are SEEDED by the session at frame start rather than written by a
-contributor (`FRAME`, `POSE`, `TRACKS_PREV`, `LOCK`): they are the frame's
-given facts, not anybody's contribution, so declaring them as writes would
-make the one-writer rule fight the session itself.
+Three keys are SEEDED by the session at frame start rather than written by a
+contributor (`FRAME`, `POSE`, `LOCK`): they are the frame's given facts, not
+anybody's contribution, so declaring them as writes would make the
+one-writer rule fight the session itself. `TRACKS_PREV` is deliberately NOT
+one of them -- the book's tracks are only correct to read AFTER ego-motion
+has warped them, so `predict.cv` owns that snapshot and the ordering is
+structural instead of a comment.
 """
 
 from __future__ import annotations
@@ -28,12 +31,13 @@ class Key(Enum):
     FRAME = "frame"
     #: This frame's `CameraPose`, `CameraPose()` when the wire carried none. Seeded.
     POSE = "pose"
-    #: `list[Track]` -- the book's live tracks as of frame start, post-warp. Seeded.
-    TRACKS_PREV = "tracks_prev"
     #: `LockArbiter` state for this frame (`lock.target`, bound id). Seeded.
     LOCK = "lock"
 
-    #: `dict[object, Box]` -- constant-velocity box per live track key.
+    #: `list[Track]` -- the book's live tracks, snapshotted post-warp.
+    TRACKS_PREV = "tracks_prev"
+    #: `list[Box]` -- constant-velocity box per track, positional against
+    #: `TRACKS_PREV`; the two are written together and never separately.
     PREDICTIONS = "predictions"
     #: `Transform` -- this frame's ego-motion, `IDENTITY` when uncompensated.
     TRANSFORM = "transform"
@@ -57,4 +61,4 @@ class Key(Enum):
 
 #: Keys the session puts on the blackboard itself; never declared as a
 #: contributor `writes` (see the module docstring).
-SEEDED: "frozenset[Key]" = frozenset({Key.FRAME, Key.POSE, Key.TRACKS_PREV, Key.LOCK})
+SEEDED: "frozenset[Key]" = frozenset({Key.FRAME, Key.POSE, Key.LOCK})
