@@ -5,6 +5,7 @@ import { TracksStore } from './tracks-store';
 import { VisionApi } from '../api/vision-api';
 import { PollScheduler } from '../poll-scheduler';
 import { LiveStore } from '../live/live-store';
+import type { LiveConnectionState } from '../live/live-fallback-logic';
 import type { MapEventPayload, ProjectedTrackResponse } from '../api/models';
 
 /**
@@ -37,22 +38,30 @@ function stubApi(overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
   };
 }
 
+/** `connectionState` seeded `'closed'` — reproduces today's (pre-D1) behaviour exactly, see
+ *  `marks-store.spec.ts`'s identical `stubLiveStore` doc comment. */
 function stubLiveStore() {
   const events = signal<readonly MapEventPayload[]>([]);
-  return { mapEvents: events.asReadonly() };
+  const connectionState = signal<LiveConnectionState>('closed');
+  return {
+    mapEvents: events.asReadonly(),
+    push: (incoming: readonly MapEventPayload[]) => events.update((existing) => [...existing, ...incoming]),
+    connectionState,
+  };
 }
 
 function createInactive(api: ReturnType<typeof stubApi>) {
+  const live = stubLiveStore();
   const scheduleFn = vi.fn().mockReturnValue(vi.fn());
   TestBed.configureTestingModule({
     providers: [
       TracksStore,
       { provide: VisionApi, useValue: api },
       { provide: PollScheduler, useValue: { schedule: scheduleFn } },
-      { provide: LiveStore, useValue: stubLiveStore() },
+      { provide: LiveStore, useValue: live },
     ],
   });
-  return { store: TestBed.inject(TracksStore), scheduleFn };
+  return { store: TestBed.inject(TracksStore), live, scheduleFn };
 }
 
 /** Lets the fire-and-forget promise chain inside `refresh()` settle. */
@@ -131,6 +140,58 @@ describe('TracksStore', () => {
 
       expect(store.tracks()).toEqual([]);
       expect(store.loaded()).toBe(true);
+    });
+  });
+
+  describe('live gate (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1)', () => {
+    /**
+     * The plan's own frozen acceptance criterion (§5): a poll that stops must still reconcile on
+     * reconnect. With the store active and live open, driving `connectionState` through
+     * `open → closed → open` must issue **exactly one** REST refresh on (re-)entering `open`, and
+     * **zero** REST requests for as long as `open` persists.
+     */
+    it('reconciles exactly once on reconnect, and stays silent for as long as live holds', async () => {
+      const api = stubApi({ listMapTracks: vi.fn().mockResolvedValue({ tracks: [track()] }) });
+      const { store, live } = createInactive(api);
+      store.activate();
+      await flush();
+      TestBed.tick();
+
+      live.connectionState.set('open');
+      TestBed.tick();
+      await flush();
+      // (the first entry into live already reconciled once here — not the segment under test)
+
+      live.connectionState.set('closed');
+      TestBed.tick();
+      await flush();
+      // Falling back to polling refreshes immediately too (the D1 table's own
+      // `>0 | false | live → refresh once, then start poll` row) — a separate, legitimate call,
+      // also not the segment under test. Only now do we isolate "entering open".
+      api.listMapTracks.mockClear();
+
+      live.connectionState.set('open');
+      TestBed.tick();
+      await flush();
+
+      expect(api.listMapTracks).toHaveBeenCalledTimes(1); // exactly one refresh, entering 'open'
+
+      store.activate(); // a second concurrent consumer while already live — no further request
+      TestBed.tick();
+      await flush();
+      expect(api.listMapTracks).toHaveBeenCalledTimes(1);
+    });
+
+    it('a store that activates while already live does one initial GET, not zero, and never schedules the poll', async () => {
+      const api = stubApi({ listMapTracks: vi.fn().mockResolvedValue({ tracks: [track()] }) });
+      const { store, live, scheduleFn } = createInactive(api);
+      live.connectionState.set('open');
+
+      store.activate();
+      await flush();
+
+      expect(api.listMapTracks).toHaveBeenCalledTimes(1);
+      expect(scheduleFn).not.toHaveBeenCalled();
     });
   });
 });

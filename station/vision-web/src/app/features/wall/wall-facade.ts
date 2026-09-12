@@ -1,4 +1,4 @@
-import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
+import { DestroyRef, Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
 import type { FleetSummary } from '../../core/api/models';
 import { FleetStore } from '../../core/fleet/fleet-store';
@@ -6,6 +6,13 @@ import { SettingsStore } from '../../core/settings/settings-store';
 import { EventsStore } from '../../core/events/events-store';
 import { LiveStore } from '../../core/live/live-store';
 import { PollScheduler } from '../../core/poll-scheduler';
+import { isLiveAvailable } from '../../core/live/live-fallback-logic';
+import {
+  SUMMARY_FLOOR_INTERVAL_MS,
+  anyNamesListedAsset,
+  invalidationDelayMs,
+  listedAssetIds,
+} from '../../core/fleet/summary-refresh-logic';
 import { activeGeofenceBreaches } from '../../core/geofence/geofence-logic';
 import { activePipelineErrorMessagesByStreamId } from '../../core/system-events/system-events-logic';
 import { cycleBoxesMode, type BoxesMode } from '../../shared/player/detection-overlay-logic';
@@ -19,9 +26,15 @@ import {
   type WallTileModel,
 } from './wall-logic';
 
-/** Matches `command-facade.ts#SUMMARY_POLL_INTERVAL_MS` verbatim — this is the same fleet-summary
- *  read, on the same cadence, just consumed by the wall instead of Command. */
+/** Matches `command-facade.ts#SUMMARY_POLL_INTERVAL_MS` verbatim — the same fleet-summary read, the
+ *  same **not-open fallback** cadence, just consumed by the wall instead of Command. Wave L8a
+ *  (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §5 L8a) gated it the same way too: while live is
+ *  open the summary refetches on invalidation plus a floor, not on this timer. */
 const SUMMARY_POLL_INTERVAL_MS = 5_000;
+
+/** Matches `command-facade.ts#CLOCK_TICK_MS` verbatim, and exists for the same reason — see that
+ *  constant's own doc comment. Local, no requests. */
+const CLOCK_TICK_MS = 5_000;
 
 /**
  * `WallPage`'s facade (docs/plans/active/WALL-FLOW-PLAN.md, wave W1) — the wall's one frozen surface
@@ -70,15 +83,16 @@ export class WallFacade {
   private readonly fleet = inject(FleetStore);
   private readonly events = inject(EventsStore);
   private readonly live = inject(LiveStore);
+  private readonly scheduler = inject(PollScheduler);
   private readonly settings = inject(SettingsStore);
 
   private readonly summarySignal = signal<FleetSummary | undefined>(undefined);
   /** Flips once, after `refreshSummary`'s first attempt settles (success or failure) — see the class
    *  doc comment's "`unlinked` waits for the first summary response" note. Never resets. */
   private readonly summaryLoadedSignal = signal(false);
-  /** Piggybacks the summary poll's own 5s cadence for the pipeline-error decay window and the pulse
-   *  window — the same "tick alongside the poll that already runs" idiom `command-facade.ts#nowSignal`
-   *  uses, rather than a second independent clock. */
+  /** Drives the pipeline-error decay window and the pulse window on its own {@link CLOCK_TICK_MS}
+   *  tick — the same arrangement, and the same wave-L8a reason for it, as
+   *  `command-facade.ts#nowSignal`; see that field's own doc comment. */
   private readonly nowSignal = signal(Date.now());
 
   private readonly pipelineErrorMessagesByStreamId = computed(() =>
@@ -182,9 +196,39 @@ export class WallFacade {
     this.events.activate();
     inject(DestroyRef).onDestroy(() => this.events.release());
 
-    void this.refreshSummary();
-    const stopPoll = inject(PollScheduler).schedule(SUMMARY_POLL_INTERVAL_MS, () => this.refreshSummary());
-    inject(DestroyRef).onDestroy(stopPoll);
+    // No `refreshSummary()` here: `applySummaryTransport` below fetches once on its own first run,
+    // whichever transport it resolves to. Calling it here as well would double-fetch at construction
+    // -- the same reason `MarksStore.activate()` routes through `applyTransport` instead of
+    // refreshing directly.
+    const stopClock = this.scheduler.schedule(CLOCK_TICK_MS, () => this.nowSignal.set(Date.now()));
+    inject(DestroyRef).onDestroy(stopClock);
+
+    // D1 + L8a — identical to `command-facade.ts`'s own pair of effects; see those for the reasoning.
+    effect(() => {
+      this.applySummaryTransport(isLiveAvailable(this.live.connectionState()));
+    });
+
+    effect(() => {
+      const detectionEvents = this.live.detectionEvents();
+      const structural = this.live.fleet() !== undefined || this.live.devices() !== undefined;
+      untracked(() => {
+        const newEvents = detectionEvents.slice(this.processedDetectionEventCount);
+        this.processedDetectionEventCount = detectionEvents.length;
+        if (!this.summaryBootstrapped) {
+          this.summaryBootstrapped = true;
+          return;
+        }
+        if (!isLiveAvailable(this.live.connectionState())) {
+          return; // the fallback poll already covers this case
+        }
+        if (!structural && !anyNamesListedAsset(newEvents, listedAssetIds(this.summarySignal()))) {
+          return;
+        }
+        this.invalidateSummary();
+      });
+    });
+
+    inject(DestroyRef).onDestroy(() => this.teardownSummaryTransport());
 
     // Never leaves the focus view pointed at a tile that just vanished (its stream stopped, or the
     // fleet-summary poll simply hasn't caught up yet) — honest "nothing to show" beats a frozen
@@ -208,7 +252,74 @@ export class WallFacade {
     });
   }
 
+  /** See `command-facade.ts`' fields of the same names — this facade mirrors them exactly. */
+  private processedDetectionEventCount = 0;
+  private summaryBootstrapped = false;
+  private summaryLiveGated = false;
+  private stopSummaryPollFn: (() => void) | null = null;
+  private stopSummaryFloorFn: (() => void) | null = null;
+  private summaryInvalidationHandle: ReturnType<typeof setTimeout> | null = null;
+  private lastSummaryFetchAtMs = 0;
+
+  /** D1's gate for the fleet-summary read — see `command-facade.ts#applySummaryTransport`'s own table. */
+  private applySummaryTransport(liveAvailable: boolean): void {
+    if (liveAvailable) {
+      if (this.summaryLiveGated) {
+        return;
+      }
+      this.stopSummaryPoll();
+      void this.refreshSummary();
+      this.stopSummaryFloorFn = this.scheduler.schedule(SUMMARY_FLOOR_INTERVAL_MS, () => this.refreshSummary());
+      this.summaryLiveGated = true;
+      return;
+    }
+    this.summaryLiveGated = false;
+    this.stopSummaryFloor();
+    this.cancelPendingInvalidation();
+    if (this.stopSummaryPollFn !== null) {
+      return; // already polling
+    }
+    void this.refreshSummary();
+    this.stopSummaryPollFn = this.scheduler.schedule(SUMMARY_POLL_INTERVAL_MS, () => this.refreshSummary());
+  }
+
+  /** See `command-facade.ts#invalidateSummary` for why this is a raw one-shot timer. */
+  private invalidateSummary(): void {
+    if (this.summaryInvalidationHandle !== null) {
+      return;
+    }
+    const delay = invalidationDelayMs(this.lastSummaryFetchAtMs, Date.now());
+    this.summaryInvalidationHandle = setTimeout(() => {
+      this.summaryInvalidationHandle = null;
+      void this.refreshSummary();
+    }, delay);
+  }
+
+  private cancelPendingInvalidation(): void {
+    if (this.summaryInvalidationHandle !== null) {
+      clearTimeout(this.summaryInvalidationHandle);
+      this.summaryInvalidationHandle = null;
+    }
+  }
+
+  private stopSummaryPoll(): void {
+    this.stopSummaryPollFn?.();
+    this.stopSummaryPollFn = null;
+  }
+
+  private stopSummaryFloor(): void {
+    this.stopSummaryFloorFn?.();
+    this.stopSummaryFloorFn = null;
+  }
+
+  private teardownSummaryTransport(): void {
+    this.stopSummaryPoll();
+    this.stopSummaryFloor();
+    this.cancelPendingInvalidation();
+  }
+
   private async refreshSummary(): Promise<void> {
+    this.lastSummaryFetchAtMs = Date.now();
     // Ticks the shared clock on every attempt, success or failure — the pipeline-error decay window
     // and the pulse window should keep advancing even while the summary itself fails to refresh
     // (mirrors `command-facade.ts#refreshSummary`'s identical unconditional tick).

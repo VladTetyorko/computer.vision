@@ -21,6 +21,10 @@ import { SidebarStore } from './core/shell/sidebar-store';
  * test in this file (see each store's own spec, and `shared/ui/app-sidebar/app-sidebar.spec.ts` for
  * the sidebar's own tiering/role-gate/collapse behavior). `ToastService`/`UndoToastService` are left
  * real — both are self-contained `signal()`-only state with no injected dependencies of their own.
+ * `AppSidebar` also constructs a real `SystemStatusStore` for the shell health dot (§5.2),
+ * which since docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md wave L5 reads `LiveStore.systemStatus()`
+ * — `fakeLiveStore` below carries that member too, purely so `SystemStatusStore` can construct
+ * without throwing; nothing in this file exercises its value.
  */
 function fakeFleetStore(reachable: boolean | undefined = true) {
   return { streams: () => [] as unknown[], reachable: () => reachable };
@@ -31,7 +35,11 @@ function fakeEventsStore() {
 }
 
 function fakeLiveStore(connectionState: 'connecting' | 'open' | 'closed' = 'open') {
-  return { liveEvents: () => [] as unknown[], connectionState: () => connectionState };
+  return {
+    liveEvents: () => [] as unknown[],
+    connectionState: () => connectionState,
+    systemStatus: () => undefined,
+  };
 }
 
 /** Mirrors the real policy table closely enough for a fixture (docs/plans/active/AUTH-ROLES-PLAN.md §3.2,
