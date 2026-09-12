@@ -5,11 +5,17 @@ import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.perception.domain.model.DetectionSource;
 import com.drones.vision.perception.domain.model.DetectorReason;
+import com.drones.vision.perception.domain.model.EventRuleConfig;
+import com.drones.vision.perception.domain.model.EvidenceSource;
+import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.perception.domain.model.ObjectLifecycle;
+import com.drones.vision.perception.domain.model.ObjectState;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.model.PixelFormat;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.perception.domain.model.TrackRef;
 import com.drones.vision.perception.domain.model.TrackState;
+import com.drones.vision.perception.domain.model.TrackingConfig;
 import com.drones.vision.perception.domain.model.TrackingTelemetry;
 import com.drones.vision.perception.domain.model.VideoFrame;
 import com.drones.vision.proto.v1.BoundingBox;
@@ -21,6 +27,8 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.time.Instant;
 import java.nio.ByteBuffer;
+import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -459,5 +467,275 @@ class DetectionFrameCodecTest {
                 .build();
 
         assertThrows(IllegalArgumentException.class, () -> DetectionFrameCodec.decode(STREAM_ID, response));
+    }
+
+    // --- decode: the per-identity mirror (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.5, wave W1 step 4) ---
+
+    /** One wire {@code ObjectState} with every group present and every leaf distinct, lifecycle DORMANT. */
+    private static com.drones.vision.proto.v1.ObjectState fullWireObjectState(long id) {
+        com.drones.vision.proto.v1.BoundingBox box = com.drones.vision.proto.v1.BoundingBox.newBuilder()
+                .setX(0.10f).setY(0.20f).setWidth(0.30f).setHeight(0.40f).build();
+        com.drones.vision.proto.v1.BoundingBox detectorBox = com.drones.vision.proto.v1.BoundingBox.newBuilder()
+                .setX(0.11f).setY(0.21f).setWidth(0.31f).setHeight(0.41f).build();
+        com.drones.vision.proto.v1.BoundingBox trackerBox = com.drones.vision.proto.v1.BoundingBox.newBuilder()
+                .setX(0.12f).setY(0.22f).setWidth(0.32f).setHeight(0.42f).build();
+        com.drones.vision.proto.v1.BoundingBox predictedBox = com.drones.vision.proto.v1.BoundingBox.newBuilder()
+                .setX(0.13f).setY(0.23f).setWidth(0.33f).setHeight(0.43f).build();
+
+        com.drones.vision.proto.v1.ObjectState.Identity identity = com.drones.vision.proto.v1.ObjectState.Identity
+                .newBuilder()
+                .setLabel("person").setLabelRaw("person-raw").setStability(4)
+                .addCandidates(com.drones.vision.proto.v1.ObjectState.LabelCandidate.newBuilder()
+                        .setLabel("person").setWeight(0.9f).build())
+                .addCandidates(com.drones.vision.proto.v1.ObjectState.LabelCandidate.newBuilder()
+                        .setLabel("bicycle").setWeight(0.1f).build())
+                .build();
+
+        com.drones.vision.proto.v1.ObjectState.Kinematics kinematics = com.drones.vision.proto.v1.ObjectState.Kinematics
+                .newBuilder()
+                .setBox(box).setDetectorBox(detectorBox).setTrackerBox(trackerBox).setPredictedBox(predictedBox)
+                .setHorizonMs(120).setVelocityX(0.05f).setVelocityY(-0.03f)
+                .setDisplacementX(0.02f).setDisplacementY(-0.01f).setMotionCompensated(true)
+                .build();
+
+        com.drones.vision.proto.v1.ObjectState.Belief belief = com.drones.vision.proto.v1.ObjectState.Belief
+                .newBuilder()
+                .setConfidenceRaw(0.8f).setConfidenceSmoothed(0.75f).setExistence(0.9f).setSinceConfirmedMs(500)
+                .build();
+
+        com.drones.vision.proto.v1.ObjectState.Provenance provenance = com.drones.vision.proto.v1.ObjectState.Provenance
+                .newBuilder()
+                .setSource(com.drones.vision.proto.v1.EvidenceSource.EVIDENCE_SOURCE_TRACKER)
+                .addContributors("assoc.cost").addContributors("detect.full")
+                .setAssocCost(1.25f).setReupdated(true)
+                .build();
+
+        com.drones.vision.proto.v1.ObjectState.Memory memory = com.drones.vision.proto.v1.ObjectState.Memory
+                .newBuilder()
+                .setRecovered(true).setIdentityConfidence(0.66f).setDormantMs(9000)
+                .setGalleryMatches(3).setMatchDistance(0.2f)
+                .build();
+
+        com.drones.vision.proto.v1.ObjectState.Lock lock = com.drones.vision.proto.v1.ObjectState.Lock.newBuilder()
+                .setLocked(true).setLockSeqApplied(7)
+                .build();
+
+        com.drones.vision.proto.v1.ObjectState.Timing timing = com.drones.vision.proto.v1.ObjectState.Timing
+                .newBuilder()
+                .setFirstSeenMs(1000).setLastSeenMs(2000).setLastConfirmedMs(1800)
+                .setAgeFrames(30).setHits(20).setMisses(2)
+                .build();
+
+        return com.drones.vision.proto.v1.ObjectState.newBuilder()
+                .setId(id)
+                .setLifecycle(com.drones.vision.proto.v1.ObjectLifecycle.OBJECT_LIFECYCLE_DORMANT)
+                .setStreamId(STREAM_ID.value().toString())
+                .setIdentity(identity)
+                .setKinematics(kinematics)
+                .setBelief(belief)
+                .setProvenance(provenance)
+                .setMemory(memory)
+                .setLock(lock)
+                .setTiming(timing)
+                .build();
+    }
+
+    @Test
+    void everyObjectStateGroupRoundTripsWithDistinctValuesForADormantObject() {
+        DetectionResponse response = responseBuilder().addObjects(fullWireObjectState(11)).build();
+
+        List<ObjectState> objects = DetectionFrameCodec.decode(STREAM_ID, response).objects();
+
+        assertEquals(1, objects.size());
+        ObjectState state = objects.get(0);
+        assertEquals(11L, state.id());
+        assertEquals(ObjectLifecycle.DORMANT, state.lifecycle());
+        assertEquals(STREAM_ID, state.streamId());
+
+        assertEquals("person", state.identity().label());
+        assertEquals("person-raw", state.identity().labelRaw());
+        assertEquals(2, state.identity().candidates().size());
+        assertEquals("person", state.identity().candidates().get(0).label());
+        assertEquals(0.9, state.identity().candidates().get(0).weight(), 1e-6);
+        assertEquals("bicycle", state.identity().candidates().get(1).label());
+        assertEquals(0.1, state.identity().candidates().get(1).weight(), 1e-6);
+        assertEquals(4, state.identity().stability());
+
+        assertEquals(0.10, state.kinematics().box().x(), 1e-6);
+        assertEquals(0.20, state.kinematics().box().y(), 1e-6);
+        assertEquals(0.11, state.kinematics().detectorBox().x(), 1e-6);
+        assertEquals(0.12, state.kinematics().trackerBox().x(), 1e-6);
+        assertEquals(0.13, state.kinematics().predictedBox().x(), 1e-6);
+        assertEquals(120L, state.kinematics().horizonMillis());
+        assertEquals(0.05, state.kinematics().velocityX(), 1e-6);
+        assertEquals(-0.03, state.kinematics().velocityY(), 1e-6);
+        assertEquals(0.02, state.kinematics().displacementX(), 1e-6);
+        assertEquals(-0.01, state.kinematics().displacementY(), 1e-6);
+        assertTrue(state.kinematics().motionCompensated());
+
+        assertEquals(0.8, state.belief().confidenceRaw(), 1e-6);
+        assertEquals(0.75, state.belief().confidenceSmoothed(), 1e-6);
+        assertEquals(0.9, state.belief().existence(), 1e-6);
+        assertEquals(500L, state.belief().sinceConfirmedMillis());
+
+        assertEquals(EvidenceSource.TRACKER, state.provenance().source());
+        assertEquals(List.of("assoc.cost", "detect.full"), state.provenance().contributors());
+        assertEquals(1.25, state.provenance().assocCost(), 1e-6);
+        assertTrue(state.provenance().reupdated());
+
+        assertTrue(state.memory().recovered());
+        assertEquals(0.66, state.memory().identityConfidence(), 1e-6);
+        assertEquals(9000L, state.memory().dormantMillis());
+        assertEquals(3, state.memory().galleryMatches());
+        assertEquals(0.2, state.memory().matchDistance(), 1e-6);
+
+        assertTrue(state.lock().locked());
+        assertEquals(7L, state.lock().lockSeqApplied());
+
+        assertEquals(1000L, state.timing().firstSeenMillis());
+        assertEquals(2000L, state.timing().lastSeenMillis());
+        assertEquals(1800L, state.timing().lastConfirmedMillis());
+        assertEquals(30, state.timing().ageFrames());
+        assertEquals(20, state.timing().hits());
+        assertEquals(2, state.timing().misses());
+    }
+
+    @Test
+    void objectStateWithNoGroupsPresentDecodesEveryGroupNullNotZeroValued() {
+        com.drones.vision.proto.v1.ObjectState wire = com.drones.vision.proto.v1.ObjectState.newBuilder()
+                .setId(3)
+                .setLifecycle(com.drones.vision.proto.v1.ObjectLifecycle.OBJECT_LIFECYCLE_TENTATIVE)
+                .setStreamId(STREAM_ID.value().toString())
+                .build();
+        DetectionResponse response = responseBuilder().addObjects(wire).build();
+
+        ObjectState state = DetectionFrameCodec.decode(STREAM_ID, response).objects().get(0);
+
+        assertEquals(3L, state.id());
+        assertEquals(ObjectLifecycle.TENTATIVE, state.lifecycle());
+        assertNull(state.identity());
+        assertNull(state.kinematics());
+        assertNull(state.belief());
+        assertNull(state.provenance());
+        assertNull(state.memory());
+        assertNull(state.lock());
+        assertNull(state.timing());
+    }
+
+    @Test
+    void unspecifiedLifecycleDropsThatObjectButKeepsTheOthers() {
+        com.drones.vision.proto.v1.ObjectState unspecifiedLifecycle = com.drones.vision.proto.v1.ObjectState
+                .newBuilder()
+                .setId(1)
+                .setStreamId(STREAM_ID.value().toString())
+                // lifecycle left unset -> OBJECT_LIFECYCLE_UNSPECIFIED, must drop this one only
+                .build();
+        com.drones.vision.proto.v1.ObjectState good = com.drones.vision.proto.v1.ObjectState.newBuilder()
+                .setId(2)
+                .setLifecycle(com.drones.vision.proto.v1.ObjectLifecycle.OBJECT_LIFECYCLE_CONFIRMED)
+                .setStreamId(STREAM_ID.value().toString())
+                .build();
+        DetectionResponse response = responseBuilder().addObjects(unspecifiedLifecycle).addObjects(good).build();
+
+        List<ObjectState> objects = DetectionFrameCodec.decode(STREAM_ID, response).objects();
+
+        assertEquals(1, objects.size());
+        assertEquals(2L, objects.get(0).id());
+    }
+
+    @Test
+    void unspecifiedEvidenceSourceOnAPresentProvenanceDropsThatObjectButKeepsTheOthers() {
+        com.drones.vision.proto.v1.ObjectState.Provenance unspecifiedSource = com.drones.vision.proto.v1.ObjectState.Provenance
+                .newBuilder()
+                // source left unset -> EVIDENCE_SOURCE_UNSPECIFIED
+                .build();
+        com.drones.vision.proto.v1.ObjectState bad = com.drones.vision.proto.v1.ObjectState.newBuilder()
+                .setId(5)
+                .setLifecycle(com.drones.vision.proto.v1.ObjectLifecycle.OBJECT_LIFECYCLE_CONFIRMED)
+                .setStreamId(STREAM_ID.value().toString())
+                .setProvenance(unspecifiedSource)
+                .build();
+        com.drones.vision.proto.v1.ObjectState good = com.drones.vision.proto.v1.ObjectState.newBuilder()
+                .setId(6)
+                .setLifecycle(com.drones.vision.proto.v1.ObjectLifecycle.OBJECT_LIFECYCLE_CONFIRMED)
+                .setStreamId(STREAM_ID.value().toString())
+                .build();
+        DetectionResponse response = responseBuilder().addObjects(bad).addObjects(good).build();
+
+        List<ObjectState> objects = DetectionFrameCodec.decode(STREAM_ID, response).objects();
+
+        assertEquals(1, objects.size());
+        assertEquals(6L, objects.get(0).id());
+    }
+
+    @Test
+    void anObjectStateIdOfZeroIsDroppedByItsOwnCompactConstructorButKeepsTheOthers() {
+        // 0 is the wire's untracked sentinel (TrackRef's own doctrine); ObjectState.id() must be
+        // positive. Proves the generic "any IllegalArgumentException from a nested/compact ctor
+        // drops just this object" path, not only the two dedicated enum checks above.
+        com.drones.vision.proto.v1.ObjectState zeroId = com.drones.vision.proto.v1.ObjectState.newBuilder()
+                .setId(0)
+                .setLifecycle(com.drones.vision.proto.v1.ObjectLifecycle.OBJECT_LIFECYCLE_CONFIRMED)
+                .setStreamId(STREAM_ID.value().toString())
+                .build();
+        com.drones.vision.proto.v1.ObjectState good = com.drones.vision.proto.v1.ObjectState.newBuilder()
+                .setId(9)
+                .setLifecycle(com.drones.vision.proto.v1.ObjectLifecycle.OBJECT_LIFECYCLE_CONFIRMED)
+                .setStreamId(STREAM_ID.value().toString())
+                .build();
+        DetectionResponse response = responseBuilder().addObjects(zeroId).addObjects(good).build();
+
+        List<ObjectState> objects = DetectionFrameCodec.decode(STREAM_ID, response).objects();
+
+        assertEquals(1, objects.size());
+        assertEquals(9L, objects.get(0).id());
+    }
+
+    @Test
+    void objectsListDoesNotAffectDetectionsDecodingWhichStaysByteIdentical() {
+        // Wave acceptance criterion: a response carrying objects[] must decode detections[]
+        // identically to the same response without objects[].
+        com.drones.vision.proto.v1.Detection wireDetection = detectionBuilder()
+                .setTrackId(3)
+                .setTrackState(com.drones.vision.proto.v1.TrackState.TRACK_STATE_CONFIRMED)
+                .setSource(com.drones.vision.proto.v1.DetectionSource.DETECTION_SOURCE_DETECTOR)
+                .build();
+        DetectionResponse withoutObjects = responseBuilder().addDetections(wireDetection).build();
+        DetectionResponse withObjects = responseBuilder().addDetections(wireDetection)
+                .addObjects(fullWireObjectState(1))
+                .build();
+
+        List<Detection> detectionsWithout = DetectionFrameCodec.decode(STREAM_ID, withoutObjects).detections();
+        List<Detection> detectionsWith = DetectionFrameCodec.decode(STREAM_ID, withObjects).detections();
+
+        assertEquals(detectionsWithout, detectionsWith);
+    }
+
+    @Test
+    void noObjectsFieldDecodesAnEmptyObjectsListNeverNull() {
+        DetectionResponse response = responseBuilder().build();
+
+        assertEquals(List.of(), DetectionFrameCodec.decode(STREAM_ID, response).objects());
+    }
+
+    // --- encode: trace (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4) --------------------------
+
+    private static PipelineConfig configWithTrace(boolean trace) {
+        return new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 10, 2, Set.of(),
+                EventRuleConfig.defaults(), true, TrackingConfig.defaults(), Set.of(), trace);
+    }
+
+    @Test
+    void encodeStatesTraceFalseFromPipelineConfigByDefault() throws Exception {
+        FrameRequest request = codec().encode(smallBgrFrame(), configWithTrace(false));
+
+        assertFalse(request.getTrace());
+    }
+
+    @Test
+    void encodeStatesTraceTrueWhenPipelineConfigCarriesIt() throws Exception {
+        FrameRequest request = codec().encode(smallBgrFrame(), configWithTrace(true));
+
+        assertTrue(request.getTrace());
     }
 }

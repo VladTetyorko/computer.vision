@@ -33,6 +33,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -77,6 +78,11 @@ class GrpcPulledDetectionPortTest {
 
     private static CameraAttitude attitude(double yaw) {
         return new CameraAttitude(yaw, 0, 0, 60, 34, Instant.now());
+    }
+
+    private static PipelineConfig configWithTrace(boolean trace) {
+        return new PipelineConfig(new ModelRef("m", "v1"), 0.4, 10, 2, Set.of(),
+                EventRuleConfig.defaults(), true, TrackingConfig.defaults(), Set.of(), trace);
     }
 
     // -- first-message-only source_url ----------------------------------
@@ -164,6 +170,97 @@ class GrpcPulledDetectionPortTest {
         port.attitude(StreamId.random(), attitude(1.0));
 
         assertTrue(servicer.received().isEmpty(), "no session was ever opened for either id");
+    }
+
+    // -- trace (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4) -----------
+
+    @Test
+    void traceIsRestatedOnPullControlFromPipelineConfigTrace() throws Exception {
+        RecordingServicer servicer = new RecordingServicer();
+        GrpcPulledDetectionPort port = newPort(servicer);
+        StreamId id = StreamId.random();
+
+        port.open(id, URI.create("rtsp://localhost:8554/" + id.value()), configWithTrace(true));
+        awaitAtLeast(servicer, 1);
+
+        assertTrue(servicer.received().get(0).getTrace());
+    }
+
+    @Test
+    void traceIsFalseOnPullControlByDefault() throws Exception {
+        RecordingServicer servicer = new RecordingServicer();
+        GrpcPulledDetectionPort port = newPort(servicer);
+        StreamId id = StreamId.random();
+
+        port.open(id, URI.create("rtsp://localhost:8554/" + id.value()), configWithTrace(false));
+        awaitAtLeast(servicer, 1);
+
+        assertFalse(servicer.received().get(0).getTrace());
+    }
+
+    // -- stream_id checking (docs/plans/active/CV-ORCHESTRATION-PLAN.md R4 surprise 2) ------------
+
+    @Test
+    void emptyStreamIdOnResponseIsAcceptedAsALegitimateOlderPeer() throws Exception {
+        RecordingServicer servicer = new RecordingServicer();
+        GrpcPulledDetectionPort port = newPort(servicer);
+        StreamId id = StreamId.random();
+
+        CapturingSubscriber subscriber = new CapturingSubscriber();
+        Flow.Publisher<DetectionResult> publisher =
+                port.open(id, URI.create("rtsp://localhost:8554/" + id.value()), config("m", "v1", 0.4, 10));
+        publisher.subscribe(subscriber);
+        awaitAtLeast(servicer, 1);
+
+        servicer.pushResponse(DetectionResponse.newBuilder()
+                // stream_id deliberately left unset -- "this server did not say", not a mismatch
+                .setSequence(1)
+                .setTimestampMillis(Instant.now().toEpochMilli())
+                .setModelId("m")
+                .setModelVersion("v1")
+                .setInferenceMillis(9)
+                .build());
+
+        assertTrue(subscriber.atLeastOne.await(AWAIT_SECONDS, TimeUnit.SECONDS));
+        assertEquals(1, subscriber.results.get(0).frameSequence());
+    }
+
+    @Test
+    void mismatchedStreamIdOnResponseIsDroppedButTheSessionKeepsRunning() throws Exception {
+        RecordingServicer servicer = new RecordingServicer();
+        GrpcPulledDetectionPort port = newPort(servicer);
+        StreamId id = StreamId.random();
+
+        CapturingSubscriber subscriber = new CapturingSubscriber();
+        Flow.Publisher<DetectionResult> publisher =
+                port.open(id, URI.create("rtsp://localhost:8554/" + id.value()), config("m", "v1", 0.4, 10));
+        publisher.subscribe(subscriber);
+        awaitAtLeast(servicer, 1);
+
+        servicer.pushResponse(DetectionResponse.newBuilder()
+                .setStreamId(StreamId.random().value().toString())
+                .setSequence(1)
+                .setTimestampMillis(Instant.now().toEpochMilli())
+                .setModelId("m")
+                .setModelVersion("v1")
+                .setInferenceMillis(9)
+                .build());
+
+        assertFalse(subscriber.atLeastOne.await(300, TimeUnit.MILLISECONDS),
+                "a mismatched stream_id must never be delivered to the subscriber");
+
+        // The session itself must still be alive: a correctly-addressed response now gets through.
+        servicer.pushResponse(DetectionResponse.newBuilder()
+                .setStreamId(id.value().toString())
+                .setSequence(2)
+                .setTimestampMillis(Instant.now().toEpochMilli())
+                .setModelId("m")
+                .setModelVersion("v1")
+                .setInferenceMillis(9)
+                .build());
+
+        assertTrue(subscriber.atLeastOne.await(AWAIT_SECONDS, TimeUnit.SECONDS));
+        assertEquals(2, subscriber.results.get(0).frameSequence());
     }
 
     // -- stop=true on close ------------------------------------------------

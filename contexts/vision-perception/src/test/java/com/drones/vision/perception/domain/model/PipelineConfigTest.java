@@ -39,10 +39,13 @@ class PipelineConfigTest {
         assertEquals(TrackingConfig.defaults(), defaults.tracking(), "tracking defaults ASSOCIATE as of wave T8");
         assertEquals(TrackingMode.ASSOCIATE, defaults.tracking().mode());
         assertNull(defaults.tracking().lock(), "a default stream holds no target -- FOLLOW is what locks");
+        assertFalse(defaults.trace(),
+                "trace defaults off (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4); wave W2's "
+                        + "TraceDemand is what flips it per-stream, not a platform default");
     }
 
     @Test
-    void fiveArgConvenienceConstructorDefaultsEventRuleDetectionEnabledTrackingAndLabelDenyFilter() {
+    void fiveArgConvenienceConstructorDefaultsEventRuleDetectionEnabledTrackingLabelDenyFilterAndTrace() {
         PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, Set.of());
 
         assertEquals(EventRuleConfig.defaults(), config.eventRule());
@@ -51,10 +54,11 @@ class PipelineConfigTest {
         assertEquals(TrackingConfig.off(), config.tracking(), "5-arg ctor chain still defaults tracking=off");
         assertTrue(config.labelDenyFilter().isEmpty(),
                 "5-arg ctor chain defaults labelDenyFilter to empty (deny nothing)");
+        assertFalse(config.trace(), "5-arg ctor chain defaults trace off too");
     }
 
     @Test
-    void sixArgConstructorAcceptsAnExplicitEventRuleAndDefaultsDetectionEnabledTrackingAndLabelDenyFilter() {
+    void sixArgConstructorAcceptsAnExplicitEventRuleAndDefaultsDetectionEnabledTrackingLabelDenyFilterAndTrace() {
         EventRuleConfig customRule = new EventRuleConfig(Set.of("dog"), 0.7, 5, Duration.ofSeconds(10));
 
         PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, Set.of(), customRule);
@@ -64,10 +68,11 @@ class PipelineConfigTest {
                 "6-arg ctor chain defaults detectionEnabled=false (docs/plans/done/CV-DEMAND-PLAN.md §1, wave D1)");
         assertEquals(TrackingConfig.off(), config.tracking(), "6-arg ctor chain still defaults tracking=off");
         assertTrue(config.labelDenyFilter().isEmpty());
+        assertFalse(config.trace(), "6-arg ctor chain defaults trace off too");
     }
 
     @Test
-    void sevenArgConstructorAcceptsAnExplicitDetectionEnabledAndDefaultsTrackingAndLabelDenyFilter() {
+    void sevenArgConstructorAcceptsAnExplicitDetectionEnabledAndDefaultsTrackingLabelDenyFilterAndTrace() {
         EventRuleConfig customRule = EventRuleConfig.defaults();
 
         PipelineConfig config =
@@ -77,10 +82,11 @@ class PipelineConfigTest {
         assertTrue(config.detectionEnabled());
         assertEquals(TrackingConfig.off(), config.tracking(), "7-arg ctor chain still defaults tracking=off");
         assertTrue(config.labelDenyFilter().isEmpty());
+        assertFalse(config.trace(), "7-arg ctor chain defaults trace off too");
     }
 
     @Test
-    void eightArgConstructorRoundTripsAnExplicitTrackingAndDefaultsLabelDenyFilter() {
+    void eightArgConstructorRoundTripsAnExplicitTrackingAndDefaultsLabelDenyFilterAndTrace() {
         EventRuleConfig customRule = EventRuleConfig.defaults();
         TrackingConfig tracking = TrackingConfig.defaults();
 
@@ -92,17 +98,19 @@ class PipelineConfigTest {
         assertEquals(tracking, config.tracking());
         assertTrue(config.labelDenyFilter().isEmpty(),
                 "8-arg ctor chain (pre-CV-CLEAN-FEED-PLAN) defaults labelDenyFilter to empty");
+        assertFalse(config.trace(), "8-arg ctor chain defaults trace off too");
     }
 
     @Test
-    void nineArgCanonicalConstructorRoundTripsAnExplicitLabelDenyFilter() {
+    void tenArgCanonicalConstructorRoundTripsAnExplicitLabelDenyFilterAndTrace() {
         EventRuleConfig customRule = EventRuleConfig.defaults();
         TrackingConfig tracking = TrackingConfig.defaults();
 
         PipelineConfig config = new PipelineConfig(
-                new ModelRef("yolo", "1"), 0.5, 5, 2, Set.of(), customRule, false, tracking, Set.of("bird"));
+                new ModelRef("yolo", "1"), 0.5, 5, 2, Set.of(), customRule, false, tracking, Set.of("bird"), true);
 
         assertEquals(Set.of("bird"), config.labelDenyFilter());
+        assertTrue(config.trace(), "trace is a plain component of the canonical ctor like any other");
         // Wave T8 flipped defaults() to ASSOCIATE but the convenience ctors deliberately keep off():
         // "the component you did not mention keeps its pre-existing value" is a different contract
         // from "what a new stream should be".
@@ -122,7 +130,7 @@ class PipelineConfigTest {
         ModelRef model = new ModelRef("yolo", "1");
 
         assertThrows(IllegalArgumentException.class, () -> new PipelineConfig(
-                model, 0.5, 5, 2, Set.of(), EventRuleConfig.defaults(), true, null, Set.of()));
+                model, 0.5, 5, 2, Set.of(), EventRuleConfig.defaults(), true, null, Set.of(), false));
     }
 
     @Test
@@ -130,7 +138,7 @@ class PipelineConfigTest {
         ModelRef model = new ModelRef("yolo", "1");
 
         assertThrows(IllegalArgumentException.class, () -> new PipelineConfig(
-                model, 0.5, 5, 2, Set.of(), EventRuleConfig.defaults(), true, TrackingConfig.off(), null));
+                model, 0.5, 5, 2, Set.of(), EventRuleConfig.defaults(), true, TrackingConfig.off(), null, false));
     }
 
     @Test
@@ -152,7 +160,7 @@ class PipelineConfigTest {
         denied.add("tree");
 
         PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "1"), 0.5, 5, 2, Set.of(),
-                EventRuleConfig.defaults(), false, TrackingConfig.off(), denied);
+                EventRuleConfig.defaults(), false, TrackingConfig.off(), denied, false);
 
         denied.add("cloud");
 

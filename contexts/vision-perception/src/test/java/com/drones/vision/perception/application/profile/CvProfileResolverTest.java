@@ -21,6 +21,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * {@link CvProfileResolver}: the asset &rarr; category &rarr; organization &rarr; platform fold
@@ -120,18 +121,20 @@ class CvProfileResolverTest {
     }
 
     @Test
-    void maxInFlightInferencesAlwaysComesFromThePlatformDefaultEvenWhenAProfileMatches() {
+    void maxInFlightInferencesAndTraceAlwaysComeFromThePlatformDefaultEvenWhenAProfileMatches() {
         AssetId assetId = AssetId.random();
         GroupId groupId = GroupId.random();
         CvProfile matched = profile("mast-cams", groupId, "yolo26n.pt");
         CvProfileResolver resolver = resolverWith(matched,
                 new CvProfileBinding(BindingScope.ASSET, assetId.value().toString(), matched.id(), NOW));
         PipelineConfig platformDefault = new PipelineConfig(new ModelRef("other", "v1"), 0.9, 30, 17, Set.of(),
-                EventRuleConfig.defaults(), false, TrackingConfig.off(), Set.of());
+                EventRuleConfig.defaults(), false, TrackingConfig.off(), Set.of(), true);
 
         EffectiveProfile resolved = resolver.resolve(assetId, new CategoryId("fixed-camera"), groupId, platformDefault);
 
         assertEquals(17, resolved.config().maxInFlightInferences(), "host capacity is never a profile concern");
+        assertTrue(resolved.config().trace(),
+                "trace is per-session inspector demand (CV-ORCHESTRATION-PLAN.md §4.4), never a profile concern");
         assertEquals(matched.model(), resolved.config().model(), "every other field comes from the matched profile");
     }
 }

@@ -41,9 +41,12 @@ import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
+import com.drones.vision.perception.domain.model.EvidenceSource;
 import com.drones.vision.perception.domain.model.FollowState;
 import com.drones.vision.perception.domain.model.FollowStatus;
 import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.perception.domain.model.ObjectLifecycle;
+import com.drones.vision.perception.domain.model.ObjectState;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.model.PixelFormat;
 import com.drones.vision.kernel.StreamId;
@@ -249,7 +252,7 @@ class StreamControllerTest {
     private static DetectionResult detectionResult(StreamId streamId, long frameSequence, Instant capturedAt) {
         Detection detection = new Detection("person", 0.87, new BoundingBox(0.1, 0.2, 0.3, 0.4),
                 new ModelRef("yolo", "latest"));
-        return new DetectionResult(streamId, frameSequence, capturedAt, List.of(detection), Duration.ofMillis(42));
+        return new DetectionResult(streamId, frameSequence, capturedAt, List.of(detection), Duration.ofMillis(42), null, null, List.of());
     }
 
     @Test
@@ -351,7 +354,7 @@ class StreamControllerTest {
         PipelineConfig running = new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.55, 12, 2,
                 Set.of("person", "car"), PipelineConfig.defaults().eventRule(), true,
                 new TrackingConfig(TrackingMode.FOLLOW, "cost", 2000, 15, 30, 30, 3, 0, 0, null),
-                Set.of("bird"));
+                Set.of("bird"), false);
         when(streamService.config(streamId)).thenReturn(Optional.of(running));
 
         mockMvc.perform(get("/api/streams/{id}/config", streamId.value()))
@@ -1287,12 +1290,47 @@ class StreamControllerTest {
     void tracksReturnsAnEmptyListAndNoStatsForAnUnknownOrStoppedStream() throws Exception {
         when(streamService.tracks(any())).thenReturn(List.of());
         when(streamService.trackingStats(any())).thenReturn(Optional.empty());
+        when(streamService.objects(any())).thenReturn(List.of());
 
         mockMvc.perform(get("/api/streams/{streamId}/tracks", StreamId.random().value()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.tracks", hasSize(0)))
                 .andExpect(jsonPath("$.lockedTrackId").value(0))
-                .andExpect(jsonPath("$.stats").doesNotExist());
+                .andExpect(jsonPath("$.stats").doesNotExist())
+                // objects is never null (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.5, wave W1):
+                // present as an empty array, not omitted like stats/latency/rate/follow are -- this
+                // endpoint never errors, and objects must not be the one field that breaks that rule.
+                .andExpect(jsonPath("$.objects", hasSize(0)));
+    }
+
+    @Test
+    void tracksReportsTheObjectMirrorAlongsideTracks() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.tracks(streamId)).thenReturn(List.of());
+        when(streamService.trackingStats(streamId)).thenReturn(Optional.empty());
+        ObjectState.Identity identity = new ObjectState.Identity("person", "person",
+                List.of(new ObjectState.LabelCandidate("person", 0.9)), 3);
+        ObjectState.Kinematics kinematics = new ObjectState.Kinematics(new BoundingBox(0.1, 0.2, 0.3, 0.4), null,
+                null, null, 0L, 0.01, 0.02, 0.03, 0.04, false);
+        ObjectState object = new ObjectState(9L, ObjectLifecycle.CONFIRMED, streamId, identity, kinematics, null,
+                new ObjectState.Provenance(EvidenceSource.DETECTOR, List.of("detect.full"), 0.0, false), null, null,
+                null);
+        when(streamService.objects(streamId)).thenReturn(List.of(object));
+
+        mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.objects", hasSize(1)))
+                .andExpect(jsonPath("$.objects[0].id").value(9))
+                .andExpect(jsonPath("$.objects[0].lifecycle").value("CONFIRMED"))
+                .andExpect(jsonPath("$.objects[0].streamId").value(streamId.value().toString()))
+                .andExpect(jsonPath("$.objects[0].identity.label").value("person"))
+                .andExpect(jsonPath("$.objects[0].kinematics.box.x").value(0.1))
+                .andExpect(jsonPath("$.objects[0].kinematics.detectorBox").doesNotExist())
+                .andExpect(jsonPath("$.objects[0].provenance.source").value("DETECTOR"))
+                .andExpect(jsonPath("$.objects[0].belief").doesNotExist())
+                .andExpect(jsonPath("$.objects[0].memory").doesNotExist())
+                .andExpect(jsonPath("$.objects[0].lock").doesNotExist())
+                .andExpect(jsonPath("$.objects[0].timing").doesNotExist());
     }
 
     @Test
@@ -1517,7 +1555,7 @@ class StreamControllerTest {
                 new TrackRef(3L, TrackState.COASTING, DetectionSource.TRACKER, 0.01, -0.02, 12));
         DetectionResult result = new DetectionResult(streamId, 42, Instant.parse("2026-08-11T10:00:00Z"),
                 List.of(tracked), Duration.ofMillis(7),
-                new TrackingTelemetry(true, DetectorReason.CADENCE, Duration.ofNanos(400_000), "lk", 3L));
+                new TrackingTelemetry(true, DetectorReason.CADENCE, Duration.ofNanos(400_000), "lk", 3L), null, List.of());
         when(detectionRepositoryPort.query(any(DetectionQuery.class))).thenReturn(List.of(result));
 
         mockMvc.perform(get("/api/streams/{streamId}/detections", streamId.value()))
@@ -1556,7 +1594,7 @@ class StreamControllerTest {
         DetectionResult result = new DetectionResult(streamId, 44, Instant.parse("2026-08-11T10:00:02Z"),
                 List.of(tracked), Duration.ofMillis(7),
                 new TrackingTelemetry(true, DetectorReason.CADENCE, Duration.ofNanos(400_000), "lk", 3L,
-                        Duration.ofMillis(42), Duration.ofMillis(6), 2, new TrackingCapability(2, "")));
+                        Duration.ofMillis(42), Duration.ofMillis(6), 2, new TrackingCapability(2, "")), null, List.of());
         when(detectionRepositoryPort.query(any(DetectionQuery.class))).thenReturn(List.of(result));
 
         mockMvc.perform(get("/api/streams/{streamId}/detections", streamId.value()))
@@ -1583,7 +1621,7 @@ class StreamControllerTest {
                         new TrackRef(3L, TrackState.CONFIRMED, DetectionSource.TRACKER))),
                 Duration.ZERO,
                 new TrackingTelemetry(false, null, Duration.ZERO, "", 0, Duration.ZERO, Duration.ZERO, 0,
-                        new TrackingCapability(2, "OpenVINO unavailable; degraded from requested L4 to L2")));
+                        new TrackingCapability(2, "OpenVINO unavailable; degraded from requested L4 to L2")), null, List.of());
         when(detectionRepositoryPort.query(any(DetectionQuery.class))).thenReturn(List.of(result));
 
         mockMvc.perform(get("/api/streams/{streamId}/detections", streamId.value()))
@@ -1601,7 +1639,7 @@ class StreamControllerTest {
                         new ModelRef("yolo26n.pt", "latest"),
                         new TrackRef(3L, TrackState.CONFIRMED, DetectionSource.TRACKER))),
                 Duration.ZERO,
-                new TrackingTelemetry(false, null, Duration.ofNanos(370_000), "lk", 3L));
+                new TrackingTelemetry(false, null, Duration.ofNanos(370_000), "lk", 3L), null, List.of());
         when(detectionRepositoryPort.query(any(DetectionQuery.class))).thenReturn(List.of(result));
 
         mockMvc.perform(get("/api/streams/{streamId}/detections", streamId.value()))

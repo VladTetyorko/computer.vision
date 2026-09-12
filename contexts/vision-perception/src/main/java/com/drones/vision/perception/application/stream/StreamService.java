@@ -4,6 +4,7 @@ import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.perception.domain.model.FollowStatus;
 import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.perception.domain.model.ObjectState;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.model.StopReason;
 import com.drones.vision.perception.domain.model.StreamState;
@@ -166,6 +167,20 @@ public interface StreamService {
      * @return the booked tracks, ordered by {@code trackId} ascending, or an empty list
      */
     List<TrackedObject> tracks(StreamId streamId);
+
+    /**
+     * A running stream's object mirror (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.5, wave W1) —
+     * exactly {@link StreamPipeline#latestObjects()}, surfaced here for the same reason {@link
+     * #latestDetections} is: a caller outside the pipeline never reaches into pipeline internals.
+     *
+     * <p><b>Never errors.</b> An unknown or stopped stream reads as an empty list, the same
+     * forgiving idiom {@link #latestDetections}/{@link #tracks} already use.
+     *
+     * @param streamId the stream to inspect
+     * @return the current object mirror, or an empty list if {@code streamId} is unknown/not
+     *         running on this instance, or no inference has completed yet
+     */
+    List<ObjectState> objects(StreamId streamId);
 
     /**
      * A running stream's {@code FOLLOW}-lock lifecycle (docs/plans/active/TRACK-FOLLOW-PLAN.md

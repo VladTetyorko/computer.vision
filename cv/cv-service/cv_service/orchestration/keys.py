@@ -36,8 +36,10 @@ class Key(Enum):
 
     #: `list[Track]` -- the book's live tracks, snapshotted post-warp.
     TRACKS_PREV = "tracks_prev"
-    #: `list[Box]` -- constant-velocity box per track, positional against
-    #: `TRACKS_PREV`; the two are written together and never separately.
+    #: `list[Prediction]` -- constant-velocity extrapolation per track,
+    #: positional against `TRACKS_PREV`; the two are written together and
+    #: never separately. The whole `Prediction`, not just its box, because
+    #: `horizon_seconds` is only knowable before the fold (see `predict.cv`).
     PREDICTIONS = "predictions"
     #: `Transform` -- this frame's ego-motion, `IDENTITY` when uncompensated.
     TRANSFORM = "transform"

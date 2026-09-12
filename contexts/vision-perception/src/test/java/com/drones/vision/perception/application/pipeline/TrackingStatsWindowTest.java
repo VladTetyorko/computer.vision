@@ -35,7 +35,7 @@ class TrackingStatsWindowTest {
     private final StreamId streamId = StreamId.random();
 
     private DetectionResult frame(long sequence, Instant at, TrackingTelemetry telemetry, Detection... detections) {
-        return new DetectionResult(streamId, sequence, at, List.of(detections), Duration.ZERO, telemetry);
+        return new DetectionResult(streamId, sequence, at, List.of(detections), Duration.ZERO, telemetry, null, List.of());
     }
 
     /** A tracker-only frame: no detector pass, so no reason, costing {@code trackerMillis}. */
@@ -160,7 +160,7 @@ class TrackingStatsWindowTest {
         TrackingStatsWindow window = new TrackingStatsWindow(WINDOW);
 
         // Tracking off for this stream: the 5-arg convenience ctor leaves tracking null.
-        window.accept(new DetectionResult(streamId, 0, T0, List.of(), Duration.ZERO));
+        window.accept(new DetectionResult(streamId, 0, T0, List.of(), Duration.ZERO, null, null, List.of()));
 
         TrackingStats stats = window.snapshot(TrackingMode.OFF);
         assertEquals(0L, stats.detectorPasses());

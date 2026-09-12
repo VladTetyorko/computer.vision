@@ -6,7 +6,10 @@ import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.perception.domain.model.DetectionSource;
 import com.drones.vision.perception.domain.model.DetectorReason;
+import com.drones.vision.perception.domain.model.EvidenceSource;
 import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.perception.domain.model.ObjectLifecycle;
+import com.drones.vision.perception.domain.model.ObjectState;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.model.PixelFormat;
 import com.drones.vision.perception.domain.model.PullTelemetry;
@@ -40,6 +43,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 
@@ -104,6 +108,17 @@ import java.util.List;
  * {@code [1,5]}, so {@link TrackingTelemetry#capability()} decodes {@code null} in that case rather
  * than constructing one that would throw.
  *
+ * <h2>The per-identity mirror (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.5, wave W1 step 4)</h2>
+ * {@link #decode} additionally maps {@code response.getObjectsList()} (field 27) onto {@link
+ * DetectionResult#objects()} via {@link #toObjectStates}, a separate per-object try/catch loop from
+ * everything above: one malformed {@link ObjectState} — an unspecified/unrecognized lifecycle or
+ * evidence source, or any nested record's own compact-ctor rejection — drops only that object, never
+ * the frame's {@code detections[]}. {@link #encode} additionally states {@code trace} on every
+ * outbound {@code FrameRequest} from {@link PipelineConfig#trace()} — {@code false} on every call
+ * site today; W2's {@code TraceDemand} is what will actually flip it per-stream. {@code
+ * DetectionResponse.ledger} (field 28) is deliberately never decoded — see {@link #toObjectStates}'s
+ * own javadoc for why.
+ *
  * <h2>Failure shape</h2>
  * {@link #encode} throws {@link IllegalArgumentException} for an unsupported {@link PixelFormat}
  * (only {@code JPEG}/{@code BGR24} are mapped), {@link IOException} if the JPEG encoder fails, and a
@@ -113,6 +128,8 @@ import java.util.List;
  * touched, so an already-open session for the same stream is unaffected.
  */
 final class DetectionFrameCodec {
+
+    private static final System.Logger LOG = System.getLogger(DetectionFrameCodec.class.getName());
 
     private final int detectWidth;
     private final float jpegQuality;
@@ -175,7 +192,13 @@ final class DetectionFrameCodec {
                 .setModelId(config.model().id())
                 .setModelVersion(config.model().version())
                 .setConfidenceThreshold((float) config.confidenceThreshold())
-                .setTracking(toWireTrackingConfig(config.tracking()));
+                .setTracking(toWireTrackingConfig(config.tracking()))
+                // CV-ORCHESTRATION wave W1 (§4.4): demand for the warm trace tier. PipelineConfig.trace()
+                // is false on every call site today -- W2's TraceDemand is what will actually flip it
+                // per-stream, not this codec; restated on every request like the rest of this message's
+                // desired state, matching FrameRequest.trace's own "self-healing, never a one-shot" wire
+                // contract.
+                .setTrace(config.trace());
 
         if (attitude != null && attitude.known()) {
             builder.setCameraPose(toWireCameraPose(attitude));
@@ -206,7 +229,147 @@ final class DetectionFrameCodec {
                 detections,
                 Duration.ofMillis(response.getInferenceMillis()),
                 toTrackingTelemetry(response),
-                toPullTelemetry(response));
+                toPullTelemetry(response),
+                toObjectStates(streamId, response));
+    }
+
+    /**
+     * Maps {@code response.getObjectsList()} (field 27, docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.5)
+     * onto {@link ObjectState}, one wire {@code ObjectState} at a time. A malformed entry — an
+     * unspecified/unrecognized {@link com.drones.vision.proto.v1.ObjectLifecycle}, an unspecified/
+     * unrecognized {@link com.drones.vision.proto.v1.EvidenceSource} on a present {@code provenance},
+     * or any {@link IllegalArgumentException} an {@link ObjectState} nested record's own compact
+     * constructor raises — drops <em>only that one object</em> (logged at WARNING, naming this
+     * stream, the offending object id, and the reason) and never fails the whole frame: {@code
+     * detections[]} decodes exactly as it did before this wave regardless of what {@code objects[]}
+     * carries. {@link ObjectState#streamId()} is always this method's own {@code streamId} parameter,
+     * never a re-parse of the wire object's own implicit stream membership — the same "correlation
+     * never depends on the server echoing an id correctly" doctrine {@link DetectionResult#streamId()}
+     * already applies (see class javadoc).
+     *
+     * <p><b>{@code DetectionResponse.ledger} (field 28) is deliberately not decoded here or anywhere
+     * in this class.</b> There is no domain type for a {@code FrameLedger} — step 3 of this wave
+     * added only {@link ObjectState}, on purpose — and {@link PipelineConfig#trace()} is {@code false}
+     * on every call site today, so cv-service never actually attaches one to a response this codec
+     * sees. Inventing a domain record family with zero readers is not this wave's job; W2's {@code
+     * TraceDemand} is what will make {@code trace} true for a stream, and that is also where the
+     * ledger's own reader belongs.
+     */
+    private static List<ObjectState> toObjectStates(StreamId streamId, DetectionResponse response) {
+        if (response.getObjectsCount() == 0) {
+            return List.of();
+        }
+        List<ObjectState> objects = new ArrayList<>(response.getObjectsCount());
+        for (com.drones.vision.proto.v1.ObjectState wire : response.getObjectsList()) {
+            try {
+                objects.add(toObjectState(streamId, wire));
+            } catch (IllegalArgumentException e) {
+                LOG.log(System.Logger.Level.WARNING,
+                        () -> "Dropping malformed ObjectState id=" + wire.getId() + " on stream " + streamId
+                                + ": " + e.getMessage());
+            }
+        }
+        return objects;
+    }
+
+    private static ObjectState toObjectState(StreamId streamId, com.drones.vision.proto.v1.ObjectState wire) {
+        ObjectLifecycle lifecycle = toObjectLifecycle(wire.getLifecycle());
+        if (lifecycle == null) {
+            throw new IllegalArgumentException("unspecified/unrecognized ObjectLifecycle " + wire.getLifecycle());
+        }
+        return new ObjectState(
+                wire.getId(),
+                lifecycle,
+                streamId,
+                wire.hasIdentity() ? toIdentity(wire.getIdentity()) : null,
+                wire.hasKinematics() ? toKinematics(wire.getKinematics()) : null,
+                wire.hasBelief() ? toBelief(wire.getBelief()) : null,
+                wire.hasProvenance() ? toProvenance(wire.getProvenance()) : null,
+                wire.hasMemory() ? toMemoryFacts(wire.getMemory()) : null,
+                wire.hasLock() ? toLockFacts(wire.getLock()) : null,
+                wire.hasTiming() ? toTiming(wire.getTiming()) : null);
+    }
+
+    private static ObjectState.Identity toIdentity(com.drones.vision.proto.v1.ObjectState.Identity wire) {
+        List<ObjectState.LabelCandidate> candidates = wire.getCandidatesList().stream()
+                .map(c -> new ObjectState.LabelCandidate(c.getLabel(), c.getWeight()))
+                .toList();
+        return new ObjectState.Identity(wire.getLabel(), wire.getLabelRaw(), candidates, wire.getStability());
+    }
+
+    /**
+     * {@code box} (the elected box) has wire presence like every other submessage field here, but
+     * unlike them it is not itself optional in the domain ({@link ObjectState.Kinematics#box()} must
+     * not be {@code null}) -- an absent {@code box} on a present {@code kinematics} group is a
+     * contract violation, not a fact to guess at, so it is rejected the same way every other
+     * malformed field in this method is: an {@link IllegalArgumentException} that drops just this one
+     * object.
+     */
+    private static ObjectState.Kinematics toKinematics(com.drones.vision.proto.v1.ObjectState.Kinematics wire) {
+        if (!wire.hasBox()) {
+            throw new IllegalArgumentException("Kinematics.box is required but absent");
+        }
+        return new ObjectState.Kinematics(
+                toBoundingBox(wire.getBox()),
+                wire.hasDetectorBox() ? toBoundingBox(wire.getDetectorBox()) : null,
+                wire.hasTrackerBox() ? toBoundingBox(wire.getTrackerBox()) : null,
+                wire.hasPredictedBox() ? toBoundingBox(wire.getPredictedBox()) : null,
+                wire.getHorizonMs(),
+                wire.getVelocityX(),
+                wire.getVelocityY(),
+                wire.getDisplacementX(),
+                wire.getDisplacementY(),
+                wire.getMotionCompensated());
+    }
+
+    private static ObjectState.Belief toBelief(com.drones.vision.proto.v1.ObjectState.Belief wire) {
+        return new ObjectState.Belief(wire.getConfidenceRaw(), wire.getConfidenceSmoothed(), wire.getExistence(),
+                wire.getSinceConfirmedMs());
+    }
+
+    private static ObjectState.Provenance toProvenance(com.drones.vision.proto.v1.ObjectState.Provenance wire) {
+        EvidenceSource source = toEvidenceSource(wire.getSource());
+        if (source == null) {
+            throw new IllegalArgumentException("unspecified/unrecognized EvidenceSource " + wire.getSource());
+        }
+        return new ObjectState.Provenance(source, wire.getContributorsList(), wire.getAssocCost(),
+                wire.getReupdated());
+    }
+
+    private static ObjectState.MemoryFacts toMemoryFacts(com.drones.vision.proto.v1.ObjectState.Memory wire) {
+        return new ObjectState.MemoryFacts(wire.getRecovered(), wire.getIdentityConfidence(), wire.getDormantMs(),
+                wire.getGalleryMatches(), wire.getMatchDistance());
+    }
+
+    private static ObjectState.LockFacts toLockFacts(com.drones.vision.proto.v1.ObjectState.Lock wire) {
+        return new ObjectState.LockFacts(wire.getLocked(), wire.getLockSeqApplied());
+    }
+
+    private static ObjectState.Timing toTiming(com.drones.vision.proto.v1.ObjectState.Timing wire) {
+        return new ObjectState.Timing(wire.getFirstSeenMs(), wire.getLastSeenMs(), wire.getLastConfirmedMs(),
+                wire.getAgeFrames(), wire.getHits(), wire.getMisses());
+    }
+
+    private static ObjectLifecycle toObjectLifecycle(com.drones.vision.proto.v1.ObjectLifecycle wire) {
+        return switch (wire) {
+            case OBJECT_LIFECYCLE_TENTATIVE -> ObjectLifecycle.TENTATIVE;
+            case OBJECT_LIFECYCLE_CONFIRMED -> ObjectLifecycle.CONFIRMED;
+            case OBJECT_LIFECYCLE_COASTING -> ObjectLifecycle.COASTING;
+            case OBJECT_LIFECYCLE_LOST -> ObjectLifecycle.LOST;
+            case OBJECT_LIFECYCLE_DORMANT -> ObjectLifecycle.DORMANT;
+            case OBJECT_LIFECYCLE_UNSPECIFIED, UNRECOGNIZED -> null;
+        };
+    }
+
+    private static EvidenceSource toEvidenceSource(com.drones.vision.proto.v1.EvidenceSource wire) {
+        return switch (wire) {
+            case EVIDENCE_SOURCE_DETECTOR -> EvidenceSource.DETECTOR;
+            case EVIDENCE_SOURCE_TRACKER -> EvidenceSource.TRACKER;
+            case EVIDENCE_SOURCE_PREDICTED -> EvidenceSource.PREDICTED;
+            case EVIDENCE_SOURCE_MEMORY -> EvidenceSource.MEMORY;
+            case EVIDENCE_SOURCE_REUPDATE -> EvidenceSource.REUPDATE;
+            case EVIDENCE_SOURCE_UNSPECIFIED, UNRECOGNIZED -> null;
+        };
     }
 
     /**
@@ -507,8 +670,11 @@ final class DetectionFrameCodec {
     }
 
     private static Detection toDetection(com.drones.vision.proto.v1.Detection wire, ModelRef model) {
-        var wireBox = wire.getBox();
-        BoundingBox box = new BoundingBox(wireBox.getX(), wireBox.getY(), wireBox.getWidth(), wireBox.getHeight());
-        return new Detection(wire.getLabel(), wire.getConfidence(), box, model, toTrackRef(wire));
+        return new Detection(wire.getLabel(), wire.getConfidence(), toBoundingBox(wire.getBox()), model,
+                toTrackRef(wire));
+    }
+
+    private static BoundingBox toBoundingBox(com.drones.vision.proto.v1.BoundingBox wire) {
+        return new BoundingBox(wire.getX(), wire.getY(), wire.getWidth(), wire.getHeight());
     }
 }

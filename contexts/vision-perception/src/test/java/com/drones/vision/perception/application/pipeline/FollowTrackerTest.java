@@ -62,17 +62,17 @@ class FollowTrackerTest {
     private DetectionResult bound(Instant at, long lockedTrackId, Detection... detections) {
         TrackingTelemetry telemetry =
                 new TrackingTelemetry(true, DetectorReason.ALWAYS, Duration.ZERO, "engine", lockedTrackId);
-        return new DetectionResult(streamId, 0L, at, List.of(detections), Duration.ZERO, telemetry);
+        return new DetectionResult(streamId, 0L, at, List.of(detections), Duration.ZERO, telemetry, null, List.of());
     }
 
     private DetectionResult unbound(Instant at) {
         TrackingTelemetry telemetry =
                 new TrackingTelemetry(true, DetectorReason.NO_LOCK, Duration.ZERO, "engine", 0L);
-        return new DetectionResult(streamId, 0L, at, List.of(), Duration.ZERO, telemetry);
+        return new DetectionResult(streamId, 0L, at, List.of(), Duration.ZERO, telemetry, null, List.of());
     }
 
     private DetectionResult noTracking(Instant at) {
-        return new DetectionResult(streamId, 0L, at, List.of(), Duration.ZERO);
+        return new DetectionResult(streamId, 0L, at, List.of(), Duration.ZERO, null, null, List.of());
     }
 
     // -- construction --------------------------------------------------------------------------

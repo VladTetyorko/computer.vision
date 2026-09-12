@@ -61,6 +61,15 @@ class Prediction:
 
     box: Box
     confidence: float
+    #: How far `box` was actually extrapolated, in seconds -- AFTER the
+    #: `_MAX_EXTRAPOLATION_SECONDS` clamp below, so it is the interval this
+    #: prediction really used and not the gap it was asked to cover. Reported
+    #: on the wire as `ObjectState.kinematics.horizon_ms` (CV-ORCHESTRATION
+    #: wave W1): a predicted box means something very different at 40ms than
+    #: at the 2s ceiling, and a consumer cannot tell the two apart from the
+    #: box alone. Carried here rather than recomputed by the reader because
+    #: the clamp is this module's rule and must not be spelled twice.
+    horizon_seconds: float
 
 
 def predict(track: "Track", now: float) -> Prediction:
@@ -87,4 +96,4 @@ def predict(track: "Track", now: float) -> Prediction:
 
     since_confirmed = max(0.0, now - track.last_confirmed)
     confidence = max(0.0, 1.0 - since_confirmed / _CONFIDENCE_DECAY_SECONDS)
-    return Prediction(box=predicted, confidence=confidence)
+    return Prediction(box=predicted, confidence=confidence, horizon_seconds=elapsed)

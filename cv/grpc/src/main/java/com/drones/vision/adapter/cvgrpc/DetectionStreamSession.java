@@ -50,6 +50,11 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   CompletableFuture#orTimeout}). The first future to time out cancels the underlying call, fails
  *   every other pending future for this session immediately, and drops the session — so the next
  *   {@code detect()} always opens a fresh call instead of reusing one that may never recover.</li>
+ *   <li><b>A response whose {@code stream_id} names a different stream</b> (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+ *   R4 surprise 2): logged at WARNING (naming both ids) and dropped — the pending future for that
+ *   sequence, if any, is left in the map untouched and times out on its own, exactly like a sequence
+ *   that never got any response at all. An <em>empty</em> {@code stream_id} is not a mismatch: it is
+ *   a cv-service that never set the field, a legitimate older peer this check must not break.</li>
  * </ul>
  *
  * <p><b>Teardown is idempotent</b> ({@link #torndown}, an {@link AtomicBoolean} CAS guard): a timeout
@@ -137,6 +142,23 @@ final class DetectionStreamSession {
     }
 
     private void onResponse(DetectionResponse response) {
+        // R4 surprise 2 (docs/plans/active/CV-ORCHESTRATION-PLAN.md): stream_id has always been on the
+        // wire and, until this wave, never read. Checked BEFORE pending.remove: a mismatch must leave
+        // the pending future (if any) untouched in the map rather than completed, so it times out
+        // exactly like a sequence that genuinely never got any response -- via that future's own
+        // orTimeout, armed independently of map membership back in #send. Removing it here first would
+        // not shorten that timeout (nothing gates it on map presence), it would only make a dropped
+        // response indistinguishable from a real completion for the map's own bookkeeping. An empty
+        // wire stream_id is not a mismatch -- it is a server that never set the field, a legitimate
+        // older peer this check must not break.
+        String wireStreamId = response.getStreamId();
+        if (!wireStreamId.isEmpty() && !wireStreamId.equals(streamId.value().toString())) {
+            LOG.log(System.Logger.Level.WARNING,
+                    () -> "Detection response stream_id mismatch: session is for " + streamId
+                            + " but response carried " + wireStreamId + " for sequence " + response.getSequence()
+                            + "; dropping it");
+            return;
+        }
         CompletableFuture<DetectionResult> future = pending.remove(response.getSequence());
         if (future == null) {
             return; // already timed out, or an unrecognized/late sequence -- nothing to complete

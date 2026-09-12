@@ -13,6 +13,7 @@ import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.perception.domain.model.FollowStatus;
+import com.drones.vision.perception.domain.model.ObjectState;
 import com.drones.vision.perception.domain.model.StopReason;
 import com.drones.vision.perception.domain.model.StreamState;
 import com.drones.vision.perception.domain.model.PipelineConfig;
@@ -116,6 +117,11 @@ public final class LiveFrameFallbackStreamService implements StreamService {
     @Override
     public List<TrackedObject> tracks(StreamId streamId) {
         return delegate.tracks(streamId);
+    }
+
+    @Override
+    public List<ObjectState> objects(StreamId streamId) {
+        return delegate.objects(streamId);
     }
 
     @Override

@@ -24,26 +24,15 @@ import java.util.List;
  * @param tracking        this frame's duty-cycle facts (did the detector run, why, what the tracker
  *                        cost, which engine served, what is locked), or absent while tracking is off
  *                        for the stream
+ * @param objects         the object mirror for this frame (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+ *                        §4.5, wave W1) — a different set from {@code detections}, see {@code
+ *                        DetectionResult#objects()}; never {@code null}, empty when no mirror was
+ *                        produced
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record DetectionResultResponse(String streamId, long frameSequence, Instant capturedAt, long inferenceMillis,
-                                       List<DetectionResponse> detections, FrameTrackingResponse tracking) {
-
-    /**
-     * The canonical constructor before docs/plans/done/TRACKING-PLAN.md wave T6 added {@code tracking}, kept as
-     * a convenience constructor defaulting it to {@code null} ("tracking was off"), so every
-     * pre-existing call site compiles unchanged.
-     *
-     * @param streamId        the stream this result belongs to
-     * @param frameSequence   the source frame's sequence number
-     * @param capturedAt      when the source frame was captured
-     * @param inferenceMillis how long inference took, in milliseconds
-     * @param detections      the objects detected on this frame
-     */
-    public DetectionResultResponse(String streamId, long frameSequence, Instant capturedAt, long inferenceMillis,
-                                    List<DetectionResponse> detections) {
-        this(streamId, frameSequence, capturedAt, inferenceMillis, detections, null);
-    }
+                                       List<DetectionResponse> detections, FrameTrackingResponse tracking,
+                                       List<ObjectStateResponse> objects) {
 
     /**
      * Maps a domain {@link DetectionResult} to its wire representation.
@@ -55,6 +44,7 @@ public record DetectionResultResponse(String streamId, long frameSequence, Insta
         return new DetectionResultResponse(result.streamId().value().toString(), result.frameSequence(),
                 result.capturedAt(), result.inferenceLatency().toMillis(),
                 result.detections().stream().map(DetectionResponse::from).toList(),
-                result.tracking() == null ? null : FrameTrackingResponse.from(result.tracking()));
+                result.tracking() == null ? null : FrameTrackingResponse.from(result.tracking()),
+                result.objects().stream().map(ObjectStateResponse::from).toList());
     }
 }

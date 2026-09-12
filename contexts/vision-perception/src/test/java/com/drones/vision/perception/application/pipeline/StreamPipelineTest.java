@@ -15,6 +15,8 @@ import com.drones.vision.perception.domain.model.EventRuleConfig;
 import com.drones.vision.platform.EventType;
 import com.drones.vision.perception.domain.model.FollowState;
 import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.perception.domain.model.ObjectLifecycle;
+import com.drones.vision.perception.domain.model.ObjectState;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.model.PixelFormat;
 import com.drones.vision.kernel.StreamDescriptor;
@@ -110,19 +112,38 @@ class StreamPipelineTest {
     }
 
     private DetectionResult emptyResult(long sequence) {
-        return new DetectionResult(streamId, sequence, Instant.now(), List.of(), Duration.ZERO);
+        return new DetectionResult(streamId, sequence, Instant.now(), List.of(), Duration.ZERO, null, null, List.of());
     }
 
     private DetectionResult resultWithBoxX(long sequence, Instant capturedAt, double boxX) {
         Detection detection = new Detection("person", 0.9, new BoundingBox(boxX, 0.10, 0.20, 0.20),
                 new ModelRef("yolo", "latest"));
-        return new DetectionResult(streamId, sequence, capturedAt, List.of(detection), Duration.ofMillis(5));
+        return new DetectionResult(streamId, sequence, capturedAt, List.of(detection), Duration.ofMillis(5), null, null, List.of());
     }
 
     private DetectionResult nonEmptyResult(long sequence) {
         Detection detection = new Detection("person", 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2),
                 new ModelRef("yolo", "latest"));
-        return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5));
+        return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5), null, null, List.of());
+    }
+
+    /** @see #objectState(long, String) -- a {@code DetectionResult} whose object mirror is non-empty. */
+    private DetectionResult resultWithObjects(long sequence, ObjectState... objects) {
+        Detection detection = new Detection("person", 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2),
+                new ModelRef("yolo", "latest"));
+        return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5), null,
+                null, List.of(objects));
+    }
+
+    /** A minimal, validly-populated {@link ObjectState} with an elected {@code label}, for read-model/filter tests. */
+    private ObjectState objectState(long id, String label) {
+        ObjectState.Identity identity = new ObjectState.Identity(label, label, List.of(), 1);
+        return new ObjectState(id, ObjectLifecycle.CONFIRMED, streamId, identity, null, null, null, null, null, null);
+    }
+
+    /** @see #objectState(long, String) -- an object with no {@code identity}, e.g. a pure box-only coast. */
+    private ObjectState objectStateWithoutIdentity(long id) {
+        return new ObjectState(id, ObjectLifecycle.COASTING, streamId, null, null, null, null, null, null, null);
     }
 
     private static CompletableFuture<DetectionResult> failedFuture(String message) {
@@ -998,7 +1019,7 @@ class StreamPipelineTest {
             detections.add(new Detection(label, 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2),
                     new ModelRef("yolo", "latest")));
         }
-        return new DetectionResult(streamId, sequence, Instant.now(), detections, Duration.ofMillis(5));
+        return new DetectionResult(streamId, sequence, Instant.now(), detections, Duration.ofMillis(5), null, null, List.of());
     }
 
     @Test
@@ -1561,6 +1582,97 @@ class StreamPipelineTest {
                 "the very next sampled frame must already carry the new model");
     }
 
+    // --- docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.5, wave W1: latestObjects() read model + object-mirror
+    // label filtering ---
+
+    @Test
+    void onDetectionResultWritesLatestObjectsAlongsideLatestDetections() {
+        ObjectState object = objectState(1L, "person");
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(resultWithObjects(0, object)));
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L);
+
+        assertTrue(pipeline.latestObjects().isEmpty(), "no inference has completed yet");
+        pipeline.onNext(frame(0));
+
+        assertEquals(List.of(object), pipeline.latestObjects());
+    }
+
+    @Test
+    void aModelReArmClearsLatestObjectsJustAsItClearsLatestDetections() {
+        ObjectState object = objectState(1L, "person");
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(resultWithObjects(0, object)));
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L);
+
+        pipeline.onNext(frame(0));
+        assertFalse(pipeline.latestObjects().isEmpty());
+
+        // detectionEnabled stated explicitly (docs/plans/done/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor
+        // default), same reasoning as the sibling latestDetections test this one mirrors.
+        PipelineConfig newModel = new PipelineConfig(new ModelRef("orion12l", "latest"), 0.4, 1000, 5, Set.of(),
+                EventRuleConfig.defaults(), true);
+        pipeline.updateConfig(newModel);
+
+        assertTrue(pipeline.latestObjects().isEmpty(),
+                "a model-id change must clear stale object-mirror state bound to the old model");
+    }
+
+    @Test
+    void theLiveOnlyEdgeClearsLatestObjectsButDurableInferenceKeepsRunningForAnAlwaysPolicyStream() {
+        ObjectState object = objectState(1L, "person");
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(resultWithObjects(0, object)));
+        AssetId assetId = AssetId.random();
+        DetectionLiveUpdatePort liveUpdatePublisherPort = mock(DetectionLiveUpdatePort.class);
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L, assetId, liveUpdatePublisherPort);
+        pipeline.updateDetectionPolicy(true); // opted into ALWAYS
+
+        pipeline.onNext(frame(0)); // demand still true (the default) -- a viewer is watching
+        assertFalse(pipeline.latestObjects().isEmpty(),
+                "object mirror must be established while watched, before the edge under test");
+
+        pipeline.updateDetectionDemand(false); // the last viewer leaves; ALWAYS keeps inference open
+
+        assertEquals(DetectionState.RUNNING_UNWATCHED, pipeline.detectionState(),
+                "ALWAYS keeps inference running even though the live gate just closed");
+        assertTrue(pipeline.latestObjects().isEmpty(),
+                "clearLiveDerivedState must clear the object mirror on the live-only edge, mirroring latestDetections");
+    }
+
+    /**
+     * The keep-when-{@code identity}-is-{@code null} rule (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+     * §4.5): the filter has nothing to match an unidentified object against, so dropping it would
+     * invent an answer the platform does not have — only an object whose elected label the deny
+     * filter actually names is dropped.
+     */
+    @Test
+    void labelFilterKeepsAnObjectWithNoIdentityButDropsADeniedIdentifiedObject() {
+        ObjectState denied = objectState(1L, "person");
+        ObjectState unidentified = objectStateWithoutIdentity(2L);
+        DetectionResult result = new DetectionResult(streamId, 0, Instant.now(), List.of(), Duration.ofMillis(5),
+                null, null, List.of(denied, unidentified));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
+        PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, Set.of(),
+                EventRuleConfig.defaults(), true, TrackingConfig.off(), Set.of("person"), false);
+        StreamPipeline pipeline = manualPipeline(config, () -> 0L);
+
+        pipeline.onNext(frame(0));
+
+        assertEquals(List.of(2L), pipeline.latestObjects().stream().map(ObjectState::id).toList(),
+                "the denied 'person' identity is dropped; the unidentified object has nothing to match and is kept");
+    }
+
+    @Test
+    void emptyLabelFiltersKeepEveryObjectRegardlessOfIdentity() {
+        ObjectState identified = objectState(1L, "person");
+        ObjectState unidentified = objectStateWithoutIdentity(2L);
+        DetectionResult result = resultWithObjects(0, identified, unidentified);
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L); // config(...)'s labelFilter is Set.of()
+
+        pipeline.onNext(frame(0));
+
+        assertEquals(List.of(1L, 2L), pipeline.latestObjects().stream().map(ObjectState::id).toList());
+    }
+
     // --- docs/plans/done/TRACKING-PLAN.md §5.D/§5.E, wave T3: track book, stats window, follow sampling ---
 
     // --- docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R2: the adaptive rate, end to end -------------
@@ -1581,7 +1693,7 @@ class StreamPipelineTest {
         Detection detection = new Detection("person", 0.9, new BoundingBox(0.4, 0.4, 0.05, 0.05),
                 new ModelRef("yolo", "latest"),
                 new TrackRef(1L, TrackState.CONFIRMED, DetectionSource.TRACKER, 2.0, 0.0, 10));
-        return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5));
+        return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5), null, null, List.of());
     }
 
     private int samplesOverTwoSecondsOfA60FpsSource(AdaptiveRateSettings adaptiveRate) {
@@ -1637,7 +1749,7 @@ class StreamPipelineTest {
                 new ModelRef("yolo", "latest"), new TrackRef(trackId, state, DetectionSource.TRACKER));
         return new DetectionResult(streamId, sequence, Instant.parse("2026-08-11T10:00:00Z").plusMillis(sequence * 100),
                 List.of(detection), Duration.ofMillis(5),
-                new TrackingTelemetry(false, null, Duration.ofNanos(400_000), "lk", trackId));
+                new TrackingTelemetry(false, null, Duration.ofNanos(400_000), "lk", trackId), null, List.of());
     }
 
     /** @see #trackedResult(long, long, TrackState) — same shape, but the box comes from a detector pass. */
@@ -1647,7 +1759,7 @@ class StreamPipelineTest {
         return new DetectionResult(streamId, sequence, Instant.parse("2026-08-11T10:00:00Z").plusMillis(sequence * 100),
                 List.of(detection), Duration.ofMillis(5),
                 new TrackingTelemetry(true, com.drones.vision.perception.domain.model.DetectorReason.ALWAYS,
-                        Duration.ofNanos(400_000), "lk", trackId));
+                        Duration.ofNanos(400_000), "lk", trackId), null, List.of());
     }
 
     /** A result carrying tracking telemetry but no detections — for exercising the unbound branch. */
@@ -1655,7 +1767,7 @@ class StreamPipelineTest {
         return new DetectionResult(streamId, sequence, Instant.parse("2026-08-11T10:00:00Z").plusMillis(sequence * 100),
                 List.of(), Duration.ofMillis(5),
                 new TrackingTelemetry(false, com.drones.vision.perception.domain.model.DetectorReason.NO_LOCK,
-                        Duration.ofNanos(400_000), "lk", lockedTrackId));
+                        Duration.ofNanos(400_000), "lk", lockedTrackId), null, List.of());
     }
 
     /** @see #mode(TrackingMode, int) — same shape, plus an explicit lock. */

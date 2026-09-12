@@ -123,6 +123,7 @@ from cv_service.pull.loop import PullDecodeLoop, PullStalledError
 from cv_service.pull.source import PullSource, PullSourceError
 from cv_service.tracking import params as tracking_params
 from cv_service.tracking.engines.base import Box, CameraPose
+from cv_service.tracking.objectstate import ObjectState
 from cv_service.tracking.registry import TrackerRegistry
 from cv_service.tracking.session import FrameOutcome, StreamTrackingSession
 from cv_service.tracking.sessions import SessionRegistry
@@ -295,6 +296,133 @@ def _tracked_detection(box: "object") -> "cv_pb2.Detection":
     return detection
 
 
+def _bounding_box(box: "Optional[object]") -> "Optional[cv_pb2.BoundingBox]":
+    """`None` in, `None` out -- the absent-vs-zero rule of
+    `tracking/objectstate.py`, kept intact across the one wire translation.
+
+    A `BoundingBox()` at the origin would claim the object was measured to be
+    a zero-area sliver in the top-left corner; the absent field says nothing
+    was measured, which is the truth for every source that did not run.
+    """
+    if box is None:
+        return None
+    return cv_pb2.BoundingBox(x=box.x, y=box.y, width=box.width, height=box.height)
+
+
+def _object_state_message(
+    state: "ObjectState", *, epoch_offset_millis: float
+) -> "cv_pb2.ObjectState":
+    """One `ObjectState` on the wire (CV-ORCHESTRATION wave W1, plan §4.5).
+
+    This function and `_frame_ledger_message` are the ONLY places
+    `cv_service/orchestration/`'s and `tracking/objectstate.py`'s plain
+    dataclasses become protobuf -- the same sole-touchpoint rule
+    `_tracked_response` has always held for `FrameOutcome`, and the one
+    `tests/tracking/test_registry.py` greps for.
+
+    **Enum values need no lookup table.** `state.lifecycle`/`.provenance.
+    source` are already the proto enums' own VALUE NAMES (see
+    `objectstate.py`), so `Value(...)` IS the whole mapping. A name the proto
+    does not know raises here rather than silently serializing `0`, which is
+    the correct blast radius: it is a cv-service bug, caught on the first
+    frame, not a wrong `UNSPECIFIED` an operator has to explain later.
+
+    **`epoch_offset_millis` is the one clock rebase on this boundary.**
+    `Timing`'s three instants arrive on the session's MONOTONIC timebase
+    (`time.monotonic() * 1000.0`, see `_handle_request`); adding this offset
+    puts them on the same timebase as this response's own `timestamp_millis`,
+    the only clock a consumer of this message already holds. Exactly one
+    subtraction, computed once per frame at the single point that knows both
+    clocks -- this repo's "convert units once, at the boundary" precedent.
+    Durations (`horizon_ms`, `since_confirmed_ms`, `dormant_ms`) are
+    timebase-independent and deliberately untouched.
+    """
+    message = cv_pb2.ObjectState(
+        id=state.id,
+        lifecycle=cv_pb2.ObjectLifecycle.Value(state.lifecycle),
+        stream_id=state.stream_id,
+    )
+    if state.identity is not None:
+        message.identity.CopyFrom(
+            cv_pb2.ObjectState.Identity(
+                label=state.identity.label,
+                label_raw=state.identity.label_raw,
+                candidates=[
+                    cv_pb2.ObjectState.LabelCandidate(
+                        label=candidate.label, weight=candidate.weight
+                    )
+                    for candidate in state.identity.candidates
+                ],
+                stability=state.identity.stability,
+            )
+        )
+    if state.kinematics is not None:
+        kinematics = cv_pb2.ObjectState.Kinematics(
+            horizon_ms=state.kinematics.horizon_ms,
+            velocity_x=state.kinematics.velocity_x,
+            velocity_y=state.kinematics.velocity_y,
+            displacement_x=state.kinematics.displacement_x,
+            displacement_y=state.kinematics.displacement_y,
+            motion_compensated=state.kinematics.motion_compensated,
+        )
+        for name, box in (
+            ("box", state.kinematics.box),
+            ("detector_box", state.kinematics.detector_box),
+            ("tracker_box", state.kinematics.tracker_box),
+            ("predicted_box", state.kinematics.predicted_box),
+        ):
+            wire_box = _bounding_box(box)
+            if wire_box is not None:
+                getattr(kinematics, name).CopyFrom(wire_box)
+        message.kinematics.CopyFrom(kinematics)
+    if state.belief is not None:
+        message.belief.CopyFrom(
+            cv_pb2.ObjectState.Belief(
+                confidence_raw=state.belief.confidence_raw,
+                confidence_smoothed=state.belief.confidence_smoothed,
+                existence=state.belief.existence,
+                since_confirmed_ms=state.belief.since_confirmed_ms,
+            )
+        )
+    if state.provenance is not None:
+        message.provenance.CopyFrom(
+            cv_pb2.ObjectState.Provenance(
+                source=cv_pb2.EvidenceSource.Value(state.provenance.source),
+                contributors=list(state.provenance.contributors),
+                assoc_cost=state.provenance.assoc_cost,
+                reupdated=state.provenance.reupdated,
+            )
+        )
+    if state.memory is not None:
+        message.memory.CopyFrom(
+            cv_pb2.ObjectState.Memory(
+                recovered=state.memory.recovered,
+                identity_confidence=state.memory.identity_confidence,
+                dormant_ms=state.memory.dormant_ms,
+                gallery_matches=state.memory.gallery_matches,
+                match_distance=state.memory.match_distance,
+            )
+        )
+    if state.lock is not None:
+        message.lock.CopyFrom(
+            cv_pb2.ObjectState.Lock(
+                locked=state.lock.locked, lock_seq_applied=state.lock.lock_seq_applied
+            )
+        )
+    if state.timing is not None:
+        message.timing.CopyFrom(
+            cv_pb2.ObjectState.Timing(
+                first_seen_ms=int(state.timing.first_seen_ms + epoch_offset_millis),
+                last_seen_ms=int(state.timing.last_seen_ms + epoch_offset_millis),
+                last_confirmed_ms=int(state.timing.last_confirmed_ms + epoch_offset_millis),
+                age_frames=state.timing.age_frames,
+                hits=state.timing.hits,
+                misses=state.timing.misses,
+            )
+        )
+    return message
+
+
 def _reportable(box: "object", report_threshold: float) -> bool:
     """Whether one tracked box belongs in the response the operator sees.
 
@@ -318,7 +446,11 @@ def _reportable(box: "object", report_threshold: float) -> bool:
 
 
 def _tracked_response(
-    request: "cv_pb2.FrameRequest", outcome: FrameOutcome, report_threshold: float = 0.0
+    request: "cv_pb2.FrameRequest",
+    outcome: FrameOutcome,
+    report_threshold: float,
+    *,
+    epoch_offset_millis: float,
 ) -> "cv_pb2.DetectionResponse":
     """A `DetectionResponse` carrying this frame's tracking telemetry.
 
@@ -330,7 +462,7 @@ def _tracked_response(
     for proto3 additivity here, and why `detector_ran` is not asserted true
     on a frame where no duty cycle was ever running to report on.
     """
-    return cv_pb2.DetectionResponse(
+    response = cv_pb2.DetectionResponse(
         stream_id=request.stream_id,
         sequence=request.sequence,
         timestamp_millis=request.timestamp_millis,
@@ -367,7 +499,28 @@ def _tracked_response(
         # `capture_skew_millis`, pull-only today), echoed straight through.
         # `0` on every push-mode frame -- genuinely unknown, never fabricated.
         detection_lag_millis=outcome.detection_lag_millis,
+        # CV-ORCHESTRATION wave W1 (field 27) -- the object mirror (plan
+        # §4.5): every LIVE track plus every DORMANT identity, whether or not
+        # it produced a `detections[]` entry above. UNFILTERED by
+        # `report_threshold` on purpose: that threshold decides what an
+        # operator SEES drawn on the video, and this array is what the
+        # service BELIEVES -- suppressing a coasting or weak object here
+        # would reintroduce, one level down, exactly the blindness this wave
+        # exists to remove.
+        objects=[
+            _object_state_message(state, epoch_offset_millis=epoch_offset_millis)
+            for state in outcome.objects
+        ],
     )
+    # CV-ORCHESTRATION wave W1 (field 28) -- only when the request asked for
+    # it. A ledger is roughly one message per contributor per frame;
+    # attaching it to every frame would multiply this stream's bytes for a
+    # surface nobody is looking at. `Inspect` keeps serving the ring
+    # regardless, so tracing is a convenience on the live path, never the
+    # only way to obtain a ledger.
+    if request.trace and outcome.ledger is not None:
+        response.ledger.CopyFrom(_frame_ledger_message(outcome.ledger))
+    return response
 
 
 def _frame_loader(request: "cv_pb2.FrameRequest") -> Callable[[], Any]:
@@ -1237,6 +1390,11 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                 # (TRACKING-V2-PLAN wave C5c) -- `_frame_loader`'s docstring
                 # makes the "no second decode" promise explicit.
                 loader = _frame_loader(request)
+                # Read ONCE and kept, so the clock the duty cycle is measured
+                # on and the clock `ObjectState.Timing` is rebased off are the
+                # same instant rather than two `time.monotonic()` calls a
+                # frame's work apart (CV-ORCHESTRATION wave W1).
+                now_millis = time.monotonic() * 1000.0
                 outcome = session.process(
                     # A LOCAL monotonic clock, deliberately, not
                     # `request.timestamp_millis`. Under DetectStream (push),
@@ -1253,7 +1411,7 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                     # monotonic clock is also immune to the wall-clock
                     # corrections/NTP steps a capture timestamp is not, which
                     # matters for pull's own anchored `timestamp_millis` too.
-                    now_millis=time.monotonic() * 1000.0,
+                    now_millis=now_millis,
                     detect=lambda roi=None: self._run_detector(
                         request, roi, loader, self._detect_floor_for(request)
                     ),
@@ -1264,7 +1422,22 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                 )
                 if outcome.boxes is None:
                     return self._echo(request)
-                return _tracked_response(request, outcome, _report_threshold_for(request))
+                return _tracked_response(
+                    request,
+                    outcome,
+                    _report_threshold_for(request),
+                    # CV-ORCHESTRATION wave W1: the single monotonic -> this
+                    # response's own timebase rebase. `session.process()` ages
+                    # everything against `now_millis` (monotonic), and
+                    # `timestamp_millis` below is what this response already
+                    # reports the frame's instant as -- so the difference is
+                    # exactly what puts `ObjectState.Timing`'s three instants
+                    # on the clock a consumer of this message already holds.
+                    # No guard for an unset `timestamp_millis`: the whole
+                    # response is anchored to it either way, so this adds no
+                    # failure mode that field does not already have.
+                    epoch_offset_millis=request.timestamp_millis - now_millis,
+                )
 
             detections, inference_millis = self._run_detector(request)
             if detections is None:

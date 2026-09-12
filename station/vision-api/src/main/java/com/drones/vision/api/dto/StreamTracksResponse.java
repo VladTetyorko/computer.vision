@@ -47,48 +47,20 @@ import java.util.List;
  *                       fact derived from this same source (see {@code StreamController#tracks}),
  *                       not from {@code stats} any more (D4): the two must never be read as
  *                       independent
+ * @param objects        this stream's current object mirror (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+ *                       §4.5, wave W1) — sourced from {@code StreamService#objects}, the same
+ *                       "never null, empty for an unknown/stopped stream" idiom {@code tracks}
+ *                       already uses; unlike {@code stats}/{@code latency}/{@code rate}/{@code
+ *                       follow}, always present as a JSON array, never omitted
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record StreamTracksResponse(String streamId, long lockedTrackId, List<TrackResponse> tracks,
                                     TrackStatsResponse stats, PipelineLatencyResponse latency,
                                     DetectionRateResponse rate, DetectionState detectionState,
-                                    FollowResponse follow) {
+                                    FollowResponse follow, List<ObjectStateResponse> objects) {
 
     public StreamTracksResponse {
         tracks = List.copyOf(tracks);
-    }
-
-    /**
-     * The shape before {@code follow} was added, kept as a convenience constructor defaulting it to
-     * absent — same "N-1-arg convenience ctor" idiom the domain records use, so every pre-existing
-     * caller (and every test asserting the old body) compiles and behaves unchanged.
-     */
-    public StreamTracksResponse(String streamId, long lockedTrackId, List<TrackResponse> tracks,
-                                 TrackStatsResponse stats, PipelineLatencyResponse latency,
-                                 DetectionRateResponse rate, DetectionState detectionState) {
-        this(streamId, lockedTrackId, tracks, stats, latency, rate, detectionState, null);
-    }
-
-    /**
-     * The shape before {@code detectionState} was added, kept as a convenience constructor
-     * defaulting it (and {@code follow}) to absent — same "N-1-arg convenience ctor" idiom the
-     * domain records use, so every pre-existing caller (and every test asserting the old body)
-     * compiles and behaves unchanged.
-     */
-    public StreamTracksResponse(String streamId, long lockedTrackId, List<TrackResponse> tracks,
-                                 TrackStatsResponse stats, PipelineLatencyResponse latency,
-                                 DetectionRateResponse rate) {
-        this(streamId, lockedTrackId, tracks, stats, latency, rate, null, null);
-    }
-
-    /**
-     * The shape before {@code rate} was added, kept as a convenience constructor defaulting both
-     * {@code rate} and {@code detectionState} to absent — same "N-1-arg convenience ctor" idiom, so
-     * every pre-existing caller (and every test asserting the old body) compiles and behaves
-     * unchanged.
-     */
-    public StreamTracksResponse(String streamId, long lockedTrackId, List<TrackResponse> tracks,
-                                 TrackStatsResponse stats, PipelineLatencyResponse latency) {
-        this(streamId, lockedTrackId, tracks, stats, latency, null, null, null);
+        objects = List.copyOf(objects);
     }
 }

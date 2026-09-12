@@ -60,11 +60,17 @@ import java.util.Set;
  *                               {@link TrackingConfig#off()} is how "no tracking" is spelled
  * @param labelDenyFilter        labels to drop even when {@code labelFilter} would keep them;
  *                               empty means deny nothing; defensively copied
+ * @param trace                  per-stream demand for the warm trace tier
+ *                               (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4) — {@code true}
+ *                               attaches the frame ledger to the wire response; {@code false} at
+ *                               every call site in this wave. Wave W2's {@code TraceDemand} is
+ *                               what will actually drive this from an open inspector; nothing in
+ *                               this wave wires it to any UI toggle
  */
 public record PipelineConfig(ModelRef model, double confidenceThreshold, int inferenceFps,
                               int maxInFlightInferences, Set<String> labelFilter,
                               EventRuleConfig eventRule, boolean detectionEnabled,
-                              TrackingConfig tracking, Set<String> labelDenyFilter) {
+                              TrackingConfig tracking, Set<String> labelDenyFilter, boolean trace) {
 
     /**
      * Default for {@link #detectionEnabled()} on every N-1-arg convenience constructor, and what
@@ -114,13 +120,15 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
      * defaults it to an empty set ("deny nothing"), the same "N-1-arg convenience ctor" idiom used
      * elsewhere. This was the canonical constructor before docs/plans/done/CV-CLEAN-FEED-PLAN.md
      * &sect;2 added {@link #labelDenyFilter()}; every pre-existing 8-arg call site compiles
-     * <em>and behaves</em> unchanged.
+     * <em>and behaves</em> unchanged. Also defaults {@link #trace()} to {@code false}
+     * (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4, wave W1) — this constructor predates
+     * tracing entirely, and off is what every pre-existing call site already behaves as.
      */
     public PipelineConfig(ModelRef model, double confidenceThreshold, int inferenceFps, int maxInFlightInferences,
                            Set<String> labelFilter, EventRuleConfig eventRule, boolean detectionEnabled,
                            TrackingConfig tracking) {
         this(model, confidenceThreshold, inferenceFps, maxInFlightInferences, labelFilter, eventRule,
-                detectionEnabled, tracking, Set.of());
+                detectionEnabled, tracking, Set.of(), false);
     }
 
     /**
@@ -134,7 +142,8 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
      * A convenience constructor's contract is "the component you did not mention keeps the value it
      * had before the component existed"; {@link #defaults()}'s contract is "what a new stream
      * should be". Those are different questions, and answering the first one with the second would
-     * silently turn tracking on for every caller that merely predates the field.
+     * silently turn tracking on for every caller that merely predates the field. {@link #trace()}
+     * defaults to {@code false} for the same "predates the field" reason.
      */
     public PipelineConfig(ModelRef model, double confidenceThreshold, int inferenceFps, int maxInFlightInferences,
                            Set<String> labelFilter, EventRuleConfig eventRule, boolean detectionEnabled) {
@@ -147,9 +156,9 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
      * defaults it to {@link #DEFAULT_DETECTION_ENABLED} (unchanged behavior), the same "N-1-arg
      * convenience ctor" idiom used elsewhere ({@code Asset}'s 6-arg ctor, {@code AssetUsage}'s
      * 7-arg ctor, this record's own ctors above), chaining onto the 7-arg convenience ctor above
-     * (so {@link #tracking()} also defaults to {@link TrackingConfig#off()}). This was the
-     * canonical constructor before docs/plans/done/CV-CONTROL-PLAN.md Wave B added {@link
-     * #detectionEnabled()}; every pre-existing 6-arg call site compiles unchanged.
+     * (so {@link #tracking()} also defaults to {@link TrackingConfig#off()}, and {@link #trace()}
+     * to {@code false}). This was the canonical constructor before docs/plans/done/CV-CONTROL-PLAN.md
+     * Wave B added {@link #detectionEnabled()}; every pre-existing 6-arg call site compiles unchanged.
      */
     public PipelineConfig(ModelRef model, double confidenceThreshold, int inferenceFps, int maxInFlightInferences,
                            Set<String> labelFilter, EventRuleConfig eventRule) {
@@ -160,7 +169,7 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
     /**
      * Convenience constructor for callers that don't care about {@link #eventRule()} either —
      * defaults it to {@link EventRuleConfig#defaults()}, chaining onto the 6-arg convenience ctor
-     * above.
+     * above (so {@link #trace()} also defaults to {@code false}, transitively).
      */
     public PipelineConfig(ModelRef model, double confidenceThreshold, int inferenceFps, int maxInFlightInferences,
                            Set<String> labelFilter) {
@@ -197,10 +206,14 @@ public record PipelineConfig(ModelRef model, double confidenceThreshold, int inf
      * {@code vision.cv.enabled} already kills CV wholesale and a per-stream switch is strictly
      * better than a global one.
      *
+     * <p><strong>{@link #trace()} defaults to {@code false}</strong>
+     * (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4, wave W1) — a new stream carries no
+     * inspector demand until one actually opens; wave W2's {@code TraceDemand} is what flips this.
+     *
      * @return a default {@code PipelineConfig}
      */
     public static PipelineConfig defaults() {
         return new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.4, 10, 2, Set.of(),
-                EventRuleConfig.defaults(), DEFAULT_DETECTION_ENABLED, TrackingConfig.defaults(), Set.of());
+                EventRuleConfig.defaults(), DEFAULT_DETECTION_ENABLED, TrackingConfig.defaults(), Set.of(), false);
     }
 }

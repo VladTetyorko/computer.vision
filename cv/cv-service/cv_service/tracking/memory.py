@@ -42,7 +42,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Optional
 
 from cv_service.tracking.engines.base import Box, Descriptor
@@ -69,6 +69,29 @@ class Recovery:
     track_id: int
     confidence: float
     dormant_millis: int
+    # CV-ORCHESTRATION wave W1 -- `ObjectState.memory.match_distance`/
+    # `.gallery_matches` (plan §4.5). Defaults keep every EXISTING caller
+    # (this module's own `_score`, and any test constructing a `Recovery`
+    # directly) source-compatible: `1.0` is `best_distance`'s own "no
+    # descriptor to compare" answer (max distance, i.e. no match), and `0`
+    # gallery entries considered is honest for a caller that never asks
+    # `match`/`match_identity` to look.
+    #
+    # `match_distance` is the appearance distance this recovery actually
+    # scored at (`_score`'s own `distance`, before the `1.0 - distance`
+    # flip into `appearance`) -- reported raw because the wire's own
+    # `Belief`/`Memory` split already reports a confidence separately;
+    # duplicating the flipped number would just be `1.0 - match_distance`
+    # under a different name.
+    #
+    # `gallery_considered` is how many dormant identities were on the table
+    # when this one won -- `match`'s own gallery size at call time, or `1`
+    # from `match_identity` (which never considers more than the one id the
+    # caller named). Filled by `match`/`match_identity` themselves via
+    # `dataclasses.replace`, not by `_score` (which only ever sees one
+    # entry and has no way to know the gallery's total size).
+    match_distance: float = 1.0
+    gallery_considered: int = 0
 
 
 @dataclass(frozen=True)
@@ -208,6 +231,10 @@ class ObjectMemory:
         the caller does with the answer.
         """
         self.forget_expired(now_millis)
+        # Captured after `forget_expired`, so it is the gallery this
+        # candidate was actually weighed against, not a stale pre-expiry
+        # count.
+        considered = len(self._dormant)
         best: Optional[Recovery] = None
         for entry in self._dormant.values():
             scored = self._score(entry, box, label, descriptor, now_millis)
@@ -215,7 +242,9 @@ class ObjectMemory:
                 continue
             if best is None or scored.confidence > best.confidence:
                 best = scored
-        return best
+        if best is None:
+            return None
+        return replace(best, gallery_considered=considered)
 
     def match_identity(
         self,
@@ -240,7 +269,12 @@ class ObjectMemory:
         entry = self._dormant.get(track_id)
         if entry is None:
             return None
-        return self._score(entry, box, label, descriptor, now_millis)
+        scored = self._score(entry, box, label, descriptor, now_millis)
+        if scored is None:
+            return None
+        # Exactly one identity was ever on the table -- see `Recovery.
+        # gallery_considered`'s own docstring.
+        return replace(scored, gallery_considered=1)
 
     def claim(self, track_id: int) -> Optional[DormantIdentity]:
         """Take an identity out of the gallery; it is live again."""
@@ -303,6 +337,7 @@ class ObjectMemory:
             track_id=entry.track_id,
             confidence=max(0.0, min(1.0, confidence)),
             dormant_millis=int(elapsed_millis),
+            match_distance=distance,
         )
 
     def _motion_score(

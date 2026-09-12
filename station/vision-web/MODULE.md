@@ -37,6 +37,22 @@ Angular 21 SPA (driving adapter): the whole product UI — operator cockpit, man
   are purely server-derived — the frontend never re-derives authority from role/capability. `{kind}`
   is `flight`|`camera`, lowercase exactly (`VisionApi#takeAssetSeat`/`releaseAssetSeat` lowercase the
   `SeatKind` union on the way out). See `core/seat/`/`features/crew/` below for the one consumer.
+- **`ObjectState` family (new, type mirror only — no endpoint serves it yet)** (docs/plans/active/
+  CV-ORCHESTRATION-PLAN.md §4.5, wave W1 "wire mirror") — `ObjectState`/`ObjectIdentity`/
+  `ObjectLabelCandidate`/`ObjectKinematics`/`ObjectBelief`/`ObjectProvenance`/`ObjectMemoryFacts`/
+  `ObjectLockFacts`/`ObjectTiming`, plus `OBJECT_LIFECYCLES`/`ObjectLifecycle` and
+  `EVIDENCE_SOURCES`/`EvidenceSource` (`as const` tuple + derived union, same idiom as
+  `DETECTION_STATES`/`DetectionState`, each pinned by its own `*.contract.spec.ts`). Every nested
+  group (`identity`/`kinematics`/`belief`/`provenance`/`memory`/`lock`/`timing`) is **optional**, not
+  nullable — the DTO layer serializes `NON_NULL`, so a Java `null` group is a missing key, meaning
+  "this configuration does not compute these facts," never a zeroed default; same rule for
+  `kinematics.detectorBox`/`trackerBox`/`predictedBox` (`kinematics.box` alone is always present).
+  `streamId` is a plain string on the wire. Nested TS interfaces are named `Object*` rather than the
+  Java records' own bare names (`Identity`, `Belief`, `Timing`, …) because TS has no per-record
+  nesting scope the way Java does — collapsing them to the Java names would collide with (or shadow)
+  unrelated concepts elsewhere in this 4000-line file. **Nothing constructs, fetches, or renders an
+  `ObjectState` yet** — no store, no component, no route; rendering is wave W3's job. See
+  `core/api/models.ts`'s own doc comment on `ObjectState` and the two contract specs for detail.
 
 ### `core/**` — stores (all `providedIn: 'root'` unless noted)
 | Area | Types |
@@ -1069,3 +1085,66 @@ it already carries the truth for `RUNNING_UNWATCHED` specifically.
 `npm run test:ci` — **193/193 files, 3829/3829 tests green** (up from 192/3825: one new contract
 spec file plus cases added to the two existing logic specs). `npx tsc --noEmit` clean on both
 `tsconfig.app.json` and `tsconfig.spec.json`.
+
+## Status — CV-ORCHESTRATION wave W1 (web): the `ObjectState` type mirror, no rendering (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.5, §6 W1 row) — 2026-09-12
+
+W1 is a sequential, disjoint-file wave (domain-modeler → adapter-builder → spring-integrator →
+web-ui); this entry is only the last, web-ui step. Scope was `station/vision-web/**` only — no
+component, store, service call, or route. **No endpoint serves `ObjectState` in this worktree yet**
+(no DTO exists under `station/vision-api/src/main/java/.../dto/` for it) — this step mirrors only
+the domain record family the plan's §6 W1 row names, ahead of the wire actually carrying it.
+
+**What changed, all in `core/api/models.ts`:**
+
+- New interfaces mirroring `contexts/vision-perception/.../domain/model/ObjectState.java` 1:1 by
+  JSON key: `ObjectState` (`id`, `lifecycle`, `streamId`, `identity?`, `kinematics?`, `belief?`,
+  `provenance?`, `memory?`, `lock?`, `timing?`) and its nested groups `ObjectLabelCandidate`,
+  `ObjectIdentity`, `ObjectKinematics`, `ObjectBelief`, `ObjectProvenance`, `ObjectMemoryFacts`
+  (JSON key `memory`), `ObjectLockFacts` (JSON key `lock`), `ObjectTiming`. `Object*` prefixing is a
+  deliberate deviation from the Java records' own bare names (`Identity`, `Belief`, …): TS has no
+  per-record nesting scope, so reusing the bare names in this one 4000-line file would collide with
+  or shadow unrelated concepts. `Kinematics.box` reuses the existing `BoundingBox` interface rather
+  than declaring a second one.
+- Every nested group on `ObjectState` is **optional (`?`), not `T | null`** — the DTO layer
+  serializes with Jackson `NON_NULL` (confirmed against `StreamTracksResponse.java`'s own use of the
+  same annotation), so a `null` group on the Java side is a **missing key** on the wire, not an
+  explicit `null`. The same rule applies to `ObjectKinematics.detectorBox`/`trackerBox`/
+  `predictedBox` (`box` itself is never null/absent). Each doc comment says why this distinction
+  matters: an absent group means "this configuration does not compute these facts," which is a
+  different statement from a present-but-zeroed group, and collapsing the two back into one is the
+  exact honesty defect this whole plan exists to remove (`ObjectState.java`'s own class doc makes
+  the same point about the Java side).
+- `streamId` is `string` (the wire's `StreamId` mirror, matching every other `streamId` field in
+  this file).
+- New `OBJECT_LIFECYCLES`/`ObjectLifecycle` and `EVIDENCE_SOURCES`/`EvidenceSource` — `as const`
+  tuple + derived string union, the exact idiom `DETECTION_STATES`/`DetectionState` established in
+  wave W-pre (immediately above), each with its own hand-pinned contract spec so a Java enum
+  addition or reorder fails a TS test instead of falling through a switch silently, the way
+  `DetectionState` already did once (§7 D1). `EvidenceSource` is a new, separate type from the
+  existing `DetectionSource` union (`'DETECTOR' | 'TRACKER'`) — no collision, but note both exist:
+  `DetectionSource` is `domain.model.DetectionSource` (two values, mirrored on `Detection`/
+  `StreamTrack`/`DetectionTrack`); `EvidenceSource` is `perception.domain.model.EvidenceSource` (a
+  five-value superset used only inside `ObjectProvenance`).
+- New `core/api/object-lifecycle.contract.spec.ts` and `core/api/evidence-source.contract.spec.ts`,
+  in the `detection-state.contract.spec.ts` pattern exactly: a hand-pinned tuple of the Java enum's
+  declaration order, a comment naming the Java file path it's pinned to, and a comment naming the
+  silent-fallthrough failure it prevents.
+
+**Not built (by this brief's own design, not an omission):** no component reads `ObjectState`, no
+store fetches it, `StreamTracksResponse` gained no `objects` field — there is nothing to wire it to
+yet on the server side of this worktree. Rendering is wave W3's job per the plan.
+
+**Nothing in this brief was found wrong or unimplementable.** One judgment call worth flagging: the
+brief named `Identity`/`Belief`/`Timing`/etc. as the Java accessor names to mirror for JSON *keys*,
+which this entry followed exactly (`identity`, `belief`, `timing`, `memory`, `lock` — all lowercase,
+matching the record accessors); the `Object*` prefix applies only to the TS *interface* names, never
+to a field name or JSON key.
+
+### Tests / build
+
+`npm run test:ci` — **198/198 files, 3892/3892 tests green** (this worktree's branch already carried
+193/3829 from prior waves before this step; +2 files/+2 tests are this step's own two contract
+specs — the remaining +3 files/+61 tests already existed on this branch from unrelated,
+already-committed work ahead of this task, per `git status` showing only `models.ts` plus the two
+new spec files touched). `npx tsc --noEmit` clean on both `tsconfig.app.json` and
+`tsconfig.spec.json`.

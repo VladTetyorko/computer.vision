@@ -6,6 +6,7 @@ import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.perception.domain.model.FollowStatus;
+import com.drones.vision.perception.domain.model.ObjectState;
 import com.drones.vision.perception.domain.model.StreamState;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.platform.Event;
@@ -361,6 +362,13 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private volatile Flow.Subscription pullSubscription;
 
     private volatile List<Detection> latestDetections = List.of();
+
+    /**
+     * @see #latestObjects() — the object-mirror counterpart to {@link #latestDetections}, written
+     *      and cleared on exactly the same edges (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.5,
+     *      wave W1).
+     */
+    private volatile List<ObjectState> latestObjects = List.of();
     private volatile VideoFrame latestFrame;
 
     // Only ever touched from within onNext(), which Flow.Subscriber's contract serializes
@@ -697,6 +705,19 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      */
     public List<Detection> latestDetections() {
         return latestDetections;
+    }
+
+    /**
+     * @return the most recently completed result's object mirror (docs/plans/active/
+     *         CV-ORCHESTRATION-PLAN.md §4.5, wave W1) — one entry per tracked or dormant identity,
+     *         a different set from {@link #latestDetections()} (see {@link DetectionResult#objects()}).
+     *         Written and cleared on exactly the same edges as {@link #latestDetections()}: updated
+     *         for every completed inference while the live plane is open, left untouched during a
+     *         detection outage, and reset to empty by both {@link #clearDetectionDerivedState()} and
+     *         {@link #clearLiveDerivedState()}.
+     */
+    public List<ObjectState> latestObjects() {
+        return latestObjects;
     }
 
     /**
@@ -1108,6 +1129,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private void clearDetectionDerivedState() {
         extrapolator.reset();
         latestDetections = List.of();
+        latestObjects = List.of();
         trackBook.clear();
         trackingStats.clear();
         followTracker.clear();
@@ -1130,6 +1152,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private void clearLiveDerivedState() {
         extrapolator.reset();
         latestDetections = List.of();
+        latestObjects = List.of();
         trackBook.clear();
         trackingStats.clear();
         followTracker.clear();
@@ -1369,6 +1392,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         boolean live = liveGateOpen();
         if (live) {
             latestDetections = filtered.detections();
+            latestObjects = filtered.objects();
             extrapolator.accept(filtered);
             trackBook.accept(filtered);
             trackingStats.accept(filtered);
@@ -1405,6 +1429,20 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * what the tracker cost, which track is locked) are true of the frame regardless of which of its
      * boxes survived filtering. Dropping them here would silently zero the duty-cycle stats of every
      * stream that happens to use a label filter.
+     *
+     * <p>{@link DetectionResult#objects()} (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.5, wave
+     * W1) is filtered by the same allow/deny rule, matched on {@link ObjectState.Identity#label()} —
+     * an operator who denied a label must not have it reappear under a new JSON key just because it
+     * arrived through the object mirror instead of {@code detections}. An object whose {@code
+     * identity} is {@code null} is always <b>kept</b>: the filter has nothing to match on, and
+     * dropping it would invent an answer ("this is the denied label") the platform does not actually
+     * have. {@code tracks[]} is already effectively label-filtered by this same method — a denied
+     * detection never reaches {@link TrackBook#accept}, so it never books a track in the first place.
+     *
+     * <p>The "nothing was actually dropped, return {@code result} unchanged" fast path is evaluated
+     * for both lists independently and ANDed together, so the common case (neither filter
+     * configured, or every detection and every identified object already matches) still allocates
+     * nothing new.
      */
     private DetectionResult applyLabelFilters(DetectionResult result) {
         Set<String> labelFilter = config.labelFilter();
@@ -1416,11 +1454,21 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                 .filter(d -> (labelFilter.isEmpty() || labelFilter.contains(d.label()))
                         && !labelDenyFilter.contains(d.label()))
                 .toList();
-        if (kept.size() == result.detections().size()) {
+        List<ObjectState> keptObjects = result.objects().stream()
+                .filter(o -> o.identity() == null
+                        || ((labelFilter.isEmpty() || labelFilter.contains(o.identity().label()))
+                        && !labelDenyFilter.contains(o.identity().label())))
+                .toList();
+        if (kept.size() == result.detections().size() && keptObjects.size() == result.objects().size()) {
             return result;
         }
+        // pullTelemetry is CARRIED, not dropped. Until W1 this line read the six-argument
+        // convenience constructor, which defaulted it to null -- so a pull-mode stream with any
+        // label filter set silently lost its transport diagnostics on exactly the frames where the
+        // filter bit. Nothing about which labels an operator wants to see is a fact about how the
+        // frame was fetched. Rule 10 retiring that constructor is what made the loss visible.
         return new DetectionResult(result.streamId(), result.frameSequence(), result.capturedAt(), kept,
-                result.inferenceLatency(), result.tracking());
+                result.inferenceLatency(), result.tracking(), result.pullTelemetry(), keptObjects);
     }
 
     /**
