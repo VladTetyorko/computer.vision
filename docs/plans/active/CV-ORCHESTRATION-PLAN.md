@@ -384,7 +384,7 @@ Decisions:
 
 ## 6. Waves
 
-Task branch `feat/cv-orchestration` from master once this plan is accepted; each wave is a sub-branch `feat/cv-orchestration/wN-<name>`, merged into the task branch when its acceptance holds; the task branch merges to master when W0–W3 are in. Roles per CLAUDE.md: Opus owns each wave's flow and may write code; Sonnet implements and tests within a file scope; Fable reviews acceptance only. Every wave updates its `MODULE.md`s and the context file's status log. No reactor-wide builds while another wave holds modules red.
+Task branch `feat/cv-orchestration` from master once this plan is accepted; each wave is a dash-named sub-branch `feat/cv-orchestration-wN-<name>` (git refuses nested refs under the existing leaf `feat/cv-orchestration`), merged into the task branch when its acceptance holds; the task branch merges to master when W0–W3 are in. Roles per CLAUDE.md: Opus owns each wave's flow and may write code; Sonnet implements and tests within a file scope; Fable reviews acceptance only. Every wave updates its `MODULE.md`s and the context file's status log. No reactor-wide builds while another wave holds modules red.
 
 | Wave | Scope (disjoint files) | Agent | Acceptance |
 |---|---|---|---|
