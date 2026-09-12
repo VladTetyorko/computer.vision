@@ -568,3 +568,14 @@ See `docs/plans/README.md` for the plan-status authority behind the phase refere
 file (MVP2, POSTGRES-ONLY-CONTEXT, SCALE-100, FIXED-CAMERA-GEO, VISUAL-GEO-V2, DRONE-ONBOARDING,
 CONTROLLER-SETUP-CONTEXT, ARCHITECTURE-AUDIT-2026-08-26, CV-SETTINGS, ZERO-CONFIG-ONBOARDING-CONTEXT,
 ASSET-FLOWS, AUTH-ROLES, ALWAYS-ON-FLOW).
+
+`docs/plans/active/CV-ORCHESTRATION-PLAN.md` wave W2.1 (mechanical, folded into this module's file
+scope by `DetectionResult`'s domain constructor growing a 9th component, `Optional<FrameLedger>
+ledger`) touched exactly one call site here: `DetectionResultMapper#toDomain` now passes
+`Optional.empty()` as the trailing argument — this mapper never round-trips a ledger (the warm trace
+tier is never persisted, by design, `contexts/vision-perception/MODULE.md`'s own `FrameLedger`
+bullet), so `Optional.empty()` is the permanently-correct value here, not a placeholder awaiting a
+later wave. `PostgresDockerIntegrationTest` needed the same mechanical update at its own
+`DetectionResult` construction sites. No schema change, no new migration, no behavior change — noted
+here only because CLAUDE.md's module-docs rule calls for every touched module's doc to reflect its
+own change, however small.
