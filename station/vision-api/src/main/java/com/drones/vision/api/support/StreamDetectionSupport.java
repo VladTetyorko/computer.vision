@@ -2,6 +2,7 @@ package com.drones.vision.api.support;
 
 import com.drones.vision.api.dto.StartStreamRequest;
 import com.drones.vision.api.live.LiveAndPollDetectionDemand;
+import com.drones.vision.api.live.LiveAndPollTraceDemand;
 import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.StreamId;
@@ -53,17 +54,26 @@ import java.util.Optional;
  *                            concern in this controller
  * @param currentUser         the acting caller, so profile resolution is scoped the same way every
  *                            other read in this request is
+ * @param traceDemand         the trace-demand port's concrete implementation (docs/plans/active/
+ *                            CV-ORCHESTRATION-PLAN.md §4.4, wave W2), so {@link
+ *                            #touchedTrace(StreamId)} can reach {@link
+ *                            LiveAndPollTraceDemand#touched(StreamId)} directly; {@code null} on
+ *                            the same condition {@link #demand} is (the demand gate not wired at
+ *                            all), in which case {@link #touchedTrace(StreamId)} is a no-op — a
+ *                            sixth component on this bundle rather than a seventh {@code
+ *                            StreamController} constructor parameter, for the same reason {@link
+ *                            #demand} is a component here and not a parameter there
  */
 public record StreamDetectionSupport(PipelineConfig defaultConfig, LiveAndPollDetectionDemand demand,
                                       CvProfileService cvProfileService, AssetRepositoryPort assetRepositoryPort,
-                                      CurrentUser currentUser) {
+                                      CurrentUser currentUser, LiveAndPollTraceDemand traceDemand) {
 
     public StreamDetectionSupport {
         Objects.requireNonNull(defaultConfig, "defaultConfig must not be null");
         Objects.requireNonNull(cvProfileService, "cvProfileService must not be null");
         Objects.requireNonNull(assetRepositoryPort, "assetRepositoryPort must not be null");
         Objects.requireNonNull(currentUser, "currentUser must not be null");
-        // demand is nullable -- see this record's own javadoc
+        // demand/traceDemand are nullable -- see this record's own javadoc
     }
 
     /**
@@ -76,6 +86,19 @@ public record StreamDetectionSupport(PipelineConfig defaultConfig, LiveAndPollDe
     public void touched(StreamId streamId) {
         if (demand != null) {
             demand.touched(streamId);
+        }
+    }
+
+    /**
+     * Stamps {@code streamId} as polled-for-trace just now (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+     * §4.4, wave W2) — a no-op when {@link #traceDemand()} is absent, the same posture {@link
+     * #touched(StreamId)} already takes for its own port.
+     *
+     * @param streamId the stream {@code GET /api/streams/{id}/cv/trace} was just read for
+     */
+    public void touchedTrace(StreamId streamId) {
+        if (traceDemand != null) {
+            traceDemand.touched(streamId);
         }
     }
 

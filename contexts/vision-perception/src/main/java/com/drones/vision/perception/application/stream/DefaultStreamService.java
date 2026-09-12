@@ -6,6 +6,7 @@ import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.perception.domain.model.FollowStatus;
+import com.drones.vision.perception.domain.model.FrameLedger;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
@@ -61,6 +62,7 @@ import com.drones.vision.perception.application.pipeline.StreamPipelineCollabora
 import com.drones.vision.perception.application.pipeline.StreamPipelineSettings;
 import com.drones.vision.perception.application.pipeline.SupervisedPublisher;
 import com.drones.vision.perception.application.pipeline.DetectionRate;
+import com.drones.vision.perception.application.pipeline.GateDecision;
 import com.drones.vision.perception.application.pipeline.PipelineLatency;
 import com.drones.vision.perception.application.pipeline.TrackingStats;
 import com.drones.vision.perception.application.pipeline.UsageTracker;
@@ -620,6 +622,20 @@ public final class DefaultStreamService implements StreamService {
         Objects.requireNonNull(streamId, "streamId must not be null");
         RunningStream active = activeStreams.get(streamId);
         return active == null ? List.of() : active.pipeline().latestObjects();
+    }
+
+    @Override
+    public List<GateDecision> gateLedger(StreamId streamId, int last) {
+        Objects.requireNonNull(streamId, "streamId must not be null");
+        RunningStream active = activeStreams.get(streamId);
+        return active == null ? List.of() : active.pipeline().gateLedger(last);
+    }
+
+    @Override
+    public List<FrameLedger> frameLedger(StreamId streamId, int last) {
+        Objects.requireNonNull(streamId, "streamId must not be null");
+        RunningStream active = activeStreams.get(streamId);
+        return active == null ? List.of() : active.pipeline().frameLedger(last);
     }
 
     @Override

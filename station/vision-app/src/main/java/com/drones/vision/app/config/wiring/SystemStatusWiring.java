@@ -2,6 +2,7 @@ package com.drones.vision.app.config.wiring;
 
 import com.drones.vision.adapter.cvgrpc.CvChannelSupervisor;
 import com.drones.vision.adapter.cvgrpc.CvStatusProvider;
+import com.drones.vision.adapter.cvgrpc.GrpcCvInspectClient;
 import com.drones.vision.adapter.mavlink.MavlinkLinkStatusProvider;
 import com.drones.vision.adapter.mavlink.MavlinkSettings;
 import com.drones.vision.adapter.mavlink.MavlinkTelemetrySource;
@@ -63,12 +64,18 @@ public class SystemStatusWiring {
                 "Set vision.cv.enabled=true to enable detection");
     }
 
-    /** Mirrors {@link CvWiring#cvGrpcChannel}'s own condition exactly — present whenever that channel is. */
+    /**
+     * Mirrors {@link CvWiring#cvGrpcChannel}'s own condition exactly — present whenever that channel
+     * is. {@code cvInspectClient} feeds {@link CvStatusProvider}'s capacity-fields enrichment
+     * (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.9); see {@link CvWiring#cvInspectClient}'s
+     * own javadoc for why its condition is independent of {@code vision.cv.reconnect.enabled}.
+     */
     @Bean
     @ConditionalOnExpression("${vision.cv.enabled:false} or ${vision.training.enabled:false} "
             + "or '${vision.cv.frame-transport:push}' == 'pull'")
-    public SubsystemStatusPort cvServiceStatus(ObjectProvider<CvChannelSupervisor> cvChannelSupervisor) {
-        return new CvStatusProvider(cvChannelSupervisor::getIfAvailable);
+    public SubsystemStatusPort cvServiceStatus(ObjectProvider<CvChannelSupervisor> cvChannelSupervisor,
+            ObjectProvider<GrpcCvInspectClient> cvInspectClient) {
+        return new CvStatusProvider(cvChannelSupervisor::getIfAvailable, cvInspectClient::getIfAvailable);
     }
 
     /**

@@ -6,6 +6,7 @@ import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.perception.domain.model.FollowStatus;
+import com.drones.vision.perception.domain.model.FrameLedger;
 import com.drones.vision.perception.domain.model.ObjectState;
 import com.drones.vision.perception.domain.model.StreamState;
 import com.drones.vision.warehouse.domain.model.Device;
@@ -335,6 +336,13 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final FrameGateLedger gateLedger;
 
     /**
+     * The frame half of {@code cv-trace} (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.4) — see
+     * {@link FrameLedgerRing}'s own javadoc for why this does not coalesce the way {@link
+     * #gateLedger} does. Populated in {@link #onDetectionResult} whenever a result carries one.
+     */
+    private final FrameLedgerRing frameLedger;
+
+    /**
      * Chooses the rate {@link #sampleIntervalNanos} schedules deadlines at
      * (docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R2). Built here rather than injected for the same
      * reason {@link #world} is: it is this pipeline's own per-stream bookkeeping, not a
@@ -469,6 +477,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         this.detectionRate = new DetectionRateWindow(settings.trackingStatsWindow(),
                 this.pullDetection == null ? DetectionRateWindow.Transport.PUSH : DetectionRateWindow.Transport.PULL);
         this.gateLedger = new FrameGateLedger(settings.gateLedgerDepth());
+        this.frameLedger = new FrameLedgerRing(settings.frameLedgerDepth());
         this.rateController = new DetectionRateController(settings.adaptiveRate(), settings.cameraHfovDegrees());
         this.backoffNanos = this.detectionBackoffInitialNanos;
         // Seeded from this.config/this.detectionDemand/this.detectionPolicyAlwaysOn, all already
@@ -839,6 +848,19 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
+     * @param last how many of the most recent {@link FrameLedger}s to return; must not be negative
+     * @return the most recent {@code last} {@link FrameLedger}s this pipeline actually received from
+     *         cv-service, oldest first (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.4) — the
+     *         frame half of {@code GET /api/streams/{id}/cv/trace}, alongside {@link #gateLedger(int)}
+     *         (the gate half) and {@link #objects()} (the world half). Never {@code null}; empty
+     *         while {@link PipelineConfig#trace()} is {@code false} (the default), since cv-service
+     *         never attaches a ledger to a response in that case.
+     */
+    public List<FrameLedger> frameLedger(int last) {
+        return frameLedger.recent(last);
+    }
+
+    /**
      * @return the most recently published frame — exactly the source's own pixels
      *         (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-1: there is no server-side rendering stage
      *         anymore), the same instance handed to {@link StreamPublisherPort#publish}
@@ -1181,12 +1203,12 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * produce. A held {@code FOLLOW} lock is no exception: its bound {@code trackId} was allocated by
      * whatever the detector was feeding before the re-arm/close, so it means nothing after.
      *
-     * <p>Includes {@link #pipelineLatency}/{@link #detectionRate}/{@link #gateLedger} — detector-health
-     * windows tied to whether inference itself is running, not to whether anyone is watching it —
-     * which is exactly why {@link #clearLiveDerivedState()} (the narrower, live-only counterpart, wave
-     * D2) leaves them alone: an {@code ALWAYS} asset losing its last viewer keeps inferring, so these
-     * windows keep being meaningfully written to and must not be wiped out from under that ongoing
-     * activity.
+     * <p>Includes {@link #pipelineLatency}/{@link #detectionRate}/{@link #gateLedger}/{@link
+     * #frameLedger} — detector-health windows tied to whether inference itself is running, not to
+     * whether anyone is watching it — which is exactly why {@link #clearLiveDerivedState()} (the
+     * narrower, live-only counterpart, wave D2) leaves them alone: an {@code ALWAYS} asset losing its
+     * last viewer keeps inferring, so these windows keep being meaningfully written to and must not
+     * be wiped out from under that ongoing activity.
      */
     private void clearDetectionDerivedState() {
         world.clear();
@@ -1194,6 +1216,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         pipelineLatency.clear();
         detectionRate.clear();
         gateLedger.clear();
+        frameLedger.clear();
         rateController.clear();
     }
 
@@ -1483,6 +1506,11 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
             return;
         }
         DetectionResult filtered = applyLabelFilters(result);
+        // Detector-health bookkeeping, gate-independent -- see clearDetectionDerivedState's own
+        // javadoc for why this ring sits beside gateLedger/detectionRate rather than behind either
+        // the live or durable plane below: it records whatever cv-service actually attached
+        // (present only while PipelineConfig#trace() is true), regardless of who is watching.
+        filtered.ledger().ifPresent(frameLedger::record);
         // Live plane FIRST, durable plane after -- the pre-D2 order, restored deliberately and not
         // merely for diff minimality. detectionRepositoryPort#save is synchronous I/O, and the live
         // read models below are what a polling client observes; running the write between a

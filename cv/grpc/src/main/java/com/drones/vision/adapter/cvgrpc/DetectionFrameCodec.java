@@ -7,7 +7,11 @@ import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.perception.domain.model.DetectionSource;
 import com.drones.vision.perception.domain.model.DetectorReason;
 import com.drones.vision.perception.domain.model.EvidenceSource;
+import com.drones.vision.perception.domain.model.FrameLedger;
+import com.drones.vision.perception.domain.model.LedgerEntry;
+import com.drones.vision.perception.domain.model.LedgerOutcome;
 import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.perception.domain.model.ObjectEvidence;
 import com.drones.vision.perception.domain.model.ObjectLifecycle;
 import com.drones.vision.perception.domain.model.ObjectState;
 import com.drones.vision.perception.domain.model.PipelineConfig;
@@ -45,7 +49,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -232,7 +238,7 @@ final class DetectionFrameCodec {
                 toTrackingTelemetry(response),
                 toPullTelemetry(response),
                 toObjectStates(streamId, response),
-                Optional.empty());
+                toFrameLedger(streamId, response));
     }
 
     /**
@@ -249,13 +255,9 @@ final class DetectionFrameCodec {
      * never depends on the server echoing an id correctly" doctrine {@link DetectionResult#streamId()}
      * already applies (see class javadoc).
      *
-     * <p><b>{@code DetectionResponse.ledger} (field 28) is deliberately not decoded here or anywhere
-     * in this class.</b> There is no domain type for a {@code FrameLedger} — step 3 of this wave
-     * added only {@link ObjectState}, on purpose — and {@link PipelineConfig#trace()} is {@code false}
-     * on every call site today, so cv-service never actually attaches one to a response this codec
-     * sees. Inventing a domain record family with zero readers is not this wave's job; W2's {@code
-     * TraceDemand} is what will make {@code trace} true for a stream, and that is also where the
-     * ledger's own reader belongs.
+     * <p>{@code DetectionResponse.ledger} (field 28) is decoded separately, by {@link
+     * #toFrameLedger} — see that method's own javadoc for why a malformed ledger is dropped whole
+     * rather than salvaged entry-by-entry the way this method salvages {@code objects[]}.
      */
     private static List<ObjectState> toObjectStates(StreamId streamId, DetectionResponse response) {
         if (response.getObjectsCount() == 0) {
@@ -290,6 +292,71 @@ final class DetectionFrameCodec {
                 wire.hasMemory() ? toMemoryFacts(wire.getMemory()) : null,
                 wire.hasLock() ? toLockFacts(wire.getLock()) : null,
                 wire.hasTiming() ? toTiming(wire.getTiming()) : null);
+    }
+
+    /**
+     * Decodes {@code response.getLedger()} (field 28) into the domain {@link FrameLedger} — present
+     * only when the caller asked for a trace ({@link PipelineConfig#trace()}) and cv-service actually
+     * attached one; {@link DetectionResponse#hasLedger()} is {@code false} on every response today
+     * ({@code trace} is {@code false} on every call site until wave W2's {@code TraceDemand} makes it
+     * {@code true} for a stream someone is inspecting).
+     *
+     * <p><b>Unlike {@link #toObjectStates}, a malformed ledger drops the WHOLE ledger</b> (logged at
+     * WARNING), not just the offending entry. This is the warm debug tier
+     * (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.4) — never on the durable or live-overlay
+     * path — so losing one frame's trace to a decode error costs nothing a viewer of {@code
+     * detections[]}/{@code objects[]} would ever notice; the coarse fallback keeps this method simple
+     * rather than reproducing {@link #toObjectStates}'s per-entry salvage for a tier where salvage
+     * buys nothing.
+     */
+    private static Optional<FrameLedger> toFrameLedger(StreamId streamId, DetectionResponse response) {
+        if (!response.hasLedger()) {
+            return Optional.empty();
+        }
+        try {
+            com.drones.vision.proto.v1.FrameLedger wire = response.getLedger();
+            List<LedgerEntry> entries = wire.getEntriesList().stream()
+                    .map(DetectionFrameCodec::toLedgerEntry)
+                    .toList();
+            Map<Long, List<ObjectEvidence>> objects = new LinkedHashMap<>();
+            for (Map.Entry<Long, com.drones.vision.proto.v1.ObjectClaims> entry : wire.getObjectsMap().entrySet()) {
+                List<ObjectEvidence> claims = entry.getValue().getClaimsList().stream()
+                        .map(DetectionFrameCodec::toObjectEvidence)
+                        .toList();
+                objects.put(entry.getKey(), claims);
+            }
+            return Optional.of(new FrameLedger(streamId, wire.getSequence(),
+                    Instant.ofEpochMilli(wire.getCapturedAtMillis()), wire.getLevelServed(), wire.getDetectorReason(),
+                    wire.getEligibleList(), entries, objects, wire.getDropsSinceLast(), wire.getGateWaitMs(),
+                    wire.getTotalMs(), wire.getHalted()));
+        } catch (RuntimeException e) {
+            LOG.log(System.Logger.Level.WARNING,
+                    () -> "Dropping malformed FrameLedger on stream " + streamId + ": " + e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    private static LedgerEntry toLedgerEntry(com.drones.vision.proto.v1.LedgerEntry wire) {
+        LedgerOutcome outcome = toLedgerOutcome(wire.getOutcome());
+        if (outcome == null) {
+            throw new IllegalArgumentException("unspecified/unrecognized LedgerOutcome " + wire.getOutcome());
+        }
+        return new LedgerEntry(wire.getContributorId(), outcome, wire.getReason(), wire.getCostMs(),
+                wire.getSummaryMap());
+    }
+
+    private static ObjectEvidence toObjectEvidence(com.drones.vision.proto.v1.ObjectEvidence wire) {
+        return new ObjectEvidence(wire.getContributorId(), wire.getClaimMap());
+    }
+
+    /** {@code null} on the proto zero-value/an unrecognized future value — see {@link #toObjectLifecycle}'s own precedent. */
+    private static LedgerOutcome toLedgerOutcome(com.drones.vision.proto.v1.LedgerOutcome wire) {
+        return switch (wire) {
+            case LEDGER_OUTCOME_RAN -> LedgerOutcome.RAN;
+            case LEDGER_OUTCOME_SKIPPED -> LedgerOutcome.SKIPPED;
+            case LEDGER_OUTCOME_FAILED -> LedgerOutcome.FAILED;
+            case LEDGER_OUTCOME_UNSPECIFIED, UNRECOGNIZED -> null;
+        };
     }
 
     private static ObjectState.Identity toIdentity(com.drones.vision.proto.v1.ObjectState.Identity wire) {

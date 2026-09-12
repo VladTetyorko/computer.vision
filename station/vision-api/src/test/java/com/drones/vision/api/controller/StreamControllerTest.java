@@ -13,6 +13,10 @@ import com.drones.vision.flight.application.seat.SeatService;
 import com.drones.vision.flight.domain.model.SeatKind;
 import com.drones.vision.platform.AuditTrailPort;
 import com.drones.vision.map.application.MapAccessPolicy;
+import com.drones.vision.perception.application.pipeline.DemandSnapshot;
+import com.drones.vision.perception.application.pipeline.GateDecision;
+import com.drones.vision.perception.application.pipeline.GateOutcome;
+import com.drones.vision.perception.application.pipeline.GateReason;
 import com.drones.vision.perception.application.pipeline.TrackingStats;
 import com.drones.vision.perception.application.profile.CvProfileService;
 import com.drones.vision.perception.application.profile.EffectiveProfile;
@@ -44,7 +48,11 @@ import com.drones.vision.kernel.Ownership;
 import com.drones.vision.perception.domain.model.EvidenceSource;
 import com.drones.vision.perception.domain.model.FollowState;
 import com.drones.vision.perception.domain.model.FollowStatus;
+import com.drones.vision.perception.domain.model.FrameLedger;
+import com.drones.vision.perception.domain.model.LedgerEntry;
+import com.drones.vision.perception.domain.model.LedgerOutcome;
 import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.perception.domain.model.ObjectEvidence;
 import com.drones.vision.perception.domain.model.ObjectLifecycle;
 import com.drones.vision.perception.domain.model.ObjectState;
 import com.drones.vision.perception.domain.model.PipelineConfig;
@@ -88,6 +96,7 @@ import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 import com.drones.vision.api.live.LiveAndPollDetectionDemand;
+import com.drones.vision.api.live.LiveAndPollTraceDemand;
 import com.drones.vision.api.support.SnapshotJpegEncoder;
 import com.drones.vision.api.support.StreamDetectionSupport;
 import com.drones.vision.api.support.VisionApiProperties;
@@ -100,6 +109,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -136,6 +146,13 @@ class StreamControllerTest {
      * #detectionDemand}'s own {@code detectionWanted}/{@code touched} reads in tests below.
      */
     private LiveAndPollDetectionDemand detectionDemand;
+    /**
+     * Same real-instance-not-mock reasoning as {@link #detectionDemand} ({@link
+     * LiveAndPollTraceDemand} is {@code final} too) — a never-watching SSE predicate, so only the
+     * poll half ({@link StreamDetectionSupport#touchedTrace}) is exercised via {@link
+     * #traceDemand}'s own {@code traceWanted}/{@code touched} reads in the trace tests below.
+     */
+    private LiveAndPollTraceDemand traceDemand;
     private MockMvc mockMvc;
 
     private final DeviceId deviceId = DeviceId.random();
@@ -158,6 +175,7 @@ class StreamControllerTest {
         assetRepositoryPort = mock(AssetRepositoryPort.class);
         when(assetRepositoryPort.findByDeviceId(deviceId)).thenReturn(Optional.of(ownedAsset));
         detectionDemand = new LiveAndPollDetectionDemand(assetId -> false, Duration.ofSeconds(10));
+        traceDemand = new LiveAndPollTraceDemand(assetId -> false, Duration.ofSeconds(10));
         cvProfileService = mock(CvProfileService.class);
         when(cvProfileService.effective(any(), any(), any(), any())).thenAnswer(invocation -> new EffectiveProfile(
                 invocation.getArgument(0), null, null, ProfileSource.PLATFORM, invocation.getArgument(1)));
@@ -240,7 +258,7 @@ class StreamControllerTest {
     private MockMvc mockMvcFor(CurrentUser user, SeatAccess seatAccess) {
         StreamAccess streamAccess = new StreamAccess(streamService, assetRepositoryPort, user);
         StreamDetectionSupport streamDetectionSupport = new StreamDetectionSupport(PipelineConfig.defaults(),
-                detectionDemand, cvProfileService, assetRepositoryPort, user);
+                detectionDemand, cvProfileService, assetRepositoryPort, user, traceDemand);
         return MockMvcBuilders
                 .standaloneSetup(new StreamController(streamService, streamPublisherPort, detectionRepositoryPort,
                         new SnapshotJpegEncoder(VisionApiProperties.defaults()), streamDetectionSupport,
@@ -1658,6 +1676,120 @@ class StreamControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].detections[0].track").doesNotExist())
                 .andExpect(jsonPath("$[0].tracking").doesNotExist());
+    }
+
+    // ---- docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4/§4.5, wave W2.5: GET /api/streams/{streamId}/cv/trace ----
+
+    @Test
+    void traceReturnsEmptyListsForAnUnknownOrStoppedStream() throws Exception {
+        // Same "never errors" idiom #tracks/#detections already establish -- an unknown or
+        // stopped stream is a 200 of empty lists, not a 404 (StreamService#gateLedger/#frameLedger
+        // return List.of() for it, and Mockito's default answer for an unstubbed List-returning
+        // method is already an empty list, so nothing needs stubbing here).
+        StreamId streamId = StreamId.random();
+
+        mockMvc.perform(get("/api/streams/{streamId}/cv/trace", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.streamId").value(streamId.value().toString()))
+                .andExpect(jsonPath("$.gate", hasSize(0)))
+                .andExpect(jsonPath("$.frame", hasSize(0)))
+                .andExpect(jsonPath("$.world", hasSize(0)));
+    }
+
+    @Test
+    void traceReturns400ForAMalformedStreamId() throws Exception {
+        mockMvc.perform(get("/api/streams/{streamId}/cv/trace", "not-a-uuid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+    }
+
+    @Test
+    void traceMapsGateDecisionsFrameLedgerAndWorldObjectsFromTheirRespectiveReadModels() throws Exception {
+        StreamId streamId = StreamId.random();
+        Instant at = Instant.parse("2026-09-01T10:00:00Z");
+        GateDecision gate = new GateDecision(3, at, GateOutcome.SKIPPED, GateReason.GATE_NO_DEMAND,
+                new DemandSnapshot(true, false, false));
+        when(streamService.gateLedger(eq(streamId), anyInt())).thenReturn(List.of(gate));
+
+        FrameLedger frame = new FrameLedger(streamId, 3, at, 1, "TRACE_REQUESTED", List.of("detect.full"),
+                List.of(new LedgerEntry("detect.full", LedgerOutcome.RAN, "", 12.5, Map.of())),
+                Map.of(9L, List.of(new ObjectEvidence("detect.full", Map.of("label", "person")))), 0, 5.0, 12.5,
+                false);
+        when(streamService.frameLedger(eq(streamId), anyInt())).thenReturn(List.of(frame));
+
+        ObjectState object = new ObjectState(9L, ObjectLifecycle.CONFIRMED, streamId, null, null, null, null, null,
+                null, null);
+        when(streamService.objects(streamId)).thenReturn(List.of(object));
+
+        mockMvc.perform(get("/api/streams/{streamId}/cv/trace", streamId.value()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.streamId").value(streamId.value().toString()))
+                .andExpect(jsonPath("$.gate", hasSize(1)))
+                .andExpect(jsonPath("$.gate[0].frameSequence").value(3))
+                .andExpect(jsonPath("$.gate[0].outcome").value("SKIPPED"))
+                .andExpect(jsonPath("$.gate[0].reason").value("GATE_NO_DEMAND"))
+                .andExpect(jsonPath("$.gate[0].demand.detectionEnabled").value(true))
+                .andExpect(jsonPath("$.gate[0].demand.viewerDemand").value(false))
+                .andExpect(jsonPath("$.frame", hasSize(1)))
+                .andExpect(jsonPath("$.frame[0].sequence").value(3))
+                .andExpect(jsonPath("$.frame[0].detectorReason").value("TRACE_REQUESTED"))
+                .andExpect(jsonPath("$.frame[0].entries[0].contributorId").value("detect.full"))
+                .andExpect(jsonPath("$.frame[0].entries[0].outcome").value("RAN"))
+                .andExpect(jsonPath("$.frame[0].objects['9'][0].contributorId").value("detect.full"))
+                .andExpect(jsonPath("$.frame[0].objects['9'][0].claim.label").value("person"))
+                .andExpect(jsonPath("$.world", hasSize(1)))
+                .andExpect(jsonPath("$.world[0].id").value(9))
+                .andExpect(jsonPath("$.world[0].lifecycle").value("CONFIRMED"));
+    }
+
+    @Test
+    void traceUsesDefaultLastOfFiftyAndPassesAnExplicitLastThrough() throws Exception {
+        StreamId streamId = StreamId.random();
+
+        mockMvc.perform(get("/api/streams/{streamId}/cv/trace", streamId.value()))
+                .andExpect(status().isOk());
+
+        verify(streamService).gateLedger(eq(streamId), eq(50));
+        verify(streamService).frameLedger(eq(streamId), eq(50));
+
+        mockMvc.perform(get("/api/streams/{streamId}/cv/trace", streamId.value()).param("last", "5"))
+                .andExpect(status().isOk());
+
+        verify(streamService).gateLedger(eq(streamId), eq(5));
+        verify(streamService).frameLedger(eq(streamId), eq(5));
+    }
+
+    @Test
+    void traceTouchesTheTraceDemandPortSoAPollingInspectorCountsAsDemand() throws Exception {
+        // The trace-tier mirror of detectionsTouchesTheDemandPortSoAPollingReaderCountsAsDemand --
+        // TraceDemandPort's poll half (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4/W2.3).
+        StreamId streamId = StreamId.random();
+        assertFalse(traceDemand.traceWanted(streamId, null), "not demanded before the first read");
+
+        mockMvc.perform(get("/api/streams/{streamId}/cv/trace", streamId.value()))
+                .andExpect(status().isOk());
+
+        assertTrue(traceDemand.traceWanted(streamId, null), "reading the trace endpoint counts as demand");
+    }
+
+    @Test
+    void traceReturns404ForAPilotAssignedElsewhereOnARunningStream() throws Exception {
+        // Same LIVE-SCOPE-PLAN.md authority gap #tracks/#detections already close: a
+        // RUNNING-but-invisible stream must 404, never the forgiving empty-list 200.
+        StreamId streamId = StreamId.random();
+        when(streamService.streams()).thenReturn(List.of(runningOnOwnedDevice(streamId)));
+
+        pilotScopedTo(otherAssetId).perform(get("/api/streams/{streamId}/cv/trace", streamId.value()))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void traceReturns200ForAPilotAssignedToTheStreamsOwnAsset() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.streams()).thenReturn(List.of(runningOnOwnedDevice(streamId)));
+
+        pilotScopedTo(ownedAsset.id()).perform(get("/api/streams/{streamId}/cv/trace", streamId.value()))
+                .andExpect(status().isOk());
     }
 
     // ---- docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2: authority --------------------------------

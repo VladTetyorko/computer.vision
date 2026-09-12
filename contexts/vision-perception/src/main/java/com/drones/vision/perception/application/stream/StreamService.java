@@ -3,6 +3,7 @@ package com.drones.vision.perception.application.stream;
 import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.perception.domain.model.FollowStatus;
+import com.drones.vision.perception.domain.model.FrameLedger;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.perception.domain.model.ObjectState;
 import com.drones.vision.perception.domain.model.PipelineConfig;
@@ -19,6 +20,7 @@ import java.util.Set;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.perception.application.pipeline.StreamPipeline;
 import com.drones.vision.perception.application.pipeline.DetectionRate;
+import com.drones.vision.perception.application.pipeline.GateDecision;
 import com.drones.vision.perception.application.pipeline.PipelineLatency;
 import com.drones.vision.perception.application.pipeline.TrackingStats;
 
@@ -181,6 +183,38 @@ public interface StreamService {
      *         running on this instance, or no inference has completed yet
      */
     List<ObjectState> objects(StreamId streamId);
+
+    /**
+     * A running stream's gate-decision history (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.4:
+     * {@code GET /api/streams/{id}/cv/trace}'s "gate" half) — exactly {@link
+     * StreamPipeline#gateLedger(int)}: every recent {@code SENT}/{@code PROBE}/{@code SKIPPED}
+     * decision this pipeline made, consecutive same-reason {@code SKIPPED} runs coalesced.
+     *
+     * <p><b>Never errors.</b> An unknown or stopped stream reads as an empty list, the same
+     * forgiving idiom {@link #tracks}/{@link #objects} already use.
+     *
+     * @param streamId the stream to inspect
+     * @param last     how many of the most recent decisions to return; must not be negative
+     * @return the most recent gate decisions, oldest first, or an empty list if {@code streamId}
+     *         is unknown/not running on this instance
+     */
+    List<GateDecision> gateLedger(StreamId streamId, int last);
+
+    /**
+     * A running stream's frame-ledger history (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.4:
+     * {@code GET /api/streams/{id}/cv/trace}'s "frame" half) — exactly {@link
+     * StreamPipeline#frameLedger(int)}: every recent per-frame contributor evidence bundle
+     * cv-service actually attached (present only while {@link PipelineConfig#trace()} is true).
+     *
+     * <p><b>Never errors.</b> An unknown or stopped stream reads as an empty list, the same
+     * forgiving idiom {@link #tracks}/{@link #objects}/{@link #gateLedger} already use.
+     *
+     * @param streamId the stream to inspect
+     * @param last     how many of the most recent frame ledgers to return; must not be negative
+     * @return the most recent frame ledgers, oldest first, or an empty list if {@code streamId}
+     *         is unknown/not running on this instance, or tracing was never requested
+     */
+    List<FrameLedger> frameLedger(StreamId streamId, int last);
 
     /**
      * A running stream's {@code FOLLOW}-lock lifecycle (docs/plans/active/TRACK-FOLLOW-PLAN.md
