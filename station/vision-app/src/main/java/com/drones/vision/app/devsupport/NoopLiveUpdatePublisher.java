@@ -5,7 +5,10 @@ import com.drones.vision.flight.domain.model.GeofenceZoneEvent;
 import com.drones.vision.flight.domain.port.GeofenceLiveUpdatePort;
 import com.drones.vision.perception.domain.model.DetectionEvent;
 import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.perception.domain.model.WorldObject;
 import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
+
+import java.util.List;
 import com.drones.vision.platform.Event;
 import com.drones.vision.platform.EventLiveUpdatePort;
 import com.drones.vision.map.domain.model.MapEvent;
@@ -51,7 +54,7 @@ public final class NoopLiveUpdatePublisher implements FleetLiveUpdatePort, Telem
     }
 
     @Override
-    public void publishDetections(AssetId assetId, DetectionResult result) {
+    public void publishDetections(AssetId assetId, DetectionResult result, List<WorldObject> worldObjects) {
         // no-op
     }
 

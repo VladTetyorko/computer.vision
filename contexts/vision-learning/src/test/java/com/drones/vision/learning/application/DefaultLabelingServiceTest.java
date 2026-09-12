@@ -286,11 +286,11 @@ class DefaultLabelingServiceTest {
                 new ModelRef("yolo26n.pt", "latest"));
         // one second inside the +-2s tolerance window, and a farther-away decoy to prove "nearest" wins
         detectionRepository.save(new DetectionResult(replayStreamId, 1, AT.minusSeconds(1),
-                List.of(detection), Duration.ZERO, null, null, List.of()));
+                List.of(detection), Duration.ZERO, null, null, List.of(), Optional.empty()));
         Detection decoy = new Detection("building", 0.5, new BoundingBox(0.9, 0.9, 0.05, 0.05),
                 new ModelRef("yolo26n.pt", "latest"));
         detectionRepository.save(new DetectionResult(replayStreamId, 2, AT.plusSeconds(2),
-                List.of(decoy), Duration.ZERO, null, null, List.of()));
+                List.of(decoy), Duration.ZERO, null, null, List.of(), Optional.empty()));
 
         TrainingSample sample = service.captureFromReplay(new ReplayCaptureSpec(usage.id(), dataset.id(), AT_SECONDS),
                 actor, VisibilityScope.unbounded());

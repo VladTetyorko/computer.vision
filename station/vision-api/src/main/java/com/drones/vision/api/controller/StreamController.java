@@ -1,9 +1,11 @@
 package com.drones.vision.api.controller;
 
 import com.drones.vision.api.dto.ActiveStreamResponse;
+import com.drones.vision.api.dto.CvTraceResponse;
 import com.drones.vision.api.dto.DetectionResultResponse;
 import com.drones.vision.api.dto.FollowResponse;
-import com.drones.vision.api.dto.ObjectStateResponse;
+import com.drones.vision.api.dto.FrameLedgerResponse;
+import com.drones.vision.api.dto.GateDecisionResponse;
 import com.drones.vision.api.dto.StartStreamRequest;
 import com.drones.vision.api.dto.StartStreamResponse;
 import com.drones.vision.api.dto.DetectionRateResponse;
@@ -14,6 +16,7 @@ import com.drones.vision.api.dto.TrackResponse;
 import com.drones.vision.api.dto.TrackStatsResponse;
 import com.drones.vision.api.dto.UpdateStreamConfigRequest;
 import com.drones.vision.api.dto.UpdateStreamConfigResponse;
+import com.drones.vision.api.dto.WorldObjectResponse;
 import com.drones.vision.api.security.SeatAccess;
 import com.drones.vision.api.security.StreamAccess;
 import com.drones.vision.api.support.StreamDetectionSupport;
@@ -104,8 +107,8 @@ import com.drones.vision.api.support.SnapshotJpegEncoder;
  * 2-3). A seventh constructor parameter, for the identical reason {@link #streamAccess} is already a
  * sixth: two independent authorization axes (visibility, seat) must not be folded into one
  * collaborator or conflated with an unrelated one. Pass-through with {@code vision.crew.enabled=false}
- * (default) — unchanged behavior. {@link #list}, {@link #config}, {@link #tracks}, {@link
- * #detections} and {@link #snapshot} are reads and are never seat-guarded (&sect;3.3's last rows).
+ * (default) — unchanged behavior. {@link #list}, {@link #config}, {@link #tracks}, {@link #trace},
+ * {@link #detections} and {@link #snapshot} are reads and are never seat-guarded (&sect;3.3's last rows).
  */
 @RestController
 public class StreamController {
@@ -114,6 +117,9 @@ public class StreamController {
 
     /** Default {@code limit} for {@link #detections} when the query parameter is absent. */
     private static final int DEFAULT_DETECTIONS_LIMIT = 50;
+
+    /** Default {@code last} for {@link #trace} when the query parameter is absent. */
+    private static final int DEFAULT_TRACE_LAST = 50;
 
     private final StreamService streamService;
     private final StreamPublisherPort streamPublisherPort;
@@ -403,9 +409,52 @@ public class StreamController {
                 .map(FollowStatus::trackId)
                 .orElse(0L);
         FollowResponse followResponse = follow.map(status -> FollowResponse.from(status, Instant.now())).orElse(null);
-        List<ObjectStateResponse> objects = streamService.objects(id).stream().map(ObjectStateResponse::from).toList();
+        List<WorldObjectResponse> objects =
+                streamService.worldObjects(id).stream().map(WorldObjectResponse::from).toList();
         return new StreamTracksResponse(id.value().toString(), lockedTrackId, tracks, statsResponse, latencyResponse,
                 rateResponse, detectionState, followResponse, objects);
+    }
+
+    /**
+     * The warm trace tier's three ledgers side by side (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+     * §4.4) — {@code GET /api/streams/{streamId}/cv/trace?last=N}: the gate ledger (why a frame was
+     * or was not sent to cv-service), the frame ledger (what cv-service's contributors did on the
+     * frames it was asked to trace), and the world mirror (the platform's current fold, the same
+     * view {@link #tracks} already exposes as {@code objects}).
+     *
+     * <p><b>Never errors for an unknown or stopped stream</b> — a {@code 200} with every list empty,
+     * the same forgiving idiom {@link #tracks}/{@link #detections} already use. Only a malformed
+     * UUID, or a currently running stream whose asset the caller's scope may not reach, is an error.
+     *
+     * <p>This read is itself trace demand (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4, the poll
+     * half): a debug console polling this endpoint keeps {@code PipelineConfig#trace()} true for the
+     * stream, exactly like an open SSE {@code cv-trace:<assetId>} subscription does — see {@code
+     * TraceDemandPort}'s own javadoc. Touched only once the caller is known to be allowed to read
+     * this stream at all, the same ordering {@link #detections} already uses for its own touch.
+     *
+     * @param streamId the stream to inspect, as a canonical UUID string
+     * @param last     how many of the most recent gate/frame ledger entries to return; must not be
+     *                 negative (400 otherwise, via {@code StreamService#gateLedger}/{@code
+     *                 #frameLedger}'s own validation); defaults to {@value #DEFAULT_TRACE_LAST}.
+     *                 Does not window {@code world}, which is one live fold rather than a history
+     * @return the stream's recent gate decisions, recent frame ledgers, and current object mirror
+     * @throws java.util.NoSuchElementException if {@code streamId} is currently running on a device
+     *                                            whose asset the caller's scope may not reach
+     *                                            (docs/plans/done/LIVE-SCOPE-PLAN.md §2, W2)
+     */
+    @GetMapping("/api/streams/{streamId}/cv/trace")
+    public CvTraceResponse trace(@PathVariable String streamId,
+                                  @RequestParam(defaultValue = "" + DEFAULT_TRACE_LAST) int last) {
+        StreamId id = StreamId.of(streamId);
+        streamAccess.requireVisible(id);
+        streamDetectionSupport.touchedTrace(id);
+        List<GateDecisionResponse> gate =
+                streamService.gateLedger(id, last).stream().map(GateDecisionResponse::from).toList();
+        List<FrameLedgerResponse> frame =
+                streamService.frameLedger(id, last).stream().map(FrameLedgerResponse::from).toList();
+        List<WorldObjectResponse> world =
+                streamService.worldObjects(id).stream().map(WorldObjectResponse::from).toList();
+        return new CvTraceResponse(id.value().toString(), gate, frame, world);
     }
 
     /**

@@ -14,6 +14,8 @@ import com.drones.vision.platform.Event;
 import com.drones.vision.perception.domain.model.EventRuleConfig;
 import com.drones.vision.platform.EventType;
 import com.drones.vision.perception.domain.model.FollowState;
+import com.drones.vision.perception.domain.model.FrameLedger;
+import com.drones.vision.perception.domain.model.FrameLedgerFixtures;
 import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.perception.domain.model.ObjectLifecycle;
 import com.drones.vision.perception.domain.model.ObjectState;
@@ -37,6 +39,7 @@ import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 import java.net.URI;
 import java.nio.ByteBuffer;
@@ -64,6 +67,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
@@ -112,19 +117,19 @@ class StreamPipelineTest {
     }
 
     private DetectionResult emptyResult(long sequence) {
-        return new DetectionResult(streamId, sequence, Instant.now(), List.of(), Duration.ZERO, null, null, List.of());
+        return new DetectionResult(streamId, sequence, Instant.now(), List.of(), Duration.ZERO, null, null, List.of(), Optional.empty());
     }
 
     private DetectionResult resultWithBoxX(long sequence, Instant capturedAt, double boxX) {
         Detection detection = new Detection("person", 0.9, new BoundingBox(boxX, 0.10, 0.20, 0.20),
                 new ModelRef("yolo", "latest"));
-        return new DetectionResult(streamId, sequence, capturedAt, List.of(detection), Duration.ofMillis(5), null, null, List.of());
+        return new DetectionResult(streamId, sequence, capturedAt, List.of(detection), Duration.ofMillis(5), null, null, List.of(), Optional.empty());
     }
 
     private DetectionResult nonEmptyResult(long sequence) {
         Detection detection = new Detection("person", 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2),
                 new ModelRef("yolo", "latest"));
-        return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5), null, null, List.of());
+        return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5), null, null, List.of(), Optional.empty());
     }
 
     /** @see #objectState(long, String) -- a {@code DetectionResult} whose object mirror is non-empty. */
@@ -132,7 +137,7 @@ class StreamPipelineTest {
         Detection detection = new Detection("person", 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2),
                 new ModelRef("yolo", "latest"));
         return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5), null,
-                null, List.of(objects));
+                null, List.of(objects), Optional.empty());
     }
 
     /** A minimal, validly-populated {@link ObjectState} with an elected {@code label}, for read-model/filter tests. */
@@ -286,8 +291,9 @@ class StreamPipelineTest {
                 base.warmupFrames(), base.minMeasuredFps(), base.maxMeasuredFps(),
                 base.detectionBackoffInitialNanos(), base.detectionBackoffMaxNanos(),
                 base.sourceReopenBackoffInitialNanos(), base.sourceReopenBackoffMaxNanos(),
-                base.extrapolationMaxMillis(), base.extrapolationMatchGate(),
-                base.trackingStatsWindow(), base.trackRetention(), base.trackingSeed(), hfovDegrees);
+                base.trackingStatsWindow(), base.trackRetention(), base.trackingSeed(), hfovDegrees,
+                base.adaptiveRate(), base.detectionDemandPollInterval(), base.detectionDemandGrace(),
+                base.videoStaleAfter(), base.renderTier(), base.gateLedgerDepth(), base.frameLedgerDepth());
     }
 
     private StreamPipeline attitudePipeline(ScriptedVideoPublisher publisher, PipelineConfig config,
@@ -833,8 +839,63 @@ class StreamPipelineTest {
 
         pipeline(publisher, config(30, 2), assetId, liveUpdatePublisherPort, 30.0).start();
 
-        verify(liveUpdatePublisherPort).publishDetections(assetId, nonEmpty);
-        verify(liveUpdatePublisherPort).publishDetections(assetId, empty);
+        verify(liveUpdatePublisherPort).publishDetections(eq(assetId), eq(nonEmpty), any());
+        verify(liveUpdatePublisherPort).publishDetections(eq(assetId), eq(empty), any());
+    }
+
+    @Test
+    void publishesTheLiveUpdateBeforeSavingDurablyForTheSameResult() {
+        // docs/plans/active/CV-ORCHESTRATION-PLAN.md wave W2.4, onDetectionResult's own javadoc:
+        // the live plane runs before the durable save DELIBERATELY, restored after a regression cost
+        // TrackingAssociateE2ETest a detector pass -- detectionRepositoryPort#save is synchronous I/O,
+        // so running it between a result completing and the live read models updating makes every
+        // live reader lag by a database round trip. InOrder across two different mocks is the only
+        // way to assert a cross-collaborator ordering rather than each call's mere occurrence.
+        VideoFrame f = frame(0);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f));
+        DetectionResult result = nonEmptyResult(0);
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
+        AssetId assetId = AssetId.random();
+        DetectionLiveUpdatePort liveUpdatePublisherPort = mock(DetectionLiveUpdatePort.class);
+
+        pipeline(publisher, config(30, 2), assetId, liveUpdatePublisherPort, 30.0).start();
+
+        InOrder inOrder = inOrder(liveUpdatePublisherPort, detectionRepositoryPort);
+        inOrder.verify(liveUpdatePublisherPort).publishDetections(eq(assetId), eq(result), any());
+        inOrder.verify(detectionRepositoryPort).save(result);
+    }
+
+    @Test
+    void liveGateIsReadOnceAndSurvivesADemandChangeMidFanOut() {
+        // onDetectionResult's own javadoc: both gates are read ONCE at the top, not re-read around
+        // each plane -- re-reading liveGateOpen() right before the live-update publish would silently
+        // drop an update whose live-plane work (world/trackingStats/rateController) already ran,
+        // widening the accepted race window to a whole eventEngine dispatch. eventEngine#accept is
+        // the one collaborator this method calls strictly BETWEEN the live-plane block and the
+        // live-update publish (see the method body), so flipping detection demand off from inside
+        // the mocked eventEngine is the seam that proves the captured `live` local is not re-read:
+        // if it were, this demand flip would suppress the live-update publish below.
+        VideoFrame f = frame(0);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f));
+        DetectionResult result = nonEmptyResult(0);
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
+        AssetId assetId = AssetId.random();
+        DetectionLiveUpdatePort liveUpdatePublisherPort = mock(DetectionLiveUpdatePort.class);
+        DetectionEventEngine eventEngine = mock(DetectionEventEngine.class);
+        StreamPipeline pipeline = new StreamPipeline(streamId, device, config(30, 2), publisher, detectionPort,
+                streamPublisherPort, detectionRepositoryPort, eventPublisher,
+                new StreamPipelineCollaborators(Optional.of(eventEngine), Optional.of(assetId),
+                        Optional.of(liveUpdatePublisherPort), Optional.empty(), fixedFpsClock(30.0),
+                        StreamPipelineSettings.defaults(), System::nanoTime, Optional.empty()));
+        doAnswer(invocation -> {
+            pipeline.updateDetectionDemand(false); // flips liveGateOpen() false mid-fan-out
+            return null;
+        }).when(eventEngine).accept(any());
+
+        pipeline.start();
+
+        verify(liveUpdatePublisherPort).publishDetections(eq(assetId), eq(result), any());
+        assertFalse(pipeline.detectionDemand(), "the demand flip must actually have landed for this test to mean anything");
     }
 
     @Test
@@ -1019,7 +1080,7 @@ class StreamPipelineTest {
             detections.add(new Detection(label, 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2),
                     new ModelRef("yolo", "latest")));
         }
-        return new DetectionResult(streamId, sequence, Instant.now(), detections, Duration.ofMillis(5), null, null, List.of());
+        return new DetectionResult(streamId, sequence, Instant.now(), detections, Duration.ofMillis(5), null, null, List.of(), Optional.empty());
     }
 
     @Test
@@ -1377,7 +1438,7 @@ class StreamPipelineTest {
         verify(detectionRepositoryPort, times(1)).save(any());
         assertTrue(pipeline.latestDetections().isEmpty(),
                 "the live gate stayed closed (no demand) -- live read models must not populate for an unwatched stream");
-        verify(liveUpdatePublisherPort, never()).publishDetections(any(), any());
+        verify(liveUpdatePublisherPort, never()).publishDetections(any(), any(), any());
     }
 
     /**
@@ -1400,7 +1461,7 @@ class StreamPipelineTest {
         assertFalse(pipeline.latestDetections().isEmpty(), "boxes must be established while watched, before the edge under test");
         assertEquals(1L, pipeline.detectionRate().submitted());
         assertEquals(1L, pipeline.pipelineLatency().samples());
-        verify(liveUpdatePublisherPort, times(1)).publishDetections(eq(assetId), any());
+        verify(liveUpdatePublisherPort, times(1)).publishDetections(eq(assetId), any(), any());
 
         pipeline.updateDetectionDemand(false); // the last viewer leaves; ALWAYS keeps inference open
 
@@ -1419,7 +1480,7 @@ class StreamPipelineTest {
         verify(detectionRepositoryPort, times(2)).save(any());
         assertTrue(pipeline.latestDetections().isEmpty(),
                 "durable keeps saving for the unwatched ALWAYS stream, but live read models stay empty");
-        verify(liveUpdatePublisherPort, times(1)).publishDetections(eq(assetId), any());
+        verify(liveUpdatePublisherPort, times(1)).publishDetections(eq(assetId), any(), any());
         // still only once -- the second (post-edge) detection must never reach the live publisher
     }
 
@@ -1504,7 +1565,7 @@ class StreamPipelineTest {
         assertTrue(pipeline.latestDetections().isEmpty(),
                 "a result computed before the live-only close must not resurrect the live state that close cleared");
         verify(detectionRepositoryPort, times(2)).save(any());
-        verify(liveUpdatePublisherPort, times(1)).publishDetections(eq(assetId), any());
+        verify(liveUpdatePublisherPort, times(1)).publishDetections(eq(assetId), any(), any());
         // still only once -- the durable save for the late result must happen, but never its live counterpart
     }
 
@@ -1551,7 +1612,7 @@ class StreamPipelineTest {
         assertEquals(List.of("person"), engineCaptor.getValue().detections().stream().map(Detection::label).toList());
 
         ArgumentCaptor<DetectionResult> liveCaptor = ArgumentCaptor.forClass(DetectionResult.class);
-        verify(liveUpdatePublisherPort).publishDetections(eq(assetId), liveCaptor.capture());
+        verify(liveUpdatePublisherPort).publishDetections(eq(assetId), liveCaptor.capture(), any());
         assertEquals(List.of("person"), liveCaptor.getValue().detections().stream().map(Detection::label).toList());
     }
 
@@ -1648,7 +1709,7 @@ class StreamPipelineTest {
         ObjectState denied = objectState(1L, "person");
         ObjectState unidentified = objectStateWithoutIdentity(2L);
         DetectionResult result = new DetectionResult(streamId, 0, Instant.now(), List.of(), Duration.ofMillis(5),
-                null, null, List.of(denied, unidentified));
+                null, null, List.of(denied, unidentified), Optional.empty());
         when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
         PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, Set.of(),
                 EventRuleConfig.defaults(), true, TrackingConfig.off(), Set.of("person"), false);
@@ -1673,6 +1734,33 @@ class StreamPipelineTest {
         assertEquals(List.of(1L, 2L), pipeline.latestObjects().stream().map(ObjectState::id).toList());
     }
 
+    /**
+     * Mirrors {@link #theLabelFilterDropsDetectionsButNeverThePerFrameTrackingTelemetry}: {@code
+     * applyLabelFilters} only reconstructs a new {@link DetectionResult} when it actually drops
+     * something, and that reconstruction must carry every non-list component forward -- {@link
+     * FrameLedger} included -- exactly as {@code pullTelemetry} already does. A frame's warm debug
+     * tier is a fact about the frame, not about which boxes an operator chose to see.
+     */
+    @Test
+    void theLabelFilterCarriesTheLedgerThroughReconstructionInsteadOfDroppingIt() {
+        Detection kept = new Detection("person", 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2), new ModelRef("yolo", "latest"));
+        Detection dropped = new Detection("car", 0.9, new BoundingBox(0.3, 0.3, 0.2, 0.2), new ModelRef("yolo", "latest"));
+        FrameLedger ledger = FrameLedgerFixtures.everyFieldDistinct();
+        DetectionResult result = new DetectionResult(streamId, 0, Instant.now(), List.of(kept, dropped),
+                Duration.ofMillis(5), null, null, List.of(), Optional.of(ledger));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
+        PipelineConfig filtered = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5,
+                Set.of("person"), EventRuleConfig.defaults(), true);
+        StreamPipeline pipeline = manualPipeline(filtered, () -> 0L);
+
+        pipeline.onNext(frame(0));
+
+        ArgumentCaptor<DetectionResult> captor = ArgumentCaptor.forClass(DetectionResult.class);
+        verify(detectionRepositoryPort).save(captor.capture());
+        assertEquals(Optional.of(ledger), captor.getValue().ledger(),
+                "the ledger is a per-frame fact, not a per-list one -- filtering detections/objects must not drop it");
+    }
+
     // --- docs/plans/done/TRACKING-PLAN.md §5.D/§5.E, wave T3: track book, stats window, follow sampling ---
 
     // --- docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R2: the adaptive rate, end to end -------------
@@ -1683,9 +1771,9 @@ class StreamPipelineTest {
                 base.warmupFrames(), base.minMeasuredFps(), base.maxMeasuredFps(),
                 base.detectionBackoffInitialNanos(), base.detectionBackoffMaxNanos(),
                 base.sourceReopenBackoffInitialNanos(), base.sourceReopenBackoffMaxNanos(),
-                base.extrapolationMaxMillis(), base.extrapolationMatchGate(),
                 base.trackingStatsWindow(), base.trackRetention(), base.trackingSeed(),
-                base.cameraHfovDegrees(), adaptiveRate);
+                base.cameraHfovDegrees(), adaptiveRate, base.detectionDemandPollInterval(),
+                base.detectionDemandGrace(), base.videoStaleAfter(), base.renderTier(), base.gateLedgerDepth(), base.frameLedgerDepth());
     }
 
     /** A result whose single box is small and fast enough to demand far more than 10 fps. */
@@ -1693,7 +1781,7 @@ class StreamPipelineTest {
         Detection detection = new Detection("person", 0.9, new BoundingBox(0.4, 0.4, 0.05, 0.05),
                 new ModelRef("yolo", "latest"),
                 new TrackRef(1L, TrackState.CONFIRMED, DetectionSource.TRACKER, 2.0, 0.0, 10));
-        return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5), null, null, List.of());
+        return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5), null, null, List.of(), Optional.empty());
     }
 
     private int samplesOverTwoSecondsOfA60FpsSource(AdaptiveRateSettings adaptiveRate) {
@@ -1749,7 +1837,7 @@ class StreamPipelineTest {
                 new ModelRef("yolo", "latest"), new TrackRef(trackId, state, DetectionSource.TRACKER));
         return new DetectionResult(streamId, sequence, Instant.parse("2026-08-11T10:00:00Z").plusMillis(sequence * 100),
                 List.of(detection), Duration.ofMillis(5),
-                new TrackingTelemetry(false, null, Duration.ofNanos(400_000), "lk", trackId), null, List.of());
+                new TrackingTelemetry(false, null, Duration.ofNanos(400_000), "lk", trackId), null, List.of(), Optional.empty());
     }
 
     /** @see #trackedResult(long, long, TrackState) — same shape, but the box comes from a detector pass. */
@@ -1759,7 +1847,7 @@ class StreamPipelineTest {
         return new DetectionResult(streamId, sequence, Instant.parse("2026-08-11T10:00:00Z").plusMillis(sequence * 100),
                 List.of(detection), Duration.ofMillis(5),
                 new TrackingTelemetry(true, com.drones.vision.perception.domain.model.DetectorReason.ALWAYS,
-                        Duration.ofNanos(400_000), "lk", trackId), null, List.of());
+                        Duration.ofNanos(400_000), "lk", trackId), null, List.of(), Optional.empty());
     }
 
     /** A result carrying tracking telemetry but no detections — for exercising the unbound branch. */
@@ -1767,7 +1855,7 @@ class StreamPipelineTest {
         return new DetectionResult(streamId, sequence, Instant.parse("2026-08-11T10:00:00Z").plusMillis(sequence * 100),
                 List.of(), Duration.ofMillis(5),
                 new TrackingTelemetry(false, com.drones.vision.perception.domain.model.DetectorReason.NO_LOCK,
-                        Duration.ofNanos(400_000), "lk", lockedTrackId), null, List.of());
+                        Duration.ofNanos(400_000), "lk", lockedTrackId), null, List.of(), Optional.empty());
     }
 
     /** @see #mode(TrackingMode, int) — same shape, plus an explicit lock. */

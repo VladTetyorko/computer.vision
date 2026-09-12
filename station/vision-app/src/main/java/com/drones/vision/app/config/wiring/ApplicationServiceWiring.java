@@ -2,6 +2,7 @@ package com.drones.vision.app.config.wiring;
 
 import com.drones.vision.perception.domain.port.DetectionDemandPort;
 import com.drones.vision.perception.domain.port.DetectionPolicyPort;
+import com.drones.vision.perception.domain.port.TraceDemandPort;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
@@ -698,6 +699,15 @@ public class ApplicationServiceWiring {
      * legitimately want one without the other). Absent means every stream's {@code DetectionPolicy}
      * reads as {@code ON_VIEW} forever — no behavior change from before this port existed.
      *
+     * <p>{@code traceDemandPort} (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4) is likewise an
+     * {@link ObjectProvider}, for the same reason {@code detectionPolicyPort} is — no {@code
+     * TraceDemandPort} bean exists in this wave (the concrete adapter, backed by {@code
+     * cv-trace:<assetId>} SSE subscriber counts and {@code GET .../cv/trace} poll timestamps, is a
+     * later station/vision-api step), so this always resolves to {@link Optional#empty()} today and
+     * every stream's {@code PipelineConfig#trace()} stays at its construction-time value — see {@code
+     * TraceDemandPort}'s own javadoc for why that, not a fail-open {@code true}, is the correct "not
+     * wired yet" behavior.
+     *
      * <p>{@code cvProfileResolver} (docs/plans/active/CV-SETTINGS-PLAN.md §3.1/§5.4,
      * CV-SETTINGS-CONTEXT.md's W2 &rarr; W5 handoff) is {@code CvProfileWiringConfiguration}'s
      * unconditional bean — {@code DefaultStreamService#start} applies the same asset &rarr; category
@@ -723,6 +733,7 @@ public class ApplicationServiceWiring {
                                         MediamtxLiveFrameGrabber mediamtxLiveFrameGrabber,
                                         ObjectProvider<DetectionDemandPort> detectionDemandPort,
                                         ObjectProvider<DetectionPolicyPort> detectionPolicyPort,
+                                        ObjectProvider<TraceDemandPort> traceDemandPort,
                                         CvProfileResolver cvProfileResolver,
                                         StreamStateObserver streamStateObserver) {
         Optional<PullDetectionSettings> pullDetectionSettings = cvProperties.pullEnabled()
@@ -734,7 +745,8 @@ public class ApplicationServiceWiring {
                         Optional.of(detectionLiveUpdatePort),
                         streamPipelineSettings(applicationProperties, trackingProperties, cvProperties),
                         pullDetectionSettings, Optional.ofNullable(detectionDemandPort.getIfAvailable()),
-                        Optional.ofNullable(detectionPolicyPort.getIfAvailable()), streamStateObserver),
+                        Optional.ofNullable(detectionPolicyPort.getIfAvailable()),
+                        Optional.ofNullable(traceDemandPort.getIfAvailable()), streamStateObserver),
                 cvProfileResolver);
         if (publishProperties.sourceProxy().enabled()) {
             return new LiveFrameFallbackStreamService(defaultStreamService, mediamtxLiveFrameGrabber);
@@ -743,8 +755,8 @@ public class ApplicationServiceWiring {
     }
 
     /**
-     * Maps {@link VisionApplicationProperties.Pipeline}/{@link VisionApplicationProperties.Extrapolation}
-     * and {@link VisionTrackingProperties}' two read-model windows onto {@code
+     * Maps {@link VisionApplicationProperties.Pipeline} and {@link VisionTrackingProperties}' two
+     * read-model windows onto {@code
      * com.drones.vision.perception.application.pipeline.StreamPipelineSettings} — the two backoff
      * pairs are bound in milliseconds but the settings record's own unit is nanoseconds, so this is
      * where the conversion happens, once.
@@ -753,10 +765,10 @@ public class ApplicationServiceWiring {
      * vision.application.*} (docs/extracts/TRACKING-ORCHESTRATION.md &sect;4.3): {@code stats-window-seconds}
      * is how far back {@code TrackingStatsWindow}'s duty-cycle counters reach — the number {@code GET
      * /api/streams/{id}/tracks} reports as {@code stats.windowSeconds} — and {@code
-     * track-retention-seconds} is how long {@code TrackBook} keeps a track that stopped arriving.
+     * track-retention-seconds} is how long {@code WorldModel} keeps a track that stopped arriving.
      * Both configure per-stream <b>read models</b>, so unlike the mode/cadence seeds they apply to
      * every stream this instance starts from then on. Every default is byte-identical to the literal
-     * the settings record's own convenience constructor uses.
+     * {@code StreamPipelineSettings#defaults()} uses.
      *
      * <p>The mode/cadence seeds ({@code default-mode}, {@code verify-every-millis}, {@code
      * follow-fps}) ride the same record as {@link StreamPipelineSettings#trackingSeed()}, mapped by
@@ -777,12 +789,18 @@ public class ApplicationServiceWiring {
      * before its {@code StreamState} reads {@code STALLED}. It sits with the other per-stream
      * read-model tunables here rather than under a lifecycle root, because that is what it is: a
      * threshold over the pipeline's own frame cadence.
+     *
+     * <p>{@code pipeline.renderTier()} and the two ledger depths (docs/plans/active/
+     * CV-ORCHESTRATION-PLAN.md &sect;4.4/&sect;4.6) are the W2 additions: the first configures the
+     * server-side render tier {@code WorldModel} now assigns per object, the other two bound the
+     * per-stream trace rings. They replace {@code vision.application.extrapolation.*}, which went
+     * away with {@code DetectionExtrapolator} itself (plan &sect;7 defect D4 — its query method had
+     * no caller).
      */
     static StreamPipelineSettings streamPipelineSettings(VisionApplicationProperties properties,
                                                           VisionTrackingProperties tracking,
                                                           VisionCvProperties cvProperties) {
         VisionApplicationProperties.Pipeline pipeline = properties.pipeline();
-        VisionApplicationProperties.Extrapolation extrapolation = properties.extrapolation();
         VisionCvProperties.Demand demand = cvProperties.demand();
         return new StreamPipelineSettings(pipeline.assumedSourceFps(), pipeline.measuredFpsEwmaAlpha(),
                 pipeline.warmupFrames(), pipeline.minMeasuredFps(), pipeline.maxMeasuredFps(),
@@ -790,14 +808,17 @@ public class ApplicationServiceWiring {
                 TimeUnit.MILLISECONDS.toNanos(pipeline.detectionBackoff().maxMs()),
                 TimeUnit.MILLISECONDS.toNanos(pipeline.sourceReopenBackoff().initialMs()),
                 TimeUnit.MILLISECONDS.toNanos(pipeline.sourceReopenBackoff().maxMs()),
-                extrapolation.maxMillis(), extrapolation.matchGate(),
                 Duration.ofSeconds(tracking.statsWindowSeconds()),
                 Duration.ofSeconds(tracking.trackRetentionSeconds()),
                 TrackingWiring.streamStartTrackingSeed(tracking),
                 pipeline.cameraHfovDegrees(),
                 new AdaptiveRateSettings(pipeline.adaptiveRate().enabled(), pipeline.adaptiveRate().maxFps(),
                         pipeline.adaptiveRate().ewmaAlpha()),
-                demand.pollInterval(), demand.grace(), pipeline.videoStaleAfter());
+                demand.pollInterval(), demand.grace(), pipeline.videoStaleAfter(),
+                new RenderTierSettings(pipeline.renderTier().notableTopK(),
+                        pipeline.renderTier().movingDisplacementThreshold(),
+                        pipeline.renderTier().subScaleFraction()),
+                pipeline.gateLedgerDepth(), pipeline.frameLedgerDepth());
     }
 
     /**

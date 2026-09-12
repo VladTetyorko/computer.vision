@@ -1326,7 +1326,7 @@ class PostgresDockerIntegrationTest {
             DetectionResult result = new DetectionResult(streamId, 7, NOW,
                     List.of(new Detection("person", 0.87, new BoundingBox(0.1, 0.2, 0.3, 0.4),
                             new ModelRef("yolo", "v1"))),
-                    Duration.ofMillis(42), null, null, List.of());
+                    Duration.ofMillis(42), null, null, List.of(), Optional.empty());
 
             repository.save(result);
 
@@ -1369,10 +1369,10 @@ class PostgresDockerIntegrationTest {
             StreamId streamId = StreamId.random();
             repository.save(new DetectionResult(streamId, 1, NOW,
                     List.of(new Detection("person", 0.9, new BoundingBox(0, 0, 0.1, 0.1), new ModelRef("yolo", "v1"))),
-                    Duration.ZERO, null, null, List.of()));
+                    Duration.ZERO, null, null, List.of(), Optional.empty()));
             repository.save(new DetectionResult(streamId, 2, NOW.plusSeconds(1),
                     List.of(new Detection("car", 0.8, new BoundingBox(0, 0, 0.1, 0.1), new ModelRef("yolo", "v1"))),
-                    Duration.ZERO, null, null, List.of()));
+                    Duration.ZERO, null, null, List.of(), Optional.empty()));
 
             List<DetectionResult> found = repository.query(new DetectionQuery(streamId, null, null, "car", 10));
 
@@ -1462,7 +1462,7 @@ class PostgresDockerIntegrationTest {
                     new TrackRef(7L, TrackState.COASTING, DetectionSource.TRACKER, 0.012, -0.001, 143));
 
             repository.save(new DetectionResult(streamId, 5, NOW, List.of(tracked), Duration.ofMillis(3),
-                    new TrackingTelemetry(true, DetectorReason.CADENCE, Duration.ofNanos(400_000), "lk", 7L), null, List.of()));
+                    new TrackingTelemetry(true, DetectorReason.CADENCE, Duration.ofNanos(400_000), "lk", 7L), null, List.of(), Optional.empty()));
 
             List<DetectionResult> found = repository.query(new DetectionQuery(streamId, null, null, null, 10));
 
@@ -1474,7 +1474,7 @@ class PostgresDockerIntegrationTest {
         }
 
         private DetectionResult emptyDetectionResult(StreamId streamId, long frameSequence, Instant capturedAt) {
-            return new DetectionResult(streamId, frameSequence, capturedAt, List.of(), Duration.ZERO, null, null, List.of());
+            return new DetectionResult(streamId, frameSequence, capturedAt, List.of(), Duration.ZERO, null, null, List.of(), Optional.empty());
         }
     }
 
@@ -2230,7 +2230,7 @@ class PostgresDockerIntegrationTest {
         DetectionRepositoryPort repository = new JpaDetectionRepository(entityManagerFactory, 3);
         StreamId streamId = StreamId.random();
         for (int i = 0; i < 5; i++) {
-            repository.save(new DetectionResult(streamId, i, NOW.plusSeconds(i), List.of(), Duration.ZERO, null, null, List.of()));
+            repository.save(new DetectionResult(streamId, i, NOW.plusSeconds(i), List.of(), Duration.ZERO, null, null, List.of(), Optional.empty()));
         }
 
         List<DetectionResult> remaining = repository.query(new DetectionQuery(streamId, null, null, null, 10));
@@ -2263,7 +2263,7 @@ class PostgresDockerIntegrationTest {
 
         DetectionResult detection = new DetectionResult(streamId, 1, NOW,
                 List.of(new Detection("person", 0.75, new BoundingBox(0.1, 0.1, 0.2, 0.2), new ModelRef("yolo", "v1"))),
-                Duration.ofMillis(30), null, null, List.of());
+                Duration.ofMillis(30), null, null, List.of(), Optional.empty());
         new JpaDetectionRepository(entityManagerFactory).save(detection);
 
         EntityManagerFactory freshContext = PersistenceUnit.start(POSTGRES.getJdbcUrl(), POSTGRES.getUsername(),

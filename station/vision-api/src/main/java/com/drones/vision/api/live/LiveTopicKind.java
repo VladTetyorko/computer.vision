@@ -4,13 +4,15 @@ import java.util.Arrays;
 import java.util.stream.Collectors;
 
 /**
- * The ten kinds of {@link LiveTopic} (docs/plans/done/REALTIME-PLAN.md §4; {@link #DEVICES}/{@link
+ * The twelve kinds of {@link LiveTopic} (docs/plans/done/REALTIME-PLAN.md §4; {@link #DEVICES}/{@link
  * #DETECTION_EVENTS} extend the channel for the fleet/warehouse and events UIs; {@link #MAP}
  * extends it again for the common operational picture, docs/plans/done/MAP-REWORK-PLAN.md
  * §4.3; {@link #GEO} extends it again for visual geolocation's corrected track,
  * docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4/D11; {@link #ZONES}/{@link #SYSTEM} extend it again
  * for geofence-zone deltas and a server-side system-health sampler, docs/plans/active/
- * LIVE-POLL-RETIREMENT-PLAN.md §3 D2/D3 &amp; §4.1/§4.2, waves L3/L4) — {@link #wire()}
+ * LIVE-POLL-RETIREMENT-PLAN.md §3 D2/D3 &amp; §4.1/§4.2, waves L3/L4; {@link #TRACKS}/{@link
+ * #CV_TRACE} extend it again for the world model's object mirror and warm-tier frame ledger,
+ * docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4/§4.5/§5, wave W2) — {@link #wire()}
  * is both the topic-string prefix (e.g. {@code "telemetry:<assetId>"}) and the {@code
  * com.drones.vision.api.dto.LiveEnvelopeResponse#type()} value for envelopes of that kind, since
  * the two are deliberately the same vocabulary.
@@ -98,7 +100,26 @@ enum LiveTopicKind {
      * com.drones.vision.api.dto.SystemStatusResponse} shape {@code GET /api/system/status} already
      * returns. Always-on. Ring-buffer capacity 1: only the latest sample matters (CLAUDE.md rule 9).
      */
-    SYSTEM("system");
+    SYSTEM("system"),
+    /**
+     * Per-asset object mirror at frame cadence, opt-in (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+     * §4.5/§5, wave W2) — {@code List<ObjectStateResponse>}, exactly {@code
+     * StreamTracksResponse#objects}'s own shape, published every time {@link #DETECTIONS} is (the
+     * same {@code DetectionResult}, riding a second topic) rather than gated by a separate demand
+     * signal — the first <em>live</em> path for object state; {@code GET /api/streams/{id}/tracks}
+     * remains the poll fallback for a client with no open connection. Ring-buffer capacity 1, same
+     * "freshest wins" treatment as {@link #DETECTIONS} (CLAUDE.md rule 9).
+     */
+    TRACKS("tracks"),
+    /**
+     * Per-asset frame ledger, opt-in (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4/§5, wave W2)
+     * — one {@code FrameLedgerResponse}, published only for a frame cv-service was actually asked
+     * to trace ({@code PipelineConfig#trace()}); most {@link #DETECTIONS} ticks carry no ledger at
+     * all and so publish nothing here. The live half of {@code GET /api/streams/{id}/cv/trace}'s
+     * "frame" ledger — an inspector subscribing to this topic is itself part of what keeps {@code
+     * trace} demanded (see {@code TraceDemandPort}'s own javadoc). Ring-buffer capacity 1.
+     */
+    CV_TRACE("cv-trace");
 
     private final String wire;
 

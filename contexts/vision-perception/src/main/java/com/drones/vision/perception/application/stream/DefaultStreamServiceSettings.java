@@ -7,6 +7,7 @@ import com.drones.vision.perception.domain.port.DetectionDemandPort;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
 import com.drones.vision.perception.domain.port.DetectionPolicyPort;
+import com.drones.vision.perception.domain.port.TraceDemandPort;
 
 import java.util.Objects;
 import java.util.Optional;
@@ -46,6 +47,16 @@ import java.util.Optional;
  *                                      demand-poll tick as {@link #detectionDemandPort} when either
  *                                      is present — the two are independently optional, so either
  *                                      one alone still schedules the poll task
+ * @param traceDemandPort              empty means the demand-poll task never evaluates trace demand
+ *                                      for any stream this service starts, so {@code
+ *                                      PipelineConfig#trace()} stays at whatever value the stream
+ *                                      started with (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+ *                                      &sect;4.4); see {@link TraceDemandPort}'s own javadoc for why
+ *                                      that is the correct "off" behavior rather than {@link
+ *                                      #detectionDemandPort}'s fail-open-{@code true}. Consulted on
+ *                                      the same demand-poll tick as {@link #detectionDemandPort}/
+ *                                      {@link #detectionPolicyPort} — independently optional, so it
+ *                                      alone is also enough to schedule the poll task
  * @param streamStateObserver           notified on every computed {@code StreamState} transition
  *                                      (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.2 C6);
  *                                      never {@code null} — {@link StreamStateObserver#NOOP} is the
@@ -59,6 +70,7 @@ public record DefaultStreamServiceSettings(Optional<UsageTracker> usageTracker,
                                             Optional<PullDetectionSettings> pullDetectionSettings,
                                             Optional<DetectionDemandPort> detectionDemandPort,
                                             Optional<DetectionPolicyPort> detectionPolicyPort,
+                                            Optional<TraceDemandPort> traceDemandPort,
                                             StreamStateObserver streamStateObserver) {
 
     public DefaultStreamServiceSettings {
@@ -69,6 +81,7 @@ public record DefaultStreamServiceSettings(Optional<UsageTracker> usageTracker,
         Objects.requireNonNull(pullDetectionSettings, "pullDetectionSettings must not be null");
         Objects.requireNonNull(detectionDemandPort, "detectionDemandPort must not be null");
         Objects.requireNonNull(detectionPolicyPort, "detectionPolicyPort must not be null");
+        Objects.requireNonNull(traceDemandPort, "traceDemandPort must not be null");
         Objects.requireNonNull(streamStateObserver, "streamStateObserver must not be null");
     }
 
@@ -79,6 +92,6 @@ public record DefaultStreamServiceSettings(Optional<UsageTracker> usageTracker,
     public static DefaultStreamServiceSettings defaults() {
         return new DefaultStreamServiceSettings(Optional.empty(), Optional.empty(), Optional.empty(),
                 StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty(), Optional.empty(),
-                StreamStateObserver.NOOP);
+                Optional.empty(), StreamStateObserver.NOOP);
     }
 }

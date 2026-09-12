@@ -39,6 +39,8 @@ import java.util.concurrent.Flow;
 import java.util.concurrent.SubmissionPublisher;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -125,7 +127,7 @@ class StreamPipelinePullModeTest {
         Detection detection = new Detection("person", 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2),
                 new ModelRef("yolo26n.pt", "latest"));
         return new DetectionResult(streamId, sequence, capturedAt, List.of(detection), Duration.ofMillis(7), null,
-                telemetry, List.of());
+                telemetry, List.of(), Optional.empty());
     }
 
     // --- the driver seam: pull results reach the same fan-out push mode uses -------------------
@@ -158,7 +160,7 @@ class StreamPipelinePullModeTest {
         DetectionResult result = resultWithPullTelemetry(0, Instant.now(), SOME_TELEMETRY);
         results.submit(result);
 
-        verify(liveUpdatePublisherPort).publishDetections(assetId, result);
+        verify(liveUpdatePublisherPort).publishDetections(eq(assetId), eq(result), any());
     }
 
     @Test

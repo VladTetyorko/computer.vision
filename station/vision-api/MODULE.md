@@ -102,10 +102,11 @@ the full mechanism.
 | StreamController | POST | `/api/devices/{deviceId}/stream` | Start a stream on a device | scope |
 | StreamController | GET | `/api/streams` | List active streams | scope (filtered) |
 | StreamController | DELETE | `/api/streams/{streamId}` | Stop (idempotent no-op if unknown/stopped) | scope |
-| StreamController | GET | `/api/streams/{streamId}/detections?limit=` | Recent per-frame detections, each now also carrying `objects` (CV-ORCHESTRATION wave W1 step 5 — the per-identity mirror, `ObjectStateResponse`, never omitted, empty when no mirror was produced) | scope |
+| StreamController | GET | `/api/streams/{streamId}/detections?limit=` | Recent per-frame detections, each now also carrying `objects` (CV-ORCHESTRATION wave W1 step 5 — the per-identity mirror, `ObjectStateResponse`, never omitted, empty when no mirror was produced) — **deliberately still the flat mirror as of wave W2.8**, not `WorldObjectResponse`: the operator/event/render relations are a platform concern this durable/detections path must never carry, see `WorldObjectResponse`'s own javadoc | scope |
 | StreamController | GET | `/api/streams/{streamId}/snapshot` | Latest frame as downscaled JPEG (only binary, non-JSON response besides the HLS proxy) | scope |
 | StreamController | PATCH | `/api/streams/{streamId}/config` | Hot-patch confidence/fps/labelFilter/model/tracking — never interrupts video | scope |
-| StreamController | GET | `/api/streams/{streamId}/tracks` | Track book + duty-cycle stats + the held `FOLLOW` lock's own lifecycle (`follow`, TRACK-FOLLOW-PLAN §3.1 — omitted until a lock is issued) + `objects` (CV-ORCHESTRATION wave W1 step 5 — the current object mirror, `ObjectStateResponse`, sourced from `StreamService#objects`; unlike `stats`/`latency`/`rate`/`follow`, always a JSON array, never omitted); never errors on unknown stream (empty `tracks`/`objects`) | scope |
+| StreamController | GET | `/api/streams/{streamId}/tracks` | Track book + duty-cycle stats + the held `FOLLOW` lock's own lifecycle (`follow`, TRACK-FOLLOW-PLAN §3.1 — omitted until a lock is issued) + `objects` — **as of wave W2.8, `List<WorldObjectResponse>`** (`{state, operator, event, render}`, sourced from `StreamService#worldObjects`, built from the same `WorldModel` fold `onDetectionResult` already ran; previously the flat `ObjectStateResponse` mirror, CV-ORCHESTRATION wave W1 step 5 — see `WorldObjectResponse`'s own javadoc for why `/detections` did **not** move with it); unlike `stats`/`latency`/`rate`/`follow`, always a JSON array, never omitted; never errors on unknown stream (empty `tracks`/`objects`) | scope |
+| StreamController | GET | `/api/streams/{streamId}/cv/trace?last=N` | CV-ORCHESTRATION wave W2.5, docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4 — the warm trace tier's three ledgers side by side (`CvTraceResponse{streamId, gate, frame, world}`): `gate` (`GateDecisionResponse[]`, `contexts/vision-perception`'s `FrameGateLedger`, coalesced), `frame` (`FrameLedgerResponse[]`, `FrameLedgerRing`, empty unless tracing was ever requested for this stream), `world` (**as of wave W2.8, `List<WorldObjectResponse>`**, previously `ObjectStateResponse[]` — same `StreamService#worldObjects` source `/tracks` now uses, **not** windowed by `last`). `last` defaults to `DEFAULT_TRACE_LAST=50` when absent. **This read is itself trace demand** — polling this endpoint counts toward `TraceDemandPort#traceWanted` exactly like an open `cv-trace:<assetId>` SSE subscription (`StreamDetectionSupport#touchedTrace`). Never errors — unknown/stopped stream reads every list empty, same idiom as `/tracks` | scope |
 | HlsProxyController | GET | `/hls/{streamId}/**` | Reverse-proxy this asset's live HLS bytes to the mediamtx sidecar | scope (`StreamAccess#requireVisibleForHlsProxy`, checked **before** the upstream is ever contacted; fails closed on an unknown/stopped id — AUTH-ROLES-PLAN.md D10, wave B4 — unlike the other `StreamAccess`-gated rows above, which keep `requireVisible`'s no-op) — also now behind `SecurityConfig`'s secured chain's `authenticated()` rule (`/hls/**` joined `/api/**`/`/ws/**`) |
 | CvModelsController | GET | `/api/cv/models` | Detection-model roster — widened (CV-SETTINGS-PLAN §5.2) to serve the registry's live roster (`registrySource: true`) when `vision.cv.registry.enabled`, else the static config catalogue; never errors | open |
 | CvTrackersController | GET | `/api/cv/trackers` | Static tracker-engine roster | open |
@@ -361,7 +362,9 @@ One `LiveUpdateRegistry` implements all seven per-context live-update ports (`Fl
 only. Topics: `fleet`, `event`, `devices`, `detection-events`, `discovery`, `zones` (all always-on, no
 auth needed beyond the connection itself — see below for `discovery`'s own delta-only semantics), plus
 a tenth always-on topic `system` that carries no per-context port at all (see below), `map` and
-per-asset `telemetry:<id>`/`detections:<id>`/`geo:<id>` (individually authorized — see below).
+per-asset `telemetry:<id>`/`detections:<id>`/`geo:<id>`/`tracks:<id>`/`cv-trace:<id>` (individually
+authorized — see below; the last two, CV-ORCHESTRATION wave W2.5, are documented in their own
+paragraph further down).
 Delivery is coalesced (leading+trailing, ~150ms default) per topic, not per connection, so exactly one
 resumable `seq` exists per topic; `Last-Event-ID` resumes from a per-topic ring buffer (FIFO or
 latest-only depending on topic). Tunables live in `VisionApiProperties.Live` (coalesce/heartbeat/buffer
@@ -382,6 +385,33 @@ before removing it, rather than discarding it, specifically so a subscriber can 
 deleted" without a separate lookup. Buffer capacity mirrors `discoveryBuffer` (shares
 `eventBufferCapacity`, FIFO, not latest-only — a `DELETED` a resuming viewer missed must still be
 delivered, not collapsed away by a later `UPDATED` to a different zone).
+
+**`tracks:<assetId>`/`cv-trace:<assetId>` (CV-ORCHESTRATION-PLAN.md §4.4/§4.5/§4.6/§5, waves
+W2.5/W2.8) — the live halves of `GET /api/streams/{id}/tracks`'s `objects` and
+`GET /api/streams/{id}/cv/trace`'s `frame`, piggybacked onto the existing `pendingDetections` drain
+loop rather than a new publish call site.** `pendingDetections` holds a `PendingDetection(DetectionResult
+result, List<WorldObject> worldObjects)` per asset (wave W2.8) — `publishDetections`'s own 3rd
+parameter (`contexts/vision-perception`'s `DetectionLiveUpdatePort`, extended this wave), carried
+verbatim so `detections`/`tracks`/`cv-trace` all come from one coherent snapshot per result instead
+of three independent reads. Every time one is drained for the `detections:<assetId>` topic,
+`flushPending` also (a) **unconditionally** publishes `List<WorldObjectResponse>` (from
+`pending.worldObjects()`, mapped `WorldObjectResponse::from` — **not** the flat `ObjectStateResponse`
+`DetectionResultResponse#objects` just used for the `detections:` envelope above it, see
+`WorldObjectResponse`'s own javadoc for why) onto `tracks:<assetId>` — `TRACKS` rides the exact same
+cadence as `DETECTIONS`, every drain, empty list included, since the fold is computed for free
+alongside `detections[]` whenever tracking is on; and (b) publishes one `FrameLedgerResponse` (from
+`result.ledger()`) onto `cv-trace:<assetId>` **only when `ledger()` is present** — most ticks carry no
+ledger at all (tracing must have been separately demanded via `TraceDemandPort`), so most ticks
+publish nothing on this topic. Both ring buffers are capacity-1 latest-wins (`LiveRingBuffer(1, true)`),
+same as `DETECTIONS`.
+`LiveUpdateRegistry#watchingTrace(AssetId)` — `true` iff at least one live connection currently
+subscribes to that asset's `cv-trace:<assetId>` topic — is the SSE half of `LiveAndPollTraceDemand`'s
+OR (the poll half is `StreamDetectionSupport#touchedTrace`, a recent `GET .../cv/trace` timestamp).
+**`CV_TRACE` is deliberately removable from a stale-connection sweep the same way `DETECTIONS`/
+`DETECTION_EVENTS`/… are (an inspector's connection dying should stop counting as trace demand); `TRACKS`
+is deliberately left at this method's pre-existing broader scope, matching `GEO`** — see the sweep
+method's own inline comment for the exact reasoning; do not "clean up" the asymmetry, it is
+intentional.
 
 **`system` (LIVE-POLL-RETIREMENT-PLAN §3 D3/§4.2, wave L4) — a server-side sampler, not a port.**
 Unlike every other topic, nothing calls `LiveUpdateRegistry` through a per-context port to publish
@@ -1413,6 +1443,19 @@ surviving call sites are each record's own canonical constructor invocation insi
 `StreamController#tracks`. No `ApiExceptionHandler` mapping changed — this wave adds a field, not a
 new failure mode.
 
+**Superseded in part by wave W2.8** (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6): the paragraph
+above describes wave W1's shape, where `StreamTracksResponse#objects` and `CvTraceResponse#world`
+still carried the flat `ObjectStateResponse` mirror. As of W2.8 both are retyped to
+`List<WorldObjectResponse>` (new file, `dto/WorldObjectResponse.java` — `{state, operator, event,
+render}`, `state` the same `ObjectStateResponse` verbatim) and sourced from the new
+`StreamService#worldObjects(StreamId)` rather than `#objects(StreamId)`. `DetectionResultResponse#objects`
+and the `detections:` SSE topic are **unchanged** — they deliberately keep the flat mirror, since the
+operator/event/render relations are a platform concern cv-service's own wire shape (and the durable/
+detections path mirroring it) must never carry. `LiveUpdateRegistry`'s `tracks:` envelope payload
+follows the same retype (see this file's `live` package section below) — it and the `/tracks`/`/cv/trace`
+REST reads now share one `WorldObjectResponse::from` mapping fed by one `WorldModel` fold per result,
+never re-folded per surface.
+
 `./mvnw -B -pl contexts/vision-perception,cv/grpc,station/vision-api,storage/persistence,contexts/vision-events,contexts/vision-learning,station/vision-app -am -DskipWeb test` —
 `station/vision-api` **1069 → 1074 tests, all green** (5 new: 4 `ObjectStateResponseTest` cases —
 `everyGroupAbsentSerializesToMissingKeysNotNulls`,
@@ -1436,3 +1479,64 @@ own, so its report honestly says `Tests run: 0` while its 35 `@Nested` classes e
 line in the build log and none of their own `.txt`. A per-file tally over `surefire-reports/*.txt`
 therefore under-counts this module by an order of magnitude; trust Maven's per-module `Results:`
 line instead. An earlier pass through this wave mistook exactly that for a Docker-gate flake.
+
+`docs/plans/active/CV-ORCHESTRATION-PLAN.md` **wave W2.5 (`GET /api/streams/{id}/cv/trace`, TRACKS/
+CV_TRACE SSE, cv status capacity, commit `cdf17816`) and W2.6 (profile fold + `intent`, Java only,
+commit `fc0bfa00`) are done here.** W2.5: new `dto.CvTraceResponse`/`GateDecisionResponse`/
+`FrameLedgerResponse` (see the endpoint table's new `/cv/trace` row above), new `LiveTopicKind.TRACKS`/
+`.CV_TRACE` plus `LiveUpdateRegistry#watchingTrace(AssetId)` (see the "Live updates" section's own new
+paragraph above), new `live.LiveAndPollTraceDemand implements TraceDemandPort`
+(`contexts/vision-perception`'s new port — see that module's MODULE.md), and
+`StreamDetectionSupport` grew from a 5-component to a **6-component** record (`traceDemand` appended,
+nullable on the same "demand gate not wired at all" condition as `demand`, backing
+`#touchedTrace(StreamId)` — see that record's own javadoc). `SystemStatusResponse`'s cv-service row
+gained no new structured field — capacity facts fold into the existing free-text `detail` string
+(`cv/grpc`'s `CvStatusProvider`, that module's own MODULE.md). W2.6: `dto.CvProfileRequest` grew from
+a 9-component to a **10-component** record (`Intent intent` appended, nullable — `null` leaves every
+other field exactly as sent, byte-identical to before this wave); `toSpec()` resolves it via
+`contexts/vision-perception`'s new `IntentPolicyResolver` to seed a blank `model`/empty `labelFilter`/
+the synthesized `eventRule`'s confidence only — see that record's own javadoc and
+`contexts/vision-perception/MODULE.md`'s `IntentPolicy`/`IntentPolicyResolver` bullets for the full
+"which fields intent can and cannot reach" reasoning; no web surface consumes `intent` yet (Java-only
+wave, `docs/plans/active/CV-ORCHESTRATION-PLAN.md` §4.7/§4.8's Tuning modal is a later, UI-owned wave).
+`./mvnw -B -pl contexts/vision-perception,station/vision-api -am test` — `station/vision-api`
+**1074 → 1097 tests, all green** (new coverage: `LiveUpdateRegistryTest`'s
+`aResultWithAPopulatedObjectMirrorBroadcastsOntoTheTracksTopic`/
+`aResultWithATracedLedgerBroadcastsOntoTheCvTraceTopic`/
+`aResultWithNoLedgerNeverBroadcastsOntoTheCvTraceTopic`/`watchingTraceIsFalseWhenNoConnectionIsSubscribed`/
+`watchingTraceIsTrueOnceAConnectionSubscribesToThatAssetsCvTraceTopic`, plus 7 new
+`StreamControllerTest` cases for the `trace` endpoint); full `station/vision-app -am test` reactor
+(vision-perception/adapter-cv-grpc/vision-api/vision-web/vision-app) **`BUILD SUCCESS`**,
+`vision-app` itself **355 tests, all green**. No web-side DTO mirror change was needed for either
+step — `intent` is Java-only by design, and the trace DTOs have no `station/vision-web` consumer this
+wave. This W2.7 pass is documentation-only (this file, `cv/grpc`'s, `contexts/vision-perception`'s,
+`station/vision-app`'s and `storage/persistence`'s own MODULE.md) — no source change, counts above are
+carried forward from W2.5/W2.6's own measurement, not re-run for this docs-only step per this wave's
+"skip the tests" instruction.
+
+**W2.8 test/gap follow-up (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7):** W2.6 shipped
+`CvProfileRequest`'s `intent` fold without tests; closed here with `dto.CvProfileRequestTest` (12
+cases: null-intent passthrough, blank-model/empty-labelFilter seeding, an explicit value winning
+over the intent's own choice, `CUSTOM` returning the caller's own list unchanged, the synthesized
+`eventRule` confidence, and `fieldSources()`'s per-knob provenance) and `support.StreamDetectionSupportTest`
+(2 cases, new file — proves an asset-tier profile fold and the session-tier `StartStreamRequest#mergeOnto`
+override coexist in one resolved `PipelineConfig`, and that an unowned device skips the fold entirely).
+Also new: `CvProfileRequest#fieldSources()` → nested `CvProfileRequest.Sources(ProfileSource model,
+ProfileSource labelFilter)`, reporting `contexts/vision-perception`'s new `ProfileSource.INTENT` for
+exactly the two fields `toSpec()` actually seeded from `intent`; `CvProfileResponse` grew from a
+15-component to a **16-component** record (`Sources sources` appended, `@JsonInclude(NON_NULL)` —
+omitted, not `null`, for every read with no originating request) with its own nested
+`CvProfileResponse.Sources`, populated by `CvProfileController#create`/`#update` from
+`request.fieldSources()` so a caller (W3's Tuning modal) can render "resolved from intent People."
+**W2.10 fix:** the one-arg `from(CvProfile)` overload (silently delegating to `from(profile, null)`)
+was the withdrawn "null means the feature is off" convenience-overload pattern (CLAUDE.md rule 10)
+in static-factory form — removed. `CvProfileResponse.from(CvProfile, Sources)` is now the sole
+factory; `Sources.none()` (both fields `null`, so `@JsonInclude(NON_NULL)` still omits the group)
+is what every read-path caller (`list`, `get`, `effective`, `platformDefault`) passes explicitly. **Disclosed, permanent gap** (not a later-wave TODO):
+`confidenceThreshold`/`inferenceFps` have no `sources` representation at all, even though
+`IntentPolicyResolver` computes an `IntentPolicy#detectFloor()`/`#rateCeiling()` for them, because
+those two `CvProfileRequest` fields are bare primitives with no "caller left this to the platform"
+sentinel under this frozen wire contract — see `CvProfileRequest#fieldSources()`'s and
+`CvProfileResponse.Sources`'s own javadoc. No `station/vision-web` change: `models.ts` has no
+exhaustive wire-contract-spec test for `CvProfile`/`CvProfileRequest` and no mirror of `intent` yet
+(still Java-only), so `sources` needed none either this wave.

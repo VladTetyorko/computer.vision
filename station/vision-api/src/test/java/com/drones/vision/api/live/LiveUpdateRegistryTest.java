@@ -55,6 +55,13 @@ import com.drones.vision.kernel.StreamId;
 import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.map.domain.model.Verification;
+import com.drones.vision.api.dto.FrameLedgerResponse;
+import com.drones.vision.api.dto.WorldObjectResponse;
+import com.drones.vision.perception.domain.model.FrameLedger;
+import com.drones.vision.perception.domain.model.ObjectLifecycle;
+import com.drones.vision.perception.domain.model.ObjectState;
+import com.drones.vision.perception.domain.model.RenderTier;
+import com.drones.vision.perception.domain.model.WorldObject;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import org.junit.jupiter.api.Test;
@@ -71,6 +78,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -138,7 +146,41 @@ class LiveUpdateRegistryTest {
     private static DetectionResult detectionResult(StreamId streamId, long frameSequence) {
         Detection detection = new Detection("person", 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2),
                 new ModelRef("yolo", "latest"));
-        return new DetectionResult(streamId, frameSequence, Instant.now(), List.of(detection), Duration.ZERO, null, null, List.of());
+        return new DetectionResult(streamId, frameSequence, Instant.now(), List.of(detection), Duration.ZERO, null, null, List.of(), Optional.empty());
+    }
+
+    private static ObjectState objectState(StreamId streamId, long id) {
+        return new ObjectState(id, ObjectLifecycle.CONFIRMED, streamId, null, null, null, null, null, null, null);
+    }
+
+    /**
+     * {@link WorldObject}'s own fold (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6, wave W2.8) --
+     * a minimal, valid instance so the {@code tracks}/{@code cv-trace} broadcast tests can exercise
+     * {@link LiveUpdateRegistry#publishDetections}'s own {@code worldObjects} parameter, independent
+     * of {@code detectionResultWithMirror}'s flat {@code ObjectState} list.
+     */
+    private static WorldObject worldObject(StreamId streamId, long id) {
+        return new WorldObject(objectState(streamId, id), new WorldObject.Operator(false, false, null),
+                new WorldObject.EventLink(null), new WorldObject.Render(RenderTier.T1));
+    }
+
+    /** {@link FrameLedger}'s own trace tier (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4) -- a minimal, valid instance for {@code cv-trace} broadcast tests. */
+    private static FrameLedger frameLedger(StreamId streamId, long frameSequence) {
+        return new FrameLedger(streamId, frameSequence, Instant.now(), 1, "TRACE_REQUESTED", List.of(), List.of(),
+                Map.of(), 0, 1.0, 2.0, false);
+    }
+
+    /**
+     * A {@link DetectionResult} carrying a populated {@code objects()} mirror and, optionally, a
+     * {@code ledger()} -- the fixture {@link #detectionResult} deliberately leaves both empty, so
+     * this one exists just for the {@code tracks}/{@code cv-trace} broadcast tests.
+     */
+    private static DetectionResult detectionResultWithMirror(StreamId streamId, long frameSequence,
+            boolean withLedger) {
+        List<ObjectState> objects = List.of(objectState(streamId, 1));
+        Optional<FrameLedger> ledger = withLedger ? Optional.of(frameLedger(streamId, frameSequence)) : Optional.empty();
+        return new DetectionResult(streamId, frameSequence, Instant.now(), List.of(), Duration.ZERO, null, null,
+                objects, ledger);
     }
 
     private static Device device(DeviceId deviceId) {
@@ -637,16 +679,83 @@ class LiveUpdateRegistryTest {
         StreamId streamId = StreamId.random();
         LiveUpdateRegistry registry = registry();
 
-        registry.publishDetections(assetId, detectionResult(streamId, 0));
-        registry.publishDetections(assetId, detectionResult(streamId, 1));
+        registry.publishDetections(assetId, detectionResult(streamId, 0), List.of());
+        registry.publishDetections(assetId, detectionResult(streamId, 1), List.of());
         DetectionResult latest = detectionResult(streamId, 2);
-        registry.publishDetections(assetId, latest);
+        registry.publishDetections(assetId, latest, List.of());
 
         registry.flushPending();
 
         List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.detections(assetId)).snapshot();
         assertEquals(1, buffered.size(), "detections emit latest-frame-only -- no backlog");
         assertEquals("detections", buffered.get(0).type());
+    }
+
+    /**
+     * docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.5/W2.5 -- the same {@code pendingDetections}
+     * drain loop that already broadcasts {@code detections:<assetId>} additionally broadcasts
+     * {@code tracks:<assetId>} whenever the result's {@code objects()} mirror is non-empty,
+     * independent of whether a {@code ledger()} was traced this frame.
+     */
+    @Test
+    void aResultWithAPopulatedObjectMirrorBroadcastsOntoTheTracksTopic() {
+        AssetId assetId = AssetId.random();
+        StreamId streamId = StreamId.random();
+        LiveUpdateRegistry registry = registry();
+
+        registry.publishDetections(assetId, detectionResultWithMirror(streamId, 0, false),
+                List.of(worldObject(streamId, 1)));
+        registry.flushPending();
+
+        List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.tracks(assetId)).snapshot();
+        assertEquals(1, buffered.size(), "a populated object mirror must reach the tracks topic");
+        assertEquals("tracks", buffered.get(0).type());
+        Object payload = buffered.get(0).payload();
+        assertTrue(payload instanceof List<?>, "tracks payload must be a list of WorldObjectResponse");
+        assertEquals(1, ((List<?>) payload).size());
+        assertTrue(((List<?>) payload).get(0) instanceof WorldObjectResponse,
+                "tracks must carry the WorldObject fold (operator/event/render), not the flat ObjectState mirror");
+    }
+
+    /**
+     * The other half of the same drain loop: a {@code ledger()} present on the result additionally
+     * broadcasts {@code cv-trace:<assetId>}, carrying the mapped {@link FrameLedgerResponse}.
+     */
+    @Test
+    void aResultWithATracedLedgerBroadcastsOntoTheCvTraceTopic() {
+        AssetId assetId = AssetId.random();
+        StreamId streamId = StreamId.random();
+        LiveUpdateRegistry registry = registry();
+
+        registry.publishDetections(assetId, detectionResultWithMirror(streamId, 0, true),
+                List.of(worldObject(streamId, 1)));
+        registry.flushPending();
+
+        List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.cvTrace(assetId)).snapshot();
+        assertEquals(1, buffered.size(), "a traced ledger must reach the cv-trace topic");
+        assertEquals("cv-trace", buffered.get(0).type());
+        assertTrue(buffered.get(0).payload() instanceof FrameLedgerResponse);
+    }
+
+    /**
+     * The fail-safe direction: a result whose {@code ledger()} is {@link Optional#empty()} (this
+     * frame was not traced -- {@code trace=false} is the common case) must never broadcast onto
+     * {@code cv-trace:<assetId>}, even though the same result does reach {@code tracks}.
+     */
+    @Test
+    void aResultWithNoLedgerNeverBroadcastsOntoTheCvTraceTopic() {
+        AssetId assetId = AssetId.random();
+        StreamId streamId = StreamId.random();
+        LiveUpdateRegistry registry = registry();
+
+        registry.publishDetections(assetId, detectionResultWithMirror(streamId, 0, false),
+                List.of(worldObject(streamId, 1)));
+        registry.flushPending();
+
+        assertEquals(0, registry.bufferFor(LiveTopic.cvTrace(assetId)).snapshot().size(),
+                "an untraced frame must not put anything on the cv-trace topic");
+        assertEquals(1, registry.bufferFor(LiveTopic.tracks(assetId)).snapshot().size(),
+                "the same frame's object mirror still reaches tracks");
     }
 
     @Test
@@ -711,6 +820,28 @@ class LiveUpdateRegistryTest {
 
         assertEquals(true, registry.watchingDetections(assetId));
         assertEquals(false, registry.watchingDetections(otherAssetId), "only the subscribed asset counts");
+    }
+
+    @Test
+    void watchingTraceIsFalseWhenNoConnectionIsSubscribed() {
+        LiveUpdateRegistry registry = registry();
+
+        assertEquals(false, registry.watchingTrace(AssetId.random()));
+    }
+
+    @Test
+    void watchingTraceIsTrueOnceAConnectionSubscribesToThatAssetsCvTraceTopic() {
+        // Mirrors watchingDetectionsIsTrueOnceAConnectionSubscribesToThatAssetsDetectionsTopic --
+        // TraceDemandPort's SSE half (LiveAndPollTraceDemand) is built on exactly this method.
+        AssetId assetId = AssetId.random();
+        AssetId otherAssetId = AssetId.random();
+        when(assetService.assets()).thenReturn(List.of());
+        LiveUpdateRegistry registry = registry();
+
+        registry.connect("cv-trace:" + assetId.value(), null, UserId.random(), layerId -> true, id -> true);
+
+        assertEquals(true, registry.watchingTrace(assetId));
+        assertEquals(false, registry.watchingTrace(otherAssetId), "only the subscribed asset counts");
     }
 
     /**

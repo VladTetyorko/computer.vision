@@ -2,12 +2,14 @@ package com.drones.vision.app.config.wiring;
 
 import com.drones.vision.adapter.cvgrpc.CvChannelSupervisor;
 import com.drones.vision.adapter.cvgrpc.CvChannels;
+import com.drones.vision.adapter.cvgrpc.GrpcCvInspectClient;
 import com.drones.vision.adapter.cvgrpc.GrpcCvSettings;
 import com.drones.vision.adapter.cvgrpc.WireFormat;
 import com.drones.vision.adapter.cvgrpc.GrpcDetectionPort;
 import com.drones.vision.adapter.cvgrpc.GrpcPulledDetectionPort;
 import com.drones.vision.api.dto.CvModelResponse;
 import com.drones.vision.api.live.LiveAndPollDetectionDemand;
+import com.drones.vision.api.live.LiveAndPollTraceDemand;
 import com.drones.vision.api.live.LiveUpdateRegistry;
 import com.drones.vision.api.support.StreamDetectionSupport;
 import com.drones.vision.app.config.properties.VisionCvProperties;
@@ -27,6 +29,7 @@ import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.port.DetectionPolicyPort;
 import com.drones.vision.perception.domain.port.DetectionPort;
 import com.drones.vision.perception.domain.port.PulledDetectionPort;
+import com.drones.vision.perception.domain.port.TraceDemandPort;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.domain.port.AssetRepositoryPort;
 import com.drones.vision.api.security.CurrentUser;
@@ -223,6 +226,23 @@ public class CvWiring {
     }
 
     /**
+     * {@code Inference/Inspect} client for {@link SystemStatusWiring#cvServiceStatus}'s capacity
+     * fields (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.9, wave W2) — rides the same shared
+     * {@link #cvGrpcChannel} {@link #detectionPort} streams frames over, so this bean's own condition
+     * mirrors {@link #cvGrpcChannel}'s exactly (same order-independence reasoning as {@link
+     * #cvChannelSupervisor}'s own javadoc): whenever the channel exists, Inspect can be asked over it.
+     * Independent of {@code vision.cv.reconnect.enabled} — Inspect needs no reconnect supervision of
+     * its own, it either answers or {@link CvStatusProvider} catches the failure.
+     */
+    @Bean
+    @ConditionalOnExpression("${vision.cv.enabled:false} or ${vision.training.enabled:false} "
+            + "or '${vision.cv.frame-transport:push}' == 'pull' or ${vision.geo.visual.enabled:false} "
+            + "or ${vision.cv.registry.enabled:false}")
+    public GrpcCvInspectClient cvInspectClient(@Qualifier("cvGrpcChannel") ObjectProvider<ManagedChannel> cvGrpcChannel) {
+        return new GrpcCvInspectClient(cvGrpcChannel.getObject());
+    }
+
+    /**
      * Selects the {@link DetectionPort} implementation per {@link VisionCvProperties#enabled()}
      * (docs/plans/done/MVP1-PLAN.md §C7 bullet 4): {@code true} wires {@code GrpcDetectionPort}
      * (adapter-cv-grpc) against the shared {@link #cvGrpcChannel}; {@code false} (the default)
@@ -378,6 +398,31 @@ public class CvWiring {
     }
 
     /**
+     * The concrete {@link TraceDemandPort} adapter (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+     * §4.4, wave W2) — {@link TraceDemandPort}'s own javadoc names this bean as its "later
+     * station/vision-api step". Gated on the same {@code vision.cv.demand.enabled} flag as {@link
+     * #detectionDemandPort}, not a dedicated property: an absent bean here reproduces {@link
+     * TraceDemandPort}'s own documented "fail open, structurally" fallback ({@code
+     * DefaultStreamService} simply never evaluates trace demand at all, so {@code
+     * PipelineConfig#trace()} stays at whatever the stream started with), the same posture the
+     * demand flag already gives {@link #detectionDemandPort}.
+     *
+     * <p>Reuses {@link VisionCvProperties.Demand#pollTtl()} rather than a dedicated {@code
+     * vision.cv.trace.poll-ttl} property — a deliberate simplification (not asked for by the plan's
+     * own frozen contract), since the two poll TTLs answer the same question ("how long does one
+     * read count as demand") for two siblings of the same demand model; splitting the knob can
+     * follow later if trace's usage pattern ever needs a different value.
+     */
+    @Bean
+    @ConditionalOnExpression("${vision.cv.demand.enabled:true}")
+    public LiveAndPollTraceDemand traceDemandPort(VisionCvProperties cvProperties,
+            @Qualifier("liveUpdateRegistry") ObjectProvider<LiveUpdateRegistry> liveUpdateRegistry) {
+        LiveUpdateRegistry registry = liveUpdateRegistry.getIfAvailable();
+        Predicate<AssetId> watchingTrace = registry == null ? assetId -> false : registry::watchingTrace;
+        return new LiveAndPollTraceDemand(watchingTrace, cvProperties.demand().pollTtl());
+    }
+
+    /**
      * D1's self-scheduled per-asset {@code DetectionPolicy} cache (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md
      * wave D1) — see {@link DetectionPolicyCache}'s own javadoc for the staleness/fail-closed
      * contract. No dedicated {@code vision.cv.policy.enabled} escape hatch: this bean's own existence
@@ -470,8 +515,9 @@ public class CvWiring {
     @Bean
     public StreamDetectionSupport streamDetectionSupport(PipelineConfig streamDefaultConfig,
             ObjectProvider<LiveAndPollDetectionDemand> detectionDemandPort, CvProfileService cvProfileService,
-            AssetRepositoryPort assetRepositoryPort, CurrentUser currentUser) {
+            AssetRepositoryPort assetRepositoryPort, CurrentUser currentUser,
+            ObjectProvider<LiveAndPollTraceDemand> traceDemandPort) {
         return new StreamDetectionSupport(streamDefaultConfig, detectionDemandPort.getIfAvailable(),
-                cvProfileService, assetRepositoryPort, currentUser);
+                cvProfileService, assetRepositoryPort, currentUser, traceDemandPort.getIfAvailable());
     }
 }

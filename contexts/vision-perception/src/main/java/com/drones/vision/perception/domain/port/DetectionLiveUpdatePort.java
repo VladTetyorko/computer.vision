@@ -3,6 +3,9 @@ package com.drones.vision.perception.domain.port;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.perception.domain.model.DetectionEvent;
 import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.perception.domain.model.WorldObject;
+
+import java.util.List;
 
 /**
  * Driven port: announce a stream's live detection activity — a completed inference or a debounced
@@ -37,10 +40,22 @@ public interface DetectionLiveUpdatePort {
     /**
      * Announces that one stream's inference completed, attributed to the stream's owning asset.
      *
-     * @param assetId the asset that owns the stream this result belongs to
-     * @param result  the completed detection result, including an empty one
+     * @param assetId      the asset that owns the stream this result belongs to
+     * @param result       the completed detection result, including an empty one
+     * @param worldObjects {@code result}'s world fold (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+     *                     §4.6, wave W2.8) — the same objects {@code result.objects()} carries, plus
+     *                     the operator/event/render relations this platform owns on top of them.
+     *                     Computed once, ahead of this call, by whichever {@code WorldModel} folded
+     *                     {@code result} (today: {@code StreamPipeline#onDetectionResult}, right
+     *                     after its own live-plane {@code world.accept} call) — a driving adapter
+     *                     must treat this as that fold's read-only snapshot for {@code result} and
+     *                     must never re-fold or call back into the pipeline to obtain it. Deliberately
+     *                     a sibling parameter rather than a new field on {@link DetectionResult}: the
+     *                     operator/event/render relations are a platform concern cv-service's own
+     *                     wire shape must never carry (see {@link WorldObject}'s own javadoc). Never
+     *                     {@code null}; empty exactly when {@code result.objects()} is empty.
      */
-    void publishDetections(AssetId assetId, DetectionResult result);
+    void publishDetections(AssetId assetId, DetectionResult result, List<WorldObject> worldObjects);
 
     /**
      * Announces a debounced {@link DetectionEvent} occurrence — opened, advanced (a further

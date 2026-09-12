@@ -46,6 +46,24 @@ class LiveTopicTest {
     }
 
     @Test
+    void parsesATracksTopicWithItsAssetId() {
+        AssetId assetId = AssetId.random();
+
+        LiveTopic topic = LiveTopic.parse("tracks:" + assetId.value());
+
+        assertEquals(LiveTopic.tracks(assetId), topic);
+    }
+
+    @Test
+    void parsesACvTraceTopicWithItsAssetId() {
+        AssetId assetId = AssetId.random();
+
+        LiveTopic topic = LiveTopic.parse("cv-trace:" + assetId.value());
+
+        assertEquals(LiveTopic.cvTrace(assetId), topic);
+    }
+
+    @Test
     void wireRoundTripsForEveryKind() {
         AssetId assetId = AssetId.random();
 
@@ -53,6 +71,8 @@ class LiveTopicTest {
         assertEquals("event", LiveTopic.EVENT.wire());
         assertEquals("telemetry:" + assetId.value(), LiveTopic.telemetry(assetId).wire());
         assertEquals("detections:" + assetId.value(), LiveTopic.detections(assetId).wire());
+        assertEquals("tracks:" + assetId.value(), LiveTopic.tracks(assetId).wire());
+        assertEquals("cv-trace:" + assetId.value(), LiveTopic.cvTrace(assetId).wire());
     }
 
     @Test
@@ -72,6 +92,8 @@ class LiveTopicTest {
         assertThrows(IllegalArgumentException.class, () -> LiveTopic.parse("telemetry"));
         assertThrows(IllegalArgumentException.class, () -> LiveTopic.parse("telemetry:"));
         assertThrows(IllegalArgumentException.class, () -> LiveTopic.parse("detections"));
+        assertThrows(IllegalArgumentException.class, () -> LiveTopic.parse("tracks"));
+        assertThrows(IllegalArgumentException.class, () -> LiveTopic.parse("cv-trace"));
     }
 
     @Test

@@ -10,7 +10,8 @@ import java.util.Set;
  * {@code event}, {@code devices}, {@code detection-events}, {@code map}, {@code discovery},
  * {@code zones}, and {@code system} are implicit and always-on (every connection gets all eight
  * regardless of the {@code topics} query parameter); {@code telemetry:<assetId>}/{@code
- * detections:<assetId>}/{@code geo:<assetId>} are opt-in, named explicitly by the caller.
+ * detections:<assetId>}/{@code geo:<assetId>}/{@code tracks:<assetId>}/{@code
+ * cv-trace:<assetId>} are opt-in, named explicitly by the caller.
  *
  * @param kind    which kind of topic
  * @param assetId the asset this topic is scoped to; {@code null} for {@link #FLEET}/{@link
@@ -56,6 +57,16 @@ record LiveTopic(LiveTopicKind kind, AssetId assetId) {
         return new LiveTopic(LiveTopicKind.GEO, assetId);
     }
 
+    /** The world model's per-asset object mirror at frame cadence (see {@link LiveTopicKind#TRACKS}). */
+    static LiveTopic tracks(AssetId assetId) {
+        return new LiveTopic(LiveTopicKind.TRACKS, assetId);
+    }
+
+    /** The warm trace tier's per-asset frame ledger (see {@link LiveTopicKind#CV_TRACE}). */
+    static LiveTopic cvTrace(AssetId assetId) {
+        return new LiveTopic(LiveTopicKind.CV_TRACE, assetId);
+    }
+
     /**
      * @return the wire form, e.g. {@code "fleet"} or {@code "telemetry:<assetId>"}
      */
@@ -95,6 +106,8 @@ record LiveTopic(LiveTopicKind kind, AssetId assetId) {
             case TELEMETRY -> telemetry(requireAssetId(idPart, "telemetry"));
             case DETECTIONS -> detections(requireAssetId(idPart, "detections"));
             case GEO -> geo(requireAssetId(idPart, "geo"));
+            case TRACKS -> tracks(requireAssetId(idPart, "tracks"));
+            case CV_TRACE -> cvTrace(requireAssetId(idPart, "cv-trace"));
         };
     }
 

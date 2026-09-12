@@ -305,7 +305,7 @@ class DefaultStreamServiceTest {
                 detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher,
                 new DefaultStreamServiceSettings(Optional.empty(), Optional.empty(), Optional.empty(),
                         settingsWithSourceReopenBackoff(TimeUnit.MILLISECONDS.toNanos(20),
-                                TimeUnit.MILLISECONDS.toNanos(20)), Optional.empty(), Optional.empty(), Optional.empty(),
+                                TimeUnit.MILLISECONDS.toNanos(20)), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
                         StreamStateObserver.NOOP), cvProfileResolver());
         ErroringThenSilentPublisher publisher = new ErroringThenSilentPublisher();
         when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(publisher);
@@ -484,7 +484,7 @@ class DefaultStreamServiceTest {
         return new DefaultStreamService(assetDirectory, videoSourceRegistry, detectionPort, streamPublisherPort,
                 detectionRepositoryPort, eventPublisher,
                 new DefaultStreamServiceSettings(Optional.empty(), Optional.empty(), Optional.empty(),
-                        StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty(), Optional.empty(), observer),
+                        StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), observer),
                 cvProfileResolver());
     }
 
@@ -592,7 +592,7 @@ class DefaultStreamServiceTest {
                 new com.drones.vision.kernel.BoundingBox(0.1, 0.1, 0.2, 0.2),
                 new ModelRef("yolo26n.pt", "latest"));
         DetectionResult result = new DetectionResult(frame.streamId(), 0, Instant.now(), List.of(detection),
-                Duration.ZERO, null, null, List.of());
+                Duration.ZERO, null, null, List.of(), Optional.empty());
         when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
 
         StreamId streamId = service.start(device.id(), detectingDefaults());
@@ -609,7 +609,7 @@ class DefaultStreamServiceTest {
                 new com.drones.vision.kernel.BoundingBox(0.1, 0.1, 0.2, 0.2),
                 new ModelRef("yolo26n.pt", "latest"));
         DetectionResult result = new DetectionResult(frame.streamId(), 0, Instant.now(), List.of(detection),
-                Duration.ZERO, null, null, List.of());
+                Duration.ZERO, null, null, List.of(), Optional.empty());
         when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
         StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
 
@@ -632,16 +632,16 @@ class DefaultStreamServiceTest {
                 streamPublisherPort, detectionRepositoryPort, eventPublisher,
                 new DefaultStreamServiceSettings(Optional.of(usageTracker), Optional.empty(),
                         Optional.of(liveUpdatePublisherPort), StreamPipelineSettings.defaults(), Optional.empty(),
-                        Optional.empty(), Optional.empty(), StreamStateObserver.NOOP), cvProfileResolver());
+                        Optional.empty(), Optional.empty(), Optional.empty(), StreamStateObserver.NOOP), cvProfileResolver());
         VideoFrame frame = new VideoFrame(StreamId.random(), 0, Instant.now(), 64, 48, PixelFormat.JPEG,
                 ByteBuffer.wrap(new byte[]{1, 2, 3}));
         when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(framePublisher(frame));
-        DetectionResult result = new DetectionResult(frame.streamId(), 0, Instant.now(), List.of(), Duration.ZERO, null, null, List.of());
+        DetectionResult result = new DetectionResult(frame.streamId(), 0, Instant.now(), List.of(), Duration.ZERO, null, null, List.of(), Optional.empty());
         when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
 
         withLiveUpdates.start(device.id(), detectingDefaults());
 
-        verify(liveUpdatePublisherPort).publishDetections(assetId, result);
+        verify(liveUpdatePublisherPort).publishDetections(eq(assetId), eq(result), any());
     }
 
     @Test
@@ -654,7 +654,7 @@ class DefaultStreamServiceTest {
         StreamService withTracker = new DefaultStreamService(assetDirectory, videoSourceRegistry, detectionPort,
                 streamPublisherPort, detectionRepositoryPort, eventPublisher,
                 new DefaultStreamServiceSettings(Optional.of(usageTracker), Optional.empty(), Optional.empty(),
-                        StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty(), Optional.empty(),
+                        StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
                         StreamStateObserver.NOOP), cvProfileResolver());
 
         withTracker.start(device.id(), PipelineConfig.defaults());
@@ -680,11 +680,11 @@ class DefaultStreamServiceTest {
         StreamService service = new DefaultStreamService(assetDirectory, videoSourceRegistry, detectionPort,
                 streamPublisherPort, detectionRepositoryPort, eventPublisher,
                 new DefaultStreamServiceSettings(Optional.of(usageTracker), Optional.empty(), Optional.empty(),
-                        withFov, Optional.empty(), Optional.empty(), Optional.empty(), StreamStateObserver.NOOP), cvProfileResolver());
+                        withFov, Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), StreamStateObserver.NOOP), cvProfileResolver());
         VideoFrame frame = new VideoFrame(StreamId.random(), 0, Instant.now(), 64, 48, PixelFormat.JPEG,
                 ByteBuffer.wrap(new byte[]{1, 2, 3}));
         when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(framePublisher(frame));
-        DetectionResult result = new DetectionResult(frame.streamId(), 0, Instant.now(), List.of(), Duration.ZERO, null, null, List.of());
+        DetectionResult result = new DetectionResult(frame.streamId(), 0, Instant.now(), List.of(), Duration.ZERO, null, null, List.of(), Optional.empty());
         when(detectionPort.detect(any(), any(), any())).thenReturn(CompletableFuture.completedFuture(result));
 
         service.start(device.id(), detectingDefaults());
@@ -702,7 +702,7 @@ class DefaultStreamServiceTest {
         StreamService service = new DefaultStreamService(assetDirectory, videoSourceRegistry, detectionPort,
                 streamPublisherPort, detectionRepositoryPort, eventPublisher,
                 new DefaultStreamServiceSettings(Optional.of(usageTracker), Optional.empty(), Optional.empty(),
-                        StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty(), Optional.empty(),
+                        StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
                         StreamStateObserver.NOOP), cvProfileResolver());
 
         service.start(device.id(), PipelineConfig.defaults());
@@ -717,8 +717,9 @@ class DefaultStreamServiceTest {
                 base.warmupFrames(), base.minMeasuredFps(), base.maxMeasuredFps(),
                 base.detectionBackoffInitialNanos(), base.detectionBackoffMaxNanos(),
                 base.sourceReopenBackoffInitialNanos(), base.sourceReopenBackoffMaxNanos(),
-                base.extrapolationMaxMillis(), base.extrapolationMatchGate(),
-                base.trackingStatsWindow(), base.trackRetention(), base.trackingSeed(), hfovDegrees);
+                base.trackingStatsWindow(), base.trackRetention(), base.trackingSeed(), hfovDegrees,
+                base.adaptiveRate(), base.detectionDemandPollInterval(), base.detectionDemandGrace(),
+                base.videoStaleAfter(), base.renderTier(), base.gateLedgerDepth(), base.frameLedgerDepth());
     }
 
     /**
@@ -730,9 +731,10 @@ class DefaultStreamServiceTest {
         StreamPipelineSettings base = StreamPipelineSettings.defaults();
         return new StreamPipelineSettings(base.assumedSourceFps(), base.measuredFpsEwmaAlpha(), base.warmupFrames(),
                 base.minMeasuredFps(), base.maxMeasuredFps(), base.detectionBackoffInitialNanos(),
-                base.detectionBackoffMaxNanos(), initialNanos, maxNanos, base.extrapolationMaxMillis(),
-                base.extrapolationMatchGate(), base.trackingStatsWindow(), base.trackRetention(),
-                base.trackingSeed());
+                base.detectionBackoffMaxNanos(), initialNanos, maxNanos,
+                base.trackingStatsWindow(), base.trackRetention(), base.trackingSeed(),
+                base.cameraHfovDegrees(), base.adaptiveRate(), base.detectionDemandPollInterval(),
+                base.detectionDemandGrace(), base.videoStaleAfter(), base.renderTier(), base.gateLedgerDepth(), base.frameLedgerDepth());
     }
 
     /** A {@link Flow.Publisher} that delivers exactly one frame on its first {@code request()} call. */
@@ -761,7 +763,7 @@ class DefaultStreamServiceTest {
         StreamService withTracker = new DefaultStreamService(assetDirectory, videoSourceRegistry, detectionPort,
                 streamPublisherPort, detectionRepositoryPort, eventPublisher,
                 new DefaultStreamServiceSettings(Optional.of(usageTracker), Optional.empty(), Optional.empty(),
-                        StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty(), Optional.empty(),
+                        StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
                         StreamStateObserver.NOOP), cvProfileResolver());
 
         StreamId streamId = withTracker.start(device.id(), PipelineConfig.defaults());
@@ -775,7 +777,7 @@ class DefaultStreamServiceTest {
         StreamService withTracker = new DefaultStreamService(assetDirectory, videoSourceRegistry, detectionPort,
                 streamPublisherPort, detectionRepositoryPort, eventPublisher,
                 new DefaultStreamServiceSettings(Optional.of(usageTracker), Optional.empty(), Optional.empty(),
-                        StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty(), Optional.empty(),
+                        StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
                         StreamStateObserver.NOOP), cvProfileResolver());
         StreamId streamId = withTracker.start(device.id(), PipelineConfig.defaults());
 
@@ -804,7 +806,7 @@ class DefaultStreamServiceTest {
         StreamService withEvents = new DefaultStreamService(assetDirectory, videoSourceRegistry, detectionPort,
                 streamPublisherPort, detectionRepositoryPort, eventPublisher,
                 new DefaultStreamServiceSettings(Optional.empty(), Optional.of(detectionEventRepositoryPort),
-                        Optional.empty(), StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty(), Optional.empty(),
+                        Optional.empty(), StreamPipelineSettings.defaults(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
                         StreamStateObserver.NOOP), cvProfileResolver());
 
         StreamId streamId = withEvents.start(device.id(), PipelineConfig.defaults());
@@ -859,13 +861,13 @@ class DefaultStreamServiceTest {
     }
 
     private static DetectionResult emptyResultOn(StreamId streamId) {
-        return new DetectionResult(streamId, 0, Instant.now(), List.of(), Duration.ZERO, null, null, List.of());
+        return new DetectionResult(streamId, 0, Instant.now(), List.of(), Duration.ZERO, null, null, List.of(), Optional.empty());
     }
 
     /** Carries tracking telemetry (unlike {@link #emptyResultOn}) but no bound track — {@code lockedTrackId == 0}. */
     private static DetectionResult noLockResultOn(StreamId streamId) {
         return new DetectionResult(streamId, 0, Instant.now(), List.of(), Duration.ZERO,
-                new TrackingTelemetry(false, DetectorReason.NO_LOCK, Duration.ZERO, "lk", 0L), null, List.of());
+                new TrackingTelemetry(false, DetectorReason.NO_LOCK, Duration.ZERO, "lk", 0L), null, List.of(), Optional.empty());
     }
 
     @Test
@@ -1264,12 +1266,13 @@ class DefaultStreamServiceTest {
                 base.measuredFpsEwmaAlpha(), base.warmupFrames(), base.minMeasuredFps(), base.maxMeasuredFps(),
                 base.detectionBackoffInitialNanos(), base.detectionBackoffMaxNanos(),
                 base.sourceReopenBackoffInitialNanos(), base.sourceReopenBackoffMaxNanos(),
-                base.extrapolationMaxMillis(), base.extrapolationMatchGate(), base.trackingStatsWindow(),
-                base.trackRetention(), seed);
+                base.trackingStatsWindow(), base.trackRetention(), seed, base.cameraHfovDegrees(),
+                base.adaptiveRate(), base.detectionDemandPollInterval(), base.detectionDemandGrace(),
+                base.videoStaleAfter(), base.renderTier(), base.gateLedgerDepth(), base.frameLedgerDepth());
         return new DefaultStreamService(assetDirectory, videoSourceRegistry, detectionPort, streamPublisherPort,
                 detectionRepositoryPort, eventPublisher,
                 new DefaultStreamServiceSettings(Optional.empty(), Optional.empty(), Optional.empty(), seeded,
-                        Optional.empty(), Optional.empty(), Optional.empty(), StreamStateObserver.NOOP), cvProfileResolver());
+                        Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), StreamStateObserver.NOOP), cvProfileResolver());
     }
 
     @Test
@@ -1354,9 +1357,9 @@ class DefaultStreamServiceTest {
                 base.warmupFrames(), base.minMeasuredFps(), base.maxMeasuredFps(),
                 base.detectionBackoffInitialNanos(), base.detectionBackoffMaxNanos(),
                 base.sourceReopenBackoffInitialNanos(), base.sourceReopenBackoffMaxNanos(),
-                base.extrapolationMaxMillis(), base.extrapolationMatchGate(),
                 base.trackingStatsWindow(), base.trackRetention(), base.trackingSeed(),
-                base.cameraHfovDegrees(), base.adaptiveRate(), pollInterval, grace);
+                base.cameraHfovDegrees(), base.adaptiveRate(), pollInterval, grace,
+                base.videoStaleAfter(), base.renderTier(), base.gateLedgerDepth(), base.frameLedgerDepth());
     }
 
     @Test
@@ -1374,7 +1377,7 @@ class DefaultStreamServiceTest {
         DefaultStreamService demandService = new DefaultStreamService(assetDirectory, videoSourceRegistry,
                 detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher,
                 new DefaultStreamServiceSettings(Optional.empty(), Optional.empty(), Optional.empty(), settings,
-                        Optional.empty(), Optional.of(demandPort), Optional.empty(), StreamStateObserver.NOOP), cvProfileResolver());
+                        Optional.empty(), Optional.of(demandPort), Optional.empty(), Optional.empty(), StreamStateObserver.NOOP), cvProfileResolver());
         // inferenceFps=100 (10ms sample interval) plus the 15ms real sleeps below reliably clear the
         // pipeline's own real-nanoTime sample deadline between pushes -- unrelated to (and much
         // shorter than) the synthetic Instants driving the grace computation itself below, which
@@ -1420,7 +1423,7 @@ class DefaultStreamServiceTest {
         DefaultStreamService demandService = new DefaultStreamService(assetDirectory, videoSourceRegistry,
                 detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher,
                 new DefaultStreamServiceSettings(Optional.empty(), Optional.empty(), Optional.empty(), settings,
-                        Optional.empty(), Optional.of(throwingPort), Optional.empty(), StreamStateObserver.NOOP), cvProfileResolver());
+                        Optional.empty(), Optional.of(throwingPort), Optional.empty(), Optional.empty(), StreamStateObserver.NOOP), cvProfileResolver());
 
         demandService.start(device.id(), PipelineConfig.defaults());
 
@@ -1446,7 +1449,7 @@ class DefaultStreamServiceTest {
         DefaultStreamService policyService = new DefaultStreamService(assetDirectory, videoSourceRegistry,
                 detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher,
                 new DefaultStreamServiceSettings(Optional.empty(), Optional.empty(), Optional.empty(), settings,
-                        Optional.empty(), Optional.empty(), Optional.of(throwingPolicyPort), StreamStateObserver.NOOP), cvProfileResolver());
+                        Optional.empty(), Optional.empty(), Optional.of(throwingPolicyPort), Optional.empty(), StreamStateObserver.NOOP), cvProfileResolver());
 
         policyService.start(device.id(), PipelineConfig.defaults());
 
@@ -1469,7 +1472,7 @@ class DefaultStreamServiceTest {
         DefaultStreamService demandService = new DefaultStreamService(assetDirectory, videoSourceRegistry,
                 detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher,
                 new DefaultStreamServiceSettings(Optional.empty(), Optional.empty(), Optional.empty(), settings,
-                        Optional.empty(), Optional.of(demandPort), Optional.empty(), StreamStateObserver.NOOP), cvProfileResolver());
+                        Optional.empty(), Optional.of(demandPort), Optional.empty(), Optional.empty(), StreamStateObserver.NOOP), cvProfileResolver());
         StreamId streamId = demandService.start(device.id(), detectingDefaults());
 
         // Before any evaluation at all: StreamPipeline#detectionDemand's own fail-open true default
@@ -1503,7 +1506,7 @@ class DefaultStreamServiceTest {
         DefaultStreamService policyService = new DefaultStreamService(assetDirectory, videoSourceRegistry,
                 detectionPort, streamPublisherPort, detectionRepositoryPort, eventPublisher,
                 new DefaultStreamServiceSettings(Optional.empty(), Optional.empty(), Optional.empty(), settings,
-                        Optional.empty(), Optional.of(demandPort), Optional.of(policyPort), StreamStateObserver.NOOP), cvProfileResolver());
+                        Optional.empty(), Optional.of(demandPort), Optional.of(policyPort), Optional.empty(), StreamStateObserver.NOOP), cvProfileResolver());
         StreamId streamId = policyService.start(device.id(), detectingDefaults());
 
         policyService.evaluateDetectionDemand(streamId, Instant.now());

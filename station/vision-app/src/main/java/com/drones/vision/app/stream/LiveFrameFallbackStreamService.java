@@ -2,6 +2,7 @@ package com.drones.vision.app.stream;
 
 import com.drones.vision.adapter.publishhls.MediamtxLiveFrameGrabber;
 import com.drones.vision.perception.application.pipeline.DetectionRate;
+import com.drones.vision.perception.application.pipeline.GateDecision;
 import com.drones.vision.perception.application.pipeline.PipelineLatency;
 import com.drones.vision.perception.application.pipeline.TrackingStats;
 import com.drones.vision.perception.application.stream.ActiveStream;
@@ -13,6 +14,7 @@ import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.perception.domain.model.FollowStatus;
+import com.drones.vision.perception.domain.model.FrameLedger;
 import com.drones.vision.perception.domain.model.ObjectState;
 import com.drones.vision.perception.domain.model.StopReason;
 import com.drones.vision.perception.domain.model.StreamState;
@@ -20,6 +22,7 @@ import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.perception.domain.model.TrackedObject;
 import com.drones.vision.perception.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.model.WorldObject;
 
 import java.util.List;
 import java.util.Objects;
@@ -122,6 +125,21 @@ public final class LiveFrameFallbackStreamService implements StreamService {
     @Override
     public List<ObjectState> objects(StreamId streamId) {
         return delegate.objects(streamId);
+    }
+
+    @Override
+    public List<WorldObject> worldObjects(StreamId streamId) {
+        return delegate.worldObjects(streamId);
+    }
+
+    @Override
+    public List<GateDecision> gateLedger(StreamId streamId, int last) {
+        return delegate.gateLedger(streamId, last);
+    }
+
+    @Override
+    public List<FrameLedger> frameLedger(StreamId streamId, int last) {
+        return delegate.frameLedger(streamId, last);
     }
 
     @Override

@@ -10,12 +10,14 @@ import com.drones.vision.api.dto.DiscoveryCandidateResponse;
 import com.drones.vision.api.dto.DiscoveryEventPayload;
 import com.drones.vision.api.dto.CorrectionResponse;
 import com.drones.vision.api.dto.EventResponse;
+import com.drones.vision.api.dto.FrameLedgerResponse;
 import com.drones.vision.api.dto.GeofenceZoneEventPayload;
 import com.drones.vision.api.dto.GeofenceZoneResponse;
 import com.drones.vision.api.dto.LiveConnectedResponse;
 import com.drones.vision.api.dto.LiveEnvelopeResponse;
 import com.drones.vision.api.dto.LiveSubscriptionResponse;
 import com.drones.vision.api.dto.MapEventPayload;
+import com.drones.vision.api.dto.WorldObjectResponse;
 import com.drones.vision.api.dto.SystemStatusResponse;
 import com.drones.vision.api.dto.TelemetrySampleResponse;
 import com.drones.vision.api.dto.UpdateLiveTopicsRequest;
@@ -27,6 +29,7 @@ import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.perception.domain.model.DetectionEvent;
 import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.perception.domain.model.WorldObject;
 import com.drones.vision.platform.Event;
 import com.drones.vision.flight.domain.model.GeofenceZoneEvent;
 import com.drones.vision.map.domain.model.MapEvent;
@@ -346,11 +349,29 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
     private final ConcurrentHashMap<AssetId, LiveRingBuffer> detectionBuffers = new ConcurrentHashMap<>();
     /** Per-asset {@code geo:<assetId>} buffer (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4, D11) -- same eviction/capacity-1 treatment as {@link #detectionBuffers}. */
     private final ConcurrentHashMap<AssetId, LiveRingBuffer> geoBuffers = new ConcurrentHashMap<>();
+    /**
+     * Per-asset {@code tracks:<assetId>}/{@code cv-trace:<assetId>} buffers (docs/plans/active/
+     * CV-ORCHESTRATION-PLAN.md §4.4/§4.5/§5, wave W2) -- same eviction/capacity-1 treatment as
+     * {@link #detectionBuffers}; both are populated from the very same {@link #pendingDetections}
+     * drain in {@link #flushPending()}, never a second port call.
+     */
+    private final ConcurrentHashMap<AssetId, LiveRingBuffer> tracksBuffers = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<AssetId, LiveRingBuffer> cvTraceBuffers = new ConcurrentHashMap<>();
 
     private final ConcurrentHashMap<AssetId, ConcurrentLinkedQueue<Telemetry>> pendingTelemetry =
             new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<AssetId, DetectionResult> pendingDetections = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<AssetId, PendingDetection> pendingDetections = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<AssetId, TrackCorrection> pendingCorrections = new ConcurrentHashMap<>();
+
+    /**
+     * One asset's latest-only {@link #publishDetections} payload, held together so {@link
+     * #flushPending()} builds the {@code detections}/{@code tracks}/{@code cv-trace} envelopes from
+     * one coherent snapshot instead of three independent reads (docs/plans/active/
+     * CV-ORCHESTRATION-PLAN.md §4.6, wave W2.8). {@code worldObjects} is {@link DetectionLiveUpdatePort
+     * #publishDetections}'s own per-result fold, carried verbatim -- this class never re-folds it.
+     */
+    private record PendingDetection(DetectionResult result, List<WorldObject> worldObjects) {
+    }
 
     /**
      * {@link #publishFleetChanged()}'s coalescing window, in nanoseconds ({@link System#nanoTime()}
@@ -627,8 +648,13 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
         }
         for (String raw : request.remove()) {
             LiveTopic topic = LiveTopic.parse(raw);
-            if (topic.kind() == LiveTopicKind.TELEMETRY || topic.kind() == LiveTopicKind.DETECTIONS) {
-                connection.topics().remove(topic); // FLEET/EVENT/DEVICES/DETECTION_EVENTS/MAP stay on regardless -- see class javadoc
+            if (topic.kind() == LiveTopicKind.TELEMETRY || topic.kind() == LiveTopicKind.DETECTIONS
+                    || topic.kind() == LiveTopicKind.CV_TRACE) {
+                // FLEET/EVENT/DEVICES/DETECTION_EVENTS/MAP stay on regardless -- see class javadoc. CV_TRACE
+                // is deliberately removable (unlike GEO/TRACKS, left at this method's pre-existing scope) --
+                // see TraceDemandPort's own javadoc for why closing a debug console must actually stop
+                // paying the trace tier's cost, not just stop rendering it.
+                connection.topics().remove(topic);
             }
         }
         try {
@@ -665,6 +691,22 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      */
     public boolean watchingDetections(AssetId assetId) {
         LiveTopic topic = LiveTopic.detections(assetId);
+        return connections.values().stream().anyMatch(connection -> connection.topics().contains(topic));
+    }
+
+    /**
+     * Whether any open connection currently subscribes to {@code cv-trace:<assetId>}
+     * (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4, wave W2) — the SSE half of {@code
+     * LiveAndPollTraceDemand}'s two-protocol demand signal, exactly {@link
+     * #watchingDetections(AssetId)}'s own reasoning applied to the warm trace tier instead of
+     * ordinary detection output: a debug console subscribed to this topic is itself what keeps
+     * {@code PipelineConfig#trace()} true for the stream it is inspecting.
+     *
+     * @param assetId the asset whose {@code cv-trace} topic to check
+     * @return {@code true} if at least one connection is subscribed
+     */
+    public boolean watchingTrace(AssetId assetId) {
+        LiveTopic topic = LiveTopic.cvTrace(assetId);
         return connections.values().stream().anyMatch(connection -> connection.topics().contains(topic));
     }
 
@@ -715,7 +757,9 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
             return true;
         }
         return telemetryBuffers.values().stream().anyMatch(LiveRingBuffer::everDropped)
-                || detectionBuffers.values().stream().anyMatch(LiveRingBuffer::everDropped);
+                || detectionBuffers.values().stream().anyMatch(LiveRingBuffer::everDropped)
+                || tracksBuffers.values().stream().anyMatch(LiveRingBuffer::everDropped)
+                || cvTraceBuffers.values().stream().anyMatch(LiveRingBuffer::everDropped);
     }
 
     /**
@@ -768,10 +812,12 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
     }
 
     @Override
-    public void publishDetections(AssetId assetId, DetectionResult result) {
+    public void publishDetections(AssetId assetId, DetectionResult result, List<WorldObject> worldObjects) {
         Objects.requireNonNull(assetId, "assetId must not be null");
         Objects.requireNonNull(result, "result must not be null");
-        pendingDetections.put(assetId, result); // latest-only: a later put simply overwrites
+        Objects.requireNonNull(worldObjects, "worldObjects must not be null");
+        // latest-only: a later put simply overwrites
+        pendingDetections.put(assetId, new PendingDetection(result, worldObjects));
     }
 
     /**
@@ -936,15 +982,35 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
             broadcast(topic, envelope);
         }
         for (AssetId assetId : List.copyOf(pendingDetections.keySet())) {
-            DetectionResult result = pendingDetections.remove(assetId);
-            if (result == null) {
+            PendingDetection pending = pendingDetections.remove(assetId);
+            if (pending == null) {
                 continue; // another flush already claimed it
             }
+            DetectionResult result = pending.result();
             LiveTopic topic = LiveTopic.detections(assetId);
             LiveEnvelopeResponse envelope = new LiveEnvelopeResponse(sequencer.incrementAndGet(),
                     assetId.value().toString(), LiveTopicKind.DETECTIONS.wire(), DetectionResultResponse.from(result));
             bufferFor(topic).append(envelope);
             broadcast(topic, envelope);
+            // tracks/cv-trace ride the same PendingDetection, never a second port call (docs/plans/active/
+            // CV-ORCHESTRATION-PLAN.md §4.5/§4.4/§4.6, waves W2/W2.8) -- see LiveTopicKind#TRACKS/#CV_TRACE's
+            // own javadoc. tracks carries WorldObjectResponse (the fold), never the flat ObjectStateResponse
+            // DetectionResultResponse#objects above just used -- see WorldObjectResponse's own javadoc for why.
+            LiveTopic tracksTopic = LiveTopic.tracks(assetId);
+            List<WorldObjectResponse> objects =
+                    pending.worldObjects().stream().map(WorldObjectResponse::from).toList();
+            LiveEnvelopeResponse tracksEnvelope = new LiveEnvelopeResponse(sequencer.incrementAndGet(),
+                    assetId.value().toString(), LiveTopicKind.TRACKS.wire(), objects);
+            bufferFor(tracksTopic).append(tracksEnvelope);
+            broadcast(tracksTopic, tracksEnvelope);
+            if (result.ledger().isPresent()) {
+                LiveTopic cvTraceTopic = LiveTopic.cvTrace(assetId);
+                LiveEnvelopeResponse cvTraceEnvelope = new LiveEnvelopeResponse(sequencer.incrementAndGet(),
+                        assetId.value().toString(), LiveTopicKind.CV_TRACE.wire(),
+                        FrameLedgerResponse.from(result.ledger().get()));
+                bufferFor(cvTraceTopic).append(cvTraceEnvelope);
+                broadcast(cvTraceTopic, cvTraceEnvelope);
+            }
         }
         for (AssetId assetId : List.copyOf(pendingCorrections.keySet())) {
             TrackCorrection correction = pendingCorrections.remove(assetId);
@@ -1074,6 +1140,8 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
         telemetryBuffers.keySet().retainAll(subscribedAssetIds(LiveTopicKind.TELEMETRY));
         detectionBuffers.keySet().retainAll(subscribedAssetIds(LiveTopicKind.DETECTIONS));
         geoBuffers.keySet().retainAll(subscribedAssetIds(LiveTopicKind.GEO));
+        tracksBuffers.keySet().retainAll(subscribedAssetIds(LiveTopicKind.TRACKS));
+        cvTraceBuffers.keySet().retainAll(subscribedAssetIds(LiveTopicKind.CV_TRACE));
     }
 
     private Set<AssetId> subscribedAssetIds(LiveTopicKind kind) {
@@ -1107,7 +1175,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
             case FLEET -> buffer.append(freshFleetEnvelope());
             case DEVICES -> buffer.append(freshDevicesEnvelope());
             case DETECTION_EVENTS -> seedDetectionEventsIfEmpty(buffer);
-            default -> { } // EVENT/TELEMETRY/DETECTIONS/MAP/DISCOVERY/ZONES: honestly-limited, nothing to seed -- see class javadoc's "Snapshot-on-connect" section for why MAP specifically stays in this bucket. SYSTEM needs no case either, for a different reason: SystemStatusSampler's first tick runs at startup delay 0, so systemBuffer is populated before any connection can arrive.
+            default -> { } // EVENT/TELEMETRY/DETECTIONS/GEO/TRACKS/CV_TRACE/MAP/DISCOVERY/ZONES: honestly-limited, nothing to seed -- see class javadoc's "Snapshot-on-connect" section for why MAP specifically stays in this bucket. SYSTEM needs no case either, for a different reason: SystemStatusSampler's first tick runs at startup delay 0, so systemBuffer is populated before any connection can arrive.
         }
     }
 
@@ -1126,6 +1194,8 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
                     id -> new LiveRingBuffer(telemetryBufferCapacity, false));
             case DETECTIONS -> detectionBuffers.computeIfAbsent(topic.assetId(), id -> new LiveRingBuffer(1, true));
             case GEO -> geoBuffers.computeIfAbsent(topic.assetId(), id -> new LiveRingBuffer(1, true));
+            case TRACKS -> tracksBuffers.computeIfAbsent(topic.assetId(), id -> new LiveRingBuffer(1, true));
+            case CV_TRACE -> cvTraceBuffers.computeIfAbsent(topic.assetId(), id -> new LiveRingBuffer(1, true));
         };
     }
 

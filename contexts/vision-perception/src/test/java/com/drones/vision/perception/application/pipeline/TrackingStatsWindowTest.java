@@ -17,6 +17,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -35,7 +36,7 @@ class TrackingStatsWindowTest {
     private final StreamId streamId = StreamId.random();
 
     private DetectionResult frame(long sequence, Instant at, TrackingTelemetry telemetry, Detection... detections) {
-        return new DetectionResult(streamId, sequence, at, List.of(detections), Duration.ZERO, telemetry, null, List.of());
+        return new DetectionResult(streamId, sequence, at, List.of(detections), Duration.ZERO, telemetry, null, List.of(), Optional.empty());
     }
 
     /** A tracker-only frame: no detector pass, so no reason, costing {@code trackerMillis}. */
@@ -160,7 +161,7 @@ class TrackingStatsWindowTest {
         TrackingStatsWindow window = new TrackingStatsWindow(WINDOW);
 
         // Tracking off for this stream: the 5-arg convenience ctor leaves tracking null.
-        window.accept(new DetectionResult(streamId, 0, T0, List.of(), Duration.ZERO, null, null, List.of()));
+        window.accept(new DetectionResult(streamId, 0, T0, List.of(), Duration.ZERO, null, null, List.of(), Optional.empty()));
 
         TrackingStats stats = window.snapshot(TrackingMode.OFF);
         assertEquals(0L, stats.detectorPasses());

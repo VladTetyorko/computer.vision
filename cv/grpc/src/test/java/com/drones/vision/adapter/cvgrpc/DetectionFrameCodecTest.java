@@ -7,6 +7,8 @@ import com.drones.vision.perception.domain.model.DetectionSource;
 import com.drones.vision.perception.domain.model.DetectorReason;
 import com.drones.vision.perception.domain.model.EventRuleConfig;
 import com.drones.vision.perception.domain.model.EvidenceSource;
+import com.drones.vision.perception.domain.model.FrameLedger;
+import com.drones.vision.perception.domain.model.LedgerOutcome;
 import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.perception.domain.model.ObjectLifecycle;
 import com.drones.vision.perception.domain.model.ObjectState;
@@ -737,5 +739,99 @@ class DetectionFrameCodecTest {
         FrameRequest request = codec().encode(smallBgrFrame(), configWithTrace(true));
 
         assertTrue(request.getTrace());
+    }
+
+    // --- decode: ledger (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4, wave W2) ----------------
+
+    @Test
+    void noLedgerFieldDecodesAsAnEmptyOptional() {
+        DetectionResponse response = responseBuilder().build();
+
+        assertTrue(DetectionFrameCodec.decode(STREAM_ID, response).ledger().isEmpty());
+    }
+
+    @Test
+    void presentLedgerRoundTripsIntoTheDomainFrameLedger() {
+        com.drones.vision.proto.v1.LedgerEntry entryWire = com.drones.vision.proto.v1.LedgerEntry.newBuilder()
+                .setContributorId("detect.full")
+                .setOutcome(com.drones.vision.proto.v1.LedgerOutcome.LEDGER_OUTCOME_RAN)
+                .setReason("")
+                .setCostMs(12.5)
+                .putSummary("boxes", "3")
+                .build();
+        com.drones.vision.proto.v1.ObjectEvidence evidenceWire = com.drones.vision.proto.v1.ObjectEvidence.newBuilder()
+                .setContributorId("assoc.cost")
+                .putClaim("cost", "0.12")
+                .build();
+        com.drones.vision.proto.v1.ObjectClaims claimsWire = com.drones.vision.proto.v1.ObjectClaims.newBuilder()
+                .addClaims(evidenceWire)
+                .build();
+        com.drones.vision.proto.v1.FrameLedger ledgerWire = com.drones.vision.proto.v1.FrameLedger.newBuilder()
+                .setStreamId(STREAM_ID.value().toString())
+                .setSequence(5)
+                .setCapturedAtMillis(CAPTURED_AT.toEpochMilli())
+                .setLevelServed(2)
+                .setDetectorReason("PERIODIC")
+                .addEligible("detect")
+                .addEligible("assoc")
+                .addEntries(entryWire)
+                .putObjects(42L, claimsWire)
+                .setDropsSinceLast(1)
+                .setGateWaitMs(3.0)
+                .setTotalMs(15.5)
+                .setHalted(false)
+                .build();
+        DetectionResponse response = responseBuilder().setLedger(ledgerWire).build();
+
+        FrameLedger ledger = DetectionFrameCodec.decode(STREAM_ID, response).ledger().orElseThrow();
+
+        assertEquals(STREAM_ID, ledger.streamId());
+        assertEquals(5L, ledger.sequence());
+        assertEquals(CAPTURED_AT, ledger.capturedAt());
+        assertEquals(2, ledger.levelServed());
+        assertEquals("PERIODIC", ledger.detectorReason());
+        assertEquals(List.of("detect", "assoc"), ledger.eligible());
+        assertEquals(1, ledger.entries().size());
+        assertEquals("detect.full", ledger.entries().get(0).contributorId());
+        assertEquals(LedgerOutcome.RAN, ledger.entries().get(0).outcome());
+        assertEquals(12.5, ledger.entries().get(0).costMillis());
+        assertEquals("3", ledger.entries().get(0).summary().get("boxes"));
+        assertEquals(1, ledger.objects().size());
+        assertEquals("assoc.cost", ledger.objects().get(42L).get(0).contributorId());
+        assertEquals("0.12", ledger.objects().get(42L).get(0).claim().get("cost"));
+        assertEquals(1, ledger.dropsSinceLast());
+        assertEquals(3.0, ledger.gateWaitMillis());
+        assertEquals(15.5, ledger.totalMillis());
+        assertFalse(ledger.halted());
+    }
+
+    @Test
+    void malformedLedgerEntryOutcomeDropsTheWholeLedgerButNeverTheFrame() {
+        // Unlike objects[] (see unspecifiedLifecycleDropsThatObjectButKeepsTheOthers above), a
+        // malformed ledger is a purely diagnostic loss -- the whole ledger drops to empty rather
+        // than being salvaged entry-by-entry, and detections[]/objects[] decode unaffected.
+        com.drones.vision.proto.v1.LedgerEntry unspecifiedOutcome = com.drones.vision.proto.v1.LedgerEntry
+                .newBuilder()
+                .setContributorId("detect.full")
+                // outcome left unset -> LEDGER_OUTCOME_UNSPECIFIED
+                .build();
+        com.drones.vision.proto.v1.FrameLedger ledgerWire = com.drones.vision.proto.v1.FrameLedger.newBuilder()
+                .setStreamId(STREAM_ID.value().toString())
+                .setSequence(5)
+                .setCapturedAtMillis(CAPTURED_AT.toEpochMilli())
+                .addEntries(unspecifiedOutcome)
+                .build();
+        com.drones.vision.proto.v1.ObjectState goodObject = com.drones.vision.proto.v1.ObjectState.newBuilder()
+                .setId(9)
+                .setLifecycle(com.drones.vision.proto.v1.ObjectLifecycle.OBJECT_LIFECYCLE_CONFIRMED)
+                .setStreamId(STREAM_ID.value().toString())
+                .build();
+        DetectionResponse response = responseBuilder().setLedger(ledgerWire).addObjects(goodObject).build();
+
+        DetectionResult result = DetectionFrameCodec.decode(STREAM_ID, response);
+
+        assertTrue(result.ledger().isEmpty());
+        assertEquals(1, result.objects().size());
+        assertEquals(9L, result.objects().get(0).id());
     }
 }

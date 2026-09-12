@@ -381,7 +381,7 @@ class AfterActionAssemblerTest {
         DetectionResult result = new DetectionResult(streamId, 1, STARTED_AT,
                 List.of(new Detection("person", 0.9, new BoundingBox(0, 0, 0.1, 0.1), new ModelRef("yolo", "1")),
                         new Detection("car", 0.8, new BoundingBox(0.2, 0.2, 0.1, 0.1), new ModelRef("yolo", "1"))),
-                Duration.ofMillis(10), null, null, List.of());
+                Duration.ofMillis(10), null, null, List.of(), Optional.empty());
 
         List<DetectionRow> rows = AfterActionAssembler.flattenDetections(List.of(result));
 
@@ -434,7 +434,7 @@ class AfterActionAssemblerTest {
     private DetectionResult detectionResultAt(Instant at, String label) {
         return new DetectionResult(streamId, 1, at,
                 List.of(new Detection(label, 0.9, new BoundingBox(0, 0, 0.1, 0.1), new ModelRef("yolo", "1"))),
-                Duration.ofMillis(10), null, null, List.of());
+                Duration.ofMillis(10), null, null, List.of(), Optional.empty());
     }
 
     private Mark markAt(Instant createdAt) {

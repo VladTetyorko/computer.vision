@@ -67,7 +67,7 @@ class DefaultReplayServiceTest {
     }
 
     private static DetectionResult detectionAt(Instant at) {
-        return new DetectionResult(STREAM_ID, 0, at, List.of(), Duration.ZERO, null, null, List.of());
+        return new DetectionResult(STREAM_ID, 0, at, List.of(), Duration.ZERO, null, null, List.of(), Optional.empty());
     }
 
     private AssetUsage closedUsage(Instant startedAt, Instant endedAt) {

@@ -1115,11 +1115,23 @@ vision:
     #       enabled: true
     #       max-fps: 30.0
     #       ewma-alpha: 0.2
-    #   DetectionExtrapolator's smoothing tunables (how far past the latest completed result's capture
-    #   time it extrapolates, and the max normalized box-center distance for a same-label match).
-    #   extrapolation:
-    #     max-millis: 800
-    #     match-gate: 0.15
+    #   WorldModel's render-tier tunables (CV-ORCHESTRATION-PLAN.md §4.6) -- the server-side port of
+    #   the client overlay's detectionTiers logic. notable-top-k is how many objects are promoted to
+    #   T1 by area x confidence on top of those already promoted for moving; moving-displacement-
+    #   threshold is the normalized one-frame box-centre displacement that counts as moving;
+    #   sub-scale-fraction is the normalized box size below which an object draws as a T3 dot.
+    #   The client's own SUB_SCALE_PX is CSS pixels against the letterboxed video rect; the server has
+    #   no viewport, so this is its normalized analogue and the two can disagree at unusual sizes.
+    #   render-tier:
+    #     notable-top-k: 5
+    #     moving-displacement-threshold: 0.02
+    #     sub-scale-fraction: 0.01
+    #   Per-stream trace ring depths (CV-ORCHESTRATION-PLAN.md §4.4, hot tier): how many sampler-gate
+    #   decisions and how many decoded per-frame ledgers GET /api/streams/{id}/cv/trace can look back
+    #   over. Both cost a few KB per stream and no I/O; raise them to widen the window an inspector
+    #   sees, not to change any behaviour.
+    #   gate-ledger-depth: 256
+    #   frame-ledger-depth: 64
     #   DefaultSimulationService's MAVLink-transport fallback defaults.
     #   simulation:
     #     mavlink-loopback-host: 127.0.0.1

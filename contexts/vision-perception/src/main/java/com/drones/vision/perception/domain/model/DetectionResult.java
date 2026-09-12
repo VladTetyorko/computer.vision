@@ -4,6 +4,7 @@ import com.drones.vision.kernel.StreamId;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * The outcome of running inference on one sampled frame.
@@ -40,10 +41,17 @@ import java.util.List;
  * @param pullTelemetry     worker-reported pull-mode diagnostics, or {@code null} in push mode
  * @param objects           the object mirror for this frame; defensively copied to an immutable
  *                          list; never {@code null}, empty when no mirror was produced
+ * @param ledger            the warm debug tier for this frame (docs/plans/active/
+ *                          CV-ORCHESTRATION-PLAN.md §4.4, wave W2); {@link Optional#empty()} means
+ *                          this frame was not traced. Deliberately {@code Optional} rather than a
+ *                          nullable component: a {@code null} here would read as "the trace
+ *                          feature is off" for the whole result type, which CLAUDE.md rule 10
+ *                          forbids — absence is a per-frame fact ({@link PipelineConfig#trace()}
+ *                          was off for this frame), never a per-feature one
  */
 public record DetectionResult(StreamId streamId, long frameSequence, Instant capturedAt, List<Detection> detections,
                                Duration inferenceLatency, TrackingTelemetry tracking, PullTelemetry pullTelemetry,
-                               List<ObjectState> objects) {
+                               List<ObjectState> objects, Optional<FrameLedger> ledger) {
 
     public DetectionResult {
         if (streamId == null) {
@@ -66,6 +74,9 @@ public record DetectionResult(StreamId streamId, long frameSequence, Instant cap
         }
         if (objects == null) {
             throw new IllegalArgumentException("DetectionResult objects must not be null");
+        }
+        if (ledger == null) {
+            throw new IllegalArgumentException("DetectionResult ledger must not be null");
         }
         detections = List.copyOf(detections);
         objects = List.copyOf(objects);
