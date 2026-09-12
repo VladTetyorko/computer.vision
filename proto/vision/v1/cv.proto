@@ -90,7 +90,11 @@ message TargetLock {
   int64 track_id  = 2;  // lock onto an existing track; 0 = use point/box instead
   float point_x   = 3;  // normalized [0,1] click point, used when track_id == 0
   float point_y   = 4;
-  BoundingBox box = 5;  // optional explicit box; unset -> a server-side default box around the point
+  // DEPRECATED by CV-ORCHESTRATION W1 (§4.5, E14): unreachable from this codebase by design --
+  // the REST PATCH surface only ever accepted trackId/point/release, so the Java codec
+  // deliberately never sets it (R4 surprise 4). Kept, never renumbered: the server still honours
+  // it if some other client ever sends one.
+  BoundingBox box = 5;  // DEPRECATED -- optional explicit box; unset -> server default around the point
   bool  release   = 6;  // true = drop the current lock, fall back to the config's mode policy
 }
 
@@ -109,9 +113,15 @@ message TrackingConfig {
   int32  max_age_frames         = 5;  // unmatched frames before LOST;      <=0 = default (30)
   int32  min_hits               = 6;  // detector hits TENTATIVE -> CONFIRMED; <=0 = default (3)
   TargetLock lock               = 7;  // FOLLOW only; absent = no lock held
-  string motion_engine_id       = 8;  // NEW -- ego-motion compensator; "" = server default, "off" disables
-  string appearance_engine_id   = 9;  // NEW -- appearance descriptor;  "" = server default, "off" disables
-  int32  memory_ttl_millis      = 10; // NEW -- dormant-gallery TTL for re-acquisition; <=0 = server default
+  // DEPRECATED by CV-ORCHESTRATION W1 (§4.5, E14). Fields 8-10 have no domain field, no REST
+  // field and no UI control anywhere in the stack (R4 surprise 3) -- nothing has ever set them
+  // to a non-default value. Never renumbered and never removed: cv-service still reads them, so
+  // a future caller that wants one costs nothing. Their INFORMATION now lives in the ledger
+  // (`SessionFacts.motion_engine_id`/`.appearance_engine_id`, `LedgerEntry.summary`), which is
+  // where a served engine belongs -- a request field can only ever say what was asked for.
+  string motion_engine_id       = 8;  // DEPRECATED -- see above
+  string appearance_engine_id   = 9;  // DEPRECATED -- see above
+  int32  memory_ttl_millis      = 10; // DEPRECATED -- see above
   // TRACKING-V3-PLAN wave V1 -- the capability ladder (§5). 0 = auto-probe: cv-service
   // decides the highest level this host affords. 1-5 = an explicit CEILING (decision
   // E12): the session serves min(requested, affordable), never more, never a refusal.
@@ -141,6 +151,7 @@ message PullControl {
   TrackingConfig tracking     = 9;   // hot; reused verbatim, including TargetLock/lock_seq semantics
   CameraPose camera_pose      = 10;  // hot; arrives at telemetry rate, decoupled from frames
   bool   stop                 = 11;  // true = drain and half-close cleanly
+  bool   trace                = 12;  // NEW (W1) -- hot; see FrameRequest.trace
 }
 
 // ---------------------------------------------------------- CHANGED messages
@@ -160,6 +171,12 @@ message FrameRequest {
   float confidence_threshold   = 10;
   TrackingConfig tracking      = 11;  // NEW -- absent => TRACKING_MODE_OFF
   CameraPose camera_pose       = 12;  // NEW -- absent => flow-based ego-motion compensation only
+  // CV-ORCHESTRATION wave W1 -- demand for the warm trace tier (§4.4). `true` attaches this
+  // frame's `FrameLedger` to the response; `false` (the default, and every call site today)
+  // leaves the response byte-identical to what it is without this field. Restated on EVERY
+  // request like the rest of this message's desired state, so demand appearing or disappearing
+  // is self-healing rather than a one-shot that can be dropped.
+  bool trace                   = 13;  // NEW
 }
 
 // Normalized bounding box. Coordinates are in [0, 1] relative to frame
@@ -204,9 +221,15 @@ message DetectionResponse {
   string tracker_engine_id     = 10;  // NEW -- engine that actually served this frame ("" = none)
   int64 locked_track_id        = 11;  // NEW -- FOLLOW: the track currently held (0 = none)
   DetectorReason detector_reason = 12; // NEW -- why the pass ran; UNSPECIFIED when it did not
-  bool   detector_roi      = 13;  // NEW -- the pass was a crop around a prediction, not a full frame
-  int64  motion_millis     = 14;  // NEW -- ego-motion estimation cost for this frame
-  string motion_engine_id  = 15;  // NEW -- compensator that served this frame ("" = none ran)
+  // DEPRECATED by CV-ORCHESTRATION W1 (§4.5, E14). All three are populated by cv-service and
+  // read by NOBODY: the Java codec has zero call sites for any of them (R4 surprise 1), so the
+  // whole ego-motion story is computed and discarded end to end. Never renumbered, never removed.
+  // Their information is now a ledger fact per frame (`egomotion.*`'s `LedgerEntry.cost_ms` and
+  // summary, `detect.roi`'s own entry) -- which is also where the ROI pass stops hiding inside
+  // `tracker_millis` (R3 surprise 4).
+  bool   detector_roi      = 13;  // DEPRECATED -- see above
+  int64  motion_millis     = 14;  // DEPRECATED -- see above
+  string motion_engine_id  = 15;  // DEPRECATED -- see above
 
   // Pull mode (DetectPulled). Zero in push mode, with ONE exception since CV-ORCHESTRATION wave
   // W0: `dropped_frames` (19) is now also filled under DetectStream, from the latest-wins mailbox
@@ -225,7 +248,10 @@ message DetectionResponse {
   float achieved_fps        = 18;  // NEW -- measured rate at which this loop actually infers
   int64 dropped_frames      = 19;  // NEW -- cumulative frames genuinely dropped, not merely unselected (D8)
   int64 missed_deadlines    = 20;  // NEW -- cumulative sampler deadlines no frame arrived to serve
-  int64 capture_skew_millis = 21;  // NEW -- worker's estimate of (local receipt - capture); 0 = unknown
+  // DEPRECATED by CV-ORCHESTRATION W1 (§4.5, E14): decoded into `PullTelemetry` and consumed by
+  // no JSON DTO on any surface (R4 surprise 7). Kept and never renumbered; the honest home for a
+  // per-frame timing fact is the ledger.
+  int64 capture_skew_millis = 21;  // DEPRECATED -- worker's estimate of (local receipt - capture)
 
   // TRACKING-V3-PLAN wave V3 -- ORU (§4.2).
   int64  reupdate_millis    = 22; // NEW -- ORU cost this frame, milliseconds; 0 = none ran
@@ -237,6 +263,16 @@ message DetectionResponse {
   // TRACKING-V3-PLAN wave V1 -- the capability ladder (§5).
   int32  capability_level_served = 25; // NEW -- level that ACTUALLY ran; always <= requested
   string capability_level_reason = 26; // NEW -- why it was capped; "" = served as requested
+
+  // CV-ORCHESTRATION wave W1 (§4.5) -- the mirror, and the trace it was produced by.
+  // `objects` carries one entry per LIVE and per DORMANT identity of this frame, which is a
+  // different set from `detections`: a coasting track with no detection this frame is here and
+  // not there, and a dormant identity is here and has never been anywhere. `detections` is
+  // unchanged, byte for byte, and remains the contract every existing reader is written against.
+  repeated ObjectState objects = 27;
+  // Present ONLY while the request asked for it (`FrameRequest.trace` / `PullControl.trace`).
+  // Zero cost when nobody looks: the ring is filled either way, but nothing serializes it.
+  FrameLedger ledger           = 28;
 }
 
 message TrainingJobSpec {
@@ -389,6 +425,146 @@ message InspectResponse {
   SessionFacts session          = 2;   // set only when the request named a stream_id
   repeated FrameLedger ledgers  = 3;
   bool   found                  = 4;   // false when a named stream_id has no live session
+}
+
+// ---- CV-ORCHESTRATION wave W1 (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.5) -------------
+// The MIRROR: one message describing one object as this platform currently sees it, so a reader
+// no longer has to reconstruct an identity from a box plus eight scalars. Purely ADDITIVE, and
+// deliberately so in a way that costs old readers nothing: `detections[]` keeps every byte it has
+// today, no existing message loses or renumbers a field, and -- decision E8 -- NO EXISTING ENUM
+// GAINS A VALUE. The codec maps `TrackState`/`DetectionSource`/`DetectorReason` with exhaustive
+// Java switch EXPRESSIONS that have no `default` branch, so a new value there breaks the build of
+// every Java client, and an already-deployed one decodes it as `UNRECOGNIZED` and nulls the whole
+// track reference. The mirror therefore brings its own enums, used only by its own messages.
+
+// Where one identity is in its life. `LOST` is the last state today's wire can report; `DORMANT`
+// is the one this adds -- a retired identity still held in the per-stream gallery and still
+// recoverable under its own number (`cv_service/tracking/memory.py`). Not a value of `TrackState`,
+// see the banner above.
+enum ObjectLifecycle {
+  OBJECT_LIFECYCLE_UNSPECIFIED = 0;
+  OBJECT_LIFECYCLE_TENTATIVE   = 1;  // born, below min_hits -- not yet a stable identity
+  OBJECT_LIFECYCLE_CONFIRMED   = 2;  // confirmed by the detector on this or a recent pass
+  OBJECT_LIFECYCLE_COASTING    = 3;  // tracker-predicted; the detector has not re-confirmed yet
+  OBJECT_LIFECYCLE_LOST        = 4;  // unmatched past max_age_frames; kept for re-acquisition
+  OBJECT_LIFECYCLE_DORMANT     = 5;  // retired into the gallery; matchable, not currently tracked
+}
+
+// What kind of evidence produced THIS frame's view of the object. A superset of `DetectionSource`
+// in meaning, a separate enum in fact (E8): `PREDICTED` is a pure coast with no observation at
+// all, `MEMORY` is a re-acquisition from the dormant gallery, `REUPDATE` is a box ORU
+// reconstructed from the track's own bracketing observations.
+enum EvidenceSource {
+  EVIDENCE_SOURCE_UNSPECIFIED = 0;
+  EVIDENCE_SOURCE_DETECTOR    = 1;
+  EVIDENCE_SOURCE_TRACKER     = 2;
+  EVIDENCE_SOURCE_PREDICTED   = 3;
+  EVIDENCE_SOURCE_MEMORY      = 4;
+  EVIDENCE_SOURCE_REUPDATE    = 5;
+}
+
+// One object, mirrored. Keyed by `(stream_id, id)` so a later cross-camera fusion stage can
+// consume a stream of these with no wire change (E5; fusion itself is out of scope).
+//
+// Groups are nested messages, not a flat field list, because the alternative is what produced the
+// dead scalars this wave deprecates below: every new fact became one more top-level field, and a
+// reader could not tell which ones belong together or which are absent versus zero. An absent
+// GROUP means "this configuration does not compute these facts at all" (e.g. `kinematics.
+// predicted_box` in FOLLOW, where the book is never whole-predicted); a zero FIELD inside a
+// present group means the fact is genuinely zero.
+//
+// Algorithm-shaped facts (the ego-motion transform, appearance descriptors, per-term association
+// weights) deliberately do NOT live here -- they are `ObjectEvidence.claim` in the ledger (E7).
+// This message describes the OBJECT; the ledger describes the algorithm.
+message ObjectState {
+  // One entry of the label vote tally behind `Identity.label` -- the distribution, not just the
+  // winner (E3), so a training-capture consumer can audit an election it disagrees with.
+  message LabelCandidate {
+    string label  = 1;
+    float  weight = 2;   // decayed, confidence-weighted tally; comparable only within one frame
+  }
+
+  // What the object is called, and how settled that name is.
+  message Identity {
+    string label                       = 1;  // ELECTED -- hysteresis-gated, what an operator reads
+    string label_raw                   = 2;  // this frame's own detector label, un-elected
+    repeated LabelCandidate candidates = 3;  // the tally behind the election, best-first
+    int32  stability                   = 4;  // consecutive elections since `label` last changed
+  }
+
+  // Where the object is, and how that was arrived at. Three boxes are kept SEPARATE rather than
+  // merged into one "current box" (the DeepStream separation, R5): `box` is the elected one that
+  // `detections[]` also carries, and the other three say what each source independently claimed.
+  message Kinematics {
+    BoundingBox box                = 1;  // the elected box -- identical to the `Detection` box
+    BoundingBox detector_box       = 2;  // what the detector claimed this frame; absent if none
+    BoundingBox tracker_box        = 3;  // what the single-object tracker claimed; FOLLOW only
+    BoundingBox predicted_box      = 4;  // constant-velocity extrapolation to this frame's instant
+    int64       horizon_ms         = 5;  // how far `predicted_box` was extrapolated
+    float       velocity_x         = 6;  // normalized frame-WIDTHS per second (as `Detection`)
+    float       velocity_y         = 7;  // normalized frame-HEIGHTS per second
+    float       displacement_x     = 8;  // box-centre delta since the previous update, normalized
+    float       displacement_y     = 9;
+    bool        motion_compensated = 10; // a non-identity ego-motion transform was applied
+  }
+
+  // How strongly the platform believes the object is there at all.
+  message Belief {
+    float confidence_raw      = 1;  // this frame's own detector confidence
+    float confidence_smoothed = 2;  // EMA across this identity's observations
+    float existence           = 3;  // [0,1] from hits/misses -- survives a frame with no detection
+    int64 since_confirmed_ms  = 4;  // since the last DETECTOR confirmation, not since birth
+  }
+
+  // Who said so. `contributors` is the list of contributor ids that made a claim about this object
+  // on this frame (the ledger's own attribution, summarised); the claims themselves stay in the
+  // ledger.
+  message Provenance {
+    EvidenceSource   source       = 1;
+    repeated string  contributors = 2;
+    float            assoc_cost   = 3;  // the matched pair's total cost; 0 when nothing matched
+    bool             reupdated    = 4;  // ORU reconstructed this track's gap this frame
+  }
+
+  // Re-acquisition facts. Today's wire carries `identity_confidence`/`dormant_millis` per
+  // detection but the JSON republishes them only for the FOLLOW-locked track (R4 surprise 5, D6);
+  // here they belong to the object, whoever is watching it.
+  message Memory {
+    bool  recovered           = 1;  // this frame re-acquired the identity from the gallery
+    float identity_confidence = 2;  // the match score that justified it
+    int64 dormant_ms          = 3;  // how long it had been dormant (for a DORMANT object: still is)
+    int32 gallery_matches     = 4;  // dormant identities considered before this answer
+    float match_distance      = 5;  // best appearance distance across the gallery, [0,1]
+  }
+
+  // Whether FOLLOW is holding this object. Frame-level `locked_track_id` says WHICH; this says so
+  // on the object itself, which is the only form a renderer can use without a second lookup.
+  message Lock {
+    bool  locked           = 1;
+    int64 lock_seq_applied = 2;  // the lock generation actually in force
+  }
+
+  // The counters death is decided from (E4). Every `*_ms` is epoch milliseconds.
+  message Timing {
+    int64 first_seen_ms     = 1;
+    int64 last_seen_ms      = 2;
+    int64 last_confirmed_ms = 3;
+    int32 age_frames        = 4;
+    int32 hits              = 5;
+    int32 misses            = 6;
+  }
+
+  int64           id        = 1;  // per-stream track id; matches `Detection.track_id`
+  ObjectLifecycle lifecycle = 2;
+  string          stream_id = 3;  // keyed `(stream_id, id)` -- see the message comment
+
+  Identity   identity   = 4;
+  Kinematics kinematics = 5;
+  Belief     belief     = 6;
+  Provenance provenance = 7;
+  Memory     memory     = 8;
+  Lock       lock       = 9;
+  Timing     timing     = 10;
 }
 
 // Frame -> detections streaming inference.
