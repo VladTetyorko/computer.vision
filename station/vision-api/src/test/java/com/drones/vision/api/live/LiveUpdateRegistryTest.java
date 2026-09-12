@@ -71,6 +71,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -138,7 +139,7 @@ class LiveUpdateRegistryTest {
     private static DetectionResult detectionResult(StreamId streamId, long frameSequence) {
         Detection detection = new Detection("person", 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2),
                 new ModelRef("yolo", "latest"));
-        return new DetectionResult(streamId, frameSequence, Instant.now(), List.of(detection), Duration.ZERO, null, null, List.of());
+        return new DetectionResult(streamId, frameSequence, Instant.now(), List.of(detection), Duration.ZERO, null, null, List.of(), Optional.empty());
     }
 
     private static Device device(DeviceId deviceId) {

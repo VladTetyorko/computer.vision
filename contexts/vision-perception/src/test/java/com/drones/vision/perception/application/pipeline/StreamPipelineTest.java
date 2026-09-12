@@ -112,19 +112,19 @@ class StreamPipelineTest {
     }
 
     private DetectionResult emptyResult(long sequence) {
-        return new DetectionResult(streamId, sequence, Instant.now(), List.of(), Duration.ZERO, null, null, List.of());
+        return new DetectionResult(streamId, sequence, Instant.now(), List.of(), Duration.ZERO, null, null, List.of(), Optional.empty());
     }
 
     private DetectionResult resultWithBoxX(long sequence, Instant capturedAt, double boxX) {
         Detection detection = new Detection("person", 0.9, new BoundingBox(boxX, 0.10, 0.20, 0.20),
                 new ModelRef("yolo", "latest"));
-        return new DetectionResult(streamId, sequence, capturedAt, List.of(detection), Duration.ofMillis(5), null, null, List.of());
+        return new DetectionResult(streamId, sequence, capturedAt, List.of(detection), Duration.ofMillis(5), null, null, List.of(), Optional.empty());
     }
 
     private DetectionResult nonEmptyResult(long sequence) {
         Detection detection = new Detection("person", 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2),
                 new ModelRef("yolo", "latest"));
-        return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5), null, null, List.of());
+        return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5), null, null, List.of(), Optional.empty());
     }
 
     /** @see #objectState(long, String) -- a {@code DetectionResult} whose object mirror is non-empty. */
@@ -132,7 +132,7 @@ class StreamPipelineTest {
         Detection detection = new Detection("person", 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2),
                 new ModelRef("yolo", "latest"));
         return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5), null,
-                null, List.of(objects));
+                null, List.of(objects), Optional.empty());
     }
 
     /** A minimal, validly-populated {@link ObjectState} with an elected {@code label}, for read-model/filter tests. */
@@ -1019,7 +1019,7 @@ class StreamPipelineTest {
             detections.add(new Detection(label, 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2),
                     new ModelRef("yolo", "latest")));
         }
-        return new DetectionResult(streamId, sequence, Instant.now(), detections, Duration.ofMillis(5), null, null, List.of());
+        return new DetectionResult(streamId, sequence, Instant.now(), detections, Duration.ofMillis(5), null, null, List.of(), Optional.empty());
     }
 
     @Test
@@ -1648,7 +1648,7 @@ class StreamPipelineTest {
         ObjectState denied = objectState(1L, "person");
         ObjectState unidentified = objectStateWithoutIdentity(2L);
         DetectionResult result = new DetectionResult(streamId, 0, Instant.now(), List.of(), Duration.ofMillis(5),
-                null, null, List.of(denied, unidentified));
+                null, null, List.of(denied, unidentified), Optional.empty());
         when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
         PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, Set.of(),
                 EventRuleConfig.defaults(), true, TrackingConfig.off(), Set.of("person"), false);
@@ -1693,7 +1693,7 @@ class StreamPipelineTest {
         Detection detection = new Detection("person", 0.9, new BoundingBox(0.4, 0.4, 0.05, 0.05),
                 new ModelRef("yolo", "latest"),
                 new TrackRef(1L, TrackState.CONFIRMED, DetectionSource.TRACKER, 2.0, 0.0, 10));
-        return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5), null, null, List.of());
+        return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5), null, null, List.of(), Optional.empty());
     }
 
     private int samplesOverTwoSecondsOfA60FpsSource(AdaptiveRateSettings adaptiveRate) {
@@ -1749,7 +1749,7 @@ class StreamPipelineTest {
                 new ModelRef("yolo", "latest"), new TrackRef(trackId, state, DetectionSource.TRACKER));
         return new DetectionResult(streamId, sequence, Instant.parse("2026-08-11T10:00:00Z").plusMillis(sequence * 100),
                 List.of(detection), Duration.ofMillis(5),
-                new TrackingTelemetry(false, null, Duration.ofNanos(400_000), "lk", trackId), null, List.of());
+                new TrackingTelemetry(false, null, Duration.ofNanos(400_000), "lk", trackId), null, List.of(), Optional.empty());
     }
 
     /** @see #trackedResult(long, long, TrackState) — same shape, but the box comes from a detector pass. */
@@ -1759,7 +1759,7 @@ class StreamPipelineTest {
         return new DetectionResult(streamId, sequence, Instant.parse("2026-08-11T10:00:00Z").plusMillis(sequence * 100),
                 List.of(detection), Duration.ofMillis(5),
                 new TrackingTelemetry(true, com.drones.vision.perception.domain.model.DetectorReason.ALWAYS,
-                        Duration.ofNanos(400_000), "lk", trackId), null, List.of());
+                        Duration.ofNanos(400_000), "lk", trackId), null, List.of(), Optional.empty());
     }
 
     /** A result carrying tracking telemetry but no detections — for exercising the unbound branch. */
@@ -1767,7 +1767,7 @@ class StreamPipelineTest {
         return new DetectionResult(streamId, sequence, Instant.parse("2026-08-11T10:00:00Z").plusMillis(sequence * 100),
                 List.of(), Duration.ofMillis(5),
                 new TrackingTelemetry(false, com.drones.vision.perception.domain.model.DetectorReason.NO_LOCK,
-                        Duration.ofNanos(400_000), "lk", lockedTrackId), null, List.of());
+                        Duration.ofNanos(400_000), "lk", lockedTrackId), null, List.of(), Optional.empty());
     }
 
     /** @see #mode(TrackingMode, int) — same shape, plus an explicit lock. */

@@ -252,7 +252,7 @@ class StreamControllerTest {
     private static DetectionResult detectionResult(StreamId streamId, long frameSequence, Instant capturedAt) {
         Detection detection = new Detection("person", 0.87, new BoundingBox(0.1, 0.2, 0.3, 0.4),
                 new ModelRef("yolo", "latest"));
-        return new DetectionResult(streamId, frameSequence, capturedAt, List.of(detection), Duration.ofMillis(42), null, null, List.of());
+        return new DetectionResult(streamId, frameSequence, capturedAt, List.of(detection), Duration.ofMillis(42), null, null, List.of(), Optional.empty());
     }
 
     @Test
@@ -1555,7 +1555,7 @@ class StreamControllerTest {
                 new TrackRef(3L, TrackState.COASTING, DetectionSource.TRACKER, 0.01, -0.02, 12));
         DetectionResult result = new DetectionResult(streamId, 42, Instant.parse("2026-08-11T10:00:00Z"),
                 List.of(tracked), Duration.ofMillis(7),
-                new TrackingTelemetry(true, DetectorReason.CADENCE, Duration.ofNanos(400_000), "lk", 3L), null, List.of());
+                new TrackingTelemetry(true, DetectorReason.CADENCE, Duration.ofNanos(400_000), "lk", 3L), null, List.of(), Optional.empty());
         when(detectionRepositoryPort.query(any(DetectionQuery.class))).thenReturn(List.of(result));
 
         mockMvc.perform(get("/api/streams/{streamId}/detections", streamId.value()))
@@ -1594,7 +1594,7 @@ class StreamControllerTest {
         DetectionResult result = new DetectionResult(streamId, 44, Instant.parse("2026-08-11T10:00:02Z"),
                 List.of(tracked), Duration.ofMillis(7),
                 new TrackingTelemetry(true, DetectorReason.CADENCE, Duration.ofNanos(400_000), "lk", 3L,
-                        Duration.ofMillis(42), Duration.ofMillis(6), 2, new TrackingCapability(2, "")), null, List.of());
+                        Duration.ofMillis(42), Duration.ofMillis(6), 2, new TrackingCapability(2, "")), null, List.of(), Optional.empty());
         when(detectionRepositoryPort.query(any(DetectionQuery.class))).thenReturn(List.of(result));
 
         mockMvc.perform(get("/api/streams/{streamId}/detections", streamId.value()))
@@ -1621,7 +1621,7 @@ class StreamControllerTest {
                         new TrackRef(3L, TrackState.CONFIRMED, DetectionSource.TRACKER))),
                 Duration.ZERO,
                 new TrackingTelemetry(false, null, Duration.ZERO, "", 0, Duration.ZERO, Duration.ZERO, 0,
-                        new TrackingCapability(2, "OpenVINO unavailable; degraded from requested L4 to L2")), null, List.of());
+                        new TrackingCapability(2, "OpenVINO unavailable; degraded from requested L4 to L2")), null, List.of(), Optional.empty());
         when(detectionRepositoryPort.query(any(DetectionQuery.class))).thenReturn(List.of(result));
 
         mockMvc.perform(get("/api/streams/{streamId}/detections", streamId.value()))
@@ -1639,7 +1639,7 @@ class StreamControllerTest {
                         new ModelRef("yolo26n.pt", "latest"),
                         new TrackRef(3L, TrackState.CONFIRMED, DetectionSource.TRACKER))),
                 Duration.ZERO,
-                new TrackingTelemetry(false, null, Duration.ofNanos(370_000), "lk", 3L), null, List.of());
+                new TrackingTelemetry(false, null, Duration.ofNanos(370_000), "lk", 3L), null, List.of(), Optional.empty());
         when(detectionRepositoryPort.query(any(DetectionQuery.class))).thenReturn(List.of(result));
 
         mockMvc.perform(get("/api/streams/{streamId}/detections", streamId.value()))

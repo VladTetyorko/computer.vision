@@ -1468,7 +1468,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         // filter bit. Nothing about which labels an operator wants to see is a fact about how the
         // frame was fetched. Rule 10 retiring that constructor is what made the loss visible.
         return new DetectionResult(result.streamId(), result.frameSequence(), result.capturedAt(), kept,
-                result.inferenceLatency(), result.tracking(), result.pullTelemetry(), keptObjects);
+                result.inferenceLatency(), result.tracking(), result.pullTelemetry(), keptObjects, Optional.empty());
     }
 
     /**

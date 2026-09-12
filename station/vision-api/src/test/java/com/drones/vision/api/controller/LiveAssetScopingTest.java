@@ -359,7 +359,7 @@ class LiveAssetScopingTest {
     private static DetectionResult detectionResult(StreamId streamId, long frameSequence) {
         Detection detection = new Detection("person", 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2),
                 new ModelRef("yolo", "latest"));
-        return new DetectionResult(streamId, frameSequence, Instant.now(), List.of(detection), Duration.ZERO, null, null, List.of());
+        return new DetectionResult(streamId, frameSequence, Instant.now(), List.of(detection), Duration.ZERO, null, null, List.of(), Optional.empty());
     }
 
     private static boolean topicsInclude(JsonNode connected, String topic) {

@@ -46,6 +46,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Pure wire&harr;domain codec for one {@link GrpcDetectionPort} instance: turns a {@link VideoFrame}+
@@ -230,7 +231,8 @@ final class DetectionFrameCodec {
                 Duration.ofMillis(response.getInferenceMillis()),
                 toTrackingTelemetry(response),
                 toPullTelemetry(response),
-                toObjectStates(streamId, response));
+                toObjectStates(streamId, response),
+                Optional.empty());
     }
 
     /**

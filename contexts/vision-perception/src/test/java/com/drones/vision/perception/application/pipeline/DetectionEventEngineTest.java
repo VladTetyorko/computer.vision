@@ -61,7 +61,7 @@ class DetectionEventEngineTest {
     }
 
     private DetectionResult result(long sequence, Instant capturedAt, Detection... detections) {
-        return new DetectionResult(streamId, sequence, capturedAt, List.of(detections), Duration.ZERO, null, null, List.of());
+        return new DetectionResult(streamId, sequence, capturedAt, List.of(detections), Duration.ZERO, null, null, List.of(), Optional.empty());
     }
 
     private static Detection detection(String label, double confidence) {

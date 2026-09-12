@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -32,7 +33,7 @@ class TrackBookTest {
     private final StreamId streamId = StreamId.random();
 
     private DetectionResult result(long frameSequence, Instant capturedAt, Detection... detections) {
-        return new DetectionResult(streamId, frameSequence, capturedAt, List.of(detections), Duration.ZERO, null, null, List.of());
+        return new DetectionResult(streamId, frameSequence, capturedAt, List.of(detections), Duration.ZERO, null, null, List.of(), Optional.empty());
     }
 
     private static Detection tracked(String label, long trackId, TrackState state, double x) {

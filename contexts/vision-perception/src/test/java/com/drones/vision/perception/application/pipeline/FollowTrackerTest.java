@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -62,17 +63,17 @@ class FollowTrackerTest {
     private DetectionResult bound(Instant at, long lockedTrackId, Detection... detections) {
         TrackingTelemetry telemetry =
                 new TrackingTelemetry(true, DetectorReason.ALWAYS, Duration.ZERO, "engine", lockedTrackId);
-        return new DetectionResult(streamId, 0L, at, List.of(detections), Duration.ZERO, telemetry, null, List.of());
+        return new DetectionResult(streamId, 0L, at, List.of(detections), Duration.ZERO, telemetry, null, List.of(), Optional.empty());
     }
 
     private DetectionResult unbound(Instant at) {
         TrackingTelemetry telemetry =
                 new TrackingTelemetry(true, DetectorReason.NO_LOCK, Duration.ZERO, "engine", 0L);
-        return new DetectionResult(streamId, 0L, at, List.of(), Duration.ZERO, telemetry, null, List.of());
+        return new DetectionResult(streamId, 0L, at, List.of(), Duration.ZERO, telemetry, null, List.of(), Optional.empty());
     }
 
     private DetectionResult noTracking(Instant at) {
-        return new DetectionResult(streamId, 0L, at, List.of(), Duration.ZERO, null, null, List.of());
+        return new DetectionResult(streamId, 0L, at, List.of(), Duration.ZERO, null, null, List.of(), Optional.empty());
     }
 
     // -- construction --------------------------------------------------------------------------

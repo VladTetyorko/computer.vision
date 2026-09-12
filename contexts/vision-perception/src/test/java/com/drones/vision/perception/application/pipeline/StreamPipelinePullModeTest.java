@@ -125,7 +125,7 @@ class StreamPipelinePullModeTest {
         Detection detection = new Detection("person", 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2),
                 new ModelRef("yolo26n.pt", "latest"));
         return new DetectionResult(streamId, sequence, capturedAt, List.of(detection), Duration.ofMillis(7), null,
-                telemetry, List.of());
+                telemetry, List.of(), Optional.empty());
     }
 
     // --- the driver seam: pull results reach the same fan-out push mode uses -------------------

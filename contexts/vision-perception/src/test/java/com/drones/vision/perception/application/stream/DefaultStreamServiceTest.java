@@ -592,7 +592,7 @@ class DefaultStreamServiceTest {
                 new com.drones.vision.kernel.BoundingBox(0.1, 0.1, 0.2, 0.2),
                 new ModelRef("yolo26n.pt", "latest"));
         DetectionResult result = new DetectionResult(frame.streamId(), 0, Instant.now(), List.of(detection),
-                Duration.ZERO, null, null, List.of());
+                Duration.ZERO, null, null, List.of(), Optional.empty());
         when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
 
         StreamId streamId = service.start(device.id(), detectingDefaults());
@@ -609,7 +609,7 @@ class DefaultStreamServiceTest {
                 new com.drones.vision.kernel.BoundingBox(0.1, 0.1, 0.2, 0.2),
                 new ModelRef("yolo26n.pt", "latest"));
         DetectionResult result = new DetectionResult(frame.streamId(), 0, Instant.now(), List.of(detection),
-                Duration.ZERO, null, null, List.of());
+                Duration.ZERO, null, null, List.of(), Optional.empty());
         when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
         StreamId streamId = service.start(device.id(), PipelineConfig.defaults());
 
@@ -636,7 +636,7 @@ class DefaultStreamServiceTest {
         VideoFrame frame = new VideoFrame(StreamId.random(), 0, Instant.now(), 64, 48, PixelFormat.JPEG,
                 ByteBuffer.wrap(new byte[]{1, 2, 3}));
         when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(framePublisher(frame));
-        DetectionResult result = new DetectionResult(frame.streamId(), 0, Instant.now(), List.of(), Duration.ZERO, null, null, List.of());
+        DetectionResult result = new DetectionResult(frame.streamId(), 0, Instant.now(), List.of(), Duration.ZERO, null, null, List.of(), Optional.empty());
         when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
 
         withLiveUpdates.start(device.id(), detectingDefaults());
@@ -684,7 +684,7 @@ class DefaultStreamServiceTest {
         VideoFrame frame = new VideoFrame(StreamId.random(), 0, Instant.now(), 64, 48, PixelFormat.JPEG,
                 ByteBuffer.wrap(new byte[]{1, 2, 3}));
         when(videoSourcePort.open(any(), eq(device.stream()))).thenReturn(framePublisher(frame));
-        DetectionResult result = new DetectionResult(frame.streamId(), 0, Instant.now(), List.of(), Duration.ZERO, null, null, List.of());
+        DetectionResult result = new DetectionResult(frame.streamId(), 0, Instant.now(), List.of(), Duration.ZERO, null, null, List.of(), Optional.empty());
         when(detectionPort.detect(any(), any(), any())).thenReturn(CompletableFuture.completedFuture(result));
 
         service.start(device.id(), detectingDefaults());
@@ -859,13 +859,13 @@ class DefaultStreamServiceTest {
     }
 
     private static DetectionResult emptyResultOn(StreamId streamId) {
-        return new DetectionResult(streamId, 0, Instant.now(), List.of(), Duration.ZERO, null, null, List.of());
+        return new DetectionResult(streamId, 0, Instant.now(), List.of(), Duration.ZERO, null, null, List.of(), Optional.empty());
     }
 
     /** Carries tracking telemetry (unlike {@link #emptyResultOn}) but no bound track — {@code lockedTrackId == 0}. */
     private static DetectionResult noLockResultOn(StreamId streamId) {
         return new DetectionResult(streamId, 0, Instant.now(), List.of(), Duration.ZERO,
-                new TrackingTelemetry(false, DetectorReason.NO_LOCK, Duration.ZERO, "lk", 0L), null, List.of());
+                new TrackingTelemetry(false, DetectorReason.NO_LOCK, Duration.ZERO, "lk", 0L), null, List.of(), Optional.empty());
     }
 
     @Test
