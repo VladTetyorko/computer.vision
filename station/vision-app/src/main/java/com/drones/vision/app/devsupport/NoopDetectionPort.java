@@ -23,7 +23,7 @@ public final class NoopDetectionPort implements DetectionPort {
     @Override
     public CompletionStage<DetectionResult> detect(VideoFrame frame, PipelineConfig config) {
         DetectionResult result = new DetectionResult(frame.streamId(), frame.sequence(), frame.capturedAt(),
-                List.of(), Duration.ZERO);
+                List.of(), Duration.ZERO, null, null, List.of());
         return CompletableFuture.completedFuture(result);
     }
 }

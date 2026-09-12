@@ -163,7 +163,7 @@ class DefaultStreamServiceProxyAndPullModeTest {
         PipelineConfig base = PipelineConfig.defaults();
         return new PipelineConfig(base.model(), base.confidenceThreshold(), base.inferenceFps(),
                 base.maxInFlightInferences(), base.labelFilter(), base.eventRule(), true, base.tracking(),
-                base.labelDenyFilter());
+                base.labelDenyFilter(), base.trace());
     }
 
     @Test

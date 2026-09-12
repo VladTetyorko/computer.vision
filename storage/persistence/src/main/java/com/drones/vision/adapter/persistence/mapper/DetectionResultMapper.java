@@ -5,6 +5,7 @@ import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.kernel.StreamId;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -28,6 +29,6 @@ public final class DetectionResultMapper {
 
     public static DetectionResult toDomain(DetectionResultEntity entity) {
         return new DetectionResult(new StreamId(entity.streamId()), entity.frameSequence(), entity.capturedAt(),
-                entity.detections(), Duration.ofNanos(entity.inferenceLatencyNanos()));
+                entity.detections(), Duration.ofNanos(entity.inferenceLatencyNanos()), null, null, List.of());
     }
 }

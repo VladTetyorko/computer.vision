@@ -110,19 +110,19 @@ class StreamPipelineTest {
     }
 
     private DetectionResult emptyResult(long sequence) {
-        return new DetectionResult(streamId, sequence, Instant.now(), List.of(), Duration.ZERO);
+        return new DetectionResult(streamId, sequence, Instant.now(), List.of(), Duration.ZERO, null, null, List.of());
     }
 
     private DetectionResult resultWithBoxX(long sequence, Instant capturedAt, double boxX) {
         Detection detection = new Detection("person", 0.9, new BoundingBox(boxX, 0.10, 0.20, 0.20),
                 new ModelRef("yolo", "latest"));
-        return new DetectionResult(streamId, sequence, capturedAt, List.of(detection), Duration.ofMillis(5));
+        return new DetectionResult(streamId, sequence, capturedAt, List.of(detection), Duration.ofMillis(5), null, null, List.of());
     }
 
     private DetectionResult nonEmptyResult(long sequence) {
         Detection detection = new Detection("person", 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2),
                 new ModelRef("yolo", "latest"));
-        return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5));
+        return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5), null, null, List.of());
     }
 
     private static CompletableFuture<DetectionResult> failedFuture(String message) {
@@ -998,7 +998,7 @@ class StreamPipelineTest {
             detections.add(new Detection(label, 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2),
                     new ModelRef("yolo", "latest")));
         }
-        return new DetectionResult(streamId, sequence, Instant.now(), detections, Duration.ofMillis(5));
+        return new DetectionResult(streamId, sequence, Instant.now(), detections, Duration.ofMillis(5), null, null, List.of());
     }
 
     @Test
@@ -1581,7 +1581,7 @@ class StreamPipelineTest {
         Detection detection = new Detection("person", 0.9, new BoundingBox(0.4, 0.4, 0.05, 0.05),
                 new ModelRef("yolo", "latest"),
                 new TrackRef(1L, TrackState.CONFIRMED, DetectionSource.TRACKER, 2.0, 0.0, 10));
-        return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5));
+        return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5), null, null, List.of());
     }
 
     private int samplesOverTwoSecondsOfA60FpsSource(AdaptiveRateSettings adaptiveRate) {
@@ -1637,7 +1637,7 @@ class StreamPipelineTest {
                 new ModelRef("yolo", "latest"), new TrackRef(trackId, state, DetectionSource.TRACKER));
         return new DetectionResult(streamId, sequence, Instant.parse("2026-08-11T10:00:00Z").plusMillis(sequence * 100),
                 List.of(detection), Duration.ofMillis(5),
-                new TrackingTelemetry(false, null, Duration.ofNanos(400_000), "lk", trackId));
+                new TrackingTelemetry(false, null, Duration.ofNanos(400_000), "lk", trackId), null, List.of());
     }
 
     /** @see #trackedResult(long, long, TrackState) — same shape, but the box comes from a detector pass. */
@@ -1647,7 +1647,7 @@ class StreamPipelineTest {
         return new DetectionResult(streamId, sequence, Instant.parse("2026-08-11T10:00:00Z").plusMillis(sequence * 100),
                 List.of(detection), Duration.ofMillis(5),
                 new TrackingTelemetry(true, com.drones.vision.perception.domain.model.DetectorReason.ALWAYS,
-                        Duration.ofNanos(400_000), "lk", trackId));
+                        Duration.ofNanos(400_000), "lk", trackId), null, List.of());
     }
 
     /** A result carrying tracking telemetry but no detections — for exercising the unbound branch. */
@@ -1655,7 +1655,7 @@ class StreamPipelineTest {
         return new DetectionResult(streamId, sequence, Instant.parse("2026-08-11T10:00:00Z").plusMillis(sequence * 100),
                 List.of(), Duration.ofMillis(5),
                 new TrackingTelemetry(false, com.drones.vision.perception.domain.model.DetectorReason.NO_LOCK,
-                        Duration.ofNanos(400_000), "lk", lockedTrackId));
+                        Duration.ofNanos(400_000), "lk", lockedTrackId), null, List.of());
     }
 
     /** @see #mode(TrackingMode, int) — same shape, plus an explicit lock. */

@@ -743,8 +743,10 @@ public final class DefaultStreamService implements StreamService {
 
     /**
      * Folds {@code patch}'s present fields onto {@code current}, leaving every absent field (and
-     * every non-PATCH-able field — {@code maxInFlightInferences}, {@code eventRule}, and the
-     * model's own {@code version}, frozen contract &sect;3) exactly as {@code current} has it.
+     * every non-PATCH-able field — {@code maxInFlightInferences}, {@code eventRule}, {@code trace}
+     * (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.4, driven by demand rather than a client
+     * PATCH), and the model's own {@code version}, frozen contract &sect;3) exactly as {@code
+     * current} has it.
      *
      * <p>The tracking component folds <b>per field</b> through {@link TrackingConfigPatch#foldOnto}
      * (docs/plans/done/TRACKING-PLAN.md &sect;4.D): an absent {@code tracking} leaves it entirely alone, and a
@@ -775,7 +777,7 @@ public final class DefaultStreamService implements StreamService {
                 ? current.tracking()
                 : patch.tracking().foldOnto(current.tracking(), lockSeq::incrementAndGet);
         return new PipelineConfig(model, confidenceThreshold, inferenceFps, current.maxInFlightInferences(),
-                labelFilter, current.eventRule(), detectionEnabled, tracking, labelDenyFilter);
+                labelFilter, current.eventRule(), detectionEnabled, tracking, labelDenyFilter, current.trace());
     }
 
     /** {@code config} with its tracking component replaced; {@code config} itself when unchanged. */
@@ -785,7 +787,7 @@ public final class DefaultStreamService implements StreamService {
         }
         return new PipelineConfig(config.model(), config.confidenceThreshold(), config.inferenceFps(),
                 config.maxInFlightInferences(), config.labelFilter(), config.eventRule(),
-                config.detectionEnabled(), tracking, config.labelDenyFilter());
+                config.detectionEnabled(), tracking, config.labelDenyFilter(), config.trace());
     }
 
     /**

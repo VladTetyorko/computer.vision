@@ -12,6 +12,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class DetectionResultTest {
 
@@ -25,7 +26,7 @@ class DetectionResultTest {
         detections.add(detection());
 
         DetectionResult result = new DetectionResult(
-                StreamId.random(), 0L, Instant.now(), detections, Duration.ofMillis(20));
+                StreamId.random(), 0L, Instant.now(), detections, Duration.ofMillis(20), null, null, List.of());
 
         detections.add(detection());
 
@@ -42,39 +43,29 @@ class DetectionResultTest {
         Duration latency = Duration.ofMillis(10);
 
         assertThrows(IllegalArgumentException.class,
-                () -> new DetectionResult(null, 0L, now, detections, latency));
+                () -> new DetectionResult(null, 0L, now, detections, latency, null, null, List.of()));
         assertThrows(IllegalArgumentException.class,
-                () -> new DetectionResult(streamId, -1L, now, detections, latency));
+                () -> new DetectionResult(streamId, -1L, now, detections, latency, null, null, List.of()));
         assertThrows(IllegalArgumentException.class,
-                () -> new DetectionResult(streamId, 0L, null, detections, latency));
+                () -> new DetectionResult(streamId, 0L, null, detections, latency, null, null, List.of()));
         assertThrows(IllegalArgumentException.class,
-                () -> new DetectionResult(streamId, 0L, now, null, latency));
+                () -> new DetectionResult(streamId, 0L, now, null, latency, null, null, List.of()));
         assertThrows(IllegalArgumentException.class,
-                () -> new DetectionResult(streamId, 0L, now, detections, null));
+                () -> new DetectionResult(streamId, 0L, now, detections, null, null, null, List.of()));
         assertThrows(IllegalArgumentException.class,
-                () -> new DetectionResult(streamId, 0L, now, detections, Duration.ofMillis(-1)));
+                () -> new DetectionResult(
+                        streamId, 0L, now, detections, Duration.ofMillis(-1), null, null, List.of()));
+        assertThrows(IllegalArgumentException.class,
+                () -> new DetectionResult(streamId, 0L, now, detections, latency, null, null, null),
+                "objects must never be null — an empty list is the honest 'no mirror' value, not null");
     }
 
     @Test
     void allowsEmptyDetections() {
         DetectionResult result = new DetectionResult(
-                StreamId.random(), 0L, Instant.now(), List.of(), Duration.ZERO);
+                StreamId.random(), 0L, Instant.now(), List.of(), Duration.ZERO, null, null, List.of());
 
         assertEquals(0, result.detections().size());
-    }
-
-    @Test
-    void fiveArgConstructorEqualsSixArgConstructorWithNullTracking() {
-        StreamId streamId = StreamId.random();
-        Instant now = Instant.now();
-        List<Detection> detections = List.of(detection());
-        Duration latency = Duration.ofMillis(10);
-
-        DetectionResult viaConvenience = new DetectionResult(streamId, 0L, now, detections, latency);
-        DetectionResult viaCanonical = new DetectionResult(streamId, 0L, now, detections, latency, null);
-
-        assertEquals(viaCanonical, viaConvenience);
-        assertNull(viaConvenience.tracking());
     }
 
     @Test
@@ -82,25 +73,11 @@ class DetectionResultTest {
         TrackingTelemetry tracking =
                 new TrackingTelemetry(false, null, Duration.ofMillis(0), "lk", 7L);
 
-        DetectionResult result = new DetectionResult(
-                StreamId.random(), 0L, Instant.now(), List.of(detection()), Duration.ofMillis(10), tracking);
+        DetectionResult result = new DetectionResult(StreamId.random(), 0L, Instant.now(), List.of(detection()),
+                Duration.ofMillis(10), tracking, null, List.of());
 
         assertEquals(tracking, result.tracking());
-    }
-
-    @Test
-    void sixArgConstructorEqualsSevenArgConstructorWithNullPullTelemetry() {
-        StreamId streamId = StreamId.random();
-        Instant now = Instant.now();
-        List<Detection> detections = List.of(detection());
-        Duration latency = Duration.ofMillis(10);
-        TrackingTelemetry tracking = new TrackingTelemetry(false, null, Duration.ZERO, "lk", 0L);
-
-        DetectionResult viaConvenience = new DetectionResult(streamId, 0L, now, detections, latency, tracking);
-        DetectionResult viaCanonical = new DetectionResult(streamId, 0L, now, detections, latency, tracking, null);
-
-        assertEquals(viaCanonical, viaConvenience);
-        assertNull(viaConvenience.pullTelemetry());
+        assertNull(result.pullTelemetry());
     }
 
     @Test
@@ -108,9 +85,44 @@ class DetectionResultTest {
         PullTelemetry pullTelemetry = new PullTelemetry(3L, 9.9f, 9.5f, 2L, 1L, 12L);
 
         DetectionResult result = new DetectionResult(StreamId.random(), 0L, Instant.now(), List.of(detection()),
-                Duration.ofMillis(10), null, pullTelemetry);
+                Duration.ofMillis(10), null, pullTelemetry, List.of());
 
         assertEquals(pullTelemetry, result.pullTelemetry());
         assertNull(result.tracking());
+    }
+
+    @Test
+    void objectsDefaultsToEmptyForAResultWithNoMirror() {
+        DetectionResult result = new DetectionResult(StreamId.random(), 0L, Instant.now(), List.of(detection()),
+                Duration.ofMillis(10), null, null, List.of());
+
+        assertTrue(result.objects().isEmpty(), "no mirror produced => empty list, never null");
+    }
+
+    @Test
+    void objectsListIsDefensivelyCopied() {
+        List<ObjectState> objects = new ArrayList<>();
+        objects.add(ObjectStateFixtures.everyFieldDistinct());
+
+        DetectionResult result = new DetectionResult(StreamId.random(), 0L, Instant.now(), List.of(),
+                Duration.ZERO, null, null, objects);
+
+        objects.add(ObjectStateFixtures.everyFieldDistinct());
+
+        assertEquals(1, result.objects().size(), "later mutation of the source list must not affect the result");
+        assertThrows(UnsupportedOperationException.class,
+                () -> result.objects().add(ObjectStateFixtures.everyFieldDistinct()),
+                "returned objects list must be immutable");
+    }
+
+    @Test
+    void objectsCanCarryAMirroredObjectDistinctFromDetections() {
+        ObjectState coastingWithNoDetection = ObjectStateFixtures.everyFieldDistinct();
+
+        DetectionResult result = new DetectionResult(StreamId.random(), 0L, Instant.now(), List.of(),
+                Duration.ZERO, null, null, List.of(coastingWithNoDetection));
+
+        assertTrue(result.detections().isEmpty(), "no detection this frame");
+        assertEquals(1, result.objects().size(), "the coasting/dormant object still appears in objects");
     }
 }

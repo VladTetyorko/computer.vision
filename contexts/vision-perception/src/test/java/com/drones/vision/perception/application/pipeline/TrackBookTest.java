@@ -32,7 +32,7 @@ class TrackBookTest {
     private final StreamId streamId = StreamId.random();
 
     private DetectionResult result(long frameSequence, Instant capturedAt, Detection... detections) {
-        return new DetectionResult(streamId, frameSequence, capturedAt, List.of(detections), Duration.ZERO);
+        return new DetectionResult(streamId, frameSequence, capturedAt, List.of(detections), Duration.ZERO, null, null, List.of());
     }
 
     private static Detection tracked(String label, long trackId, TrackState state, double x) {

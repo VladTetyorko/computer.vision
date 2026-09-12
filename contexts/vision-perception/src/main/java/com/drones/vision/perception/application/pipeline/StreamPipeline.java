@@ -1404,7 +1404,11 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * filter drops <i>detections</i>, and per-frame tracking facts (whether the detector ran, why,
      * what the tracker cost, which track is locked) are true of the frame regardless of which of its
      * boxes survived filtering. Dropping them here would silently zero the duty-cycle stats of every
-     * stream that happens to use a label filter.
+     * stream that happens to use a label filter. {@link DetectionResult#objects()} carries through
+     * unchanged for the same reason (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.5) — the object
+     * mirror is a per-identity fact, not a per-detection one, so filtering {@code detections} must
+     * not filter it too; today it is always empty here regardless, since nothing in this module
+     * populates it yet.
      */
     private DetectionResult applyLabelFilters(DetectionResult result) {
         Set<String> labelFilter = config.labelFilter();
@@ -1420,7 +1424,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
             return result;
         }
         return new DetectionResult(result.streamId(), result.frameSequence(), result.capturedAt(), kept,
-                result.inferenceLatency(), result.tracking());
+                result.inferenceLatency(), result.tracking(), null, result.objects());
     }
 
     /**

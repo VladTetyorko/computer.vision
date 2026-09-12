@@ -119,21 +119,26 @@ public record CvProfile(CvProfileId id, String name, String description, boolean
      * happens once, at {@code start}; nothing here re-resolves mid-flight).
      *
      * <p>Every {@link PipelineConfig} field comes from this profile <b>except</b> {@link
-     * PipelineConfig#maxInFlightInferences()}, which always comes from {@code defaults} — it is
-     * host capacity, not a profile concern (docs/plans/active/CV-SETTINGS-PLAN.md §5.1: "{@code
-     * maxInFlightInferences} is deliberately not a profile field"). Concretely:
+     * PipelineConfig#maxInFlightInferences()} and {@link PipelineConfig#trace()}, which always come
+     * from {@code defaults} — neither is a profile concern: {@code maxInFlightInferences} is host
+     * capacity (docs/plans/active/CV-SETTINGS-PLAN.md §5.1: "{@code maxInFlightInferences} is
+     * deliberately not a profile field"), and {@code trace} is per-session inspector demand
+     * (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4) — a persisted profile has no notion of
+     * "an inspector happens to be open right now". Concretely:
      * <ul>
      *   <li>{@code model}, {@code confidenceThreshold}, {@code inferenceFps}, {@code
      *       detectionEnabled}, {@code tracking}, {@code eventRule} — this profile's own values.</li>
      *   <li>{@code labelFilter}, {@code labelDenyFilter} — this profile's lists, converted to sets
      *       (order is a display concern this profile keeps; {@link PipelineConfig} only tests
      *       membership).</li>
-     *   <li>{@code maxInFlightInferences} — always {@code defaults.maxInFlightInferences()}.</li>
+     *   <li>{@code maxInFlightInferences}, {@code trace} — always {@code defaults.maxInFlightInferences()}/
+     *       {@code defaults.trace()}.</li>
      * </ul>
      * A profile whose fields exactly mirror {@link PipelineConfig#defaults()}'s own components
      * therefore folds to a byte-identical {@code PipelineConfig.defaults()}.
      *
-     * @param defaults the platform defaults to fold over — supplies only {@code maxInFlightInferences}
+     * @param defaults the platform defaults to fold over — supplies {@code maxInFlightInferences}
+     *                 and {@code trace}
      * @return the resolved {@code PipelineConfig}
      * @throws IllegalArgumentException if {@code defaults} is {@code null}
      */
@@ -142,6 +147,7 @@ public record CvProfile(CvProfileId id, String name, String description, boolean
             throw new IllegalArgumentException("CvProfile toPipelineConfig defaults must not be null");
         }
         return new PipelineConfig(model, confidenceThreshold, inferenceFps, defaults.maxInFlightInferences(),
-                Set.copyOf(labelFilter), eventRule, detectionEnabled, tracking, Set.copyOf(labelDenyFilter));
+                Set.copyOf(labelFilter), eventRule, detectionEnabled, tracking, Set.copyOf(labelDenyFilter),
+                defaults.trace());
     }
 }

@@ -206,7 +206,11 @@ final class DetectionFrameCodec {
                 detections,
                 Duration.ofMillis(response.getInferenceMillis()),
                 toTrackingTelemetry(response),
-                toPullTelemetry(response));
+                toPullTelemetry(response),
+                // CV-ORCHESTRATION wave W1 step 3: the mirror itself is decoded by a later step of
+                // this wave; until then every response decodes to no mirror, the honest "not
+                // computed here yet" answer (never null -- see DetectionResult#objects javadoc).
+                List.of());
     }
 
     /**

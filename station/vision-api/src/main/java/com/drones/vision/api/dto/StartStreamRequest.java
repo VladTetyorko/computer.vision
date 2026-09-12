@@ -93,7 +93,10 @@ public record StartStreamRequest(Double confidenceThreshold, Integer inferenceFp
      * of the fold, not the answer. What this request states about tracking travels separately as
      * {@link #trackingPatch()}, and the application layer composes the three layers (request &gt;
      * deployment seed &gt; this default) when the stream starts, so that every start path seeds
-     * identically (docs/extracts/TRACKING-ORCHESTRATION.md §4.1).
+     * identically (docs/extracts/TRACKING-ORCHESTRATION.md §4.1). {@code trace} likewise always stays
+     * {@code defaults}' own value — this request has no field for it, since warm-trace-tier demand
+     * is per-session inspector state (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4), not something
+     * a start request expresses.
      *
      * @param defaults the deployment's default pipeline configuration to merge this request onto
      * @return the effective pipeline configuration for the new stream
@@ -110,7 +113,7 @@ public record StartStreamRequest(Double confidenceThreshold, Integer inferenceFp
                 detectionEnabled != null ? detectionEnabled : defaults.detectionEnabled();
         return new PipelineConfig(effectiveModel, confidence, fps, defaults.maxInFlightInferences(),
                 effectiveLabelFilter, defaults.eventRule(), effectiveDetectionEnabled, defaults.tracking(),
-                effectiveLabelDenyFilter);
+                effectiveLabelDenyFilter, defaults.trace());
     }
 
     /**

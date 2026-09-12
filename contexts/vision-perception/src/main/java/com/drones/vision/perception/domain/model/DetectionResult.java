@@ -23,6 +23,14 @@ import java.util.List;
  * a result produced by the worker's pull loop carries its own diagnostics, a result produced by a
  * push-mode {@code DetectStream} call has none to carry.
  *
+ * <p>{@code objects} (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.5, wave W1) is a
+ * <strong>different set</strong> from {@code detections} — a coasting track with no detection
+ * this frame is in {@code objects} and not in {@code detections}; a dormant identity is in {@code
+ * objects} and has never been anywhere in {@code detections}. It is <strong>never {@code
+ * null}</strong> — an empty list is the honest value for a result produced by a path with no
+ * mirror yet (legacy replay, devsupport, persistence round-trips predating this wave), never a
+ * "feature is off" signal (CLAUDE.md rule 10). Defensively copied to an immutable list.
+ *
  * @param streamId          stream the source frame belongs to
  * @param frameSequence     sequence number of the source frame; must be non-negative
  * @param capturedAt        capture timestamp of the source frame
@@ -30,9 +38,12 @@ import java.util.List;
  * @param inferenceLatency  wall-clock time the inference call took; must not be negative
  * @param tracking          per-frame tracking facts, or {@code null} if tracking was off
  * @param pullTelemetry     worker-reported pull-mode diagnostics, or {@code null} in push mode
+ * @param objects           the object mirror for this frame; defensively copied to an immutable
+ *                          list; never {@code null}, empty when no mirror was produced
  */
 public record DetectionResult(StreamId streamId, long frameSequence, Instant capturedAt, List<Detection> detections,
-                               Duration inferenceLatency, TrackingTelemetry tracking, PullTelemetry pullTelemetry) {
+                               Duration inferenceLatency, TrackingTelemetry tracking, PullTelemetry pullTelemetry,
+                               List<ObjectState> objects) {
 
     public DetectionResult {
         if (streamId == null) {
@@ -53,28 +64,10 @@ public record DetectionResult(StreamId streamId, long frameSequence, Instant cap
         if (inferenceLatency.isNegative()) {
             throw new IllegalArgumentException("DetectionResult inferenceLatency must not be negative: " + inferenceLatency);
         }
+        if (objects == null) {
+            throw new IllegalArgumentException("DetectionResult objects must not be null");
+        }
         detections = List.copyOf(detections);
-    }
-
-    /**
-     * Convenience constructor for a push-mode result — defaults {@link #pullTelemetry()} to {@code
-     * null}, the same "N-1-arg convenience ctor" idiom used elsewhere. This was the canonical
-     * constructor before docs/plans/done/MEDIA-SOT-PLAN.md wave M5/D12 added {@link #pullTelemetry()}; every
-     * pre-existing 6-arg call site compiles unchanged.
-     */
-    public DetectionResult(StreamId streamId, long frameSequence, Instant capturedAt, List<Detection> detections,
-                            Duration inferenceLatency, TrackingTelemetry tracking) {
-        this(streamId, frameSequence, capturedAt, detections, inferenceLatency, tracking, null);
-    }
-
-    /**
-     * Convenience constructor for a result with tracking off — defaults {@link #tracking()} to
-     * {@code null}, the same "N-1-arg convenience ctor" idiom used elsewhere. This was the
-     * canonical constructor before docs/plans/done/TRACKING-PLAN.md §4.B added {@link #tracking()}; every
-     * pre-existing 5-arg call site compiles unchanged.
-     */
-    public DetectionResult(StreamId streamId, long frameSequence, Instant capturedAt, List<Detection> detections,
-                            Duration inferenceLatency) {
-        this(streamId, frameSequence, capturedAt, detections, inferenceLatency, null, null);
+        objects = List.copyOf(objects);
     }
 }

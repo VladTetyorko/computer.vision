@@ -107,7 +107,7 @@ class CvDetectionE2ETest {
         PipelineConfig defaults = PipelineConfig.defaults();
         return new PipelineConfig(defaults.model(), defaults.confidenceThreshold(), defaults.inferenceFps(),
                 defaults.maxInFlightInferences(), defaults.labelFilter(), defaults.eventRule(),
-                true, defaults.tracking(), defaults.labelDenyFilter());
+                true, defaults.tracking(), defaults.labelDenyFilter(), defaults.trace());
     }
 
     @Autowired
