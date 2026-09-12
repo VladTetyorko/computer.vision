@@ -327,20 +327,15 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final DetectionRateWindow detectionRate;
 
     /**
-     * Why the sampler decided what it decided, per deadline (docs/plans/active/CV-ORCHESTRATION-PLAN.md
-     * &sect;4.4) — a trace of individual {@link GateDecision}s, as opposed to {@link #detectionRate}'s
-     * aggregate counters over the same events. Peer of {@link #detectionRate} for the same reason:
-     * different read model, same underlying events, no reason to share a lock. See {@link
-     * FrameGateLedger}'s own javadoc for why this does not grow by one entry per video frame.
+     * {@code cv-trace}'s gate ledger, frame ledger, and trace-demand fold, as one collaborator
+     * (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.4, wave W2.9 extraction) — see {@link
+     * PipelineTrace}'s own javadoc for exactly what moved here and why. {@link #gateLedger(int)}/
+     * {@link #frameLedger(int)} delegate to it; {@link #maybeDetect}/{@link #submitDetection} record
+     * gate decisions into it; {@link #onDetectionResult} records an attached {@link FrameLedger} into
+     * it; {@link #clearDetectionDerivedState()} clears it; {@link #updateTraceDemand} folds through
+     * it.
      */
-    private final FrameGateLedger gateLedger;
-
-    /**
-     * The frame half of {@code cv-trace} (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.4) — see
-     * {@link FrameLedgerRing}'s own javadoc for why this does not coalesce the way {@link
-     * #gateLedger} does. Populated in {@link #onDetectionResult} whenever a result carries one.
-     */
-    private final FrameLedgerRing frameLedger;
+    private final PipelineTrace trace;
 
     /**
      * Chooses the rate {@link #sampleIntervalNanos} schedules deadlines at
@@ -476,8 +471,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         this.pipelineLatency = new PipelineLatencyWindow(settings.trackingStatsWindow());
         this.detectionRate = new DetectionRateWindow(settings.trackingStatsWindow(),
                 this.pullDetection == null ? DetectionRateWindow.Transport.PUSH : DetectionRateWindow.Transport.PULL);
-        this.gateLedger = new FrameGateLedger(settings.gateLedgerDepth());
-        this.frameLedger = new FrameLedgerRing(settings.frameLedgerDepth());
+        this.trace = new PipelineTrace(settings);
         this.rateController = new DetectionRateController(settings.adaptiveRate(), settings.cameraHfovDegrees());
         this.backoffNanos = this.detectionBackoffInitialNanos;
         // Seeded from this.config/this.detectionDemand/this.detectionPolicyAlwaysOn, all already
@@ -676,12 +670,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * @param wanted whether something is currently consuming this stream's trace
      */
     public void updateTraceDemand(boolean wanted) {
-        PipelineConfig current = config;
-        if (current.trace() != wanted) {
-            config = new PipelineConfig(current.model(), current.confidenceThreshold(), current.inferenceFps(),
-                    current.maxInFlightInferences(), current.labelFilter(), current.eventRule(),
-                    current.detectionEnabled(), current.tracking(), current.labelDenyFilter(), wanted);
-        }
+        config = PipelineTrace.withTraceDemand(config, wanted);
     }
 
     /**
@@ -837,27 +826,26 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     /**
      * @param last how many of the most recent gate decisions to return; must not be negative
      * @return the most recent {@code last} {@link GateDecision}s {@link #maybeDetect} made, oldest
-     *         first (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.4) — the companion to {@link
-     *         #detectionRate()}: that one aggregates the same underlying events into counters, this
-     *         one is the individual trace a {@code GET /api/streams/{id}/cv/trace} caller (a later
-     *         wave step) would render. See {@link FrameGateLedger} for why this does not grow by one
-     *         entry per video frame. Never {@code null}; empty before the first frame arrives.
+     *         first — the companion to {@link #detectionRate()}: that one aggregates the same
+     *         underlying events into counters, this one is the individual trace a {@code GET
+     *         /api/streams/{id}/cv/trace} caller renders. Delegates to {@link #trace}; never {@code
+     *         null}, empty before the first frame arrives. See {@link PipelineTrace} for the ring
+     *         this reads from.
      */
     public List<GateDecision> gateLedger(int last) {
-        return gateLedger.recent(last);
+        return trace.gateLedger(last);
     }
 
     /**
      * @param last how many of the most recent {@link FrameLedger}s to return; must not be negative
      * @return the most recent {@code last} {@link FrameLedger}s this pipeline actually received from
-     *         cv-service, oldest first (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.4) — the
-     *         frame half of {@code GET /api/streams/{id}/cv/trace}, alongside {@link #gateLedger(int)}
-     *         (the gate half) and {@link #objects()} (the world half). Never {@code null}; empty
-     *         while {@link PipelineConfig#trace()} is {@code false} (the default), since cv-service
-     *         never attaches a ledger to a response in that case.
+     *         cv-service, oldest first — the frame half of {@code GET /api/streams/{id}/cv/trace},
+     *         alongside {@link #gateLedger(int)} (the gate half) and {@link #objects()} (the world
+     *         half). Delegates to {@link #trace}; never {@code null}, empty while {@link
+     *         PipelineConfig#trace()} is {@code false} (the default).
      */
     public List<FrameLedger> frameLedger(int last) {
-        return frameLedger.recent(last);
+        return trace.frameLedger(last);
     }
 
     /**
@@ -1203,9 +1191,9 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * produce. A held {@code FOLLOW} lock is no exception: its bound {@code trackId} was allocated by
      * whatever the detector was feeding before the re-arm/close, so it means nothing after.
      *
-     * <p>Includes {@link #pipelineLatency}/{@link #detectionRate}/{@link #gateLedger}/{@link
-     * #frameLedger} — detector-health windows tied to whether inference itself is running, not to
-     * whether anyone is watching it — which is exactly why {@link #clearLiveDerivedState()} (the
+     * <p>Includes {@link #pipelineLatency}/{@link #detectionRate}/{@link #trace} — detector-health
+     * windows tied to whether inference itself is running, not to whether anyone is watching it —
+     * which is exactly why {@link #clearLiveDerivedState()} (the
      * narrower, live-only counterpart, wave D2) leaves them alone: an {@code ALWAYS} asset losing its
      * last viewer keeps inferring, so these windows keep being meaningfully written to and must not
      * be wiped out from under that ongoing activity.
@@ -1215,8 +1203,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         trackingStats.clear();
         pipelineLatency.clear();
         detectionRate.clear();
-        gateLedger.clear();
-        frameLedger.clear();
+        trace.clear();
         rateController.clear();
     }
 
@@ -1255,17 +1242,12 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * behavior depends on being a no-op for: {@code pullDetection} is {@code null} for every existing
      * caller, so the check below always falls through exactly as it did before this capability existed.
      *
-     * <p><b>Gate ledger (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.4).</b> {@link
-     * #detectionGateOpen()}'s single boolean expression is expanded below into its three component
-     * checks — {@link #pullDetection}, {@link PipelineConfig#detectionEnabled()}, then demand/{@code
-     * ALWAYS} — purely so each early return can record a distinct {@link GateReason} ({@link
-     * GateReason#PULL_MODE}/{@link GateReason#GATE_OFF}/{@link GateReason#GATE_NO_DEMAND}) into
-     * {@link #gateLedger}. The union of frames returned early is identical to the single-expression
-     * form this replaces — only the recorded classification is new — and {@code cfg}/{@code demand}/
-     * {@code alwaysOn} are read once, together, into locals at the top precisely so the {@link
-     * DemandSnapshot} attached to whichever reason fires is guaranteed consistent with the decision
-     * itself, narrower than the field-by-field reads {@link #detectionGateOpen()} itself still does
-     * for its other (non-ledger) callers.
+     * <p><b>Gate ledger.</b> {@link #detectionGateOpen()}'s single boolean expression is expanded
+     * below into its three component checks purely so each early return can record a distinct
+     * {@link GateReason} into {@link #trace} — same union of early returns as the single-expression
+     * form, only the classification is new. {@code cfg}/{@code demand}/{@code alwaysOn} are read
+     * once, together, into locals precisely so the recorded {@link DemandSnapshot} is guaranteed
+     * consistent with the decision itself.
      */
     private void maybeDetect(VideoFrame frame, long now) {
         PipelineConfig cfg = config;
@@ -1273,15 +1255,15 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         boolean alwaysOn = detectionPolicyAlwaysOn;
         DemandSnapshot snapshot = new DemandSnapshot(cfg.detectionEnabled(), demand, alwaysOn);
         if (pullDetection != null) {
-            gateLedger.record(skippedDecision(frame, snapshot, GateReason.PULL_MODE));
+            trace.recordSkip(frame, snapshot, GateReason.PULL_MODE);
             return;
         }
         if (!cfg.detectionEnabled()) {
-            gateLedger.record(skippedDecision(frame, snapshot, GateReason.GATE_OFF));
+            trace.recordSkip(frame, snapshot, GateReason.GATE_OFF);
             return;
         }
         if (!(demand || alwaysOn)) {
-            gateLedger.record(skippedDecision(frame, snapshot, GateReason.GATE_NO_DEMAND));
+            trace.recordSkip(frame, snapshot, GateReason.GATE_NO_DEMAND);
             return;
         }
         switch (outageDecision()) {
@@ -1301,18 +1283,18 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                 // one entry per deadline, not one per frame arriving during a ten-second backoff.
                 if (sampleDue(now)) {
                     detectionRate.record(DetectionRateWindow.Outcome.DROPPED_OUTAGE, now);
-                    gateLedger.record(skippedDecision(frame, snapshot, GateReason.OUTAGE_BACKOFF));
+                    trace.recordSkip(frame, snapshot, GateReason.OUTAGE_BACKOFF);
                 }
             }
             case NORMAL -> {
                 if (!sampleDue(now)) {
-                    gateLedger.record(skippedDecision(frame, snapshot, GateReason.DEADLINE_NOT_DUE));
+                    trace.recordSkip(frame, snapshot, GateReason.DEADLINE_NOT_DUE);
                     return;
                 }
                 if (inFlightInferences.get() >= config.maxInFlightInferences()) {
                     // bounded in-flight: skip this sample rather than queue it
                     detectionRate.record(DetectionRateWindow.Outcome.DROPPED_IN_FLIGHT, now);
-                    gateLedger.record(skippedDecision(frame, snapshot, GateReason.IN_FLIGHT_FULL));
+                    trace.recordSkip(frame, snapshot, GateReason.IN_FLIGHT_FULL);
                     return;
                 }
                 inFlightInferences.incrementAndGet();
@@ -1320,11 +1302,6 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                 submitDetection(frame, false, snapshot);
             }
         }
-    }
-
-    /** One {@link GateOutcome#SKIPPED} entry for {@code frame}'s deadline; see {@link #gateLedger}. */
-    private static GateDecision skippedDecision(VideoFrame frame, DemandSnapshot demand, GateReason reason) {
-        return new GateDecision(frame.sequence(), frame.capturedAt(), GateOutcome.SKIPPED, reason, demand);
     }
 
     /**
@@ -1369,10 +1346,9 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         // went out and is still in flight" -- without this module ever depending on adapter-cv-grpc to
         // learn the concrete exception type, which the hexagonal dependency rule forbids.
         if (pending.toCompletableFuture().isCompletedExceptionally()) {
-            gateLedger.record(skippedDecision(frame, demand, GateReason.CV_UNAVAILABLE));
+            trace.recordSkip(frame, demand, GateReason.CV_UNAVAILABLE);
         } else {
-            gateLedger.record(new GateDecision(frame.sequence(), frame.capturedAt(),
-                    isProbe ? GateOutcome.PROBE : GateOutcome.SENT, null, demand));
+            trace.recordSent(frame, demand, isProbe);
         }
         pending.whenComplete((result, error) -> {
             // Recorded before the closed/error branches below: a round trip that ended in a failure,
@@ -1507,10 +1483,10 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         }
         DetectionResult filtered = applyLabelFilters(result);
         // Detector-health bookkeeping, gate-independent -- see clearDetectionDerivedState's own
-        // javadoc for why this ring sits beside gateLedger/detectionRate rather than behind either
-        // the live or durable plane below: it records whatever cv-service actually attached
-        // (present only while PipelineConfig#trace() is true), regardless of who is watching.
-        filtered.ledger().ifPresent(frameLedger::record);
+        // javadoc for why trace's frame ledger sits beside pipelineLatency/detectionRate rather than
+        // behind either the live or durable plane below: it records whatever cv-service actually
+        // attached (present only while PipelineConfig#trace() is true), regardless of who is watching.
+        filtered.ledger().ifPresent(trace::recordFrameLedger);
         // Live plane FIRST, durable plane after -- the pre-D2 order, restored deliberately and not
         // merely for diff minimality. detectionRepositoryPort#save is synchronous I/O, and the live
         // read models below are what a polling client observes; running the write between a
