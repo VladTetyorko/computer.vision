@@ -34,12 +34,12 @@ import java.util.List;
  * @param updatedAt           when this profile was last edited
  * @param sources             per-knob provenance for the request that just created/updated this
  *                            profile (wave W2.8, docs/plans/active/CV-ORCHESTRATION-PLAN.md
- *                            &sect;4.7) — {@code null} (the whole group omitted) for every read
- *                            that has no originating {@link CvProfileRequest} to compare against
- *                            ({@link #from(CvProfile)}, {@link #platformDefault}, {@code GET}):
- *                            provenance is not persisted on {@link CvProfile} itself, so it exists
- *                            only in the same response as the request that produced it — see
- *                            {@link Sources}'s own javadoc
+ *                            &sect;4.7) — {@link Sources#none()} (the whole group omitted on the
+ *                            wire) for every read that has no originating {@link CvProfileRequest}
+ *                            to compare against ({@link #platformDefault}, {@code GET}): provenance
+ *                            is not persisted on {@link CvProfile} itself, so it exists only in the
+ *                            same response as the request that produced it — see {@link Sources}'s
+ *                            own javadoc
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record CvProfileResponse(String id, String name, String description, boolean builtIn, String groupId,
@@ -60,25 +60,16 @@ public record CvProfileResponse(String id, String name, String description, bool
     public static final String PLATFORM_DEFAULT_NAME = "Platform default";
 
     /**
-     * Maps a persisted profile to the wire, field for field, with no {@link #sources} — the plain
-     * {@code GET} shape, where there is no originating {@link CvProfileRequest} to report
-     * provenance against.
+     * Maps a profile to the wire together with its {@link Sources} — one canonical factory (CLAUDE.md
+     * rule 10: no second, narrower overload whose missing argument silently means "no provenance").
+     * {@code CvProfileController#create}/{@code #update} pass the originating request's {@link
+     * CvProfileRequest#fieldSources()}; every plain read (`GET`, {@code list}, {@code effective})
+     * passes {@link Sources#none()} deliberately, since a persisted profile alone has no originating
+     * request to report provenance against.
      *
      * @param profile the profile to map
-     * @return the response body for {@code profile}
-     */
-    public static CvProfileResponse from(CvProfile profile) {
-        return from(profile, null);
-    }
-
-    /**
-     * Maps a just-created/updated profile to the wire together with the {@link Sources} the
-     * request that produced it reports (wave W2.8) — {@code CvProfileController#create}/{@code
-     * #update}'s own shape.
-     *
-     * @param profile the freshly created/updated profile to map
-     * @param sources the originating {@link CvProfileRequest#fieldSources()}, or {@code null} to
-     *                omit the group entirely (same as {@link #from(CvProfile)})
+     * @param sources the originating {@link CvProfileRequest#fieldSources()}, or {@link
+     *                Sources#none()} when there is no originating request
      * @return the response body for {@code profile}, carrying {@code sources}
      */
     public static CvProfileResponse from(CvProfile profile, Sources sources) {
@@ -111,7 +102,7 @@ public record CvProfileResponse(String id, String name, String description, bool
                 config.model().id(), config.confidenceThreshold(), config.inferenceFps(),
                 List.copyOf(config.labelFilter()), List.copyOf(config.labelDenyFilter()), config.detectionEnabled(),
                 CvProfileTrackingResponse.from(config.tracking()), CvProfileEventRuleResponse.from(config.eventRule()),
-                Instant.EPOCH, Instant.EPOCH, null);
+                Instant.EPOCH, Instant.EPOCH, Sources.none());
     }
 
     /**
@@ -151,6 +142,23 @@ public record CvProfileResponse(String id, String name, String description, bool
          */
         public static Sources from(CvProfileRequest.Sources requestSources) {
             return new Sources(requestSources.model(), requestSources.labelFilter());
+        }
+
+        /**
+         * The "no provenance to report" value — both fields {@code null}, so {@code @JsonInclude(NON_NULL)}
+         * still omits the whole {@code sources} group from the wire, exactly as a bare {@code null}
+         * used to. Named and returned explicitly (rather than passing a literal {@code null} for
+         * {@link #sources()} at each such call site) because every one of those call sites is a read
+         * of an already-persisted {@link CvProfile} — {@code GET}, {@code list}, {@code effective},
+         * {@link #platformDefault} — and intent provenance is never persisted on {@link CvProfile}
+         * itself (see this record's own javadoc), so none of them has anything to report even in
+         * principle; this is that fact stated once, not four separate nulls that each look like they
+         * could have been an oversight.
+         *
+         * @return a {@link Sources} with both fields {@code null}
+         */
+        public static Sources none() {
+            return new Sources(null, null);
         }
     }
 }

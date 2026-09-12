@@ -54,7 +54,15 @@ class WorldObjectResponseWireContractTest {
     private static final Path FIXTURE_PATH = Path.of(
             "..", "vision-web", "src", "app", "core", "api", "__fixtures__", "world-object.wire.json");
 
-    private static final Path ACTUAL_PATH = FIXTURE_PATH.resolveSibling("world-object.wire.actual.json");
+    /**
+     * Deliberately NOT a sibling of {@link #FIXTURE_PATH} (unlike {@code ObjectStateRoundTripTest}'s
+     * own convention) — a sibling would land inside {@code vision-web}'s tracked source tree, where
+     * nothing ignores it, so a failing run would leave an untracked file a later {@code git add -A}
+     * could commit. {@code target/} is this module's own untracked build-output directory, safe for
+     * exactly this kind of scratch artifact; {@code cp} regeneration still works off the absolute
+     * path the failure message prints.
+     */
+    private static final Path ACTUAL_PATH = Path.of("target", "world-object.wire.actual.json");
 
     /** Fixed, not {@link StreamId#random()}: the fixture is a committed file and must be produced
      *  identically on every run. */
@@ -82,8 +90,9 @@ class WorldObjectResponseWireContractTest {
 
         // Compared as parsed JSON trees (order-independent) so a harmless field-ordering difference
         // never fails this test -- only an actual content difference does. On a mismatch we do NOT
-        // overwrite the fixture; we write the produced JSON beside it so regenerating is one `cp`
-        // away -- same idiom as ObjectStateRoundTripTest.
+        // overwrite the fixture; we write the produced JSON to ACTUAL_PATH (this module's own
+        // target/, not beside the fixture -- see that field's own javadoc for why) so regenerating
+        // is still one `cp` away.
         if (!expected.equals(actual)) {
             Files.writeString(ACTUAL_PATH, actualJson, StandardCharsets.UTF_8);
             fail("Produced JSON does not match the committed fixture " + FIXTURE_PATH.toAbsolutePath()

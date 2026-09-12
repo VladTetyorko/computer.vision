@@ -97,7 +97,7 @@ public class CvProfileController {
     @GetMapping("/api/cv/profiles")
     public CvProfilesResponse list() {
         List<CvProfileResponse> profiles = cvProfileService.list(currentUser.userId(), currentUser.scope()).stream()
-                .map(CvProfileResponse::from).toList();
+                .map(profile -> CvProfileResponse.from(profile, CvProfileResponse.Sources.none())).toList();
         return new CvProfilesResponse(profiles);
     }
 
@@ -110,7 +110,7 @@ public class CvProfileController {
     @GetMapping("/api/cv/profiles/{id}")
     public CvProfileResponse get(@PathVariable String id) {
         CvProfile profile = cvProfileService.get(CvProfileId.of(id), currentUser.userId(), currentUser.scope());
-        return CvProfileResponse.from(profile);
+        return CvProfileResponse.from(profile, CvProfileResponse.Sources.none());
     }
 
     /**
@@ -192,7 +192,8 @@ public class CvProfileController {
         CvProfileResponse profile = resolved.source() == ProfileSource.PLATFORM
                 ? CvProfileResponse.platformDefault(resolved.config())
                 : CvProfileResponse.from(
-                        cvProfileService.get(resolved.profileId(), currentUser.userId(), currentUser.scope()));
+                        cvProfileService.get(resolved.profileId(), currentUser.userId(), currentUser.scope()),
+                        CvProfileResponse.Sources.none());
         return new EffectiveCvProfileResponse(resolved.assetId().value().toString(), profile,
                 resolved.source().name());
     }

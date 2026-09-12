@@ -1525,10 +1525,14 @@ Also new: `CvProfileRequest#fieldSources()` → nested `CvProfileRequest.Sources
 ProfileSource labelFilter)`, reporting `contexts/vision-perception`'s new `ProfileSource.INTENT` for
 exactly the two fields `toSpec()` actually seeded from `intent`; `CvProfileResponse` grew from a
 15-component to a **16-component** record (`Sources sources` appended, `@JsonInclude(NON_NULL)` —
-omitted, not `null`, for every read with no originating request, i.e. `from(CvProfile)`/
-`platformDefault`/plain `GET`) with its own nested `CvProfileResponse.Sources`, populated by
-`CvProfileController#create`/`#update` from `request.fieldSources()` so a caller (W3's Tuning modal)
-can render "resolved from intent People." **Disclosed, permanent gap** (not a later-wave TODO):
+omitted, not `null`, for every read with no originating request) with its own nested
+`CvProfileResponse.Sources`, populated by `CvProfileController#create`/`#update` from
+`request.fieldSources()` so a caller (W3's Tuning modal) can render "resolved from intent People."
+**W2.10 fix:** the one-arg `from(CvProfile)` overload (silently delegating to `from(profile, null)`)
+was the withdrawn "null means the feature is off" convenience-overload pattern (CLAUDE.md rule 10)
+in static-factory form — removed. `CvProfileResponse.from(CvProfile, Sources)` is now the sole
+factory; `Sources.none()` (both fields `null`, so `@JsonInclude(NON_NULL)` still omits the group)
+is what every read-path caller (`list`, `get`, `effective`, `platformDefault`) passes explicitly. **Disclosed, permanent gap** (not a later-wave TODO):
 `confidenceThreshold`/`inferenceFps` have no `sources` representation at all, even though
 `IntentPolicyResolver` computes an `IntentPolicy#detectFloor()`/`#rateCeiling()` for them, because
 those two `CvProfileRequest` fields are bare primitives with no "caller left this to the platform"
