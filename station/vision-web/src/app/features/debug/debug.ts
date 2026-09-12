@@ -1,13 +1,23 @@
-import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, HostListener, computed, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { healthLabel, healthSeverity } from '../../core/system-status/system-status-logic';
 import { SystemStatusStore } from '../../core/system-status/system-status-store';
 import { DebugApiService, type RawResponse } from './debug-api.service';
+import { buildCurl } from './debug-curl';
+import { DebugRail } from './debug-rail';
 import { DEBUG_ENDPOINTS, methodHasBody, prefillForEndpoint } from './debug-endpoints';
 import { describeHealthProbe, formatResponseBody, isSuccessStatus, type FormattedBody } from './debug-response';
 import { DEBUG_HISTORY_LIMIT, pushHistoryEntry, type DebugHistoryEntry } from './debug-history';
+
+/** `Pretty` re-runs `formatResponseBody`'s pretty-print; `Raw` is the exact bytes the server sent —
+ *  a data-shape toggle (R1 §2.6/Grafana Explore), not two panels to navigate between. */
+type ResponseViewMode = 'pretty' | 'raw';
+
+/** How long the response pane's "Copy as cURL" button shows "Copied" before reverting (§1.3's
+ *  same-verb rule §10) — long enough to register, short enough that it never looks stuck. */
+const COPIED_LABEL_MS = 1500;
 
 /** The shape this page cares about from Spring Boot Actuator's `/actuator/health` body. */
 interface HealthDocument {
@@ -53,7 +63,7 @@ const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
  */
 @Component({
   selector: 'vision-debug',
-  imports: [FormsModule, PageBar, RouterLink],
+  imports: [FormsModule, PageBar, RouterLink, DebugRail],
   templateUrl: './debug.html',
   styleUrl: './debug.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -81,11 +91,6 @@ export class DebugPage {
     return this.systemStatusStore.refresh();
   }
 
-  constructor() {
-    // Best-effort convenience; a stale/absent result is still shown honestly (see template).
-    void this.loadHealth();
-  }
-
   // --- Raw API console -------------------------------------------------------
 
   protected readonly selectedEndpointId = signal('');
@@ -95,12 +100,31 @@ export class DebugPage {
   protected readonly sending = signal(false);
   protected readonly response = signal<RawResponse | null>(null);
   protected readonly history = signal<readonly DebugHistoryEntry[]>([]);
+  protected readonly viewMode = signal<ResponseViewMode>('pretty');
+  protected readonly curlCopied = signal(false);
+  private curlCopiedTimer: ReturnType<typeof setTimeout> | undefined;
+
+  private readonly pathInputRef = viewChild<ElementRef<HTMLInputElement>>('pathInput');
 
   protected readonly showBody = computed(() => methodHasBody(this.method()));
   protected readonly formatted = computed<FormattedBody | null>(() => {
     const current = this.response();
     return current ? formatResponseBody(current.bodyText) : null;
   });
+
+  /** Built from the *last history entry*, not the live form fields — those may have already been
+   *  edited again by the time the user clicks "Copy as cURL" (§1.4); the history row is what
+   *  actually ran. */
+  protected readonly curlCommand = computed<string | null>(() => {
+    const last = this.history()[0];
+    return last ? buildCurl(last, window.location.origin) : null;
+  });
+
+  constructor() {
+    // Best-effort convenience; a stale/absent result is still shown honestly (see template).
+    void this.loadHealth();
+    inject(DestroyRef).onDestroy(() => clearTimeout(this.curlCopiedTimer));
+  }
 
   protected selectEndpoint(id: string): void {
     this.selectedEndpointId.set(id);
@@ -117,7 +141,28 @@ export class DebugPage {
     const method = this.method();
     const path = this.path();
     const body = this.showBody() ? this.body() : undefined;
+    await this.execute(method, path, body);
+  }
 
+  /** Re-fills the form from a history row; the user still presses Send (R1 §2.3's view/replay
+   *  distinction) — this is the row's *only* built-in interaction. */
+  protected replay(entry: DebugHistoryEntry): void {
+    this.selectedEndpointId.set('');
+    this.method.set(entry.method);
+    this.path.set(entry.path);
+    this.body.set(entry.body ?? '');
+    this.response.set(null);
+  }
+
+  /** The rail's hover/focus-revealed "send again" icon — the one explicit action that re-sends a
+   *  past request (§1.1). Also refills the form fields, same as picking the row would, so what just
+   *  ran is what's visible. */
+  protected async resend(entry: DebugHistoryEntry): Promise<void> {
+    this.replay(entry);
+    await this.execute(entry.method, entry.path, entry.body);
+  }
+
+  private async execute(method: string, path: string, body: string | undefined): Promise<void> {
     this.sending.set(true);
     try {
       const result = await this.api.send({ method, path, body });
@@ -137,21 +182,53 @@ export class DebugPage {
     }
   }
 
-  /** Re-fills the form from a history row; the user still presses Send. */
-  protected replay(entry: DebugHistoryEntry): void {
-    this.selectedEndpointId.set('');
-    this.method.set(entry.method);
-    this.path.set(entry.path);
-    this.body.set(entry.body ?? '');
-    this.response.set(null);
-  }
-
   protected isOk(status: number): boolean {
     return isSuccessStatus(status);
   }
 
   protected headerEntries(headers: Record<string, string>): { key: string; value: string }[] {
     return Object.entries(headers).map(([key, value]) => ({ key, value }));
+  }
+
+  protected async copyCurl(): Promise<void> {
+    const curl = this.curlCommand();
+    if (!curl) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(curl);
+    } catch {
+      // Clipboard unavailable/denied — degrade silently rather than claim a copy that didn't happen.
+      return;
+    }
+    this.curlCopied.set(true);
+    clearTimeout(this.curlCopiedTimer);
+    this.curlCopiedTimer = setTimeout(() => this.curlCopied.set(false), COPIED_LABEL_MS);
+  }
+
+  // --- Keyboard shortcuts (§1.4) -------------------------------------------
+
+  /** Ctrl/Cmd+Enter sends from the path or body field — bound directly on those two controls. */
+  protected onRequestFieldKeydown(event: KeyboardEvent): void {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      event.preventDefault();
+      void this.send();
+    }
+  }
+
+  /** "/" focuses the path input when focus isn't already in an input/textarea — a lightweight
+   *  jump-to-field idiom (R1 §5), not a command palette. */
+  @HostListener('document:keydown', ['$event'])
+  protected onDocumentKeydown(event: KeyboardEvent): void {
+    if (event.key !== '/' || event.ctrlKey || event.metaKey || event.altKey) {
+      return;
+    }
+    const active = document.activeElement as HTMLElement | null;
+    if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT' || active.isContentEditable)) {
+      return;
+    }
+    event.preventDefault();
+    this.pathInputRef()?.nativeElement.focus();
   }
 
   // --- Health ------------------------------------------------------------

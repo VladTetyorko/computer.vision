@@ -1,0 +1,65 @@
+<div
+  class="rail"
+  role="listbox"
+  aria-label="Endpoints and history"
+  tabindex="0"
+  [attr.aria-activedescendant]="activeOptionId()"
+  (focus)="onRailFocus()"
+  (keydown)="onRailKeydown($event)"
+>
+  <div class="rail-group" role="group" aria-labelledby="rail-group-endpoints">
+    <h3 class="rail-group-label" id="rail-group-endpoints">Endpoints</h3>
+    @for (option of railOptions(); track option.id; let i = $index) {
+      @if (option.kind === 'endpoint' && option.endpoint; as endpoint) {
+        <div
+          class="rail-option"
+          role="option"
+          [id]="option.id"
+          [attr.aria-selected]="endpoint.id === selectedEndpointId()"
+          [class.selected]="endpoint.id === selectedEndpointId()"
+          [class.active]="option.id === activeOptionId()"
+          (click)="onOptionClick(i, option)"
+        >
+          <span class="mono truncate" [title]="endpoint.label">{{ endpoint.label }}</span>
+        </div>
+      }
+    }
+  </div>
+
+  <div class="rail-group" role="group" aria-labelledby="rail-group-history">
+    <h3 class="rail-group-label" id="rail-group-history">History (last {{ historyLimit() }})</h3>
+    @if (history().length === 0) {
+      <p class="muted faint rail-empty">No requests sent yet.</p>
+    }
+    @for (option of railOptions(); track option.id; let i = $index) {
+      @if (option.kind === 'history' && option.entry; as entry) {
+        <div
+          class="rail-option history-row"
+          role="option"
+          [id]="option.id"
+          aria-selected="false"
+          [class.active]="option.id === activeOptionId()"
+          (click)="onOptionClick(i, option)"
+        >
+          <span
+            class="dot"
+            [class.ok]="statusFamily(entry.status) === 'ok'"
+            [class.warn]="statusFamily(entry.status) === 'warn'"
+            [class.danger]="statusFamily(entry.status) === 'danger'"
+          ></span>
+          <span class="mono truncate history-code" [title]="entry.method + ' ' + entry.path">
+            {{ entry.method }} {{ entry.path }}
+          </span>
+          <span class="mono history-status">{{ entry.status || '—' }}</span>
+          <vision-icon-button
+            class="send-again"
+            icon="replay"
+            label="Send again"
+            (activated)="onSendAgain(entry)"
+            (click)="$event.stopPropagation()"
+          />
+        </div>
+      }
+    }
+  </div>
+</div>

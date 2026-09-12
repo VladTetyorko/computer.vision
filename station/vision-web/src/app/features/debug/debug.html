@@ -1,121 +1,113 @@
 <div class="page">
   <vision-page-bar title="Debug" icon="gear" />
 
-  <!-- ---- Raw API console -------------------------------------------------- -->
+  <!-- ---- Raw API console (docs/plans/active/fly-debug-redesign/PLAN.md §1.1-§1.3) ------------- -->
   <section class="card">
     <header><h2>Raw API console</h2></header>
 
-    <div class="console-form">
-      <label class="field wide">
-        <span class="label">Endpoint</span>
-        <select
-          [value]="selectedEndpointId()"
-          (change)="selectEndpoint($any($event.target).value)"
-        >
-          <option value="">Custom…</option>
-          @for (endpoint of endpoints; track endpoint.id) {
-            <option [value]="endpoint.id">{{ endpoint.label }}</option>
-          }
-        </select>
-      </label>
+    <div class="console">
+      <vision-debug-rail
+        [endpoints]="endpoints"
+        [history]="history()"
+        [historyLimit]="historyLimit"
+        [selectedEndpointId]="selectedEndpointId()"
+        [sending]="sending()"
+        (endpointPicked)="selectEndpoint($event)"
+        (historyRefilled)="replay($event)"
+        (historySent)="resend($event)"
+      />
 
-      <label class="field method">
-        <span class="label">Method</span>
-        <select class="field-sm" [(ngModel)]="method" name="method">
-          @for (m of methods; track m) {
-            <option [value]="m">{{ m }}</option>
-          }
-        </select>
-      </label>
-
-      <label class="field wide">
-        <span class="label">Path</span>
-        <input
-          class="mono field-lg"
-          [(ngModel)]="path"
-          name="path"
-          placeholder="/api/devices"
-          spellcheck="false"
-        />
-      </label>
-    </div>
-
-    @if (showBody()) {
-      <label class="field">
-        <span class="label">Request body (JSON)</span>
-        <textarea
-          class="mono body-editor"
-          [(ngModel)]="body"
-          name="body"
-          rows="6"
-          spellcheck="false"
-        ></textarea>
-      </label>
-    }
-
-    <div class="row">
-      <button type="button" class="btn" (click)="send()" [disabled]="sending() || !path().trim()">
-        {{ sending() ? 'Sending…' : 'Send' }}
-      </button>
-    </div>
-
-    @if (response(); as result) {
-      <div class="response">
-        <div class="response-status row">
-          <span class="chip" [class.ok]="isOk(result.status)" [class.danger]="!isOk(result.status)">
-            {{ result.status || '—' }} {{ result.statusText }}
-          </span>
-          <span class="muted mono">{{ result.ms.toFixed(0) }} ms</span>
-          @if (!result.reached) {
-            <span class="chip danger">unreachable</span>
-          }
+      <div class="stack">
+        <div class="request-bar">
+          <div class="method-path">
+            <select class="mono method-select" [(ngModel)]="method" name="method" aria-label="HTTP method">
+              @for (m of methods; track m) {
+                <option [value]="m">{{ m }}</option>
+              }
+            </select>
+            <input
+              #pathInput
+              class="mono path-input"
+              [(ngModel)]="path"
+              name="path"
+              placeholder="/api/devices"
+              spellcheck="false"
+              aria-label="Request path"
+              (keydown)="onRequestFieldKeydown($event)"
+            />
+          </div>
+          <button type="button" class="btn" (click)="send()" [disabled]="sending() || !path().trim()">
+            {{ sending() ? 'Sending…' : 'Send' }}
+          </button>
         </div>
 
-        @if (headerEntries(result.headers).length > 0) {
-          <div class="headers row">
-            @for (header of headerEntries(result.headers); track header.key) {
-              <span class="chip mono">{{ header.key }}: {{ header.value }}</span>
+        @if (showBody()) {
+          <label class="field">
+            <span class="label">Request body (JSON)</span>
+            <textarea
+              class="mono body-editor"
+              [(ngModel)]="body"
+              name="body"
+              rows="6"
+              spellcheck="false"
+              (keydown)="onRequestFieldKeydown($event)"
+            ></textarea>
+          </label>
+        }
+
+        @if (response(); as result) {
+          <div class="response">
+            <div class="response-status row">
+              <span class="chip" [class.ok]="isOk(result.status)" [class.danger]="!isOk(result.status)">
+                {{ result.status || '—' }} {{ result.statusText }}
+              </span>
+              <span class="muted mono">{{ result.ms.toFixed(0) }} ms</span>
+              @if (!result.reached) {
+                <span class="chip danger">unreachable</span>
+              }
+              @if (curlCommand()) {
+                <button type="button" class="btn secondary copy-curl" (click)="copyCurl()">
+                  {{ curlCopied() ? 'Copied' : 'Copy as cURL' }}
+                </button>
+              }
+            </div>
+
+            @if (headerEntries(result.headers).length > 0) {
+              <div class="headers row">
+                @for (header of headerEntries(result.headers); track header.key) {
+                  <span class="chip mono">{{ header.key }}: {{ header.value }}</span>
+                }
+              </div>
+            }
+
+            <div class="segmented" role="group" aria-label="Response view">
+              <button
+                type="button"
+                class="btn secondary small"
+                [class.active]="viewMode() === 'pretty'"
+                (click)="viewMode.set('pretty')"
+              >
+                Pretty
+              </button>
+              <button
+                type="button"
+                class="btn secondary small"
+                [class.active]="viewMode() === 'raw'"
+                (click)="viewMode.set('raw')"
+              >
+                Raw
+              </button>
+            </div>
+
+            @if (result.bodyText) {
+              <pre class="mono response-body">{{ viewMode() === 'pretty' ? formatted()?.text : result.bodyText }}</pre>
+            } @else {
+              <p class="muted faint response-empty">—</p>
             }
           </div>
         }
-
-        <pre class="mono response-body">{{ formatted()?.text }}</pre>
       </div>
-    }
-
-    @if (history().length > 0) {
-      <div class="history">
-        <h3>History (last {{ historyLimit }})</h3>
-        <table>
-          <thead>
-            <tr>
-              <th>Method</th>
-              <th>Path</th>
-              <th>Status</th>
-              <th class="col-num">ms</th>
-            </tr>
-          </thead>
-          <tbody>
-            @for (entry of history(); track $index) {
-              <tr class="history-row" (click)="replay(entry)">
-                <td class="mono">{{ entry.method }}</td>
-                <td class="mono truncate">{{ entry.path }}</td>
-                <td>
-                  <span
-                    class="chip"
-                    [class.ok]="isOk(entry.status)"
-                    [class.danger]="!isOk(entry.status)"
-                  >
-                    {{ entry.status || '—' }}
-                  </span>
-                </td>
-                <td class="col-num mono">{{ entry.ms }}</td>
-              </tr>
-            }
-          </tbody>
-        </table>
-      </div>
-    }
+    </div>
   </section>
 
   <!-- ---- Health (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.3 — repointed at GET /api/system/status) ------- -->

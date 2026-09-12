@@ -20,3 +20,22 @@ export function pushHistoryEntry(
 ): readonly DebugHistoryEntry[] {
   return [entry, ...history].slice(0, limit);
 }
+
+/**
+ * A history row's status badge (docs/plans/active/fly-debug-redesign/PLAN.md §1.1): a colored dot +
+ * `.mono` code, three-way by status family — 2xx `ok`, 4xx `warn`, 5xx or an unreachable backend
+ * `danger`. Deliberately not `isSuccessStatus`'s binary ok/danger (`debug-response.ts`) — that stays
+ * the response pane's own chip semantics, unchanged; the rail is a list, not the one canonical chip.
+ * `status === 0` is `DebugApiService`'s own convention for "never reached the server at all".
+ */
+export type StatusFamily = 'ok' | 'warn' | 'danger';
+
+export function statusFamily(status: number): StatusFamily {
+  if (status === 0 || status >= 500) {
+    return 'danger';
+  }
+  if (status >= 400) {
+    return 'warn';
+  }
+  return 'ok';
+}
