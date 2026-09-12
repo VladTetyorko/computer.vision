@@ -842,12 +842,17 @@ export function formatMeasuredRate(submittedFps: number): string {
  *  the frontend-style skill's "status colours mean state, nothing else": there is no dedicated
  *  "good" hue in this app's token set, so `'running'` renders as a plain quiet reading, the same
  *  posture as the flow strip). `'stalled'` is new in P2 — see {@link detectionStatus}'s own doc
- *  comment for what distinguishes it from `'running'`. */
+ *  comment for what distinguishes it from `'running'`. `'running-unwatched'` is a distinct kind
+ *  from `'running'` rather than folded into it, even though both render as a plain quiet reading
+ *  today — it names a genuinely different fact (inferring under an asset's always-on policy with
+ *  no current viewer, `DetectionState.RUNNING_UNWATCHED`) so a future styling pass can tell them
+ *  apart without re-deriving it from the text. */
 export type DetectionStatusKind =
   | 'off'
   | 'waiting-to-start'
   | 'waiting-for-viewer'
   | 'running'
+  | 'running-unwatched'
   | 'stalled'
   | 'unknown';
 
@@ -867,7 +872,15 @@ export interface DetectionStatus {
  *    said yes, the backend's own viewer-demand gate says no one is watching (docs/plans/active/
  *    CV-DEMAND-PLAN.md) — named explicitly as **not a fault** ("no cost while idle"), matching
  *    `DetectionState`'s own javadoc.
- * 4. `detectionState === 'RUNNING'` — both gates open, but "running" says nothing about whether the
+ * 4. `detectionState === 'RUNNING_UNWATCHED'` — this asset's own `DetectionPolicy.ALWAYS` opt-in
+ *    (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave D2) keeps the detector inferring with no viewer
+ *    demand at all; durable persistence/events proceed exactly as `'RUNNING'`, but the *live* read
+ *    models this very function's own `rate`/`classesOnScreen` inputs come from are not being kept
+ *    warm for nobody to see them (`DetectionState`'s own javadoc) — so, unlike case 5 below, this
+ *    branch never reads `rate`, on purpose: `"On — inferring without a viewer (asset policy:
+ *    always)."`, distinct from "idle" (detection genuinely *is* running) and from a measured rate
+ *    (would risk echoing a stale number as current).
+ * 5. `detectionState === 'RUNNING'` — both gates open, but "running" says nothing about whether the
  *    detector has actually produced anything lately (`DetectionState`'s own javadoc: it "reports
  *    gating, never health" — a stalled cv-service still reads `RUNNING`). Three sub-cases, read off
  *    `rate` (`DetectionRateResponse`, `GET .../tracks`):
@@ -883,10 +896,10 @@ export interface DetectionStatus {
  *      c. Otherwise — the plan's own mockup line: {@link formatMeasuredRate} plus how many classes
  *         are on screen right now ({@link classesOnScreenCount}), joined with `" · "`; the classes
  *         clause is omitted entirely when 0 (never `"0 classes on screen"`).
- * 5. `detectionState === 'OFF'` while the operator's own draft says enabled — a genuine sync gap
+ * 6. `detectionState === 'OFF'` while the operator's own draft says enabled — a genuine sync gap
  *    (the PATCH hasn't landed yet, or a reload raced a running stream) named honestly rather than
  *    echoed back as confirmed "on".
- * 6. Anything else (`detectionState` absent — an old server, or nothing polled yet this session) —
+ * 7. Anything else (`detectionState` absent — an old server, or nothing polled yet this session) —
  *    the 'unknown' kind, never a guess.
  */
 export function detectionStatus(
@@ -904,6 +917,9 @@ export function detectionStatus(
   }
   if (detectionState === 'IDLE_NO_VIEWERS') {
     return { kind: 'waiting-for-viewer', text: 'On — idle, waiting for a viewer (no cost while idle).' };
+  }
+  if (detectionState === 'RUNNING_UNWATCHED') {
+    return { kind: 'running-unwatched', text: 'On — inferring without a viewer (asset policy: always).' };
   }
   if (detectionState === 'RUNNING') {
     if (rate === undefined) {

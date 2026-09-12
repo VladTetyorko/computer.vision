@@ -892,6 +892,17 @@ describe('cv-control-panel-logic', () => {
       expect(status.text).toMatch(/no cost while idle/i);
     });
 
+    it('names RUNNING_UNWATCHED honestly instead of falling through to "not reported" (D1)', () => {
+      const status = detectionStatus(true, true, 'RUNNING_UNWATCHED', rate({ submittedFps: 9.9 }), 3);
+      expect(status.kind).toBe('running-unwatched');
+      expect(status.text).toBe('On — inferring without a viewer (asset policy: always).');
+    });
+
+    it('RUNNING_UNWATCHED never echoes the (possibly stale) rate/classes reading', () => {
+      const status = detectionStatus(true, true, 'RUNNING_UNWATCHED', rate({ submittedFps: 9.9 }), 3);
+      expect(status.text).not.toMatch(/\d/);
+    });
+
     it('reports the measured rate and classes-on-screen count while running, matching the plan\'s own mockup format', () => {
       const status = detectionStatus(true, true, 'RUNNING', rate({ submittedFps: 9.9 }), 3);
       expect(status.kind).toBe('running');

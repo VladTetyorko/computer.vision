@@ -296,6 +296,7 @@ Redirects: `/crew` → `/wall` (wave W3 — no crew-specific landing/picker page
   - **`{ optional: true }` injection of `KeyboardRcInputService` now has a second consumer inside the same harness.** `control-action-dispatcher.spec.ts`'s `create()` also constructs a real `RcSource` (see the `{ optional: true }` gotcha above), and `RcSource`'s own constructor unconditionally calls `this.keyboard?.setEnabled(...)` once on construction regardless of which `RcSourceKind` is selected. Providing a `FakeKeyboardRcInputService` for the dispatcher's own keyboard tests therefore also hands that instance to `RcSource` — the fake must implement `setEnabled`/`axes`/`buttons` (no-ops/empty signals are enough; this harness never selects the `'keyboard'` `RcSourceKind`), not just the `actionKeysDown` this spec file actually exercises, or construction throws `TypeError: this.keyboard?.setEnabled is not a function`.
   - **`HTMLElement.isContentEditable` reads `undefined`, not `false`, under this project's `ng test` DOM environment** on a plain `document.createElement('div')` — `isTypingTarget`'s boolean OR chain must wrap it in `Boolean(...)` or the function's return type is a lie (`tag==='INPUT' || … || target.isContentEditable` evaluates to `undefined` for an ordinary element, which is falsy for an `if` caller but fails a strict `expect(...).toBe(false)`).
 - **`<vision-follow-hud>`'s Re-acquire button once ignored `canRelease` — found in wave W5, fixed immediately after (same branch).** `follow-hud.html` now gates Re-acquire on `p.showReacquire && canRelease()`, matching the component doc's promise that `canRelease=false` renders no actions at all. Wall's read-only mount additionally never binds `(reacquire)`, so it was defense-in-depth even while the defect lived.
+- **`DetectionState` had 3 values while the Java enum (`contexts/vision-perception/.../domain/model/DetectionState.java`) had 4 — a real drift, not a hypothetical one** (CV-ORCHESTRATION-PLAN.md §7 D1, fixed W-pre 2026-09-12): `RUNNING_UNWATCHED` (a `DetectionPolicy.ALWAYS` asset inferring with no current viewer — durable persistence/events proceed exactly as `RUNNING`, only the *live* read models go stale) fell through every `switch`/`if`-chain over the type, landing on each one's `default`/fallback case. `models.ts` now exports `DETECTION_STATES` as an `as const` tuple and derives `export type DetectionState = (typeof DETECTION_STATES)[number]` from it, so the union and the runtime value list cannot diverge from each other again; `core/api/detection-state.contract.spec.ts` pins that tuple against a hand-copied fixture of the Java enum's exact order (a generated fixture is wave W1's job, not this one's). **Every remaining `DetectionState` switch must be exhaustive over all four values, not just three** — `cv-control-panel-logic.ts#detectionStatus` (new `'running-unwatched'` `DetectionStatusKind`, text `"On — inferring without a viewer (asset policy: always)."`, deliberately never reads `rate`/`classesOnScreen` since those are exactly the *live* read models the Java javadoc says go stale in this state) and `camera-geo-logic.ts`'s `detectionStateLabel`/`-Tone`/`-Explanation` (treated as inference-running — `'ok'` tone, label `'Detecting (no viewer)'` — because that panel's own question is "is the detector producing tracks," which it is; durable persistence means tracks still exist server-side even though nobody's watching).
 
 ## Status
 
@@ -909,3 +910,51 @@ get marks that render fine but a contribution target resolved against an empty l
 `npm run test:ci` — **192/192 files, 3825/3825 tests green** (up from 190/3793: new `layers-store.spec.ts`
 and `tracks-store.spec.ts`, plus ref-count and video-toggle cases added to the existing store and wall
 specs). `npx tsc --noEmit` clean on both `tsconfig.app.json` and `tsconfig.spec.json`.
+
+## Status — CV-ORCHESTRATION wave W-pre (web): DetectionState's 4th value stops falling through every switch (docs/plans/active/CV-ORCHESTRATION-PLAN.md §7 D1, §4.6, §6 W-pre row) — 2026-09-12
+
+Standalone defect fix, disjoint from the rest of CV-ORCHESTRATION's waves (W-pre runs parallel to
+W0, ahead of W1-W6). Scope was `station/vision-web/**` only — no Java, no proto, no Python.
+
+**What changed:**
+
+- `core/api/models.ts` — `DetectionState` now has all four values Java's enum has always declared
+  post-ALWAYS-ON-FLOW D2 (`OFF | IDLE_NO_VIEWERS | RUNNING_UNWATCHED | RUNNING`), derived from a new
+  exported `DETECTION_STATES` `as const` tuple so the type and the runtime value list share one
+  source and cannot drift apart independently again. Doc comment rewritten to explain
+  `RUNNING_UNWATCHED` from the Java javadoc: an asset opted into `DetectionPolicy.ALWAYS` keeps
+  inferring with no current viewer; durable persistence/events proceed exactly as `RUNNING`, only
+  the *live* read models a viewer would see go stale.
+- New `core/api/detection-state.contract.spec.ts` — asserts `DETECTION_STATES` equals
+  `['OFF','IDLE_NO_VIEWERS','RUNNING_UNWATCHED','RUNNING']`, with a comment pointing at
+  `DetectionState.java` as the fixture's source of truth (a generated cross-language fixture is
+  wave W1's job per the plan, not this one's).
+- `features/fly/cv-control-panel-logic.ts#detectionStatus` — new `'running-unwatched'`
+  `DetectionStatusKind` and an explicit branch between the `IDLE_NO_VIEWERS` and `RUNNING` checks,
+  ordered to match the Java enum's declaration order. Renders `"On — inferring without a viewer
+  (asset policy: always)."`, and deliberately never touches `rate`/`classesOnScreen` — those are
+  exactly the *live* read models the enum's own javadoc says are not being kept warm in this state,
+  so echoing a possibly-stale number would be a fabricated health claim, not an honest one.
+- `core/camera-geo/camera-geo-logic.ts` — `detectionStateLabel`/`detectionStateTone`/
+  `detectionStateExplanation` each gained an explicit `RUNNING_UNWATCHED` case rather than falling
+  into `default`. Decided per-case (rationale in the file's own new comment and the commit message):
+  the pose panel's question is narrower than the Fly hero's — "is the detector producing tracks for
+  this map to project" — and the answer is yes regardless of viewer presence, so tone matches
+  `RUNNING` (`'ok'`), while the label (`'Detecting (no viewer)'`) and explanation still name the
+  "no viewer" fact plainly instead of silently reusing `RUNNING`'s wording verbatim.
+- Unit tests added next to each changed function in `cv-control-panel-logic.spec.ts` and
+  `camera-geo-logic.spec.ts`, matching each file's existing spec style (no new component specs —
+  all four are pure functions).
+
+**Not touched (out of this wave's scope, named honestly):** the static "Runs only while this
+stream is watched — zero cost otherwise." caption under the Detect toggle in `cv-control-panel.html`
+is now imprecise for an `ALWAYS`-policy asset; fixing it needs the asset's own policy plumbed into
+this component, which is D7/wave W3's job (no UI sets `cv.detection-policy=ALWAYS` yet, so the two
+defects cancel out today per the plan's own §7 D7 note). The honest per-stream status line beneath
+it already carries the truth for `RUNNING_UNWATCHED` specifically.
+
+### Tests / build
+
+`npm run test:ci` — **193/193 files, 3829/3829 tests green** (up from 192/3825: one new contract
+spec file plus cases added to the two existing logic specs). `npx tsc --noEmit` clean on both
+`tsconfig.app.json` and `tsconfig.spec.json`.

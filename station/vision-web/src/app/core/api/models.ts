@@ -794,15 +794,39 @@ export interface StreamTrack {
 }
 
 /**
- * Mirrors `dto.DetectionState` (docs/plans/done/CV-DEMAND-PLAN.md §3.6) — which of the two
- * independent detection gates currently explains a stream's boxes-or-no-boxes state: `'OFF'` (the
- * operator's own choice), `'IDLE_NO_VIEWERS'` (enabled, but nobody has consumed this stream's
- * detections within the grace period — not a fault), `'RUNNING'` (both gates open; says nothing
- * about detector *health* — a stalled cv-service still reads `'RUNNING'`, see the Java enum's own
- * javadoc). Absent on `StreamTracksResponse` for an unknown/not-running stream or an old server —
- * every reader degrades to the honest "nothing measured yet" case, never a guess.
+ * The runtime value list `DetectionState` is derived from, in the same declaration order as the
+ * Java enum (`contexts/vision-perception/src/main/java/com/drones/vision/perception/domain/model/
+ * DetectionState.java`) — kept as a tuple rather than inlined into the union so a contract test
+ * (`detection-state.contract.spec.ts`) can assert this exact list against a fixture pinned to the
+ * Java source, instead of the two representations being able to drift apart silently again. They
+ * already did once: this union held only three values while the Java enum had four, and
+ * `'RUNNING_UNWATCHED'` fell through every switch in this app (docs/plans/active/
+ * CV-ORCHESTRATION-PLAN.md §7 D1).
  */
-export type DetectionState = 'OFF' | 'IDLE_NO_VIEWERS' | 'RUNNING';
+export const DETECTION_STATES = ['OFF', 'IDLE_NO_VIEWERS', 'RUNNING_UNWATCHED', 'RUNNING'] as const;
+
+/**
+ * Mirrors `dto.DetectionState` (docs/plans/done/CV-DEMAND-PLAN.md §3.6, widened by
+ * docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave D2 from two gates to three questions) — which of
+ * the detection gates currently explains a stream's boxes-or-no-boxes state:
+ *
+ * - `'OFF'` — the operator's own `detectionEnabled` choice, always the operator's own choice.
+ * - `'IDLE_NO_VIEWERS'` — enabled, but neither a viewer's demand nor this asset's own
+ *   `DetectionPolicy.ALWAYS` opt-in is asking for inference — not a fault.
+ * - `'RUNNING_UNWATCHED'` — enabled and inferring: a `DetectionPolicy.ALWAYS` asset keeps the
+ *   detector running with no current viewer. Durable persistence/events proceed exactly as
+ *   `'RUNNING'`; only the *live* read models a viewer would see (this response's own `rate` among
+ *   them) are not being kept warm, because there is no viewer to show them to. Unreachable for the
+ *   default `ON_VIEW` policy — such an asset's inference and live gates always agree, so this state
+ *   and `'IDLE_NO_VIEWERS'` collapse to one outcome for it, exactly as before this state existed.
+ * - `'RUNNING'` — both the inference and live gates are open; says nothing about detector *health*
+ *   — a stalled cv-service still reads `'RUNNING'`/`'RUNNING_UNWATCHED'` throughout its outage, see
+ *   the Java enum's own javadoc. **This enum reports gating, never health**, for any of its values.
+ *
+ * Absent on `StreamTracksResponse` for an unknown/not-running stream or an old server — every
+ * reader degrades to the honest "nothing measured yet" case, never a guess.
+ */
+export type DetectionState = (typeof DETECTION_STATES)[number];
 
 /**
  * Mirrors the `"rate"` object of `GET /api/streams/{streamId}/tracks` (`dto.DetectionRateResponse`,
