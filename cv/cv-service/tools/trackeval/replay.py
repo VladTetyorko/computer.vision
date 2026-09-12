@@ -66,7 +66,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 from typing import Sequence as TypingSequence
 
 from cv_service.config import Settings
@@ -552,6 +552,7 @@ def run_replay(
     detector_config: DetectorNoiseConfig = DetectorNoiseConfig(),
     settings: Optional[Settings] = None,
     registry: Optional[TrackerRegistry] = None,
+    observer: Optional[Callable[[int, FrameOutcome], None]] = None,
 ) -> ReplayResult:
     """Run `sequence` through one real `StreamTrackingSession`.
 
@@ -560,6 +561,14 @@ def run_replay(
     onto and scores only `sequence.primary_gt_id`, clicking the centre of
     its box on the first frame that object is visible -- exactly what an
     operator's click does in production (`lock.select_by_point`).
+
+    `observer` (CV-ORCHESTRATION wave W0) is called with `(frame_index,
+    outcome)` the instant `process()` returns, in the same place and for the
+    same reason `coast_track_ids` is captured there: `TrackedBox.track`
+    aliases the book's own mutable `Track`, so anything a caller wants to
+    read PER FRAME has to be read before the next frame runs. `None` (the
+    default) leaves this loop byte-identical to what it was before the hook
+    existed -- `tools/trackeval/golden.py` is its only user.
     """
     # `from_env()`, NOT a bare `Settings()`: production resolves every CV_*
     # knob from the environment (`YoloDetector`, `process_gate()`), and a
@@ -615,6 +624,10 @@ def run_replay(
             detection_lag_millis=detection_lag_millis,
         )
         outcomes.append(outcome)
+        if observer is not None:
+            # Before anything below reads a `Track` field -- see this
+            # function's own `observer` docstring.
+            observer(frame.index, outcome)
         # Captured immediately, before the NEXT iteration's `process()` call
         # mutates the same live `Track` objects -- see `ReplayResult.
         # coast_track_ids`'s own docstring for why this cannot be done later.
