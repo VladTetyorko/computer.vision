@@ -375,3 +375,47 @@ python -m tools.detectorbench --scenario split --detectors 2 --streams 1,2,3,4 -
 It prints the machine facts alongside the numbers, because none of them are
 portable. Run it on a quiet box: a concurrent build makes every figure a
 measurement of the build.
+
+#### Measured 2026-09-12 (W4, decision E17)
+
+One stream at 10 fps, `yolo26n.pt`, `allinone` vs `split --detectors 2`, on
+the CV-ORCHESTRATION worktree's dev box — **not** GB4005 itself (AMD Ryzen 5
+5600U, 12 threads, CPU-only, no CUDA/OpenVINO — a different machine, but the
+same "one CPU-bound box, no GPU" shape GB4005 is). Confirmed no `mvn`/
+`surefire`/`vitest`/`java -jar` process was running immediately before and
+immediately after each run — **not measured under contention**.
+
+| Scenario | Sent/Recv | Answered | p50 | p95 | Effective fps | Sustained |
+|---|---|---|---|---|---|---|
+| `allinone` (1 process) | 301/301 | 100.0% | 37 ms | 40 ms | 10.03 | yes |
+| `split` (tracker + 2 detectors) | 301/301 | 100.0% | 45 ms | 48 ms | 10.03 | yes |
+
+Both shapes sustain one 10 fps stream without dropping a frame — unsurprising
+at this load, since a `yolo26n` pass (~35 ms) leaves ample headroom under a
+100 ms frame budget either way. The number this run actually resolves is the
+**split's overhead**, exactly as the tool's own docstring says a one-machine
+run can: `split` cost **+8 ms p50 / +8 ms p95** over `allinone` — the
+serialize-over-loopback-gRPC-and-back that `all-in-one` never pays. That is
+the same order of magnitude §4.9 estimated for a LAN hop (1–3 ms) plus this
+box's own gRPC/JPEG round-trip cost; it did not need a second machine to
+measure, because it is paid on every call regardless of where the target
+lives.
+
+What this run cannot answer — and no single-machine run can (the tool's own
+docstring says so) — is whether splitting **buys** anything: both shapes ran
+on the same cores here, so there was no extra silicon to show a throughput
+gain against. That question only has a real answer on two boxes, with the
+`detector` role on hardware the `tracker` doesn't share.
+
+**E17 recommendation: stay all-in-one on GB4005.** The measured number
+confirms the plan's own prediction — splitting on a single box is pure
+overhead (+~20% p50 latency here) for zero measured throughput benefit,
+because GB4005 has no second box to hand the split load to today. Revisit
+this decision only when GB4005 alone can no longer sustain the stream count
+actually in use (watch `Inspect`'s `gate_occupancy`/`gate_queue_depth`
+climbing toward `gate_max_queue`, or `detector_reason` turning up
+`RESOURCE_EXHAUSTED` in the field) — at that point, add a second physical
+box, wire it as a `CV_SERVICE_ROLE=detector` target, and re-run
+`tools/detectorbench --scenario split` across *both* machines before
+greenlighting the switch, since only that run can show the gain this one
+structurally cannot.
