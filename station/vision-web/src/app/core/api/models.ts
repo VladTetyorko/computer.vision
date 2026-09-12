@@ -945,6 +945,186 @@ export interface StreamTracksResponse {
 }
 
 /**
+ * The runtime value list `ObjectLifecycle` is derived from, in the same declaration order as the
+ * Java enum (`contexts/vision-perception/src/main/java/com/drones/vision/perception/domain/model/
+ * ObjectLifecycle.java`) — kept as a tuple, mirroring `DETECTION_STATES`' own idiom, so
+ * `object-lifecycle.contract.spec.ts` can pin this exact list against the Java source instead of
+ * the two representations drifting apart silently, the way `DetectionState` already did once
+ * (docs/plans/active/CV-ORCHESTRATION-PLAN.md §7 D1).
+ */
+export const OBJECT_LIFECYCLES = ['TENTATIVE', 'CONFIRMED', 'COASTING', 'LOST', 'DORMANT'] as const;
+
+/**
+ * Mirrors `domain.model.ObjectLifecycle` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.5) — where
+ * one tracked identity is in its life. `'DORMANT'` is the value today's `TrackState`/wire could
+ * never report at all: a retired identity still held in cv-service's per-stream gallery and still
+ * recoverable under its own number. No `'UNSPECIFIED'` member, by the Java enum's own design — the
+ * proto zero value is a codec-boundary concern the backend already strips.
+ */
+export type ObjectLifecycle = (typeof OBJECT_LIFECYCLES)[number];
+
+/**
+ * The runtime value list `EvidenceSource` is derived from, in the same declaration order as the
+ * Java enum (`contexts/vision-perception/src/main/java/com/drones/vision/perception/domain/model/
+ * EvidenceSource.java`) — see `OBJECT_LIFECYCLES`'s own comment for why this is a pinned tuple
+ * rather than an inline union.
+ */
+export const EVIDENCE_SOURCES = ['DETECTOR', 'TRACKER', 'PREDICTED', 'MEMORY', 'REUPDATE'] as const;
+
+/**
+ * Mirrors `domain.model.EvidenceSource` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.5) — what
+ * kind of evidence produced one frame's view of an object. A superset of {@link DetectionSource}
+ * in meaning but a deliberately separate wire type (same reasoning as the Java enum's own doc
+ * comment): `'PREDICTED'` is a pure coast with no observation, `'MEMORY'` is a re-acquisition from
+ * the dormant gallery, `'REUPDATE'` is a box ORU reconstructed from the track's own bracketing
+ * observations — none of which `DetectionSource`'s two values (`'DETECTOR'`/`'TRACKER'`) can
+ * express.
+ */
+export type EvidenceSource = (typeof EVIDENCE_SOURCES)[number];
+
+/**
+ * Mirrors `ObjectState.LabelCandidate` — one entry of the label-vote tally behind
+ * {@link ObjectIdentity#label}, the distribution rather than just the winner.
+ */
+export interface ObjectLabelCandidate {
+  readonly label: string;
+  readonly weight: number;
+}
+
+/**
+ * Mirrors `ObjectState.Identity` (JSON key `identity`) — what the object is called, and how
+ * settled that name is. `labelRaw` may be `''` — a frame with no detector observation (a pure
+ * coast, or a recovery from memory) still carries the elected `label` but has no raw detector
+ * label of its own to report.
+ */
+export interface ObjectIdentity {
+  readonly label: string;
+  readonly labelRaw: string;
+  readonly candidates: readonly ObjectLabelCandidate[];
+  readonly stability: number;
+}
+
+/**
+ * Mirrors `ObjectState.Kinematics` (JSON key `kinematics`) — where the object is, and how that was
+ * arrived at. `box` is the elected box, identical to the sibling {@link Detection}/{@link
+ * StreamTrack} box for the same object, and is always present. `detectorBox`/`trackerBox`/
+ * `predictedBox` each say what one source independently claimed this frame and are **optional**,
+ * not nullable-to-a-default: the DTO serializes with Jackson `NON_NULL`, so a source that produced
+ * nothing this frame is a missing key on the wire, not a zeroed box. Collapsing "this source didn't
+ * run" into a fabricated zero box is the exact honesty defect this wave exists to remove (see the
+ * Java record's own doc comment on `ObjectState`).
+ */
+export interface ObjectKinematics {
+  readonly box: BoundingBox;
+  readonly detectorBox?: BoundingBox;
+  readonly trackerBox?: BoundingBox;
+  readonly predictedBox?: BoundingBox;
+  readonly horizonMillis: number;
+  readonly velocityX: number;
+  readonly velocityY: number;
+  readonly displacementX: number;
+  readonly displacementY: number;
+  readonly motionCompensated: boolean;
+}
+
+/**
+ * Mirrors `ObjectState.Belief` (JSON key `belief`) — how strongly the platform believes the object
+ * is there at all. `confidenceRaw`/`confidenceSmoothed`/`existence` are each `[0,1]`.
+ */
+export interface ObjectBelief {
+  readonly confidenceRaw: number;
+  readonly confidenceSmoothed: number;
+  readonly existence: number;
+  readonly sinceConfirmedMillis: number;
+}
+
+/**
+ * Mirrors `ObjectState.Provenance` (JSON key `provenance`) — who said so, this frame. `source` is
+ * this frame's {@link EvidenceSource}; `contributors` is the ledger's own attribution, summarized —
+ * the claims themselves stay in the (not yet mirrored) ledger, never here.
+ */
+export interface ObjectProvenance {
+  readonly source: EvidenceSource;
+  readonly contributors: readonly string[];
+  readonly assocCost: number;
+  readonly reupdated: boolean;
+}
+
+/**
+ * Mirrors `ObjectState.MemoryFacts` (JSON key `memory` — the Java type is named `MemoryFacts`, not
+ * the wire's bare `memory`, to avoid a generic top-level domain type name; the JSON key and this
+ * interface's field name stay `memory` on `ObjectState` below). Re-acquisition facts: whether this
+ * frame recovered the identity from the dormant gallery, and the evidence behind that answer.
+ */
+export interface ObjectMemoryFacts {
+  readonly recovered: boolean;
+  readonly identityConfidence: number;
+  readonly dormantMillis: number;
+  readonly galleryMatches: number;
+  readonly matchDistance: number;
+}
+
+/**
+ * Mirrors `ObjectState.LockFacts` (JSON key `lock` — same naming rationale as {@link
+ * ObjectMemoryFacts}). Whether FOLLOW is holding this object, on the object itself rather than only
+ * as the frame-level `lockedTrackId` sentinel a renderer would otherwise have to cross-reference.
+ */
+export interface ObjectLockFacts {
+  readonly locked: boolean;
+  readonly lockSeqApplied: number;
+}
+
+/**
+ * Mirrors `ObjectState.Timing` (JSON key `timing`) — the counters death is decided from.
+ *
+ * **The three instants are not epoch time.** They share the timebase of the detection result
+ * they arrived on (`DetectionResultResponse.capturedAt`) and of no other clock: cv-service ages
+ * tracks on a monotonic clock and rebases them once, at the wire. Render them as an age against
+ * that same result's `capturedAt`, never against `Date.now()` — the two are unrelated numbers
+ * and subtracting one from the other produces a plausible-looking lie. The durations here and
+ * on the sibling groups (`horizonMillis`, `sinceConfirmedMillis`, `dormantMillis`) carry no
+ * timebase at all and need no such care.
+ */
+export interface ObjectTiming {
+  readonly firstSeenMillis: number;
+  readonly lastSeenMillis: number;
+  readonly lastConfirmedMillis: number;
+  readonly ageFrames: number;
+  readonly hits: number;
+  readonly misses: number;
+}
+
+/**
+ * Mirrors `domain.model.ObjectState` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.5, wave W1
+ * "wire mirror") — the platform's whole current view of one tracked or dormant identity, grouped
+ * by facet instead of a box with facts bolted on as flat scalars. Keyed by `(streamId, id)`; `id`
+ * is the same number as {@link StreamTrack}'s own `trackId`.
+ *
+ * **A missing nested group is not the forbidden "null means the feature is off."** Every group
+ * below is optional because the DTO serializes with Jackson `NON_NULL`: a Java `null` group means
+ * this configuration does not *compute* those facts at all (e.g. `kinematics.predictedBox` is
+ * never populated in FOLLOW mode), so its absence is honest, not a missing default — a different
+ * statement from a zeroed group, and collapsing the two is the exact honesty defect this wave
+ * exists to remove. A field inside a *present* group, by contrast, is always a genuine fact,
+ * including a genuine zero.
+ *
+ * This is a type mirror only (wave W1) — no endpoint serves `ObjectState` yet and nothing in this
+ * app constructs or reads one. Rendering it is wave W3's job.
+ */
+export interface ObjectState {
+  readonly id: number;
+  readonly lifecycle: ObjectLifecycle;
+  readonly streamId: string;
+  readonly identity?: ObjectIdentity;
+  readonly kinematics?: ObjectKinematics;
+  readonly belief?: ObjectBelief;
+  readonly provenance?: ObjectProvenance;
+  readonly memory?: ObjectMemoryFacts;
+  readonly lock?: ObjectLockFacts;
+  readonly timing?: ObjectTiming;
+}
+
+/**
  * Mirrors one entry of `GET /api/cv/trackers`'s roster (docs/plans/done/TRACKING-PLAN.md §4.F) — the Tracking
  * section's engine picker, filtered to whichever `modes` include the currently-selected
  * `TrackingMode` (`cv-control-panel-logic.ts#engineOptionsForMode`). Config-backed and static, like
