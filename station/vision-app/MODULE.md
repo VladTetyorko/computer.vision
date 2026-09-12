@@ -1515,3 +1515,111 @@ bar held throughout both `vision.live.enabled=true` (default) and `=false` wirin
 real, not skipped. No new `ApiExceptionHandler` mapping, no new REST endpoint (both waves are pure
 SSE-topic additions — see `station/vision-api/MODULE.md`). Nothing deferred except the pre-existing
 `everDropped`/`live-updates` `DEGRADED` defect, explicitly out of scope per this wave's own task spec.
+
+### 2026-09-12, CV-ORCHESTRATION wave W1 step 5 "wire mirror" — this module's one-line share
+
+This module's entire file scope for the wave was `stream/LiveFrameFallbackStreamService` — the
+domain/application half (`StreamPipeline`'s new `latestObjects()` read model, `StreamService#objects`,
+`DefaultStreamService`) lives in `contexts/vision-perception`, and the DTO/controller half in
+`station/vision-api`; see those modules' own MODULE.md entries for the full wiring writeup and the
+label-filter rule. `LiveFrameFallbackStreamService#objects(StreamId)` is a one-line pure delegation to
+`delegate.objects(streamId)`, matching every other method on this decorator (same shape as the
+`followStatus` fix recorded above). No wiring bean changed — `LiveFrameFallbackStreamService` is
+already assembled by the existing `streamService` bean (see "Application-service beans" above) iff
+`vision.publish.source-proxy.enabled=true`; adding a method to an already-wired interface needs no new
+selector.
+
+No test file in this module's own scope needed a change: this decorator has no dedicated unit test
+(each method is a one-line pass-through verified by inspection, the same precedent the `followStatus`
+fix above established), so `station/vision-app`'s own test count is unchanged by this wave.
+
+`./mvnw -B -pl contexts/vision-perception,cv/grpc,station/vision-api,storage/persistence,contexts/vision-events,contexts/vision-learning,station/vision-app -am -DskipWeb test` —
+`station/vision-app` **354/354, unchanged** (no test file in this module's scope touched).
+`contexts/vision-perception` **755 → 760** and `station/vision-api` **1069 → 1074** — see those
+modules' own MODULE.md entries for the breakdown. `BUILD SUCCESS`, all green across the whole scoped
+reactor. Docker ran for real: this module's own Testcontainers-backed suites (`SessionPersistenceIntegrationTest`,
+`PersistenceWiringTest`, `OnboardingWiringTest` and friends) migrated a real `postgres:16` container
+through `V35` during this run (confirmed in the build log). `storage/persistence`'s Docker suite also ran for real in the same
+reactor (**283 tests, 0 failures** across its 35 `@Nested` classes). Its OUTER
+`PostgresDockerIntegrationTest` report reads `Tests run: 0` because that class declares no `@Test`
+of its own — not because the `@EnabledIf("dockerAvailable")` gate skipped it. Counting a module by
+summing `surefire-reports/*.txt` misses every nested class; read Maven's per-module `Results:` line.
+An earlier pass through this wave recorded that mistake as a Docker flake, and it was not one.
+Nothing deferred from this module's own file scope. Not committed — the wave owner commits.
+
+### 2026-09-12, CV-ORCHESTRATION wave W1 — the headline `ObjectState` wire-mirror acceptance test
+
+`ObjectStateRoundTripTest` (`src/test/java/com/drones/vision/adapter/cvgrpc/`) is the acceptance test
+for the whole wave: it builds a wire-shaped `com.drones.vision.proto.v1.ObjectState` proto message by
+hand (every field of all 7 nested groups set to a distinct value — no two numbers equal anywhere in
+the message — plus a second, minimal object with only `id`/`lifecycle`/`stream_id` and no groups at
+all), wraps both in one `DetectionResponse`, decodes it, maps each object through
+`com.drones.vision.api.dto.ObjectStateResponse#from`, serializes with a bare `tools.jackson.databind.json.JsonMapper`
+(byte-identical to Spring's configured bean here, since `@JsonInclude(NON_NULL)` lives on the record
+type, not on mapper config), and compares the resulting JSON tree against a fixture **committed under
+vision-web's own test tree** — `station/vision-web/src/app/core/api/__fixtures__/object-state.wire.json`
+— as parsed `JsonNode` trees (object-key order-independent; array order-sensitive, satisfied here since
+`candidates` is built in the same order on both sides). On a mismatch the test writes the actual JSON
+next to the fixture as `object-state.wire.actual.json` and fails naming both paths plus a `cp`
+regeneration hint — it never auto-overwrites the committed fixture. It additionally asserts the minimal
+object's JSON has none of the seven group keys (`identity`/`kinematics`/`belief`/`provenance`/`memory`/
+`lock`/`timing` all absent, not zeroed) — the same "absent is honest, zero is a lie" invariant
+`ObjectState`'s own Java doc comment states.
+
+**Why this test lives in `vision-app`, in `adapter-cvgrpc`'s own package:** this is the only module
+that depends on both `adapter-cv-grpc` (the proto message builders) and `vision-api` (the DTO +
+Jackson config to serialize with) — `contexts/vision-perception` doesn't know about the DTOs, and
+`vision-api` doesn't know about the proto wire types (ArchUnit's `onlyAppMayDependOnAdapterPackages`
+would fail it if it did). `DetectionFrameCodec#decode` (the proto→domain mapping step) is
+package-private in `adapter-cv-grpc`'s `com.drones.vision.adapter.cvgrpc` package — rather than widen
+its visibility or add reflection, the test class sits in that exact same fully-qualified package name
+under this module's own `src/test/java` root; the plain (non-JPMS) classpath grants package-private
+access by package name alone, regardless of which module/source-root a `.java` file physically lives
+under, and this reactor has no `module-info.java` anywhere. This is a **type-mirror-only** precedent
+(no other test in this module reaches into an adapter's package-private surface today) — if a second
+wave needs the same trick, promote it into a documented convention rather than copy-pasting the
+javadoc justification a third time.
+
+**Determinism:** the fixture is a real, hand-committed file (not test-generated on every green run) —
+`StreamId.of("aaaaaaaa-…")` replaces `StreamId.random()`, and every numeric field uses either a `k/32`
+fraction (21 fields constrained to `[0,1]`) or a `0.125`-multiple (unconstrained fields), both exactly
+representable in IEEE-754 single **and** double precision, so the float→double widening across
+proto→domain→DTO→JSON never rounds and the committed JSON literals are exact decimals, not
+`0.30000001192092896`-style artifacts. The fixture matched the Java-produced tree on the very first
+real run — no `.actual.json` regeneration cycle was needed.
+
+**The TypeScript half** (out of this module's own scope, listed here only for the cross-reference) is
+`station/vision-web/src/app/core/api/object-state.wire.contract.spec.ts` — it loads the same committed
+fixture and asserts it satisfies every `ObjectState`-family interface in `core/api/models.ts` key-for-key
+via the `Record<keyof T, true>` compiler-enforced exhaustive-key-list technique (catches a renamed/
+removed/added TS field at compile time) paired with a runtime `Object.keys(...).sort()` equality check
+(catches drift the compiler-side check alone cannot — an object literal assigned to a narrower
+interface type does not trigger TypeScript's excess-property check, so a stray extra key would
+otherwise pass silently). No `resolveJsonModule` addition to `tsconfig.spec.json` was needed — the
+fixture bundled and the spec ran against Angular's Vite-based `ng test` runner (which resolves JSON
+imports at the bundler level, independent of `tsc` type-checking) without any tsconfig change; the
+`station/vision-web/tsconfig*.json` file-scope allowance in this wave's brief went unused.
+
+**Builds, both run in full (never filtered, never backgrounded):**
+
+- `./mvnw -B -pl contexts/vision-perception,cv/grpc,station/vision-api,station/vision-app -am -DskipWeb test`
+  — `BUILD SUCCESS`, all 26 reactor modules green. `station/vision-app` **354 → 355** (exactly the one
+  new `ObjectStateRoundTripTest`, no other test file in this module touched): `Tests run: 355,
+  Failures: 0, Errors: 0, Skipped: 0`. Total time 08:34 min. The pre-existing uncommitted W1 step-5
+  work already in this worktree (`ObjectStateResponse`/`StreamPipeline#applyLabelFilters`'s
+  `pullTelemetry` fix, recorded in the entry above) broke nothing — every one of the 354 pre-existing
+  tests in this module still passed.
+- `npm --prefix station/vision-web run test:ci` (never bare `npx vitest run`, which fakes ~536
+  failures per this repo's own [[web-test-command]] memory) — **199 → 199 test files, 3892 → 3904
+  tests**, all green: `Test Files 199 passed (199)` / `Tests 3904 passed (3904)`, 6.83s. The new spec
+  file contributes exactly 12 of those (one `describe` block, 12 `it`s — 9 key-set assertions for the
+  9 grouped interfaces, 2 enum-membership checks, 1 absence check for `minimal`'s 7 missing groups).
+
+Docker ran for real in the Maven build (Postgres via Testcontainers, migrated through `V35` — visible
+in the log for `TrackingAssociateE2ETest`/`OnboardingProbeEnabledWiringTest`, both of which ran and
+passed in the same module before the new test).
+
+**Nothing in the brief proved unimplementable.** The one open question flagged mid-task — whether
+`tsconfig.spec.json` needed `resolveJsonModule` — resolved itself empirically (not needed) rather than
+requiring the scoped tsconfig change the brief conditionally allowed. Not committed — the wave owner
+commits.

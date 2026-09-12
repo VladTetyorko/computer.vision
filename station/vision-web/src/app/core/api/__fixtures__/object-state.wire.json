@@ -1,0 +1,64 @@
+{
+  "full": {
+    "id": 101,
+    "lifecycle": "DORMANT",
+    "streamId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    "identity": {
+      "label": "elected-label",
+      "labelRaw": "raw-label",
+      "candidates": [
+        { "label": "cand-a", "weight": 20.5 },
+        { "label": "cand-b", "weight": 21.25 }
+      ],
+      "stability": 102
+    },
+    "kinematics": {
+      "box": { "x": 0.03125, "y": 0.0625, "width": 0.09375, "height": 0.125 },
+      "detectorBox": { "x": 0.15625, "y": 0.1875, "width": 0.21875, "height": 0.25 },
+      "trackerBox": { "x": 0.28125, "y": 0.3125, "width": 0.34375, "height": 0.375 },
+      "predictedBox": { "x": 0.40625, "y": 0.4375, "width": 0.46875, "height": 0.5 },
+      "horizonMillis": 203,
+      "velocityX": 10.5,
+      "velocityY": 11.25,
+      "displacementX": 12.75,
+      "displacementY": 13.125,
+      "motionCompensated": true
+    },
+    "belief": {
+      "confidenceRaw": 0.53125,
+      "confidenceSmoothed": 0.5625,
+      "existence": 0.59375,
+      "sinceConfirmedMillis": 304
+    },
+    "provenance": {
+      "source": "REUPDATE",
+      "contributors": ["contributor-alpha", "contributor-beta"],
+      "assocCost": 14.625,
+      "reupdated": true
+    },
+    "memory": {
+      "recovered": true,
+      "identityConfidence": 0.625,
+      "dormantMillis": 405,
+      "galleryMatches": 106,
+      "matchDistance": 0.65625
+    },
+    "lock": {
+      "locked": true,
+      "lockSeqApplied": 507
+    },
+    "timing": {
+      "firstSeenMillis": 608,
+      "lastSeenMillis": 709,
+      "lastConfirmedMillis": 810,
+      "ageFrames": 111,
+      "hits": 112,
+      "misses": 113
+    }
+  },
+  "minimal": {
+    "id": 999,
+    "lifecycle": "TENTATIVE",
+    "streamId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+  }
+}
