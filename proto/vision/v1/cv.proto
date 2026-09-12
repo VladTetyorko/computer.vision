@@ -208,9 +208,13 @@ message DetectionResponse {
   int64  motion_millis     = 14;  // NEW -- ego-motion estimation cost for this frame
   string motion_engine_id  = 15;  // NEW -- compensator that served this frame ("" = none ran)
 
-  // Pull mode only (DetectPulled). All zero in push mode -- together these are the complete,
-  // honest accounting of a decode-and-infer loop that now runs on another machine, where the
-  // usual per-request round trip can no longer tell an operator what happened (MEDIA-SOT-PLAN §5.1, §7).
+  // Pull mode (DetectPulled). Zero in push mode, with ONE exception since CV-ORCHESTRATION wave
+  // W0: `dropped_frames` (19) is now also filled under DetectStream, from the latest-wins mailbox
+  // that already counted them (`LatestOnlyMailbox.dropped`) -- same field, same cumulative meaning,
+  // and the only number that distinguishes "this worker could not keep up" from a Java-side
+  // sampling decision. Together these are the complete, honest accounting of a decode-and-infer
+  // loop that now runs on another machine, where the usual per-request round trip can no longer
+  // tell an operator what happened (MEDIA-SOT-PLAN §5.1, §7).
   // `dropped_frames` (19) counts only frames the loop genuinely could not keep up with -- a served
   // frame superseded while still out for inference, or backlog thrown away because the detector was
   // busy (D8). It excludes frames the deadline sampler never selected because the source simply

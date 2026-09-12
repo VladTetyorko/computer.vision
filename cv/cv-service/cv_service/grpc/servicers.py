@@ -551,6 +551,21 @@ class _StreamReader:
             raise self._error
         return None
 
+    @property
+    def dropped(self) -> int:
+        """Cumulative frames this reader's mailbox replaced before the
+        consumer could take them -- never inferred, never answered.
+
+        Counted since this call began, and reported on the wire as
+        `DetectionResponse.dropped_frames`, the SAME field and the same
+        cumulative meaning `DetectPulled` already gives it (proto field 19).
+        Push mode reported `0` there until CV-ORCHESTRATION wave W0, which
+        made a drop indistinguishable from a Java-side sampling decision --
+        the one number that says "this worker could not keep up" was being
+        thrown away at the one place that knew it.
+        """
+        return self._mailbox.dropped
+
     def stop(self) -> None:
         """Best-effort: stop queueing further frames for a consumer that's
         going away (client cancel, or the generator returning/raising).
@@ -935,13 +950,27 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         session = self._session_registry.acquire(stream_id)
 
         reader = _StreamReader(request_iterator)
+        # The first frame was claimed before the reader existed, so nothing
+        # can have been dropped ahead of it -- the delta below is measured
+        # from there.
+        reported_drops = 0
         try:
             yield self._handle_request(first_request, session)
             while True:
                 request = reader.next()
                 if request is None:
                     return
-                yield self._handle_request(request, session)
+                dropped = reader.dropped
+                response = self._handle_request(
+                    request, session, dropped_frames=dropped - reported_drops
+                )
+                reported_drops = dropped
+                # Cumulative, matching `DetectPulled`'s own use of field 19.
+                # Set here rather than inside `_handle_request` so the echo
+                # degradations report it too: a frame that could not be
+                # inferred is exactly when an operator needs this number.
+                response.dropped_frames = dropped
+                yield response
         finally:
             reader.stop()
             self._session_registry.release(stream_id, session)

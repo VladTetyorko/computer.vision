@@ -221,6 +221,14 @@ def test_latest_wins_drops_stale_frame_received_while_busy_inferring():
 
     assert [r.sequence for r in result["responses"]] == [0, 2]
     assert call_count["n"] == 2  # frame 1 never reached detect() at all
+    # CV-ORCHESTRATION wave W0: the drop is now REPORTED, on the same
+    # `dropped_frames` field (19) DetectPulled already uses, with the same
+    # cumulative meaning. Before this, a push-mode drop was indistinguishable
+    # from the Java sampler simply not sending a frame -- the one number that
+    # says "this worker could not keep up" was thrown away at the one place
+    # that knew it. The first response predates the reader thread, so nothing
+    # can have been dropped ahead of it.
+    assert [r.dropped_frames for r in result["responses"]] == [0, 1]
 
 
 def test_ordering_is_preserved_per_stream_when_nothing_is_dropped():
@@ -238,6 +246,7 @@ def test_ordering_is_preserved_per_stream_when_nothing_is_dropped():
 
     assert [r.sequence for r in responses] == list(range(frame_count))
     assert detector.calls == frame_count
+    assert [r.dropped_frames for r in responses] == [0] * frame_count
 
 
 # --- (4) graceful teardown on client cancel -----------------------------------
