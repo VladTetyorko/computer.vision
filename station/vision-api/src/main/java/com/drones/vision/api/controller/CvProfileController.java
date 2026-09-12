@@ -124,7 +124,7 @@ public class CvProfileController {
     public CvProfileResponse create(@RequestBody CvProfileRequest request) {
         CvProfile created = cvProfileService.create(request.toSpec(), currentUser.ownership().groupId(),
                 currentUser.userId(), currentUser.authority());
-        return CvProfileResponse.from(created);
+        return CvProfileResponse.from(created, CvProfileResponse.Sources.from(request.fieldSources()));
     }
 
     /**
@@ -139,7 +139,7 @@ public class CvProfileController {
     public CvProfileResponse update(@PathVariable String id, @RequestBody CvProfileRequest request) {
         CvProfile updated = cvProfileService.update(CvProfileId.of(id), request.toSpec(), currentUser.userId(),
                 currentUser.authority());
-        return CvProfileResponse.from(updated);
+        return CvProfileResponse.from(updated, CvProfileResponse.Sources.from(request.fieldSources()));
     }
 
     /**

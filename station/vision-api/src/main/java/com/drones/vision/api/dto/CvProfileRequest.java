@@ -3,6 +3,7 @@ package com.drones.vision.api.dto;
 import com.drones.vision.perception.application.profile.CvProfileSpec;
 import com.drones.vision.perception.application.profile.IntentPolicy;
 import com.drones.vision.perception.application.profile.IntentPolicyResolver;
+import com.drones.vision.perception.application.profile.ProfileSource;
 import com.drones.vision.perception.domain.model.EventRuleConfig;
 import com.drones.vision.perception.domain.model.Intent;
 import com.drones.vision.perception.domain.model.ModelRef;
@@ -89,5 +90,55 @@ public record CvProfileRequest(String name, String description, String model, do
         return new CvProfileSpec(name, description, new ModelRef(resolvedModel, DEFAULT_MODEL_VERSION),
                 confidenceThreshold, inferenceFps, resolvedLabelFilter, labelDenyFilter, detectionEnabled,
                 tracking.toTrackingConfig(), eventRule);
+    }
+
+    /**
+     * Which of this request's own knobs {@link #toSpec()} actually seeded from {@link #intent}
+     * rather than taking verbatim (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.7, wave
+     * W2.8) — the per-knob provenance {@code CvProfileController#create}/{@code #update} attach to
+     * their response so a caller (W3's Tuning modal) can render "resolved from intent People,"
+     * matching {@link #toSpec()}'s own field-by-field logic exactly (a field reports {@link
+     * ProfileSource#INTENT} under precisely the condition that made {@link #toSpec()} use the
+     * intent's value for it, never a heuristic re-derivation).
+     *
+     * <p><b>Two of {@link CvProfileSpec}'s ten fields, and only two, can ever report {@link
+     * ProfileSource#INTENT} here</b> — {@code model} and {@code labelFilter} — because those are
+     * the only two fields this wire shape gives an unambiguous "caller left this to the platform"
+     * sentinel for (a blank string, an empty list). {@code confidenceThreshold}/{@code inferenceFps}
+     * can never report {@link ProfileSource#INTENT}, even though {@link IntentPolicyResolver} does
+     * compute an {@link IntentPolicy#detectFloor()} for them: those two request fields are bare
+     * primitives with no such sentinel under this frozen wire contract, so this method cannot tell
+     * "the caller explicitly sent 0.0" from "the caller left this to the platform" any more than
+     * {@link #toSpec()} itself can — see {@link IntentPolicy}'s own javadoc for the full disclosure.
+     * {@code description}/{@code detectionEnabled}/{@code tracking} are never intent-seeded at all
+     * ({@link #toSpec()} never reads {@code resolved} for them), so they have no representation
+     * here either — {@link Sources} carries only the two fields that can ever be non-{@code null}.
+     *
+     * @return {@code {model: null, labelFilter: null}} when {@link #intent} is {@code null} (intent
+     *         resolution was skipped entirely, so nothing could have been seeded)
+     */
+    public Sources fieldSources() {
+        if (intent == null) {
+            return new Sources(null, null);
+        }
+        ProfileSource modelSource = model == null || model.isBlank() ? ProfileSource.INTENT : null;
+        ProfileSource labelFilterSource = labelFilter == null || labelFilter.isEmpty() ? ProfileSource.INTENT : null;
+        return new Sources(modelSource, labelFilterSource);
+    }
+
+    /**
+     * Per-knob provenance for the two fields {@link #intent} can seed — see {@link #fieldSources()}.
+     * {@code null} means "this field came from the request itself, unmodified" (the "absence of a
+     * relation" idiom, CLAUDE.md rule 10) — the only other possible value is {@link
+     * ProfileSource#INTENT}, since {@link #fieldSources()} is never called with a tier-fold source
+     * in scope (this is a creation-time fact, not a resolution-time one — see {@link
+     * ProfileSource}'s own javadoc for that distinction).
+     *
+     * @param model       {@link ProfileSource#INTENT} iff this request's own {@code model} was
+     *                    blank and {@link #intent} supplied one instead
+     * @param labelFilter {@link ProfileSource#INTENT} iff this request's own {@code labelFilter}
+     *                    was empty and {@link #intent} supplied one instead
+     */
+    public record Sources(ProfileSource model, ProfileSource labelFilter) {
     }
 }

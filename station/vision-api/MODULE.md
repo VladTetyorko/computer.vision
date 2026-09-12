@@ -1513,3 +1513,26 @@ wave. This W2.7 pass is documentation-only (this file, `cv/grpc`'s, `contexts/vi
 `station/vision-app`'s and `storage/persistence`'s own MODULE.md) — no source change, counts above are
 carried forward from W2.5/W2.6's own measurement, not re-run for this docs-only step per this wave's
 "skip the tests" instruction.
+
+**W2.8 test/gap follow-up (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7):** W2.6 shipped
+`CvProfileRequest`'s `intent` fold without tests; closed here with `dto.CvProfileRequestTest` (12
+cases: null-intent passthrough, blank-model/empty-labelFilter seeding, an explicit value winning
+over the intent's own choice, `CUSTOM` returning the caller's own list unchanged, the synthesized
+`eventRule` confidence, and `fieldSources()`'s per-knob provenance) and `support.StreamDetectionSupportTest`
+(2 cases, new file — proves an asset-tier profile fold and the session-tier `StartStreamRequest#mergeOnto`
+override coexist in one resolved `PipelineConfig`, and that an unowned device skips the fold entirely).
+Also new: `CvProfileRequest#fieldSources()` → nested `CvProfileRequest.Sources(ProfileSource model,
+ProfileSource labelFilter)`, reporting `contexts/vision-perception`'s new `ProfileSource.INTENT` for
+exactly the two fields `toSpec()` actually seeded from `intent`; `CvProfileResponse` grew from a
+15-component to a **16-component** record (`Sources sources` appended, `@JsonInclude(NON_NULL)` —
+omitted, not `null`, for every read with no originating request, i.e. `from(CvProfile)`/
+`platformDefault`/plain `GET`) with its own nested `CvProfileResponse.Sources`, populated by
+`CvProfileController#create`/`#update` from `request.fieldSources()` so a caller (W3's Tuning modal)
+can render "resolved from intent People." **Disclosed, permanent gap** (not a later-wave TODO):
+`confidenceThreshold`/`inferenceFps` have no `sources` representation at all, even though
+`IntentPolicyResolver` computes an `IntentPolicy#detectFloor()`/`#rateCeiling()` for them, because
+those two `CvProfileRequest` fields are bare primitives with no "caller left this to the platform"
+sentinel under this frozen wire contract — see `CvProfileRequest#fieldSources()`'s and
+`CvProfileResponse.Sources`'s own javadoc. No `station/vision-web` change: `models.ts` has no
+exhaustive wire-contract-spec test for `CvProfile`/`CvProfileRequest` and no mirror of `intent` yet
+(still Java-only), so `sources` needed none either this wave.
