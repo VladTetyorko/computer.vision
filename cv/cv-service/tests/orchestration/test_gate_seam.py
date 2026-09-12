@@ -67,6 +67,17 @@ def test_only_the_detector_client_may_acquire_the_inference_gate(path: Path) -> 
         f"exactly one door in this package and it is orchestration/{GATE_DOOR} "
         "(CV-ORCHESTRATION §4.1 rule 5)"
     )
+    # CV-ORCHESTRATION wave W4 gave `InferenceGate` a SECOND door --
+    # `admit(max_queue)`, the refusing one the `Detector` servicer takes --
+    # so the seam this file guards would have had a hole in it the width of
+    # one method name. Named explicitly rather than widened to a substring
+    # like "gate" or "Inference": a loose grep here is how a structural test
+    # starts failing for reasons nobody can act on.
+    assert "admit" not in code, (
+        f"{path.relative_to(PACKAGE_ROOT)} admits something; `InferenceGate.admit` is "
+        f"the gate's other door and orchestration/{GATE_DOOR} is still the only file "
+        "in this package allowed to hold either"
+    )
     assert "InferenceGate" not in code, (
         f"{path.relative_to(PACKAGE_ROOT)} names InferenceGate; only "
         f"orchestration/{GATE_DOOR} may know the gate exists"
@@ -86,6 +97,36 @@ def test_the_detector_client_is_the_packages_only_route_to_a_detector() -> None:
             f"{path.relative_to(PACKAGE_ROOT)} reaches into cv_service.inference; "
             "detection enters this package through DetectorClient only"
         )
+
+
+def test_the_orchestration_package_never_imports_grpc_or_generated_stubs() -> None:
+    """CV-ORCHESTRATION wave W4's other structural promise, from `detector.py`'s
+    own module docstring: "a module that imports neither `grpc` nor `cv_pb2`".
+    The pool (`PoolDetectorClient`) holds ordering/failover/accounting only,
+    never wire knowledge -- `grpc/detector_transport.py`'s `GrpcRemoteDetector`
+    is the one place a `RemoteDetector` is actually implemented, and it lives
+    OUTSIDE this package specifically so that split stays a plain grep, not a
+    convention someone has to remember. Unlike `GATE_DOOR` above, no file in
+    `orchestration/` is exempt from this one -- there is no module here that
+    is supposed to know gRPC exists at all, `detector.py` included.
+
+    Token-stripped (`_code_without_comments_or_strings`), not raw text: several
+    docstrings in this package (`detector.py`'s own) name
+    "`grpc/detector_transport.py`" IN PROSE, describing where the wire
+    implementation lives without importing it -- exactly the distinction this
+    test exists to enforce, so a naive raw-substring check would misfire on
+    the very file that states the rule.
+    """
+    offenders: "list[str]" = []
+    for path in _python_files(ORCHESTRATION_ROOT):
+        code = _code_without_comments_or_strings(path)
+        if "import grpc" in code or "cv_pb2" in code:
+            offenders.append(path.relative_to(PACKAGE_ROOT).as_posix())
+    assert offenders == [], (
+        f"{offenders} import grpc or a generated cv_pb2 stub; the orchestration "
+        "package must stay wire-agnostic (CV-ORCHESTRATION §4.9) -- see "
+        "grpc/detector_transport.py for where that knowledge belongs instead"
+    )
 
 
 def test_the_tracking_package_still_cannot_see_the_gate() -> None:

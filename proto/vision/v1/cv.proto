@@ -404,13 +404,34 @@ message SessionFacts {
   repeated string contributors  = 12;  // registered ids, in run order
 }
 
+// One entry of a `pool` detector client's ordered target list (CV-ORCHESTRATION W4, §4.9).
+// Health is OBSERVED, never probed: these counters are what this process's own calls saw, so
+// an unused target reads all-zero rather than claiming to be up.
+message DetectorTarget {
+  string target      = 1;   // "host:port", or the literal "local" for the in-process detector
+  int64  served      = 2;   // passes this target answered
+  int64  refused     = 3;   // RESOURCE_EXHAUSTED -- it was up and said no; the caller moved on
+  int64  failed      = 4;   // unavailable/timeout/error -- the caller moved on
+  string last_error  = 5;   // "" once a call has succeeded since the last failure
+}
+
 // What the process as a whole is doing. Cheap enough to answer while streams are running.
 message ProcessFacts {
-  string detector_client        = 1;   // "local" in W0; "pool" once the detector role ships
+  string detector_client        = 1;   // "local" (in-process) or "pool" (CV_DETECTOR_TARGETS set)
   int32  sessions               = 2;
   int32  gate_permits           = 3;
   int32  ledger_ring            = 4;   // CV_LEDGER_RING: frames retained per session
   repeated string stream_ids    = 5;
+  // CV-ORCHESTRATION W4. The local gate's live admission facts -- what a `detector`-role
+  // process reports about itself, and what an all-in-one reports about its own in-process
+  // detector. `max_queue` is CV_DETECTOR_MAX_QUEUE, the bound above which the `Detector`
+  // service answers RESOURCE_EXHAUSTED (0 on a process that serves no Detector service).
+  int32  gate_occupancy         = 6;
+  int32  gate_queue_depth       = 7;
+  int32  gate_max_queue         = 8;
+  // Set only on a `pool` client; empty on `local`. Ordered exactly as CV_DETECTOR_TARGETS.
+  repeated DetectorTarget detector_targets = 9;
+  string role                   = 10;  // CV_SERVICE_ROLE, so "who am I" needs no second call
 }
 
 // Empty stream_id: the process and its session list. Otherwise: that session's facts and its
@@ -582,6 +603,57 @@ service Inference {
   rpc DetectPulled(stream PullControl) returns (stream DetectionResponse);
   // NEW -- CV-ORCHESTRATION wave W0: read-only debug surface, off the response path entirely.
   rpc Inspect(InspectRequest) returns (InspectResponse);
+}
+
+// ---- CV-ORCHESTRATION wave W4 (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.9) ------------
+// The DETECTOR role: the stateless half of a tracker/detector split. A detector instance holds
+// no identity, no gallery, no lock and no session -- it turns pixels into boxes and says how
+// busy it is. That is the whole reason it may be scaled to N instances behind an ordered target
+// list while the tracker session stays sticky to one stream (§4.9, decision E11).
+//
+// Deliberately NOT a variant of `FrameRequest`: that message carries tracking config, camera
+// pose, trace demand and a stream-scoped contract a detector has no business seeing. This one
+// carries the pixels and the model, and `stream_id` only so an instance can ACCOUNT for the
+// load it is serving -- never so it can hold state for that stream.
+
+message DetectRequest {
+  // Accounting only. A detector instance never keys state on this -- affinity lives in the
+  // CALLER's ordered target list (§4.9 "affinity is a deployment requirement"), so two
+  // consecutive frames of one stream may legitimately be served by two different instances.
+  string stream_id           = 1;
+  int64  sequence            = 2;
+  int32  width               = 3;
+  int32  height              = 4;
+  ImageEncoding encoding     = 5;
+  bytes  data                = 6;
+  // The model REF, exactly as `FrameRequest.model_id` means it -- comma-separated routes a
+  // composite. `model_version` is carried for symmetry with the response and is not resolved.
+  string model_id            = 7;
+  string model_version       = 8;
+  float  confidence_threshold = 9;
+  // Optional region of interest (the ROI rescue's crop, TRACKING-V2 wave C5c). Message
+  // presence IS the option: absent = full frame. The detector crops and maps the boxes back
+  // to full-frame coordinates itself, so the caller sends one frame, never two.
+  BoundingBox roi            = 10;
+}
+
+message DetectResponse {
+  repeated Detection detections = 1;  // track fields are always unset: a detector has no identity
+  int64  inference_millis       = 2;
+  string model_id               = 3;  // what actually served, which may differ from what was asked
+  // Admission facts, on EVERY response (§4.9): the fleet budget is the sum of what instances
+  // report, not a shared token. `occupancy` is how many passes are inside the gate right now,
+  // `queue_depth` how many are waiting for a permit, `capacity` the gate's permit count.
+  int32  occupancy              = 4;
+  int32  queue_depth            = 5;
+  int32  capacity               = 6;
+  int32  max_queue              = 7;  // the bound above which this instance answers RESOURCE_EXHAUSTED
+}
+
+// Stateless detection. One RPC, unary on purpose: there is no per-stream state to keep a
+// stream open for, and a unary call is what makes "try the next target" a one-line failover.
+service Detector {
+  rpc Detect(DetectRequest) returns (DetectResponse);
 }
 
 // Dataset training and model registry control plane.

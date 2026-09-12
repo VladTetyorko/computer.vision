@@ -17,6 +17,17 @@ module never touches ``os.environ``). Together those two facts are what make
 engine" checkable rather than aspirational -- every such value in this
 package traces back to a `TrackingParams` field.
 
+**Retired engine ids (CV-ORCHESTRATION wave W4, decision E16).** `resolve()`
+is also the one place a retired ASSOCIATE engine id is rewritten to its
+replacement (`RETIRED_ASSOCIATORS` below) -- a deployment's `CV_TRACK_
+ASSOCIATE_ENGINE=bytetrack`, or a client's wire `engine_id="bytetrack"` in
+ASSOCIATE mode, keeps tracking on `cost` instead of silently losing every
+track id, which is what `EngineSet`'s `FOLLOW -> ASSOCIATE -> OFF` ladder
+would otherwise do to a stream whose engine id simply stopped resolving.
+ASSOCIATE only: `engine_id` doubles as the FOLLOW engine id too, and no
+follower has ever been named `bytetrack`, so aliasing it there would corrupt
+FOLLOW for no reason.
+
 **Resolved on config CHANGE, never per frame.** `TrackingConfig` is restated
 on *every* `FrameRequest` (deliberately -- TRACKING-PLAN invariant P2: the
 mailbox may silently drop a frame, so a one-shot control message could be
@@ -33,6 +44,7 @@ builds them; nothing here knows protobuf exists.
 from __future__ import annotations
 
 import dataclasses
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional, Tuple
 
@@ -62,6 +74,48 @@ _LOST_VERIFY_OPPORTUNITIES = 3
 
 _ACTIVE_MODES = frozenset({MODE_ASSOCIATE, MODE_FOLLOW})
 _KNOWN_MODES = frozenset({MODE_UNSPECIFIED, MODE_OFF, MODE_ASSOCIATE, MODE_FOLLOW})
+
+LOGGER = logging.getLogger("cv_service.tracking.params")
+
+# CV-ORCHESTRATION wave W4 (decision E16): associator ids `registry.py`'s
+# `BUILTIN_ASSOCIATORS` no longer constructs, mapped to the replacement
+# `resolve()` serves instead. `bytetrack` is retired -- every associator now
+# shares one evidence graph (`cv_service/orchestration/`), and its Kalman
+# state, held behind ultralytics' `BYTETracker`, had no seam to warp, rescue
+# against or hang a descriptor on -- but a deployment or client still naming
+# it must not go silently untracked, so it resolves to the measured-
+# equal-or-better `cost` (decision E11, `registry.py`'s own comment) instead
+# of falling through `EngineSet`'s degradation ladder. A named module-level
+# table, not an inline string comparison, per CLAUDE.md rule 1 (no bare
+# literals branching in code) and so a second retirement is one dict entry,
+# not a second `if`.
+RETIRED_ASSOCIATORS: "dict[str, str]" = {"bytetrack": "cost"}
+
+# Dedup for `_warn_retired_associator_once` -- process-wide, the same
+# "log this surprising fact exactly once" idiom `TrackerRegistry._warned_
+# unknown_ids`/`EngineSet._degraded_engine_ids` already use elsewhere in this
+# package, just module-level here because `resolve()` is a plain function
+# with no instance to hold it on.
+_warned_retired_associators: "set[str]" = set()
+
+
+def _warn_retired_associator_once(requested: str, replacement: str) -> None:
+    """Log a retired-engine alias exactly once per process, not once per frame.
+
+    `resolve()` runs on every config CHANGE (see the module docstring's
+    "resolved on config change, never per frame"), so a stream whose operator
+    never updates it would otherwise say nothing at all -- once, at the
+    moment it is first substituted, is what an operator actually greps for.
+    """
+    if requested in _warned_retired_associators:
+        return
+    _warned_retired_associators.add(requested)
+    LOGGER.warning(
+        "tracking: ASSOCIATE engine_id=%r is retired (CV-ORCHESTRATION E16); "
+        "resolving to %r instead",
+        requested,
+        replacement,
+    )
 
 
 @dataclass(frozen=True)
@@ -437,6 +491,15 @@ def resolve(request: TrackingRequest, settings: "Settings") -> TrackingParams:
             if mode == MODE_FOLLOW
             else settings.track_associate_engine
         )
+    # CV-ORCHESTRATION wave W4 (decision E16), ASSOCIATE only -- see
+    # `RETIRED_ASSOCIATORS`'s own comment. `engine_id` doubles as the FOLLOW
+    # engine id above, and no follower is named `bytetrack`, so this must
+    # gate on the resolved MODE, not merely on the string, or a FOLLOW
+    # request would be corrupted by a rule that was never about it.
+    if mode == MODE_ASSOCIATE and engine_id in RETIRED_ASSOCIATORS:
+        replacement = RETIRED_ASSOCIATORS[engine_id]
+        _warn_retired_associator_once(engine_id, replacement)
+        engine_id = replacement
     return TrackingParams(
         mode=mode,
         engine_id=engine_id,

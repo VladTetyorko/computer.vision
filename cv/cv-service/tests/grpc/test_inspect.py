@@ -6,19 +6,31 @@ the RPC is that the dataclass tree under `cv_service/orchestration/` reaches
 a caller correctly -- a test against the dataclasses alone would prove the
 one half that was never in doubt.
 
-Deterministic: a fake detector, a stub associator, a real `InferenceGate`.
-Nothing here depends on timing or on the `cv` extra's models.
+Deterministic: a fake detector, the real `cost` associator, a real
+`InferenceGate`. Nothing here depends on timing or on the `cv` extra's models.
+
+CV-ORCHESTRATION wave W4 (decision E16): `orchestration.contributors.
+roster()` registers an ASSOCIATE contributor chain only for the engine id
+`CostAssociator.engine_id` ("cost") -- the old `bytetrack`-shaped stub that
+minted its own `Observation.key` straight from `associate()` no longer gets
+a contributor at all (`roster()`'s own comment: "nothing is registered"),
+so it books no track and `Inspect` would have nothing to show. `StubTracker
+Registry` below hands back the real, pure-stdlib `CostAssociator` instead,
+the same substitution `tests/grpc/test_detect_stream_tracking.py`'s
+`real_cost_associator()` makes for the same reason.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
-from cv_service.config import Settings
+from cv_service.config import ROLE_INFERENCE, Settings
 from cv_service.grpc.servicers import InferenceServicer, cv_pb2
 from cv_service.inference.concurrency import InferenceGate
 from cv_service.inference.detector import Detection
-from cv_service.tracking.engines.base import Box, Observation, TrackerUpdate
+from cv_service.orchestration.detector import LOCAL_TARGET
+from cv_service.tracking.assign import AssignGates, AssignWeights, CostAssociator
+from cv_service.tracking.engines.base import TrackerUpdate
 
 WIDTH, HEIGHT = 8, 6
 FRAME_BYTES = bytes(np.zeros((HEIGHT, WIDTH, 3), dtype=np.uint8).tobytes())
@@ -32,26 +44,13 @@ class FakeDetector:
         return [Detection("car", 0.9, 0.10, 0.10, 0.10, 0.10)], 11
 
 
-class StubAssociator:
-    """Every detection becomes its own observation -- enough to give the
-    aggregator something to book without a real engine."""
-
-    engine_id = "stub-assoc"
-
-    def associate(self, detections, now):
-        return [
-            Observation(
-                key=detection.label,
-                box=Box(detection.x, detection.y, detection.width, detection.height),
-                label=detection.label,
-                confidence=detection.confidence,
-                det_index=index,
-            )
-            for index, detection in enumerate(detections)
-        ]
-
-    def reset(self):
-        pass
+def cost_associator() -> CostAssociator:
+    """Neutral weights/gates (`assign.py`'s own dataclass defaults) -- the
+    same construction `registry.py`'s production `_cost()` factory performs,
+    kept here so `StubTrackerRegistry.associator()` returns a real, working
+    engine rather than a hand-rolled double the roster no longer builds
+    anything for."""
+    return CostAssociator(weights=AssignWeights(), gates=AssignGates())
 
 
 class StubFollower:
@@ -75,7 +74,7 @@ class StubFollower:
 
 class StubTrackerRegistry:
     def associator(self, engine_id, *, max_age_frames):
-        return StubAssociator.engine_id, StubAssociator()
+        return CostAssociator.engine_id, cost_associator()
 
     def follower(self, engine_id, *, max_age_frames):
         return StubFollower.engine_id, StubFollower()
@@ -149,9 +148,52 @@ def test_inspect_without_a_stream_id_describes_the_process():
     assert response.process.gate_permits == GATE_PERMITS
     assert response.process.ledger_ring == Settings().ledger_ring
     assert sorted(response.process.stream_ids) == ["stream-a", "stream-b"]
+    # CV-ORCHESTRATION wave W4: process-wide facts a `local` deployment still
+    # answers -- `role` names configured intent, the gate numbers are live,
+    # `detector_targets` is empty (the wire's own doc: "Set only on a `pool`
+    # client; empty on `local`").
+    assert response.process.role == "all"
+    assert response.process.gate_occupancy == 0
+    assert response.process.gate_queue_depth == 0
+    assert not response.process.detector_targets
     # No stream was named, so there is nothing session-shaped to answer with.
     assert not response.ledgers
     assert response.session.stream_id == ""
+
+
+def test_inspect_reports_gate_max_queue_only_on_a_process_that_also_serves_detector():
+    """`gate_max_queue` (§4.9's own wire comment) is 0 on a process that
+    serves no `Detector` -- true for `inference`/`tracker`, since those
+    roles never register `DetectorServicer` alongside `InferenceServicer`
+    (`grpc/server.py`'s own role wiring). Only `role=all` combines both on
+    one gate, so only `role=all` has a bound worth reporting here."""
+    all_role = servicer(Settings(role="all", detector_max_queue=9))
+    run_stream(all_role, 1)
+    assert inspect(all_role).process.gate_max_queue == 9
+
+    inference_only = servicer(Settings(role=ROLE_INFERENCE, detector_max_queue=9))
+    run_stream(inference_only, 1)
+    assert inspect(inference_only).process.gate_max_queue == 0
+
+
+def test_inspect_shows_pool_facts_when_detector_targets_are_configured():
+    """The other half of `detector_client`/`detector_targets`: once an
+    operator sets `CV_DETECTOR_TARGETS`, every session's `PoolDetectorClient`
+    reports into the SAME process-wide health dict (`InferenceServicer.
+    __init__`'s `self._detector_health`), so `Inspect` sees it even though
+    each session holds its own private `PoolDetectorClient` instance."""
+    subject = servicer(Settings(detector_targets=(LOCAL_TARGET,)))
+    run_stream(subject, 3, stream_id="stream-a")
+
+    response = inspect(subject)
+
+    assert response.process.detector_client == "pool"
+    assert [t.target for t in response.process.detector_targets] == [LOCAL_TARGET]
+    target = response.process.detector_targets[0]
+    assert target.served == 3
+    assert target.refused == 0
+    assert target.failed == 0
+    assert target.last_error == ""
 
 
 def test_inspect_reports_an_unknown_stream_as_not_found_but_still_answers():
@@ -178,7 +220,7 @@ def test_inspect_names_the_engine_that_is_actually_serving():
 
     assert facts.stream_id == "stream-1"
     assert facts.mode == "TRACKING_MODE_ASSOCIATE"
-    assert facts.engine_id == "stub-assoc"
+    assert facts.engine_id == "cost"
     assert facts.frames_processed == 3
     assert facts.live_tracks == 1
     assert facts.level_served > 0
@@ -190,7 +232,22 @@ def test_inspect_lists_the_contributors_in_run_order():
 
     contributors = list(inspect(subject, "stream-1").session.contributors)
 
-    assert contributors == ["detect.full", "assoc.bytetrack", "aggregate"]
+    # CV-ORCHESTRATION wave W4 (decision E16): `cost` is the only ASSOCIATE
+    # associator left, so its full contributor chain (`orchestration.
+    # contributors.roster()`) is what every ASSOCIATE stream now registers --
+    # not the three-contributor `detect.full` / `assoc.bytetrack` / `aggregate`
+    # chain the retired engine used to get.
+    assert contributors == [
+        "detect.full",
+        "egomotion.flow",
+        "predict.cv",
+        "appearance.histogram",
+        "assoc.cost",
+        "detect.roi",
+        "memory.gallery",
+        "propose.cost",
+        "aggregate",
+    ]
 
 
 def test_a_session_that_never_ran_a_frame_reports_no_roster():
@@ -216,14 +273,25 @@ def test_every_contributor_gets_a_row_with_an_outcome():
 
     assert ledger.stream_id == "stream-1"
     assert ledger.sequence == 0
-    assert [entry.contributor_id for entry in ledger.entries] == [
-        "detect.full",
-        "assoc.bytetrack",
-        "aggregate",
-    ]
-    assert all(
-        entry.outcome == cv_pb2.LEDGER_OUTCOME_RAN for entry in ledger.entries
-    ), [(entry.contributor_id, entry.outcome, entry.reason) for entry in ledger.entries]
+    outcomes = {entry.contributor_id: entry.outcome for entry in ledger.entries}
+    # `detect.roi` is registered (`cost`'s chain always is) but SKIPPED on
+    # this frame: the single detection matched outright, so the rescue --
+    # "one bounded second look at what [the match] left unmatched" (§4.1) --
+    # found nothing to do. Every other contributor genuinely ran. A row
+    # existing at all, whatever its outcome, is what this test's name is
+    # about -- see `test_a_skipped_contributor_says_why` below for a SKIPPED
+    # row's own reason string.
+    assert outcomes == {
+        "detect.full": cv_pb2.LEDGER_OUTCOME_RAN,
+        "egomotion.flow": cv_pb2.LEDGER_OUTCOME_RAN,
+        "predict.cv": cv_pb2.LEDGER_OUTCOME_RAN,
+        "appearance.histogram": cv_pb2.LEDGER_OUTCOME_RAN,
+        "assoc.cost": cv_pb2.LEDGER_OUTCOME_RAN,
+        "detect.roi": cv_pb2.LEDGER_OUTCOME_SKIPPED,
+        "memory.gallery": cv_pb2.LEDGER_OUTCOME_RAN,
+        "propose.cost": cv_pb2.LEDGER_OUTCOME_RAN,
+        "aggregate": cv_pb2.LEDGER_OUTCOME_RAN,
+    }, [(entry.contributor_id, entry.outcome, entry.reason) for entry in ledger.entries]
     assert not ledger.halted
     # The response's own `DetectorReason`, carried as its value NAME: a
     # debug surface a human reads should not render `1` where the

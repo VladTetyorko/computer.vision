@@ -256,3 +256,188 @@ concern at typical stream counts.
    much longer, TCP-level failure detection — and detection should resume
    automatically once the link is back, via the same probe/backoff recovery
    item 4 describes.
+
+---
+
+## 7. Splitting the detector out (CV-ORCHESTRATION §4.9, wave W4)
+
+Everything above deploys one **all-in-one** process: sessions, identity and
+inference in the same place. That is still the default and still the right
+shape for one box. This section is for the other shape — one **tracker** and
+N **detectors** — and for the one question that decides which you want.
+
+### Which shape
+
+| | all-in-one (`CV_SERVICE_ROLE` unset) | tracker + detectors |
+|---|---|---|
+| Processes | 1 | 1 tracker + N detectors |
+| Holds identity | yes | tracker only |
+| Scales by | nothing — one box is the ceiling | adding detector instances |
+| Extra cost per detector frame | none | one serialize + hop + deserialize |
+| Right when | the box has spare cores for the streams you run | the DETECTOR is the ceiling and you have another box |
+
+The split moves **only** the stateless part. A detector holds no track, no
+gallery, no lock and no session — it turns pixels into boxes and reports how
+busy it is. Everything sub-millisecond stays on the tracker's session thread,
+because the hop would cost more than the work (§4.9, P6).
+
+**It buys nothing on one machine.** Both shapes then use the same cores, and a
+`yolo26n` pass is over 95% of a frame's cost, so splitting on one box only adds
+the hop. The split pays when the detectors are on *other* hardware.
+
+### Wiring
+
+```
+# on each detector box
+CV_SERVICE_ROLE=detector CV_MAX_CONCURRENT_INFERENCES=4 \
+  ~/vision/cv-service/.venv/bin/python -m cv_service.grpc.server
+
+# on the tracker box (the one VISION_CV_ENDPOINT points at)
+CV_SERVICE_ROLE=tracker \
+CV_DETECTOR_TARGETS=gpu-a:50051,gpu-b:50051 \
+  ~/vision/cv-service/.venv/bin/python -m cv_service.grpc.server
+```
+
+`docker-compose.yml`'s `scale` profile is the container form of exactly this
+(`cv-detector-1`, `cv-detector-2`); its comment block carries the same rules.
+
+### The three rules that are deployment's job, not the code's
+
+Affinity is a **deployment requirement** (decision E11). No code enforces these
+and no code can:
+
+1. **One tracker process per app instance.** Two trackers behind one address
+   work until the first reconnect, which lands on the other and silently
+   resets that stream's ids, gallery and lock. Only the detectors may be
+   scaled.
+2. **`CV_DETECTOR_TARGETS` is an ORDERED list**, tried first-to-last,
+   `pick_first` semantics — never load balancing. A healthy first target
+   therefore serves every frame of every stream, which is what makes a
+   detector swap invisible to identities: there is no swap unless the first
+   target refuses or dies, and when it does, the tracker's own state is
+   untouched because the detector never held any.
+3. **Name detector instances individually.** Do not point the list at one DNS
+   name with N backends: that round-robins a list whose order is the whole
+   mechanism, and a gRPC channel resolves once anyway.
+
+Append `,local` as the last entry to keep the tracker's own in-process
+detector as a final fallback. Leave it off if you would rather the fleet's
+saturation be visible than quietly absorbed.
+
+### Admission, and the fleet budget
+
+A detector answers `RESOURCE_EXHAUSTED` once more than `CV_DETECTOR_MAX_QUEUE`
+(default 2) passes are already waiting for a permit, instead of queueing. The
+caller immediately tries the next target; if every target refuses, that frame
+gets no detections and the frame ledger says so — visible, never a silent
+queue.
+
+The bound is a **freshness** rule, not a throughput one: at 135–230 ms per pass
+on this class of box, two queued passes already mean the third's answer
+describes a frame half a second old, and CLAUDE.md rule 9 says the newest data
+wins. There is no shared token anywhere; the fleet budget is the sum of what
+the instances report (decision E10).
+
+### Reading it back
+
+`Inference.Inspect` with an empty `stream_id` answers, for any role:
+
+- `detector_client` — `local` or `pool`
+- `role` — this process's `CV_SERVICE_ROLE`
+- `gate_permits` / `gate_occupancy` / `gate_queue_depth` / `gate_max_queue`
+- `detector_targets[]` — the ordered list with **observed** per-target health
+  (`served`, `refused`, `failed`, `last_error`). Observed, never probed: a
+  fallback that has never been needed honestly reads all-zero.
+
+Per frame, the `detect.full` / `detect.roi` ledger rows name `served_by` and
+`hops` whenever the pass did not run in this process.
+
+### Config reference
+
+| Env | Default | Meaning |
+|---|---|---|
+| `CV_SERVICE_ROLE` | `all` | `all` \| `inference` \| `training` \| `detector` \| `tracker` |
+| `CV_DETECTOR_TARGETS` | *(unset)* | ordered `host:port` list; `local` is a legal entry; unset = detect in-process |
+| `CV_DETECTOR_MAX_QUEUE` | `2` | waiting passes above which a detector answers `RESOURCE_EXHAUSTED` |
+| `CV_DETECTOR_TIMEOUT_MILLIS` | `2000` | deadline on one pooled `Detect` call |
+| `CV_MAX_CONCURRENT_INFERENCES` | `min(2, cpu//2)` | gate permits — per instance, so raise it on a detector box |
+
+### Measuring it yourself
+
+`tools/detectorbench` starts both shapes and drives real 10 fps streams
+through them:
+
+```
+python -m tools.detectorbench --scenario allinone --streams 1,2,3,4 --seconds 30
+python -m tools.detectorbench --scenario split --detectors 2 --streams 1,2,3,4 --seconds 30
+```
+
+It prints the machine facts alongside the numbers, because none of them are
+portable. Run it on a quiet box: a concurrent build makes every figure a
+measurement of the build.
+
+#### Measured 2026-09-12 (W4, decision E17) — streams-sustained sweep
+
+The plan's own acceptance bar (§6 wave W4) is a **streams-sustained**
+comparison, not single-stream latency: "1 tracker + 2 detectors sustains
+>= 2x the streams of 1 all-in-one at 10 fps `yolo26n` on the same
+hardware." Swept both shapes across `--streams 1,2,3,4,6,8 --seconds 30`
+on the CV-ORCHESTRATION worktree's dev box — **not** GB4005 itself (AMD
+Ryzen 5 5600U, 12 threads, CPU-only, no CUDA/OpenVINO — a different
+machine, but the same "one CPU-bound box, no GPU" shape GB4005 is).
+Confirmed no `mvn`/`surefire`/`vitest`/`java -jar` process was running
+immediately before and immediately after **each** scenario run —
+**not measured under contention**. `--permits` (`CV_MAX_CONCURRENT_
+INFERENCES`) is pinned at 2 per spawned process by the harness, which
+means the two shapes are NOT running the same total concurrency: `allinone`
+is one process → 2 gate permits total; `split --detectors 2` is two
+detector processes each with their own 2 permits → 4 gate permits total,
+with the tracker process's own 2 permits unused (it holds no local
+model once `CV_DETECTOR_TARGETS` is set). That 2-vs-4-permit difference
+is exactly what this sweep is measuring the consequence of on one box.
+
+| Scenario | Streams | Answered | p50 | p95 | Effective fps | Sustained (>=95% & p95<=500ms) |
+|---|---|---|---|---|---|---|
+| `allinone` | 1 | 100.0% | 36 ms | 39 ms | 10.03 | yes |
+| `allinone` | 2 | 99.8% | 65 ms | 72 ms | 20.03 | yes |
+| `allinone` | 3 | 99.8% | 77 ms | 139 ms | 30.03 | yes |
+| `allinone` | **4** | **76.1%** | 182 ms | 229 ms | 30.53 | **no — first to fail** |
+| `allinone` | 6 | 32.4% | 364 ms | 520 ms | 19.53 | no |
+| `allinone` | 8 | 24.5% | 452 ms | 668 ms | 19.63 | no |
+| `split` (tracker + 2 detectors) | 1 | 100.0% | 46 ms | 90 ms | 10.03 | yes |
+| `split` (tracker + 2 detectors) | 2 | 99.7% | 81 ms | 92 ms | 20.00 | yes |
+| `split` (tracker + 2 detectors) | **3** | **85.9%** | 167 ms | 212 ms | 25.87 | **no — first to fail** |
+| `split` (tracker + 2 detectors) | 4 | 64.0% | 207 ms | 254 ms | 25.70 | no |
+| `split` (tracker + 2 detectors) | 6 | 52.7% | 236 ms | 349 ms | 31.70 | no |
+| `split` (tracker + 2 detectors) | 8 | 39.7% | 305 ms | 359 ms | 31.83 | no |
+
+Raw JSON: `allinone_sweep.json` / `split_sweep.json` (not checked in —
+machine-specific numbers, kept in the run's own scratch output).
+
+**`allinone` sustains up to 3 streams; `split` sustains up to 2** — the
+split needed >= 6 to clear the plan's 2x bar and instead sustains *fewer*
+streams than `allinone`, despite starting from double the raw gate
+permits (4 vs 2). On a single CPU-bound box this is not a contradiction:
+`yolo26n` on CPU is itself multi-threaded (`torch`'s intra-op
+parallelism), so 4 concurrent forward passes across 3 processes
+oversubscribes the same 12 threads harder than 2 concurrent passes in 1
+process does, and `split` also pays the serialize/hop/deserialize cost
+on every one of those passes. More permits bought more contention, not
+more throughput, because there was no second machine's cores behind
+them.
+
+**E17 recommendation: stay all-in-one on GB4005 — now from the
+saturation point, not just the overhead.** The sweep says the split does
+not merely fail to double GB4005's sustained stream count on one box, it
+actively sustains fewer streams (2 vs 3) at the same pinned permits,
+because splitting spends the extra permits as CPU contention with no
+second machine to spend them on. Revisit only once a second physical box
+exists to host the `detector` role: wire it as a `CV_SERVICE_ROLE=detector`
+target and re-run this same sweep (`--scenario split --detectors 2
+--streams 1,2,3,4,6,8`) across *both* machines — the plan's own >=2x bar
+can only be judged honestly once the detectors are not competing with the
+tracker for the same cores. Until then, `gate_occupancy`/`gate_queue_depth`
+climbing toward `gate_max_queue` on GB4005's `Inspect` output (or
+`RESOURCE_EXHAUSTED` showing up in the field) is the trigger to revisit
+this decision at all, not a reason to split pre-emptively on the same
+box.

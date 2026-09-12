@@ -230,12 +230,24 @@ def test_build_default_registry_takes_its_defaults_from_settings():
     assert subject.default_associate_id == Settings().track_associate_engine
     assert subject.default_motion_id == "pose"
     assert subject.default_appearance_id == "off"
-    assert set(subject.roster()) == {"bytetrack", "cost", "lk", "ncc", "flow", "pose", "histogram"}
+    assert set(subject.roster()) == {"cost", "lk", "ncc", "flow", "pose", "histogram"}
 
 
-@pytest.mark.parametrize("engine_id", ["bytetrack", "cost", "lk", "ncc", "flow", "pose", "histogram"])
-def test_the_seven_shipped_engines_are_advertised(engine_id):
+@pytest.mark.parametrize("engine_id", ["cost", "lk", "ncc", "flow", "pose", "histogram"])
+def test_the_six_shipped_engines_are_advertised(engine_id):
     assert engine_id in build_default_registry(Settings(), probe=False).roster()
+
+
+def test_probe_no_longer_lists_bytetrack_in_the_associator_roster():
+    """CV-ORCHESTRATION wave W4 (decision E16): `bytetrack` is retired from
+    `BUILTIN_ASSOCIATORS`, so the real, probed registry must never advertise
+    it -- `engines/bytetrack.py` stays on disk only as an unregistered
+    reference (`params.py#resolve()` is what still accepts the id on the
+    wire/env, aliasing it to `cost` rather than the roster serving it)."""
+    roster = build_default_registry(Settings(), probe=True).roster()
+
+    assert "bytetrack" not in roster
+    assert roster["cost"] == [MODE_ASSOCIATE]
 
 
 @pytest.mark.parametrize(
@@ -356,22 +368,17 @@ def counting_factory(engine_id: str):
     return create
 
 
-def test_bytetrack_is_not_selectable_below_l3():
-    subject = registry()
+def test_an_l1_capped_stream_still_gets_cost_from_a_one_entry_associator_roster():
+    """CV-ORCHESTRATION wave W4 (decision E16): the real `BUILTIN_ASSOCIATORS`
+    now has exactly one entry (`cost`, min-level L1, since `bytetrack`'s own
+    L3 floor was retired along with the engine). The level filter must not
+    treat "only one candidate" as a reason to skip filtering -- `cost` is
+    affordable at L1 on its own merits, not by default."""
+    subject = build_default_registry(Settings(), probe=False)
 
-    engine_id, engine = subject.associator("bytetrack", max_age_frames=30, level=levels.LEVEL_L1)
+    engine_id, _engine = subject.associator("cost", max_age_frames=30, level=levels.LEVEL_L1)
 
     assert engine_id == "cost"
-    engine_id, engine = subject.associator("bytetrack", max_age_frames=30, level=levels.LEVEL_L2)
-    assert engine_id == "cost"
-
-
-def test_bytetrack_becomes_selectable_from_l3_up():
-    subject = registry()
-
-    for level in (levels.LEVEL_L3, levels.LEVEL_L4, levels.LEVEL_L5):
-        engine_id, _engine = subject.associator("bytetrack", max_age_frames=30, level=level)
-        assert engine_id == "bytetrack"
 
 
 def test_cost_is_selectable_at_every_level():
@@ -383,12 +390,21 @@ def test_cost_is_selectable_at_every_level():
 
 
 def test_a_level_ceiling_never_even_calls_the_excluded_factory():
-    bytetrack_factory = counting_factory("bytetrack")
-    subject = registry(associators={"bytetrack": bytetrack_factory, "cost": factory("cost")})
+    # `lk` (min-level L2, `_FOLLOWER_MIN_LEVEL`) rather than the pre-E16
+    # `bytetrack` example -- CV-ORCHESTRATION wave W4 retired the only
+    # associator that ever had a level floor above L1, but this is a
+    # role-agnostic property of `_create` (invariant P8), so any gated role
+    # proves it: a level-excluded engine's factory must never be invoked at
+    # all, not merely have its RESULT discarded, which is also what proves
+    # it is excluded despite being technically constructible (nothing here
+    # raises) -- the level is a CONTRACT, not "whatever this box can do"
+    # (decision E12/invariant P9).
+    lk_factory = counting_factory("lk")
+    subject = registry(followers={"lk": lk_factory, "ncc": factory("ncc")})
 
-    subject.associator("bytetrack", max_age_frames=30, level=levels.LEVEL_L1)
+    subject.follower("lk", max_age_frames=30, level=levels.LEVEL_L1)
 
-    assert bytetrack_factory.calls == []
+    assert lk_factory.calls == []
 
 
 def test_no_level_argument_means_no_ceiling_at_all():
@@ -452,14 +468,3 @@ def test_appearance_becomes_selectable_from_l2_up():
     assert engine_id == APPEARANCE_ENGINE_HISTOGRAM
 
 
-def test_a_level_ceiling_is_applied_even_when_the_engine_is_technically_constructible():
-    # The whole point of a CEILING (decision E12/invariant P9): a host that
-    # COULD build `bytetrack` (nothing here raises) must still not get it
-    # when capped to L1 -- the level is a contract, not "whatever this box
-    # can do".
-    subject = registry()
-    assert "bytetrack" in subject.roster()
-
-    engine_id, _engine = subject.associator("bytetrack", max_age_frames=30, level=levels.LEVEL_L1)
-
-    assert engine_id != "bytetrack"

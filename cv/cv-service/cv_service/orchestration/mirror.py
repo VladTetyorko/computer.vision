@@ -407,8 +407,11 @@ def _detector_boxes(ctx: Any) -> "dict[int, Box]":
     and this is the raw target it was corrected from.
     `CostAssignment.tracks[i]` and `.candidates[i]` are the same track by
     construction, so a match `(candidate_index, target_index)` names both the
-    track and the detector target it was paired with. Empty for `bytetrack`
-    (which exposes no readable assignment) and for FOLLOW.
+    track and the detector target it was paired with. Empty for FOLLOW, which
+    never resolves `Key.ASSIGNMENT` at all -- `cost`, the only associator left
+    in the roster since CV-ORCHESTRATION W4 (decision E16) retired
+    `bytetrack` (which exposed no readable assignment to begin with), always
+    populates one when it runs.
     """
     found = ctx.get(Key.ASSIGNMENT)
     if found is None:
@@ -452,8 +455,11 @@ def _costs_by_track(ctx: Any) -> "dict[int, float]":
     """The matched pair's total association cost, per track.
 
     Positional against `assignment.matches`, exactly as `CostAssignment.costs`
-    documents. Empty when the resolved engine exposes no `.cost` (bytetrack),
-    in which case `assoc_cost` stays at its honest `0.0`.
+    documents. Empty when the resolved engine exposes no `.cost` method --
+    defensive only since CV-ORCHESTRATION W4 (decision E16) retired
+    `bytetrack`, the one associator that lacked one; `cost` always has one, so
+    `assoc_cost` staying at its honest `0.0` here is now unreachable in
+    production rather than a documented case.
     """
     found = ctx.get(Key.ASSIGNMENT)
     if found is None or not found.costs:

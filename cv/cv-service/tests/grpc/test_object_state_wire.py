@@ -340,6 +340,16 @@ def test_tracing_changes_the_ledger_and_nothing_else(clock):
     # `trace` is a debug demand, so it must be provably free of side effects
     # on the response an operator's UI reads. Two identical streams, one
     # traced, compared byte-for-byte on every other field.
+    #
+    # `tracker_millis` and `motion_millis` are excluded from that comparison
+    # (normalized to 0 on both sides below) even though neither lives inside
+    # `ledger`: both are genuine `perf_counter()`-measured wall-clock spans
+    # (`orchestrator.run()`, `egomotion.py`'s `_estimate_motion`), not values
+    # the fake `clock` fixture controls, and building the ledger IS extra
+    # work on the traced run -- so the two `run()` calls are never actually
+    # equally fast, and comparing their measured durations byte-for-byte
+    # asserts a coincidence, not a side-effect-freedom claim. Every other
+    # field stays a real equality check.
     def run(trace: bool):
         detector = ScriptedDetector([[Detection("car", 0.9, 0.40, 0.50, 0.10, 0.10)]] * 3)
         subject = servicer(
@@ -360,4 +370,12 @@ def test_tracing_changes_the_ledger_and_nothing_else(clock):
         stripped = cv_pb2.DetectionResponse()
         stripped.CopyFrom(traced)
         stripped.ClearField("ledger")
-        assert stripped.SerializeToString() == quiet.SerializeToString()
+        stripped.tracker_millis = 0
+        stripped.motion_millis = 0
+
+        normalized_quiet = cv_pb2.DetectionResponse()
+        normalized_quiet.CopyFrom(quiet)
+        normalized_quiet.tracker_millis = 0
+        normalized_quiet.motion_millis = 0
+
+        assert stripped.SerializeToString() == normalized_quiet.SerializeToString()

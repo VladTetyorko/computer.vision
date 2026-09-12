@@ -187,10 +187,17 @@ def _motion_refusal(mode: str, state: BudgetState, params: TrackingParams) -> st
     if not state.engine_resolved:
         return "no engine constructible"
     if mode == MODE_ASSOCIATE:
-        # Stated precisely rather than as "wrong mode": `bytetrack`'s
-        # association state lives inside a third-party Kalman filter with no
-        # seam to warp, so compensating it would cost a frame decode for a
-        # transform nothing reads (`session.py`'s own module docstring).
+        # Stated precisely rather than as "wrong mode": `cost` is the only
+        # associator this build wires ego-motion into (`contributors/
+        # __init__.py`'s `roster()`). CV-ORCHESTRATION W4 (decision E16)
+        # retired the other one, `bytetrack`, whose association state lived
+        # inside a third-party Kalman filter with no seam to warp at all, so
+        # compensating it would have cost a frame decode for a transform
+        # nothing read. `params.py#resolve()` now aliases a wire/env
+        # `bytetrack` to `cost` before it gets this far, so any OTHER
+        # associator id reaching here is unreachable against the real
+        # registry (it serves only `cost`) but still gets this same honest
+        # refusal from a test or future registry that resolves one anyway.
         return f"associator {state.engine_id!r} has no seam to warp"
     return f"mode is {mode}"
 

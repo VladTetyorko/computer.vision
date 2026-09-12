@@ -1,4 +1,39 @@
-"""`bytetrack` -- the ASSOCIATE engine, over ultralytics' `BYTETracker`.
+"""`bytetrack` -- a RETIRED reference implementation, over ultralytics' `BYTETracker`.
+
+**Unregistered since CV-ORCHESTRATION wave W4 (decision E16, 2026-09-12).**
+This file stays on disk on purpose -- kept as a reference implementation, not
+as dead weight to delete -- but `registry.py`'s `BUILTIN_ASSOCIATORS` no
+longer names it, `TrackerRegistry.probe()` never constructs it, and nothing
+else in `cv_service/` imports this module at runtime. A deployment or client
+still naming `bytetrack` (`CV_TRACK_ASSOCIATE_ENGINE=bytetrack`, or a wire
+`engine_id="bytetrack"` in ASSOCIATE mode) is not left stranded: `cv_service.
+tracking.params.resolve()` aliases it to `cost` and logs the substitution
+once (`RETIRED_ASSOCIATORS`) rather than letting `EngineSet`'s `FOLLOW ->
+ASSOCIATE -> OFF` degradation ladder silently drop every track id on the
+floor, which is what an id that simply stopped resolving would otherwise do.
+
+**Why it was retired, not merely deprecated.** CV-ORCHESTRATION rebuilt the
+per-frame duty cycle as one evidence graph shared by every associator
+(`cv_service/orchestration/`, `docs/plans/active/CV-ORCHESTRATION-PLAN.md`
+§4.1/§4.3) -- ego-motion, ROI rescue, the dormant gallery and per-object
+provenance all hang off `cost`'s own seam, the fact that its candidates ARE
+`TrackBook`'s live tracks so "what did the match leave unexplained" is
+readable BEFORE anything is booked. `ByteTrackEngine` below holds its own
+Kalman state entirely behind ultralytics' `BYTETracker`, with no such seam:
+it cannot be ego-motion-warped, ORU-rescued, or handed a descriptor, and the
+book only ever gets to RENAME the ids it mints, never to reason about the
+match itself. Keeping it registered would have meant every future
+contributor in that graph needing a bytetrack-shaped special case forever --
+a visible DAG dead-end (decision E11's own measurement already favoured
+`cost` at the deployed detection counts; E16 is the structural argument, not
+a second performance one). `tests/tracking/test_capability_benchmark.py`
+still reproduces E11's numbers directly against this file, since it remains
+importable and constructible on any host with the `cv` extra -- only the
+registry stopped offering it.
+
+The remainder of this docstring is retained as-is: it documents the adapter
+below, which still exists, still works, and is still worth understanding
+even though nothing in this process builds one anymore.
 
 `docs/plans/done/TRACKING-PLAN.md` §5.B (the measured roster) and §5.C (library, not
 reimplementation). IoU + Kalman motion association in two stages

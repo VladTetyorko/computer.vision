@@ -85,6 +85,16 @@ class LatestOnlyMailbox(Generic[T]):
             self._not_empty.notify_all()
 
 
+class GateFull(RuntimeError):
+    """Admission refused: this instance's queue is already at its bound.
+
+    Raised only by `InferenceGate.admit`, never by `acquire` --
+    CV-ORCHESTRATION §4.9 puts admission at the detector, and a refusal is a
+    *reported* outcome (`RESOURCE_EXHAUSTED` on the `Detector` wire, then the
+    caller's next target) rather than an error anybody has to handle as one.
+    """
+
+
 class InferenceGate:
     """Process-wide bound on how many `detect()` calls may run concurrently.
 
@@ -93,6 +103,12 @@ class InferenceGate:
     `cv_service.grpc.servicers`' `DetectStream`/`_StreamReader`); this only
     ever gates *how many of those threads* may be inside `detect()` at once,
     it never moves work onto new threads of its own.
+
+    Since CV-ORCHESTRATION wave W4 it also COUNTS, because a detector instance
+    that cannot say how busy it is cannot be pooled: the fleet budget is the
+    sum of what instances report (decision E10), not a shared token. The two
+    counters cost one uncontended lock acquisition on each side of a call that
+    already costs 135-230ms, so they are unconditional rather than a knob.
     """
 
     def __init__(self, max_concurrent: int) -> None:
@@ -100,13 +116,66 @@ class InferenceGate:
             raise ValueError(f"max_concurrent must be >= 1, got {max_concurrent}")
         self.max_concurrent = max_concurrent
         self._semaphore = threading.Semaphore(max_concurrent)
+        # One lock for BOTH counters: `admit` has to test-and-increment
+        # `_waiting` atomically or two callers can both squeak past a full
+        # queue, and splitting the counters would make that impossible to
+        # state in one place.
+        self._counts = threading.Lock()
+        self._occupancy = 0
+        self._waiting = 0
+
+    @property
+    def occupancy(self) -> int:
+        """Calls inside the gate right now (0..`max_concurrent`)."""
+        return self._occupancy
+
+    @property
+    def queue_depth(self) -> int:
+        """Calls waiting for a permit -- the number admission bounds."""
+        return self._waiting
 
     @contextmanager
     def acquire(self) -> Iterator[None]:
+        """Wait for a permit, however long it takes. Unchanged by W4.
+
+        Every in-process caller uses this: an all-in-one deployment has
+        nowhere else to send the work, so refusing it would drop a frame that
+        nothing else was going to detect.
+        """
+        self._enter_queue()
+        yield from self._hold()
+
+    @contextmanager
+    def admit(self, max_queue: int) -> Iterator[None]:
+        """Wait for a permit, or raise `GateFull` if the queue is already full.
+
+        The `Detector` service's door (§4.9): a pooled caller HAS somewhere
+        else to go, so telling it "no" immediately is strictly better than
+        making it wait behind work it could have routed around.
+        """
+        with self._counts:
+            if self._waiting >= max_queue:
+                raise GateFull(
+                    f"inference queue full: {self._waiting} waiting, bound {max_queue}"
+                )
+            self._waiting += 1
+        yield from self._hold()
+
+    def _enter_queue(self) -> None:
+        with self._counts:
+            self._waiting += 1
+
+    def _hold(self) -> Iterator[None]:
+        """Block for a permit already queued for, then hold it for the body."""
         self._semaphore.acquire()
+        with self._counts:
+            self._waiting -= 1
+            self._occupancy += 1
         try:
             yield
         finally:
+            with self._counts:
+                self._occupancy -= 1
             self._semaphore.release()
 
 

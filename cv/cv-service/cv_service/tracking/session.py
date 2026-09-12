@@ -58,7 +58,7 @@ from cv_service.orchestration.budget import BudgetPolicy, BudgetState, scheduler
 from cv_service.orchestration.contract import FrameContext
 from cv_service.orchestration.contributors import roster
 from cv_service.orchestration.contributors import signature as roster_signature
-from cv_service.orchestration.detector import LocalDetectorClient
+from cv_service.orchestration.detector import DetectorClient, LocalDetectorClient
 from cv_service.orchestration.engines import EngineSet
 from cv_service.orchestration.facts import SessionFacts, session_facts
 from cv_service.orchestration.keys import Key
@@ -153,6 +153,29 @@ class StreamTrackingSession:
         # frame config costs one comparison and `resolve()` runs only on a
         # real change. The servicer owns the comparison: it is a wire type.
         self.applied_wire_config: Any = None
+
+    def detect_through(self, client: DetectorClient) -> None:
+        """Adopt this process's detector placement -- in-process
+        (`LocalDetectorClient`) or a pooled remote target list
+        (`PoolDetectorClient`) -- for every frame from now on.
+
+        WHY a setter here rather than a constructor argument (CV-ORCHESTRATION
+        §4.9, wave W4): the SERVICER is the composition root that knows
+        whether this process was started with `CV_DETECTOR_TARGETS` set; a
+        session itself has no opinion and defaults to in-process detection
+        (`__init__`'s own `LocalDetectorClient()`), which is every pre-W4
+        deployment's exact behaviour unchanged.
+
+        Replacing `self._client` alone is NOT enough: `detect.full`/
+        `detect.roi` contributors close over the CLIENT OBJECT at
+        roster-build time (`orchestration.contributors.roster`), so a
+        roster built before this call keeps calling the OLD client even
+        after it returns. Forcing `self._built = None` makes `_orchestrator()`
+        rebuild on the very next frame -- the same lazy-rebuild path any
+        other engine change already takes.
+        """
+        self._client = client
+        self._built = None
 
     def _adopt_params(self, params: TrackingParams) -> None:
         """A degradation rewrote the resolved params: re-tune what reads them.

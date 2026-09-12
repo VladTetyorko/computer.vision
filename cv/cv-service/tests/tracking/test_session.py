@@ -48,9 +48,24 @@ def det(label="car", x=0.1, y=0.1, w=0.1, h=0.1, confidence=0.9) -> Detection:
 
 
 class FakeAssociator:
-    """Keys every detection by its label, so identity is trivially assertable."""
+    """The old, simple `Associator` protocol -- `.associate(detections, now)`
+    hands back finished observations, the engine owning identity outright.
 
-    def __init__(self, engine_id="fake-assoc"):
+    `orchestration.contributors.associate.AssociateCost` (the roster's only
+    ASSOCIATE contributor since CV-ORCHESTRATION W4 decision E16 retired
+    `bytetrack`) does NOT use this protocol: it calls `engine.retune(...)`
+    and `engine.assign(candidates, targets)` against `TrackBook`'s own live
+    tracks, a shape only `CostAssociator` (`cost_engine()` below) actually
+    implements. A `FakeAssociator`, real registry or not, can therefore
+    never BE `cost` -- which is exactly why it is still useful: it stands in
+    for "an id the roster does not build a contributor for" (a real registry
+    can in fact never hand one out; this file's `FakeRegistry` can, on
+    purpose, to prove `roster()`'s documented outcome for it -- no
+    contributor, an untracked echo, never a crash). Tests that need a
+    genuinely WORKING associator use `cost_engine()` instead.
+    """
+
+    def __init__(self, engine_id="other-engine"):
         self.engine_id = engine_id
         self.resets = 0
         self.raise_on_next = False
@@ -304,9 +319,8 @@ def test_off_stays_off_when_the_config_restates_nothing():
 
 
 def test_associate_detects_on_every_frame_and_books_stable_ids():
-    engine = FakeAssociator()
-    subject = session(FakeRegistry(associator=engine))
-    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, min_hits=1))
+    subject = session(FakeRegistry(associator=cost_engine))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
 
     ids = []
     for frame in range(4):
@@ -320,17 +334,17 @@ def test_associate_detects_on_every_frame_and_books_stable_ids():
 
 
 def test_the_serving_engine_id_is_reported_on_every_response():
-    subject = session(FakeRegistry(associator=FakeAssociator("bytetrack")))
+    subject = session(FakeRegistry(associator=FakeAssociator("other-engine")))
     subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE))
 
-    assert run(subject, now_millis=0.0, detections=[det()]).engine_id == "bytetrack"
+    assert run(subject, now_millis=0.0, detections=[det()]).engine_id == "other-engine"
 
 
 def test_two_sessions_never_share_engines_or_ids():
-    left = session(FakeRegistry(associator=FakeAssociator))
-    right = session(FakeRegistry(associator=FakeAssociator))
+    left = session(FakeRegistry(associator=cost_engine))
+    right = session(FakeRegistry(associator=cost_engine))
     for subject in (left, right):
-        subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, min_hits=1))
+        subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
 
     left_outcome = run(left, now_millis=0.0, detections=[det("car")])
     right_outcome = run(right, now_millis=0.0, detections=[det("van"), det("bus", x=0.5)])
@@ -341,56 +355,39 @@ def test_two_sessions_never_share_engines_or_ids():
     assert [t.label for t in right.tracks] == ["van", "bus"]
 
 
-def test_a_detection_the_engine_did_not_identify_is_reported_untracked():
-    class Partial(FakeAssociator):
-        def associate(self, detections, now):
-            return [
-                Observation(
-                    key="only-the-first",
-                    box=Box(detections[0].x, detections[0].y, detections[0].width, detections[0].height),
-                    label=detections[0].label,
-                    confidence=detections[0].confidence,
-                    det_index=0,
-                )
-            ]
-
-    subject = session(FakeRegistry(associator=Partial()))
-    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, min_hits=1))
-
-    outcome = run(subject, now_millis=0.0, detections=[det("car"), det("person", x=0.6)])
-
-    assert outcome.boxes[0].track is not None
-    assert outcome.boxes[1].track is None
-
-
 # -- ASSOCIATE via `cost` (TRACKING-V2-PLAN wave C3) -------------------------
+
+
+class RaisingCostAssociator(CostAssociator):
+    """A REAL `cost` engine that can be made to raise exactly once.
+
+    `FakeAssociator` cannot stand in for "the engine raised mid-frame" any
+    more: since E16 the roster registers `AssociateCost` only for the serving
+    engine id `cost`, so a fake would be handed no contributor at all and the
+    frame would report untracked for a completely different reason than the
+    one under test. Subclassing the real associator keeps the failure where
+    the test says it is -- inside the engine, on one frame.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(weights=AssignWeights(), gates=AssignGates())
+        self.raise_on_next = False
+        self.resets = 0
+
+    def assign(self, candidates, targets):
+        if self.raise_on_next:
+            self.raise_on_next = False
+            raise RuntimeError("engine exploded mid-frame")
+        return super().assign(candidates, targets)
+
+    def reset(self) -> None:
+        self.resets += 1
 
 
 def cost_engine(**overrides) -> CostAssociator:
     weights = overrides.pop("weights", AssignWeights())
     gates = overrides.pop("gates", AssignGates())
     return CostAssociator(weights=weights, gates=gates)
-
-
-def test_bytetrack_is_still_selectable_and_never_touches_motion_or_appearance():
-    # Acceptance: `bytetrack` remains fully working and selectable, and
-    # stays the no-appearance, no-compensation baseline -- neither the
-    # motion nor the appearance registry call is ever made for it.
-    registry = FakeRegistry(
-        associator=FakeAssociator("bytetrack"),
-        compensator=FakeMotionCompensator,
-        appearance=FakeAppearanceExtractor,
-    )
-    subject = session(registry)
-    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="bytetrack", min_hits=1))
-
-    outcome = run(subject, now_millis=0.0, detections=[det()])
-
-    assert outcome.engine_id == "bytetrack"
-    assert outcome.boxes[0].track is not None
-    assert registry.compensator_calls == 0
-    assert registry.appearance_calls == 0
-    assert outcome.motion_engine_id == ""
 
 
 def test_cost_is_selectable_and_books_stable_ids_across_frames():
@@ -438,8 +435,9 @@ def test_an_unmatched_candidate_ages_toward_lost_instead_of_vanishing():
 
 def test_associate_with_cost_asks_for_a_motion_compensator():
     # THE keystone this wave adds: `cost`'s candidates ARE the book's own
-    # tracks, so -- unlike `bytetrack` -- ego-motion compensation now has a
-    # seam to plug into for ASSOCIATE.
+    # tracks, so ego-motion compensation now has a seam to plug into for
+    # ASSOCIATE -- the retired `bytetrack` engine (CV-ORCHESTRATION W4
+    # decision E16) held its own Kalman state with no such seam.
     compensator = FakeMotionCompensator()
     registry = FakeRegistry(associator=cost_engine, compensator=compensator)
     subject = session(registry)
@@ -717,22 +715,6 @@ def test_a_non_positive_crop_factor_is_a_genuine_no_op():
     assert detect.roi_calls == []
 
 
-def test_bytetrack_associate_never_triggers_a_roi_pass():
-    # TRACKING-V2-PLAN wave C5c's own scope decision: `bytetrack` has no
-    # Candidate/Assignment seam (its association state lives inside a
-    # third-party engine), the SAME reasoning wave C2 already gives for why
-    # `bytetrack` never gets ego-motion compensation either.
-    registry = FakeRegistry(associator=FakeAssociator("bytetrack"))
-    subject = session(registry, settings=roi_settings())
-    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="bytetrack", min_hits=1))
-    run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
-
-    detect = RecordingDetect(full=[])
-    subject.process(now_millis=66.0, detect=detect, frame=lambda: FRAME)
-
-    assert detect.roi_calls == []
-
-
 def test_follow_mode_never_triggers_a_roi_pass():
     registry = FakeRegistry(follower=FakeFollower)
     subject = session(registry, settings=roi_settings())
@@ -810,34 +792,6 @@ def test_a_track_that_expires_is_recovered_under_its_own_id_when_it_reappears():
     assert again.boxes[0].track.track_id == 1
     assert again.boxes[0].identity_confidence == 0.0
     assert again.boxes[0].dormant_millis == 0
-
-
-def test_a_track_expiring_under_one_associator_is_recovered_after_switching_to_cost():
-    # `TrackBook._retire` remembers regardless of which associator produced
-    # the track -- `bytetrack` (via `FakeAssociator`) never itself queries
-    # the gallery back, but the SAME book, and the SAME `ObjectMemory`
-    # instance, keep serving this stream across an `apply_config` engine
-    # switch. Proven end to end through public API only (`subject.tracks`/
-    # `outcome.boxes`), not by inspecting session internals.
-    registry = FakeRegistry(associator=FakeAssociator("bytetrack"))
-    subject = session(registry)
-    subject.apply_config(
-        TrackingRequest(mode=MODE_ASSOCIATE, engine_id="bytetrack", min_hits=1, max_age_frames=1)
-    )
-    born = run(subject, now_millis=0.0, detections=[det("car", x=0.1)])
-    assert born.boxes[0].track.track_id == 1
-
-    for frame in range(1, 4):
-        run(subject, now_millis=frame * 1000.0, detections=[])
-    assert subject.tracks == []
-
-    registry._associator = cost_engine  # the registry now serves `cost`
-    subject.apply_config(
-        TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1, max_age_frames=1)
-    )
-    recovered = run(subject, now_millis=4000.0, detections=[det("car", x=0.1)])
-
-    assert recovered.boxes[0].track.track_id == 1
 
 
 def test_a_different_object_arriving_in_the_gap_does_not_inherit_the_id():
@@ -1663,21 +1617,6 @@ def test_no_compensator_reports_no_compensation_on_the_outcome():
     assert outcome.motion_engine_id == ""
 
 
-def test_associate_never_asks_for_a_motion_compensator():
-    # TRACKING-V2-PLAN C2's design decision: ASSOCIATE is deliberately NOT
-    # compensated this wave (association still lives inside ByteTrack's own
-    # state, with no seam to warp) -- so the registry is never even asked.
-    registry = FakeRegistry(associator=FakeAssociator(), compensator=FakeMotionCompensator)
-    subject = session(registry)
-    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, min_hits=1))
-
-    outcome = run(subject, now_millis=0.0, detections=[det()])
-
-    assert registry.compensator_calls == 0
-    assert outcome.motion_millis == 0
-    assert outcome.motion_engine_id == ""
-
-
 def test_a_follow_frame_estimates_motion_once_and_reports_it():
     compensator = FakeMotionCompensator("fake-motion")
     subject, _engine = follow_session(compensator=compensator)
@@ -1888,11 +1827,17 @@ def test_a_cadence_change_keeps_the_engine_and_the_track_ids():
 
 
 def test_an_engine_change_rebuilds_and_retires_the_ids():
-    subject = session(FakeRegistry(associator=FakeAssociator))
-    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="a", min_hits=1))
+    # `cost` is the only associator id left to request (CV-ORCHESTRATION W4
+    # decision E16), so this no longer exercises an ENGINE_ID change --
+    # `max_age_frames` is `EngineSet.reconfigure()`'s other rebuild trigger
+    # (`engines.py`'s own comment: kept as a forward-looking hook even
+    # though no built-in engine reads it post-E16), and it is just as real a
+    # config change for proving the book retires old ids on a rebuild.
+    subject = session(FakeRegistry(associator=cost_engine))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1, max_age_frames=30))
     first = run(subject, now_millis=0.0, detections=[det()])
 
-    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="b", min_hits=1))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1, max_age_frames=5))
     second = run(subject, now_millis=66.0, detections=[det()])
 
     assert second.boxes[0].track.track_id > first.boxes[0].track.track_id
@@ -2006,9 +1951,9 @@ def test_a_reconnected_stream_re_verifies_and_continues_the_id_counter():
 
 
 def test_a_raising_engine_degrades_that_frame_to_untracked_without_killing_the_stream():
-    engine = FakeAssociator()
+    engine = RaisingCostAssociator()
     subject = session(FakeRegistry(associator=engine))
-    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, min_hits=1))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
     run(subject, now_millis=0.0, detections=[det()])
 
     engine.raise_on_next = True
@@ -2016,7 +1961,20 @@ def test_a_raising_engine_degrades_that_frame_to_untracked_without_killing_the_s
 
     assert [box.track for box in degraded.boxes] == [None, None]
     assert [box.label for box in degraded.boxes] == ["car", "person"]
-    assert engine.resets == 1
+    # The raise is a FAILED ledger row and the frame keeps going -- W0's
+    # orchestrator rule 4, which is now the ONLY thing that happens on the
+    # ASSOCIATE side. Until E16 this assertion read `engine.resets == 1`,
+    # and that was `bytetrack`-specific: it was the one contributor that
+    # caught its own engine's exception and called `EngineSet.reset_engine`,
+    # because its identities lived inside a third-party Kalman filter that
+    # genuinely needed re-seeding. `cost` is stateless per call -- the
+    # candidates it ranks are the BOOK's tracks -- so there is nothing to
+    # reset, and resetting would bump the key epoch and cost the operator
+    # every id over one transient error. FOLLOW still resets its engine
+    # (`contributors/follow.py`), which is why `reset_engine` is not dead.
+    assert engine.resets == 0
+    failed = subject.ledgers.last(1)[0].entry_for("assoc.cost")
+    assert failed.outcome == "LEDGER_OUTCOME_FAILED"
 
     survived = run(subject, now_millis=132.0, detections=[det()])
     assert survived.boxes[0].track is not None
@@ -2026,9 +1984,9 @@ def test_an_engine_exception_does_not_retire_or_renumber_other_tracks():
     # Review finding D1: the old fix wiped the WHOLE book (`forget_keys()`)
     # on any engine exception, so a transient error involving one target
     # renumbered the entire scene. Both tracks here now survive untouched.
-    engine = FakeAssociator()
+    engine = RaisingCostAssociator()
     subject = session(FakeRegistry(associator=engine))
-    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, min_hits=1))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
     run(subject, now_millis=0.0, detections=[det("car"), det("person", x=0.6)])
     ids_before = {track.label: track.track_id for track in subject.tracks}
     assert set(ids_before) == {"car", "person"}
@@ -2041,14 +1999,14 @@ def test_an_engine_exception_does_not_retire_or_renumber_other_tracks():
 
 
 def test_no_follow_engine_degrades_to_associate(caplog):
-    subject = session(FakeRegistry(associator=FakeAssociator("bytetrack"), follower=None))
+    subject = session(FakeRegistry(associator=cost_engine, follower=None))
     subject.apply_config(TrackingRequest(mode=MODE_FOLLOW, min_hits=1))
 
     with caplog.at_level(logging.WARNING, logger="cv_service.tracking.session"):
         outcome = run(subject, now_millis=0.0, detections=[det()])
 
     assert subject.params.mode == MODE_ASSOCIATE
-    assert outcome.engine_id == "bytetrack"
+    assert outcome.engine_id == CostAssociator.engine_id
     assert outcome.boxes[0].track is not None
     assert sum("degrading" in r.getMessage() for r in caplog.records) == 1
 

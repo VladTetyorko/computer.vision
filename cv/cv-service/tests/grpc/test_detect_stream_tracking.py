@@ -86,7 +86,29 @@ class RecordingGate:
         return _Scope()
 
 
+def real_cost_associator() -> CostAssociator:
+    """The REAL `cost` engine, which since CV-ORCHESTRATION W4 (decision E16
+    retired `bytetrack`) is the only associator `orchestration.contributors.
+    roster()` builds a contributor chain for -- so a stub associator can no
+    longer stand in for "tracking is on" at the wire. It is cheap and pure
+    stdlib (`tests/tracking/test_assign.py` verifies the solver itself), so
+    using the real one here costs nothing and removes a divergence between
+    what these wire tests exercise and what a deployment runs.
+    """
+    return CostAssociator(weights=AssignWeights(), gates=AssignGates())
+
+
 class StubAssociator:
+    """An associator id the roster deliberately builds NOTHING for.
+
+    Kept (it was this file's default until E16) precisely because that
+    outcome needs a test: a `registry_provider` handing back an engine whose
+    `engine_id` is not `cost` gets no ASSOCIATE contributor, and the frame
+    must then echo the detector's raw boxes untracked rather than crash. A
+    real `TrackerRegistry` can no longer produce this case; a substituted one
+    still can.
+    """
+
     engine_id = "stub-assoc"
 
     def associate(self, detections, now):
@@ -191,7 +213,7 @@ class StubTrackerRegistry:
     def __init__(
         self,
         *,
-        associator=StubAssociator,
+        associator=real_cost_associator,
         follower=StubFollower,
         compensator=None,
         appearance=None,
@@ -353,7 +375,7 @@ def test_associate_puts_stable_ids_on_the_wire(clock):
     for response in responses:
         assert response.detector_ran is True
         assert response.detector_reason == cv_pb2.DetectorReason.DETECTOR_REASON_ALWAYS
-        assert response.tracker_engine_id == "stub-assoc"
+        assert response.tracker_engine_id == "cost"
         assert [detection.track_id for detection in response.detections] == [1, 2]
         assert all(
             detection.track_state == cv_pb2.TrackState.TRACK_STATE_CONFIRMED
@@ -624,14 +646,19 @@ def test_no_motion_compensator_reports_no_compensation_on_the_wire(clock):
     assert responses[0].motion_millis == 0
 
 
-def test_associate_never_populates_motion_fields_on_the_wire(clock):
-    # `bytetrack` (or any non-`cost` associator) is deliberately NOT
-    # compensated (TRACKING-V2-PLAN wave C2's own reasoning, unchanged by
-    # wave C3): even with a compensator available, it must never be asked
-    # for one -- `StubAssociator`'s `engine_id` is `"stub-assoc"`, not
-    # `"cost"`. See `test_associate_with_cost_populates_motion_fields_on_
-    # the_wire` below for the wave C3 counterpart.
-    subject = servicer(tracker_registry=StubTrackerRegistry(compensator=StubCompensator))
+def test_an_associator_the_roster_does_not_know_never_reaches_the_motion_engine(clock):
+    # Until CV-ORCHESTRATION W4 this read "`bytetrack` is deliberately NOT
+    # compensated" (TRACKING-V2-PLAN wave C2): its state lived inside a
+    # third-party Kalman filter with no seam to warp. E16 retired that
+    # engine, and what survives it is the structural rule underneath --
+    # `roster()` registers `egomotion.*` only alongside `assoc.cost`, so an
+    # `engine_id` the roster builds no contributor for is never compensated,
+    # never crashes, and echoes the detector's boxes instead. See
+    # `test_associate_with_cost_populates_motion_fields_on_the_wire` below
+    # for the path a real deployment always takes.
+    subject = servicer(
+        tracker_registry=StubTrackerRegistry(associator=StubAssociator, compensator=StubCompensator)
+    )
     config = tracking(cv_pb2.TrackingMode.TRACKING_MODE_ASSOCIATE, min_hits=1)
 
     responses = drive(subject, [frame_request(0, config)])
@@ -642,8 +669,7 @@ def test_associate_never_populates_motion_fields_on_the_wire(clock):
 
 def test_associate_with_cost_populates_motion_fields_on_the_wire(clock):
     # TRACKING-V2-PLAN wave C3's keystone, at the wire: `cost`'s candidates
-    # ARE `TrackBook`'s own tracks, so ASSOCIATE now HAS a seam to warp --
-    # unlike `bytetrack` above.
+    # ARE `TrackBook`'s own tracks, so ASSOCIATE HAS a seam to warp.
     subject = servicer(
         tracker_registry=StubTrackerRegistry(associator=StubCostAssociator, compensator=StubCompensator)
     )

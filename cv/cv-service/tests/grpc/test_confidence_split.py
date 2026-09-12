@@ -12,6 +12,7 @@ import pytest
 from cv_service.config import DEFAULT_CONFIDENCE, DEFAULT_DETECT_FLOOR, Settings
 from cv_service.grpc.servicers import InferenceServicer, cv_pb2
 from cv_service.inference.detector import Detection
+from cv_service.tracking.session import StreamTrackingSession
 
 from tests.grpc.test_detect_stream_tracking import (  # noqa: F401 - `clock` is a fixture
     RecordingGate,
@@ -141,9 +142,34 @@ def test_a_strong_box_is_reported_immediately(clock):
     assert [len(response.detections) for response in responses] == [1, 1, 1]
 
 
+#: Four far-apart corners, walked one per frame. Nothing links consecutive
+#: frames: no overlap, and a centre distance of ~0.8 of the frame, far past
+#: any plausible association gate.
+_NOISE_CORNERS = ((0.05, 0.05), (0.85, 0.05), (0.85, 0.85), (0.05, 0.85))
+
+
 def test_a_weak_box_never_reaches_the_operator_when_it_never_confirms(clock):
-    # A different label every frame -> a fresh TENTATIVE track each time, which
-    # is exactly what detector noise at a 0.15 floor looks like.
+    # A different label AND a different place every frame -> a fresh
+    # TENTATIVE track each time, which is what detector noise at a 0.15
+    # floor actually looks like.
+    #
+    # The box has to MOVE, and the deployment's own geometry gate has to be
+    # ABLE to reject a non-overlapping pair. Until CV-ORCHESTRATION W4 this
+    # file's stub associator keyed identity on the label alone, so
+    # re-labelling a stationary box was enough; E16 left `cost` as the only
+    # associator, and `cost` matches on GEOMETRY with a label PENALTY, not a
+    # label veto (`assign.py#cost`: `1.0*(1-iou) + 0.3*label_mismatch <=
+    # 1.3`, always under the shipped `max_cost=1.5`). `DEFAULT_TRACK_COST_
+    # GATE_MIN_IOU=0.0` is loose ON PURPOSE (`config.py`'s own comment: a
+    # reappearing/occluded target can legitimately have zero true overlap
+    # with its prediction and still needs to match) -- which means under the
+    # shipped default, moving the box is not sufficient BY ITSELF: a solo
+    # detection with nothing competing for the match still always wins the
+    # only slot in the cost matrix, confirms by frame 3, and this test would
+    # be proving the opposite of its own name. A nonzero `min_iou` is this
+    # test's own opt-in gate, standing in for a deployment that WANTS
+    # non-overlapping detections treated as different objects, so that
+    # "moved far enough to never overlap" is actually what breaks the link.
     class NoisyDetector(ThresholdRecordingDetector):
         def __init__(self) -> None:
             super().__init__()
@@ -152,13 +178,26 @@ def test_a_weak_box_never_reaches_the_operator_when_it_never_confirms(clock):
         def detect(self, *, confidence_threshold=None, **_kwargs):
             self.thresholds.append(confidence_threshold)
             self._n += 1
-            return [Detection(f"noise-{self._n}", 0.18, 0.10, 0.10, 0.10, 0.10)], 11
+            x, y = _NOISE_CORNERS[self._n % len(_NOISE_CORNERS)]
+            return [Detection(f"noise-{self._n}", 0.18, x, y, 0.05, 0.05)], 11
 
-    subject = servicer_with(NoisyDetector())
-
-    responses = drive(
-        subject,
-        [frame_request(i, tracking(ASSOCIATE), confidence_threshold=0.4) for i in range(1, 6)],
+    settings = Settings(track_cost_gate_min_iou=0.05)
+    subject = servicer_with(NoisyDetector(), settings=settings)
+    # NOT `drive()`: it always builds its session with a bare `Settings()`
+    # (every other caller in this file relies on that -- none of them pass a
+    # non-default `settings=` through `servicer_with()`), which would throw
+    # away the `min_iou` override above and silently resolve `cost_gates`
+    # from the defaults again. A session built with the SAME `settings`
+    # `servicer_with()` gave the servicer is what actually exercises it,
+    # matching how `_new_session()` wires a real one (`servicers.py`).
+    session = StreamTrackingSession(
+        settings=settings, registry_provider=subject._resolve_tracker_registry
     )
+    responses = [
+        subject._handle_request(
+            frame_request(i, tracking(ASSOCIATE), confidence_threshold=0.4), session
+        )
+        for i in range(1, 6)
+    ]
 
     assert [len(response.detections) for response in responses] == [0, 0, 0, 0, 0]
