@@ -3,6 +3,7 @@ package com.drones.vision.api.controller;
 import com.drones.vision.api.dto.ActiveStreamResponse;
 import com.drones.vision.api.dto.DetectionResultResponse;
 import com.drones.vision.api.dto.FollowResponse;
+import com.drones.vision.api.dto.ObjectStateResponse;
 import com.drones.vision.api.dto.StartStreamRequest;
 import com.drones.vision.api.dto.StartStreamResponse;
 import com.drones.vision.api.dto.DetectionRateResponse;
@@ -402,8 +403,9 @@ public class StreamController {
                 .map(FollowStatus::trackId)
                 .orElse(0L);
         FollowResponse followResponse = follow.map(status -> FollowResponse.from(status, Instant.now())).orElse(null);
+        List<ObjectStateResponse> objects = streamService.objects(id).stream().map(ObjectStateResponse::from).toList();
         return new StreamTracksResponse(id.value().toString(), lockedTrackId, tracks, statsResponse, latencyResponse,
-                rateResponse, detectionState, followResponse);
+                rateResponse, detectionState, followResponse, objects);
     }
 
     /**

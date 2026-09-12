@@ -102,10 +102,10 @@ the full mechanism.
 | StreamController | POST | `/api/devices/{deviceId}/stream` | Start a stream on a device | scope |
 | StreamController | GET | `/api/streams` | List active streams | scope (filtered) |
 | StreamController | DELETE | `/api/streams/{streamId}` | Stop (idempotent no-op if unknown/stopped) | scope |
-| StreamController | GET | `/api/streams/{streamId}/detections?limit=` | Recent per-frame detections | scope |
+| StreamController | GET | `/api/streams/{streamId}/detections?limit=` | Recent per-frame detections, each now also carrying `objects` (CV-ORCHESTRATION wave W1 step 5 — the per-identity mirror, `ObjectStateResponse`, never omitted, empty when no mirror was produced) | scope |
 | StreamController | GET | `/api/streams/{streamId}/snapshot` | Latest frame as downscaled JPEG (only binary, non-JSON response besides the HLS proxy) | scope |
 | StreamController | PATCH | `/api/streams/{streamId}/config` | Hot-patch confidence/fps/labelFilter/model/tracking — never interrupts video | scope |
-| StreamController | GET | `/api/streams/{streamId}/tracks` | Track book + duty-cycle stats + the held `FOLLOW` lock's own lifecycle (`follow`, TRACK-FOLLOW-PLAN §3.1 — omitted until a lock is issued); never errors on unknown stream (empty `tracks`) | scope |
+| StreamController | GET | `/api/streams/{streamId}/tracks` | Track book + duty-cycle stats + the held `FOLLOW` lock's own lifecycle (`follow`, TRACK-FOLLOW-PLAN §3.1 — omitted until a lock is issued) + `objects` (CV-ORCHESTRATION wave W1 step 5 — the current object mirror, `ObjectStateResponse`, sourced from `StreamService#objects`; unlike `stats`/`latency`/`rate`/`follow`, always a JSON array, never omitted); never errors on unknown stream (empty `tracks`/`objects`) | scope |
 | HlsProxyController | GET | `/hls/{streamId}/**` | Reverse-proxy this asset's live HLS bytes to the mediamtx sidecar | scope (`StreamAccess#requireVisibleForHlsProxy`, checked **before** the upstream is ever contacted; fails closed on an unknown/stopped id — AUTH-ROLES-PLAN.md D10, wave B4 — unlike the other `StreamAccess`-gated rows above, which keep `requireVisible`'s no-op) — also now behind `SecurityConfig`'s secured chain's `authenticated()` rule (`/hls/**` joined `/api/**`/`/ws/**`) |
 | CvModelsController | GET | `/api/cv/models` | Detection-model roster — widened (CV-SETTINGS-PLAN §5.2) to serve the registry's live roster (`registrySource: true`) when `vision.cv.registry.enabled`, else the static config catalogue; never errors | open |
 | CvTrackersController | GET | `/api/cv/trackers` | Static tracker-engine roster | open |
@@ -703,6 +703,27 @@ on anything else), never a body field, so there is exactly one place a client ca
   never absent), unaffected.
 - Rationale for any of the above beyond what's stated here lives in the plan doc cited inline, under
   `docs/plans/`.
+
+**CV-ORCHESTRATION wave W1 step 5 additions** — `ObjectStateResponse(id, lifecycle, streamId, identity,
+kinematics, belief, provenance, memory, lock, timing)` (new file, `@JsonInclude(NON_NULL)`, static
+`from(ObjectState)`) mirrors `contexts/vision-perception`'s `ObjectState` field-for-field, JSON keys
+matching `station/vision-web`'s frozen TS interfaces exactly; nested DTO records `Identity`,
+`Kinematics`, `Belief`, `Provenance`, `MemoryFacts`, `LockFacts`, `Timing`, `LabelCandidate` mirror the
+domain's own nested records one-for-one, each with its own static `from(...)`. `Kinematics` reuses
+`BoundingBoxResponse` for all four box fields (no second box DTO) and is itself `@JsonInclude(NON_NULL)`
+— `detectorBox`/`trackerBox`/`predictedBox` are individually omitted (not zeroed) when that source
+produced nothing this frame, one level below the enclosing record's own group-level omission. A `null`
+domain group (`identity`/`kinematics`/…) maps to a `null` DTO component, which `NON_NULL` then omits
+from the JSON entirely — the intended honesty behavior carried down from the domain record's own
+javadoc, not a bug. `DetectionResultResponse` gained a trailing `objects` (`List<ObjectStateResponse>`,
+mapped from `DetectionResult#objects()`) and lost its 5-arg convenience constructor (zero call sites,
+CLAUDE.md rule 10 — `from(...)` now calls the canonical 7-arg form directly). `StreamTracksResponse`
+gained `objects` as its new **last** component (sourced from the new `StreamService#objects(StreamId)`,
+mapped in `StreamController#tracks`) and lost all **three** of its dead convenience constructors (zero
+call sites) — unlike `stats`/`latency`/`rate`/`follow`, `objects` is **not** covered by the class's own
+`NON_NULL` annotation in practice: it is a `List`, so an empty list still serializes as `[]`, matching
+`tracks`' own "always present, empty is honest" idiom rather than the "absent-object" idiom the four
+`Optional`-sourced fields use.
 
 ## Gotchas
 
@@ -1363,3 +1384,55 @@ throughout both `vision.live.enabled=true` (default) and `=false` wiring tests. 
 (not skipped). Nothing deferred except the pre-existing `everDropped`/`live-updates` `DEGRADED` defect,
 explicitly out of scope per this wave's own task spec (see "Live updates" above for why the L4
 mitigation routes around it rather than fixing it).
+
+**`docs/plans/active/CV-ORCHESTRATION-PLAN.md` wave W1 step 5 "wire mirror" done here** (this module's
+file scope: DTOs + `StreamController`). New `dto.ObjectStateResponse` — `@JsonInclude(NON_NULL)` wire
+mirror of the domain `ObjectState` (`contexts/vision-perception`, landed in an earlier W1 step), with
+one nested static record per facet (`Identity`, `Kinematics`, `Belief`, `Provenance`, `MemoryFacts`,
+`LockFacts`, `Timing`, `LabelCandidate`), a `static from(ObjectState)` factory on every record, and
+`Kinematics` reusing the shared `BoundingBoxResponse` for its `box`/`detectorBox`/`trackerBox`/
+`predictedBox`. A `null` domain group maps to a `null` DTO component, which `NON_NULL` then omits from
+the JSON entirely — the class javadoc calls this out explicitly as the intended "absent is honest,
+not a missing default" behavior, not the forbidden "null means the feature is off" (CLAUDE.md rule
+10 territory, but for a JSON contract instead of a constructor). JSON keys match the already-committed
+TypeScript mirror (`station/vision-web/src/app/core/api/models.ts`'s `ObjectState`) field-for-field —
+verified directly against that file, not just against the domain record.
+
+`DetectionResultResponse` gained a 7th component, `objects` (`List<ObjectStateResponse>`, never
+`null`, sourced from `DetectionResult#objects()`); `StreamTracksResponse` gained `objects` as its 9th
+and last component, `List.copyOf`'d in its compact constructor like `tracks` — unlike the `Optional`-
+sourced `stats`/`latency`/`rate`/`follow` fields, `objects` is always present as a JSON array, even
+`[]`, the same idiom `tracks` itself already uses. `StreamController#tracks` now calls the new
+`StreamService#objects(StreamId)` (see `contexts/vision-perception/MODULE.md`'s own W1 entry) and maps
+each element through `ObjectStateResponse::from`; an unknown/stopped stream reads as `[]`, never
+`null`, matching `tracks`'s own forgiving contract. Per CLAUDE.md rule 10, both DTOs' dead N-1-arg
+convenience constructors were deleted rather than growing a new overload — confirmed zero call sites
+for all four (`DetectionResultResponse`'s 5-arg ctor, `StreamTracksResponse`'s three) both before and
+after this change via `grep -rn "new DetectionResultResponse(\|new StreamTracksResponse("`; the only
+surviving call sites are each record's own canonical constructor invocation inside `from()`/
+`StreamController#tracks`. No `ApiExceptionHandler` mapping changed — this wave adds a field, not a
+new failure mode.
+
+`./mvnw -B -pl contexts/vision-perception,cv/grpc,station/vision-api,storage/persistence,contexts/vision-events,contexts/vision-learning,station/vision-app -am -DskipWeb test` —
+`station/vision-api` **1069 → 1074 tests, all green** (5 new: 4 `ObjectStateResponseTest` cases —
+`everyGroupAbsentSerializesToMissingKeysNotNulls`,
+`everyGroupPresentRoundTripsEveryLeafByPairwiseDistinctValue` (every leaf a pairwise-distinct value,
+proving no field is accidentally mapped from a sibling), `kinematicsOmitsIndividualSourceBoxesTheyDoNotClaim`,
+`idAndStreamIdMapToTheWireShapeExactly` — against the real Jackson setup (plain `JsonMapper`, the same
+direct-serialization pattern `ManualControlFrameDtoTest` already uses), not a mocked one; plus 1 new
+`StreamControllerTest#tracksReportsTheObjectMirrorAlongsideTracks`, and the pre-existing
+`tracksReturnsAnEmptyListAndNoStatsForAnUnknownOrStoppedStream` widened in place with an
+`objects`-is-`[]` assertion, not counted as a new method). `BUILD SUCCESS`, all green. See
+`contexts/vision-perception/MODULE.md` and `station/vision-app/MODULE.md` for those modules' own
+counts (**755 → 760** and **354 → 354** respectively — `vision-app`'s only change is a one-line
+`LiveFrameFallbackStreamService#objects` delegation, no test file in that module's scope was touched).
+Docker ran for real for this module's and `vision-app`'s own Testcontainers-based suites (confirmed via
+live Flyway migration through `V35` in the build log). `storage/persistence` IS in this wave's blast radius (W1 step 3
+updated seven `DetectionResult` call sites in `PostgresDockerIntegrationTest` plus
+`DetectionResultMapper#toDomain`) and its Docker suite ran for real: **283 tests, 0 failures**,
+including `PostgresDockerIntegrationTest$DetectionRepositoryTests`. **Do not read that class's own
+`surefire-reports/*.txt` and conclude it skipped** — the outer class holds no `@Test` method of its
+own, so its report honestly says `Tests run: 0` while its 35 `@Nested` classes each get their own
+line in the build log and none of their own `.txt`. A per-file tally over `surefire-reports/*.txt`
+therefore under-counts this module by an order of magnitude; trust Maven's per-module `Results:`
+line instead. An earlier pass through this wave mistook exactly that for a Docker-gate flake.

@@ -15,6 +15,8 @@ import com.drones.vision.perception.domain.model.EventRuleConfig;
 import com.drones.vision.platform.EventType;
 import com.drones.vision.perception.domain.model.FollowState;
 import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.perception.domain.model.ObjectLifecycle;
+import com.drones.vision.perception.domain.model.ObjectState;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.model.PixelFormat;
 import com.drones.vision.kernel.StreamDescriptor;
@@ -123,6 +125,25 @@ class StreamPipelineTest {
         Detection detection = new Detection("person", 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2),
                 new ModelRef("yolo", "latest"));
         return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5), null, null, List.of());
+    }
+
+    /** @see #objectState(long, String) -- a {@code DetectionResult} whose object mirror is non-empty. */
+    private DetectionResult resultWithObjects(long sequence, ObjectState... objects) {
+        Detection detection = new Detection("person", 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2),
+                new ModelRef("yolo", "latest"));
+        return new DetectionResult(streamId, sequence, Instant.now(), List.of(detection), Duration.ofMillis(5), null,
+                null, List.of(objects));
+    }
+
+    /** A minimal, validly-populated {@link ObjectState} with an elected {@code label}, for read-model/filter tests. */
+    private ObjectState objectState(long id, String label) {
+        ObjectState.Identity identity = new ObjectState.Identity(label, label, List.of(), 1);
+        return new ObjectState(id, ObjectLifecycle.CONFIRMED, streamId, identity, null, null, null, null, null, null);
+    }
+
+    /** @see #objectState(long, String) -- an object with no {@code identity}, e.g. a pure box-only coast. */
+    private ObjectState objectStateWithoutIdentity(long id) {
+        return new ObjectState(id, ObjectLifecycle.COASTING, streamId, null, null, null, null, null, null, null);
     }
 
     private static CompletableFuture<DetectionResult> failedFuture(String message) {
@@ -1559,6 +1580,97 @@ class StreamPipelineTest {
         verify(detectionPort, times(2)).detect(any(), configCaptor.capture());
         assertEquals("orion12l", configCaptor.getAllValues().get(1).model().id(),
                 "the very next sampled frame must already carry the new model");
+    }
+
+    // --- docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.5, wave W1: latestObjects() read model + object-mirror
+    // label filtering ---
+
+    @Test
+    void onDetectionResultWritesLatestObjectsAlongsideLatestDetections() {
+        ObjectState object = objectState(1L, "person");
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(resultWithObjects(0, object)));
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L);
+
+        assertTrue(pipeline.latestObjects().isEmpty(), "no inference has completed yet");
+        pipeline.onNext(frame(0));
+
+        assertEquals(List.of(object), pipeline.latestObjects());
+    }
+
+    @Test
+    void aModelReArmClearsLatestObjectsJustAsItClearsLatestDetections() {
+        ObjectState object = objectState(1L, "person");
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(resultWithObjects(0, object)));
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L);
+
+        pipeline.onNext(frame(0));
+        assertFalse(pipeline.latestObjects().isEmpty());
+
+        // detectionEnabled stated explicitly (docs/plans/done/CV-DEMAND-PLAN.md §1 flipped the convenience-ctor
+        // default), same reasoning as the sibling latestDetections test this one mirrors.
+        PipelineConfig newModel = new PipelineConfig(new ModelRef("orion12l", "latest"), 0.4, 1000, 5, Set.of(),
+                EventRuleConfig.defaults(), true);
+        pipeline.updateConfig(newModel);
+
+        assertTrue(pipeline.latestObjects().isEmpty(),
+                "a model-id change must clear stale object-mirror state bound to the old model");
+    }
+
+    @Test
+    void theLiveOnlyEdgeClearsLatestObjectsButDurableInferenceKeepsRunningForAnAlwaysPolicyStream() {
+        ObjectState object = objectState(1L, "person");
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(resultWithObjects(0, object)));
+        AssetId assetId = AssetId.random();
+        DetectionLiveUpdatePort liveUpdatePublisherPort = mock(DetectionLiveUpdatePort.class);
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L, assetId, liveUpdatePublisherPort);
+        pipeline.updateDetectionPolicy(true); // opted into ALWAYS
+
+        pipeline.onNext(frame(0)); // demand still true (the default) -- a viewer is watching
+        assertFalse(pipeline.latestObjects().isEmpty(),
+                "object mirror must be established while watched, before the edge under test");
+
+        pipeline.updateDetectionDemand(false); // the last viewer leaves; ALWAYS keeps inference open
+
+        assertEquals(DetectionState.RUNNING_UNWATCHED, pipeline.detectionState(),
+                "ALWAYS keeps inference running even though the live gate just closed");
+        assertTrue(pipeline.latestObjects().isEmpty(),
+                "clearLiveDerivedState must clear the object mirror on the live-only edge, mirroring latestDetections");
+    }
+
+    /**
+     * The keep-when-{@code identity}-is-{@code null} rule (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+     * §4.5): the filter has nothing to match an unidentified object against, so dropping it would
+     * invent an answer the platform does not have — only an object whose elected label the deny
+     * filter actually names is dropped.
+     */
+    @Test
+    void labelFilterKeepsAnObjectWithNoIdentityButDropsADeniedIdentifiedObject() {
+        ObjectState denied = objectState(1L, "person");
+        ObjectState unidentified = objectStateWithoutIdentity(2L);
+        DetectionResult result = new DetectionResult(streamId, 0, Instant.now(), List.of(), Duration.ofMillis(5),
+                null, null, List.of(denied, unidentified));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
+        PipelineConfig config = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5, Set.of(),
+                EventRuleConfig.defaults(), true, TrackingConfig.off(), Set.of("person"), false);
+        StreamPipeline pipeline = manualPipeline(config, () -> 0L);
+
+        pipeline.onNext(frame(0));
+
+        assertEquals(List.of(2L), pipeline.latestObjects().stream().map(ObjectState::id).toList(),
+                "the denied 'person' identity is dropped; the unidentified object has nothing to match and is kept");
+    }
+
+    @Test
+    void emptyLabelFiltersKeepEveryObjectRegardlessOfIdentity() {
+        ObjectState identified = objectState(1L, "person");
+        ObjectState unidentified = objectStateWithoutIdentity(2L);
+        DetectionResult result = resultWithObjects(0, identified, unidentified);
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
+        StreamPipeline pipeline = manualPipeline(config(1000, 5), () -> 0L); // config(...)'s labelFilter is Set.of()
+
+        pipeline.onNext(frame(0));
+
+        assertEquals(List.of(1L, 2L), pipeline.latestObjects().stream().map(ObjectState::id).toList());
     }
 
     // --- docs/plans/done/TRACKING-PLAN.md §5.D/§5.E, wave T3: track book, stats window, follow sampling ---
