@@ -18,6 +18,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import com.drones.vision.perception.application.stream.DefaultStreamService;
 
 /**
@@ -28,14 +29,14 @@ import com.drones.vision.perception.application.stream.DefaultStreamService;
  * EventRuleConfig#absenceToClose()} closes it.
  *
  * <p>One instance per running stream (constructed by {@link DefaultStreamService}, mirroring
- * {@link DetectionExtrapolator}'s per-pipeline lifetime), fed every completed result — including
+ * {@link WorldModel}'s own per-pipeline lifetime), fed every completed result — including
  * empty ones, since an empty result is exactly what "absent" looks like — via {@link
  * #accept(DetectionResult)}, called from {@link StreamPipeline} the same way {@code
- * extrapolator.accept} already is.
+ * world.accept} already is.
  *
  * <h2>Timebase</h2>
  * Every timestamp this class produces comes from {@link DetectionResult#capturedAt()}, never
- * wall-clock time — consistent with {@link DetectionExtrapolator}'s own choice, and it means a
+ * wall-clock time — consistent with {@link WorldModel}'s own choice, and it means a
  * unit test can drive the whole open/close lifecycle off hand-picked {@code Instant}s with no
  * clock injection needed.
  *
@@ -52,10 +53,9 @@ import com.drones.vision.perception.application.stream.DefaultStreamService;
  * failure.
  *
  * <h2>Threading</h2>
- * {@link #accept} is {@code synchronized}, exactly like {@link DetectionExtrapolator#accept}/
- * {@link DetectionExtrapolator#at} — inference completions can land on arbitrary executor threads
- * out of order once more than one can be in flight, and per-label state must be read/mutated as
- * one atomic step.
+ * {@link #accept} is {@code synchronized}, exactly like {@link WorldModel#accept} — inference
+ * completions can land on arbitrary executor threads out of order once more than one can be in
+ * flight, and per-label state must be read/mutated as one atomic step.
  */
 public final class DetectionEventEngine {
 
@@ -98,6 +98,24 @@ public final class DetectionEventEngine {
                 onAbsent(state, result.capturedAt());
             }
         }
+    }
+
+    /**
+     * @param label the label to look up
+     * @return the id of the {@link DetectionEvent} currently open for {@code label}, or {@link
+     *         Optional#empty()} if none is open (the label is not tracked by {@link
+     *         EventRuleConfig#labels()}, or is tracked but nothing currently qualifies). Read by
+     *         {@link WorldModel#accept} to stamp {@code WorldObject.EventLink#openEventId()} —
+     *         necessarily <b>one frame behind</b> this engine's own state, since {@link
+     *         StreamPipeline#onDetectionResult} folds the world model before feeding this same
+     *         result to {@link #accept} (R2 &sect;3's frozen live-plane order); see {@link
+     *         WorldModel}'s own javadoc for why that lag is accepted rather than fixed by
+     *         reordering.
+     */
+    synchronized Optional<DetectionEventId> openEventId(String label) {
+        Objects.requireNonNull(label, "label must not be null");
+        LabelState state = stateByLabel.get(label);
+        return state == null || state.open == null ? Optional.empty() : Optional.of(state.open.id());
     }
 
     private void onQualifying(String label, LabelState state, Instant at, double confidence) {

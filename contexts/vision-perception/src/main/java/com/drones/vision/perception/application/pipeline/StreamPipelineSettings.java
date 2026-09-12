@@ -7,8 +7,8 @@ import com.drones.vision.perception.application.stream.TrackingConfigPatch;
 /**
  * Tunables for one running stream's {@link StreamPipeline} runtime — frame-cadence measurement,
  * detection-outage backoff, video-source reopen backoff (the bounds {@link DefaultStreamService}
- * passes when wrapping a source in a {@link SupervisedPublisher}), and detection-box extrapolation
- * (see {@link DetectionExtrapolator}) — extracted per docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3's
+ * passes when wrapping a source in a {@link SupervisedPublisher}), and {@link WorldModel}/render-
+ * tier tuning — extracted per docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3's
  * config-extraction rule: none of these may live as a hardcoded literal inside the classes that use
  * them.
  *
@@ -36,6 +36,13 @@ import com.drones.vision.perception.application.stream.TrackingConfigPatch;
  * unrelated recovery costs, so collapsing them to one pair would be a behavior change, not a
  * cleanup.
  *
+ * <p><b>One canonical constructor</b> (CLAUDE.md rule 10, docs/plans/active/
+ * ARCHITECTURE-AUDIT-2026-08-26.md Finding R1): this record used to carry six N-1-arg convenience
+ * constructors, one per wave that added a component, purely so pre-existing call sites kept
+ * compiling. Every call site now names every component explicitly, sourcing an unchanged value
+ * from {@link #defaults()} where a given wave has nothing new to say about it — the cost the
+ * withdrawn convention was deferring, paid once here instead of compounding on the next addition.
+ *
  * @param assumedSourceFps               assumed source frame rate used before the measured rate is
  *                                        trusted; must be positive
  * @param measuredFpsEwmaAlpha            smoothing factor for the source frame-rate EWMA, in
@@ -53,18 +60,12 @@ import com.drones.vision.perception.application.stream.TrackingConfigPatch;
  *                                        must be positive
  * @param sourceReopenBackoffMaxNanos     cap the exponential source-reopen backoff doubles up to;
  *                                        must be &ge; {@code sourceReopenBackoffInitialNanos}
- * @param extrapolationMaxMillis         how far past the latest completed result's capture time
- *                                        {@link DetectionExtrapolator} extrapolates before the
- *                                        output freezes; must not be negative
- * @param extrapolationMatchGate         max normalized box-center distance for a same-label match
- *                                        between two completed results, used only where at least
- *                                        one side is untracked; must not be negative
  * @param trackingStatsWindow            how far back {@link TrackingStatsWindow}'s counters reach
  *                                        (docs/plans/done/TRACKING-PLAN.md &sect;4.E); must be positive.
  *                                        {@code vision-app} binds this to {@code
  *                                        vision.tracking.stats-window-seconds}
- * @param trackRetention                 how long a track that stops arriving stays in {@link
- *                                        TrackBook} before being expired; must be positive
+ * @param trackRetention                 how long a track/object that stops arriving stays known by
+ *                                        {@link WorldModel} before being expired; must be positive
  * @param trackingSeed                   the deployment's tracking defaults for <b>new</b> streams
  *                                        ({@code vision.tracking.*} — docs/extracts/TRACKING-ORCHESTRATION.md
  *                                        &sect;4.1), read by {@code DefaultStreamService#start}
@@ -90,6 +91,18 @@ import com.drones.vision.perception.application.stream.TrackingConfigPatch;
  *                                        is told {@code false} (docs/plans/done/CV-DEMAND-PLAN.md &sect;2,
  *                                        &sect;3.3) — the window that keeps navigating between pages from
  *                                        thrashing the detector on and off; must be positive
+ * @param videoStaleAfter                how long a running stream may go without a frame before
+ *                                        {@code StreamState} reports it {@code STALLED} rather than
+ *                                        {@code LIVE} (docs/plans/done/STREAM-STATE-PLAN.md &sect;2.4);
+ *                                        must be positive
+ * @param renderTier                     tunables for {@link WorldModel}'s server-side render-tier
+ *                                        assignment (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+ *                                        &sect;4.6); never {@code null}
+ * @param gateLedgerDepth                how many {@code GateDecision} entries this pipeline retains
+ *                                        per stream for the warm trace tier (docs/plans/active/
+ *                                        CV-ORCHESTRATION-PLAN.md &sect;4.4); must be positive
+ * @param frameLedgerDepth               how many {@code FrameLedger} entries this pipeline retains
+ *                                        per stream for the warm trace tier; must be positive
  */
 public record StreamPipelineSettings(
         int assumedSourceFps,
@@ -101,8 +114,6 @@ public record StreamPipelineSettings(
         long detectionBackoffMaxNanos,
         long sourceReopenBackoffInitialNanos,
         long sourceReopenBackoffMaxNanos,
-        long extrapolationMaxMillis,
-        double extrapolationMatchGate,
         Duration trackingStatsWindow,
         Duration trackRetention,
         TrackingConfigPatch trackingSeed,
@@ -110,7 +121,10 @@ public record StreamPipelineSettings(
         AdaptiveRateSettings adaptiveRate,
         Duration detectionDemandPollInterval,
         Duration detectionDemandGrace,
-        Duration videoStaleAfter) {
+        Duration videoStaleAfter,
+        RenderTierSettings renderTier,
+        int gateLedgerDepth,
+        int frameLedgerDepth) {
 
     /** @see #trackRetention() */
     private static final Duration DEFAULT_TRACK_RETENTION = Duration.ofSeconds(5);
@@ -146,121 +160,11 @@ public record StreamPipelineSettings(
      */
     public static final double DEFAULT_CAMERA_HFOV_DEGREES = 0.0;
 
-    /**
-     * The canonical constructor before docs/plans/done/TRACKING-PLAN.md wave T3 added the two tracking
-     * tunables, kept as a convenience constructor defaulting both to {@link #defaults()}'s values,
-     * so every pre-existing call site — including {@code vision-app}'s own property mapping —
-     * compiles unchanged. Same "N-1-arg convenience ctor" idiom the domain's {@code
-     * PipelineConfig}/{@code Detection}/{@code DetectionResult} already use.
-     */
-    public StreamPipelineSettings(int assumedSourceFps, double measuredFpsEwmaAlpha, int warmupFrames,
-                                   double minMeasuredFps, double maxMeasuredFps, long detectionBackoffInitialNanos,
-                                   long detectionBackoffMaxNanos, long sourceReopenBackoffInitialNanos,
-                                   long sourceReopenBackoffMaxNanos, long extrapolationMaxMillis,
-                                   double extrapolationMatchGate) {
-        this(assumedSourceFps, measuredFpsEwmaAlpha, warmupFrames, minMeasuredFps, maxMeasuredFps,
-                detectionBackoffInitialNanos, detectionBackoffMaxNanos, sourceReopenBackoffInitialNanos,
-                sourceReopenBackoffMaxNanos, extrapolationMaxMillis, extrapolationMatchGate,
-                Duration.ofSeconds(TrackingStatsWindow.DEFAULT_WINDOW_SECONDS), DEFAULT_TRACK_RETENTION,
-                TrackingConfigPatch.NOTHING);
-    }
+    /** @see #gateLedgerDepth() */
+    private static final int DEFAULT_GATE_LEDGER_DEPTH = 256;
 
-    /**
-     * The canonical constructor before the tracking seed moved into this record, kept as a
-     * convenience constructor defaulting it to {@link TrackingConfigPatch#NOTHING} — "the deployment
-     * states nothing about tracking", which folds to exactly the domain's own literals. Same
-     * "N-1-arg convenience ctor" idiom as above.
-     */
-    public StreamPipelineSettings(int assumedSourceFps, double measuredFpsEwmaAlpha, int warmupFrames,
-                                   double minMeasuredFps, double maxMeasuredFps, long detectionBackoffInitialNanos,
-                                   long detectionBackoffMaxNanos, long sourceReopenBackoffInitialNanos,
-                                   long sourceReopenBackoffMaxNanos, long extrapolationMaxMillis,
-                                   double extrapolationMatchGate, Duration trackingStatsWindow,
-                                   Duration trackRetention) {
-        this(assumedSourceFps, measuredFpsEwmaAlpha, warmupFrames, minMeasuredFps, maxMeasuredFps,
-                detectionBackoffInitialNanos, detectionBackoffMaxNanos, sourceReopenBackoffInitialNanos,
-                sourceReopenBackoffMaxNanos, extrapolationMaxMillis, extrapolationMatchGate, trackingStatsWindow,
-                trackRetention, TrackingConfigPatch.NOTHING);
-    }
-
-    /**
-     * The canonical constructor before {@code adaptiveRate} was added, kept as a convenience
-     * constructor defaulting it to {@link AdaptiveRateSettings#defaults()}. Same "N-1-arg
-     * convenience ctor" idiom as the others here.
-     */
-    public StreamPipelineSettings(int assumedSourceFps, double measuredFpsEwmaAlpha, int warmupFrames,
-                                   double minMeasuredFps, double maxMeasuredFps, long detectionBackoffInitialNanos,
-                                   long detectionBackoffMaxNanos, long sourceReopenBackoffInitialNanos,
-                                   long sourceReopenBackoffMaxNanos, long extrapolationMaxMillis,
-                                   double extrapolationMatchGate, Duration trackingStatsWindow,
-                                   Duration trackRetention, TrackingConfigPatch trackingSeed,
-                                   double cameraHfovDegrees) {
-        this(assumedSourceFps, measuredFpsEwmaAlpha, warmupFrames, minMeasuredFps, maxMeasuredFps,
-                detectionBackoffInitialNanos, detectionBackoffMaxNanos, sourceReopenBackoffInitialNanos,
-                sourceReopenBackoffMaxNanos, extrapolationMaxMillis, extrapolationMatchGate, trackingStatsWindow,
-                trackRetention, trackingSeed, cameraHfovDegrees, AdaptiveRateSettings.defaults());
-    }
-
-    /**
-     * The canonical constructor before {@code cameraHfovDegrees} was added, kept as a convenience
-     * constructor defaulting it to {@link #DEFAULT_CAMERA_HFOV_DEGREES} — "the deployment has not
-     * described its optics", which disables pose compensation exactly as an absent value should.
-     * Same "N-1-arg convenience ctor" idiom as the two above.
-     */
-    public StreamPipelineSettings(int assumedSourceFps, double measuredFpsEwmaAlpha, int warmupFrames,
-                                   double minMeasuredFps, double maxMeasuredFps, long detectionBackoffInitialNanos,
-                                   long detectionBackoffMaxNanos, long sourceReopenBackoffInitialNanos,
-                                   long sourceReopenBackoffMaxNanos, long extrapolationMaxMillis,
-                                   double extrapolationMatchGate, Duration trackingStatsWindow,
-                                   Duration trackRetention, TrackingConfigPatch trackingSeed) {
-        this(assumedSourceFps, measuredFpsEwmaAlpha, warmupFrames, minMeasuredFps, maxMeasuredFps,
-                detectionBackoffInitialNanos, detectionBackoffMaxNanos, sourceReopenBackoffInitialNanos,
-                sourceReopenBackoffMaxNanos, extrapolationMaxMillis, extrapolationMatchGate, trackingStatsWindow,
-                trackRetention, trackingSeed, DEFAULT_CAMERA_HFOV_DEGREES);
-    }
-
-    /**
-     * The canonical constructor before docs/plans/done/CV-DEMAND-PLAN.md wave D1 added the two demand
-     * tunables, kept as a convenience constructor defaulting both to {@link
-     * #DEFAULT_DETECTION_DEMAND_POLL_INTERVAL}/{@link #DEFAULT_DETECTION_DEMAND_GRACE} — the values
-     * the plan itself pins (2s/30s) — so every pre-existing call site, including {@code
-     * DefaultStreamService}'s own {@code withSourceReopenBackoff} test seam, compiles unchanged.
-     * Same "N-1-arg convenience ctor" idiom as every other addition to this record.
-     */
-    public StreamPipelineSettings(int assumedSourceFps, double measuredFpsEwmaAlpha, int warmupFrames,
-                                   double minMeasuredFps, double maxMeasuredFps, long detectionBackoffInitialNanos,
-                                   long detectionBackoffMaxNanos, long sourceReopenBackoffInitialNanos,
-                                   long sourceReopenBackoffMaxNanos, long extrapolationMaxMillis,
-                                   double extrapolationMatchGate, Duration trackingStatsWindow,
-                                   Duration trackRetention, TrackingConfigPatch trackingSeed,
-                                   double cameraHfovDegrees, AdaptiveRateSettings adaptiveRate) {
-        this(assumedSourceFps, measuredFpsEwmaAlpha, warmupFrames, minMeasuredFps, maxMeasuredFps,
-                detectionBackoffInitialNanos, detectionBackoffMaxNanos, sourceReopenBackoffInitialNanos,
-                sourceReopenBackoffMaxNanos, extrapolationMaxMillis, extrapolationMatchGate, trackingStatsWindow,
-                trackRetention, trackingSeed, cameraHfovDegrees, adaptiveRate,
-                DEFAULT_DETECTION_DEMAND_POLL_INTERVAL, DEFAULT_DETECTION_DEMAND_GRACE);
-    }
-
-    /**
-     * The shape before {@link #videoStaleAfter()} was added (docs/plans/done/STREAM-STATE-PLAN.md
-     * &sect;2.4), defaulting it to {@link #DEFAULT_VIDEO_STALE_AFTER} — the value the plan itself
-     * pins (5s) — so every pre-existing call site compiles unchanged. Same "N-1-arg convenience
-     * ctor" idiom as every other addition to this record.
-     */
-    public StreamPipelineSettings(int assumedSourceFps, double measuredFpsEwmaAlpha, int warmupFrames,
-                                   double minMeasuredFps, double maxMeasuredFps, long detectionBackoffInitialNanos,
-                                   long detectionBackoffMaxNanos, long sourceReopenBackoffInitialNanos,
-                                   long sourceReopenBackoffMaxNanos, long extrapolationMaxMillis,
-                                   double extrapolationMatchGate, Duration trackingStatsWindow,
-                                   Duration trackRetention, TrackingConfigPatch trackingSeed,
-                                   double cameraHfovDegrees, AdaptiveRateSettings adaptiveRate,
-                                   Duration detectionDemandPollInterval, Duration detectionDemandGrace) {
-        this(assumedSourceFps, measuredFpsEwmaAlpha, warmupFrames, minMeasuredFps, maxMeasuredFps,
-                detectionBackoffInitialNanos, detectionBackoffMaxNanos, sourceReopenBackoffInitialNanos,
-                sourceReopenBackoffMaxNanos, extrapolationMaxMillis, extrapolationMatchGate, trackingStatsWindow,
-                trackRetention, trackingSeed, cameraHfovDegrees, adaptiveRate,
-                detectionDemandPollInterval, detectionDemandGrace, DEFAULT_VIDEO_STALE_AFTER);
-    }
+    /** @see #frameLedgerDepth() */
+    private static final int DEFAULT_FRAME_LEDGER_DEPTH = 64;
 
     public StreamPipelineSettings {
         if (assumedSourceFps <= 0) {
@@ -288,12 +192,6 @@ public record StreamPipelineSettings(
         if (sourceReopenBackoffMaxNanos < sourceReopenBackoffInitialNanos) {
             throw new IllegalArgumentException(
                     "sourceReopenBackoffMaxNanos must be >= sourceReopenBackoffInitialNanos");
-        }
-        if (extrapolationMaxMillis < 0) {
-            throw new IllegalArgumentException("extrapolationMaxMillis must not be negative");
-        }
-        if (extrapolationMatchGate < 0) {
-            throw new IllegalArgumentException("extrapolationMatchGate must not be negative");
         }
         if (trackingStatsWindow == null || trackingStatsWindow.isZero() || trackingStatsWindow.isNegative()) {
             throw new IllegalArgumentException("trackingStatsWindow must be positive, was " + trackingStatsWindow);
@@ -324,6 +222,15 @@ public record StreamPipelineSettings(
         if (videoStaleAfter == null || videoStaleAfter.isZero() || videoStaleAfter.isNegative()) {
             throw new IllegalArgumentException("videoStaleAfter must be positive, was " + videoStaleAfter);
         }
+        if (renderTier == null) {
+            throw new IllegalArgumentException("renderTier must not be null; use RenderTierSettings.defaults()");
+        }
+        if (gateLedgerDepth <= 0) {
+            throw new IllegalArgumentException("gateLedgerDepth must be positive, was " + gateLedgerDepth);
+        }
+        if (frameLedgerDepth <= 0) {
+            throw new IllegalArgumentException("frameLedgerDepth must be positive, was " + frameLedgerDepth);
+        }
     }
 
     /** Every value byte-identical to the literal it replaces (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3). */
@@ -332,6 +239,9 @@ public record StreamPipelineSettings(
                 30, 0.2, 5, 1.0, 240.0,
                 1_000_000_000L, 10_000_000_000L,
                 1_000_000_000L, 30_000_000_000L,
-                800L, 0.15);
+                Duration.ofSeconds(TrackingStatsWindow.DEFAULT_WINDOW_SECONDS), DEFAULT_TRACK_RETENTION,
+                TrackingConfigPatch.NOTHING, DEFAULT_CAMERA_HFOV_DEGREES, AdaptiveRateSettings.defaults(),
+                DEFAULT_DETECTION_DEMAND_POLL_INTERVAL, DEFAULT_DETECTION_DEMAND_GRACE, DEFAULT_VIDEO_STALE_AFTER,
+                RenderTierSettings.defaults(), DEFAULT_GATE_LEDGER_DEPTH, DEFAULT_FRAME_LEDGER_DEPTH);
     }
 }

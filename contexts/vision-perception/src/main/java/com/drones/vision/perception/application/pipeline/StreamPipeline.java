@@ -20,6 +20,7 @@ import com.drones.vision.perception.domain.model.TrackedObject;
 import com.drones.vision.perception.domain.model.TrackingConfig;
 import com.drones.vision.perception.domain.model.TrackingMode;
 import com.drones.vision.perception.domain.model.VideoFrame;
+import com.drones.vision.perception.domain.model.WorldObject;
 import com.drones.vision.perception.domain.port.DetectionPort;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.platform.EventPublisherPort;
@@ -39,6 +40,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import com.drones.vision.perception.application.stream.DefaultStreamService;
 import com.drones.vision.perception.application.stream.PipelineConfigPatch;
 import com.drones.vision.perception.application.stream.StreamService;
@@ -122,17 +124,17 @@ import com.drones.vision.perception.application.stream.StreamService;
  * is a separate concern from {@link #latestDetections()}: the engine only ever reads results, it
  * never influences what gets published or returned from this class.
  *
- * <p><b>Tracking</b> (docs/plans/done/TRACKING-PLAN.md &sect;5.D/&sect;5.E): three further consumers on that same
- * fan-out. {@link TrackBook} keeps this stream's tracks by id with their lifetimes ({@link
- * #tracks()}); {@link TrackingStatsWindow} keeps rolling duty-cycle counters over the {@link
- * com.drones.vision.perception.domain.model.TrackingTelemetry} riding each result ({@link #trackingStats()});
- * {@link FollowTracker} (docs/plans/active/TRACK-FOLLOW-PLAN.md &sect;3.1/W2) turns the same telemetry's
- * {@code lockedTrackId} bounces into an honest {@link FollowStatus} lifecycle for whichever {@code
- * FOLLOW} lock is currently held ({@link #followStatus()}). All three are cleared on a model re-arm,
- * exactly as {@link #extrapolator} is. Tracking also reaches the sampling logic above through one
- * value: {@link #effectiveInferenceFps()}, which raises the sample rate to {@code followFps} while
- * the stream is in {@link TrackingMode#FOLLOW}. Nothing else in this class knows tracking exists —
- * no branch in the publish path, none in {@link #maybeDetect}.
+ * <p><b>Tracking</b> (docs/plans/done/TRACKING-PLAN.md &sect;5.D/&sect;5.E): further consumers on that same
+ * fan-out. {@link WorldModel} (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.6) is this
+ * stream's single owner of object state — this stream's tracks by id with their lifetimes ({@link
+ * #tracks()}), the {@code FOLLOW} lock's lifecycle ({@link #followStatus()}), and the {@link
+ * com.drones.vision.perception.domain.model.WorldObject} fold ({@link #worldObjects()}); {@link
+ * TrackingStatsWindow} keeps rolling duty-cycle counters over the {@link
+ * com.drones.vision.perception.domain.model.TrackingTelemetry} riding each result ({@link #trackingStats()})
+ * as its own peer. Both are cleared on a model re-arm. Tracking also reaches the sampling logic
+ * above through one value: {@link #effectiveInferenceFps()}, which raises the sample rate to
+ * {@code followFps} while the stream is in {@link TrackingMode#FOLLOW}. Nothing else in this class
+ * knows tracking exists — no branch in the publish path, none in {@link #maybeDetect}.
  *
  * <h2>Error handling &amp; lifecycle</h2>
  * Two failure classes are handled very differently, on purpose: a CV service
@@ -279,7 +281,6 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final DetectionLiveUpdatePort liveUpdatePublisherPort;
     private final Supplier<Telemetry> telemetrySupplier;
     private final LongSupplier nanoTimeSource;
-    private final DetectionExtrapolator extrapolator;
 
     /**
      * Pull-mode detection driver (docs/plans/done/MEDIA-SOT-PLAN.md wave M5, D5/D6) — {@code null} means push
@@ -293,20 +294,22 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final PullDetectionBinding pullDetection;
 
     /**
-     * Two more consumers on {@link #onDetectionResult}'s existing fan-out, built here rather than
-     * injected for exactly the reason {@link #extrapolator} is (docs/plans/done/TRACKING-PLAN.md &sect;5.E,
-     * TRACKING-ORCHESTRATION.md &sect;2.3): they are this pipeline's own per-stream bookkeeping, not
-     * substitutable collaborators, so they cost this class's constructor nothing. They are peers,
-     * not one class — see {@link TrackingStatsWindow}'s javadoc for why the counters do not live on
-     * the book.
+     * The single owner of this stream's object state (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+     * &sect;4.6) — track lifetimes ({@link #tracks()}), the {@code FOLLOW} lock's lifecycle
+     * ({@link #followStatus()}) and the {@link com.drones.vision.perception.domain.model.WorldObject}
+     * fold ({@link #worldObjects()}). Built here rather than injected, for the same reason as
+     * before this class replaced {@code TrackBook}/{@code FollowTracker}/{@code
+     * DetectionExtrapolator} with it (docs/plans/done/TRACKING-PLAN.md &sect;5.E, TRACKING-ORCHESTRATION.md
+     * &sect;2.3): it is this pipeline's own per-stream bookkeeping, not a substitutable collaborator,
+     * so it costs this class's constructor nothing.
      */
-    private final TrackBook trackBook;
+    private final WorldModel world;
 
-    /** @see #trackBook */
+    /**
+     * A peer of {@link #world}, not part of it — see {@link TrackingStatsWindow}'s javadoc for why
+     * the duty-cycle counters do not live on the same class as track/object bookkeeping.
+     */
     private final TrackingStatsWindow trackingStats;
-
-    /** @see #trackBook */
-    private final FollowTracker followTracker;
 
     /**
      * Wall-clock cost of the detection round trip, as opposed to the compute cost cv-service
@@ -325,7 +328,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     /**
      * Chooses the rate {@link #sampleIntervalNanos} schedules deadlines at
      * (docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R2). Built here rather than injected for the same
-     * reason {@link #extrapolator} is: it is this pipeline's own per-stream bookkeeping, not a
+     * reason {@link #world} is: it is this pipeline's own per-stream bookkeeping, not a
      * substitutable collaborator.
      */
     private final DetectionRateController rateController;
@@ -361,14 +364,6 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     /** This pipeline's subscription to {@link #pullDetection}'s result publisher; {@code null} in push mode. */
     private volatile Flow.Subscription pullSubscription;
 
-    private volatile List<Detection> latestDetections = List.of();
-
-    /**
-     * @see #latestObjects() — the object-mirror counterpart to {@link #latestDetections}, written
-     *      and cleared on exactly the same edges (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.5,
-     *      wave W1).
-     */
-    private volatile List<ObjectState> latestObjects = List.of();
     private volatile VideoFrame latestFrame;
 
     // Only ever touched from within onNext(), which Flow.Subscriber's contract serializes
@@ -451,17 +446,15 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         this.maxMeasuredFps = settings.maxMeasuredFps();
         this.detectionBackoffInitialNanos = settings.detectionBackoffInitialNanos();
         this.detectionBackoffMaxNanos = settings.detectionBackoffMaxNanos();
-        this.extrapolator =
-                new DetectionExtrapolator(settings.extrapolationMaxMillis(), settings.extrapolationMatchGate());
-        this.trackBook = new TrackBook(settings.trackRetention());
+        this.world = new WorldModel(settings.trackRetention(), WorldModel.DEFAULT_MEMORY_TTL, settings.renderTier(),
+                label -> this.eventEngine == null ? null : this.eventEngine.openEventId(label).orElse(null));
         this.trackingStats = new TrackingStatsWindow(settings.trackingStatsWindow());
-        this.followTracker = new FollowTracker();
         // A lock can already be present in `config` at construction time -- DefaultStreamService.start()
         // folds a requested TrackingConfigPatch (which may itself carry a lock) before this pipeline
         // ever exists, so updateConfig's own lock-change detection never runs for it. Seeding here
         // closes that gap the same way updateConfig would have, had this pipeline already existed.
         if (this.config.tracking().lock() != null) {
-            this.followTracker.lockRequested(this.config.tracking().lock());
+            this.world.lockRequested(this.config.tracking().lock());
         }
         this.pipelineLatency = new PipelineLatencyWindow(settings.trackingStatsWindow());
         this.detectionRate = new DetectionRateWindow(settings.trackingStatsWindow(),
@@ -509,9 +502,9 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      *
      * <p><b>Model-id re-arm.</b> When {@code next.model().id()} differs from the model this
      * pipeline is currently running, this call also clears this pipeline's own model-bound
-     * bookkeeping ({@link #clearDetectionDerivedState()}) — {@link #extrapolator}, {@link
-     * #latestDetections}, the track book/stats, and the rate/latency windows — so no stale detection
-     * produced by the old model lingers (extrapolated against, persisted, or shown) past the swap;
+     * bookkeeping ({@link #clearDetectionDerivedState()}) — {@link #world} (tracks, follow status,
+     * the object fold, the latest-detections mirror) and the tracking-stats/rate/latency windows —
+     * so no stale detection produced by the old model lingers (persisted, or shown) past the swap;
      * {@link #latestDetections()} reads empty again until the new model's first result completes. The
      * very next sampled frame's {@link #detectionPort}{@code .detect} call already carries {@code
      * next} — including the new model — since {@link DetectionPort}'s own contract runs inference
@@ -552,7 +545,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * reimplementing it is deliberate: this class does not know (and must not need to know) how
      * {@code lockSeq} is allocated. Detected independently of {@code modelChanged} because a single
      * patch may legitimately carry both a model swap and a fresh lock at once — {@link
-     * #followTracker} must see the lock either way.
+     * #world} must see the lock either way.
      *
      * @param next the config to switch to
      */
@@ -570,7 +563,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         }
         TargetLock nextLock = next.tracking().lock();
         if (nextLock != null && !nextLock.equals(previousLock)) {
-            followTracker.lockRequested(nextLock);
+            world.lockRequested(nextLock);
         }
         handleDetectionGateTransition();
         // docs/plans/done/MEDIA-SOT-PLAN.md wave M5, item 7: PATCH .../config keeps working in pull mode -- its
@@ -704,7 +697,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      *         frames from the detector, since no inference actually ran.
      */
     public List<Detection> latestDetections() {
-        return latestDetections;
+        return world.latestDetections();
     }
 
     /**
@@ -717,7 +710,21 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      *         {@link #clearLiveDerivedState()}.
      */
     public List<ObjectState> latestObjects() {
-        return latestObjects;
+        return world.latestObjects();
+    }
+
+    /**
+     * @return every object {@link #world} currently owns for this stream — the fold of {@link
+     *         #latestObjects()} plus the operator/event/render relations this platform owns on top
+     *         of the wire mirror (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6), ordered by id
+     *         ascending. Unlike {@link #latestObjects()}, this is not reset to empty by a frame with
+     *         no fresh geometry for a given object — a {@link
+     *         com.drones.vision.perception.domain.model.RenderTier#HIDDEN} label-denied object, or
+     *         one simply not re-observed yet, stays until {@link WorldModel}'s own retention window
+     *         expires it, rather than vanishing the instant one frame is empty.
+     */
+    public List<WorldObject> worldObjects() {
+        return world.objects();
     }
 
     /**
@@ -726,20 +733,20 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      *         read-from-any-thread convention as {@link #latestDetections()}. Empty when tracking is
      *         off, when no tracked detection has arrived yet, or when every track has expired.
      *         Unlike {@link #latestDetections()}, this survives an empty result: a track is a
-     *         lifetime, not a frame. See {@link TrackBook} for what booking does and does not mean.
+     *         lifetime, not a frame. See {@link WorldModel} for what booking does and does not mean.
      */
     public List<TrackedObject> tracks() {
-        return trackBook.tracks();
+        return world.tracks();
     }
 
     /**
      * @return the current state of whichever {@code FOLLOW} lock this stream's operator holds
      *         (docs/plans/active/TRACK-FOLLOW-PLAN.md &sect;3.1), or {@link Optional#empty()} if no
      *         lock has ever been issued, or the most recent lock action was a release. See {@link
-     *         FollowTracker} for the state machine that computes it.
+     *         WorldModel} for the state machine that computes it.
      */
     public Optional<FollowStatus> followStatus() {
-        return followTracker.status();
+        return world.followStatus();
     }
 
     /**
@@ -1041,9 +1048,8 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * #detectionDemand()} alone, deliberately never widened by {@link #detectionPolicyAlwaysOn}. A
      * {@code DetectionPolicy.ALWAYS} asset's whole point is inference that outlives its last viewer,
      * which means this narrower gate is exactly what must still be able to close for it — see {@link
-     * #onDetectionResult} for where this governs {@link #latestDetections}/{@link #extrapolator}/
-     * {@link #trackBook}/{@link #trackingStats}/{@link #followTracker}/{@link #rateController}/{@link
-     * #liveUpdatePublisherPort}.
+     * #onDetectionResult} for where this governs {@link #world}/{@link #trackingStats}/{@link
+     * #rateController}/{@link #liveUpdatePublisherPort}.
      */
     private boolean liveGateOpen() {
         return config.detectionEnabled() && detectionDemand;
@@ -1110,10 +1116,10 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * Clears every piece of detection-derived state a consumer could otherwise read as fresh: the
-     * raw result ({@link #latestDetections}), the extrapolator's own bookkeeping ({@link
-     * #extrapolator}), the track book/stats, the follow tracker, and the rate/latency windows.
-     * Shared by two call sites that reach it for
+     * Clears every piece of detection-derived state a consumer could otherwise read as fresh:
+     * {@link #world} — the raw-detections/objects mirror, the track book, the follow lock's
+     * lifecycle and the object fold, all in one call — {@link #trackingStats}, and the rate/latency
+     * windows. Shared by two call sites that reach it for
      * different reasons — {@link #updateConfig}'s model-id re-arm and {@link
      * #handleDetectionGateTransition}'s <em>inference</em> gate close — both boiling down to the same
      * fact: nothing already held describes what this pipeline is about to (or will never again)
@@ -1127,12 +1133,8 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * being meaningfully written to and must not be wiped out from under that ongoing activity.
      */
     private void clearDetectionDerivedState() {
-        extrapolator.reset();
-        latestDetections = List.of();
-        latestObjects = List.of();
-        trackBook.clear();
+        world.clear();
         trackingStats.clear();
-        followTracker.clear();
         pipelineLatency.clear();
         detectionRate.clear();
         rateController.clear();
@@ -1150,12 +1152,8 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * screen's own state is wiped because there is no screen left to be wrong on.
      */
     private void clearLiveDerivedState() {
-        extrapolator.reset();
-        latestDetections = List.of();
-        latestObjects = List.of();
-        trackBook.clear();
+        world.clear();
         trackingStats.clear();
-        followTracker.clear();
         rateController.clear();
     }
 
@@ -1340,9 +1338,8 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * to every downstream consumer, split across two independent planes (docs/plans/active/
      * ALWAYS-ON-FLOW-PLAN.md &sect;4 "the gate is three questions, not two"): <b>durable</b> ({@link
      * #eventEngine}, persistence/the {@code DETECTION} event), gated on {@link #detectionGateOpen()}
-     * alone ("durable follows inference"), then <b>live</b> ({@link #latestDetections()}, {@link
-     * #extrapolator}, {@link #trackBook}, {@link #trackingStats}, {@link #followTracker}, {@link
-     * #rateController}, {@link #liveUpdatePublisherPort}), additionally gated on {@link
+     * alone ("durable follows inference"), then <b>live</b> ({@link #world}, {@link #trackingStats},
+     * {@link #rateController}, {@link #liveUpdatePublisherPort}), additionally gated on {@link
      * #liveGateOpen()}. Filtering once here, before either plane, is what makes every consumer see
      * the same filtered set uniformly instead of each having to know about {@code labelFilter}/{@code
      * labelDenyFilter} itself — screen, alerts and recording all stay consistent because there is
@@ -1350,9 +1347,9 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      *
      * <p>This list is a <b>fan-out of consumers by design</b>: adding one is not a new
      * responsibility for this class (TRACKING-ORCHESTRATION.md &sect;2.3). The tracking work
-     * genuinely lives in {@link TrackBook}/{@link TrackingStatsWindow}, carved as peers of {@link
-     * DetectionExtrapolator} so the decomposition this class is queued for inherits well-shaped
-     * perception stages rather than a fatter method.
+     * genuinely lives in {@link WorldModel}/{@link TrackingStatsWindow}, carved as peers so the
+     * decomposition this class is queued for inherits well-shaped perception stages rather than a
+     * fatter method.
      *
      * <p><b>Re-checks both gates on entry, independently</b> (docs/plans/done/CV-DEMAND-PLAN.md
      * &sect;5/&sect;7, widened by docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave D2): both callers
@@ -1391,12 +1388,12 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         // the order between them is free -- and cheap in-memory updates belong before slow I/O.
         boolean live = liveGateOpen();
         if (live) {
-            latestDetections = filtered.detections();
-            latestObjects = filtered.objects();
-            extrapolator.accept(filtered);
-            trackBook.accept(filtered);
+            // world.accept runs where trackBook.accept/followTracker.accept used to, ahead of
+            // eventEngine.accept below -- WorldModel's own javadoc "Event link is one frame behind"
+            // section is the authoritative note for why that relative order is frozen, not a diff
+            // artifact.
+            world.accept(filtered, suppressedObjects(result, filtered));
             trackingStats.accept(filtered);
-            followTracker.accept(filtered);
             rateController.observeDetections(filtered.detections(), config.tracking().redetectIouPercent());
         }
         if (eventEngine != null) {
@@ -1437,12 +1434,16 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * identity} is {@code null} is always <b>kept</b>: the filter has nothing to match on, and
      * dropping it would invent an answer ("this is the denied label") the platform does not actually
      * have. {@code tracks[]} is already effectively label-filtered by this same method — a denied
-     * detection never reaches {@link TrackBook#accept}, so it never books a track in the first place.
+     * detection never reaches {@link WorldModel}'s own track booking, so it never books a track in
+     * the first place. {@link WorldModel#objects()} is the one read model that does <b>not</b> lose
+     * a denied object outright: {@link #suppressedObjects} tells it which ids this method just
+     * dropped, so it can flip that object's {@code render.tier} to {@code HIDDEN} instead — see
+     * {@link WorldModel}'s own "Suppressed" javadoc section.
      *
      * <p>The "nothing was actually dropped, return {@code result} unchanged" fast path is evaluated
      * for both lists independently and ANDed together, so the common case (neither filter
      * configured, or every detection and every identified object already matches) still allocates
-     * nothing new.
+     * nothing new — {@link #suppressedObjects} reuses this exact same-instance check.
      */
     private DetectionResult applyLabelFilters(DetectionResult result) {
         Set<String> labelFilter = config.labelFilter();
@@ -1469,6 +1470,30 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         // frame was fetched. Rule 10 retiring that constructor is what made the loss visible.
         return new DetectionResult(result.streamId(), result.frameSequence(), result.capturedAt(), kept,
                 result.inferenceLatency(), result.tracking(), result.pullTelemetry(), keptObjects, result.ledger());
+    }
+
+    /**
+     * Diffs {@code raw} against {@code filtered} (the {@link #applyLabelFilters} output) to name
+     * exactly which {@link ObjectState} ids the label filter dropped this frame, so {@link
+     * #world}/{@link WorldModel#accept} can mark each one {@code HIDDEN} instead of losing it
+     * outright — see {@link WorldModel}'s own "Suppressed" javadoc section for why that distinction
+     * matters. Reuses {@link #applyLabelFilters}'s own same-instance fast path: when nothing was
+     * dropped, {@code raw == filtered} and this returns {@link Set#of()} without walking either
+     * list.
+     *
+     * @param raw      the result exactly as {@link #detectionPort}/{@link PullResultSubscriber}
+     *                 produced it, before filtering; never {@code null}
+     * @param filtered {@link #applyLabelFilters}'s own output for the same {@code raw}; never
+     *                 {@code null}
+     * @return every {@link ObjectState#id()} present in {@code raw.objects()} but absent from
+     *         {@code filtered.objects()}; never {@code null}, empty when nothing was suppressed
+     */
+    private static List<ObjectState> suppressedObjects(DetectionResult raw, DetectionResult filtered) {
+        if (raw == filtered) {
+            return List.of();
+        }
+        Set<Long> kept = filtered.objects().stream().map(ObjectState::id).collect(Collectors.toSet());
+        return raw.objects().stream().filter(state -> !kept.contains(state.id())).toList();
     }
 
     /**
@@ -1538,8 +1563,9 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * skipped along with the forward — push mode sets this same precedent via {@link
      * #maybeDetect}'s own early return.
      *
-     * <p><b>{@link #latestDetections}/{@link #extrapolator}/{@link #trackBook} are cleared</b> the
-     * moment the <em>live</em> gate closes, in both transports alike — not merely left to freeze.
+     * <p><b>{@link #world} (the latest-detections mirror, the track book, the follow lock, the
+     * object fold) is cleared</b> the moment the <em>live</em> gate closes, in both transports
+     * alike — not merely left to freeze.
      * This class's first cut left them frozen at their last value, reasoning (wrongly) that push
      * mode's own behavior was the reference to match; it was instead a shared defect, not a
      * precedent, per CLAUDE.md &sect;9 ("newest data ... should be used, even if previous is still

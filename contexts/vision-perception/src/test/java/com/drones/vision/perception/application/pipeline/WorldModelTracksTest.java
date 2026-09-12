@@ -11,6 +11,8 @@ import com.drones.vision.perception.domain.model.TrackState;
 import com.drones.vision.perception.domain.model.TrackedObject;
 import org.junit.jupiter.api.Test;
 
+import java.util.function.Function;
+
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -21,10 +23,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Every timestamp here comes from the result's own {@code capturedAt}, never {@code Instant.now()} —
- * {@link TrackBook} has no clock by design, so these assertions are exact rather than tolerant.
+ * The former {@code TrackBookTest}, ported verbatim onto {@link WorldModel} when the track book
+ * moved into it (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.6, wave W2) — same scenarios,
+ * same assertions, so the move is provably behaviour-preserving.
+ *
+ * <p>Every timestamp here comes from the result's own {@code capturedAt}, never {@code
+ * Instant.now()} — {@link WorldModel} has no clock by design, so these assertions are exact rather
+ * than tolerant.
  */
-class TrackBookTest {
+class WorldModelTracksTest {
 
     private static final ModelRef MODEL = new ModelRef("yolo26n.pt", "latest");
     private static final Instant T0 = Instant.parse("2026-08-11T10:00:00Z");
@@ -45,6 +52,12 @@ class TrackBookTest {
         return new Detection(label, 0.8, new BoundingBox(x, 0.4, 0.1, 0.1), MODEL);
     }
 
+    /** A {@link WorldModel} configured exactly as the old {@code TrackBook} was: retention only. */
+    private static WorldModel book(Duration retention) {
+        return new WorldModel(retention, WorldModel.DEFAULT_MEMORY_TTL, RenderTierSettings.defaults(),
+                label -> null);
+    }
+
     private static TrackedObject only(List<TrackedObject> tracks) {
         assertEquals(1, tracks.size(), () -> "expected exactly one booked track, got " + tracks);
         return tracks.getFirst();
@@ -52,14 +65,14 @@ class TrackBookTest {
 
     @Test
     void anEmptyBookHasNoTracks() {
-        assertTrue(new TrackBook(RETENTION).tracks().isEmpty());
+        assertTrue(book(RETENTION).tracks().isEmpty());
     }
 
     @Test
     void booksATrackedDetectionUnderItsTrackId() {
-        TrackBook book = new TrackBook(RETENTION);
+        WorldModel book = book(RETENTION);
 
-        book.accept(result(0, T0, tracked("car", 7, TrackState.CONFIRMED, 0.3)));
+        book.accept(result(0, T0, tracked("car", 7, TrackState.CONFIRMED, 0.3)), List.of());
 
         TrackedObject booked = only(book.tracks());
         assertEquals(7L, booked.trackId());
@@ -70,11 +83,11 @@ class TrackBookTest {
 
     @Test
     void aSecondResultPreservesFirstSeenAndAdvancesLastSeen() {
-        TrackBook book = new TrackBook(RETENTION);
+        WorldModel book = book(RETENTION);
         Instant later = T0.plusMillis(400);
 
-        book.accept(result(0, T0, tracked("car", 7, TrackState.CONFIRMED, 0.30)));
-        book.accept(result(1, later, tracked("car", 7, TrackState.CONFIRMED, 0.34)));
+        book.accept(result(0, T0, tracked("car", 7, TrackState.CONFIRMED, 0.30)), List.of());
+        book.accept(result(1, later, tracked("car", 7, TrackState.CONFIRMED, 0.34)), List.of());
 
         TrackedObject booked = only(book.tracks());
         assertEquals(T0, booked.firstSeen(), "firstSeen is the track's birth, not its latest observation");
@@ -84,70 +97,70 @@ class TrackBookTest {
 
     @Test
     void aLostTrackExpiresOutOfTheBookWhileALiveOneStays() {
-        TrackBook book = new TrackBook(RETENTION);
+        WorldModel book = book(RETENTION);
         book.accept(result(0, T0,
                 tracked("car", 7, TrackState.CONFIRMED, 0.30),
-                tracked("car", 8, TrackState.CONFIRMED, 0.60)));
+                tracked("car", 8, TrackState.CONFIRMED, 0.60)), List.of());
         assertEquals(2, book.tracks().size());
 
         book.accept(result(1, T0.plusMillis(400),
                 tracked("car", 7, TrackState.LOST, 0.31),
-                tracked("car", 8, TrackState.CONFIRMED, 0.62)));
+                tracked("car", 8, TrackState.CONFIRMED, 0.62)), List.of());
 
         assertEquals(List.of(8L), book.tracks().stream().map(TrackedObject::trackId).toList());
     }
 
     @Test
     void aTrackThatSimplyStopsArrivingExpiresAfterTheRetentionWindow() {
-        TrackBook book = new TrackBook(RETENTION);
-        book.accept(result(0, T0, tracked("car", 7, TrackState.CONFIRMED, 0.30)));
+        WorldModel book = book(RETENTION);
+        book.accept(result(0, T0, tracked("car", 7, TrackState.CONFIRMED, 0.30)), List.of());
 
         // A different track arriving RETENTION later is what advances the book's notion of "now".
-        book.accept(result(1, T0.plus(RETENTION), tracked("car", 9, TrackState.CONFIRMED, 0.70)));
+        book.accept(result(1, T0.plus(RETENTION), tracked("car", 9, TrackState.CONFIRMED, 0.70)), List.of());
 
         assertEquals(List.of(9L), book.tracks().stream().map(TrackedObject::trackId).toList());
     }
 
     @Test
     void aTrackStillWithinTheRetentionWindowSurvivesAResultThatDoesNotMentionIt() {
-        TrackBook book = new TrackBook(RETENTION);
-        book.accept(result(0, T0, tracked("car", 7, TrackState.CONFIRMED, 0.30)));
+        WorldModel book = book(RETENTION);
+        book.accept(result(0, T0, tracked("car", 7, TrackState.CONFIRMED, 0.30)), List.of());
 
-        book.accept(result(1, T0.plus(RETENTION).minusMillis(1), tracked("car", 9, TrackState.CONFIRMED, 0.70)));
+        book.accept(result(1, T0.plus(RETENTION).minusMillis(1), tracked("car", 9, TrackState.CONFIRMED, 0.70)), List.of());
 
         assertEquals(List.of(7L, 9L), book.tracks().stream().map(TrackedObject::trackId).toList());
     }
 
     @Test
     void untrackedDetectionsAreIgnoredEntirelySoATrackingOffStreamBooksNothing() {
-        TrackBook book = new TrackBook(RETENTION);
+        WorldModel book = book(RETENTION);
 
-        book.accept(result(0, T0, untracked("car", 0.3), untracked("person", 0.6)));
+        book.accept(result(0, T0, untracked("car", 0.3), untracked("person", 0.6)), List.of());
 
         assertTrue(book.tracks().isEmpty());
     }
 
     @Test
     void tracksAreOrderedByTrackIdAscending() {
-        TrackBook book = new TrackBook(RETENTION);
+        WorldModel book = book(RETENTION);
 
         book.accept(result(0, T0,
                 tracked("car", 12, TrackState.CONFIRMED, 0.1),
                 tracked("car", 3, TrackState.TENTATIVE, 0.2),
-                tracked("car", 7, TrackState.COASTING, 0.3)));
+                tracked("car", 7, TrackState.COASTING, 0.3)), List.of());
 
         assertEquals(List.of(3L, 7L, 12L), book.tracks().stream().map(TrackedObject::trackId).toList());
     }
 
     @Test
     void anOutOfOrderResultNeverRewindsTheBookedObservation() {
-        TrackBook book = new TrackBook(RETENTION);
+        WorldModel book = book(RETENTION);
         Instant later = T0.plusMillis(400);
-        book.accept(result(1, later, tracked("car", 7, TrackState.CONFIRMED, 0.34)));
+        book.accept(result(1, later, tracked("car", 7, TrackState.CONFIRMED, 0.34)), List.of());
 
         // An inference that completed late but was captured earlier: widens the lifetime backwards,
         // never replaces the fresher observation already booked.
-        book.accept(result(0, T0, tracked("car", 7, TrackState.TENTATIVE, 0.30)));
+        book.accept(result(0, T0, tracked("car", 7, TrackState.TENTATIVE, 0.30)), List.of());
 
         TrackedObject booked = only(book.tracks());
         assertEquals(T0, booked.firstSeen());
@@ -157,8 +170,8 @@ class TrackBookTest {
 
     @Test
     void clearEmptiesTheBook() {
-        TrackBook book = new TrackBook(RETENTION);
-        book.accept(result(0, T0, tracked("car", 7, TrackState.CONFIRMED, 0.3)));
+        WorldModel book = book(RETENTION);
+        book.accept(result(0, T0, tracked("car", 7, TrackState.CONFIRMED, 0.3)), List.of());
 
         book.clear();
 
@@ -167,11 +180,11 @@ class TrackBookTest {
 
     @Test
     void tracksReturnsAnImmutableSnapshotThatALaterAcceptCannotMutate() {
-        TrackBook book = new TrackBook(RETENTION);
-        book.accept(result(0, T0, tracked("car", 7, TrackState.CONFIRMED, 0.3)));
+        WorldModel book = book(RETENTION);
+        book.accept(result(0, T0, tracked("car", 7, TrackState.CONFIRMED, 0.3)), List.of());
         List<TrackedObject> snapshot = book.tracks();
 
-        book.accept(result(1, T0.plusMillis(100), tracked("car", 8, TrackState.CONFIRMED, 0.6)));
+        book.accept(result(1, T0.plusMillis(100), tracked("car", 8, TrackState.CONFIRMED, 0.6)), List.of());
 
         assertEquals(1, snapshot.size());
         assertThrows(UnsupportedOperationException.class, () -> snapshot.add(snapshot.getFirst()));
@@ -179,7 +192,7 @@ class TrackBookTest {
 
     @Test
     void aNonPositiveRetentionIsRejected() {
-        assertThrows(IllegalArgumentException.class, () -> new TrackBook(Duration.ZERO));
-        assertThrows(IllegalArgumentException.class, () -> new TrackBook(Duration.ofSeconds(-1)));
+        assertThrows(IllegalArgumentException.class, () -> book(Duration.ZERO));
+        assertThrows(IllegalArgumentException.class, () -> book(Duration.ofSeconds(-1)));
     }
 }

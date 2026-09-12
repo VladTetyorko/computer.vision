@@ -288,8 +288,9 @@ class StreamPipelineTest {
                 base.warmupFrames(), base.minMeasuredFps(), base.maxMeasuredFps(),
                 base.detectionBackoffInitialNanos(), base.detectionBackoffMaxNanos(),
                 base.sourceReopenBackoffInitialNanos(), base.sourceReopenBackoffMaxNanos(),
-                base.extrapolationMaxMillis(), base.extrapolationMatchGate(),
-                base.trackingStatsWindow(), base.trackRetention(), base.trackingSeed(), hfovDegrees);
+                base.trackingStatsWindow(), base.trackRetention(), base.trackingSeed(), hfovDegrees,
+                base.adaptiveRate(), base.detectionDemandPollInterval(), base.detectionDemandGrace(),
+                base.videoStaleAfter(), base.renderTier(), base.gateLedgerDepth(), base.frameLedgerDepth());
     }
 
     private StreamPipeline attitudePipeline(ScriptedVideoPublisher publisher, PipelineConfig config,
@@ -1712,9 +1713,9 @@ class StreamPipelineTest {
                 base.warmupFrames(), base.minMeasuredFps(), base.maxMeasuredFps(),
                 base.detectionBackoffInitialNanos(), base.detectionBackoffMaxNanos(),
                 base.sourceReopenBackoffInitialNanos(), base.sourceReopenBackoffMaxNanos(),
-                base.extrapolationMaxMillis(), base.extrapolationMatchGate(),
                 base.trackingStatsWindow(), base.trackRetention(), base.trackingSeed(),
-                base.cameraHfovDegrees(), adaptiveRate);
+                base.cameraHfovDegrees(), adaptiveRate, base.detectionDemandPollInterval(),
+                base.detectionDemandGrace(), base.videoStaleAfter(), base.renderTier(), base.gateLedgerDepth(), base.frameLedgerDepth());
     }
 
     /** A result whose single box is small and fast enough to demand far more than 10 fps. */

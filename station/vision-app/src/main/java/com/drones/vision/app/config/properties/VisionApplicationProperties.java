@@ -32,10 +32,10 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  *                         as a whole when absent
  * @param training         {@code DefaultTrainingJobService}'s retention cap and {@code
  *                         DefaultLabelingService}'s capture JPEG quality; defaulted as a whole when absent
- * @param pipeline         {@code StreamPipeline}'s frame-cadence/backoff tunables, plus the source
- *                         reopen backoff {@code DefaultStreamService} wraps a video source in;
- *                         defaulted as a whole when absent
- * @param extrapolation    {@code DetectionExtrapolator}'s smoothing tunables; defaulted as a whole when absent
+ * @param pipeline         {@code StreamPipeline}'s frame-cadence/backoff tunables, the source
+ *                         reopen backoff {@code DefaultStreamService} wraps a video source in, and
+ *                         {@code WorldModel}'s render-tier/trace-ledger tunables (docs/plans/active/
+ *                         CV-ORCHESTRATION-PLAN.md &sect;4.6); defaulted as a whole when absent
  * @param simulation       {@code DefaultSimulationService}'s MAVLink-transport fallback defaults;
  *                         defaulted as a whole when absent
  */
@@ -47,7 +47,6 @@ public record VisionApplicationProperties(
         Fleet fleet,
         Training training,
         Pipeline pipeline,
-        Extrapolation extrapolation,
         Simulation simulation) {
 
     static final String DEFAULT_DISCOVERY_GRACE_MS = "200";
@@ -74,11 +73,8 @@ public record VisionApplicationProperties(
             pipeline = new Pipeline(Pipeline.DEFAULT_ASSUMED_SOURCE_FPS_INT,
                     Pipeline.DEFAULT_MEASURED_FPS_EWMA_ALPHA_DOUBLE, Pipeline.DEFAULT_WARMUP_FRAMES_INT,
                     Pipeline.DEFAULT_MIN_MEASURED_FPS_DOUBLE, Pipeline.DEFAULT_MAX_MEASURED_FPS_DOUBLE, null, null,
-                    Pipeline.DEFAULT_CAMERA_HFOV_DEGREES_DOUBLE, null, null);
-        }
-        if (extrapolation == null) {
-            extrapolation = new Extrapolation(Extrapolation.DEFAULT_MAX_MILLIS_LONG,
-                    Extrapolation.DEFAULT_MATCH_GATE_DOUBLE);
+                    Pipeline.DEFAULT_CAMERA_HFOV_DEGREES_DOUBLE, null, null, null,
+                    Pipeline.DEFAULT_GATE_LEDGER_DEPTH_INT, Pipeline.DEFAULT_FRAME_LEDGER_DEPTH_INT);
         }
         if (simulation == null) {
             simulation = new Simulation(Simulation.DEFAULT_MAVLINK_LOOPBACK_HOST_STRING,
@@ -162,6 +158,14 @@ public record VisionApplicationProperties(
      *                              to leave its association budget
      *                              (docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R2); defaulted as a
      *                              whole when absent
+     * @param renderTier            {@code WorldModel}'s render-tier assignment tunables — the
+     *                              server-side port of the client's {@code detectionTiers} overlay
+     *                              logic (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.6);
+     *                              defaulted as a whole when absent
+     * @param gateLedgerDepth       how many recent gate decisions {@code StreamPipeline}'s trace
+     *                              ledger retains per stream; default {@value #DEFAULT_GATE_LEDGER_DEPTH}
+     * @param frameLedgerDepth      how many recent frames {@code StreamPipeline}'s trace ledger
+     *                              retains per stream; default {@value #DEFAULT_FRAME_LEDGER_DEPTH}
      */
     public record Pipeline(@DefaultValue(Pipeline.DEFAULT_ASSUMED_SOURCE_FPS) int assumedSourceFps,
                             @DefaultValue(Pipeline.DEFAULT_MEASURED_FPS_EWMA_ALPHA) double measuredFpsEwmaAlpha,
@@ -172,7 +176,10 @@ public record VisionApplicationProperties(
                             Backoff sourceReopenBackoff,
                             @DefaultValue(Pipeline.DEFAULT_CAMERA_HFOV_DEGREES) double cameraHfovDegrees,
                             AdaptiveRate adaptiveRate,
-                            @DefaultValue(Pipeline.DEFAULT_VIDEO_STALE_AFTER) Duration videoStaleAfter) {
+                            @DefaultValue(Pipeline.DEFAULT_VIDEO_STALE_AFTER) Duration videoStaleAfter,
+                            RenderTier renderTier,
+                            @DefaultValue(Pipeline.DEFAULT_GATE_LEDGER_DEPTH) int gateLedgerDepth,
+                            @DefaultValue(Pipeline.DEFAULT_FRAME_LEDGER_DEPTH) int frameLedgerDepth) {
         static final String DEFAULT_ASSUMED_SOURCE_FPS = "30";
         /**
          * How long a running stream may go without a frame before {@code StreamState} reports it
@@ -192,6 +199,12 @@ public record VisionApplicationProperties(
         static final int DEFAULT_WARMUP_FRAMES_INT = 5;
         static final double DEFAULT_MIN_MEASURED_FPS_DOUBLE = 1.0;
         static final double DEFAULT_MAX_MEASURED_FPS_DOUBLE = 240.0;
+        /** {@code StreamPipelineSettings#DEFAULT_GATE_LEDGER_DEPTH}. */
+        static final String DEFAULT_GATE_LEDGER_DEPTH = "256";
+        /** {@code StreamPipelineSettings#DEFAULT_FRAME_LEDGER_DEPTH}. */
+        static final String DEFAULT_FRAME_LEDGER_DEPTH = "64";
+        static final int DEFAULT_GATE_LEDGER_DEPTH_INT = 256;
+        static final int DEFAULT_FRAME_LEDGER_DEPTH_INT = 64;
 
         public Pipeline {
             if (detectionBackoff == null) {
@@ -208,6 +221,11 @@ public record VisionApplicationProperties(
             }
             if (videoStaleAfter == null) {
                 videoStaleAfter = Duration.ofSeconds(5);
+            }
+            if (renderTier == null) {
+                renderTier = new RenderTier(RenderTier.DEFAULT_NOTABLE_TOP_K_INT,
+                        RenderTier.DEFAULT_MOVING_DISPLACEMENT_THRESHOLD_DOUBLE,
+                        RenderTier.DEFAULT_SUB_SCALE_FRACTION_DOUBLE);
             }
         }
 
@@ -238,21 +256,36 @@ public record VisionApplicationProperties(
             static final int DEFAULT_SOURCE_REOPEN_INITIAL_MS_INT = 1_000;
             static final int DEFAULT_SOURCE_REOPEN_MAX_MS_INT = 30_000;
         }
-    }
 
-    /**
-     * @param maxMillis how far past the latest completed result's capture time {@code
-     *                  DetectionExtrapolator} extrapolates before the output freezes; default
-     *                  {@value #DEFAULT_MAX_MILLIS}
-     * @param matchGate max normalized box-center distance for a same-label match; default
-     *                  {@value #DEFAULT_MATCH_GATE}
-     */
-    public record Extrapolation(@DefaultValue(Extrapolation.DEFAULT_MAX_MILLIS) long maxMillis,
-                                 @DefaultValue(Extrapolation.DEFAULT_MATCH_GATE) double matchGate) {
-        static final String DEFAULT_MAX_MILLIS = "800";
-        static final String DEFAULT_MATCH_GATE = "0.15";
-        static final long DEFAULT_MAX_MILLIS_LONG = 800L;
-        static final double DEFAULT_MATCH_GATE_DOUBLE = 0.15;
+        /**
+         * {@code WorldModel}'s render-tier assignment tunables, mapped straight onto {@code
+         * RenderTierSettings} — the server-side port of the client overlay's {@code detectionTiers}
+         * logic (station/vision-web/src/app/shared/player/detection-overlay-logic.ts), with the
+         * documented deviations recorded on {@code RenderTierSettings}' own javadoc (no hover
+         * promotion, a normalized {@code subScaleFraction} rather than a CSS-pixel threshold, and
+         * one-frame displacement rather than trail-window integration for the "moving" test).
+         *
+         * @param notableTopK                  how many objects, ranked by area &times; confidence,
+         *                                      are promoted to tier {@code T1} on top of the ones
+         *                                      already promoted for moving; default
+         *                                      {@value #DEFAULT_NOTABLE_TOP_K}
+         * @param movingDisplacementThreshold   normalized one-frame displacement above which an
+         *                                      object counts as moving for tier {@code T1}; default
+         *                                      {@value #DEFAULT_MOVING_DISPLACEMENT_THRESHOLD}
+         * @param subScaleFraction              normalized fraction of the frame's shorter dimension
+         *                                      below which a box is sub-scale (tier {@code T3});
+         *                                      default {@value #DEFAULT_SUB_SCALE_FRACTION}
+         */
+        public record RenderTier(@DefaultValue(RenderTier.DEFAULT_NOTABLE_TOP_K) int notableTopK,
+                                  @DefaultValue(RenderTier.DEFAULT_MOVING_DISPLACEMENT_THRESHOLD) double movingDisplacementThreshold,
+                                  @DefaultValue(RenderTier.DEFAULT_SUB_SCALE_FRACTION) double subScaleFraction) {
+            static final String DEFAULT_NOTABLE_TOP_K = "5";
+            static final String DEFAULT_MOVING_DISPLACEMENT_THRESHOLD = "0.02";
+            static final String DEFAULT_SUB_SCALE_FRACTION = "0.01";
+            static final int DEFAULT_NOTABLE_TOP_K_INT = 5;
+            static final double DEFAULT_MOVING_DISPLACEMENT_THRESHOLD_DOUBLE = 0.02;
+            static final double DEFAULT_SUB_SCALE_FRACTION_DOUBLE = 0.01;
+        }
     }
 
     /**

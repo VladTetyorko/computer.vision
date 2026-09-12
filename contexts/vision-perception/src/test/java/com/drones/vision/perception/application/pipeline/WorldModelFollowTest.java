@@ -26,10 +26,15 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Every timestamp here comes from the result's own {@code capturedAt}, never {@code Instant.now()} —
- * {@link FollowTracker} has no clock by design, so these assertions are exact rather than tolerant.
+ * The former {@code FollowTrackerTest}, ported verbatim onto {@link WorldModel} when the follow lock
+ * moved into it (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.6, wave W2) — same scenarios,
+ * same assertions, so the move is provably behaviour-preserving.
+ *
+ * <p>Every timestamp here comes from the result's own {@code capturedAt}, never {@code
+ * Instant.now()} — {@link WorldModel} has no clock by design, so these assertions are exact rather
+ * than tolerant.
  */
-class FollowTrackerTest {
+class WorldModelFollowTest {
 
     private static final ModelRef MODEL = new ModelRef("yolo26n.pt", "latest");
     private static final Instant T0 = Instant.parse("2026-09-04T10:15:00Z");
@@ -60,6 +65,11 @@ class FollowTrackerTest {
                         dormantMillis));
     }
 
+    /** A {@link WorldModel} whose follow half is configured exactly as {@code FollowTracker} was. */
+    private static WorldModel follower(Duration memoryTtl) {
+        return new WorldModel(Duration.ofSeconds(5), memoryTtl, RenderTierSettings.defaults(), label -> null);
+    }
+
     private DetectionResult bound(Instant at, long lockedTrackId, Detection... detections) {
         TrackingTelemetry telemetry =
                 new TrackingTelemetry(true, DetectorReason.ALWAYS, Duration.ZERO, "engine", lockedTrackId);
@@ -80,54 +90,54 @@ class FollowTrackerTest {
 
     @Test
     void rejectsNonPositiveMemoryTtl() {
-        assertThrows(IllegalArgumentException.class, () -> new FollowTracker(Duration.ZERO));
-        assertThrows(IllegalArgumentException.class, () -> new FollowTracker(Duration.ofSeconds(-1)));
+        assertThrows(IllegalArgumentException.class, () -> follower(Duration.ZERO));
+        assertThrows(IllegalArgumentException.class, () -> follower(Duration.ofSeconds(-1)));
     }
 
     @Test
     void rejectsNullMemoryTtl() {
-        assertThrows(NullPointerException.class, () -> new FollowTracker(null));
+        assertThrows(NullPointerException.class, () -> follower(null));
     }
 
     @Test
     void rejectsNullLockAndNullResult() {
-        FollowTracker tracker = new FollowTracker();
+        WorldModel tracker = follower(WorldModel.DEFAULT_MEMORY_TTL);
         assertThrows(NullPointerException.class, () -> tracker.lockRequested(null));
-        assertThrows(NullPointerException.class, () -> tracker.accept(null));
+        assertThrows(NullPointerException.class, () -> tracker.accept(null, List.of()));
     }
 
     // -- never requested / tracking off --------------------------------------------------------
 
     @Test
     void neverRequestedReadsEmpty() {
-        FollowTracker tracker = new FollowTracker();
-        assertTrue(tracker.status().isEmpty());
+        WorldModel tracker = follower(WorldModel.DEFAULT_MEMORY_TTL);
+        assertTrue(tracker.followStatus().isEmpty());
 
-        tracker.accept(unbound(T0));
+        tracker.accept(unbound(T0), List.of());
 
-        assertTrue(tracker.status().isEmpty());
+        assertTrue(tracker.followStatus().isEmpty());
     }
 
     @Test
     void resultWithNoTrackingTelemetryIsIgnored() {
-        FollowTracker tracker = new FollowTracker();
+        WorldModel tracker = follower(WorldModel.DEFAULT_MEMORY_TTL);
         tracker.lockRequested(trackIdLock(1, 5));
 
-        tracker.accept(noTracking(T0));
+        tracker.accept(noTracking(T0), List.of());
 
-        assertTrue(tracker.status().isEmpty());
+        assertTrue(tracker.followStatus().isEmpty());
     }
 
     // -- REQUESTING -----------------------------------------------------------------------------
 
     @Test
     void requestingWhileLockedTrackIdStillZero() {
-        FollowTracker tracker = new FollowTracker();
+        WorldModel tracker = follower(WorldModel.DEFAULT_MEMORY_TTL);
         tracker.lockRequested(trackIdLock(1, 5));
 
-        tracker.accept(unbound(T0));
+        tracker.accept(unbound(T0), List.of());
 
-        FollowStatus status = tracker.status().orElseThrow();
+        FollowStatus status = tracker.followStatus().orElseThrow();
         assertEquals(FollowState.REQUESTING, status.state());
         assertEquals(0L, status.trackId());
         assertEquals(T0, status.since());
@@ -136,27 +146,27 @@ class FollowTrackerTest {
 
     @Test
     void requestingSinceStaysStableAcrossRepeatedUnboundFrames() {
-        FollowTracker tracker = new FollowTracker();
+        WorldModel tracker = follower(WorldModel.DEFAULT_MEMORY_TTL);
         tracker.lockRequested(trackIdLock(1, 5));
 
-        tracker.accept(unbound(T0));
-        tracker.accept(unbound(T0.plusSeconds(1)));
+        tracker.accept(unbound(T0), List.of());
+        tracker.accept(unbound(T0.plusSeconds(1)), List.of());
 
-        assertEquals(T0, tracker.status().orElseThrow().since());
+        assertEquals(T0, tracker.followStatus().orElseThrow().since());
     }
 
     // -- HOLDING / COASTING -----------------------------------------------------------------------
 
     @Test
     void holdingAfterRequestingWhenBoundToDetectorSourcedTrack() {
-        FollowTracker tracker = new FollowTracker();
+        WorldModel tracker = follower(WorldModel.DEFAULT_MEMORY_TTL);
         tracker.lockRequested(trackIdLock(1, 5));
-        tracker.accept(unbound(T0));
+        tracker.accept(unbound(T0), List.of());
 
         Instant t1 = T0.plusSeconds(1);
-        tracker.accept(bound(t1, 5, tracked("person", 5, TrackState.CONFIRMED, DetectionSource.DETECTOR)));
+        tracker.accept(bound(t1, 5, tracked("person", 5, TrackState.CONFIRMED, DetectionSource.DETECTOR)), List.of());
 
-        FollowStatus status = tracker.status().orElseThrow();
+        FollowStatus status = tracker.followStatus().orElseThrow();
         assertEquals(FollowState.HOLDING, status.state());
         assertEquals(5L, status.trackId());
         assertEquals("person", status.label());
@@ -169,24 +179,24 @@ class FollowTrackerTest {
 
     @Test
     void holdingImmediatelyWithNoPriorRequestingObservation() {
-        FollowTracker tracker = new FollowTracker();
+        WorldModel tracker = follower(WorldModel.DEFAULT_MEMORY_TTL);
         tracker.lockRequested(trackIdLock(1, 5));
 
-        tracker.accept(bound(T0, 5, tracked("person", 5, TrackState.CONFIRMED, DetectionSource.DETECTOR)));
+        tracker.accept(bound(T0, 5, tracked("person", 5, TrackState.CONFIRMED, DetectionSource.DETECTOR)), List.of());
 
-        FollowStatus status = tracker.status().orElseThrow();
+        FollowStatus status = tracker.followStatus().orElseThrow();
         assertEquals(FollowState.HOLDING, status.state());
         assertEquals(T0, status.since());
     }
 
     @Test
     void coastingWhenNewestTrackRefIsTrackerSourced() {
-        FollowTracker tracker = holdingTracker();
+        WorldModel tracker = holdingTracker();
 
         Instant t2 = T0.plusSeconds(2);
-        tracker.accept(bound(t2, 5, tracked("person", 5, TrackState.COASTING, DetectionSource.TRACKER)));
+        tracker.accept(bound(t2, 5, tracked("person", 5, TrackState.COASTING, DetectionSource.TRACKER)), List.of());
 
-        FollowStatus status = tracker.status().orElseThrow();
+        FollowStatus status = tracker.followStatus().orElseThrow();
         assertEquals(FollowState.COASTING, status.state());
         assertEquals(5L, status.trackId());
         assertEquals("person", status.label());
@@ -196,14 +206,14 @@ class FollowTrackerTest {
 
     @Test
     void holdingResumesAfterCoastingWithoutBeingMistakenForANewBind() {
-        FollowTracker tracker = holdingTracker();
+        WorldModel tracker = holdingTracker();
         Instant t2 = T0.plusSeconds(2);
-        tracker.accept(bound(t2, 5, tracked("person", 5, TrackState.COASTING, DetectionSource.TRACKER)));
+        tracker.accept(bound(t2, 5, tracked("person", 5, TrackState.COASTING, DetectionSource.TRACKER)), List.of());
 
         Instant t3 = T0.plusSeconds(3);
-        tracker.accept(bound(t3, 5, tracked("person", 5, TrackState.CONFIRMED, DetectionSource.DETECTOR)));
+        tracker.accept(bound(t3, 5, tracked("person", 5, TrackState.CONFIRMED, DetectionSource.DETECTOR)), List.of());
 
-        FollowStatus status = tracker.status().orElseThrow();
+        FollowStatus status = tracker.followStatus().orElseThrow();
         assertEquals(FollowState.HOLDING, status.state());
         assertEquals(t3, status.since());
         assertEquals(0L, status.recoveredAfterMillis(), "re-confirming after a coast is not a memory recovery");
@@ -211,15 +221,15 @@ class FollowTrackerTest {
 
     @Test
     void stickyOnAFrameWhereTheBoundDetectionWasFilteredOut() {
-        FollowTracker tracker = holdingTracker();
+        WorldModel tracker = holdingTracker();
         Instant t1 = T0.plusSeconds(1);
-        FollowStatus before = tracker.status().orElseThrow();
+        FollowStatus before = tracker.followStatus().orElseThrow();
 
         // lockedTrackId still reports the bind, but the label-filtered result carries no matching
         // Detection for it (StreamPipeline.applyLabelFilters dropped it before this call).
-        tracker.accept(bound(t1, 5));
+        tracker.accept(bound(t1, 5), List.of());
 
-        FollowStatus status = tracker.status().orElseThrow();
+        FollowStatus status = tracker.followStatus().orElseThrow();
         assertEquals(before.state(), status.state());
         assertEquals(before.label(), status.label());
         assertEquals(before.lastSeenAt(), status.lastSeenAt());
@@ -231,13 +241,13 @@ class FollowTrackerTest {
 
     @Test
     void lostFreezesLastSeenAtAndLastBoxAndKeepsLabelAndTrackId() {
-        FollowTracker tracker = holdingTracker();
+        WorldModel tracker = holdingTracker();
         Instant lastBoundAt = T0.plusSeconds(1);
 
         Instant lostAt = T0.plusSeconds(2);
-        tracker.accept(unbound(lostAt));
+        tracker.accept(unbound(lostAt), List.of());
 
-        FollowStatus status = tracker.status().orElseThrow();
+        FollowStatus status = tracker.followStatus().orElseThrow();
         assertEquals(FollowState.LOST, status.state());
         assertEquals(5L, status.trackId(), "trackId stays at its last bound value so re-acquire can resend it");
         assertEquals("person", status.label(), "label is not cleared on loss (D3/D5)");
@@ -245,9 +255,9 @@ class FollowTrackerTest {
         assertEquals(lastBoundAt, status.lastSeenAt(), "lastSeenAt freezes, it does not advance to lostAt");
 
         Instant stillLostAt = T0.plusSeconds(30);
-        tracker.accept(unbound(stillLostAt));
+        tracker.accept(unbound(stillLostAt), List.of());
 
-        FollowStatus stillLost = tracker.status().orElseThrow();
+        FollowStatus stillLost = tracker.followStatus().orElseThrow();
         assertEquals(FollowState.LOST, stillLost.state());
         assertEquals(lostAt, stillLost.since(), "since does not restamp while still LOST");
         assertEquals(lastBoundAt, stillLost.lastSeenAt(), "lastSeenAt/lastBox stay frozen across further LOST frames");
@@ -258,58 +268,58 @@ class FollowTrackerTest {
 
     @Test
     void releaseDropsFollowStatusToEmpty() {
-        FollowTracker tracker = holdingTracker();
+        WorldModel tracker = holdingTracker();
 
         tracker.lockRequested(releaseLock(2));
 
-        assertTrue(tracker.status().isEmpty());
+        assertTrue(tracker.followStatus().isEmpty());
     }
 
     @Test
     void releaseWhileLostAlsoDropsToEmpty() {
-        FollowTracker tracker = holdingTracker();
-        tracker.accept(unbound(T0.plusSeconds(2)));
-        assertEquals(FollowState.LOST, tracker.status().orElseThrow().state());
+        WorldModel tracker = holdingTracker();
+        tracker.accept(unbound(T0.plusSeconds(2)), List.of());
+        assertEquals(FollowState.LOST, tracker.followStatus().orElseThrow().state());
 
         tracker.lockRequested(releaseLock(2));
 
-        assertTrue(tracker.status().isEmpty());
+        assertTrue(tracker.followStatus().isEmpty());
     }
 
     @Test
     void afterReleaseAFurtherUnboundFrameStaysEmptyNotRequesting() {
-        FollowTracker tracker = holdingTracker();
+        WorldModel tracker = holdingTracker();
         tracker.lockRequested(releaseLock(2));
 
-        tracker.accept(unbound(T0.plusSeconds(5)));
+        tracker.accept(unbound(T0.plusSeconds(5)), List.of());
 
-        assertTrue(tracker.status().isEmpty());
+        assertTrue(tracker.followStatus().isEmpty());
     }
 
     // -- recovery (L4) ------------------------------------------------------------------------------
 
     @Test
     void coastThenRecoverKeepsTheSameTrackIdAndLabel() {
-        FollowTracker tracker = new FollowTracker();
+        WorldModel tracker = follower(WorldModel.DEFAULT_MEMORY_TTL);
         tracker.lockRequested(trackIdLock(1, 9));
 
         Instant t1 = T0.plusSeconds(1);
-        tracker.accept(bound(t1, 9, tracked("dog", 9, TrackState.CONFIRMED, DetectionSource.DETECTOR)));
+        tracker.accept(bound(t1, 9, tracked("dog", 9, TrackState.CONFIRMED, DetectionSource.DETECTOR)), List.of());
         Instant t2 = T0.plusSeconds(2);
-        tracker.accept(bound(t2, 9, tracked("dog", 9, TrackState.COASTING, DetectionSource.TRACKER)));
-        assertEquals(FollowState.COASTING, tracker.status().orElseThrow().state());
+        tracker.accept(bound(t2, 9, tracked("dog", 9, TrackState.COASTING, DetectionSource.TRACKER)), List.of());
+        assertEquals(FollowState.COASTING, tracker.followStatus().orElseThrow().state());
 
         Instant lostAt = T0.plusSeconds(3);
-        tracker.accept(unbound(lostAt));
-        FollowStatus lost = tracker.status().orElseThrow();
+        tracker.accept(unbound(lostAt), List.of());
+        FollowStatus lost = tracker.followStatus().orElseThrow();
         assertEquals(FollowState.LOST, lost.state());
         assertEquals(9L, lost.trackId());
         assertEquals("dog", lost.label());
 
         Instant recoveredAt = T0.plusSeconds(11);
-        tracker.accept(bound(recoveredAt, 9, recovered("dog", 9, DetectionSource.DETECTOR, 0.71, 8200)));
+        tracker.accept(bound(recoveredAt, 9, recovered("dog", 9, DetectionSource.DETECTOR, 0.71, 8200)), List.of());
 
-        FollowStatus recoveredStatus = tracker.status().orElseThrow();
+        FollowStatus recoveredStatus = tracker.followStatus().orElseThrow();
         assertEquals(FollowState.HOLDING, recoveredStatus.state(),
                 "a recovery goes straight back to HOLDING, not a fresh acquire flow");
         assertEquals(9L, recoveredStatus.trackId());
@@ -321,12 +331,12 @@ class FollowTrackerTest {
 
     @Test
     void freshAcquisitionHasZeroRecoveryFields() {
-        FollowTracker tracker = new FollowTracker();
+        WorldModel tracker = follower(WorldModel.DEFAULT_MEMORY_TTL);
         tracker.lockRequested(trackIdLock(1, 5));
 
-        tracker.accept(bound(T0, 5, tracked("person", 5, TrackState.CONFIRMED, DetectionSource.DETECTOR)));
+        tracker.accept(bound(T0, 5, tracked("person", 5, TrackState.CONFIRMED, DetectionSource.DETECTOR)), List.of());
 
-        FollowStatus status = tracker.status().orElseThrow();
+        FollowStatus status = tracker.followStatus().orElseThrow();
         assertEquals(0L, status.recoveredAfterMillis());
         assertEquals(0.0, status.recoveryConfidence());
     }
@@ -335,90 +345,90 @@ class FollowTrackerTest {
 
     @Test
     void reacquirableTrueWithinMemoryTtlForATrackIdLock() {
-        FollowTracker tracker = new FollowTracker(Duration.ofSeconds(30));
+        WorldModel tracker = follower(Duration.ofSeconds(30));
         tracker.lockRequested(trackIdLock(1, 5));
-        tracker.accept(bound(T0, 5, tracked("person", 5, TrackState.CONFIRMED, DetectionSource.DETECTOR)));
+        tracker.accept(bound(T0, 5, tracked("person", 5, TrackState.CONFIRMED, DetectionSource.DETECTOR)), List.of());
 
-        tracker.accept(unbound(T0.plusSeconds(5)));
+        tracker.accept(unbound(T0.plusSeconds(5)), List.of());
 
-        assertTrue(tracker.status().orElseThrow().reacquirable());
+        assertTrue(tracker.followStatus().orElseThrow().reacquirable());
     }
 
     @Test
     void reacquirableFalseOnceMemoryTtlElapses() {
-        FollowTracker tracker = new FollowTracker(Duration.ofSeconds(30));
+        WorldModel tracker = follower(Duration.ofSeconds(30));
         tracker.lockRequested(trackIdLock(1, 5));
-        tracker.accept(bound(T0, 5, tracked("person", 5, TrackState.CONFIRMED, DetectionSource.DETECTOR)));
+        tracker.accept(bound(T0, 5, tracked("person", 5, TrackState.CONFIRMED, DetectionSource.DETECTOR)), List.of());
 
-        tracker.accept(unbound(T0.plusSeconds(31)));
+        tracker.accept(unbound(T0.plusSeconds(31)), List.of());
 
-        assertFalse(tracker.status().orElseThrow().reacquirable());
+        assertFalse(tracker.followStatus().orElseThrow().reacquirable());
     }
 
     @Test
     void reacquirableFalseForAPointFormLockEvenImmediatelyAfterLoss() {
-        FollowTracker tracker = new FollowTracker(Duration.ofSeconds(30));
+        WorldModel tracker = follower(Duration.ofSeconds(30));
         tracker.lockRequested(pointLock(1));
-        tracker.accept(bound(T0, 5, tracked("person", 5, TrackState.CONFIRMED, DetectionSource.DETECTOR)));
+        tracker.accept(bound(T0, 5, tracked("person", 5, TrackState.CONFIRMED, DetectionSource.DETECTOR)), List.of());
 
-        tracker.accept(unbound(T0.plusSeconds(1)));
+        tracker.accept(unbound(T0.plusSeconds(1)), List.of());
 
-        assertFalse(tracker.status().orElseThrow().reacquirable());
+        assertFalse(tracker.followStatus().orElseThrow().reacquirable());
     }
 
     @Test
     void reacquirableFalseWhileHoldingOrCoasting() {
-        FollowTracker tracker = holdingTracker();
-        assertFalse(tracker.status().orElseThrow().reacquirable());
+        WorldModel tracker = holdingTracker();
+        assertFalse(tracker.followStatus().orElseThrow().reacquirable());
     }
 
     // -- clear (model re-arm / gate close) --------------------------------------------------------
 
     @Test
     void clearResetsToNeverRequested() {
-        FollowTracker tracker = holdingTracker();
+        WorldModel tracker = holdingTracker();
 
         tracker.clear();
 
-        assertTrue(tracker.status().isEmpty());
+        assertTrue(tracker.followStatus().isEmpty());
 
         // requestPending must also have been reset -- otherwise the next unbound frame would
         // wrongly resurrect REQUESTING for a lock this pipeline no longer remembers.
-        tracker.accept(unbound(T0.plusSeconds(9)));
-        assertTrue(tracker.status().isEmpty());
+        tracker.accept(unbound(T0.plusSeconds(9)), List.of());
+        assertTrue(tracker.followStatus().isEmpty());
     }
 
     // -- all five states enumerated end-to-end ------------------------------------------------------
 
     @Test
     void allFiveStatesAreReachableInSequence() {
-        FollowTracker tracker = new FollowTracker();
+        WorldModel tracker = follower(WorldModel.DEFAULT_MEMORY_TTL);
 
         tracker.lockRequested(trackIdLock(1, 5));
-        tracker.accept(unbound(T0));
-        assertEquals(FollowState.REQUESTING, tracker.status().orElseThrow().state());
+        tracker.accept(unbound(T0), List.of());
+        assertEquals(FollowState.REQUESTING, tracker.followStatus().orElseThrow().state());
 
         Instant t1 = T0.plusSeconds(1);
-        tracker.accept(bound(t1, 5, tracked("person", 5, TrackState.CONFIRMED, DetectionSource.DETECTOR)));
-        assertEquals(FollowState.HOLDING, tracker.status().orElseThrow().state());
+        tracker.accept(bound(t1, 5, tracked("person", 5, TrackState.CONFIRMED, DetectionSource.DETECTOR)), List.of());
+        assertEquals(FollowState.HOLDING, tracker.followStatus().orElseThrow().state());
 
         Instant t2 = T0.plusSeconds(2);
-        tracker.accept(bound(t2, 5, tracked("person", 5, TrackState.COASTING, DetectionSource.TRACKER)));
-        assertEquals(FollowState.COASTING, tracker.status().orElseThrow().state());
+        tracker.accept(bound(t2, 5, tracked("person", 5, TrackState.COASTING, DetectionSource.TRACKER)), List.of());
+        assertEquals(FollowState.COASTING, tracker.followStatus().orElseThrow().state());
 
         Instant t3 = T0.plusSeconds(3);
-        tracker.accept(unbound(t3));
-        assertEquals(FollowState.LOST, tracker.status().orElseThrow().state());
+        tracker.accept(unbound(t3), List.of());
+        assertEquals(FollowState.LOST, tracker.followStatus().orElseThrow().state());
 
         tracker.lockRequested(releaseLock(2));
-        assertTrue(tracker.status().isEmpty(), "RELEASED is a transition, not an observable resting state");
+        assertTrue(tracker.followStatus().isEmpty(), "RELEASED is a transition, not an observable resting state");
     }
 
-    private FollowTracker holdingTracker() {
-        FollowTracker tracker = new FollowTracker();
+    private WorldModel holdingTracker() {
+        WorldModel tracker = follower(WorldModel.DEFAULT_MEMORY_TTL);
         tracker.lockRequested(trackIdLock(1, 5));
-        tracker.accept(unbound(T0));
-        tracker.accept(bound(T0.plusSeconds(1), 5, tracked("person", 5, TrackState.CONFIRMED, DetectionSource.DETECTOR)));
+        tracker.accept(unbound(T0), List.of());
+        tracker.accept(bound(T0.plusSeconds(1), 5, tracked("person", 5, TrackState.CONFIRMED, DetectionSource.DETECTOR)), List.of());
         return tracker;
     }
 }

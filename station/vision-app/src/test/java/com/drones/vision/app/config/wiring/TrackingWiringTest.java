@@ -179,7 +179,7 @@ class TrackingWiringTest {
     @Test
     void statsWindowAndTrackRetentionBindIntoStreamPipelineSettings() {
         StreamPipelineSettings settings = ApplicationServiceWiring.streamPipelineSettings(
-                new VisionApplicationProperties(200L, null, null, null, null, null, null, null),
+                new VisionApplicationProperties(200L, null, null, null, null, null, null),
                 properties("OFF", 15, 2000, 45, 9), cvProperties());
 
         assertEquals(Duration.ofSeconds(45), settings.trackingStatsWindow());
@@ -189,7 +189,7 @@ class TrackingWiringTest {
     @Test
     void theDefaultWindowsAreByteIdenticalToTheSettingsRecordsOwnDefaults() {
         StreamPipelineSettings mapped = ApplicationServiceWiring.streamPipelineSettings(
-                new VisionApplicationProperties(200L, null, null, null, null, null, null, null), defaults(),
+                new VisionApplicationProperties(200L, null, null, null, null, null, null), defaults(),
                 cvProperties());
 
         assertEquals(StreamPipelineSettings.defaults().trackingStatsWindow(), mapped.trackingStatsWindow());
@@ -202,7 +202,7 @@ class TrackingWiringTest {
         // DefaultStreamService, which every start path -- device, asset, simulation, demo fleet --
         // goes through, instead of only the two REST endpoints that used to be injected with it.
         StreamPipelineSettings mapped = ApplicationServiceWiring.streamPipelineSettings(
-                new VisionApplicationProperties(200L, null, null, null, null, null, null, null),
+                new VisionApplicationProperties(200L, null, null, null, null, null, null),
                 properties("FOLLOW", 20, 1500, 30, 5), cvProperties());
 
         assertEquals(TrackingMode.FOLLOW, mapped.trackingSeed().mode());
@@ -213,7 +213,7 @@ class TrackingWiringTest {
     @Test
     void theDefaultSeedAgreesWithTheDomainDefaultSoAStartThatSaysNothingGetsExactlyIt() {
         StreamPipelineSettings mapped = ApplicationServiceWiring.streamPipelineSettings(
-                new VisionApplicationProperties(200L, null, null, null, null, null, null, null), defaults(),
+                new VisionApplicationProperties(200L, null, null, null, null, null, null), defaults(),
                 cvProperties());
 
         // The two layers must not drift: a start request that states nothing gets the domain default

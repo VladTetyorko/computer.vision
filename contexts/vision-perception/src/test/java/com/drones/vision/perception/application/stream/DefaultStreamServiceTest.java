@@ -717,8 +717,9 @@ class DefaultStreamServiceTest {
                 base.warmupFrames(), base.minMeasuredFps(), base.maxMeasuredFps(),
                 base.detectionBackoffInitialNanos(), base.detectionBackoffMaxNanos(),
                 base.sourceReopenBackoffInitialNanos(), base.sourceReopenBackoffMaxNanos(),
-                base.extrapolationMaxMillis(), base.extrapolationMatchGate(),
-                base.trackingStatsWindow(), base.trackRetention(), base.trackingSeed(), hfovDegrees);
+                base.trackingStatsWindow(), base.trackRetention(), base.trackingSeed(), hfovDegrees,
+                base.adaptiveRate(), base.detectionDemandPollInterval(), base.detectionDemandGrace(),
+                base.videoStaleAfter(), base.renderTier(), base.gateLedgerDepth(), base.frameLedgerDepth());
     }
 
     /**
@@ -730,9 +731,10 @@ class DefaultStreamServiceTest {
         StreamPipelineSettings base = StreamPipelineSettings.defaults();
         return new StreamPipelineSettings(base.assumedSourceFps(), base.measuredFpsEwmaAlpha(), base.warmupFrames(),
                 base.minMeasuredFps(), base.maxMeasuredFps(), base.detectionBackoffInitialNanos(),
-                base.detectionBackoffMaxNanos(), initialNanos, maxNanos, base.extrapolationMaxMillis(),
-                base.extrapolationMatchGate(), base.trackingStatsWindow(), base.trackRetention(),
-                base.trackingSeed());
+                base.detectionBackoffMaxNanos(), initialNanos, maxNanos,
+                base.trackingStatsWindow(), base.trackRetention(), base.trackingSeed(),
+                base.cameraHfovDegrees(), base.adaptiveRate(), base.detectionDemandPollInterval(),
+                base.detectionDemandGrace(), base.videoStaleAfter(), base.renderTier(), base.gateLedgerDepth(), base.frameLedgerDepth());
     }
 
     /** A {@link Flow.Publisher} that delivers exactly one frame on its first {@code request()} call. */
@@ -1264,8 +1266,9 @@ class DefaultStreamServiceTest {
                 base.measuredFpsEwmaAlpha(), base.warmupFrames(), base.minMeasuredFps(), base.maxMeasuredFps(),
                 base.detectionBackoffInitialNanos(), base.detectionBackoffMaxNanos(),
                 base.sourceReopenBackoffInitialNanos(), base.sourceReopenBackoffMaxNanos(),
-                base.extrapolationMaxMillis(), base.extrapolationMatchGate(), base.trackingStatsWindow(),
-                base.trackRetention(), seed);
+                base.trackingStatsWindow(), base.trackRetention(), seed, base.cameraHfovDegrees(),
+                base.adaptiveRate(), base.detectionDemandPollInterval(), base.detectionDemandGrace(),
+                base.videoStaleAfter(), base.renderTier(), base.gateLedgerDepth(), base.frameLedgerDepth());
         return new DefaultStreamService(assetDirectory, videoSourceRegistry, detectionPort, streamPublisherPort,
                 detectionRepositoryPort, eventPublisher,
                 new DefaultStreamServiceSettings(Optional.empty(), Optional.empty(), Optional.empty(), seeded,
@@ -1354,9 +1357,9 @@ class DefaultStreamServiceTest {
                 base.warmupFrames(), base.minMeasuredFps(), base.maxMeasuredFps(),
                 base.detectionBackoffInitialNanos(), base.detectionBackoffMaxNanos(),
                 base.sourceReopenBackoffInitialNanos(), base.sourceReopenBackoffMaxNanos(),
-                base.extrapolationMaxMillis(), base.extrapolationMatchGate(),
                 base.trackingStatsWindow(), base.trackRetention(), base.trackingSeed(),
-                base.cameraHfovDegrees(), base.adaptiveRate(), pollInterval, grace);
+                base.cameraHfovDegrees(), base.adaptiveRate(), pollInterval, grace,
+                base.videoStaleAfter(), base.renderTier(), base.gateLedgerDepth(), base.frameLedgerDepth());
     }
 
     @Test
