@@ -92,10 +92,22 @@ export function poseFactRows(pose: CameraPoseResponse): readonly FactRow[] {
 
 export type DetectionStateTone = 'ok' | 'warn' | 'muted';
 
+// D1 follow-up (docs/plans/active/CV-ORCHESTRATION-PLAN.md §7): `RUNNING_UNWATCHED` (a
+// `DetectionPolicy.ALWAYS` asset inferring with no current viewer) gets its own case in all three
+// functions below rather than falling into `default`/`'RUNNING'`'s case together. This panel's own
+// question is narrower than the Fly hero's — "is the detector producing tracks for this map to
+// project" — and the answer is yes regardless of whether anyone is watching (durable
+// persistence/events proceed exactly as `RUNNING`, per `DetectionState`'s own javadoc), so tone
+// matches `RUNNING` (`'ok'`, not `'warn'`: this is not the idle case). The label and explanation
+// still name the "no viewer" fact plainly rather than silently reusing `RUNNING`'s wording, since
+// this file's whole point (D9) is an explained state, never a silently-collapsed one.
+
 export function detectionStateLabel(state: DetectionState | undefined): string {
   switch (state) {
     case 'RUNNING':
       return 'Detecting';
+    case 'RUNNING_UNWATCHED':
+      return 'Detecting (no viewer)';
     case 'IDLE_NO_VIEWERS':
       return 'Detection idle';
     case 'OFF':
@@ -108,6 +120,7 @@ export function detectionStateLabel(state: DetectionState | undefined): string {
 export function detectionStateTone(state: DetectionState | undefined): DetectionStateTone {
   switch (state) {
     case 'RUNNING':
+    case 'RUNNING_UNWATCHED':
       return 'ok';
     case 'IDLE_NO_VIEWERS':
       return 'warn';
@@ -121,6 +134,8 @@ export function detectionStateExplanation(state: DetectionState | undefined): st
   switch (state) {
     case 'RUNNING':
       return 'Detection is running — tracks from this stream project onto the map, subject to calibration and range.';
+    case 'RUNNING_UNWATCHED':
+      return 'Detection is running for this asset even without a viewer (always-on policy) — tracks from this stream still project onto the map, subject to calibration and range.';
     case 'IDLE_NO_VIEWERS':
       return 'Detection is enabled but currently idle (no recent viewer) — it resumes automatically when needed.';
     case 'OFF':

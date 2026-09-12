@@ -124,6 +124,13 @@ describe('detection-state presentation (D9)', () => {
     expect(detectionStateExplanation('RUNNING')).toMatch(/project onto the map/);
     expect(detectionStateExplanation(undefined)).toMatch(/hasn't reported/);
   });
+
+  it('RUNNING_UNWATCHED reads as running for map-readiness purposes, not idle or unknown (D1)', () => {
+    expect(detectionStateLabel('RUNNING_UNWATCHED')).toBe('Detecting (no viewer)');
+    expect(detectionStateTone('RUNNING_UNWATCHED')).toBe('ok');
+    expect(detectionStateExplanation('RUNNING_UNWATCHED')).toMatch(/project onto the map/);
+    expect(detectionStateExplanation('RUNNING_UNWATCHED')).toMatch(/without a viewer/);
+  });
 });
 
 describe('measuredPosition (the wizard’s own camera-position sub-form)', () => {
