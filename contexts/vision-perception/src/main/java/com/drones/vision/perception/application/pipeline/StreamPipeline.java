@@ -1462,13 +1462,13 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         if (kept.size() == result.detections().size() && keptObjects.size() == result.objects().size()) {
             return result;
         }
-        // pullTelemetry is CARRIED, not dropped. Until W1 this line read the six-argument
+        // pullTelemetry -- and, since W2, ledger -- are CARRIED, not dropped. Until W1 this line read the six-argument
         // convenience constructor, which defaulted it to null -- so a pull-mode stream with any
         // label filter set silently lost its transport diagnostics on exactly the frames where the
         // filter bit. Nothing about which labels an operator wants to see is a fact about how the
         // frame was fetched. Rule 10 retiring that constructor is what made the loss visible.
         return new DetectionResult(result.streamId(), result.frameSequence(), result.capturedAt(), kept,
-                result.inferenceLatency(), result.tracking(), result.pullTelemetry(), keptObjects, Optional.empty());
+                result.inferenceLatency(), result.tracking(), result.pullTelemetry(), keptObjects, result.ledger());
     }
 
     /**

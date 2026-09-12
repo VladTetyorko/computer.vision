@@ -559,3 +559,37 @@ new JSON key" reasoning and why `tracks[]` needs no separate filtering.
 `station/vision-app/MODULE.md` for those modules' own count breakdowns. `BUILD SUCCESS`, all green,
 Docker ran for real for every Testcontainers-based suite this module's own tests touch. Nothing
 deferred from this module's own file scope.
+
+`docs/plans/active/CV-ORCHESTRATION-PLAN.md` **wave W2 step A1 "domain modeling" is done here** —
+domain-only, nothing wired to a production producer yet. New `domain.model` types: `LedgerOutcome`
+(3-value enum), `LedgerEntry`, `ObjectEvidence`, `FrameLedger` (§4.4's warm debug tier — present only
+on a traced frame, never persisted), `RenderTier` (`HIDDEN` plus the frozen `T0`-`T3` client
+vocabulary), `WorldObject` with nested `Operator`/`EventLink`/`Render` (§4.6 — `state` is the wire
+mirror verbatim, the three relations are platform-owned and must never reach cv-service). New
+`application.pipeline` types: `GateReason` (7-value enum, one per `StreamPipeline#maybeDetect` skip
+branch), `GateOutcome`, `DemandSnapshot` (documents the `sse|pose|poll` breakdown as unobtainable
+here — arrives as one boolean via `DetectionDemandPort`), `GateDecision` (one entry per sampler
+*deadline*, not per frame; if-and-only-if `reason`/`SKIPPED` pairing, the same idiom
+`TrackingTelemetry` already uses for `detectorRan`/`reason`). `DetectionResult` gained a 9th
+component, `Optional<FrameLedger> ledger` — deliberately `Optional`, never a nullable component
+(CLAUDE.md rule 10) — with **no** convenience constructor, so every one of the ~62 existing
+`new DetectionResult(...)` call sites across 20 files (13 outside this module: `vision-learning`,
+`vision-events`, `storage/persistence` ×2, `station/vision-app`'s `NoopDetectionPort`,
+`station/vision-api` ×4, `cv/grpc`'s `DetectionFrameCodec#decode`) now pass `Optional.empty()`
+explicitly. New fixture `FrameLedgerFixtures#everyFieldDistinct()` (test-only, stable cross-wave API,
+mirrors `ObjectStateFixtures`'s own convention).
+
+`./mvnw -B -pl contexts/vision-perception,cv/grpc,station/vision-api,station/vision-app -am -q test -DskipWeb` —
+`vision-perception` **760 → 808 tests, all green** (48 new: 16 `FrameLedgerTest`, 7 `LedgerEntryTest`,
+3 `ObjectEvidenceTest`, 8 `WorldObjectTest`, 10 `GateDecisionTest`, 3 new `DetectionResultTest` ledger
+cases, 1 new `StreamPipelineTest` case —
+`theLabelFilterCarriesTheLedgerThroughReconstructionInsteadOfDroppingIt` — pinning that
+`applyLabelFilters`'s reconstruction branch carries `ledger()` forward exactly as it already carries
+`pullTelemetry()`, not the `Optional.empty()` the mechanical call-site pass first wrote there; see the
+method's own comment). Per-module `Results:` lines from the exact 4-module `-am` run: `vision-perception`
+— Tests run: 808, Failures: 0, Errors: 0, Skipped: 0; `cv/grpc` (`adapter-cv-grpc`) — Tests run: 187,
+Failures: 0, Errors: 0, Skipped: 0; `station/vision-api` (`vision-api`) — Tests run: 1074, Failures: 0,
+Errors: 0, Skipped: 0; `station/vision-app` (`vision-app`) — Tests run: 355, Failures: 0, Errors: 0,
+Skipped: 0. `BUILD SUCCESS`, zero `[ERROR]` lines in the full log, Docker present and healthy
+(`vision-postgres-1`, `vision-mediamtx-1`). **Nothing in this module's own file scope is wired to a
+production producer yet** — see Gotchas for exactly what a later A-step must still build.

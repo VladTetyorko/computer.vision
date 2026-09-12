@@ -14,6 +14,8 @@ import com.drones.vision.platform.Event;
 import com.drones.vision.perception.domain.model.EventRuleConfig;
 import com.drones.vision.platform.EventType;
 import com.drones.vision.perception.domain.model.FollowState;
+import com.drones.vision.perception.domain.model.FrameLedger;
+import com.drones.vision.perception.domain.model.FrameLedgerFixtures;
 import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.perception.domain.model.ObjectLifecycle;
 import com.drones.vision.perception.domain.model.ObjectState;
@@ -1671,6 +1673,33 @@ class StreamPipelineTest {
         pipeline.onNext(frame(0));
 
         assertEquals(List.of(1L, 2L), pipeline.latestObjects().stream().map(ObjectState::id).toList());
+    }
+
+    /**
+     * Mirrors {@link #theLabelFilterDropsDetectionsButNeverThePerFrameTrackingTelemetry}: {@code
+     * applyLabelFilters} only reconstructs a new {@link DetectionResult} when it actually drops
+     * something, and that reconstruction must carry every non-list component forward -- {@link
+     * FrameLedger} included -- exactly as {@code pullTelemetry} already does. A frame's warm debug
+     * tier is a fact about the frame, not about which boxes an operator chose to see.
+     */
+    @Test
+    void theLabelFilterCarriesTheLedgerThroughReconstructionInsteadOfDroppingIt() {
+        Detection kept = new Detection("person", 0.9, new BoundingBox(0.1, 0.1, 0.2, 0.2), new ModelRef("yolo", "latest"));
+        Detection dropped = new Detection("car", 0.9, new BoundingBox(0.3, 0.3, 0.2, 0.2), new ModelRef("yolo", "latest"));
+        FrameLedger ledger = FrameLedgerFixtures.everyFieldDistinct();
+        DetectionResult result = new DetectionResult(streamId, 0, Instant.now(), List.of(kept, dropped),
+                Duration.ofMillis(5), null, null, List.of(), Optional.of(ledger));
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
+        PipelineConfig filtered = new PipelineConfig(new ModelRef("yolo", "latest"), 0.4, 1000, 5,
+                Set.of("person"), EventRuleConfig.defaults(), true);
+        StreamPipeline pipeline = manualPipeline(filtered, () -> 0L);
+
+        pipeline.onNext(frame(0));
+
+        ArgumentCaptor<DetectionResult> captor = ArgumentCaptor.forClass(DetectionResult.class);
+        verify(detectionRepositoryPort).save(captor.capture());
+        assertEquals(Optional.of(ledger), captor.getValue().ledger(),
+                "the ledger is a per-frame fact, not a per-list one -- filtering detections/objects must not drop it");
     }
 
     // --- docs/plans/done/TRACKING-PLAN.md §5.D/§5.E, wave T3: track book, stats window, follow sampling ---
