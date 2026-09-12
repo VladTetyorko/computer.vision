@@ -256,3 +256,122 @@ concern at typical stream counts.
    much longer, TCP-level failure detection — and detection should resume
    automatically once the link is back, via the same probe/backoff recovery
    item 4 describes.
+
+---
+
+## 7. Splitting the detector out (CV-ORCHESTRATION §4.9, wave W4)
+
+Everything above deploys one **all-in-one** process: sessions, identity and
+inference in the same place. That is still the default and still the right
+shape for one box. This section is for the other shape — one **tracker** and
+N **detectors** — and for the one question that decides which you want.
+
+### Which shape
+
+| | all-in-one (`CV_SERVICE_ROLE` unset) | tracker + detectors |
+|---|---|---|
+| Processes | 1 | 1 tracker + N detectors |
+| Holds identity | yes | tracker only |
+| Scales by | nothing — one box is the ceiling | adding detector instances |
+| Extra cost per detector frame | none | one serialize + hop + deserialize |
+| Right when | the box has spare cores for the streams you run | the DETECTOR is the ceiling and you have another box |
+
+The split moves **only** the stateless part. A detector holds no track, no
+gallery, no lock and no session — it turns pixels into boxes and reports how
+busy it is. Everything sub-millisecond stays on the tracker's session thread,
+because the hop would cost more than the work (§4.9, P6).
+
+**It buys nothing on one machine.** Both shapes then use the same cores, and a
+`yolo26n` pass is over 95% of a frame's cost, so splitting on one box only adds
+the hop. The split pays when the detectors are on *other* hardware.
+
+### Wiring
+
+```
+# on each detector box
+CV_SERVICE_ROLE=detector CV_MAX_CONCURRENT_INFERENCES=4 \
+  ~/vision/cv-service/.venv/bin/python -m cv_service.grpc.server
+
+# on the tracker box (the one VISION_CV_ENDPOINT points at)
+CV_SERVICE_ROLE=tracker \
+CV_DETECTOR_TARGETS=gpu-a:50051,gpu-b:50051 \
+  ~/vision/cv-service/.venv/bin/python -m cv_service.grpc.server
+```
+
+`docker-compose.yml`'s `scale` profile is the container form of exactly this
+(`cv-detector-1`, `cv-detector-2`); its comment block carries the same rules.
+
+### The three rules that are deployment's job, not the code's
+
+Affinity is a **deployment requirement** (decision E11). No code enforces these
+and no code can:
+
+1. **One tracker process per app instance.** Two trackers behind one address
+   work until the first reconnect, which lands on the other and silently
+   resets that stream's ids, gallery and lock. Only the detectors may be
+   scaled.
+2. **`CV_DETECTOR_TARGETS` is an ORDERED list**, tried first-to-last,
+   `pick_first` semantics — never load balancing. A healthy first target
+   therefore serves every frame of every stream, which is what makes a
+   detector swap invisible to identities: there is no swap unless the first
+   target refuses or dies, and when it does, the tracker's own state is
+   untouched because the detector never held any.
+3. **Name detector instances individually.** Do not point the list at one DNS
+   name with N backends: that round-robins a list whose order is the whole
+   mechanism, and a gRPC channel resolves once anyway.
+
+Append `,local` as the last entry to keep the tracker's own in-process
+detector as a final fallback. Leave it off if you would rather the fleet's
+saturation be visible than quietly absorbed.
+
+### Admission, and the fleet budget
+
+A detector answers `RESOURCE_EXHAUSTED` once more than `CV_DETECTOR_MAX_QUEUE`
+(default 2) passes are already waiting for a permit, instead of queueing. The
+caller immediately tries the next target; if every target refuses, that frame
+gets no detections and the frame ledger says so — visible, never a silent
+queue.
+
+The bound is a **freshness** rule, not a throughput one: at 135–230 ms per pass
+on this class of box, two queued passes already mean the third's answer
+describes a frame half a second old, and CLAUDE.md rule 9 says the newest data
+wins. There is no shared token anywhere; the fleet budget is the sum of what
+the instances report (decision E10).
+
+### Reading it back
+
+`Inference.Inspect` with an empty `stream_id` answers, for any role:
+
+- `detector_client` — `local` or `pool`
+- `role` — this process's `CV_SERVICE_ROLE`
+- `gate_permits` / `gate_occupancy` / `gate_queue_depth` / `gate_max_queue`
+- `detector_targets[]` — the ordered list with **observed** per-target health
+  (`served`, `refused`, `failed`, `last_error`). Observed, never probed: a
+  fallback that has never been needed honestly reads all-zero.
+
+Per frame, the `detect.full` / `detect.roi` ledger rows name `served_by` and
+`hops` whenever the pass did not run in this process.
+
+### Config reference
+
+| Env | Default | Meaning |
+|---|---|---|
+| `CV_SERVICE_ROLE` | `all` | `all` \| `inference` \| `training` \| `detector` \| `tracker` |
+| `CV_DETECTOR_TARGETS` | *(unset)* | ordered `host:port` list; `local` is a legal entry; unset = detect in-process |
+| `CV_DETECTOR_MAX_QUEUE` | `2` | waiting passes above which a detector answers `RESOURCE_EXHAUSTED` |
+| `CV_DETECTOR_TIMEOUT_MILLIS` | `2000` | deadline on one pooled `Detect` call |
+| `CV_MAX_CONCURRENT_INFERENCES` | `min(2, cpu//2)` | gate permits — per instance, so raise it on a detector box |
+
+### Measuring it yourself
+
+`tools/detectorbench` starts both shapes and drives real 10 fps streams
+through them:
+
+```
+python -m tools.detectorbench --scenario allinone --streams 1,2,3,4 --seconds 30
+python -m tools.detectorbench --scenario split --detectors 2 --streams 1,2,3,4 --seconds 30
+```
+
+It prints the machine facts alongside the numbers, because none of them are
+portable. Run it on a quiet box: a concurrent build makes every figure a
+measurement of the build.

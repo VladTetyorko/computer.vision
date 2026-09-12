@@ -371,6 +371,72 @@ services:
     restart: unless-stopped
     ports:
       - "50051:50051"
+    environment:
+      # Both UNSET by default, which is exactly the pre-W4 behaviour: role `all`,
+      # detection in-process. Set them together to turn this container into the
+      # tracker half of a detector pool -- see the cv-detector block below.
+      CV_SERVICE_ROLE: ${CV_SERVICE_ROLE:-}
+      CV_DETECTOR_TARGETS: ${CV_DETECTOR_TARGETS:-}
+
+  # --- Detector pool (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.9, wave W4, opt-in) -----
+  #
+  # The OTHER split, on a different axis from `cv-split` below: that one separates a
+  # latency-sensitive servicer from long-running ones, this one separates STATEFUL work
+  # (identity, gallery, lock -- sticky to one stream) from STATELESS work (pixels to boxes).
+  # A detector holds nothing, so it scales horizontally; a tracker session holds a stream's
+  # identities, so it must not move.
+  #
+  #   docker compose --profile scale up -d cv-detector-1 cv-detector-2
+  #   CV_SERVICE_ROLE=tracker \
+  #   CV_DETECTOR_TARGETS=cv-detector-1:50051,cv-detector-2:50051 \
+  #     docker compose up -d --force-recreate cv-service
+  #
+  # AFFINITY IS A DEPLOYMENT REQUIREMENT, NOT CODE (§4.9, decision E11). Three rules, and
+  # every one of them is something this file has to get right because no code can:
+  #
+  #  1. ONE tracker process per app instance, and the app's `VISION_CV_ENDPOINT` points at
+  #     exactly that one. Two trackers behind one address silently reset a stream's ids on
+  #     the first reconnect that lands on the other (R3 §6) -- the failure this ordering
+  #     exists to prevent. The `cv-detector-N` services below are the ONLY part of this
+  #     picture that may be scaled.
+  #  2. `CV_DETECTOR_TARGETS` is an ORDERED list tried first-to-last, `pick_first` semantics,
+  #     never load balancing. A healthy first target therefore serves every frame of every
+  #     stream -- which is what makes a detector swap mid-stream invisible to identities,
+  #     because there is no swap unless the first target refuses or dies.
+  #  3. NAME the detectors individually. Do NOT point the list at one service name scaled to
+  #     N replicas: Docker's DNS would round-robin it, which turns a deliberate order into
+  #     an accident, and a single-resolution gRPC channel would pin to whichever replica it
+  #     happened to resolve first anyway. Add a third instance by copying a block, not by
+  #     `--scale`.
+  #
+  # Append `,local` to the list to keep the tracker's own in-process detector as the last
+  # resort (`CV_DETECTOR_TARGETS=cv-detector-1:50051,local`); leave it off for a tracker that
+  # should degrade visibly rather than quietly absorb the fleet's load.
+  #
+  # Each detector admits what its own gate can take and answers RESOURCE_EXHAUSTED above
+  # `CV_DETECTOR_MAX_QUEUE` (default 2) instead of queueing -- the caller then tries the next
+  # target. The fleet budget is the sum of what the instances report (decision E10); there is
+  # no shared token anywhere.
+  cv-detector-1:
+    profiles: ["scale"]
+    <<: [*cv-service-build, *cv-service-healthcheck]
+    restart: unless-stopped
+    environment:
+      CV_SERVICE_ROLE: detector
+      # Raise on a box with cores to spare; this is the per-instance concurrency bound.
+      CV_MAX_CONCURRENT_INFERENCES: ${CV_DETECTOR_CONCURRENCY:-2}
+      CV_DETECTOR_MAX_QUEUE: ${CV_DETECTOR_MAX_QUEUE:-2}
+    # No published host port on purpose: a detector is reached over the compose network by
+    # the tracker only. Publish one (e.g. "50071:50051") if you want to `grpcurl` it by hand.
+
+  cv-detector-2:
+    profiles: ["scale"]
+    <<: [*cv-service-build, *cv-service-healthcheck]
+    restart: unless-stopped
+    environment:
+      CV_SERVICE_ROLE: detector
+      CV_MAX_CONCURRENT_INFERENCES: ${CV_DETECTOR_CONCURRENCY:-2}
+      CV_DETECTOR_MAX_QUEUE: ${CV_DETECTOR_MAX_QUEUE:-2}
 
   # --- Split cv-service (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6, opt-in) -----
   #
