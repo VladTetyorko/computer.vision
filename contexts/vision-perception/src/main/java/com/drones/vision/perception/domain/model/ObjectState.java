@@ -255,14 +255,30 @@ public record ObjectState(long id, ObjectLifecycle lifecycle, StreamId streamId,
     }
 
     /**
-     * The counters death is decided from (plan §4.5 E4). Every {@code *Millis} is epoch
-     * milliseconds.
+     * The counters death is decided from (plan §4.5 E4).
      *
-     * @param firstSeenMillis     when this identity was first observed; must not be negative
-     * @param lastSeenMillis      when this identity was last updated, by any evidence; must not
-     *                            be negative
-     * @param lastConfirmedMillis when the detector last confirmed this identity; must not be
-     *                            negative
+     * <p><b>The three instants are not epoch time.</b> They share the timebase of the response's
+     * own {@code timestamp_millis} and of no other clock: cv-service ages tracks on
+     * {@code time.monotonic()} and rebases them once, at the wire, onto whatever timestamp that
+     * frame carries. Under {@code DetectStream} that anchor is this JVM's clock (it stamped the
+     * request), under {@code DetectPulled} it is the service host's. Compare them against
+     * {@link DetectionResult#capturedAt()} of the result they arrived on, never against a reader's
+     * wall clock. The durations elsewhere on this record family ({@code horizonMillis},
+     * {@code sinceConfirmedMillis}, {@code dormantMillis}) carry no timebase at all and need no
+     * such care.
+     *
+     * <p>The non-negative checks below therefore assume that anchor is a real epoch stamp, which
+     * it is on every live path ({@code DetectionFrameCodec#encode} always stamps the frame's
+     * capture time). A caller that sent {@code 0} would rebase these into the negative and this
+     * constructor would reject that object — which is the intended outcome, and why the codec
+     * drops the single offending object with a warning rather than letting it fail the frame.
+     *
+     * @param firstSeenMillis     when this identity was first observed, on the response's timebase;
+     *                            must not be negative
+     * @param lastSeenMillis      when this identity was last updated by any evidence, on the
+     *                            response's timebase; must not be negative
+     * @param lastConfirmedMillis when the detector last confirmed this identity, on the response's
+     *                            timebase; must not be negative
      * @param ageFrames           frames since this identity was born; must not be negative
      * @param hits                confirming frames; must not be negative
      * @param misses              consecutive unmatched frames; must not be negative
