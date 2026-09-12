@@ -246,12 +246,34 @@ class PoolDetectorClient:
 
     __slots__ = ("_targets", "_local", "_health", "_payload", "_passes", "_wait_ms", "_served_by")
 
-    def __init__(self, targets: "Sequence[RemoteDetector]", *, local: "LocalDetectorClient") -> None:
+    def __init__(
+        self,
+        targets: "Sequence[RemoteDetector]",
+        *,
+        local: "LocalDetectorClient",
+        health: "Optional[dict[str, TargetHealth]]" = None,
+    ) -> None:
         if not targets:
             raise ValueError("a pool needs at least one target; an empty list is `local`")
         self._targets = tuple(targets)
         self._local = local
-        self._health = {target.target: TargetHealth(target.target) for target in self._targets}
+        # `health=` (CV-ORCHESTRATION wave W4, `grpc/servicers.py`): a
+        # PROCESS-WIDE dict, shared BY REFERENCE across every session's own
+        # `PoolDetectorClient` -- each session gets its own instance of this
+        # class (its `_payload`/`_passes`/`_wait_ms` are genuinely per-frame,
+        # per-session state), but `Inspect`'s `ProcessFacts.detector_targets`
+        # has no per-session concept to report against: a target is healthy
+        # or it isn't, for the process as a whole. Sharing the dict instead
+        # of summing snapshots from live sessions means a session that has
+        # since ended (and so no longer appears in `SessionRegistry.
+        # snapshot()`) does not silently drop the history of what it saw.
+        # Omitted (every pre-W4 caller and test) -> this instance's own dict,
+        # exactly as before.
+        self._health = (
+            health if health is not None else {target.target: TargetHealth(target.target) for target in self._targets}
+        )
+        for target in self._targets:
+            self._health.setdefault(target.target, TargetHealth(target.target))
         self._payload: Optional[FramePayload] = None
         self._passes = 0
         self._wait_ms = 0.0

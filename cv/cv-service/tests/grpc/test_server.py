@@ -71,7 +71,9 @@ def test_serve_passes_keepalive_options_to_grpc_server(monkeypatch):
     # installed (network fetch on first run) -- faked out for the same "slow and
     # environment-dependent" reason the other two servicers already are above.
     monkeypatch.setattr(server_module, "GeolocationServicer", lambda **kwargs: object())
+    monkeypatch.setattr(server_module, "DetectorServicer", lambda **kwargs: object())
     monkeypatch.setattr(server_module.cv_pb2_grpc, "add_InferenceServicer_to_server", lambda servicer, srv: None)
+    monkeypatch.setattr(server_module.cv_pb2_grpc, "add_DetectorServicer_to_server", lambda servicer, srv: None)
     monkeypatch.setattr(server_module.cv_pb2_grpc, "add_TrainingServicer_to_server", lambda servicer, srv: None)
     monkeypatch.setattr(server_module.cv_pb2_grpc, "add_GeolocationServicer_to_server", lambda servicer, srv: None)
 
@@ -113,8 +115,12 @@ def _patch_serve_collaborators(monkeypatch, *, track_inference_only_builds=False
     monkeypatch.setattr(server_module, "InferenceServicer", lambda **kwargs: object())
     monkeypatch.setattr(server_module, "TrainingServicer", lambda **kwargs: object())
     monkeypatch.setattr(server_module, "GeolocationServicer", lambda **kwargs: object())
+    monkeypatch.setattr(server_module, "DetectorServicer", lambda **kwargs: object())
     monkeypatch.setattr(
         server_module.cv_pb2_grpc, "add_InferenceServicer_to_server", lambda servicer, srv: added.append("inference")
+    )
+    monkeypatch.setattr(
+        server_module.cv_pb2_grpc, "add_DetectorServicer_to_server", lambda servicer, srv: added.append("detector")
     )
     monkeypatch.setattr(
         server_module.cv_pb2_grpc, "add_TrainingServicer_to_server", lambda servicer, srv: added.append("training")
@@ -132,20 +138,60 @@ def _patch_serve_collaborators(monkeypatch, *, track_inference_only_builds=False
     return added
 
 
-def test_serve_with_default_role_registers_all_three_servicers(monkeypatch):
+def test_serve_with_default_role_registers_every_servicer(monkeypatch):
     added = _patch_serve_collaborators(monkeypatch)
 
     server_module.serve(Settings(port=0))
 
-    assert added == ["inference", "training", "geolocation"]
+    # `Detector` joined the `all` set in CV-ORCHESTRATION W4: the default
+    # single-process deployment answers it too, so an operator can point a
+    # tracker at an existing all-in-one box without redeploying it first.
+    assert added == ["inference", "detector", "training", "geolocation"]
 
 
-def test_serve_with_role_all_explicit_registers_all_three_servicers(monkeypatch):
+def test_serve_with_role_all_explicit_registers_every_servicer(monkeypatch):
     added = _patch_serve_collaborators(monkeypatch)
 
     server_module.serve(Settings(port=0, role="all"))
 
-    assert added == ["inference", "training", "geolocation"]
+    assert added == ["inference", "detector", "training", "geolocation"]
+
+
+def test_serve_with_role_detector_registers_only_the_detector(monkeypatch):
+    added = _patch_serve_collaborators(monkeypatch, track_inference_only_builds=True)
+
+    server_module.serve(Settings(port=0, role="detector"))
+
+    # A detector instance holds no sessions and no tracker roster -- it is
+    # pixels in, boxes out (§4.9). It DOES build the gate: admission is the
+    # one piece of state it owns.
+    assert added == ["inference_gate", "detector"]
+    assert "tracker_registry" not in added
+
+
+def test_serve_with_role_tracker_registers_inference_exactly_like_inference_does(monkeypatch):
+    added = _patch_serve_collaborators(monkeypatch, track_inference_only_builds=True)
+
+    server_module.serve(
+        Settings(port=0, role="tracker", detector_targets=("cv-detector-1:50051",))
+    )
+
+    # `tracker` is not a different SERVICE -- it is `inference` with the
+    # detector placed elsewhere, which is why the Java side needs no change
+    # at all to talk to one (§4.9, decision E11).
+    assert added == ["inference_gate", "tracker_registry", "inference"]
+
+
+def test_serve_with_role_tracker_and_no_targets_warns_but_still_serves(monkeypatch, caplog):
+    added = _patch_serve_collaborators(monkeypatch)
+
+    with caplog.at_level("WARNING", logger="cv_service.grpc.server"):
+        server_module.serve(Settings(port=0, role="tracker"))
+
+    # Reported, never refused: it falls back to in-process detection, which
+    # is a working deployment, just not the one the operator asked for.
+    assert added == ["inference"]
+    assert "CV_DETECTOR_TARGETS is empty" in caplog.text
 
 
 def test_serve_with_role_inference_registers_only_inference(monkeypatch):

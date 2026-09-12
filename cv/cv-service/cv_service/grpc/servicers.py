@@ -1,13 +1,19 @@
 """gRPC servicers for the Vision CV service: wire <-> domain translation ONLY.
 
-This module is the **sole place** that touches generated ``cv_pb2`` message
-types -- every other cv-service module (``cv_service.inference``,
-``cv_service.training``) works with plain Python values/dataclasses and
-never imports the generated stubs. That invariant predates this module's
-own split out of the former ``cv_service/server.py`` monolith (which also
-carried training orchestration, dataset zip IO, and process bootstrap); this
-file now narrows to exactly the translation role, with those other concerns
-living in ``cv_service/training/`` and ``cv_service/grpc/server.py``.
+This module was the sole place that touched generated ``cv_pb2`` message
+types until CV-ORCHESTRATION wave W4 added two siblings under this same
+package -- ``cv_service.grpc.detector_servicer`` (the stateless ``Detector``
+RPC) and ``cv_service.grpc.detector_transport`` (the wire client a pooled
+``PoolDetectorClient`` dials through) -- each scoped to exactly the one
+service/direction its name says. Every OTHER cv-service module
+(``cv_service.inference``, ``cv_service.training``, ``cv_service.
+orchestration``) still works with plain Python values/dataclasses and never
+imports the generated stubs; that invariant predates this module's own split
+out of the former ``cv_service/server.py`` monolith (which also carried
+training orchestration, dataset zip IO, and process bootstrap); this file
+narrows to exactly the ``Inference``/``Training``/``Geolocation`` translation
+role, with those other concerns living in ``cv_service/training/`` and
+``cv_service/grpc/server.py``.
 
 * ``Inference.DetectStream`` runs real Ultralytics YOLO inference (see
   ``cv_service/inference/detector.py``) when the ``cv`` optional dependency
@@ -111,11 +117,18 @@ from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, Optional
 
 import grpc
 
-from cv_service.config import DEFAULT_CONFIDENCE, DEFAULT_MAX_UPLOAD_BYTES, Settings
+from cv_service.config import DEFAULT_CONFIDENCE, DEFAULT_MAX_UPLOAD_BYTES, DEFAULT_ROLE, Settings
 from cv_service.geo import index as geo_index
 from cv_service.geo import pack as geo_pack
+from cv_service.grpc.detector_transport import remote_detectors
 from cv_service.inference.concurrency import InferenceGate, LatestOnlyMailbox, process_gate
-from cv_service.orchestration.detector import LocalDetectorClient
+from cv_service.orchestration.detector import (
+    DetectorClient,
+    FramePayload,
+    LocalDetectorClient,
+    PoolDetectorClient,
+    TargetHealth,
+)
 from cv_service.orchestration.facts import SessionFacts
 from cv_service.orchestration.ledger import FrameLedger, LedgerEntry
 from cv_service.pull.clock import CaptureClock
@@ -966,6 +979,28 @@ class _PullControlReader:
         self._closed.set()
 
 
+class _FrameDetect:
+    """The `FrameDetect` shape (CV-ORCHESTRATION wave W4): a per-frame detect
+    callable that also carries the wire payload a pooled remote target needs.
+
+    Built ONLY on a `pool`-placement process's `_handle_request` (see that
+    method) -- never on the far more common `local` path, which stays a bare
+    `lambda` with no payload construction at all (`FramePayload` costs one
+    protobuf-enum-name lookup plus five attribute reads per frame; a `local`
+    deployment must not pay that for a value nothing ever reads). `__slots__`
+    keeps this a two-pointer object, not a dataclass with defaults to skip.
+    """
+
+    __slots__ = ("payload", "_fn")
+
+    def __init__(self, payload: FramePayload, fn: Callable[[Optional[Box]], "tuple[Optional[list], int]"]) -> None:
+        self.payload = payload
+        self._fn = fn
+
+    def __call__(self, roi: Optional[Box] = None) -> "tuple[Optional[list], int]":
+        return self._fn(roi)
+
+
 class InferenceServicer(cv_pb2_grpc.InferenceServicer):
     """Real-YOLO-when-available, echo-otherwise implementation of ``Inference``.
 
@@ -1035,6 +1070,28 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         # falls back to; resolved fresh here when not supplied, exactly like
         # `YoloDetector` does (see cv_service/config.py's module docstring).
         self._settings = settings if settings is not None else Settings.from_env()
+        # CV-ORCHESTRATION wave W4 (§4.9): this process's detector placement,
+        # resolved ONCE here -- never per session, never per frame. Empty
+        # `detector_targets` (every pre-W4 deployment, and every `tracker`
+        # process an operator forgot to point somewhere) means every session
+        # gets a plain in-process `LocalDetectorClient`, unchanged from
+        # before this wave. A non-empty list builds one `GrpcRemoteDetector`
+        # per target (one channel each, held for this servicer's lifetime)
+        # via `remote_detectors()`, plus the ONE shared per-target health
+        # dict every session's own `PoolDetectorClient` reports into --
+        # see that class's own `health=` docstring for why sharing beats
+        # summing per-session snapshots. MUST be set before
+        # `self._session_registry` below, since an eagerly-acquired session
+        # (`SessionRegistry`'s own concurrent-call fallback) can call
+        # `_new_session()` during that construction.
+        self._remote_detectors: "tuple" = (
+            tuple(remote_detectors(self._settings)) if self._settings.detector_targets else ()
+        )
+        self._detector_health: "Optional[dict[str, TargetHealth]]" = (
+            {target.target: TargetHealth(target.target) for target in self._remote_detectors}
+            if self._remote_detectors
+            else None
+        )
         # Omitted -> built LAZILY, on the first frame that actually asks for
         # an active tracking mode, so neither the OFF path nor a test that
         # never tracks pays for constructing (and probing) engines. The
@@ -1274,12 +1331,36 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         sessions = self._session_registry.snapshot()
         response = cv_pb2.InspectResponse(
             process=cv_pb2.ProcessFacts(
-                # W0 has exactly one detector seam; the pooled one is W4.
-                detector_client=LocalDetectorClient.id,
+                # CV-ORCHESTRATION wave W4: this process's ACTUAL placement,
+                # decided once in `__init__` from `settings.detector_targets`
+                # -- "local" on every pre-W4 deployment and still today's
+                # default, "pool" once an operator sets `CV_DETECTOR_TARGETS`.
+                detector_client=(PoolDetectorClient.id if self._remote_detectors else LocalDetectorClient.id),
                 sessions=len(sessions),
                 gate_permits=self._inference_gate.max_concurrent,
                 ledger_ring=self._settings.ledger_ring,
                 stream_ids=[session.stream_id for session in sessions],
+                gate_occupancy=self._inference_gate.occupancy,
+                gate_queue_depth=self._inference_gate.queue_depth,
+                # 0 unless THIS process also serves `Detector` (§4.9's own
+                # wire comment) -- true exactly for role="all", the only
+                # role that registers both `InferenceServicer` and
+                # `DetectorServicer` on the same gate (`grpc/server.py`).
+                # `inference`/`tracker` share nothing with a `Detector`
+                # service in their own process, so admission there has no
+                # bound to report.
+                gate_max_queue=(self._settings.detector_max_queue if self._settings.role == DEFAULT_ROLE else 0),
+                detector_targets=[
+                    cv_pb2.DetectorTarget(
+                        target=health.target,
+                        served=health.served,
+                        refused=health.refused,
+                        failed=health.failed,
+                        last_error=health.last_error,
+                    )
+                    for health in self._ordered_detector_health()
+                ],
+                role=self._settings.role,
             ),
             found=True,
         )
@@ -1355,10 +1436,41 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         `stream_id` or as its concurrent-call fallback (see that class's
         `acquire()`). The one construction site, so both paths stay in sync
         by construction rather than by two call sites remembering to agree.
+
+        CV-ORCHESTRATION wave W4: every session adopts this PROCESS's
+        detector placement via `detect_through()` -- a fresh
+        `LocalDetectorClient` when `self._remote_detectors` is empty
+        (`__init__`'s own default, unchanged pre-W4 behaviour), else a fresh
+        `PoolDetectorClient` over the process-wide target list, reporting
+        into the process-wide shared health dict (`self._detector_health`).
+        `PoolDetectorClient`'s own per-frame state (`_payload`/`_passes`/
+        `_wait_ms`) is genuinely per-session, which is why each session gets
+        its OWN instance rather than sharing one -- only the health dict
+        (and the process-wide target list/channels themselves) are shared.
         """
-        return StreamTrackingSession(
+        session = StreamTrackingSession(
             settings=self._settings, registry_provider=self._resolve_tracker_registry
         )
+        session.detect_through(self._new_detector_client())
+        return session
+
+    def _new_detector_client(self) -> DetectorClient:
+        if not self._remote_detectors:
+            return LocalDetectorClient()
+        return PoolDetectorClient(
+            self._remote_detectors, local=LocalDetectorClient(), health=self._detector_health
+        )
+
+    def _ordered_detector_health(self) -> "tuple[TargetHealth, ...]":
+        """`self._detector_health`, in `CV_DETECTOR_TARGETS` order -- empty on
+        a `local` process (`Inspect`'s own `detector_targets` field doc:
+        "Set only on a `pool` client; empty on `local`"). The dict is shared
+        by every session's `PoolDetectorClient` (see `_new_detector_client`),
+        so this reads live counters even with zero sessions currently open.
+        """
+        if not self._detector_health:
+            return ()
+        return tuple(self._detector_health[target.target] for target in self._remote_detectors)
 
     def _handle_request(
         self,
@@ -1395,6 +1507,37 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                 # same instant rather than two `time.monotonic()` calls a
                 # frame's work apart (CV-ORCHESTRATION wave W1).
                 now_millis = time.monotonic() * 1000.0
+                run_detector = lambda roi=None: self._run_detector(  # noqa: E731
+                    request, roi, loader, self._detect_floor_for(request)
+                )
+                # CV-ORCHESTRATION wave W4: on a `pool`-placement process
+                # (`self._remote_detectors` non-empty), the session's
+                # `PoolDetectorClient.bind()` reads `.payload` off this
+                # callable (`orchestration.detector.FrameDetect`'s own
+                # contract) -- so ONLY there is a `FramePayload` built and
+                # `_FrameDetect` used to carry it. On every `local` process
+                # (every pre-W4 deployment, and still the default today),
+                # `detect` stays the exact bare lambda it always was: no
+                # `FramePayload`, no wrapper object, zero bytes copied that
+                # weren't already going to be read by `_run_detector` itself.
+                detect = (
+                    _FrameDetect(
+                        FramePayload(
+                            stream_id=request.stream_id,
+                            sequence=request.sequence,
+                            width=request.width,
+                            height=request.height,
+                            encoding=cv_pb2.ImageEncoding.Name(request.encoding),
+                            data=request.data,
+                            model_id=request.model_id,
+                            model_version=request.model_version,
+                            confidence_threshold=request.confidence_threshold,
+                        ),
+                        run_detector,
+                    )
+                    if self._remote_detectors
+                    else run_detector
+                )
                 outcome = session.process(
                     # A LOCAL monotonic clock, deliberately, not
                     # `request.timestamp_millis`. Under DetectStream (push),
@@ -1412,9 +1555,7 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                     # corrections/NTP steps a capture timestamp is not, which
                     # matters for pull's own anchored `timestamp_millis` too.
                     now_millis=now_millis,
-                    detect=lambda roi=None: self._run_detector(
-                        request, roi, loader, self._detect_floor_for(request)
-                    ),
+                    detect=detect,
                     frame=loader,
                     pose=_camera_pose_from_wire(request.camera_pose),
                     detection_lag_millis=capture_skew_millis,

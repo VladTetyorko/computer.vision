@@ -37,21 +37,44 @@ Process roles (`Settings.role`, `CV_SERVICE_ROLE`)
 are long-running/GPU-hungry. Sharing one process (and one GIL) means a
 training run or a geolocation index build can degrade every live stream's
 detection -- the defect this knob closes
-(docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md T2/R6). Three roles,
-selected once at process start, never changed at runtime:
+(docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md T2/R6). CV-ORCHESTRATION
+wave W4 (§4.9) adds a second split, orthogonal to the first: the stateless
+`Detector` RPC (pure pixels-to-boxes, no session/identity) may scale to N
+instances behind a `tracker`'s ordered `CV_DETECTOR_TARGETS` list, because a
+detector carries no per-stream affinity to lose. Five roles total, selected
+once at process start, never changed at runtime:
 
-- ``all`` (default) -- every servicer, one process. Byte-identical to every
-  deployment that predates this knob; the only mode a plain
+- ``all`` (default) -- every servicer (`Inference` + `Detector` + `Training`
+  + `Geolocation`), one process. Byte-identical to every deployment that
+  predates either split; the only mode a plain
   ``python -m cv_service.grpc.server`` with no ``CV_SERVICE_ROLE`` set has
-  ever produced.
-- ``inference`` -- `Inference` only. `Training`/`Geolocation` are not
-  registered on the gRPC server AND their collaborators (`InferenceGate`,
-  the tracker registry) are never constructed -- this process never spends a
-  cycle or a GPU byte on training/geolocation work.
+  ever produced -- `Detector`'s addition here is new surface, not a new
+  default behavior (nothing calls it unless something is pointed at it).
+- ``inference`` -- `Inference` only, unchanged by W4. `Training`/
+  `Geolocation`/`Detector` are not registered on the gRPC server AND their
+  collaborators (`InferenceGate`, the tracker registry) are never
+  constructed -- this process never spends a cycle or a GPU byte on
+  training/geolocation/pooled-detector work.
+- ``tracker`` (CV-ORCHESTRATION W4) -- `Inference` only, exactly like
+  ``inference`` above, but the intended deployment shape is "point me at a
+  `CV_DETECTOR_TARGETS` list instead of detecting in-process": every
+  session's `StreamTrackingSession.detect_through()` gets a
+  `PoolDetectorClient` over that list (see `cv_service.grpc.servicers.
+  InferenceServicer._new_detector_client`). An operator who sets this role
+  with an EMPTY `CV_DETECTOR_TARGETS` gets exactly the ``inference`` role's
+  behavior (every session falls back to a plain `LocalDetectorClient`) plus
+  one startup warning -- this process never refuses to start over a
+  configuration mismatch it can recover from by serving locally instead.
+- ``detector`` (CV-ORCHESTRATION W4) -- `Detector` only: the stateless RPC a
+  `tracker`'s pool dials. No `Inference`, no tracker registry, no session
+  registry -- a detector instance holds no per-stream state at all. Still
+  builds a `ModelRegistry` (to resolve `DetectRequest.model_id`) and one
+  `InferenceGate` (`DetectorServicer`'s own admission door), exactly as
+  ``inference`` does for the same reasons.
 - ``training`` -- `Training` + `Geolocation` only (they are grouped: both
   are long-running/heavy, neither is latency-sensitive the way `Inference`
-  is). `InferenceServicer` is not registered and its `InferenceGate`/tracker
-  registry are never built.
+  is). `InferenceServicer`/`DetectorServicer` are not registered and their
+  `InferenceGate`/tracker registry are never built.
 
 The model registry (`ModelRegistry`) is built regardless of role -- both
 `inference` (the detector) and `training` (`ListModels`/`PromoteModel`
@@ -77,8 +100,16 @@ from concurrent import futures
 
 import grpc
 
-from cv_service.config import DEFAULT_ROLE, ROLE_INFERENCE, ROLE_TRAINING, Settings
+from cv_service.config import (
+    DEFAULT_ROLE,
+    ROLE_DETECTOR,
+    ROLE_INFERENCE,
+    ROLE_TRACKER,
+    ROLE_TRAINING,
+    Settings,
+)
 from cv_service.inference.concurrency import InferenceGate
+from cv_service.grpc.detector_servicer import DetectorServicer
 from cv_service.grpc.servicers import (  # cv_pb2_grpc re-exported so tests can monkeypatch it here
     GeolocationServicer,
     InferenceServicer,
@@ -163,25 +194,51 @@ def serve(settings: Settings | None = None) -> grpc.Server:
     stream thread parked indefinitely.
     """
     settings = settings if settings is not None else Settings.from_env()
-    serves_inference = settings.role in (DEFAULT_ROLE, ROLE_INFERENCE)
+    # `tracker` (CV-ORCHESTRATION W4) registers `Inference` only, exactly
+    # like `inference` -- its whole distinction is the DEPLOYMENT INTENT
+    # (`CV_DETECTOR_TARGETS` pointed at a pool) that `InferenceServicer`
+    # itself already reads from `settings`, not a different servicer set.
+    serves_inference = settings.role in (DEFAULT_ROLE, ROLE_INFERENCE, ROLE_TRACKER)
+    serves_detector = settings.role in (DEFAULT_ROLE, ROLE_DETECTOR)
     serves_training = settings.role in (DEFAULT_ROLE, ROLE_TRAINING)
+
+    if settings.role == ROLE_TRACKER and not settings.detector_targets:
+        # Reported, never refused: this process still serves `Inference`
+        # perfectly well by falling back to in-process detection (every
+        # session's `LocalDetectorClient` default) -- see the module
+        # docstring's `tracker` bullet. A misconfigured pool is an operator
+        # mistake worth ONE log line at startup, not a reason to crash-loop
+        # a process that can still do useful work.
+        LOGGER.warning(
+            "CV_SERVICE_ROLE=tracker but CV_DETECTOR_TARGETS is empty; this "
+            "process will detect in-process (LocalDetectorClient) instead of "
+            "pooling to any remote Detector instance."
+        )
 
     server = grpc.server(
         futures.ThreadPoolExecutor(max_workers=settings.grpc_workers),
         options=_KEEPALIVE_SERVER_OPTIONS,
     )
 
-    # Built regardless of role: `inference` needs it for detection,
-    # `training` needs it for ListModels/PromoteModel bookkeeping -- see the
-    # module docstring's "Known limitation of a split deployment" for what
-    # this shared-in-name-only registry does NOT give a split deployment
-    # (live cross-process promotion). `None` (no model loaded) is passed
-    # through explicitly: `InferenceServicer` degrades to echo,
-    # `TrainingServicer` reports an empty roster.
+    # Built regardless of role: `inference`/`tracker` need it for detection,
+    # `detector` needs it to resolve `DetectRequest.model_id`, `training`
+    # needs it for ListModels/PromoteModel bookkeeping -- see the module
+    # docstring's "Known limitation of a split deployment" for what this
+    # shared-in-name-only registry does NOT give a split deployment (live
+    # cross-process promotion). `None` (no model loaded) is passed through
+    # explicitly: `InferenceServicer`/`DetectorServicer` degrade to
+    # echo/`FAILED_PRECONDITION`, `TrainingServicer` reports an empty roster.
     registry = _build_default_registry(settings)
 
+    # ONE `InferenceGate` shared between `InferenceServicer` and
+    # `DetectorServicer` when both are registered together (role=`all`) --
+    # CV-ORCHESTRATION §4.9's admission accounting is about how many
+    # `detect()` calls THIS PROCESS runs concurrently, regardless of which
+    # RPC asked for them; two separate gates on one process would let both
+    # servicers independently believe they had the full permit count.
+    gate = InferenceGate(settings.max_concurrent_inferences) if (serves_inference or serves_detector) else None
+
     if serves_inference:
-        gate = InferenceGate(settings.max_concurrent_inferences)
         tracker_registry = _build_tracker_registry(settings)
         cv_pb2_grpc.add_InferenceServicer_to_server(
             InferenceServicer(
@@ -190,6 +247,16 @@ def serve(settings: Settings | None = None) -> grpc.Server:
                 settings=settings,
                 tracker_registry=tracker_registry,
             ),
+            server,
+        )
+
+    if serves_detector:
+        # No tracker registry, no `SessionRegistry` -- a detector instance
+        # holds no per-stream state at all (module docstring's `detector`
+        # bullet); `DetectorServicer` needs only the model registry and the
+        # (possibly shared) gate above.
+        cv_pb2_grpc.add_DetectorServicer_to_server(
+            DetectorServicer(registry=registry, inference_gate=gate, settings=settings),
             server,
         )
 

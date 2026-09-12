@@ -130,7 +130,17 @@ _DATASET_DIRNAME = "datasets"
 # minimising TOTAL cost can buy a cheap overall assignment out of
 # individually absurd pairs -- so `clutter` exists specifically to test that,
 # and both engines score IDSW 0 with every object mostly-tracked.
-# `bytetrack` remains fully supported and one env var away.
+# Since CV-ORCHESTRATION wave W4 (decision E16), `bytetrack` is retired from
+# the roster entirely, not merely deprioritized: every associator now shares
+# one evidence graph (`cv_service/orchestration/`), and `bytetrack`'s Kalman
+# state, held behind ultralytics' `BYTETracker`, had no seam for any of
+# it -- every future contributor would have needed a bytetrack-shaped special
+# case. `CV_TRACK_ASSOCIATE_ENGINE=bytetrack` (and a wire ASSOCIATE
+# `engine_id="bytetrack"`) still resolves rather than going dark: `cv_service.
+# tracking.params.resolve()` aliases it to `cost` and logs the substitution
+# once, so a deployment pinned to the old value keeps tracking instead of
+# silently losing every track id. It is no longer a distinct engine choice --
+# `engines/bytetrack.py` stays on disk as an unregistered reference only.
 DEFAULT_TRACK_ASSOCIATE_ENGINE = "cost"
 DEFAULT_TRACK_FOLLOW_ENGINE = "lk"
 # How often FOLLOW may spend a detector pass trying to RE-ACQUIRE a target it

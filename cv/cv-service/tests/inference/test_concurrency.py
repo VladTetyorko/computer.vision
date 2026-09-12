@@ -13,7 +13,7 @@ import time
 
 import pytest
 
-from cv_service.inference.concurrency import InferenceGate, LatestOnlyMailbox
+from cv_service.inference.concurrency import GateFull, InferenceGate, LatestOnlyMailbox
 
 # --- LatestOnlyMailbox -------------------------------------------------------
 
@@ -142,3 +142,87 @@ def test_inference_gate_releases_on_exception_inside_the_block():
     # If acquire() leaked (didn't release on exception), this would hang.
     acquired = gate._semaphore.acquire(timeout=1)
     assert acquired, "gate did not release its slot after an exception"
+
+
+# --- InferenceGate.admit / GateFull (CV-ORCHESTRATION wave W4, §4.9) ---------
+#
+# `admit()` is the `Detector` RPC's admission door: unlike `acquire()`, it
+# refuses immediately (`GateFull`) once the queue is already at its bound,
+# instead of making a caller that has somewhere else to go wait behind work
+# it could have routed around. It shares the exact same semaphore as
+# `acquire()` -- see `test_admit_and_acquire_share_the_same_permit_pool`,
+# the fact `cv_service.grpc.detector_servicer.DetectorServicer.Detect()`'s
+# own deadlock-avoidance decision rests on (its permit is released BEFORE
+# any real detection call re-acquires the gate).
+
+
+def test_admit_grants_a_permit_immediately_when_the_queue_is_not_full():
+    gate = InferenceGate(1)
+    with gate.admit(max_queue=1):
+        assert gate.occupancy == 1
+        assert gate.queue_depth == 0
+    assert gate.occupancy == 0
+
+
+def test_admit_releases_its_permit_after_the_block_like_acquire_does():
+    gate = InferenceGate(1)
+    with gate.admit(max_queue=1):
+        pass
+    # If admit() leaked its permit, this would hang.
+    acquired = gate._semaphore.acquire(timeout=1)
+    assert acquired, "admit() did not release its slot after the block"
+
+
+def test_admit_and_acquire_share_the_same_permit_pool():
+    gate = InferenceGate(1)
+    with gate.admit(max_queue=5):
+        # The one permit is held by admit() -- a concurrent acquire() call
+        # must wait for it, proving both doors spend the SAME semaphore.
+        acquired_immediately = gate._semaphore.acquire(timeout=0.1)
+        assert not acquired_immediately, "admit() and acquire() must share one permit pool"
+
+
+def test_admit_raises_gate_full_once_the_queue_reaches_its_bound():
+    gate = InferenceGate(1)
+    # Hold the gate's one permit externally so every admit() call below has
+    # to queue rather than proceed straight through.
+    holder_ready = threading.Event()
+    release_holder = threading.Event()
+
+    def hold():
+        with gate.acquire():
+            holder_ready.set()
+            release_holder.wait(timeout=5)
+
+    holder = threading.Thread(target=hold)
+    holder.start()
+    assert holder_ready.wait(timeout=2)
+
+    # One admit() call queues (waiting=1) and then blocks on the semaphore --
+    # `max_queue=1` means THIS call is still admitted (0 waiting when it
+    # checks), but it never gets its permit until `release_holder` fires.
+    queued_entered = threading.Event()
+
+    def queued():
+        queued_entered.set()
+        with gate.admit(max_queue=1):
+            pass
+
+    queued_thread = threading.Thread(target=queued)
+    queued_thread.start()
+    assert queued_entered.wait(timeout=2)
+    deadline = time.monotonic() + 2
+    while gate.queue_depth < 1 and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert gate.queue_depth == 1, "the queued admit() call never reached the semaphore wait"
+
+    # A THIRD caller now finds the queue already at its bound (1) and is
+    # refused immediately -- it never touches the semaphore at all.
+    with pytest.raises(GateFull):
+        with gate.admit(max_queue=1):
+            pass
+
+    release_holder.set()
+    holder.join(timeout=2)
+    queued_thread.join(timeout=2)
+    assert not holder.is_alive() and not queued_thread.is_alive()
