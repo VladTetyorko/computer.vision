@@ -81,7 +81,7 @@ Both chains are correct. Their defect is structural: a stage's output is invisib
 | Why did follow lose the target? | Java-derived state only; cv-service's own reason is not on the wire |
 | Why is inference running with nobody watching? | `RUNNING_UNWATCHED` exists in Java, is missing from the TS union, renders as "status not reported by this server yet" (R1 §9) |
 | What did ego-motion do, and what did it cost? | computed, put on the wire, dropped at the codec (R2/R4) |
-| How much did each stage cost? | `tracker_millis` spans decode + ego-motion + assign + ROI pass (R3 surprise 4) |
+| How much did each stage cost? | `tracker_millis` spans decode + assign + ROI pass; ego-motion is **not** in it — it is `PHASE_PRE` with its own `motion_millis` field (R3 surprise 4 was wrong on this point; corrected by W0, 2026-09-12) |
 | Is cv-service healthy, not merely reachable? | no health RPC, no reflection, no `/metrics`, no Micrometer anywhere (R3 §5, R2 surprise 4) |
 
 ### 1.6 The scale seam is inside one process
@@ -222,6 +222,22 @@ Mapping (R3 §1 inventory → contributor; `session.py` line ranges are the code
 | `reupdate.oru` | `reupdate.py`, `_late_corrected_box :1314`, `_observe` ORU path | OBSERVATIONS, history → CORRECTIONS | detector frames with a coasted gap |
 | *(config-time, not per-frame)* | capability/engine/motion/appearance/memory resolution `session.py:1852-2168`, degradation `:1924-1984`, `LockArbiter.apply` | — | run at `apply_config`; the ledger records the resolved set once per config change |
 | **Aggregator** | `TrackBook.apply` (`track.py:474-482`) + `FrameOutcome` construction (`session.py:595-616`) | OBSERVATIONS, FOLLOW_OBS, RECOVERIES, CORRECTIONS, LOCK → tracks, `ObjectState[]` | the only writer of `Track`; death from counters (`_retire`) |
+
+**As built in W0 (merged 2026-09-12, `c4344bf5`)** — the table above is the design; where the code's boundaries differed, W0 kept the *outcome* fixed (golden fixtures byte-identical) and moved the boundary instead:
+
+| Design | As built | Why |
+|---|---|---|
+| `label.election` contributor | runs inside `Track._observe` under `TrackBook.apply`; surfaced as aggregator evidence | moving it out would change the fold order and therefore the outcome |
+| `reupdate.oru` writes `CORRECTIONS` per frame | per-track seam (`orchestration/corrections.py`); `Key.CORRECTIONS` has no registered writer in W0 | it is a property of one track's history, not a frame stage |
+| `follow.verify` / `follow.predict` / `follow.coast` | one `follow.<engine>` contributor; its five outcomes share post-fold bookkeeping on `Proposal.settle` | the outcomes are alternatives of one decision, not stages |
+| `emit.raw` contributor | the aggregator's no-proposal branch | a second writer of `OBSERVATIONS` would break one-writer-per-key |
+| `predict.cv` in every mode; `TRACKS_PREV` seeded | `predict.cv` owns the post-warp snapshot as `TRACKS_PRED` and is registered in ASSOCIATE only | FOLLOW predicts inside the follower |
+| roster rebuilt at `apply_config` | rebuilt when the **resolved-engine signature** changes | engines resolve lazily; this is a strict superset |
+| `egomotion.*` id = served engine | id = *requested* `motion_engine_id`; the served one is a ledger summary field | the requested id is stable across degradation |
+| proto add-only list | plus `ObjectClaims` | protobuf cannot put `repeated` directly in a map value |
+| — | new: `propose.cost` (ASSIGNMENT + DETECTIONS + DETECTIONS_ROI + RECOVERIES → OBSERVATIONS), `EngineSet.reconfigure`, `StreamTrackingSession.stream_id`, `SessionRegistry.snapshot()`, `orchestration/facts.py` | the proposal step had no name in the design; the rest is what `Inspect` needs |
+
+Keys as built: `FRAME, POSE, LOCK, DETECTIONS, DETECTIONS_ROI, MOTION, TRACKS_PRED, DESCRIPTORS, ASSIGNMENT, RECOVERIES, OBSERVATIONS, FOLLOW_OBS, CORRECTIONS` (`MOTION` for the design's `TRANSFORM`, `TRACKS_PRED` for `PREDICTIONS`+`TRACKS_PREV`). Two defects of the *new* code were caught by the golden fixtures before they shipped: the budget never marked the aggregator eligible, and `Proposal` collapsed "no observations" with "do not book" (an empty `apply([])` is what ages a live track). One accepted behaviour change under rule 4 of the contract: a raising `cost` associator becomes `FAILED` + raw echo instead of propagating out of `process()`; no fixture exercises it.
 
 ### 4.2 Orchestrator and budget
 
@@ -388,8 +404,8 @@ Task branch `feat/cv-orchestration` from master once this plan is accepted; each
 
 | Wave | Scope (disjoint files) | Agent | Acceptance |
 |---|---|---|---|
-| **W-pre** standalone fixes | `models.ts` `DetectionState` 4 values + switches; `vision-perception/MODULE.md` gate re-check sentence; `cv-service/MODULE.md` two defaults + "recovery cost-only"; push-mode `dropped_frames` set on the response (field exists, "all zero in push mode") | Sonnet ×2 (web, python) | `npm run test:ci` green; cv-service pytest green; no behaviour change beyond the drop counter |
-| **W0** contributors + orchestrator + ledger + Inspect | `cv/cv-service/cv_service/tracking/**` → new `orchestration/**`; `grpc/servicers.py` Inspect only; `tools/trackeval` golden dump; proto: `Inspect*`, `FrameLedger*` only | Opus (flow, orchestrator, aggregator boundary) + Sonnet per contributor | `BASELINE.md` unchanged; **new golden test**: per-scenario `FrameOutcome` sequence byte-identical before/after; every contributor has a unit test with a fake context; `Inspect` returns ≥ 1 ledger for a running session; `session.py` ≤ 400 lines; no `acquire()` outside `DetectorClient` (grep-enforced test) |
+| **W-pre** standalone fixes — **web DONE** 2026-09-12 (`ae103a0a`); python half absorbed by W0 | `models.ts` `DetectionState` 4 values + switches; `vision-perception/MODULE.md` gate re-check sentence; `cv-service/MODULE.md` two defaults + "recovery cost-only"; push-mode `dropped_frames` set on the response (field exists, "all zero in push mode") | Sonnet ×2 (web, python) | `npm run test:ci` green; cv-service pytest green; no behaviour change beyond the drop counter |
+| **W0** contributors + orchestrator + ledger + Inspect — **DONE** 2026-09-12 (`c4344bf5`; 1423 pytest passed, BASELINE.md unchanged, 30 golden fixtures byte-identical, session.py 400 lines, gate seam grep-enforced) | `cv/cv-service/cv_service/tracking/**` → new `orchestration/**`; `grpc/servicers.py` Inspect only; `tools/trackeval` golden dump; proto: `Inspect*`, `FrameLedger*` only | Opus (flow, orchestrator, aggregator boundary) + Sonnet per contributor | `BASELINE.md` unchanged; **new golden test**: per-scenario `FrameOutcome` sequence byte-identical before/after; every contributor has a unit test with a fake context; `Inspect` returns ≥ 1 ledger for a running session; `session.py` ≤ 400 lines; no `acquire()` outside `DetectorClient` (grep-enforced test) |
 | **W1** wire mirror | proto `ObjectState*`, fields 27/28/13/12; cv-service aggregator emits `objects`; codec decode/encode + `stream_id` check; Java domain `ObjectState` family; DTO `objects[]`; TS mirrors + enum contract test | domain-modeler → adapter-builder → spring-integrator → web-ui (sequential, disjoint) | round-trip test proto→Java→JSON→TS for every group; `detections[]` unchanged byte-for-byte; a `DORMANT` object appears on the wire in the memory trackeval scenario |
 | **W2** Java world model + trace | `WorldModel`, `WorldObject`, `FrameGateLedger`, `TraceDemand`; retire `TrackBook`/`FollowTracker`/`DetectionExtrapolator`; `/cv/trace`; SSE `tracks:`, `cv-trace:`; `CvStatusProvider` capacity; profile fold patch-over-seed + `intent` (Java side); `MODULE.md`s | application-service + spring-integrator | `TrackingAssociateE2ETest` and follow tests green with `WorldModel`; live-before-durable order asserted by test; gate ledger shows all seven reasons in unit tests; **pays MASTER-MATRIX K3 (StreamPipeline decomposition)** partially — `StreamPipeline` loses the six live-model peers |
 | **W3** one operator act | vision-web only: intent chips on hero; "Tuning" modal with resolved sources; remove mode picker + memory toggle; point lock; delete client extrapolation-for-tracked and `electStickyLabels`; `/vision/profiles` intent + policy ALWAYS control; render tier from server | web-ui | click path to follow = 3 (measured by the e2e spec); no client re-derivation of velocity or label for tracked objects (grep test); `RUNNING_UNWATCHED` renders honestly |
@@ -409,7 +425,7 @@ Fix regardless of whether the plan is accepted (W-pre unless noted):
 |---|---|---|
 | D1 | TS `DetectionState` has 3 values, Java 4; `RUNNING_UNWATCHED` falls through every web switch | R1 §9, R4 surprise 8, verified 2026-09-11 (`models.ts:805` vs `DetectionState.java:39`) |
 | D2 | `vision-perception/MODULE.md` describes a trailing `liveGateOpen()` re-check the code deliberately does not do | R2 surprise 1 |
-| D3 | `cv-service/MODULE.md` has both defaults backwards: associator is `cost`, ROI rescue ships **on**; "recovery is cost-only" is false | R3 surprise 1, 2 |
+| D3 | `cv-service/MODULE.md` has both defaults backwards: associator is `cost`, ROI rescue ships **on**; "recovery is cost-only" is false | R3 surprise 1, 2  **fixed in W0** — and FOLLOW recovers too, via a targeted `ObjectMemory.match_identity` re-anchor; the modes differ in which recovery question is asked |
 | D4 | `DetectionExtrapolator` runs every frame for a caller that no longer exists; the TS header comment claims it was deleted | R1 §10, R2 surprise 6; **verified by grep 2026-09-11**: production callers are `reset()` ×2 and `accept()` ×1 in `StreamPipeline`, none for the query method (W2 deletes it) |
 | D5 | Push-mode frame drops never reach the wire | R3 surprise 3 |
 | D6 | `identity_confidence`/`dormant_millis` decoded per track, republished only for the locked track | R4 surprise 5 (W1 fixes via the memory group) |
