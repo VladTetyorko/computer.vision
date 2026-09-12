@@ -78,6 +78,12 @@ class MemoryGallery:
                 # at -- `None` for a pre-L1 entry, never a raw label.
                 "remembered_label": str(identity.elected_label),
                 "first_seen": repr(identity.first_seen),
+                # CV-ORCHESTRATION wave W1 -- `ObjectState.memory.
+                # match_distance`/`.gallery_matches` (plan §4.5) read this
+                # evidence dict the same way `identity_confidence`/
+                # `dormant_millis` above already do.
+                "match_distance": repr(recovery.match_distance),
+                "gallery_considered": str(recovery.gallery_considered),
             }
 
         return Contribution(

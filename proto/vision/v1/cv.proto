@@ -544,7 +544,13 @@ message ObjectState {
     int64 lock_seq_applied = 2;  // the lock generation actually in force
   }
 
-  // The counters death is decided from (E4). Every `*_ms` is epoch milliseconds.
+  // The counters death is decided from (E4). The three `*_ms` instants are on the SAME
+  // timebase as this response's own `DetectionResponse.timestamp_millis` -- cv-service ages
+  // tracks on a local monotonic clock and rebases once, at the wire, onto the frame's own
+  // reported capture instant. So compare them against `timestamp_millis`, never against the
+  // reader's wall clock: under DetectStream that anchor is the CALLER's clock, and under
+  // DetectPulled it is the service host's. Durations elsewhere in this message
+  // (`horizon_ms`, `since_confirmed_ms`, `dormant_ms`) are timebase-free and need no anchor.
   message Timing {
     int64 first_seen_ms     = 1;
     int64 last_seen_ms      = 2;

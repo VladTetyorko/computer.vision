@@ -110,6 +110,17 @@ _VELOCITY_SMOOTHING = 0.3
 # updates.
 _DESCRIPTOR_SMOOTHING = 0.3
 
+# CV-ORCHESTRATION wave W1 -- `ObjectState.belief.confidence_smoothed` (plan
+# §4.5). Same reasoning as `_DESCRIPTOR_SMOOTHING` immediately above, just
+# applied to the observed confidence instead of the appearance vector: one
+# frame's confidence is one detector pass's own noise, not a settled belief
+# in the object's existence, so it nudges the track's running estimate
+# rather than replacing it. Same value as `_DESCRIPTOR_SMOOTHING` because the
+# underlying argument ("one observation is one moment") is identical; kept as
+# its own named constant rather than reused so the two can be tuned
+# independently without a caller having to know they currently agree.
+_CONFIDENCE_SMOOTHING = 0.3
+
 # TRACK-IDENTITY-PLAN wave L1 -- how much weight one additional step back in
 # a track's own label-vote ring costs, applied multiplicatively per step
 # (`_update_label_election`'s decayed-tally loop below). Structural, not an
@@ -242,6 +253,33 @@ class Track:
     _label_challenger: Optional[str] = None
     _label_challenger_streak: int = 0
     _confirmed: bool = field(default=False, repr=False)
+    # CV-ORCHESTRATION wave W1 (plan §4.5) -- additive mirror state. Written
+    # where the fact is already computed and thrown away; read only by
+    # `orchestration/mirror.py`, never by any decision in this module or
+    # `assign.py`/`memory.py`/the scheduler. See `MODULE.md`'s "additive and
+    # inert" note.
+    #
+    # `label_tally` is the decayed, confidence-weighted vote tally
+    # `_update_label_election` already computes every call and previously
+    # discarded once the election decision was made -- the distribution
+    # behind `elected_label`, not just the winner.
+    label_tally: "dict[str, float]" = field(default_factory=dict, repr=False)
+    # Consecutive `_update_label_election` calls since `elected_label` last
+    # changed -- how settled the current name is, the same question
+    # `identity_confidence` answers for a recovery.
+    label_stability: int = 0
+    # EMA of observed confidence across this track's own `SOURCE_DETECTOR`
+    # observations (`_CONFIDENCE_SMOOTHING` above) -- `confidence` (above)
+    # keeps its existing unconditional-overwrite semantics; this is the
+    # second, smoothed opinion.
+    confidence_smoothed: float = 0.0
+    # Box-centre delta applied by the last `_observe` call: this frame's
+    # centre minus the centre `box` held immediately before it was
+    # overwritten. Purely geometric (unlike `velocity_x`/`_y`, this is never
+    # gated on real-vs-predicted evidence) -- a raw per-frame displacement,
+    # for a reader that wants motion without the EMA `velocity_x`/`_y` apply.
+    displacement_x: float = 0.0
+    displacement_y: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -572,6 +610,14 @@ class TrackBook:
             last_confirmed=now,
             source=observation.source,
             hits=1 if observation.source == SOURCE_DETECTOR else 0,
+            # CV-ORCHESTRATION wave W1 -- seed the EMA at this first real
+            # observation instead of the field's own `0.0` default: an EMA
+            # that starts at 0 and blends towards the true value with
+            # `_CONFIDENCE_SMOOTHING` every later frame would report a track
+            # as under-confident for several frames after birth even though
+            # birth itself is already a real `SOURCE_DETECTOR` observation
+            # (see the comment above on `hits`/`last_confirmed`).
+            confidence_smoothed=observation.confidence,
             _confirmed=observation.authoritative,
         )
         self._next_id += 1
@@ -659,6 +705,14 @@ class TrackBook:
             velocity_x=recovery.velocity[0],
             velocity_y=recovery.velocity[1],
             descriptor=recovery.descriptor,
+            # CV-ORCHESTRATION wave W1 -- same seeding reasoning as `_born`
+            # above: the observation that triggered this recovery is real
+            # evidence, so the EMA starts there rather than at `0.0`. Unlike
+            # `descriptor`/`velocity` there is no gallery-remembered
+            # confidence to restore instead (`RecoveredIdentity` carries
+            # none), so this frame's own observation is the best available
+            # seed.
+            confidence_smoothed=observation.confidence,
             _confirmed=True,
         )
         track.age_frames = -1
@@ -809,6 +863,21 @@ class TrackBook:
                 else:
                     track.velocity_x = _blend(track.velocity_x, measured_x)
                     track.velocity_y = _blend(track.velocity_y, measured_y)
+        # CV-ORCHESTRATION wave W1 -- `ObjectState.kinematics.displacement_*`
+        # (plan §4.5): the raw per-frame centre delta this booking applies,
+        # unconditionally (no `elapsed > 0.0 and not observation.predicted`
+        # evidence gate like `velocity_x`/`_y` above). Deliberately a
+        # different question from velocity: velocity is this track's
+        # smoothed, evidence-only MOTION ESTIMATE, used elsewhere to predict
+        # and to gate re-identification; displacement is simply "how far did
+        # the box this method is about to install move from the box it is
+        # replacing", true of every booking including a PREDICTED coast, and
+        # read only by the wire mirror -- never by a decision in this
+        # module.
+        old_cx, old_cy = track.box.center
+        new_cx, new_cy = observation.box.center
+        track.displacement_x = new_cx - old_cx
+        track.displacement_y = new_cy - old_cy
         track.box = observation.box
         track.label = observation.label
         track.confidence = observation.confidence
@@ -1002,7 +1071,23 @@ def _update_label_election(track: Track, observation: Observation, params: Track
     for voted_label, voted_confidence in reversed(track._label_votes):
         tally[voted_label] = tally.get(voted_label, 0.0) + voted_confidence * weight
         weight *= _LABEL_VOTE_DECAY
+    # CV-ORCHESTRATION wave W1 -- `ObjectState.identity.candidates` (plan
+    # §4.5) wants the distribution behind the election, not just the winner
+    # this function already exposes via `track.elected_label`. This tally is
+    # recomputed fresh every call (see docstring above), so storing it is
+    # simply keeping what was about to be discarded.
+    track.label_tally = tally
+    # CV-ORCHESTRATION wave W1 -- `ObjectState.belief.confidence_smoothed`:
+    # blended here, not in `_observe` alongside `track.confidence`, because
+    # this function is already the one place gated to real `SOURCE_DETECTOR`
+    # evidence only (this function's own docstring) -- the same
+    # evidence-vs-extrapolation discipline `velocity_x`/`_y` and
+    # `observe_descriptor` apply, now extended to confidence.
+    track.confidence_smoothed = (
+        _CONFIDENCE_SMOOTHING * observation.confidence + (1.0 - _CONFIDENCE_SMOOTHING) * track.confidence_smoothed
+    )
 
+    previous_elected_label = track.elected_label
     incumbent_score = tally.get(track.elected_label, 0.0)
     challenger_label: Optional[str] = None
     challenger_score = -1.0
@@ -1026,6 +1111,17 @@ def _update_label_election(track: Track, observation: Observation, params: Track
     else:
         track._label_challenger = None
         track._label_challenger_streak = 0
+
+    # CV-ORCHESTRATION wave W1 -- `ObjectState.identity.stability` (plan
+    # §4.5): consecutive calls to this function since `elected_label` last
+    # changed. Zero on the very call that changes it (a switch that just
+    # happened has earned zero settled calls yet), incremented on every call
+    # that leaves the incumbent in place -- including the first call after
+    # `_born`/`_adopt` seed it, since neither of those calls this function.
+    if track.elected_label == previous_elected_label:
+        track.label_stability += 1
+    else:
+        track.label_stability = 0
 
 
 def observe_descriptor(

@@ -6,10 +6,16 @@ whole book is predicted and publishes the answer, so the associator stops
 being the thing that happens to call it.
 
 **It also owns the snapshot.** `TRACKS_PREV` is captured here, once, and
-`PREDICTIONS[i]` is `TRACKS_PREV[i]`'s predicted box by construction -- the
+`PREDICTIONS[i]` is `TRACKS_PREV[i]`'s `Prediction` by construction -- the
 "captured once, read twice" invariant `_run_cost_associate` used to state in
 a comment and defend by nothing. A second `book.tracks` read is only correct
 by coincidence, and nothing should have to promise that to stay correct.
+
+`PREDICTIONS` carries the whole `Prediction`, not just its box (CV-
+ORCHESTRATION wave W1): `Prediction.horizon_seconds` is how far the clamp
+actually let the extrapolation reach, and the only moment that is knowable is
+HERE -- by the time the aggregator has folded, every touched track's
+`last_seen` has already advanced to now and the interval is gone.
 
 **Why this runs after ego-motion and not before.** `TrackBook.warp` has
 already carried every stored box into THIS frame's coordinates, so `predict`
@@ -48,17 +54,17 @@ class PredictConstantVelocity:
 
     def contribute(self, ctx: FrameContext, budget: Any) -> Contribution:
         tracks = self._book.tracks
-        boxes = [predict(track, ctx.now).box for track in tracks]
+        predictions = [predict(track, ctx.now) for track in tracks]
         return Contribution(
-            outputs={Key.TRACKS_PREV: tracks, Key.PREDICTIONS: boxes},
+            outputs={Key.TRACKS_PREV: tracks, Key.PREDICTIONS: predictions},
             summary={"tracks": str(len(tracks))},
             evidence={
                 track.track_id: {
-                    "predicted": _box_text(box),
+                    "predicted": _box_text(prediction.box),
                     "held": _box_text(track.box),
                     "velocity": f"{track.velocity_x!r},{track.velocity_y!r}",
                 }
-                for track, box in zip(tracks, boxes)
+                for track, prediction in zip(tracks, predictions)
             },
         )
 

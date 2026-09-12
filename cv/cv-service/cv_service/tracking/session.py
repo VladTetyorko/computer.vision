@@ -51,7 +51,7 @@ contract are in `cv_service/orchestration/corrections.py`.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Sequence
 
 from cv_service.orchestration.aggregator import Aggregator
 from cv_service.orchestration.budget import BudgetPolicy, BudgetState, scheduler_state
@@ -63,11 +63,13 @@ from cv_service.orchestration.engines import EngineSet
 from cv_service.orchestration.facts import SessionFacts, session_facts
 from cv_service.orchestration.keys import Key
 from cv_service.orchestration.ledger import FrameLedger, LedgerRing
+from cv_service.orchestration.mirror import object_states
 from cv_service.orchestration.orchestrator import Orchestrator
 from cv_service.orchestration.state import StreamState
 from cv_service.tracking import params as params_module
 from cv_service.tracking.engines.base import Box, CameraPose
 from cv_service.tracking.lock import LockArbiter
+from cv_service.tracking.objectstate import ObjectState
 # Re-exported, not re-defined (`tracking/outcome.py` owns them): every
 # `from cv_service.tracking.session import FrameOutcome, TrackedBox` in
 # `tools/trackeval/` and the servicer keeps working, so the split costs no
@@ -287,6 +289,14 @@ class StreamTrackingSession:
         if ledger.halted:
             # `detect.full` is the only contributor that halts, and only for
             # "no model resolved at all" -- the servicer's echo degradation.
+            #
+            # CV-ORCHESTRATION wave W1: no mirror here, deliberately. The
+            # servicer answers this outcome with `_echo`, the one response it
+            # also uses for "no model injected" and for a frame that raised --
+            # two paths with no `FrameOutcome` at all. Giving one of the three
+            # an `objects[]` would make the same echo response mean different
+            # things depending on which failure produced it. The mirror rides
+            # on `_tracked_response` and nowhere else.
             return FrameOutcome(boxes=None)
 
         # TRACKING-V2-PLAN wave C5c: an ROI pass is a real, additional
@@ -313,6 +323,29 @@ class StreamTrackingSession:
             # TRACKING-V3-PLAN wave V6 -- echoed straight from this call's own
             # `detection_lag_millis` argument, already clamped.
             detection_lag_millis=self._state.lag_millis,
+            # CV-ORCHESTRATION wave W1 -- built AFTER the run, from the book
+            # the aggregator has just folded into and the ledger the
+            # orchestrator has just finished. See `orchestration/mirror.py`'s
+            # own docstring for why this is not the aggregator's job.
+            objects=self._object_states(ctx, ledger, self._aggregator.boxes),
+            # Attached to the response only when the request asked to trace
+            # (`grpc/servicers.py`); parked in `self._ledgers` either way, so
+            # `Inspect` is unaffected by whether anyone traced.
+            ledger=ledger,
+        )
+
+    def _object_states(
+        self, ctx: FrameContext, ledger: FrameLedger, boxes: "Sequence[Any]"
+    ) -> "tuple[ObjectState, ...]":
+        """This frame's wire mirror -- a pure read over state this session
+        already owns, never a second place any of it is decided."""
+        return object_states(
+            book=self._book,
+            memory=self._engines.memory,
+            lock=self._lock,
+            ctx=ctx,
+            ledger=ledger,
+            boxes=boxes,
         )
 
     # -- the roster (CV-ORCHESTRATION §4.1) --------------------------------

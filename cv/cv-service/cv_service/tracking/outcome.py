@@ -16,11 +16,18 @@ Pure stdlib, like the rest of `cv_service/tracking/`.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from cv_service.tracking.engines.base import Box
+from cv_service.tracking.objectstate import ObjectState
 from cv_service.tracking.scheduler import REASON_UNSPECIFIED
 from cv_service.tracking.track import Track
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    # Type-only, the same `track.py`/`ObjectMemory` pattern: `orchestration/`
+    # imports `tracking/` and never the other way round at runtime, and this
+    # module must not be the one edge that reverses it.
+    from cv_service.orchestration.ledger import FrameLedger
 
 
 @dataclass(frozen=True)
@@ -101,6 +108,31 @@ class FrameOutcome:
     # makes the bias VISIBLE, never merely assumed corrected. `0` on a
     # stream whose caller measures no lag (every push-mode frame today).
     detection_lag_millis: int = 0
+    # CV-ORCHESTRATION wave W1 -- `DetectionResponse.objects` (wire field 27,
+    # plan §4.5). One entry per LIVE track plus one per DORMANT identity,
+    # built by `orchestration/mirror.py` AFTER the run from state this
+    # outcome's other fields never carried. Empty `()` -- never `None` --
+    # on every frame the mirror had nothing to describe, and on the halted
+    # (echo) path: "this frame knows of no objects" is a real answer, and a
+    # sentinel would make it indistinguishable from "the mirror did not run".
+    #
+    # Deliberately NOT dumped by `trackeval/golden.py`, whose `outcome_lines`
+    # names the fields it compares one by one: this field is a DESCRIPTION of
+    # state the 30 golden fixtures already pin through `boxes`, so including
+    # it would rewrite every fixture without a single behavioural change
+    # behind it.
+    objects: "tuple[ObjectState, ...]" = ()
+    # CV-ORCHESTRATION wave W1 -- `DetectionResponse.ledger` (wire field 28).
+    # THIS frame's ledger, the same object `session.ledgers` parks in its ring
+    # for `Inspect`: the servicer attaches it to the response only when the
+    # request asked to trace, so a normal frame pays nothing for it and the
+    # debug RPC keeps working exactly as before either way.
+    #
+    # `None` only on a `FrameOutcome` built outside `session.process()` (a
+    # test or a harness constructing one directly) -- the trace path then has
+    # nothing to attach, which is the honest answer rather than an invented
+    # empty ledger claiming no contributor ran.
+    ledger: "Optional[FrameLedger]" = None
 
 
 def box_for(

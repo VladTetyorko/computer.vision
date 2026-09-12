@@ -68,6 +68,13 @@ class CostAssignment:
     matched: "tuple[Observation, ...]"
     matched_descriptors: "tuple[Optional[Descriptor], ...]"
     captured_at: "dict[object, float]"
+    #: CV-ORCHESTRATION wave W1 -- `ObjectState.provenance.assoc_cost` (plan
+    #: §4.5). Positional against `assignment.matches`, not keyed: it is the
+    #: same list `matched`/`matched_descriptors` already walk in that order,
+    #: so a third parallel tuple costs nothing a reader doesn't already pay
+    #: for those two. Empty when the resolved engine has no `.cost` method
+    #: (defaults to `()` for any caller/test built before this wave).
+    costs: "tuple[float, ...]" = ()
 
 
 class AssociateByteTrack:
@@ -165,7 +172,7 @@ class AssociateCost:
         candidates = [
             Candidate(
                 key=track.key,
-                box=predicted[index],
+                box=predicted[index].box,
                 # TRACK-IDENTITY-PLAN wave L1: the ELECTED label, not the raw
                 # one, so `assign.py`'s label compatibility test and its L2
                 # penalty both get a stable operand instead of re-rolling
@@ -194,6 +201,22 @@ class AssociateCost:
         engine.retune(weights=weights, gates=params.cost_gates)
 
         assignment = engine.assign(candidates, targets)
+
+        # CV-ORCHESTRATION wave W1 -- `ObjectState.provenance.assoc_cost`
+        # (plan §4.5). `getattr(..., "cost", None)` rather than assuming
+        # every `self._engines.engine` resolved here is a `CostAssociator`
+        # with a `.cost` method: the type hint above already says it should
+        # be, but this guard is what keeps a future/test engine that lacks
+        # one a silent `()` instead of an `AttributeError` mid-frame.
+        cost_fn = getattr(engine, "cost", None)
+        costs: "tuple[float, ...]" = (
+            tuple(
+                cost_fn(candidates[candidate_index], targets[target_index])
+                for candidate_index, target_index in assignment.matches
+            )
+            if cost_fn is not None
+            else ()
+        )
 
         matched: "list[Observation]" = []
         matched_descriptors: "list[Optional[Descriptor]]" = []
@@ -248,6 +271,7 @@ class AssociateCost:
                     matched=tuple(matched),
                     matched_descriptors=tuple(matched_descriptors),
                     captured_at=captured_at,
+                    costs=costs,
                 )
             },
             summary={
