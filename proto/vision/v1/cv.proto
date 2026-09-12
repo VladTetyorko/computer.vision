@@ -295,6 +295,98 @@ message UploadAck {
   int32  file_count     = 5;   // files extracted, incl. data.yaml
 }
 
+// ---- CV-ORCHESTRATION wave W0 (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4) -------------
+// A read-only debug surface. Purely ADDITIVE: nothing on the DetectStream/DetectPulled response
+// path changes, no existing message gains a field, and no existing enum gains a value (Java's
+// exhaustive switches, plan §4.5). A client that never calls Inspect cannot tell this exists.
+
+// What happened to one contributor on one frame.
+enum LedgerOutcome {
+  LEDGER_OUTCOME_UNSPECIFIED = 0;
+  LEDGER_OUTCOME_RAN         = 1;  // it ran and produced whatever it produces
+  LEDGER_OUTCOME_SKIPPED     = 2;  // the budget refused it, or it declined itself -- `reason` says
+  LEDGER_OUTCOME_FAILED      = 3;  // it raised; the frame continued without its output
+}
+
+// One contributor's row on one frame. `cost_ms` is the contributor's OWN measurement when it has
+// one that reaches the wire (the detector's inference_millis, ego-motion's motion_millis) and the
+// orchestrator's wall clock otherwise -- the two are never summed into a single "total".
+message LedgerEntry {
+  string        contributor_id = 1;   // "detect.full", "assoc.cost", "follow.lk", ...
+  LedgerOutcome outcome        = 2;
+  string        reason         = 3;   // why it was skipped, or "<ExcType>: <message>" when it failed
+  double        cost_ms        = 4;
+  map<string, string> summary  = 5;   // free-form facts this contributor chose to record
+}
+
+// One claim ONE contributor made about ONE object, kept attributed rather than merged: "who said
+// this" is the question a merged map cannot answer.
+message ObjectEvidence {
+  string contributor_id       = 1;
+  map<string, string> claim   = 2;
+}
+
+// Every claim made about one track id on one frame.
+message ObjectClaims {
+  repeated ObjectEvidence claims = 1;
+}
+
+// One frame's complete evidence. Bounded and in-memory (CV_LEDGER_RING frames per session);
+// never persisted, never pushed -- a client asks for it or it is forgotten.
+message FrameLedger {
+  string   stream_id            = 1;
+  int64    sequence             = 2;   // this session's own frame counter, from 0
+  int64    captured_at_millis   = 3;
+  int32    level_served         = 4;   // the capability ladder level this frame actually ran at
+  string   detector_reason      = 5;   // DetectorReason's own value name, as the response carries it
+  repeated string eligible      = 6;   // contributor FAMILIES the budget allowed this frame
+  repeated LedgerEntry entries  = 7;   // in run order
+  map<int64, ObjectClaims> objects = 8;  // track id -> what was claimed about it
+  int32    drops_since_last     = 9;   // frames the mailbox dropped before this one (push mode)
+  double   gate_wait_ms         = 10;  // wall time inside the detector: queueing plus inference
+  double   total_ms             = 11;
+  bool     halted               = 12;  // a contributor stopped the frame (no model resolved)
+}
+
+// What one live tracking session is doing right now.
+message SessionFacts {
+  string stream_id              = 1;
+  string mode                   = 2;   // TrackingMode's own value name
+  string engine_id              = 3;   // the associator/follower actually serving, "" when none is
+  string motion_engine_id       = 4;
+  string appearance_engine_id   = 5;
+  int32  level_served           = 6;
+  string level_reason           = 7;
+  int32  live_tracks            = 8;
+  int32  dormant_identities     = 9;
+  int64  locked_track_id        = 10;
+  int64  frames_processed       = 11;
+  repeated string contributors  = 12;  // registered ids, in run order
+}
+
+// What the process as a whole is doing. Cheap enough to answer while streams are running.
+message ProcessFacts {
+  string detector_client        = 1;   // "local" in W0; "pool" once the detector role ships
+  int32  sessions               = 2;
+  int32  gate_permits           = 3;
+  int32  ledger_ring            = 4;   // CV_LEDGER_RING: frames retained per session
+  repeated string stream_ids    = 5;
+}
+
+// Empty stream_id: the process and its session list. Otherwise: that session's facts and its
+// last `frames` ledgers, newest last.
+message InspectRequest {
+  string stream_id = 1;
+  int32  frames    = 2;   // 0 = the whole ring
+}
+
+message InspectResponse {
+  ProcessFacts process          = 1;
+  SessionFacts session          = 2;   // set only when the request named a stream_id
+  repeated FrameLedger ledgers  = 3;
+  bool   found                  = 4;   // false when a named stream_id has no live session
+}
+
 // Frame -> detections streaming inference.
 service Inference {
   rpc DetectStream(stream FrameRequest) returns (stream DetectionResponse);
@@ -302,6 +394,8 @@ service Inference {
   // the client sends PullControl (desired state, see above) and receives the same DetectionResponse
   // push mode uses, with fields 16-21 populated. Additive: DetectStream is unchanged byte-for-byte.
   rpc DetectPulled(stream PullControl) returns (stream DetectionResponse);
+  // NEW -- CV-ORCHESTRATION wave W0: read-only debug surface, off the response path entirely.
+  rpc Inspect(InspectRequest) returns (InspectResponse);
 }
 
 // Dataset training and model registry control plane.

@@ -12,44 +12,40 @@ TRACKING-ORCHESTRATION.md` §3.1/§3.4, `docs/plans/done/TRACKING-PLAN.md`
       |                      entry each -- the chain once hand-written here
       `- FrameOutcome        from the aggregator's boxes and StreamState
 
-**Everything that decides anything now lives elsewhere, by name.** Policy is
+**Everything that decides anything lives elsewhere, by name.** Policy is
 `scheduler.py` (through `orchestration/budget.py`), identity is `track.py`,
-target selection is `lock.py`, pixels are `engines/`, and every per-frame
-step is a contributor in `cv_service/orchestration/contributors/`. The
-`TrackBook` is written in exactly one place -- `orchestration/aggregator.py`
--- at most once per frame. If this file grows a branch that decides an
-outcome, that branch belongs in a contributor.
+target selection is `lock.py`, pixels are `engines/`, and every per-frame step
+is a contributor in `cv_service/orchestration/contributors/`. The `TrackBook`
+is written in exactly one place -- `orchestration/aggregator.py` -- at most
+once per frame. A branch here that decides an outcome belongs in a contributor.
 
-**On size, honestly.** TRACKING-ORCHESTRATION §2.1 budgeted "~80 lines" for
-this class; it reached 2 362 before wave W0. The charter held on POLICY (no
-scheduling rule, no lifecycle rule, no geometry ever lived here) but said
-nothing about SEQUENCING, and FOLLOW alone has five per-frame outcomes, each
-ordering engine + book + lock. W0 does not shrink the sequencing; it gives
-each step an owner, a declared contract and a ledger row, so the sequence is
-data the orchestrator walks rather than prose this file recites.
+**On size, honestly.** TRACKING-ORCHESTRATION §2.1 budgeted "~80 lines"
+here; it reached 2 362 before W0. The charter held on POLICY but said nothing
+about SEQUENCING, and FOLLOW alone has five per-frame outcomes, each ordering
+engine + book + lock. W0 does not shrink the sequencing; it gives each step
+an owner, a declared contract and a ledger row, so the sequence is data the
+orchestrator walks, not prose this file recites.
 
 **The tracker path never acquires `InferenceGate`.** The gate bounds
 concurrent *YOLO* passes across streams; a 0.4 ms tracker update queueing
 behind a 343 ms `orion12l` pass would destroy the whole design. This class
-holds no reference to a gate -- only the `detect` callable the servicer
-passes in, which it hands to `orchestration/detector.py`, the package's one
-door, with `tests/orchestration/test_gate_seam.py` grepping to prove it.
+holds no gate reference -- only the `detect` callable the servicer passes in,
+handed to `orchestration/detector.py`, the package's one door, with
+`tests/orchestration/test_gate_seam.py` grepping to prove it.
 
 Pure stdlib -- the frame arrives as an opaque object from a `frame` callable
 the servicer supplies (it does the `cv2` decode lazily and memoizes it), so
 nothing here, or anywhere under `orchestration/`, imports `cv2` or `numpy`.
 
 **Reconnect (TRACKING-V2-PLAN wave C5b, review finding B5).** This class does
-not assume it lives for exactly one `DetectStream` call -- `cv_service.
-tracking.sessions.SessionRegistry` pools instances by `stream_id` across a
-disconnect, and `reset_for_reconnect()` is the ONE thing that happens at that
-boundary. See its own docstring for why the split is exactly there.
+not assume it lives for exactly one `DetectStream` call -- `sessions.
+SessionRegistry` pools instances by `stream_id` across a disconnect, and
+`reset_for_reconnect()` is the ONE thing that happens at that boundary.
 
 **`detection_lag_millis` (TRACKING-V3-PLAN wave V6, §4.5)** is the caller's
 measurement of how stale this frame's detection is by the time it lands (pull
-mode's `capture_skew_millis`; `0` for every push-mode frame and this stream's
-first). The mechanism and its no-op contract are in
-`cv_service/orchestration/corrections.py`.
+mode's `capture_skew_millis`; `0` in push mode). The mechanism and its no-op
+contract are in `cv_service/orchestration/corrections.py`.
 """
 
 from __future__ import annotations
@@ -64,6 +60,7 @@ from cv_service.orchestration.contributors import roster
 from cv_service.orchestration.contributors import signature as roster_signature
 from cv_service.orchestration.detector import LocalDetectorClient
 from cv_service.orchestration.engines import EngineSet
+from cv_service.orchestration.facts import SessionFacts, session_facts
 from cv_service.orchestration.keys import Key
 from cv_service.orchestration.ledger import FrameLedger, LedgerRing
 from cv_service.orchestration.orchestrator import Orchestrator
@@ -88,26 +85,22 @@ from cv_service.tracking.track import Track, TrackBook
 
 LOGGER = logging.getLogger("cv_service.tracking.session")
 
-# `detect(roi=None)` returns whatever `InferenceServicer._run_detector`
-# returns: `(detections, inference_millis)`, with `detections is None`
-# meaning "no model resolved at all -- echo this frame". `roi`
-# (TRACKING-V2-PLAN wave C5c, review §4.6) asks for a SECOND, cropped pass
-# around a candidate's predicted box instead of the full frame -- optional,
-# so every pre-C5c caller (every harness/test `detect()` written before this
-# wave) keeps working unchanged. `session.py` is the only caller that ever
-# passes one, and only from `_roi_rescue`.
+# `detect(roi=None)` returns `InferenceServicer._run_detector`'s own
+# `(detections, inference_millis)`, with `detections is None` meaning "no
+# model resolved at all -- echo this frame". `roi` (TRACKING-V2-PLAN wave
+# C5c) asks for a SECOND, cropped pass around a candidate's predicted box;
+# optional, so every pre-C5c harness `detect()` keeps working unchanged.
 DetectFn = Callable[[Optional[Box]], "tuple[Optional[list], int]"]
 FrameFn = Callable[[], Any]
 
 
 
 class StreamTrackingSession:
-    """Per-stream tracking state, created inside `DetectStream`.
+    """Per-stream tracking state, pooled by `stream_id`.
 
-    Created in the same place, and for the same reason, as `_StreamReader`:
-    it is state that belongs to one bidi call, not to the servicer, which is
-    shared by every stream. Construction is free -- no engine is built until
-    a frame actually asks for an active mode.
+    State that belongs to one stream, not to the servicer, which is shared by
+    every stream. Construction is free -- no engine is built until a frame
+    actually asks for an active mode.
     """
 
     def __init__(
@@ -124,8 +117,8 @@ class StreamTrackingSession:
         self._state = StreamState()
         # Every lazily-resolved collaborator, plus the FOLLOW -> ASSOCIATE ->
         # OFF ladder. `on_params` is how a degradation gets back here: the
-        # engine set rewrites `TrackingParams`, this class re-tunes the budget
-        # and the book from it, and neither owns both.
+        # engine set rewrites `TrackingParams`, this class re-tunes the
+        # budget and the book from it, and neither owns both.
         self._engines = EngineSet(
             settings=settings,
             registry_provider=registry_provider,
@@ -135,8 +128,8 @@ class StreamTrackingSession:
             state=self._state,
             on_params=self._adopt_params,
         )
-        # The one door to the inference gate (`orchestration/detector.py`),
-        # rebound per frame to the servicer's own `detect` callable.
+        # The one door to the inference gate, rebound per frame to the
+        # servicer's own `detect` callable (`orchestration/detector.py`).
         self._client = LocalDetectorClient()
         # The fold, built once and reused across roster rebuilds: it holds
         # this frame's response boxes, which `process()` reads back.
@@ -146,12 +139,12 @@ class StreamTrackingSession:
         )
         self._roster_signature: "Optional[tuple[str, ...]]" = None
         self._built: Optional[Orchestrator] = None
-        #: Per-frame evidence, bounded by `CV_LEDGER_RING` -- the `Inspect`
-        #: surface, and the only thing this class keeps from a finished frame.
+        #: Per-frame evidence, bounded by `CV_LEDGER_RING` -- `Inspect`'s
+        #: source, and all this class keeps from a finished frame.
         self._ledgers = LedgerRing(settings.ledger_ring)
         self._sequence = 0
-        #: Stamped by `SessionRegistry.acquire`; `""` for an un-keyed stream
-        #: (which never pools either). Names this session in every ledger.
+        #: Stamped by `SessionRegistry.acquire`; `""` for an un-keyed
+        #: stream. Names this session in every ledger it produces.
         self.stream_id: str = ""
         # The last wire `TrackingConfig` applied, held opaquely and compared
         # by equality (a protobuf `==`, no allocation) so the restated-every-
@@ -193,8 +186,8 @@ class StreamTrackingSession:
         self._budget.retune(self._params)
         self._book.retune(self._params)
         # WHICH collaborator a changed field invalidates is `EngineSet`'s
-        # own rule -- it owns every one of those releases, so this class
-        # would only be a second place to get them wrong.
+        # own rule: it owns every one of those releases, so this class would
+        # only be a second place to get them wrong.
         self._engines.reconfigure(previous, self._params)
         if self._lock.apply(request.lock):
             self._state.followed = None
@@ -211,17 +204,16 @@ class StreamTrackingSession:
         frame: FrameFn,
         pose: CameraPose = CameraPose(),
         detection_lag_millis: int = 0,
+        dropped_frames: int = 0,
     ) -> FrameOutcome:
         """Run one frame: resolve, budget, seed, orchestrate, fold.
 
-        Every branch that used to live here is a contributor now
-        (`cv_service/orchestration/`), so what remains is composition: this
-        method resolves the lazily-built collaborators, asks the budget who
-        may run, puts the frame's GIVEN facts on the blackboard, and turns
-        what the aggregator produced into a `FrameOutcome`.
-
-        `detection_lag_millis` reaches `orchestration/corrections.py` through
-        `StreamState.lag_seconds`; see the module docstring above.
+        Every branch that used to live here is a contributor now, so what
+        remains is composition. `detection_lag_millis` reaches
+        `orchestration/corrections.py` through `StreamState.lag_seconds`.
+        `dropped_frames` is the transport's count of frames discarded since
+        the previous one it delivered -- ledger evidence only, never an input
+        to a decision: the tracker cannot see a frame that never arrived.
         """
         # TRACKING-V3-PLAN wave V1: resolved FIRST, unconditionally -- every
         # engine roster call reads the served level, so it has to be current
@@ -258,8 +250,8 @@ class StreamTrackingSession:
         )
         self._state.reset_frame(lag_millis=detection_lag_millis)
         # TRACKING-V3-PLAN wave V3 -- reset before the run, which may or may
-        # not fold (see `TrackBook.reset_reupdate_stats`'s own docstring for
-        # why the reset cannot live inside `apply()` itself).
+        # not fold (`TrackBook.reset_reupdate_stats` says why it cannot live
+        # inside `apply()` itself).
         self._book.reset_reupdate_stats()
 
         ctx = FrameContext(
@@ -283,6 +275,7 @@ class StreamTrackingSession:
             level_served=self._engines.capability_level_served,
             detector_reason=budget.detector_reason,
             eligible=tuple(sorted(budget.eligible)),
+            drops_since_last=dropped_frames,
         )
         self._sequence += 1
 
@@ -293,14 +286,12 @@ class StreamTrackingSession:
 
         if ledger.halted:
             # `detect.full` is the only contributor that halts, and only for
-            # "no model resolved at all" -- the servicer's echo degradation,
-            # byte-identical to what `process()` returned inline before.
+            # "no model resolved at all" -- the servicer's echo degradation.
             return FrameOutcome(boxes=None)
 
         # TRACKING-V2-PLAN wave C5c: an ROI pass is a real, additional
-        # detector cost -- summed into the SAME `inference_millis` total
-        # (`StreamState.inference_millis`), the "one number, whatever ran"
-        # convention `detect_composite` already uses.
+        # detector cost, summed into the SAME `inference_millis` total --
+        # the "one number, whatever ran" convention `detect_composite` uses.
         return FrameOutcome(
             boxes=self._aggregator.boxes,
             inference_millis=self._state.inference_millis,
@@ -327,12 +318,12 @@ class StreamTrackingSession:
     # -- the roster (CV-ORCHESTRATION §4.1) --------------------------------
 
     def _orchestrator(self) -> Orchestrator:
-        """This configuration's ordered contributors, rebuilt only when the
-        configuration that decides membership actually changes.
+        """This configuration's ordered contributors, rebuilt only when what
+        decides membership actually changes.
 
         Not built at `apply_config` as the plan assumed: engines resolve
         LAZILY, so the frame that first builds a `cost` associator is the
-        frame the roster must change on, and that is a strict superset of the
+        frame the roster must change on -- a strict superset of the
         config-change moments. Recorded in `cv/cv-service/MODULE.md`.
         """
         current = roster_signature(self._engines)
@@ -353,43 +344,48 @@ class StreamTrackingSession:
 
     @property
     def ledgers(self) -> LedgerRing:
-        """The last `CV_LEDGER_RING` frames' evidence -- `Inspect`'s source,
-        and the only reason this class holds anything a frame produced."""
+        """The last `CV_LEDGER_RING` frames' evidence -- `Inspect`'s source."""
         return self._ledgers
 
     def declarations(self) -> "list[tuple[str, tuple[str, ...], tuple[str, ...]]]":
-        """`(id, reads, writes)` per registered contributor, in run order."""
+        """`(id, reads, writes)` per contributor, in run order. Tests, and
+        the one caller that may legitimately force a roster build."""
         return self._orchestrator().declarations()
+
+    def facts(self) -> SessionFacts:
+        """This session's configuration, frozen, for `Inspect`. Reads only
+        what is ALREADY built -- see `orchestration/facts.py`."""
+        return session_facts(
+            stream_id=self.stream_id,
+            params=self._params,
+            engines=self._engines,
+            book=self._book,
+            lock=self._lock,
+            sequence=self._sequence,
+            built=self._built,
+        )
 
     # -- reconnect (TRACKING-V2-PLAN wave C5b, review finding B5) -----------
 
     def reset_for_reconnect(self) -> None:
         """A stream just disconnected: drop every per-frame ENGINE, keep
-        everything else.
+        everything else. Called by `SessionRegistry.release()`.
 
-        Called by `cv_service.tracking.sessions.SessionRegistry.release()`
-        the moment a `DetectStream` call ends, so a session sitting inside
-        its grace window is already clean and a reconnect that DOES arrive
-        resumes into a ready-to-rebuild state rather than paying the reset
-        cost on the resumed stream's first frame.
+        **Reset, because `lk`/`flow` each hold a previous DECODED FRAME.**
+        After a reconnect the next frame is not adjacent to whatever they
+        last saw, so feeding it in computes optical flow (or a "camera
+        motion" transform) across a discontinuity -- a large, bogus estimate
+        applied to every live track at exactly the moment the stream is most
+        fragile. The releases below force `EngineSet` to rebuild on the
+        resumed stream's next active frame, the same lazy path a brand-new
+        session takes.
 
-        **What this resets, and why.** `lk`/`flow` each hold a previous
-        DECODED FRAME; after a reconnect the next frame to arrive is not
-        adjacent to whatever they last saw, so feeding it in would compute
-        optical flow (or a "camera motion" transform) across a discontinuity
-        -- a large, bogus estimate applied to every live track at exactly the
-        moment the stream is most fragile. The three releases below force
-        `EngineSet` to build fresh instances on the resumed stream's next
-        active frame, the SAME lazy build-once path a brand-new session takes.
-
-        **What this does NOT reset, and why that is the whole point.**
-        `_book` (ids, lifecycle, ages), the dormant gallery and `_lock`'s
-        TARGET (what the operator asked FOLLOW to hold -- `release_engine`'s
-        own `lock.unbind()` clears only the BOUND track id) are left alone.
-        Resuming the SAME `TrackBook`/`ObjectMemory`/`LockArbiter` OBJECTS is
-        what lets wave C4's gallery -- built to survive a NINE-SECOND
-        occlusion -- survive a two-second reconnect too. `_params`/
-        `applied_wire_config` are untouched as well: the wire restates
+        **Kept, and that is the whole point.** `_book` (ids, lifecycle,
+        ages), the dormant gallery and `_lock`'s TARGET (`release_engine`'s
+        own `lock.unbind()` clears only the BOUND track id). Resuming the
+        SAME objects is what lets wave C4's gallery -- built to survive a
+        NINE-SECOND occlusion -- survive a two-second reconnect too.
+        `_params`/`applied_wire_config` too: the wire restates
         `TrackingConfig` on the very next frame regardless.
         """
         # The epoch stops an ENGINE's restarted key numbering from landing on

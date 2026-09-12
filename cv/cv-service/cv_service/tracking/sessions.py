@@ -187,6 +187,23 @@ class SessionRegistry:
         with self._lock:
             return len(self._entries)
 
+    def snapshot(self) -> "list[StreamTrackingSession]":
+        """Every pooled session right now, live or inside its grace window.
+
+        `Inspect`'s source (CV-ORCHESTRATION §4.4). The list is copied under
+        the registry's own lock so the caller never iterates a dict another
+        thread is mutating; the SESSIONS in it are of course still live, and
+        reading one is the caller's own concern -- `StreamTrackingSession.
+        facts()` is the read that is safe to make from another thread.
+
+        Sessions minted on the unpooled fallback paths (a blank `stream_id`,
+        or a second concurrent call for one already in use) are deliberately
+        absent: this registry never held them, so it cannot honestly list
+        them.
+        """
+        with self._lock:
+            return [entry.session for entry in self._entries.values()]
+
     def _evict_expired(self, now_millis: float) -> None:
         expired = [
             stream_id

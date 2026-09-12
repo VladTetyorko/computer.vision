@@ -59,7 +59,6 @@ class FrameLedger:
     sequence: int
     captured_at_millis: float
     level_served: int = 0
-    config_digest: str = ""
     detector_reason: str = ""
     eligible: "tuple[str, ...]" = ()
     entries: "list[LedgerEntry]" = field(default_factory=list)
