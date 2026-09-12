@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **IN PROGRESS** — proposed 2026-09-11, double-checked against `O1-SYNTHESIS.md` (§12); owner said "continue" 2026-09-12, so W-pre + W0 started on `feat/cv-orchestration` sub-branches; §9 decisions taken 2026-09-12 (E16–E20) |
+| Status | **IN PROGRESS** — proposed 2026-09-11, double-checked against `O1-SYNTHESIS.md` (§12); owner said "continue" 2026-09-12, so W-pre + W0 started on `feat/cv-orchestration` sub-branches; §9 decisions taken 2026-09-12 (E16–E20); **W4 merged 2026-09-12** (`92eac8db`, measured: GB4005 stays all-in-one), W2 running |
 | Branch | `docs/cv-orchestration` (docs only). Implementation task branch: `feat/cv-orchestration`, one sub-branch per wave, merged back in order |
 | Context | [CV-ORCHESTRATION-CONTEXT.md](CV-ORCHESTRATION-CONTEXT.md) — the ask, roles, corpus, status log |
 | Evidence | `cv-orchestration/R1..R5` (Sonnet, code-truth with file:line) → `cv-orchestration/O1-SYNTHESIS.md` (Opus) → this plan (Fable) |
@@ -394,6 +394,17 @@ Decisions:
 - **Fleet budget (ALWAYS-ON D3) is answered structurally, not with a token**: each detector instance admits what it can; `CvStatusProvider` sums instance capacities into "N of M streams" on `/api/system/status`; the app's per-stream bound stays. When the sum is exhausted, `ALWAYS`-policy streams are the ones that see `RESOURCE_EXHAUSTED` first, recorded in the gate ledger as `CV_UNAVAILABLE` — visible, not silent.
 - `DetectorClient` in cv-service has two implementations: `local` (in-process `YoloDetector`, today) and `pool(targets)`. Java is unchanged by W4; it still talks to a tracker.
 
+**As built in W4 (merged 2026-09-12, `92eac8db`)** — wire and roles as specified (`service Detector { Detect }`, `CV_SERVICE_ROLE = detector | tracker | unset = all-in-one`, ordered `CV_DETECTOR_TARGETS`, `RESOURCE_EXHAUSTED` above `CV_DETECTOR_MAX_QUEUE`, capacity/occupancy/queue on `Inspect`); boundaries and numbers that differ:
+
+| Design (above) | As built | Why |
+|---|---|---|
+| Only `DetectorClient` acquires `InferenceGate` | Still true inside `cv_service/orchestration/` (grep-enforced, 30 seam tests). The **detector-role process** acquires its own gate in `grpc/detector_servicer.py` — it *is* the door on the far side of the wire | A detector instance runs no orchestration, only admission + YOLO; the seam test guards the package that must never grow a second door |
+| `bytetrack` unregistered (E16) | Unregistered from `BUILTIN_ASSOCIATORS` (`cost` is the only associator); engine file kept unregistered as a reference; `params.py#resolve()` **aliases** a stored/env `engine_id="bytetrack"` to `cost` | Profiles and env files that still say `bytetrack` keep working instead of failing at session start |
+| "1 tracker + 2 detectors sustains ≥ 2× the streams of one all-in-one on the same hardware" | **On one box the split sustains fewer**: all-in-one 3 streams, split 2 (12-core laptop, 10 fps, yolo26n, 30 s windows per count, first failing count 4 vs 3, quiet box verified). The split's 4 gate permits over-subscribe the same cores and add a loopback hop (+8 ms p50 at one stream) | The acceptance sentence assumed a second machine's cores behind the extra permits. The number that decides a GB4005 split needs GB4005 plus a second box; deferred until GB4005 alone saturates (`Inspect` occupancy/queue, `RESOURCE_EXHAUSTED` in the field), then re-run `tools/detectorbench` across both |
+| ALWAYS-ON D3 "answered by §4.9" | The **budget half** is answered (admission at the instance, fleet number = sum on `Inspect`). The **scheduler half** — fair-share ordering between `ALWAYS` streams once the fleet is saturated — stays open; today the loser is whoever asked last | Out of W4's scope; recorded on ALWAYS-ON-FLOW-PLAN's D3 row |
+| `local` unchanged by pooling | `CV_DETECTOR_TARGETS` may end in `local` as a last resort; a reconnect never reverts a pooled session to local detection (test) | A tracker stays honest about where its boxes came from (`provenance`) |
+| — | W1's wire test `test_tracing_changes_the_ledger_and_nothing_else` was load-dependent (byte-equality over measured `tracker_millis`/`motion_millis`); both are normalised before the compare now | Found by W4's full-suite runs; a test that asserts two runs took the same microseconds asserts a coincidence |
+
 ---
 
 ## 5. Contract changes (frozen for implementation)
@@ -421,7 +432,7 @@ Task branch `feat/cv-orchestration` from master once this plan is accepted; each
 | **W1** wire mirror — **DONE** 2026-09-12 (`700b7834`; pytest 1443 passed, Maven 26/26 green incl. vision-app 355, test:ci 199 files / 3904, golden + BASELINE.md unchanged, round-trip fixture `object-state.wire.json`) | proto `ObjectState*`, fields 27/28/13/12; cv-service aggregator emits `objects`; codec decode/encode + `stream_id` check; Java domain `ObjectState` family; DTO `objects[]`; TS mirrors + enum contract test | domain-modeler → adapter-builder → spring-integrator → web-ui (sequential, disjoint) | round-trip test proto→Java→JSON→TS for every group; `detections[]` unchanged byte-for-byte; a `DORMANT` object appears on the wire in the memory trackeval scenario |
 | **W2** Java world model + trace | `WorldModel`, `WorldObject`, `FrameGateLedger`, `TraceDemand`; retire `TrackBook`/`FollowTracker`/`DetectionExtrapolator`; `/cv/trace`; SSE `tracks:`, `cv-trace:`; `CvStatusProvider` capacity; profile fold patch-over-seed + `intent` (Java side); `MODULE.md`s | application-service + spring-integrator | `TrackingAssociateE2ETest` and follow tests green with `WorldModel`; live-before-durable order asserted by test; gate ledger shows all seven reasons in unit tests; **pays MASTER-MATRIX K3 (StreamPipeline decomposition)** partially — `StreamPipeline` loses the six live-model peers |
 | **W3** one operator act | vision-web only: intent chips on hero; "Tuning" modal with resolved sources; remove mode picker + memory toggle; point lock; delete client extrapolation-for-tracked and `electStickyLabels`; `/vision/profiles` intent + policy ALWAYS control; render tier from server | web-ui | click path to follow = 3 (measured by the e2e spec); no client re-derivation of velocity or label for tracked objects (grep test); `RUNNING_UNWATCHED` renders honestly |
-| **W4** detector role + pool | cv-service `DetectorClient` (`local`, `pool`), `detector` role + `Detector` service, `RESOURCE_EXHAUSTED` admission; compose `cv-detector` profile; `Inspect` capacity; **`bytetrack` unregistered from the roster (E16)** | adapter-builder (python) | trackeval identical with `local`; **measured**: 1 tracker + 2 detectors sustains ≥ 2× the streams of 1 all-in-one at 10 fps yolo26n on the same hardware; reconnect test proves affinity holds with the ordered target list |
+| **W4** detector role + pool — **DONE** 2026-09-12 (`92eac8db`; pytest 1508 passed / 8 skipped, golden + BASELINE.md byte-identical, gate-seam 30/30, vision-proto compiles, `tools/detectorbench` + `DEPLOY-GPU.md` runbook) | cv-service `DetectorClient` (`local`, `pool`), `detector` role + `Detector` service, `RESOURCE_EXHAUSTED` admission; compose `cv-detector` profile; `Inspect` capacity; **`bytetrack` unregistered from the roster (E16)** | Sonnet (branch started under an Opus owner, finished by Sonnet after the owner's Sonnet-only rule 2026-09-12) | trackeval identical with `local` ✔; reconnect/affinity tests ✔ (`test_detector_affinity.py`); **measured on one box, not under contention**: all-in-one sustains **3** streams at 10 fps yolo26n, tracker + 2 detectors sustains **2** — the "≥ 2×" target needs a second machine's cores and is deferred (E17, as-built table under §4.9) |
 | **W5** inspector | vision-web `/manage/cv` (decided E18; no fly-drawer tab): contributor timeline, per-object evidence, gate ledger, process facts; trace demand wiring | web-ui | opening the inspector flips `trace` on and closing flips it off (asserted via `/cv/trace`); a saved trace replays through trackeval |
 | **W6** cold ledger | after DOMAIN-SEPARATION W2: ledgers to a U3 history stream | — | deferred; not scheduled here |
 | **W-legacy** retire `detections[]`/`tracks[]` | wire, DTOs, TS; `objects[]` is the only shape | — | two releases after W3 (E20); not scheduled here |
@@ -470,7 +481,7 @@ Algorithm defects the research found that this plan makes **observable but does 
 | E14 | `TrackingConfig` 8/9/10, `TargetLock.box`, response 13/14/15/21 deprecated, never renumbered | re-home as `TrackingTelemetry` scalars | R4 Q1; scalar growth produced the dead fields |
 | E15 | W0 ships zero behavioural delta, proven by golden per-frame outcomes, before any new evidence source | refactor + improve together | P7; the harness is the only ground truth without aerial footage (TRACKING-V3 O1–O5) |
 | E16 | `bytetrack` unregistered from the roster (owner 2026-09-12 #1) | keep as an L3 reference entry | one evidence graph per associator; R3 Q8 |
-| E17 | GB4005 stays all-in-one until W4's measurement (owner #2) | split now | no number yet; §4.9 |
+| E17 | GB4005 stays all-in-one — **measured 2026-09-12** (W4 sweep on one box: all-in-one 3 streams vs tracker + 2 detectors 2, at 10 fps yolo26n); revisit only when GB4005 alone saturates, then re-run `tools/detectorbench` across two machines | split now | §4.9 as-built table; `cv/cv-service/DEPLOY-GPU.md` |
 | E18 | Engineer inspector is `/manage/cv` only (owner #3) | fly-drawer tab | §4.8 audiences |
 | E19 | Mode picker removed; OFF via profile only (owner #4) | keep OFF as an operator control | §4.7 |
 | E20 | `detections[]`/`tracks[]` retired two releases after W3 (owner #5) | keep indefinitely | PLATFORM-AUDIT: closed to integration |
@@ -482,7 +493,7 @@ Algorithm defects the research found that this plan makes **observable but does 
 | # | Question | Decision | Lands in |
 |---|---|---|---|
 | 1 | `bytetrack` roster entry | **Retire.** Every associator shares one evidence graph; its DAG dead-end is visible now and would cost every future contributor a special case | W4 (cv-service roster; engine module kept as a reference file, unregistered) |
-| 2 | Detector placement | **Stay all-in-one until W4 measures the split.** GB4005 stays an all-in-one instance; the role split is decided on W4's number, not before | W4 measurement → follow-up decision |
+| 2 | Detector placement | **Stay all-in-one until W4 measures the split.** GB4005 stays an all-in-one instance; the role split is decided on W4's number, not before | W4 measurement → **measured, stays all-in-one** (E17) |
 | 3 | Inspector audience | **`/manage/cv` page only.** The fly cockpit gets the one honest status line (§4.8), engineers get the full ledger elsewhere | W5 |
 | 4 | Tracking-mode picker | **Removed from the operator surface.** OFF stays reachable through the profile (asset-level policy), FOLLOW is the tap, ASSOCIATE otherwise | W3 |
 | 5 | Legacy `detections[]` / `tracks[]` | **Retire two releases after W3.** The platform is closed to integrators today (PLATFORM-AUDIT); the retirement is a scheduled row, not a maybe | W-legacy (new row in §6, deferred until two releases after W3) |
@@ -505,7 +516,7 @@ Non-goals: Kalman or any new estimator; cross-camera identity; moving frames or 
 | W1 | `cv/grpc/MODULE.md`, `contexts/vision-perception/MODULE.md`, `station/vision-api/MODULE.md`, `proto` comments |
 | W2 | `contexts/vision-perception/MODULE.md` (WorldModel replaces three peers; D2 fixed), `station/vision-app/MODULE.md` |
 | W3 | `station/vision-web/MODULE.md`; `docs/plans/README.md` rows for CV-SETTINGS, CV-PANEL-SPLIT |
-| W4 | `cv/cv-service/MODULE.md` roles table, `docker-compose.yml` comments, ALWAYS-ON-FLOW-PLAN D3 row → "answered by CV-ORCHESTRATION §4.9" |
+| W4 | `cv/cv-service/MODULE.md` roles table, `docker-compose.yml` comments, ALWAYS-ON-FLOW-PLAN D3 row → "answered by CV-ORCHESTRATION §4.9" — **done** (budget half; plus `cv/cv-service/DEPLOY-GPU.md` runbook with the measured sweep, `cv/vision-proto/MODULE.md`) |
 | all | this plan's status header; `CV-ORCHESTRATION-CONTEXT.md` status log; `docs/plans/README.md` row |
 
 ---
