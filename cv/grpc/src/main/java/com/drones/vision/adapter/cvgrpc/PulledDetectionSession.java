@@ -57,6 +57,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   range): unlike {@link DetectionStreamSession}, there is no pending future to fail just for this
  *   one item — responses are unsolicited. The malformed response is logged at WARNING and dropped;
  *   the session and the publisher both keep running for the next response.</li>
+ *   <li><b>A response whose {@code stream_id} names a different stream</b> (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+ *   R4 surprise 2): logged at WARNING (naming both ids) and dropped — the session and publisher keep
+ *   running, same as a malformed response. An <em>empty</em> {@code stream_id} is not a mismatch: it
+ *   is a cv-service that never set the field, a legitimate older peer this check must not break.</li>
  * </ul>
  *
  * <p>gRPC stream observers are not thread-safe: every write to the request observer (the lazy open,
@@ -134,7 +138,12 @@ final class PulledDetectionSession {
                     .setConfidenceThreshold((float) config.confidenceThreshold())
                     .setTargetFps((float) config.inferenceFps())
                     .setDetectWidth(detectWidth)
-                    .setTracking(DetectionFrameCodec.toWireTrackingConfig(config.tracking()));
+                    .setTracking(DetectionFrameCodec.toWireTrackingConfig(config.tracking()))
+                    // CV-ORCHESTRATION wave W1 (§4.4): same warm-trace-tier demand FrameRequest.trace
+                    // carries in push mode, restated every message like the rest of this builder's hot
+                    // fields. False on every call site today -- W2's TraceDemand is what will actually
+                    // flip PipelineConfig.trace() per-stream.
+                    .setTrace(config.trace());
         }
         CameraAttitude attitude = currentAttitude;
         if (attitude != null && attitude.known()) {
@@ -182,6 +191,17 @@ final class PulledDetectionSession {
     }
 
     private void onResponse(DetectionResponse response) {
+        // R4 surprise 2 (docs/plans/active/CV-ORCHESTRATION-PLAN.md): stream_id has always been on the
+        // wire and, until this wave, never read. An empty value is not a mismatch -- it is a server
+        // that never set the field, a legitimate older peer this wave must not break -- so only a
+        // non-empty, DIFFERING value is dropped.
+        String wireStreamId = response.getStreamId();
+        if (!wireStreamId.isEmpty() && !wireStreamId.equals(streamId.value().toString())) {
+            LOG.log(System.Logger.Level.WARNING,
+                    () -> "Pulled detection response stream_id mismatch: session is for " + streamId
+                            + " but response carried " + wireStreamId + "; dropping it");
+            return;
+        }
         DetectionResult result;
         try {
             result = DetectionFrameCodec.decode(streamId, response);

@@ -187,6 +187,37 @@ class GrpcDetectionPortTest {
     }
 
     @Test
+    void emptyStreamIdOnResponseIsAcceptedAsALegitimateOlderPeer() throws Exception {
+        // docs/plans/active/CV-ORCHESTRATION-PLAN.md R4 surprise 2: an empty response stream_id is
+        // "this server did not say", not a mismatch -- a server that never sets the field must not
+        // have its responses dropped.
+        GrpcDetectionPort port = newPort(new EmptyStreamIdServicer());
+        StreamId streamId = StreamId.random();
+
+        DetectionResult result = port.detect(frame(streamId, 0, PixelFormat.JPEG), PipelineConfig.defaults())
+                .toCompletableFuture().get(5, TimeUnit.SECONDS);
+
+        assertEquals(streamId, result.streamId());
+    }
+
+    @Test
+    void mismatchedStreamIdOnResponseIsDroppedAndThePendingFutureTimesOutRatherThanCompleting() throws Exception {
+        // A short responseTimeout so this test doesn't wait out the 2s production default -- the
+        // dropped response must leave the pending future to time out exactly like an unanswered
+        // sequence, never complete it with the wrongly-addressed result.
+        GrpcCvSettings shortTimeout = GrpcCvSettings.defaults().withResponseTimeout(Duration.ofMillis(300));
+        GrpcDetectionPort port = newPort(new WrongStreamIdServicer(), shortTimeout);
+        StreamId streamId = StreamId.random();
+
+        CompletionStage<DetectionResult> stage = port.detect(frame(streamId, 0, PixelFormat.JPEG),
+                PipelineConfig.defaults());
+
+        ExecutionException ex = assertThrows(ExecutionException.class,
+                () -> stage.toCompletableFuture().get(2, TimeUnit.SECONDS));
+        assertInstanceOf(TimeoutException.class, ex.getCause());
+    }
+
+    @Test
     void detectWithFullDetectionsResponseMapsAllFields() throws Exception {
         GrpcDetectionPort port = newPort(new FixedDetectionServicer());
         StreamId streamId = StreamId.random();
@@ -830,6 +861,66 @@ class GrpcDetectionPortTest {
                 public void onNext(FrameRequest request) {
                     responseObserver.onNext(DetectionResponse.newBuilder()
                             .setStreamId(request.getStreamId())
+                            .setSequence(request.getSequence())
+                            .setTimestampMillis(request.getTimestampMillis())
+                            .setModelId(request.getModelId())
+                            .setModelVersion(request.getModelVersion())
+                            .setInferenceMillis(0)
+                            .build());
+                }
+
+                @Override
+                public void onError(Throwable t) {
+                    // test double: nothing to clean up
+                }
+
+                @Override
+                public void onCompleted() {
+                    responseObserver.onCompleted();
+                }
+            };
+        }
+    }
+
+    /** Like {@link EchoServicer}, but always leaves the response's stream_id unset ({@code ""}). */
+    private static final class EmptyStreamIdServicer extends InferenceGrpc.InferenceImplBase {
+        @Override
+        public StreamObserver<FrameRequest> detectStream(StreamObserver<DetectionResponse> responseObserver) {
+            return new StreamObserver<>() {
+                @Override
+                public void onNext(FrameRequest request) {
+                    responseObserver.onNext(DetectionResponse.newBuilder()
+                            // stream_id deliberately left unset
+                            .setSequence(request.getSequence())
+                            .setTimestampMillis(request.getTimestampMillis())
+                            .setModelId(request.getModelId())
+                            .setModelVersion(request.getModelVersion())
+                            .setInferenceMillis(0)
+                            .build());
+                }
+
+                @Override
+                public void onError(Throwable t) {
+                    // test double: nothing to clean up
+                }
+
+                @Override
+                public void onCompleted() {
+                    responseObserver.onCompleted();
+                }
+            };
+        }
+    }
+
+    /** Like {@link EchoServicer}, but always answers with a different (random) stream_id. */
+    private static final class WrongStreamIdServicer extends InferenceGrpc.InferenceImplBase {
+        @Override
+        public StreamObserver<FrameRequest> detectStream(StreamObserver<DetectionResponse> responseObserver) {
+            return new StreamObserver<>() {
+                @Override
+                public void onNext(FrameRequest request) {
+                    responseObserver.onNext(DetectionResponse.newBuilder()
+                            .setStreamId(StreamId.random().value().toString())
                             .setSequence(request.getSequence())
                             .setTimestampMillis(request.getTimestampMillis())
                             .setModelId(request.getModelId())

@@ -246,6 +246,14 @@ public record GrpcCvSettings(
                 Duration.ofSeconds(OUTAGE_LOG_INTERVAL_SECONDS));
     }
 
+    /** Copy of this settings object with just {@link #responseTimeout()} replaced — a test/tuning convenience. */
+    public GrpcCvSettings withResponseTimeout(Duration newResponseTimeout) {
+        return new GrpcCvSettings(newResponseTimeout, keepAliveTime, keepAliveTimeout, keepAliveWithoutCalls,
+                channelShutdownTimeout, plaintext, uploadTimeout, uploadChunkBytes, detectWidth, jpegQuality,
+                wireFormat, pullRtspBase, pullReconnectInitialBackoff, pullReconnectMaxBackoff,
+                reconnectInitialBackoff, reconnectMaxBackoff, outageLogInterval);
+    }
+
     /** Copy of this settings object with just {@link #detectWidth()} replaced — a test/tuning convenience. */
     public GrpcCvSettings withDetectWidth(int newDetectWidth) {
         return new GrpcCvSettings(responseTimeout, keepAliveTime, keepAliveTimeout, keepAliveWithoutCalls,
