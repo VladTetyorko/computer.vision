@@ -56,10 +56,16 @@ from typing import Iterator, Optional
 import grpc
 
 _CV_SERVICE_DIR = Path(__file__).resolve().parent.parent.parent
-if str(_CV_SERVICE_DIR) not in sys.path:  # pragma: no cover - script entry
-    sys.path.insert(0, str(_CV_SERVICE_DIR))
+# `protoc` emits imports rooted at the PROTO package path (`from vision.v1
+# import cv_pb2`), so the generated tree's root has to be on `sys.path` --
+# the same two lines `cv_service/grpc/servicers.py` carries, for the same
+# reason. This is the only place in `tools/` that talks to the wire.
+_GEN_DIR = _CV_SERVICE_DIR / "cv_service" / "gen"
+for _path in (_CV_SERVICE_DIR, _GEN_DIR):  # pragma: no cover - script entry
+    if str(_path) not in sys.path:
+        sys.path.insert(0, str(_path))
 
-from cv_service.gen.vision.v1 import cv_pb2, cv_pb2_grpc  # noqa: E402
+from vision.v1 import cv_pb2, cv_pb2_grpc  # noqa: E402
 
 # Frame ring depth. Long enough that the model never sees the same frame twice
 # in a row (which would be an unrealistically cache-friendly workload) and
