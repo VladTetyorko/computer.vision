@@ -251,6 +251,30 @@ def test_the_seven_shipped_engines_are_advertised(engine_id):
         "cv_service.tracking.engines.base",
         "cv_service.tracking.predict",
         "cv_service.tracking.levels",
+        "cv_service.tracking.outcome",
+        # CV-ORCHESTRATION W0: the per-frame chain moved here, and the
+        # rule moved with it -- a contributor never touches pixels
+        # directly, only the memoized `frame()` callable an engine reads.
+        "cv_service.orchestration.keys",
+        "cv_service.orchestration.contract",
+        "cv_service.orchestration.budget",
+        "cv_service.orchestration.ledger",
+        "cv_service.orchestration.orchestrator",
+        "cv_service.orchestration.aggregator",
+        "cv_service.orchestration.detector",
+        "cv_service.orchestration.state",
+        "cv_service.orchestration.engines",
+        "cv_service.orchestration.facts",
+        "cv_service.orchestration.corrections",
+        "cv_service.orchestration.contributors",
+        "cv_service.orchestration.contributors.detect",
+        "cv_service.orchestration.contributors.egomotion",
+        "cv_service.orchestration.contributors.predict",
+        "cv_service.orchestration.contributors.appearance",
+        "cv_service.orchestration.contributors.associate",
+        "cv_service.orchestration.contributors.roi",
+        "cv_service.orchestration.contributors.memory",
+        "cv_service.orchestration.contributors.follow",
     ],
 )
 def test_everything_but_the_engines_stays_pure_stdlib(module_name):
@@ -271,7 +295,35 @@ def test_everything_but_the_engines_stays_pure_stdlib(module_name):
 
 @pytest.mark.parametrize(
     "module_name",
-    ["cv_service.tracking.registry", "cv_service.tracking.session", "cv_service.tracking.sessions"],
+    [
+        "cv_service.tracking.registry",
+        "cv_service.tracking.session",
+        "cv_service.tracking.sessions",
+        "cv_service.tracking.outcome",
+        # The ledger is a plain dataclass tree on purpose: `grpc/
+        # servicers.py` is still the SOLE translator to the wire, for
+        # `Inspect` exactly as for `DetectionResponse` (plan §4.4).
+        "cv_service.orchestration.keys",
+        "cv_service.orchestration.contract",
+        "cv_service.orchestration.budget",
+        "cv_service.orchestration.ledger",
+        "cv_service.orchestration.orchestrator",
+        "cv_service.orchestration.aggregator",
+        "cv_service.orchestration.detector",
+        "cv_service.orchestration.state",
+        "cv_service.orchestration.engines",
+        "cv_service.orchestration.facts",
+        "cv_service.orchestration.corrections",
+        "cv_service.orchestration.contributors",
+        "cv_service.orchestration.contributors.detect",
+        "cv_service.orchestration.contributors.egomotion",
+        "cv_service.orchestration.contributors.predict",
+        "cv_service.orchestration.contributors.appearance",
+        "cv_service.orchestration.contributors.associate",
+        "cv_service.orchestration.contributors.roi",
+        "cv_service.orchestration.contributors.memory",
+        "cv_service.orchestration.contributors.follow",
+    ],
 )
 def test_no_tracking_module_imports_cv_pb2(module_name):
     import importlib

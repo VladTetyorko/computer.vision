@@ -112,13 +112,13 @@ class SessionRegistry:
         different streams that both happened to omit one.
         """
         if not stream_id:
-            return self._session_factory()
+            return self._mint("")
         now = _now_millis()
         with self._lock:
             self._evict_expired(now)
             entry = self._entries.get(stream_id)
             if entry is None:
-                session = self._session_factory()
+                session = self._mint(stream_id)
                 self._entries[stream_id] = _Entry(session=session, in_use=True)
                 self._enforce_capacity()
                 return session
@@ -133,7 +133,7 @@ class SessionRegistry:
                     "serving this call an independent, unpooled one",
                     stream_id,
                 )
-                return self._session_factory()
+                return self._mint(stream_id)
             entry.in_use = True
             entry.released_at_millis = None
             LOGGER.info(
@@ -141,6 +141,19 @@ class SessionRegistry:
                 stream_id,
             )
             return entry.session
+
+    def _mint(self, stream_id: str) -> StreamTrackingSession:
+        """A fresh session, stamped with the id it serves.
+
+        The registry is the only thing that knows a session's `stream_id` --
+        the factory takes no arguments and the session never learns one on
+        its own -- so this is where the ledger gets its name (CV-ORCHESTRATION
+        §4.4). Stamped even on the unpooled fallback paths, so a ledger read
+        through `Inspect` is never anonymous just because pooling was skipped.
+        """
+        session = self._session_factory()
+        session.stream_id = stream_id
+        return session
 
     def release(self, stream_id: str, session: StreamTrackingSession) -> None:
         """Return `session` to the pool, disconnected as of now.
@@ -173,6 +186,23 @@ class SessionRegistry:
         """Diagnostics/tests only, never the hot path."""
         with self._lock:
             return len(self._entries)
+
+    def snapshot(self) -> "list[StreamTrackingSession]":
+        """Every pooled session right now, live or inside its grace window.
+
+        `Inspect`'s source (CV-ORCHESTRATION §4.4). The list is copied under
+        the registry's own lock so the caller never iterates a dict another
+        thread is mutating; the SESSIONS in it are of course still live, and
+        reading one is the caller's own concern -- `StreamTrackingSession.
+        facts()` is the read that is safe to make from another thread.
+
+        Sessions minted on the unpooled fallback paths (a blank `stream_id`,
+        or a second concurrent call for one already in use) are deliberately
+        absent: this registry never held them, so it cannot honestly list
+        them.
+        """
+        with self._lock:
+            return [entry.session for entry in self._entries.values()]
 
     def _evict_expired(self, now_millis: float) -> None:
         expired = [

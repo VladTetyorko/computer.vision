@@ -115,6 +115,9 @@ from cv_service.config import DEFAULT_CONFIDENCE, DEFAULT_MAX_UPLOAD_BYTES, Sett
 from cv_service.geo import index as geo_index
 from cv_service.geo import pack as geo_pack
 from cv_service.inference.concurrency import InferenceGate, LatestOnlyMailbox, process_gate
+from cv_service.orchestration.detector import LocalDetectorClient
+from cv_service.orchestration.facts import SessionFacts
+from cv_service.orchestration.ledger import FrameLedger, LedgerEntry
 from cv_service.pull.clock import CaptureClock
 from cv_service.pull.loop import PullDecodeLoop, PullStalledError
 from cv_service.pull.source import PullSource, PullSourceError
@@ -548,6 +551,21 @@ class _StreamReader:
             raise self._error
         return None
 
+    @property
+    def dropped(self) -> int:
+        """Cumulative frames this reader's mailbox replaced before the
+        consumer could take them -- never inferred, never answered.
+
+        Counted since this call began, and reported on the wire as
+        `DetectionResponse.dropped_frames`, the SAME field and the same
+        cumulative meaning `DetectPulled` already gives it (proto field 19).
+        Push mode reported `0` there until CV-ORCHESTRATION wave W0, which
+        made a drop indistinguishable from a Java-side sampling decision --
+        the one number that says "this worker could not keep up" was being
+        thrown away at the one place that knew it.
+        """
+        return self._mailbox.dropped
+
     def stop(self) -> None:
         """Best-effort: stop queueing further frames for a consumer that's
         going away (client cancel, or the generator returning/raising).
@@ -562,6 +580,87 @@ class _StreamReader:
         nobody will ever drain again.
         """
         self._mailbox.close()
+
+
+# ------------------------------------------------------------------ Inspect
+#
+# The Python side of the ledger is a plain dataclass tree
+# (`cv_service/orchestration/`); these three functions are the ONLY place it
+# becomes protobuf, exactly as `_tracked_response` is the only place a
+# `FrameOutcome` does. `tests/tracking/test_registry.py` enforces the rule by
+# importing every orchestration module and failing on a `cv_pb2` reference.
+
+
+def _session_facts_message(facts: SessionFacts) -> "cv_pb2.SessionFacts":
+    return cv_pb2.SessionFacts(
+        stream_id=facts.stream_id,
+        mode=facts.mode,
+        engine_id=facts.engine_id,
+        motion_engine_id=facts.motion_engine_id,
+        appearance_engine_id=facts.appearance_engine_id,
+        level_served=facts.level_served,
+        level_reason=facts.level_reason,
+        live_tracks=facts.live_tracks,
+        dormant_identities=facts.dormant_identities,
+        locked_track_id=facts.locked_track_id,
+        frames_processed=facts.frames_processed,
+        contributors=list(facts.contributors),
+    )
+
+
+def _frame_ledger_message(ledger: FrameLedger) -> "cv_pb2.FrameLedger":
+    message = cv_pb2.FrameLedger(
+        stream_id=ledger.stream_id,
+        sequence=ledger.sequence,
+        captured_at_millis=int(ledger.captured_at_millis),
+        level_served=ledger.level_served,
+        # Already a `DetectorReason` VALUE NAME -- the same string
+        # `_tracked_response` hands to `cv_pb2.DetectorReason.Value`. Kept as
+        # text here on purpose: a ledger is read by a human, and a debug
+        # surface that renders `3` where the response renders a name is a
+        # second vocabulary to learn for no gain.
+        detector_reason=ledger.detector_reason,
+        eligible=list(ledger.eligible),
+        entries=[_ledger_entry_message(entry) for entry in ledger.entries],
+        drops_since_last=ledger.drops_since_last,
+        gate_wait_ms=ledger.gate_wait_ms,
+        total_ms=ledger.total_ms,
+        halted=ledger.halted,
+    )
+    # Kept per-contributor rather than merged into one map per track: "who
+    # claimed this" is precisely the question a merged map cannot answer, and
+    # it is the question every association bug starts with (plan E7).
+    for track_id, evidence in ledger.objects.items():
+        message.objects[track_id].claims.extend(
+            cv_pb2.ObjectEvidence(
+                contributor_id=item.contributor_id, claim=dict(item.claim)
+            )
+            for item in evidence
+        )
+    return message
+
+
+def _ledger_entry_message(entry: LedgerEntry) -> "cv_pb2.LedgerEntry":
+    return cv_pb2.LedgerEntry(
+        contributor_id=entry.contributor_id,
+        outcome=_ledger_outcome(entry.outcome),
+        reason=entry.reason,
+        cost_ms=entry.cost_ms,
+        summary=dict(entry.summary),
+    )
+
+
+def _ledger_outcome(name: str) -> int:
+    """A contributor's outcome string is already the proto enum's own value
+    name; an unknown one becomes UNSPECIFIED rather than killing the call.
+
+    A debug RPC that raises because somebody invented a new outcome would
+    hide exactly the frame worth looking at.
+    """
+    try:
+        return cv_pb2.LedgerOutcome.Value(name)
+    except ValueError:
+        return cv_pb2.LedgerOutcome.LEDGER_OUTCOME_UNSPECIFIED
 
 
 # ------------------------------------------------------------- DetectPulled
@@ -851,13 +950,27 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         session = self._session_registry.acquire(stream_id)
 
         reader = _StreamReader(request_iterator)
+        # The first frame was claimed before the reader existed, so nothing
+        # can have been dropped ahead of it -- the delta below is measured
+        # from there.
+        reported_drops = 0
         try:
             yield self._handle_request(first_request, session)
             while True:
                 request = reader.next()
                 if request is None:
                     return
-                yield self._handle_request(request, session)
+                dropped = reader.dropped
+                response = self._handle_request(
+                    request, session, dropped_frames=dropped - reported_drops
+                )
+                reported_drops = dropped
+                # Cumulative, matching `DetectPulled`'s own use of field 19.
+                # Set here rather than inside `_handle_request` so the echo
+                # degradations report it too: a frame that could not be
+                # inferred is exactly when an operator needs this number.
+                response.dropped_frames = dropped
+                yield response
         finally:
             reader.stop()
             self._session_registry.release(stream_id, session)
@@ -985,6 +1098,56 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                     grpc.StatusCode.UNKNOWN, f"DetectPulled control stream failed: {control_reader.error}"
                 )
 
+    # -------------------------------------------------------------- Inspect
+    #
+    # CV-ORCHESTRATION wave W0 (plan §4.4). A read-only debug surface that
+    # sits entirely off the detection path: no existing message gained a
+    # field, no existing enum gained a value, and a client that never calls
+    # this RPC cannot tell it exists.
+
+    def Inspect(
+        self, request: "cv_pb2.InspectRequest", context: grpc.ServicerContext
+    ) -> "cv_pb2.InspectResponse":
+        """Empty `stream_id` -> the process and its session list; otherwise
+        that session's facts plus its last `frames` per-frame ledgers.
+
+        **Never blocks a running stream.** The registry copies its session
+        list under its own lock, `facts()` reads only already-resolved state
+        (it will not build an engine to answer a question), and the ledger
+        ring is a bounded `deque` whose append is atomic. A frame that lands
+        mid-read is simply not in the answer -- the right trade for a debug
+        surface, where making the tracker wait would be the actual bug.
+        """
+        sessions = self._session_registry.snapshot()
+        response = cv_pb2.InspectResponse(
+            process=cv_pb2.ProcessFacts(
+                # W0 has exactly one detector seam; the pooled one is W4.
+                detector_client=LocalDetectorClient.id,
+                sessions=len(sessions),
+                gate_permits=self._inference_gate.max_concurrent,
+                ledger_ring=self._settings.ledger_ring,
+                stream_ids=[session.stream_id for session in sessions],
+            ),
+            found=True,
+        )
+        if not request.stream_id:
+            return response
+        for session in sessions:
+            if session.stream_id != request.stream_id:
+                continue
+            response.session.CopyFrom(_session_facts_message(session.facts()))
+            response.ledgers.extend(
+                _frame_ledger_message(ledger)
+                for ledger in session.ledgers.last(request.frames)
+            )
+            return response
+        # A stream_id nobody is serving is a legitimate answer, not an error:
+        # asking about a stream that just ended is the normal way to find out
+        # that it ended. `process` is still filled in -- the caller learns
+        # which streams DO exist without a second round trip.
+        response.found = False
+        return response
+
     def _open_pull_source(self, first_message: "cv_pb2.PullControl") -> PullSource:
         transport = first_message.rtsp_transport or self._settings.pull_rtsp_transport
         return self._pull_source_open(
@@ -1050,6 +1213,7 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         session: Optional[StreamTrackingSession] = None,
         *,
         capture_skew_millis: int = 0,
+        dropped_frames: int = 0,
     ) -> "cv_pb2.DetectionResponse":
         """`capture_skew_millis` (TRACKING-V3-PLAN wave V6, §4.5) is
         `DetectPulled`'s own `PullDiagnostics.capture_skew_millis` -- already
@@ -1060,6 +1224,11 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
         clock, and reading it against this host's own wall clock without a
         synchronized time base would risk a bogus correction rather than a
         conservative "unknown" -- `0` (the default) stays exactly that.
+
+        `dropped_frames` is how many frames the transport discarded since the
+        previous one it delivered (`DetectStream`'s latest-wins mailbox; `0`
+        under `DetectPulled`, whose own loop reports its drops on field 19
+        directly). It is ledger evidence only -- see `session.process()`.
         """
         try:
             if session is not None and self._sync_tracking(session, request):
@@ -1091,6 +1260,7 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                     frame=loader,
                     pose=_camera_pose_from_wire(request.camera_pose),
                     detection_lag_millis=capture_skew_millis,
+                    dropped_frames=dropped_frames,
                 )
                 if outcome.boxes is None:
                     return self._echo(request)

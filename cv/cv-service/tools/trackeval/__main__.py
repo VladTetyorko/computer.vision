@@ -18,11 +18,13 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import sys
+from pathlib import Path
 from typing import Optional
 from typing import Sequence as TypingSequence
 
 from cv_service.tracking.params import MODE_ASSOCIATE, MODE_FOLLOW
 
+from tools.trackeval import golden as golden_module
 from tools.trackeval import metrics as metrics_module
 from tools.trackeval import replay as replay_module
 from tools.trackeval.sequences import DEFAULT_SEED, SCENARIOS, SMALL_TARGET_RELIABLE_SIZE
@@ -153,6 +155,28 @@ def _run_one(
     return metrics_module.compute(result)
 
 
+def golden_text(scenario: str, mode: str, *, seed: int = DEFAULT_SEED) -> str:
+    """This scenario x mode's per-frame `FrameOutcome` dump (CV-ORCHESTRATION
+    wave W0).
+
+    Deliberately shares `_noise_for`/`SCENARIOS` with `_run_one` above rather
+    than re-declaring the run: a golden dump recorded against a DIFFERENT
+    detector configuration than the scoreboard's would gate the refactor on
+    a run nobody else ever reproduces. Only the `--all` defaults are
+    supported for the same reason -- the A/B knobs exist to be swept, never
+    to be frozen.
+    """
+    sequence = SCENARIOS[scenario](seed)
+    recorder = golden_module.GoldenRecorder()
+    replay_module.run_replay(
+        sequence,
+        mode=mode,
+        detector_config=_noise_for(scenario),
+        observer=recorder,
+    )
+    return recorder.text()
+
+
 def _parse_args(argv: TypingSequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="python -m tools.trackeval")
     parser.add_argument("--scenario", choices=sorted(SCENARIOS), default=None, help="one scenario to run")
@@ -197,14 +221,34 @@ def _parse_args(argv: TypingSequence[str]) -> argparse.Namespace:
             "scenario whose own latency_frames is already positive (today, latency)."
         ),
     )
+    parser.add_argument(
+        "--golden-dir",
+        default="",
+        help=(
+            "regenerate the per-frame FrameOutcome golden dumps into this directory "
+            "(every scenario x mode, --all defaults) instead of printing the scoreboard. "
+            "The committed fixtures live in tests/trackeval/golden/; regenerate them ONLY "
+            "when a behaviour change is intended and reviewed -- they are wave W0's "
+            "zero-delta gate (docs/plans/active/CV-ORCHESTRATION-PLAN.md P7/E15)."
+        ),
+    )
     args = parser.parse_args(argv)
-    if not args.all and args.scenario is None:
-        parser.error("either --scenario NAME or --all is required")
+    if not args.all and args.scenario is None and not args.golden_dir:
+        parser.error("either --scenario NAME, --all or --golden-dir is required")
     return args
 
 
 def main(argv: Optional[TypingSequence[str]] = None) -> None:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
+    if args.golden_dir:
+        directory = Path(args.golden_dir)
+        for scenario in sorted(SCENARIOS):
+            for mode in (MODE_ASSOCIATE, MODE_FOLLOW):
+                path = golden_module.write(
+                    directory, scenario, mode, golden_text(scenario, mode, seed=args.seed)
+                )
+                print(path)
+        return
     if args.all:
         rows = [
             _run_one(
