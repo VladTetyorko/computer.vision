@@ -2,6 +2,7 @@ package com.drones.vision.app.config.wiring;
 
 import com.drones.vision.perception.domain.port.DetectionDemandPort;
 import com.drones.vision.perception.domain.port.DetectionPolicyPort;
+import com.drones.vision.perception.domain.port.TraceDemandPort;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
@@ -698,6 +699,15 @@ public class ApplicationServiceWiring {
      * legitimately want one without the other). Absent means every stream's {@code DetectionPolicy}
      * reads as {@code ON_VIEW} forever — no behavior change from before this port existed.
      *
+     * <p>{@code traceDemandPort} (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4) is likewise an
+     * {@link ObjectProvider}, for the same reason {@code detectionPolicyPort} is — no {@code
+     * TraceDemandPort} bean exists in this wave (the concrete adapter, backed by {@code
+     * cv-trace:<assetId>} SSE subscriber counts and {@code GET .../cv/trace} poll timestamps, is a
+     * later station/vision-api step), so this always resolves to {@link Optional#empty()} today and
+     * every stream's {@code PipelineConfig#trace()} stays at its construction-time value — see {@code
+     * TraceDemandPort}'s own javadoc for why that, not a fail-open {@code true}, is the correct "not
+     * wired yet" behavior.
+     *
      * <p>{@code cvProfileResolver} (docs/plans/active/CV-SETTINGS-PLAN.md §3.1/§5.4,
      * CV-SETTINGS-CONTEXT.md's W2 &rarr; W5 handoff) is {@code CvProfileWiringConfiguration}'s
      * unconditional bean — {@code DefaultStreamService#start} applies the same asset &rarr; category
@@ -723,6 +733,7 @@ public class ApplicationServiceWiring {
                                         MediamtxLiveFrameGrabber mediamtxLiveFrameGrabber,
                                         ObjectProvider<DetectionDemandPort> detectionDemandPort,
                                         ObjectProvider<DetectionPolicyPort> detectionPolicyPort,
+                                        ObjectProvider<TraceDemandPort> traceDemandPort,
                                         CvProfileResolver cvProfileResolver,
                                         StreamStateObserver streamStateObserver) {
         Optional<PullDetectionSettings> pullDetectionSettings = cvProperties.pullEnabled()
@@ -734,7 +745,8 @@ public class ApplicationServiceWiring {
                         Optional.of(detectionLiveUpdatePort),
                         streamPipelineSettings(applicationProperties, trackingProperties, cvProperties),
                         pullDetectionSettings, Optional.ofNullable(detectionDemandPort.getIfAvailable()),
-                        Optional.ofNullable(detectionPolicyPort.getIfAvailable()), streamStateObserver),
+                        Optional.ofNullable(detectionPolicyPort.getIfAvailable()),
+                        Optional.ofNullable(traceDemandPort.getIfAvailable()), streamStateObserver),
                 cvProfileResolver);
         if (publishProperties.sourceProxy().enabled()) {
             return new LiveFrameFallbackStreamService(defaultStreamService, mediamtxLiveFrameGrabber);

@@ -31,6 +31,7 @@ import com.drones.vision.platform.EventPublisherPort;
 import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
 import com.drones.vision.perception.domain.port.PulledDetectionPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
+import com.drones.vision.perception.domain.port.TraceDemandPort;
 import com.drones.vision.perception.domain.port.VideoSourcePort;
 
 import java.net.URI;
@@ -150,6 +151,16 @@ public final class DefaultStreamService implements StreamService {
     private final DetectionPolicyPort detectionPolicyPort;
 
     /**
+     * Trace-demand evaluator (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.4) — {@code null} means
+     * this service never evaluates trace demand for any stream it starts, so every stream's {@link
+     * PipelineConfig#trace()} stays at its construction-time value forever; {@link
+     * StreamPipeline#updateTraceDemand} is simply never called. Non-null is consulted on the same
+     * {@link #pollDetectionDemand} tick as {@link #detectionDemandPort}/{@link #detectionPolicyPort} —
+     * the three collaborators are independently optional, so any one alone still arms the poll task.
+     */
+    private final TraceDemandPort traceDemandPort;
+
+    /**
      * Notified on every computed {@link StreamState} transition (docs/plans/active/
      * SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C6) — never {@code null}, defaults to {@link
      * StreamStateObserver#NOOP}; see {@link #notifyStreamStateChanged} for where it is invoked and
@@ -234,8 +245,10 @@ public final class DefaultStreamService implements StreamService {
                 serviceSettings.detectionDemandPort().orElse(null); // nullable: demand-poll task never scheduled when absent
         this.detectionPolicyPort =
                 serviceSettings.detectionPolicyPort().orElse(null); // nullable: every stream reads ON_VIEW forever when absent
+        this.traceDemandPort =
+                serviceSettings.traceDemandPort().orElse(null); // nullable: trace demand never evaluated when absent
         this.streamStateObserver = serviceSettings.streamStateObserver();
-        if (this.detectionDemandPort != null || this.detectionPolicyPort != null) {
+        if (this.detectionDemandPort != null || this.detectionPolicyPort != null || this.traceDemandPort != null) {
             long intervalNanos = this.settings.detectionDemandPollInterval().toNanos();
             retryScheduler.scheduleAtFixedRate(this::pollDetectionDemand, intervalNanos, intervalNanos,
                     TimeUnit.NANOSECONDS);
@@ -395,7 +408,8 @@ public final class DefaultStreamService implements StreamService {
             // grace period of inference for nobody."
             activeStreams.put(streamId, new RunningStream(deviceId, source, supervisedSource, pulledDetectionPort,
                     supervisedPulledResults, pipeline, Instant.now(), lockSeq,
-                    new AtomicReference<>(Instant.EPOCH), new AtomicReference<>()));
+                    new AtomicReference<>(Instant.EPOCH), new AtomicReference<>(Instant.EPOCH),
+                    new AtomicReference<>()));
             pipeline.start();
             eventPublisher.publish(Event.of(streamId, EventType.STREAM_STARTED,
                     "Stream started for device " + device.name()));
@@ -646,9 +660,9 @@ public final class DefaultStreamService implements StreamService {
     /**
      * The demand-poll task (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.3, widened by docs/plans/active/
      * ALWAYS-ON-FLOW-PLAN.md wave D1), scheduled on {@link #retryScheduler} at {@link
-     * StreamPipelineSettings#detectionDemandPollInterval()} only when {@link #detectionDemandPort} or
-     * {@link #detectionPolicyPort} is non-null — see the constructor. Re-evaluates every currently
-     * running stream once per tick.
+     * StreamPipelineSettings#detectionDemandPollInterval()} only when {@link #detectionDemandPort},
+     * {@link #detectionPolicyPort} or {@link #traceDemandPort} is non-null — see the constructor.
+     * Re-evaluates every currently running stream once per tick.
      *
      * <p><b>Each stream's evaluation is individually wrapped in {@code catch (Throwable)}.</b> {@link
      * java.util.concurrent.ScheduledExecutorService#scheduleAtFixedRate} silently cancels every
@@ -687,10 +701,17 @@ public final class DefaultStreamService implements StreamService {
      * operator's own deliberate, infrequent choice, not a transient viewer-presence signal, so there
      * is nothing to debounce.
      *
-     * <p>The two collaborators are independently optional (see {@link DefaultStreamServiceSettings}):
-     * either one alone still arms {@link #pollDetectionDemand} (the constructor's own condition), and
-     * this method only ever touches the one(s) actually wired, leaving the other's {@code
-     * StreamPipeline} field at its own safe default untouched.
+     * <p>The three collaborators are independently optional (see {@link DefaultStreamServiceSettings}):
+     * any one alone still arms {@link #pollDetectionDemand} (the constructor's own condition), and
+     * this method only ever touches the one(s) actually wired, leaving the others' {@code
+     * StreamPipeline} field(s) at their own safe defaults untouched.
+     *
+     * <p>{@link #traceDemandPort} (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.4) reuses {@link
+     * StreamPipelineSettings#detectionDemandGrace()} for its own grace window rather than a dedicated
+     * knob — both answer the same shape of question ("how long to keep doing X after X was last
+     * observed wanted") for two demand signals evaluated on the very same tick, and a wave that has
+     * not yet built the concrete adapter for this port (station/vision-api's later step) is not the
+     * place to add a second grace duration nothing can independently tune yet.
      *
      * <p>Package-private, taking an explicit {@code now} rather than reading {@link Instant#now()}
      * itself, so the same-package test can drive the grace period deterministically — stamping a
@@ -718,6 +739,15 @@ public final class DefaultStreamService implements StreamService {
         }
         if (detectionPolicyPort != null) {
             active.pipeline().updateDetectionPolicy(detectionPolicyPort.alwaysOn(assetId));
+        }
+        if (traceDemandPort != null) {
+            boolean wanted = traceDemandPort.traceWanted(streamId, assetId);
+            if (wanted) {
+                active.lastTraceDemandAt().set(now);
+            }
+            Duration sinceLastTraceDemand = Duration.between(active.lastTraceDemandAt().get(), now);
+            boolean effective = sinceLastTraceDemand.compareTo(settings.detectionDemandGrace()) < 0;
+            active.pipeline().updateTraceDemand(effective);
         }
     }
 
@@ -838,6 +868,10 @@ public final class DefaultStreamService implements StreamService {
      *                                 of state that genuinely mutates over a running stream's life,
      *                                 from a different thread (the demand-poll scheduler) than the one
      *                                 that created it
+     * @param lastTraceDemandAt       the {@link TraceDemandPort} counterpart of {@code lastDemandAt}
+     *                                 (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.4); same
+     *                                 EPOCH-seeded, observed-not-assumed reasoning, evaluated by
+     *                                 {@link #evaluateDetectionDemand} on the same tick
      * @param lastKnownState          the most recently computed {@link StreamState} for this stream
      *                                 (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md &sect;3.2 C6),
      *                                 or {@code null} before {@link #stateOf} has ever been called for
@@ -851,6 +885,7 @@ public final class DefaultStreamService implements StreamService {
                                   SupervisedPublisher<DetectionResult> supervisedPulledResults,
                                   StreamPipeline pipeline, Instant startedAt, AtomicLong lockSeq,
                                   AtomicReference<Instant> lastDemandAt,
+                                  AtomicReference<Instant> lastTraceDemandAt,
                                   AtomicReference<StreamState> lastKnownState) {
     }
 }

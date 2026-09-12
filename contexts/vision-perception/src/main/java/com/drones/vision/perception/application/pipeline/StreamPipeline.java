@@ -326,6 +326,15 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final DetectionRateWindow detectionRate;
 
     /**
+     * Why the sampler decided what it decided, per deadline (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+     * &sect;4.4) — a trace of individual {@link GateDecision}s, as opposed to {@link #detectionRate}'s
+     * aggregate counters over the same events. Peer of {@link #detectionRate} for the same reason:
+     * different read model, same underlying events, no reason to share a lock. See {@link
+     * FrameGateLedger}'s own javadoc for why this does not grow by one entry per video frame.
+     */
+    private final FrameGateLedger gateLedger;
+
+    /**
      * Chooses the rate {@link #sampleIntervalNanos} schedules deadlines at
      * (docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R2). Built here rather than injected for the same
      * reason {@link #world} is: it is this pipeline's own per-stream bookkeeping, not a
@@ -459,6 +468,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         this.pipelineLatency = new PipelineLatencyWindow(settings.trackingStatsWindow());
         this.detectionRate = new DetectionRateWindow(settings.trackingStatsWindow(),
                 this.pullDetection == null ? DetectionRateWindow.Transport.PUSH : DetectionRateWindow.Transport.PULL);
+        this.gateLedger = new FrameGateLedger(settings.gateLedgerDepth());
         this.rateController = new DetectionRateController(settings.adaptiveRate(), settings.cameraHfovDegrees());
         this.backoffNanos = this.detectionBackoffInitialNanos;
         // Seeded from this.config/this.detectionDemand/this.detectionPolicyAlwaysOn, all already
@@ -634,6 +644,38 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
+     * Live-swaps this pipeline's {@link PipelineConfig#trace()} component (docs/plans/active/
+     * CV-ORCHESTRATION-PLAN.md &sect;4.4) — called only from {@code DefaultStreamService}'s demand-poll
+     * task, never the video path, the same shape as {@link #updateDetectionDemand} but for {@link
+     * TraceDemandPort} rather than {@link DetectionDemandPort} demand.
+     *
+     * <p>Unlike {@link #updateDetectionDemand}, there is no separate {@code traceDemand} field to
+     * write: {@link PipelineConfig#trace()} <em>is</em> the demand fact itself (it travels straight
+     * onto the wire — see {@code DetectionFrameCodec}), not a second input ANDed against an operator
+     * switch, so this method rebuilds {@link #config} directly, taking effect on the very next
+     * sampled/published frame exactly like every other hot knob {@link #updateConfig} swaps.
+     *
+     * <p><b>Deliberately not fail-open the way {@link #detectionDemand} is</b> (see {@link
+     * TraceDemandPort}'s own javadoc for the full reasoning): {@link #detectionDemand}'s {@code true}
+     * default is safe only because it collapses back to detection's pre-demand-gating behavior
+     * (detect unconditionally); {@code trace}'s pre-existing behavior is always {@code false} (no
+     * profile has ever requested it), so this method is simply never called — leaving {@link
+     * #config}'s {@code trace} component at whatever it was constructed with — for any pipeline whose
+     * {@code DefaultStreamService} has no {@link TraceDemandPort} wired, which is every deployment
+     * before wave W2's later station/vision-api step adds one.
+     *
+     * @param wanted whether something is currently consuming this stream's trace
+     */
+    public void updateTraceDemand(boolean wanted) {
+        PipelineConfig current = config;
+        if (current.trace() != wanted) {
+            config = new PipelineConfig(current.model(), current.confidenceThreshold(), current.inferenceFps(),
+                    current.maxInFlightInferences(), current.labelFilter(), current.eventRule(),
+                    current.detectionEnabled(), current.tracking(), current.labelDenyFilter(), wanted);
+        }
+    }
+
+    /**
      * Which of {@code StreamPipeline}'s detection gates (docs/plans/done/CV-DEMAND-PLAN.md &sect;3.6,
      * widened by docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave D2) currently explains this stream's
      * boxes-or-no-boxes state — {@link DetectionState#OFF} takes precedence over the other two when
@@ -781,6 +823,19 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      */
     public DetectionRate detectionRate() {
         return detectionRate.snapshot(sourceFps(), targetFps(), rateController.demandFps());
+    }
+
+    /**
+     * @param last how many of the most recent gate decisions to return; must not be negative
+     * @return the most recent {@code last} {@link GateDecision}s {@link #maybeDetect} made, oldest
+     *         first (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.4) — the companion to {@link
+     *         #detectionRate()}: that one aggregates the same underlying events into counters, this
+     *         one is the individual trace a {@code GET /api/streams/{id}/cv/trace} caller (a later
+     *         wave step) would render. See {@link FrameGateLedger} for why this does not grow by one
+     *         entry per video frame. Never {@code null}; empty before the first frame arrives.
+     */
+    public List<GateDecision> gateLedger(int last) {
+        return gateLedger.recent(last);
     }
 
     /**
@@ -1126,17 +1181,19 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * produce. A held {@code FOLLOW} lock is no exception: its bound {@code trackId} was allocated by
      * whatever the detector was feeding before the re-arm/close, so it means nothing after.
      *
-     * <p>Includes {@link #pipelineLatency}/{@link #detectionRate} — detector-health windows tied to
-     * whether inference itself is running, not to whether anyone is watching it — which is exactly
-     * why {@link #clearLiveDerivedState()} (the narrower, live-only counterpart, wave D2) leaves them
-     * alone: an {@code ALWAYS} asset losing its last viewer keeps inferring, so these two windows keep
-     * being meaningfully written to and must not be wiped out from under that ongoing activity.
+     * <p>Includes {@link #pipelineLatency}/{@link #detectionRate}/{@link #gateLedger} — detector-health
+     * windows tied to whether inference itself is running, not to whether anyone is watching it —
+     * which is exactly why {@link #clearLiveDerivedState()} (the narrower, live-only counterpart, wave
+     * D2) leaves them alone: an {@code ALWAYS} asset losing its last viewer keeps inferring, so these
+     * windows keep being meaningfully written to and must not be wiped out from under that ongoing
+     * activity.
      */
     private void clearDetectionDerivedState() {
         world.clear();
         trackingStats.clear();
         pipelineLatency.clear();
         detectionRate.clear();
+        gateLedger.clear();
         rateController.clear();
     }
 
@@ -1174,9 +1231,34 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * PullResultSubscriber} is the whole of pull-mode detection. This is the one line push mode's own
      * behavior depends on being a no-op for: {@code pullDetection} is {@code null} for every existing
      * caller, so the check below always falls through exactly as it did before this capability existed.
+     *
+     * <p><b>Gate ledger (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.4).</b> {@link
+     * #detectionGateOpen()}'s single boolean expression is expanded below into its three component
+     * checks — {@link #pullDetection}, {@link PipelineConfig#detectionEnabled()}, then demand/{@code
+     * ALWAYS} — purely so each early return can record a distinct {@link GateReason} ({@link
+     * GateReason#PULL_MODE}/{@link GateReason#GATE_OFF}/{@link GateReason#GATE_NO_DEMAND}) into
+     * {@link #gateLedger}. The union of frames returned early is identical to the single-expression
+     * form this replaces — only the recorded classification is new — and {@code cfg}/{@code demand}/
+     * {@code alwaysOn} are read once, together, into locals at the top precisely so the {@link
+     * DemandSnapshot} attached to whichever reason fires is guaranteed consistent with the decision
+     * itself, narrower than the field-by-field reads {@link #detectionGateOpen()} itself still does
+     * for its other (non-ledger) callers.
      */
     private void maybeDetect(VideoFrame frame, long now) {
-        if (!detectionGateOpen() || pullDetection != null) {
+        PipelineConfig cfg = config;
+        boolean demand = detectionDemand;
+        boolean alwaysOn = detectionPolicyAlwaysOn;
+        DemandSnapshot snapshot = new DemandSnapshot(cfg.detectionEnabled(), demand, alwaysOn);
+        if (pullDetection != null) {
+            gateLedger.record(skippedDecision(frame, snapshot, GateReason.PULL_MODE));
+            return;
+        }
+        if (!cfg.detectionEnabled()) {
+            gateLedger.record(skippedDecision(frame, snapshot, GateReason.GATE_OFF));
+            return;
+        }
+        if (!(demand || alwaysOn)) {
+            gateLedger.record(skippedDecision(frame, snapshot, GateReason.GATE_NO_DEMAND));
             return;
         }
         switch (outageDecision()) {
@@ -1188,7 +1270,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                 // benefit. The backoff (>=1s) is always far longer than a sample interval, so this
                 // can never probe faster than the outage logic intends.
                 detectionRate.record(DetectionRateWindow.Outcome.SUBMITTED, now);
-                submitDetection(frame, true);
+                submitDetection(frame, true, snapshot);
             }
             case SKIP -> {
                 // Still backing off, or a probe is already in flight: never counted as in-flight.
@@ -1196,22 +1278,30 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                 // one entry per deadline, not one per frame arriving during a ten-second backoff.
                 if (sampleDue(now)) {
                     detectionRate.record(DetectionRateWindow.Outcome.DROPPED_OUTAGE, now);
+                    gateLedger.record(skippedDecision(frame, snapshot, GateReason.OUTAGE_BACKOFF));
                 }
             }
             case NORMAL -> {
                 if (!sampleDue(now)) {
+                    gateLedger.record(skippedDecision(frame, snapshot, GateReason.DEADLINE_NOT_DUE));
                     return;
                 }
                 if (inFlightInferences.get() >= config.maxInFlightInferences()) {
                     // bounded in-flight: skip this sample rather than queue it
                     detectionRate.record(DetectionRateWindow.Outcome.DROPPED_IN_FLIGHT, now);
+                    gateLedger.record(skippedDecision(frame, snapshot, GateReason.IN_FLIGHT_FULL));
                     return;
                 }
                 inFlightInferences.incrementAndGet();
                 detectionRate.record(DetectionRateWindow.Outcome.SUBMITTED, now);
-                submitDetection(frame, false);
+                submitDetection(frame, false, snapshot);
             }
         }
+    }
+
+    /** One {@link GateOutcome#SKIPPED} entry for {@code frame}'s deadline; see {@link #gateLedger}. */
+    private static GateDecision skippedDecision(VideoFrame frame, DemandSnapshot demand, GateReason reason) {
+        return new GateDecision(frame.sequence(), frame.capturedAt(), GateOutcome.SKIPPED, reason, demand);
     }
 
     /**
@@ -1237,7 +1327,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         }
     }
 
-    private void submitDetection(VideoFrame frame, boolean isProbe) {
+    private void submitDetection(VideoFrame frame, boolean isProbe, DemandSnapshot demand) {
         long submittedAtNanos = latencyNanoSource.getAsLong();
         // The three-argument form is taken ONLY when there is an attitude to send, so a port (or a
         // test double) that never learned about attitude sees exactly the calls it saw before this
@@ -1247,6 +1337,20 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         CompletionStage<DetectionResult> pending = attitude == null
                 ? detectionPort.detect(frame, config)
                 : detectionPort.detect(frame, config, attitude);
+        // Classified here, before `whenComplete` is even attached, by peeking whether `pending` is
+        // ALREADY complete (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.4, GateReason#CV_UNAVAILABLE) --
+        // CompletionStage's own contract is that a dependent action attached to an already-complete
+        // stage runs synchronously, in the calling thread, so this peek is a generic, adapter-agnostic
+        // way to tell "the port refused before doing any work" (a pre-completed CompletableFuture.
+        // failedFuture, e.g. adapter-cv-grpc's CvUnavailableException) apart from "a request genuinely
+        // went out and is still in flight" -- without this module ever depending on adapter-cv-grpc to
+        // learn the concrete exception type, which the hexagonal dependency rule forbids.
+        if (pending.toCompletableFuture().isCompletedExceptionally()) {
+            gateLedger.record(skippedDecision(frame, demand, GateReason.CV_UNAVAILABLE));
+        } else {
+            gateLedger.record(new GateDecision(frame.sequence(), frame.capturedAt(),
+                    isProbe ? GateOutcome.PROBE : GateOutcome.SENT, null, demand));
+        }
         pending.whenComplete((result, error) -> {
             // Recorded before the closed/error branches below: a round trip that ended in a failure,
             // or arrived after close, still happened and is still the number worth seeing.
