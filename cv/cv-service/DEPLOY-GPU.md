@@ -376,46 +376,68 @@ It prints the machine facts alongside the numbers, because none of them are
 portable. Run it on a quiet box: a concurrent build makes every figure a
 measurement of the build.
 
-#### Measured 2026-09-12 (W4, decision E17)
+#### Measured 2026-09-12 (W4, decision E17) — streams-sustained sweep
 
-One stream at 10 fps, `yolo26n.pt`, `allinone` vs `split --detectors 2`, on
-the CV-ORCHESTRATION worktree's dev box — **not** GB4005 itself (AMD Ryzen 5
-5600U, 12 threads, CPU-only, no CUDA/OpenVINO — a different machine, but the
-same "one CPU-bound box, no GPU" shape GB4005 is). Confirmed no `mvn`/
-`surefire`/`vitest`/`java -jar` process was running immediately before and
-immediately after each run — **not measured under contention**.
+The plan's own acceptance bar (§6 wave W4) is a **streams-sustained**
+comparison, not single-stream latency: "1 tracker + 2 detectors sustains
+>= 2x the streams of 1 all-in-one at 10 fps `yolo26n` on the same
+hardware." Swept both shapes across `--streams 1,2,3,4,6,8 --seconds 30`
+on the CV-ORCHESTRATION worktree's dev box — **not** GB4005 itself (AMD
+Ryzen 5 5600U, 12 threads, CPU-only, no CUDA/OpenVINO — a different
+machine, but the same "one CPU-bound box, no GPU" shape GB4005 is).
+Confirmed no `mvn`/`surefire`/`vitest`/`java -jar` process was running
+immediately before and immediately after **each** scenario run —
+**not measured under contention**. `--permits` (`CV_MAX_CONCURRENT_
+INFERENCES`) is pinned at 2 per spawned process by the harness, which
+means the two shapes are NOT running the same total concurrency: `allinone`
+is one process → 2 gate permits total; `split --detectors 2` is two
+detector processes each with their own 2 permits → 4 gate permits total,
+with the tracker process's own 2 permits unused (it holds no local
+model once `CV_DETECTOR_TARGETS` is set). That 2-vs-4-permit difference
+is exactly what this sweep is measuring the consequence of on one box.
 
-| Scenario | Sent/Recv | Answered | p50 | p95 | Effective fps | Sustained |
+| Scenario | Streams | Answered | p50 | p95 | Effective fps | Sustained (>=95% & p95<=500ms) |
 |---|---|---|---|---|---|---|
-| `allinone` (1 process) | 301/301 | 100.0% | 37 ms | 40 ms | 10.03 | yes |
-| `split` (tracker + 2 detectors) | 301/301 | 100.0% | 45 ms | 48 ms | 10.03 | yes |
+| `allinone` | 1 | 100.0% | 36 ms | 39 ms | 10.03 | yes |
+| `allinone` | 2 | 99.8% | 65 ms | 72 ms | 20.03 | yes |
+| `allinone` | 3 | 99.8% | 77 ms | 139 ms | 30.03 | yes |
+| `allinone` | **4** | **76.1%** | 182 ms | 229 ms | 30.53 | **no — first to fail** |
+| `allinone` | 6 | 32.4% | 364 ms | 520 ms | 19.53 | no |
+| `allinone` | 8 | 24.5% | 452 ms | 668 ms | 19.63 | no |
+| `split` (tracker + 2 detectors) | 1 | 100.0% | 46 ms | 90 ms | 10.03 | yes |
+| `split` (tracker + 2 detectors) | 2 | 99.7% | 81 ms | 92 ms | 20.00 | yes |
+| `split` (tracker + 2 detectors) | **3** | **85.9%** | 167 ms | 212 ms | 25.87 | **no — first to fail** |
+| `split` (tracker + 2 detectors) | 4 | 64.0% | 207 ms | 254 ms | 25.70 | no |
+| `split` (tracker + 2 detectors) | 6 | 52.7% | 236 ms | 349 ms | 31.70 | no |
+| `split` (tracker + 2 detectors) | 8 | 39.7% | 305 ms | 359 ms | 31.83 | no |
 
-Both shapes sustain one 10 fps stream without dropping a frame — unsurprising
-at this load, since a `yolo26n` pass (~35 ms) leaves ample headroom under a
-100 ms frame budget either way. The number this run actually resolves is the
-**split's overhead**, exactly as the tool's own docstring says a one-machine
-run can: `split` cost **+8 ms p50 / +8 ms p95** over `allinone` — the
-serialize-over-loopback-gRPC-and-back that `all-in-one` never pays. That is
-the same order of magnitude §4.9 estimated for a LAN hop (1–3 ms) plus this
-box's own gRPC/JPEG round-trip cost; it did not need a second machine to
-measure, because it is paid on every call regardless of where the target
-lives.
+Raw JSON: `allinone_sweep.json` / `split_sweep.json` (not checked in —
+machine-specific numbers, kept in the run's own scratch output).
 
-What this run cannot answer — and no single-machine run can (the tool's own
-docstring says so) — is whether splitting **buys** anything: both shapes ran
-on the same cores here, so there was no extra silicon to show a throughput
-gain against. That question only has a real answer on two boxes, with the
-`detector` role on hardware the `tracker` doesn't share.
+**`allinone` sustains up to 3 streams; `split` sustains up to 2** — the
+split needed >= 6 to clear the plan's 2x bar and instead sustains *fewer*
+streams than `allinone`, despite starting from double the raw gate
+permits (4 vs 2). On a single CPU-bound box this is not a contradiction:
+`yolo26n` on CPU is itself multi-threaded (`torch`'s intra-op
+parallelism), so 4 concurrent forward passes across 3 processes
+oversubscribes the same 12 threads harder than 2 concurrent passes in 1
+process does, and `split` also pays the serialize/hop/deserialize cost
+on every one of those passes. More permits bought more contention, not
+more throughput, because there was no second machine's cores behind
+them.
 
-**E17 recommendation: stay all-in-one on GB4005.** The measured number
-confirms the plan's own prediction — splitting on a single box is pure
-overhead (+~20% p50 latency here) for zero measured throughput benefit,
-because GB4005 has no second box to hand the split load to today. Revisit
-this decision only when GB4005 alone can no longer sustain the stream count
-actually in use (watch `Inspect`'s `gate_occupancy`/`gate_queue_depth`
-climbing toward `gate_max_queue`, or `detector_reason` turning up
-`RESOURCE_EXHAUSTED` in the field) — at that point, add a second physical
-box, wire it as a `CV_SERVICE_ROLE=detector` target, and re-run
-`tools/detectorbench --scenario split` across *both* machines before
-greenlighting the switch, since only that run can show the gain this one
-structurally cannot.
+**E17 recommendation: stay all-in-one on GB4005 — now from the
+saturation point, not just the overhead.** The sweep says the split does
+not merely fail to double GB4005's sustained stream count on one box, it
+actively sustains fewer streams (2 vs 3) at the same pinned permits,
+because splitting spends the extra permits as CPU contention with no
+second machine to spend them on. Revisit only once a second physical box
+exists to host the `detector` role: wire it as a `CV_SERVICE_ROLE=detector`
+target and re-run this same sweep (`--scenario split --detectors 2
+--streams 1,2,3,4,6,8`) across *both* machines — the plan's own >=2x bar
+can only be judged honestly once the detectors are not competing with the
+tracker for the same cores. Until then, `gate_occupancy`/`gate_queue_depth`
+climbing toward `gate_max_queue` on GB4005's `Inspect` output (or
+`RESOURCE_EXHAUSTED` showing up in the field) is the trigger to revisit
+this decision at all, not a reason to split pre-emptively on the same
+box.
