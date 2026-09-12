@@ -19,7 +19,7 @@ from typing import Any
 
 from cv_service.orchestration.budget import DETECT_FULL
 from cv_service.orchestration.contract import PHASE_PRE, Contribution, FrameContext
-from cv_service.orchestration.detector import DetectorClient
+from cv_service.orchestration.detector import DetectorClient, served_by_summary
 from cv_service.orchestration.keys import Key
 from cv_service.tracking.levels import LEVEL_L3
 from cv_service.orchestration.state import StreamState
@@ -61,6 +61,7 @@ class DetectFull:
             summary={
                 "detections": str(len(result.detections)),
                 "wait_ms": f"{result.wait_ms:.3f}",
+                **served_by_summary(result),
             },
             # The detector's OWN measurement, not the orchestrator's clock:
             # this is the number that reaches the wire.

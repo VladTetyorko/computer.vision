@@ -27,7 +27,7 @@ from cv_service.orchestration.budget import DETECT_ROI
 from cv_service.orchestration.contract import PHASE_TRACK, Contribution, FrameContext, skipped
 from cv_service.orchestration.contributors.appearance import describe
 from cv_service.orchestration.contributors.associate import CostAssignment
-from cv_service.orchestration.detector import DetectorClient
+from cv_service.orchestration.detector import DetectorClient, served_by_summary
 from cv_service.orchestration.engines import EngineSet
 from cv_service.orchestration.keys import Key
 from cv_service.orchestration.state import StreamState
@@ -113,6 +113,7 @@ class RoiRescue:
             "track": str(chosen.track_id),
             "misses": str(chosen.misses),
             "roi_detections": str(len(roi_detections or [])),
+            **served_by_summary(result),
         }
         if not roi_detections:
             return Contribution(

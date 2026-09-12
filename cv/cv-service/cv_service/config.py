@@ -66,7 +66,51 @@ DEFAULT_SHUTDOWN_GRACE_SECONDS = 5
 DEFAULT_ROLE = "all"
 ROLE_INFERENCE = "inference"
 ROLE_TRAINING = "training"
-_ROLE_CHOICES = (DEFAULT_ROLE, ROLE_INFERENCE, ROLE_TRAINING)
+# CV-ORCHESTRATION wave W4 (§4.9). Two more roles, and the split they name is a
+# DIFFERENT axis from `inference`/`training`: that one separates a latency-
+# sensitive servicer from long-running ones, this one separates STATEFUL work
+# (identity, gallery, lock -- sticky to a stream) from STATELESS work (pixels
+# to boxes -- scalable to N instances). `inference` therefore keeps meaning
+# exactly what it meant before this wave.
+#
+# - `detector` -- the `Detector` servicer ONLY. No sessions, no tracker
+#   registry, no identity of any kind. Scale this one horizontally.
+# - `tracker`  -- `Inference` only, like `inference`, but declaring that this
+#   process does NOT intend to detect in-process. It is the role a deployment
+#   sets alongside `CV_DETECTOR_TARGETS`; with no targets set it degrades to
+#   exactly `inference` and says so once, because refusing to start would turn
+#   a misconfiguration into an outage.
+ROLE_DETECTOR = "detector"
+ROLE_TRACKER = "tracker"
+_ROLE_CHOICES = (DEFAULT_ROLE, ROLE_INFERENCE, ROLE_TRAINING, ROLE_DETECTOR, ROLE_TRACKER)
+
+# --- detector placement (CV-ORCHESTRATION §4.9, wave W4) --------------------
+#
+# `CV_DETECTOR_TARGETS` is the ORDERED list a tracker session tries, first to
+# last, falling through on RESOURCE_EXHAUSTED or unavailability. Order is the
+# whole mechanism: it is `pick_first`, not balancing, which is what makes one
+# tracker's stream land on the same detector while it is healthy (§4.9
+# "affinity is a deployment requirement, not code"). Entries are `host:port`,
+# or the literal `local` for this process's own in-process detector -- so
+# `a:50051,local` reads "prefer the box, fall back to myself".
+#
+# UNSET IS THE DEFAULT AND MEANS `local`: every deployment that predates this
+# wave keeps the exact single-process behaviour it has today.
+DETECTOR_TARGET_LOCAL = "local"
+# How many passes may be WAITING for a gate permit before a `detector`-role
+# process answers RESOURCE_EXHAUSTED instead of queueing. Not a throughput
+# knob -- a FRESHNESS one. A yolo26n pass costs 135-230ms on the deploy box
+# (MODULE.md "StartTraining runs on CPU"), so two already-queued passes mean
+# the third's answer would describe a frame ~0.5s stale; at the 10 fps
+# sampling default that is five frames old, and CLAUDE.md rule 9 says the
+# newest data wins. Failing over to another instance -- or dropping the pass
+# and saying so in the ledger -- beats answering late.
+DEFAULT_DETECTOR_MAX_QUEUE = 2
+# Deadline on one pooled `Detect` call. Matches `adapter-cv-grpc`'s own
+# `RESPONSE_TIMEOUT_SECONDS` (2s), so a pooled hop can never be the thing that
+# outlives the Java caller's patience: the tracker gives up on a detector
+# before its own client gives up on the tracker.
+DEFAULT_DETECTOR_TIMEOUT_MILLIS = 2000
 _DATASET_DIRNAME = "datasets"
 
 # --- tracking (docs/plans/done/TRACKING-PLAN.md §4.A / TRACKING-ORCHESTRATION §4.3) ----
@@ -995,6 +1039,31 @@ def _parse_string(raw: Optional[str], default: str) -> str:
     return stripped or default
 
 
+def _parse_targets(raw: Optional[str]) -> tuple:
+    """`CV_DETECTOR_TARGETS` -> an ordered, de-duplicated tuple of targets.
+
+    ORDER IS THE CONTRACT (§4.9): it is the failover order, and therefore the
+    affinity mechanism, so this parser preserves it exactly and only drops a
+    REPEAT -- a target listed twice would silently double its share of the
+    retry budget while looking like two instances. Unset or blank yields the
+    empty tuple, which every reader takes as "detect in-process", this
+    module's pre-W4 behaviour.
+
+    Deliberately does not validate `host:port` shape: an unreachable target is
+    already a first-class, reported outcome (the pool moves to the next one and
+    `Inspect` shows the error), so a typo degrades instead of crash-looping a
+    process at startup -- the same posture `_parse_engine_id` takes.
+    """
+    if not raw:
+        return ()
+    seen: "list[str]" = []
+    for piece in raw.split(","):
+        target = piece.strip()
+        if target and target not in seen:
+            seen.append(target)
+    return tuple(seen)
+
+
 def _parse_choice(raw: Optional[str], default: str, choices: tuple, var_name: str) -> str:
     """Forgiving-parse for a small FIXED roster (`CV_PULL_CLOCK_MODE`'s
     `anchor`/`arrival`) -- unlike `_parse_string` above, an unrecognized
@@ -1111,6 +1180,11 @@ class Settings:
     grpc_workers: int = DEFAULT_GRPC_WORKERS
     shutdown_grace_seconds: int = DEFAULT_SHUTDOWN_GRACE_SECONDS
     role: str = DEFAULT_ROLE
+    #: Ordered detector targets; empty (the default) means "detect in-process",
+    #: which is every pre-W4 deployment. See `DETECTOR_TARGET_LOCAL`.
+    detector_targets: tuple = ()
+    detector_max_queue: int = DEFAULT_DETECTOR_MAX_QUEUE
+    detector_timeout_millis: int = DEFAULT_DETECTOR_TIMEOUT_MILLIS
     track_associate_engine: str = DEFAULT_TRACK_ASSOCIATE_ENGINE
     track_follow_engine: str = DEFAULT_TRACK_FOLLOW_ENGINE
     track_reacquire_millis: int = DEFAULT_TRACK_REACQUIRE_MILLIS
@@ -1220,6 +1294,17 @@ class Settings:
                 "CV_SHUTDOWN_GRACE",
             ),
             role=_parse_choice(os.environ.get("CV_SERVICE_ROLE"), DEFAULT_ROLE, _ROLE_CHOICES, "CV_SERVICE_ROLE"),
+            detector_targets=_parse_targets(os.environ.get("CV_DETECTOR_TARGETS")),
+            detector_max_queue=_parse_positive_int(
+                os.environ.get("CV_DETECTOR_MAX_QUEUE"),
+                DEFAULT_DETECTOR_MAX_QUEUE,
+                "CV_DETECTOR_MAX_QUEUE",
+            ),
+            detector_timeout_millis=_parse_positive_int(
+                os.environ.get("CV_DETECTOR_TIMEOUT_MILLIS"),
+                DEFAULT_DETECTOR_TIMEOUT_MILLIS,
+                "CV_DETECTOR_TIMEOUT_MILLIS",
+            ),
             track_associate_engine=_parse_engine_id(
                 os.environ.get("CV_TRACK_ASSOCIATE_ENGINE"), DEFAULT_TRACK_ASSOCIATE_ENGINE
             ),
