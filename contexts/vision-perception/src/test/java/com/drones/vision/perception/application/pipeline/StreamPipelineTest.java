@@ -39,6 +39,7 @@ import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 import java.net.URI;
 import java.nio.ByteBuffer;
@@ -66,6 +67,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
@@ -838,6 +841,61 @@ class StreamPipelineTest {
 
         verify(liveUpdatePublisherPort).publishDetections(assetId, nonEmpty);
         verify(liveUpdatePublisherPort).publishDetections(assetId, empty);
+    }
+
+    @Test
+    void publishesTheLiveUpdateBeforeSavingDurablyForTheSameResult() {
+        // docs/plans/active/CV-ORCHESTRATION-PLAN.md wave W2.4, onDetectionResult's own javadoc:
+        // the live plane runs before the durable save DELIBERATELY, restored after a regression cost
+        // TrackingAssociateE2ETest a detector pass -- detectionRepositoryPort#save is synchronous I/O,
+        // so running it between a result completing and the live read models updating makes every
+        // live reader lag by a database round trip. InOrder across two different mocks is the only
+        // way to assert a cross-collaborator ordering rather than each call's mere occurrence.
+        VideoFrame f = frame(0);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f));
+        DetectionResult result = nonEmptyResult(0);
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
+        AssetId assetId = AssetId.random();
+        DetectionLiveUpdatePort liveUpdatePublisherPort = mock(DetectionLiveUpdatePort.class);
+
+        pipeline(publisher, config(30, 2), assetId, liveUpdatePublisherPort, 30.0).start();
+
+        InOrder inOrder = inOrder(liveUpdatePublisherPort, detectionRepositoryPort);
+        inOrder.verify(liveUpdatePublisherPort).publishDetections(assetId, result);
+        inOrder.verify(detectionRepositoryPort).save(result);
+    }
+
+    @Test
+    void liveGateIsReadOnceAndSurvivesADemandChangeMidFanOut() {
+        // onDetectionResult's own javadoc: both gates are read ONCE at the top, not re-read around
+        // each plane -- re-reading liveGateOpen() right before the live-update publish would silently
+        // drop an update whose live-plane work (world/trackingStats/rateController) already ran,
+        // widening the accepted race window to a whole eventEngine dispatch. eventEngine#accept is
+        // the one collaborator this method calls strictly BETWEEN the live-plane block and the
+        // live-update publish (see the method body), so flipping detection demand off from inside
+        // the mocked eventEngine is the seam that proves the captured `live` local is not re-read:
+        // if it were, this demand flip would suppress the live-update publish below.
+        VideoFrame f = frame(0);
+        ScriptedVideoPublisher publisher = new ScriptedVideoPublisher(List.of(f));
+        DetectionResult result = nonEmptyResult(0);
+        when(detectionPort.detect(any(), any())).thenReturn(CompletableFuture.completedFuture(result));
+        AssetId assetId = AssetId.random();
+        DetectionLiveUpdatePort liveUpdatePublisherPort = mock(DetectionLiveUpdatePort.class);
+        DetectionEventEngine eventEngine = mock(DetectionEventEngine.class);
+        StreamPipeline pipeline = new StreamPipeline(streamId, device, config(30, 2), publisher, detectionPort,
+                streamPublisherPort, detectionRepositoryPort, eventPublisher,
+                new StreamPipelineCollaborators(Optional.of(eventEngine), Optional.of(assetId),
+                        Optional.of(liveUpdatePublisherPort), Optional.empty(), fixedFpsClock(30.0),
+                        StreamPipelineSettings.defaults(), System::nanoTime, Optional.empty()));
+        doAnswer(invocation -> {
+            pipeline.updateDetectionDemand(false); // flips liveGateOpen() false mid-fan-out
+            return null;
+        }).when(eventEngine).accept(any());
+
+        pipeline.start();
+
+        verify(liveUpdatePublisherPort).publishDetections(assetId, result);
+        assertFalse(pipeline.detectionDemand(), "the demand flip must actually have landed for this test to mean anything");
     }
 
     @Test
