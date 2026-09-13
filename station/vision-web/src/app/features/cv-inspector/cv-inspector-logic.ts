@@ -1,4 +1,4 @@
-import type { CvTrace, FrameLedger, SubsystemStatus, SystemStatus, WorldObject } from '../../core/api/models';
+import type { CvTrace, FleetSummary, FrameLedger, SubsystemStatus, SystemStatus, WorldObject } from '../../core/api/models';
 
 /**
  * Pure, Angular-free logic behind `cv-inspector-facade.ts` (docs/plans/active/CV-ORCHESTRATION-PLAN.md
@@ -117,6 +117,20 @@ export function traceFileName(streamId: string, nowMs: number): string {
  */
 export function serializeTrace(trace: CvTrace): string {
   return JSON.stringify(trace, null, 2);
+}
+
+/**
+ * `streamId`'s owning asset, resolved from a fleet-wide summary snapshot (wave W5.7,
+ * docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.8) — the exact same join `features/wall/
+ * wall-logic.ts` performs to attribute a stream tile to an asset (`AssetAttention.streamId` is
+ * only ever set while that asset's own `streaming` is `true`), reused here rather than
+ * re-derived so this inspector never disagrees with the Wall/Command dashboards about which
+ * asset a running stream belongs to. `undefined` covers three honestly distinct cases the caller
+ * does not need to tell apart: the summary hasn't loaded yet, no asset claims this stream (an
+ * unbound device), or the stream already stopped by the time the summary was fetched.
+ */
+export function assetIdForStream(summary: FleetSummary | undefined, streamId: string): string | undefined {
+  return summary?.assets.find((asset) => asset.streamId === streamId)?.assetId;
 }
 
 /**

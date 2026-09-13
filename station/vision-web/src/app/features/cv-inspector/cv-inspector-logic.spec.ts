@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   allTrackIds,
+  assetIdForStream,
   clockTime,
   cvSubsystemRow,
   evidenceRowsFor,
@@ -10,7 +11,7 @@ import {
   traceFileName,
   worldObjectFor,
 } from './cv-inspector-logic';
-import type { CvTrace, FrameLedger, SystemStatus, WorldObject } from '../../core/api/models';
+import type { AssetAttention, CvTrace, FleetSummary, FrameLedger, SystemStatus, WorldObject } from '../../core/api/models';
 
 function frame(sequence: number, objects: FrameLedger['objects'] = {}): FrameLedger {
   return {
@@ -147,6 +148,44 @@ describe('serializeTrace', () => {
   it('is pretty-printed, not a single minified line', () => {
     const trace: CvTrace = { streamId: 'stream-1', gate: [], frame: [], world: [] };
     expect(serializeTrace(trace)).toContain('\n');
+  });
+});
+
+function attention(overrides: Partial<AssetAttention> = {}): AssetAttention {
+  return {
+    assetId: 'asset-1',
+    displayName: 'Rover 1',
+    categoryId: 'rover',
+    categoryName: 'Rover',
+    lifecycle: 'ACTIVE',
+    streaming: true,
+    openEventCount: 0,
+    ...overrides,
+  };
+}
+
+describe('assetIdForStream', () => {
+  it('finds the asset whose AssetAttention row names this stream', () => {
+    const summary: FleetSummary = { categories: [], totalAssets: 1, assets: [attention({ streamId: 'stream-1' })] };
+    expect(assetIdForStream(summary, 'stream-1')).toBe('asset-1');
+  });
+
+  it('is undefined before the fleet summary has ever loaded', () => {
+    expect(assetIdForStream(undefined, 'stream-1')).toBeUndefined();
+  });
+
+  it('is undefined when no asset in the summary claims this stream', () => {
+    const summary: FleetSummary = { categories: [], totalAssets: 1, assets: [attention({ streamId: 'stream-2' })] };
+    expect(assetIdForStream(summary, 'stream-1')).toBeUndefined();
+  });
+
+  it('is undefined for an asset that is not currently streaming (no streamId at all)', () => {
+    const summary: FleetSummary = {
+      categories: [],
+      totalAssets: 1,
+      assets: [attention({ streaming: false, streamId: undefined })],
+    };
+    expect(assetIdForStream(summary, 'stream-1')).toBeUndefined();
   });
 });
 
