@@ -150,8 +150,10 @@ import com.drones.vision.perception.application.stream.StreamService;
  *   <li><b>Detection failures</b> (an exceptionally-completed {@link
  *       java.util.concurrent.CompletionStage} from {@link
  *       DetectionPort#detect}, including timeouts) never close the pipeline
- *       and never touch the video path. The first failure enters a
- *       detection <i>outage</i>: exactly one {@code PIPELINE_ERROR} event is
+ *       and never touch the video path. The state machine deciding outage/probe/recovery is
+ *       {@link OutageSupervisor} (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.9/K3, wave
+ *       W8.1 extraction); this class keeps only the logging and event publish. The first failure
+ *       enters a detection <i>outage</i>: exactly one {@code PIPELINE_ERROR} event is
  *       published (naming the cause) and, until recovery, sampled frames are
  *       withheld from {@link #detectionPort} entirely — they are skipped
  *       just like the in-flight bound skips frames, and likewise never
@@ -178,8 +180,8 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     /**
      * The detection-outage backoff bounds from {@link StreamPipelineSettings#defaults()}, exposed
      * here purely so same-package tests can assert against them by name (docs/plans/active/LAYERING-REFACTOR-PLAN.md
-     * &sect;1.3 config extraction) — this pipeline's own working backoff state ({@link
-     * #backoffNanos}) always reads from the {@link StreamPipelineSettings} actually supplied to its
+     * &sect;1.3 config extraction) — {@link #outageSupervisor}'s own working backoff state always
+     * reads from the {@link StreamPipelineSettings} actually supplied to this pipeline's
      * constructor, not from these two constants, so a non-default settings object genuinely takes
      * effect at runtime.
      */
@@ -354,6 +356,17 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final FrameSampler sampler;
 
     /**
+     * The detection-outage/probe-backoff state machine (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+     * &sect;4.9/K3, wave W8.1 extraction) — see {@link OutageSupervisor}'s own javadoc for the
+     * backoff/probe discipline it owns. This class keeps the logging and the {@code PIPELINE_ERROR}
+     * event publish; {@link #outageSupervisor} reports only which edge (entering an outage,
+     * recovering from one) just occurred — see {@link #onDetectionFailure}/{@link
+     * #onDetectionSuccess}. Built here rather than injected, for the same reason as {@link
+     * #sampler}: this pipeline's own per-stream bookkeeping, not a substitutable collaborator.
+     */
+    private final OutageSupervisor outageSupervisor;
+
+    /**
      * The clock {@link #pipelineLatency} measures durations with — deliberately <b>not</b> {@link
      * #nanoTimeSource}. That one is a <i>cadence</i> seam: the tests' fake advances one frame
      * interval on every read, which encodes "the pipeline reads me once per frame" and silently
@@ -364,12 +377,6 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /** @see StreamPipelineSettings#cameraHfovDegrees() — {@code 0} disables pose compensation. */
     private final double cameraHfovDegrees;
-
-    // Detection-outage tuning (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3 config
-    // extraction) -- read from the StreamPipelineSettings supplied to the constructor, defaulting
-    // to StreamPipelineSettings#defaults() when the caller doesn't supply one explicitly.
-    private final long detectionBackoffInitialNanos;
-    private final long detectionBackoffMaxNanos;
 
     private final AtomicInteger inFlightInferences = new AtomicInteger();
     private final AtomicBoolean closed = new AtomicBoolean(false);
@@ -387,21 +394,6 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     // being read for ego-motion compensation (see readTelemetry()/cameraAttitude()) -- cosmetic,
     // not a resilience concern like a detection failure is.
     private boolean telemetrySupplierFailureLogged = false;
-
-    // Detection-outage state. Unlike the frame-cadence fields above, this is
-    // genuinely touched from multiple threads without serialization: onNext
-    // (submitting a new sample) races with detect() completion callbacks
-    // (which may land on an arbitrary executor thread). All reads/writes go
-    // through the synchronized blocks below rather than volatile/Atomic
-    // fields, because entering an outage, doubling the backoff, and reading
-    // the backoff deadline must be observed as a single consistent unit --
-    // see maybeDetect()/outageDecision()'s javadoc for the race this avoids.
-    private final Object outageLock = new Object();
-    private boolean inOutage = false;
-    private boolean probeInFlight = false;
-    private long backoffNanos;
-    private long nextProbeAtNanos = 0L;
-    private long outageFailureCount = 0L;
 
     /**
      * The single canonical constructor (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md Finding
@@ -436,8 +428,6 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         this.pullDetection = collaborators.pullDetection().orElse(null); // nullable: push-mode detection when absent (D5/D6)
         StreamPipelineSettings settings = collaborators.settings();
         this.cameraHfovDegrees = settings.cameraHfovDegrees();
-        this.detectionBackoffInitialNanos = settings.detectionBackoffInitialNanos();
-        this.detectionBackoffMaxNanos = settings.detectionBackoffMaxNanos();
         this.world = new WorldModel(settings.trackRetention(), WorldModel.DEFAULT_MEMORY_TTL, settings.renderTier(),
                 label -> this.eventEngine == null ? null : this.eventEngine.openEventId(label).orElse(null));
         this.trackingStats = new TrackingStatsWindow(settings.trackingStatsWindow());
@@ -454,7 +444,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         this.trace = new PipelineTrace(settings);
         this.rateController = new DetectionRateController(settings.adaptiveRate(), settings.cameraHfovDegrees());
         this.sampler = new FrameSampler(settings, this.nanoTimeSource);
-        this.backoffNanos = this.detectionBackoffInitialNanos;
+        this.outageSupervisor = new OutageSupervisor(settings, this.nanoTimeSource);
         // Seeded from this.config/this.detectionDemand/this.detectionPolicyAlwaysOn, all already
         // assigned above -- construction itself must never look like a close, only a later, genuine
         // open->closed edge should.
@@ -943,16 +933,6 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                 : config.inferenceFps();
     }
 
-    /** Outcome of consulting outage state for a newly-sampled frame, see {@link #outageDecision()}. */
-    private enum OutageDecision {
-        /** No outage in progress: fall through to the normal in-flight-bounded path. */
-        NORMAL,
-        /** An outage is in progress but the backoff hasn't elapsed, or a probe is already outstanding. */
-        SKIP,
-        /** The backoff deadline has passed and no probe is outstanding: send exactly this one frame as a probe. */
-        PROBE
-    }
-
     /**
      * The <b>inference</b> gate (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md &sect;4 "the gate is three
      * questions, not two") — {@link #maybeDetect} and {@link PullResultSubscriber#onNext} both gate
@@ -1132,7 +1112,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
             trace.recordSkip(frame, snapshot, GateReason.GATE_NO_DEMAND);
             return;
         }
-        switch (outageDecision()) {
+        switch (outageSupervisor.outageDecision()) {
             case PROBE -> {
                 // A probe is a LIVENESS check, not a sample: its cadence is the outage backoff, so
                 // it deliberately ignores the sample deadline. Letting the sampler gate it too would
@@ -1172,29 +1152,6 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         }
     }
 
-    /**
-     * Consults and, where it decides {@link OutageDecision#PROBE}, mutates
-     * outage state under {@link #outageLock} in a single atomic step —
-     * checking {@code nextProbeAtNanos} and claiming {@code probeInFlight}
-     * together, rather than as two separate lock-free reads, is what
-     * prevents a second concurrent probe from starting (or the very first
-     * backoff window from being skipped by a racing thread that observes
-     * {@code inOutage} freshly flipped {@code true} before its paired
-     * backoff fields are visible).
-     */
-    private OutageDecision outageDecision() {
-        synchronized (outageLock) {
-            if (!inOutage) {
-                return OutageDecision.NORMAL;
-            }
-            if (probeInFlight || nanoTimeSource.getAsLong() < nextProbeAtNanos) {
-                return OutageDecision.SKIP;
-            }
-            probeInFlight = true;
-            return OutageDecision.PROBE;
-        }
-    }
-
     private void submitDetection(VideoFrame frame, boolean isProbe, DemandSnapshot demand) {
         long submittedAtNanos = latencyNanoSource.getAsLong();
         // The three-argument form is taken ONLY when there is an attitude to send, so a port (or a
@@ -1225,7 +1182,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
             pipelineLatency.record(submittedAtNanos, completedAtNanos);
             rateController.recordRoundTrip(completedAtNanos - submittedAtNanos);
             if (isProbe) {
-                clearProbeInFlight();
+                outageSupervisor.clearProbeInFlight();
             } else {
                 inFlightInferences.decrementAndGet();
             }
@@ -1240,12 +1197,6 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         });
     }
 
-    private void clearProbeInFlight() {
-        synchronized (outageLock) {
-            probeInFlight = false;
-        }
-    }
-
     /**
      * Handles a failed inference. The first failure (from any in-flight
      * call, probe or not) enters the outage and is the only one that raises
@@ -1254,25 +1205,12 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * backoff (capped at {@link #MAX_BACKOFF_NANOS}) and reschedules the
      * next probe — a stray failure from a call that was already in flight
      * when the outage began must not perturb a backoff a probe may have
-     * already advanced.
+     * already advanced. State transitions themselves live on {@link #outageSupervisor}
+     * (see its own javadoc); this method's only remaining job is the logging/event side
+     * {@link OutageSupervisor} deliberately does not know about.
      */
     private void onDetectionFailure(Throwable throwable, boolean isProbe) {
-        boolean enteringOutage;
-        synchronized (outageLock) {
-            enteringOutage = !inOutage;
-            if (enteringOutage) {
-                inOutage = true;
-                backoffNanos = detectionBackoffInitialNanos;
-                outageFailureCount = 0;
-                nextProbeAtNanos = nanoTimeSource.getAsLong() + backoffNanos;
-            } else {
-                outageFailureCount++;
-                if (isProbe) {
-                    backoffNanos = Math.min(backoffNanos * 2, detectionBackoffMaxNanos);
-                    nextProbeAtNanos = nanoTimeSource.getAsLong() + backoffNanos;
-                }
-            }
-        }
+        boolean enteringOutage = outageSupervisor.recordFailure(isProbe);
         if (enteringOutage) {
             eventPublisher.publish(Event.of(streamId, EventType.PIPELINE_ERROR,
                     "detection outage: " + describeFailure(throwable)));
@@ -1284,20 +1222,15 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * alike). Always resets the backoff to its initial interval, and —
      * exactly when this success followed an active outage — clears the
      * outage and logs a recovery line (no second event is emitted; {@code
-     * PIPELINE_ERROR} is reserved for the outage's start).
+     * PIPELINE_ERROR} is reserved for the outage's start). State transitions
+     * themselves live on {@link #outageSupervisor}; this method's only remaining job is the
+     * recovery log line {@link OutageSupervisor} deliberately does not know about.
      */
     private void onDetectionSuccess(DetectionResult result) {
-        boolean recovered;
-        long failuresDuringOutage;
-        synchronized (outageLock) {
-            recovered = inOutage;
-            failuresDuringOutage = outageFailureCount;
-            inOutage = false;
-            backoffNanos = detectionBackoffInitialNanos;
-        }
-        if (recovered) {
+        OutageSupervisor.Recovery recovery = outageSupervisor.recordSuccess();
+        if (recovery.recovered()) {
             LOG.log(System.Logger.Level.INFO, () -> "stream " + streamId.value() + " detection recovered after "
-                    + failuresDuringOutage + " failed attempt(s) during the outage");
+                    + recovery.failuresDuringOutage() + " failed attempt(s) during the outage");
         }
         onDetectionResult(result);
     }
