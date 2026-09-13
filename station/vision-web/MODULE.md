@@ -1653,16 +1653,14 @@ live working tree looked like at any given moment.
   reconstruction by re-running the same suite against the reconstructed files copied back onto the
   live tree. `ng build --configuration production` — green, same two pre-existing budget warnings
   only (initial bundle over 390 kB; `tactical-map.css` over 11 kB), neither touched by this wave.
-  **Bundle delta**: not isolated via a stash-based before/after this time — both W3.4 and W3.5 held
-  actively uncommitted, disjoint-but-large edits in this same tree for most of this wave's duration
-  (unlike W3.4's own narrower ~90s window), so pathspec-stashing this wave's files back out would
-  not have produced a clean "before" baseline either — same shared-worktree call W3.2's entry made.
-  As a rough magnitude proxy instead: this wave's own diff (excluding the one-line spec fixture fix
-  and the new `fly-logic.spec.ts` tests, neither of which ship) is +21 lines `models.ts`, +68
-  `cockpit-facade.ts`, +11 `cockpit.css`, +36 `cockpit.html`, +70 `fly-logic.ts` — mostly doc
-  comments, not runtime code; the `cockpit` lazy chunk measured 140.58 kB raw / 29.63 kB transfer in
-  a full-tree build taken mid-wave, but that number includes both siblings' own substantial
-  concurrent work and is not attributable to this wave alone.
+  **Bundle delta — corrected post-hoc (W3.7 docs pass, 2026-09-13)**: the paragraph originally here
+  said no isolated delta was possible on this shared tree; that was written before an isolated
+  measurement existed, and the pessimism doesn't hold. Re-measured via two disposable
+  `git worktree add --detach` checkouts (no shared index, no sibling contamination) — one at this
+  wave's own commit `a5ab10d3`, one at its parent `41d04ba8` — both with `node_modules` symlinked in:
+  lazy **`cockpit` chunk 138.69 kB → 140.35 kB raw (+1.66 kB), 29.26 kB → 29.55 kB transfer
+  (+0.29 kB)**; initial bundle **436.41 kB → 436.82 kB raw (+0.41 kB), 122.32 kB → 122.55 kB transfer
+  (+0.24 kB)** — noise-level, as expected for a wave that adds no new route and no new eager import.
 - **Commit**: `feat(cv-orchestration W3.3): intent chips + one honest status line on the fly hero`.
 
 ## Status — CV-ORCHESTRATION wave W3.5 (web): tap to follow — box or point (D8) (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7 D8, §6 W3 row) — 2026-09-13
