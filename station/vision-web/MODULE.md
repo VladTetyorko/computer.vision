@@ -64,6 +64,7 @@ Angular 21 SPA (driving adapter): the whole product UI — operator cockpit, man
 | map / geofence / weather | **`FleetMapStore`** — page-provided (not `providedIn: 'root'`; own lifetime *is* its demand signal, see below), now gated on live too since LIVE-POLL-RETIREMENT wave L7 (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §5 L7, 2026-09-06): **L7a** retires the 5s `GET /api/assets` poll in favour of `LiveStore.fleet()` (scoped per connection since wave L6) whenever live is `'open'` — same `applyTransport`/`liveGated` D1 gate as `map-data` below, collapsed to the live axis alone (no `activeConsumers` term — this store has no ref-count, construction/`DestroyRef` already bound its lifetime to the page). **L7b** moves the 2s per-streaming-asset telemetry poll behind `LiveStore.trackTelemetry(assetId)`/`telemetryFor(assetId)` — `reconcileTrackers` now subscribes/unsubscribes per tracker *as well as* scheduling/cancelling that poll, one `untrackTelemetry` for every `trackTelemetry`, on stop-tracking and on store teardown alike. **The 2s poll is gated, not deleted** (`applyTrackerTransport`, `TELEMETRY_POLL_INTERVAL_MS`): it runs only while live is unavailable *and* the tracker has resolved an open usage, and `applyTransport` starts/stops every tracker's poll on each transport transition. The wave first deleted it outright — the plan's L7b row said "retire" where its L7a neighbour said "gate per D1; the REST call stays as the not-open fallback" — and with SSE down that froze a streaming asset's marker at its one-time backfill position while it still reported `live: true`. D1 is the frozen rule; see LIVE-POLL-RETIREMENT-PLAN.md §9 finding 7. **L7c**: `telemetry:<assetId>` has no snapshot-on-connect, so each tracker still does exactly one `GET /api/usages/{id}/telemetry` backfill (`TelemetryStore`'s own precedent, reused) merged against live deltas via `mergeTelemetrySamples` (dedup by `(deviceId, at)`) — `trackTelemetry` fires before the backfill resolves, by design, so a live sample arriving mid-fetch is never lost or duplicated. **L7d**: the 1s clock stays, untouched, local-only. **Measured** (not cadence-derived) by `core/live/poll-rate.spec.ts`, that plan's §7 acceptance criterion 2 as a test rather than a browser session: −12 req/min plus −30×N for N streaming assets while live holds, the largest single reduction in that plan. That spec measures `/command`'s whole store set in both transports and asserts `document.hidden === false` first — `PollScheduler` pauses while hidden, so a background tab measures a flattering zero regardless of the code, which is how two earlier browser attempts were voided. `GeofenceStore` (**ref-counted `activate()`/`release()`, wave C3 — same contract as the `map-data` row above**; **and gated on live since LIVE-POLL-RETIREMENT wave L5b** — the 30s poll now runs only while a consumer is active *and* live is unavailable, with `LiveStore.zoneEvents()` folded on top through the same `processedLiveEventCount` cursor idiom `MarksStore` established for `map`: `CREATED`/`UPDATED` upsert by id, `DELETED` removes by id, both idempotent so a redelivery across a reconnect can neither duplicate a zone nor resurrect a deleted one. This store's former **"deliberately not gated on `isLiveAvailable()`"** stance (SCALE-100 §5 S6) is now **obsolete, not reversed** — its whole argument was that gating would hide a second operator's newly-drawn zone for a session because `LiveEnvelope` had no zone topic to project while paused, and wave L3 supplied exactly that topic; both that paragraph and the cross-reference to it have been deleted rather than left standing as a lie), `WeatherStore` |
 | identity | `AuthStore`, `OrgStore`, `SettingsStore` |
 | geo | `GeoStore` (visual-geo correction), `camera-geo/` (fixed-camera pose, pure) |
+| cv-trace | **`CvTraceStore` (new, docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4/§4.8, wave W5.2)** — page-provided, not `providedIn: 'root'` (the `/manage/cv` engineer inspector, wave W5.3, is the one consumer). Unlike every other row in this table, poll **and** live run concurrently rather than one gating the other: `gate`/`world` have no live topic at all (only `frame` rides `cv-trace:<assetId>`), so a 3s `GET .../cv/trace` poll is their only freshness source regardless of live availability, and that same poll's `frame` array is the *authoritative* resync for the ring — a live arrival (`LiveStore.cvTraceFor`, latest-wins there) is merged in between ticks via `cv-trace-logic.ts#appendFrameLedger` (dedup by `sequence`, capped at the session's own `last`) purely for lower latency, never trusted over what the next poll confirms. `track()`/`reset()` **is** the plan's own demand rule (§6 W5 row: "opening the inspector flips `trace` on and closing flips it off") — `TraceDemandPort` fails *closed*, so either transport keeps tracing on for as long as this store is tracking. |
 | seat | **`SeatStore` (new, docs/plans/active/CREW-CONTROL-PLAN.md §3.6, wave W3)** — page-provided, not `providedIn:'root'`; `seat-logic.ts` (pure: `singleOperatorSeats`, `seatFor`, `renewalIntervalMs`). See the `features/` → `crew/`/`core/seat/` bullets below for the full renew-while-mine cadence. |
 | rc | `RcInputService`, `VirtualRcInputService`, `KeyboardRcInputService`, `RcSource`, `ManualControlClient`, `ControlActionDispatcher`, `ControlProfileStore`; `keyboard-action-logic.ts` (pure, MAVLINK-COMMANDS-PLAN.md D3) — action-key chord parsing (`actionKeyIdFor`), catalogue-driven resolution (`resolveActionKey`), live-armed-state verb (`toggleArmVerb`), edge detection (`newActionKeyPresses`), hold-cancellation (`holdContinues`), and the shared `isTypingTarget` guard |
 | events | `EventsStore` (`GET /api/events`), `SystemEventsStore` (`core/system-events/system-events-logic.ts` — maps the generic `LiveEvent`/`event` SSE feed to bell rows + severities; **S4, docs/plans/active/ASSET-FLOWS-PLAN.md §2**: `SEVERITY_BY_TYPE`/`TITLE_BY_TYPE` gained `LINK_LOST`/`BATTERY_LOW`, both `danger`, feeding `NotificationBell` — nine event kinds now render with a real label/icon/severity instead of falling through to any generic default), `TracksStore`, `TrainingStore`, `SystemStatusStore` (**gated on live since LIVE-POLL-RETIREMENT wave L5c — the live axis *only***: this store has no `activate()`/`release()` and never will, because the shell sidebar's rollup health dot needs `overall` on every page, so there is no "nobody needs this" state to ref-count. `applyTransport` is the same D1 shape as every other gated store minus the `activeConsumers` branch; a live `system` arrival is projected straight onto `status` and clears `error`, since a value that just arrived over an open connection is current-and-good by definition. **Do not add ref-counting here** — the asymmetry is deliberate) |
@@ -73,7 +74,7 @@ Angular 21 SPA (driving adapter): the whole product UI — operator cockpit, man
 | pure-logic only (no store) | `audit/` (+ `audit/summary-logic.ts` — `humanizeSummary`/`actorLabel`/`buildNameMap`, shared with `features/activity/`), `after-action/`, `readiness/` (`readiness-logic.ts` gained a "Maintenance grounding" section, S1/wave WB1 — `parseGroundingBlocker`/`groundingBlocker`/`groundedBannerText`/`featureBlockers`, the one parser every grounded surface — cockpit banner, Arm gate, both readiness pages — renders from), `roster/`, `activity/`, `command/`, `maintenance/` (`core/maintenance/maintenance-logic.ts`), `stream-info-logic.ts` |
 
 ### Routes (one lazy `loadComponent` chunk each; per-feature `*.routes.ts`)
-`/fly` picker · `/fly/:assetId` cockpit · `/crew/:assetId` (docs/plans/active/CREW-CONTROL-PLAN.md §3.4, wave W3 — the crew seat) · `/command` · `/wall` · `/live/:deviceId` · `/assets` (now **Inventory**, `?tab=vehicles|equipment|links|categories`, default `vehicles`, wave W4 — see the `inventory/` bullet below) · `/assets/:assetId` · `/assets/:assetId/readiness` · `/assets/:assetId/replay/:usageId` · `/replay` · `/add-source` · `/provision-wifi` (ZERO-CONFIG-ONBOARDING-CONTEXT.md §4/§8, wave Z5 — `orgGuard`, Improv Wi-Fi provisioning over Web Serial) · `/fleet/maintenance` · `/activity` · `/login` · `/org` (guard-only redirect → `/manage/roster?tab=org`, wave W7) · `/settings` · `/vision/profiles` (CV-SETTINGS-PLAN.md §4, wave W6 — `orgGuard`, replaces `/settings/detection`) · `/debug`
+`/fly` picker · `/fly/:assetId` cockpit · `/crew/:assetId` (docs/plans/active/CREW-CONTROL-PLAN.md §3.4, wave W3 — the crew seat) · `/command` · `/wall` · `/live/:deviceId` · `/assets` (now **Inventory**, `?tab=vehicles|equipment|links|categories`, default `vehicles`, wave W4 — see the `inventory/` bullet below) · `/assets/:assetId` · `/assets/:assetId/readiness` · `/assets/:assetId/replay/:usageId` · `/replay` · `/add-source` · `/provision-wifi` (ZERO-CONFIG-ONBOARDING-CONTEXT.md §4/§8, wave Z5 — `orgGuard`, Improv Wi-Fi provisioning over Web Serial) · `/fleet/maintenance` · `/activity` · `/login` · `/org` (guard-only redirect → `/manage/roster?tab=org`, wave W7) · `/settings` · `/vision/profiles` (CV-SETTINGS-PLAN.md §4, wave W6 — `orgGuard`, replaces `/settings/detection`) · `/manage/cv` (CV-ORCHESTRATION-PLAN.md §9 decision 3, wave W5.3 — `orgGuard`, the engineer inspector) · `/debug`
 Hubs: `/operate`(+`/preflight`, `/missions`) · `/monitor`(+`/alerts`, `/audit`, `/layouts`) · `/manage`(+`/roster` (now **Crew**, `?tab=roster|org`, wave W7), `/controller`, `/system`, `/firmware`, `/geo/regions`, `/training`, `/training/models`, `/training/:datasetId[/samples/:sampleId]`, `/training/jobs/:jobId`, `/training/runs`, `/training/runs/:runId` (wave W8))
 Redirects: `/crew` → `/wall` (wave W3 — no crew-specific landing/picker page exists yet; see the `crew/` bullet below). `/map` → `/command`, `/warehouse` → `/assets` (both pages deleted; the stub keeps old bookmarks off the 404). `/org` → `/manage/roster?tab=org` (wave W7 — see the `roster/, org-settings/` bullet below). `/devices` → `/assets?tab=links`, `/manage/categories` → `/assets?tab=categories`, `/manage/reports` → `/assets` (wave W4 — all three folded into the Inventory page's own tabs, `DevicesPage`/`CategoriesPage` themselves unmoved and unchanged; each a `RedirectFunction`, not a plain string, so a `?tab=` param survives the hop — see the `inventory/` bullet below). `/manage/health` → `/fleet/maintenance` (wave W4, closing W7's own exit criterion). `/settings/detection` → `/vision/profiles` (plain-string `redirectTo`+`pathMatch:'full'`, `settings.routes.ts` — CV-SETTINGS-PLAN.md wave W6, `detection-settings.*` deleted outright).
 
@@ -221,6 +222,9 @@ Redirects: `/crew` → `/wall` (wave W3 — no crew-specific landing/picker page
   - **Dev parity**: `vision.auth.enabled=false`'s dev admin is ADMIN/unbounded, so `orgGuard` (Training tree) and `canAdministerRegistry` (Promote/Roll back) both pass exactly as they do for a real admin.
   - **Not updated**: `core/ui/architecture.spec.ts`'s `ROUTED_PAGES` allowlist (out of this wave's declared write scope) does not yet list `training-jobs/run-history`/`training-jobs/run-detail` — both pages already follow the enforced facade-only-injection shape, so a future pass adding them only tightens the guard, it doesn't change behavior.
 - **system-status/** — `/manage/system`'s subsystem grid + overall banner, over `SystemStatusStore`'s `GET /api/system/status` poll. **The banner verdict now names the worst subsystem instead of going a uniform danger red for any one fault (docs/plans/active/OPERATOR-UX-5-PLAN.md finding U3, §2 U3, wave W2).** New `core/system-status/system-status-logic.ts#verdictFor(subsystems, transport)` is a pure `'ok'|'degraded'|'down'` verdict, distinct from the pre-existing `shellStatusSeverity`/`shellStatusLabel` (the sidebar's own worst-of-three rollup, deliberately left unchanged — out of this wave's scope, documented in `verdictFor`'s own doc comment): `'down'` only when the backend itself is unreachable *or* `transport === 'closed'` (the client's own SSE connection, not a backend-reported subsystem); otherwise the banner names `worstFaultySubsystem` by its own label (`Degraded — CV inference down` / `Degraded — Live updates degraded`, the backend's `live-updates` subsystem — a distinct fact from the client transport check above); `'UNKNOWN'` subsystems never lower the verdict (an honest "nothing to report" stays neutral, per this file's own pre-existing `HEALTH_SEVERITY` note); an all-OK/no-fault board stays `'ok'`. `SystemStatusFacade` replaced its old `overall`/`overallSeverity`/`overallMessage` (a bare health-string relabel) with `subsystems`/`verdict`/`overallSeverity`/`overallMessage` built off `verdictFor`; the banner's tone follows the verdict — danger only for `'down'`, warn for `'degraded'`, ok otherwise.
+- **cv-inspector/** (`/manage/cv`, docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.8/§9 decision 3, wave W5.3) — the engineer inspector: `CvInspectorPage`/`CvInspectorFacade` (page-provided, alongside a page-provided `CvTraceStore` — wave W5.2's own store, no consumer until this wave), four panels over one picked, **running** stream (`FleetStore.streams()`) — gate ledger (`gate[]`, already coalesced server-side), frame contributors (a frame picker over `frame[]`'s ring + that frame's `entries[]`), object evidence (a track-id picker over the union of every frame's `objects` keys and every `world[]` id, joined with that id's current `WorldObject` facets), and process facts (the stream-independent `cv-service` row of `/api/system/status`, reusing `SystemStatusStore`/`system-status-logic.ts#healthLabel`/`healthSeverity` verbatim rather than re-deriving them). New pure `cv-inspector-logic.ts` (+spec, 15 cases): `latestFrame`, `allTrackIds`, `evidenceRowsFor`, `worldObjectFor`, `formatRecord` (a `claim`/`summary` free-form record rendered as one `key=value, …` line), `clockTime`, `cvSubsystemRow`. The page's own doc comment carries the plan's §1.5 "why" table verbatim as its acceptance list — every row is a named lookup on this page, not a promise. New `vision` nav entry ("CV inspector", `MANAGE_ORG`-gated, `nav-entries.ts`/`nav-entries.spec.ts` updated) and `manage/cv` route (`cv-inspector.routes.ts`, `orgGuard`, spread into `app.routes.ts` beside `VISION_PROFILES_ROUTES`); `core/ui/architecture.spec.ts`'s `ROUTED_PAGES` gained `cv-inspector/cv-inspector`.
+  - **Live subscription (wave W5.7)**: the stream picker used to track by `streamId` alone, leaving `CvTraceStore.track()`'s optional `assetId` (the live-merge opt-in) always unset — reviewed and fixed rather than kept as a scope cut. `CvInspectorFacade#selectStream` now resolves the picked stream's owning asset via one `VisionApi#fleetSummary()` fetch joined by `cv-inspector-logic.ts#assetIdForStream` (the same `AssetAttention.streamId` join `features/wall/wall-logic.ts` uses), then calls `track(streamId, assetId)` so the live `cv-trace:<assetId>` topic actually starts — no already-loaded structure (`FleetStore` included — `ActiveStream` carries a `deviceId`, not an `assetId`) maps a stream to its asset for free, so one `GET` per pick is the documented fallback (an engineer picks rarely). A `token` counter drops a resolution superseded by a later pick or a deselect; a failed/empty lookup degrades to poll-only. `CvTraceStore`'s 3s poll (`POLL_INTERVAL_MS`) stays authoritative regardless either way. New `cv-inspector-facade.spec.ts` (7 cases) — the first facade-level spec in this app, using the real `CvTraceStore`/`CvInspectorFacade` with only their leaf deps stubbed (mirrors `core/map/map-store.spec.ts`'s "real store, stub its own leaf deps" convention) — proves subscribe-on-pick, degrade-on-miss/failure, release-on-switch, drop-on-supersede, drop-on-deselect, and release-on-page-leave (`TestBed.resetTestingModule()` exercising `CvTraceStore`'s own `DestroyRef` teardown).
+  - **Save trace (wave W5.4)**: a page-bar "Save trace" action (`[disabled]` until a stream is picked, `CvInspectorFacade#canSaveTrace`/`#saveTrace`) downloads the currently-picked stream's `{streamId, gate, frame, world}` as one pretty-printed JSON file — built straight from the facade's own live signals, never a fresh fetch, so the file matches exactly what the engineer is looking at. New pure `cv-inspector-logic.ts#traceFileName`/`#serializeTrace` (+4 spec cases). Reuses the app's existing client-side Blob-download convention (`features/onboarding/onboarding-facade.ts#downloadBlock`'s `createObjectURL`→synthetic `<a download>`→`revokeObjectURL` idiom) rather than that helper itself, since it is typed around a different (`ConfigBlock`) shape. This file is wave W5.5's own replay fixture.
 - **maintenance/** (`/fleet/maintenance`, docs/plans/active/WAREHOUSE-UX-PLAN.md §3.3/§4, wave W7 built · wave W9 one-call rewrite) — `MaintenancePage`/`MaintenanceFacade` (page-specific facade, no store — same "not shared across navigation" precedent as `ReportsFacade`/`RosterFacade`): fleet-wide KPI tiles (Grounded/Inspection due/In repair/Retired), a "Ground a vehicle" disclosure form (`VisionApi#setAssetInventory({action:'GROUND', kind, summary})`), an open-records table (Asset/Category/Kind chip/Summary/Opened age/Opened by/Custodian/Close+Release actions), and a "Recently closed" history (last 20). **One fleet-wide read replaces the old per-asset fan-out (wave W9, docs/plans/active/WAREHOUSE-UX-CONTEXT.md "W8 → W9 handoff")** — `MaintenanceFacade.load()` now calls `VisionApi#fleetMaintenance('all')` (`GET /api/maintenance?state=open|closed|all&limit=` → `FleetMaintenanceRecord[]`, W8's new endpoint) once, inside the same blocking `Promise.all` as `listAssets`/`listUsers` — a deliberate honesty change from the pre-W9 per-asset reads' silent per-asset degrade: maintenance records are this page's primary content, not enrichment, so a failed read now shows the page's own error empty-state instead of a quietly-incomplete table. Each `FleetMaintenanceRecord` already carries its own `assetName`/`categoryId`, so the pre-W9 `AssetMaintenanceRow{asset, record}` join type is gone — the record *is* the row; category *display name* and custodian still resolve through the separately-loaded `assets` list (`MaintenanceFacade#categoryNameFor`/`#custodianLabelFor`), mirroring the existing `displayNameFor(userId)` id→name-lookup precedent. Pure: `core/maintenance/maintenance-logic.ts` — `maintenanceKpis(assets, records)` (groups the flat list by `assetId` internally via a private `groupByAssetId`), `primaryOpenRecord`/`openRecords`/`recentlyClosedRecords` (worst-kind-first via `MaintenanceKind#blocksFlight()`-mirroring severity order, then oldest-first — renamed from `openRecordRows`/`recentlyClosedRecordRows`, no longer asset-joining), `hoursSinceClose` (typed against a minimal `{closedAt?: string}` structural interface so it serves both this page's fleet-wide records and `asset-detail-logic.ts#sinceServiceTile`'s unrelated per-asset `MaintenanceRecord`), `groundableAssets`, `MAINTENANCE_KIND_LABELS`. Route-guarded `orgGuard` (registered in `features/roster/roster.routes.ts`), unchanged. **Wave W10 sweep (docs/plans/active/WAREHOUSE-UX-CONTEXT.md W10 finding M1):** `MaintenanceFacade#displayNameFor` ("Opened by") now delegates to `core/audit/summary-logic.ts#actorLabel`/`ROOT_ACTOR_ID` — the same one-owner vocabulary the Audit page already uses — instead of its own bare `nameById().get(userId) ?? userId.slice(0,8)`; the dev-mode/system principal (`UUID(0,0)`, every record opened with `vision.auth.enabled=false`) now reads **"Station"**, not an unreadable `00000000…` id fragment. `vision-section-header`'s "Open" subtitle now reads `pluralize(count, 'record') + '…'` (`shared/ui/text-logic.ts`) instead of a hardcoded `'record(s)'`. New `core/maintenance/maintenance-logic.ts#isLastOpenRecordForAsset(record, records)` + `MaintenanceFacade#isLastOpenRecord` drive the open-records table's Close/Release button treatment: labelled "Close record"/"Release asset" (scope now readable from the copy itself) with a `title` naming the difference, and which one renders `.btn` (primary) vs `.btn.secondary` flips — Close stays primary while other open records remain on the same asset (Release would prematurely return it to service), Release becomes primary once this is the asset's last one (the two actions now finish the same job) — a presentation-only change, neither button's backend call (`POST .../maintenance/{id}/close`, `POST .../inventory {action:RELEASE}`) moved.
 - **roster/, org-settings/** (docs/plans/active/WAREHOUSE-UX-PLAN.md §4 wave W7) — `/manage/roster` is now **Crew** (`CrewPage`, `features/roster/crew.ts`, no facade of its own — just a `?tab=roster|org` query-param switch, `toSignal`/`router.navigate` idiom mirroring `RosterFacade`'s own `?by=`/`?sel=`): two tabs, each an **existing page mounted wholesale, not copied** — `<vision-roster [embedded]="true">` / `<vision-org-settings [embedded]="true">`. `embedded` (new `input(false)` on both `RosterPage` and `OrgSettingsPage`) swaps that page's own sticky `vision-page-bar` for a plain non-sticky `.embedded-toolbar` row (shared markup via `<ng-template>`+`NgTemplateOutlet`, so the embedded and standalone headers can't drift) since `CrewPage`'s own bar already carries the title/tab switcher; the root `<div class="page">` also becomes `[class.page]="!embedded()"` on both, else a second nested `.page` would double its 24/32/64px padding. `/org` is now a guard-only redirect leaf (`org-settings/org-to-crew-guard.ts`, `canActivate` + empty `children`, mirroring `core/shell/landing-guard.ts`'s precedent) to `/manage/roster?tab=org` — a plain string `redirectTo` can't inject a *new* query param not already on the incoming URL, and `features/hubs/route-audit-logic.ts#flattenRoutes` already classifies a guard-only leaf as `'redirect'`, so the route-audit page's own accounting stays correct. Roster's "By asset" pivot rows now also show the asset's custodian beside the pilot-assignment dots as one quiet muted line — D3's "may fly" (existing pilot dots) vs. "has it" (new) distinction, no new chip color (frontend-style §5's one-chip-per-row budget is unspent by this addition). The "By pilot" pivot is unchanged — custody is an asset-level fact, out of scope for a per-pilot row. **Wave W10 sweep (docs/plans/active/WAREHOUSE-UX-CONTEXT.md W10 findings C1(b)/C1(c)) replaced the original `RosterFacade#custodianLabel` (custody-only, ignored inventory state) with a small discriminated union**, `roster-logic.ts#CustodyStatus` (`'maintenance' | 'retired' | 'held' | 'in-stock'`) built by `custodyStatusFor(asset, nameById)`: a grounded/retired asset's **effective** `AssetSummary.inventoryState` now wins outright over any leftover `custody.custodianId` (C1(c) — a rover grounded straight out of the field used to still read a stale custodian name, or "In stock" if it never had one, either way hiding the one fact that actually matters: it isn't flyable right now), rendered via `custodyStatusLabel`/`custodyStatusTitle` ("Has: X" / "In maintenance" / "Retired" / "In stock") — `RosterFacade#custodyStatus`/`#custodyLabel`/`#custodyTitle` are the new facade surface, `#custodianLabel` is gone. `countAssetsWithoutPilot(rows, connectedCategorySlugs)` gained a second parameter (C1(b)) — the "Assets without a pilot" KPI tile used to count every zero-pilot row including non-connected equipment (a battery, a spare gimbal) that has no pilot concept at all; scoped now to `Category#connected` categories only, the same set `InventoryFacade`'s Vehicles/Equipment tab split already uses — `RosterFacade` now also loads `listCategories()` (a third `Promise.all` member) to build that set client-side.
 - **readiness/** (`/assets/:assetId/readiness`) — `ReadinessPage`/`ReadinessFacade` over the per-asset `GET /api/assets/{id}/readiness` report, plus probe/remediate actions.
@@ -1162,6 +1166,244 @@ specs — the remaining +3 files/+61 tests already existed on this branch from u
 already-committed work ahead of this task, per `git status` showing only `models.ts` plus the two
 new spec files touched). `npx tsc --noEmit` clean on both `tsconfig.app.json` and
 `tsconfig.spec.json`.
+
+## Status — CV-ORCHESTRATION wave W5.1 (web): the engineer inspector's TS mirrors + the `cv-trace` live topic (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4/§4.8, §6 W5 row) — 2026-09-13
+
+Sequential wave (Java W5.0 → this web step W5.1 → W5.2 store → W5.3 page). Scope this step:
+`core/api/models.ts`, `core/live/live-store.ts`, `core/live/live-fallback-logic.ts`, plus two new
+spec files — no component, no route yet (that's W5.3).
+
+**New types, all appended at the end of `models.ts` under a `// CV-ORCHESTRATION W5 — trace
+mirrors` banner** (this wave's own file-scope convention, so a concurrent wave editing the
+W1/W2.8 sections above never conflicts here): `GATE_OUTCOMES`/`GateOutcome` and `GATE_REASONS`/
+`GateReason` (`as const` tuple + derived union, `OBJECT_LIFECYCLES`'s own idiom, pinned to
+`application.pipeline.GateOutcome`/`GateReason`'s declaration order), `DemandSnapshot`,
+`GateDecision` (`reason?` — absent when `outcome` isn't `'SKIPPED'`, the same "absence of a
+relation" idiom as every other `@JsonInclude(NON_NULL)` field in this file), `LEDGER_OUTCOMES`/
+`LedgerOutcome`, `LedgerEntry`, `ObjectEvidence` (`claim` is `Readonly<Record<string, string>>` —
+genuinely free-form, not part of the frozen §5 contract), `FrameLedger`, and `CvTrace`. `models.ts`
+grew from 4280 to 4485 lines.
+
+**Live wiring — ONLY the `'cv-trace'` member/case, per this wave's exclusive-scope constraint**
+(wave W3, running in parallel on a disjoint worktree, owns the `'tracks'` member and every
+`features/fly/**`/`shared/player/**`/`core/detections/**` file): `LiveEnvelope` gained one more
+discriminated-union member, `{ seq, assetId, type: 'cv-trace', payload: FrameLedger }` (12th topic,
+opt-in per-asset like `telemetry`/`detections`/`geo`). `live-fallback-logic.ts` gained
+`cvTraceTopic(assetId)` (`` `cv-trace:${assetId}` ``, same shape as `detectionsTopic`/`geoTopic`).
+`live-store.ts` gained `cvTraceSignals` (a `Map<assetId, Signal<FrameLedger | undefined>>`),
+`cvTraceFor(assetId)`, `trackCvTrace`/`untrackCvTrace`, and one `applyEnvelope` switch case —
+**latest-wins**, the same posture as `detections`/`geo`, not an accumulating log: the capped
+client-side ring an inspector actually reads from is `core/cv-trace/cv-trace-store.ts`'s own job
+(wave W5.2), matching the server's own `last` cap, not this store's concern. The class doc's
+topic count/enumeration and its `<h2>` heading were updated from eleven to twelve.
+
+**New tests:** `core/api/cv-trace.wire.contract.spec.ts` (the `Record<keyof T, true>` key-mapping
+technique `world-object.wire.contract.spec.ts` established) against the fixture W5.0 committed at
+`__fixtures__/cv-trace.wire.json` — asserts the full example's `gate` covers all seven `GateReason`
+values plus a `SENT`/`PROBE` pair (each missing the `reason` key), the `frame` ledger's entries
+cover all three `LedgerOutcome` values, and the `predict.cv` evidence row carries a `held` box
+string (this fixture's own shape, not a general `ObjectEvidence` guarantee — the type stays
+free-form). One assertion needed an `as unknown as FrameLedger` cast: the JSON-imported fixture's
+inferred literal type has no string index signature, so indexing `ledger.objects[trackId]` needs
+the real `FrameLedger` type in scope. Also added one case to `live-fallback-logic.spec.ts`'s
+existing `telemetryTopic`/`detectionsTopic` test, covering `cvTraceTopic`.
+
+**Environment note, not a code defect:** this worktree's `station/vision-web/node_modules` did not
+exist at the start of this wave (a fresh worktree checkout, never `npm install`ed) — running
+`test:ci` failed instantly with `panic: aborting due to terminal initialize failure` before any
+Angular/Vitest code ran at all. `npm install` (477 packages, from the committed `package-lock.json`)
+resolved it; this is a worktree-provisioning gap, not anything wrong with this app's own tooling.
+
+### Tests / build
+
+`npm run test:ci` — **201 files / 3919 tests, all green** (up from 198/3892 at wave W1's own count;
++3 files/+27 tests is this step's own two new spec files plus growth already on this branch from
+other concurrent waves, not solely this step's addition).
+
+## Status — CV-ORCHESTRATION wave W5.2 (web): `CvTraceStore` + `VisionApi.getCvTrace` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4/§4.8, §6 W5 row) — 2026-09-13
+
+New `core/cv-trace/` (`cv-trace-store.ts`, `cv-trace-logic.ts`, plus their specs) — the `/manage/cv`
+engineer inspector's (wave W5.3) one data source. Also: `VisionApi.getCvTrace(streamId, last?)`
+(`GET /api/streams/{streamId}/cv/trace`), and the `cv-trace` row added to this file's `core/**`
+stores table.
+
+**Why poll and live run *concurrently*, not exclusively (unlike every other dual-transport store
+in this file):** `gate` and `world` have no live topic at all — `cv-trace:<assetId>` carries only
+`FrameLedger` (`frame`), per `station/vision-api/MODULE.md`'s own "Live updates" section — so a
+recurring `GET .../cv/trace` poll (3s, `POLL_INTERVAL_MS`) is their *only* freshness source
+regardless of whether live is available. `frame` itself is treated as a ring the inspector renders
+as a timeline: the poll's own `frame` array — the server's own `FrameLedgerRing`, already capped
+at `last` — **replaces** this store's ring wholesale on every tick (authoritative resync, never
+drifts); a live arrival between ticks is merged in immediately via `cv-trace-logic.ts#appendFrameLedger`
+(dedup-and-replace by `sequence`, ascending order, capped at the session's own `last`) purely to
+shave latency off what the next poll would show anyway.
+
+**This store IS the plan's own demand rule** (§6 W5 row: "opening the inspector flips `trace` on
+and closing flips it off, asserted via `/cv/trace`") — `TraceDemandPort` fails **closed** (the
+opposite of `DetectionDemandPort`), so for as long as `track()` is in effect, either the live
+`cv-trace:<assetId>` subscription or the recurring poll (usually both) keeps a stream traced;
+`reset()` releases both. `assetId` is optional on `track(streamId, assetId?, last?)` — omitting it
+stays poll-only (the poll alone is still real trace demand) rather than blocking on a caller that
+doesn't yet know the asset id, mirroring `DetectionsStore.track`'s own optional-`assetId` shape.
+
+**Not built this step (W5.3's job):** no component, no route, no facade — `CvTraceStore` has no
+consumer yet in this worktree.
+
+### Tests / build
+
+`npm run test:ci` — **203 files / 3935 tests, all green** (+2 files/+16 tests over W5.1's own
+201/3919 — exactly this step's two new spec files, `cv-trace-logic.spec.ts` and
+`cv-trace-store.spec.ts`).
+
+## Status — CV-ORCHESTRATION wave W5.3 (web): the engineer inspector page, `/manage/cv` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.8, §9 decision 3, §6 W5 row) — 2026-09-13
+
+New `features/cv-inspector/` — `CvInspectorPage`/`CvInspectorFacade`/`cv-inspector-logic.ts` (+specs),
+`cv-inspector.routes.ts` — the first consumer of wave W5.2's `CvTraceStore`. See this file's own
+`features/**` `cv-inspector/` bullet above for the full component/panel account; this section covers
+the wave-level record: what was decided, what stayed out, and the build totals.
+
+**Stream picker, not an asset picker.** The plan's own §4.8 names "one picked stream" — `FleetStore
+.streams()` (already polling app-wide) fills a plain `<select>` with running streams only; picking one
+calls `CvTraceStore.track(streamId)` (poll-only, see the `cv-inspector/` bullet's own "disclosed scope
+cut" for why no `assetId` is ever resolved and passed).
+
+**Process facts are rendered unconditionally**, before any stream is picked — `SubsystemStatus`'s
+`cv-service` row (`SystemStatusStore`, already polling app-wide) is a whole-process fact, not scoped
+to any one stream (§4.8's own audience table lists it under "Ops", not per-asset); this page is a
+second reader of the exact row `/manage/system` already renders, never a competing derivation of it —
+see `CvStatusProvider`'s own javadoc (`cv/grpc/**`) for why capacity/occupancy/queue facts are folded
+into that row's free-text `detail` sentence server-side rather than structured fields, which is why
+this panel renders one health chip + one sentence, not a KPI grid.
+
+**§1.5 acceptance table, transcribed onto the page itself.** `CvInspectorPage`'s own doc comment
+carries the plan's §4.4 "what the why table looks like afterwards" table verbatim, each question
+mapped to the exact panel and field that answers it — the brief's own instruction ("every §1.5 'why'
+question must be answerable from one lookup") is satisfied by making that table impossible to read
+without also reading where it points.
+
+**Route + nav.** `/manage/cv`, `orgGuard`-gated (`cv-inspector.routes.ts`, spread into `app.routes.ts`
+beside `VISION_PROFILES_ROUTES`) — a new fifth `vision` nav entry ("CV inspector", icon `chip`,
+`MANAGE_ORG`), landing the manager-visible nav count at 21 (`nav-entries.spec.ts`'s own regression
+guard updated in the same commit, +1 over W3's 20). `core/ui/architecture.spec.ts`'s `ROUTED_PAGES`
+gained `cv-inspector/cv-inspector` — the new page injects only its facade, declares no bare-signal
+overlay flag, and has a matching `cv-inspector-facade.ts`, guarded from day one like every other
+routed page in that list.
+
+**Save trace was deferred to W5.4** (below), landed in the same working session — the facade already
+held every ledger a download would need (`gate`/`frame`/`world`, plus `selectedStreamId`), so that
+step was purely additive, not a rework of anything built here.
+
+### Tests / build
+
+`npm run test:ci` — **204 files / 3955 tests, all green** (+1 file/+20 tests over W5.2's own
+203/3935 — `cv-inspector-logic.spec.ts`'s 15 cases, `nav-entries.spec.ts` gained one new case and two
+existing counts moved, `architecture.spec.ts`'s own `it.each` grew by one page × 3 invariants).
+
+**Worktree-provisioning gap, disclosed once more for this step's own record**: this worktree's
+`station/vision-web/node_modules` did not exist at all when W5.1 started this wave (a fresh `git
+worktree add` checkout, never `npm install`ed) — `npm run test:ci` failed instantly with an unrelated-
+looking `panic: aborting due to terminal initialize failure` (exit 134) before any code ever ran; fixed
+once, in W5.1, with a plain `npm install` from the committed `package-lock.json`. Carried here only so
+a reader who opens this file at W5.3 without having read W5.1's own section doesn't waste time on the
+same red herring.
+
+## Status — CV-ORCHESTRATION wave W5.4 (web): Save trace (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.8, §6 W5 row) — 2026-09-13
+
+`CvInspectorPage`'s page bar gained a "Save trace" action (right beside the stream picker) that
+downloads the currently-picked stream's whole in-memory `CvTrace` — `{streamId, gate, frame, world}`,
+exactly the shape `GET .../cv/trace` itself returns — as one pretty-printed JSON file. This is wave
+W5.5's own replay fixture: the plan's §4.8 names "Save trace" and "replay through trackeval" as one
+continuous engineer workflow, so this file's shape is not incidental.
+
+**Built from live signals, never a fresh fetch.** `CvInspectorFacade#saveTrace` reads `this.gate()`/
+`this.frame()`/`this.world()` — the same signals the panels above it are already rendering — rather
+than issuing a second `GET`. A second request could race the first and capture a different moment
+than what the engineer is actually looking at when they click the button; reusing the live signals
+means "what you see is what you get" is exact, not approximate.
+
+**`canSaveTrace`/`saveTrace()` on the facade**, not the page. `canSaveTrace` is `false` until a stream
+is picked (`selectedStreamId() !== undefined`) — the button binds `[disabled]` to `!canSaveTrace()`
+rather than being hidden outright, so an engineer who picked a stream but sees an empty ring yet
+still gets an honest, if empty, file rather than a puzzling missing button. `saveTrace()` itself
+no-ops (never throws) when called with nothing picked, staying defensive against a future caller that
+skips the `canSaveTrace` check.
+
+**Filename + serialization are pure, in `cv-inspector-logic.ts`, not inline in the facade.**
+`traceFileName(streamId, nowMs)` → `cv-trace-<streamId>-<timestamp>.json`, timestamped to the second
+(`:`/`.` stripped from the ISO instant — `:` is a Windows path separator, `.` would read as a second,
+spurious extension) so saving several traces across one session never silently overwrites an earlier
+one. `serializeTrace(trace)` → `JSON.stringify(trace, null, 2)`, pretty-printed so the fixture stays
+human-diffable. Both are unit-tested with no DOM/`Blob` involved (4 new cases: filename shape,
+collision-freedom a second apart, a round-trip-through-`JSON.parse` equality check, and a
+not-a-single-line pretty-print check).
+
+**Download mechanics reuse the app's one existing convention**, not a new one: `URL.createObjectURL(new
+Blob([...], {type: 'application/json'}))` → a synthetic `<a>` with `.href`/`.download` set → `.click()`
+→ `URL.revokeObjectURL(url)` — the same idiom `features/onboarding/onboarding-facade.ts#downloadBlock`
+already established, called directly rather than through that helper since it is typed around a
+different (`ConfigBlock`) shape, not a generic "download this string" utility worth extracting for a
+single second caller.
+
+### Tests / build
+
+`npm run test:ci` — **204 files / 3959 tests, all green** (+4 tests over W5.3's own 204/3955 — exactly
+`cv-inspector-logic.spec.ts`'s new `traceFileName`/`serializeTrace` describe blocks; no new spec file,
+so the file count is unchanged).
+
+## Status — CV-ORCHESTRATION wave W5.7 (web): Live subscription — 2026-09-13
+
+Follow-up requested on review of W5.0–W5.4: W5.3's stream picker tracked by `streamId` alone, so
+`CvTraceStore.track()`'s optional `assetId` (its live-merge opt-in) was never passed and the
+inspector ran poll-only — dead code on the server's own `cv-trace:<assetId>` topic, which exists
+specifically so this page does not have to be poll-only. This wave fixes that properly rather than
+re-disclosing it as a permanent scope cut.
+
+**No already-loaded structure maps a stream to its owning asset.** Verified by reading, not assumed:
+`ActiveStream` (`FleetStore.streams`) carries a `deviceId`, never an `assetId`; `FleetStore` itself
+says so directly — `fleet-store.ts`'s own comment: "assets aren't tracked by a `FleetStore` [...]
+signal"; `WallFacade`/`CommandFacade` (the only pages that already join a stream to an asset, via
+`GET /api/fleet/summary`'s `AssetAttention.streamId`) are page-provided, not root-provided, so their
+data is not loaded at all while `/manage/cv` is open. One `GET` per pick is therefore the documented
+fallback the plan's own W5.7 review explicitly sanctioned — an engineer picks a stream rarely.
+
+**`CvInspectorFacade#selectStream` is now asynchronous internally.** It still updates
+`selectedStreamId`/clears the frame+track selection synchronously, but defers the actual
+`CvTraceStore.track()` call to `trackWithResolvedAsset()`: one `VisionApi#fleetSummary()` fetch,
+joined by the new pure `cv-inspector-logic.ts#assetIdForStream(summary, streamId)` — the identical
+`AssetAttention.streamId` join `features/wall/wall-logic.ts` already performs to attribute a stream
+tile to an asset, reused rather than re-derived so the inspector never disagrees with Wall/Command
+about which asset a stream belongs to. Once resolved, `track(streamId, assetId)` runs — a single
+call that starts the poll AND (when `assetId` resolved) the live topic together, never a second,
+retargeting call that would flash the ring empty right after the first. A private
+`assetResolutionToken` counter (bumped on every `selectStream()` call, including the `''` deselect)
+drops a resolution that a later pick has since superseded — the same "compare a captured generation
+before applying" guard `CvTraceStore.pollOnce` itself already uses for the identical race. A failed
+`fleetSummary()` fetch (or a hit with no matching `AssetAttention` row) degrades to poll-only
+(`assetId` left `undefined`) rather than blocking the inspector — `CvTraceStore`'s own 3s poll
+(`POLL_INTERVAL_MS`, `core/cv-trace/cv-trace-store.ts`) is unconditionally authoritative either way
+(W5.2/W5.3's deviation (2), unaffected by this wave).
+
+**New `cv-inspector-facade.spec.ts` — the first facade-level spec in this app.** Every other facade
+in `vision-web` is exercised only indirectly (through a `*-logic.ts` spec plus, at most, structural
+checks in `core/ui/architecture.spec.ts`); proving "picking a stream subscribes to
+`cv-trace:<assetId>`, switching releases the old one, leaving the page releases it" requires
+observing a real side effect on `LiveStore`, which no pure logic function can do. The spec follows
+`core/map/map-store.spec.ts`'s established "real store, stub only its own leaf deps" convention one
+layer up: `CvTraceStore` and `CvInspectorFacade` are both the genuine classes; `VisionApi`,
+`LiveStore`, `PollScheduler`, `FleetStore`, `SystemStatusStore` are the only stubbed leaves. Seven
+cases: subscribe-on-pick (`live.trackCvTrace` called with the resolved `assetId`); degrade-on-miss
+(no `AssetAttention` row names the stream); degrade-on-fetch-failure; switching releases the old
+subscription before the new one starts (`untrackCvTrace` then `trackCvTrace`); a slow, superseded
+resolution never tracks a stream the engineer already left; deselecting drops an in-flight
+resolution; and leaving the page (`TestBed.resetTestingModule()`, which destroys `CvTraceStore` and
+runs its pre-existing `DestroyRef.onDestroy` teardown — unmodified by this wave) releases the
+subscription.
+
+### Tests / build
+
+`npm run test:ci` — **205 files / 3970 tests, all green** (+1 file/+11 tests over W5.4's own
+204/3959 — `cv-inspector-facade.spec.ts` new, 7 cases; `cv-inspector-logic.spec.ts` gained
+`assetIdForStream`'s own 4 cases).
 
 ## Status — CV-ORCHESTRATION wave W3.1 (web): `tracks:<assetId>` live topic — 2026-09-13
 

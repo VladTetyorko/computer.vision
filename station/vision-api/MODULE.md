@@ -1541,6 +1541,28 @@ sentinel under this frozen wire contract — see `CvProfileRequest#fieldSources(
 exhaustive wire-contract-spec test for `CvProfile`/`CvProfileRequest` and no mirror of `intent` yet
 (still Java-only), so `sources` needed none either this wave.
 
+**W5.0 (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4/§4.8, engineer inspector wire contract):**
+new `dto.CvTraceResponseWireContractTest`, the same fixture-comparison idiom as
+`WorldObjectResponseWireContractTest` (W2.8) — builds a `full` `CvTraceResponse` covering every
+`GateReason` value (all seven, declaration order) plus a `SENT` and a `PROBE` `GateDecisionResponse`,
+one `FrameLedgerResponse` with a `RAN`/`SKIPPED`/`FAILED` `LedgerEntryResponse` triad and one
+`ObjectEvidenceResponse` claim shaped like cv-service's real `predict.cv` evidence (`predicted`/
+`held`/`velocity` keys, `cv/cv-service/cv_service/orchestration/contributors/predict.py`), and one
+`WorldObjectResponse`; and a `minimal` never-traced-this-stream shape (`gate`/`frame`/`world` all
+empty lists, per `CvTraceResponse`'s own "never errors" contract). Fixture committed at
+`station/vision-web/src/app/core/api/__fixtures__/cv-trace.wire.json`, consumed by W5.1's
+`cv-trace.wire.contract.spec.ts`. `./mvnw -B -pl station/vision-api -am test -DskipWeb` —
+**1113 tests, all green** (up from 1097 counted at W2.7; the gap includes tests added by other
+waves running on this same branch concurrently, not solely this step).
+
+**Plan-vs-code discrepancy disclosed here** (not acted on, since it is prose-only): §4.4's
+narrative describes coalesced `SKIPPED` gate entries as carrying "a count" that "rides along."
+Reading `contexts/vision-perception`'s `FrameGateLedger` shows coalescing instead *replaces* the
+previous entry's timestamp/frameSequence/demand snapshot outright — there is no `count` field
+anywhere on `GateDecision`/`GateDecisionResponse`, and this test does not fabricate one. A
+coalesced run is indistinguishable on the wire from a single decision at the same reason; only the
+refreshed `atMillis`/`frameSequence` say time passed.
+
 **2026-09-13, wave W3.0 (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7): `intent` reaches the live
 `PATCH /api/streams/{streamId}/config` hot path**, wiring the same `IntentPolicyResolver` profile
 create/update already uses into `StreamController#updateConfig` too. `dto.UpdateStreamConfigRequest`
@@ -1586,8 +1608,12 @@ specifically, which was not re-verified end-to-end as part of this wave (out of 
 `contexts/vision-perception` and other DTOs were untouched), so this paragraph records the
 discrepancy rather than "fixing" that unrelated file's claim on unverified authority.
 
-`./mvnw -B -pl station/vision-api -am test -DskipWeb`: **1112 → 1119 tests, all green** (7 new
+`./mvnw -B -pl station/vision-api -am test -DskipWeb`: **1112 → 1120 tests, all green** (8 new
 `StreamControllerTest` cases: one per `Intent` value proving the resolved `model`/`labelFilter` reach
-`PipelineConfigPatch` unchanged from `IntentPolicyResolver`'s own values, an "explicit wins" case, and
-two response-shape cases for `sources` with and without `intent`). No `contexts/vision-perception`,
-`station/vision-web`, or other module change — Java-only, `vision-api` only, per this wave's scope.
+`PipelineConfigPatch` unchanged from `IntentPolicyResolver`'s own values, an "explicit wins" case, two
+response-shape cases for `sources` with and without `intent`, and — added during the W3.8 merge review,
+closing a gap the javadoc already promised — `updateConfigReturns400ForIntentCustomWithNoLabelFilter`,
+asserting `{"intent":"CUSTOM"}` with no `labelFilter` is a 400 `BAD_REQUEST` because
+`IntentPolicyResolver#resolve` throws for `CUSTOM` with empty/null `customClasses`). No
+`contexts/vision-perception`, `station/vision-web`, or other module change — Java-only, `vision-api`
+only, per this wave's scope.

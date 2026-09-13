@@ -1077,6 +1077,28 @@ class StreamControllerTest {
     }
 
     @Test
+    void updateConfigReturns400ForIntentCustomWithNoLabelFilter() throws Exception {
+        // UpdateStreamConfigRequest#toPatch's javadoc promises this is a 400: Intent.CUSTOM has no
+        // fixed class set of its own, so IntentPolicyResolver#resolve throws IllegalArgumentException
+        // ("customClasses must not be empty for Intent.CUSTOM") when the caller sends CUSTOM without
+        // also sending its own labelFilter. Counterpart to
+        // updateConfigResolvesIntentCustomToItsModelButKeepsTheCallersOwnExplicitLabelFilter above,
+        // which is the same intent with the labelFilter present.
+        StreamId streamId = StreamId.random();
+
+        String body = """
+                {"intent":"CUSTOM"}
+                """;
+
+        mockMvc.perform(patch("/api/streams/{streamId}/config", streamId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("BAD_REQUEST"));
+
+        verify(streamService, never()).updateConfig(any(), any());
+    }
+
+    @Test
     void updateConfigExplicitModelAndLabelFilterWinOverIntentsOwnResolvedValues() throws Exception {
         StreamId streamId = StreamId.random();
         when(streamService.updateConfig(eq(streamId), any())).thenReturn(new UpdateOutcome(false));

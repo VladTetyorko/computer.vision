@@ -2460,6 +2460,15 @@ export interface DevicesSnapshot {
  * `rate`, `follow`, `lockedTrackId`) have no live-topic equivalent yet — only `objects` does.
  * `core/live/live-store.ts#LiveStore.worldObjectsFor` projects it; wiring only, no renderer reads it
  * yet (that's wave W3.2).
+ *
+ * **`cv-trace` is the 13th, from docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4/§4.8 (wave W5.1)**
+ * — `cv-trace:<assetId>`, opt-in per-asset like `telemetry`/`detections`/`geo`, not always-on.
+ * Payload is {@link FrameLedger} — one frame's complete contributor evidence, present only while
+ * this stream is being traced (an open engineer-inspector subscriber, or a recent poll of `GET
+ * .../cv/trace` — `LiveAndPollTraceDemand`'s fail-*closed* posture, the opposite of
+ * `DetectionDemandPort`'s fail-open one). `LiveStore` itself is latest-wins for this topic, the
+ * same posture as `detections`/`geo` — `core/cv-trace/cv-trace-store.ts` (wave W5.2) is what
+ * accumulates a capped client-side ring on top, matching the server's own `last` cap.
  */
 export type LiveEnvelope =
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'fleet'; readonly payload: readonly AssetSummary[] }
@@ -2473,7 +2482,8 @@ export type LiveEnvelope =
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'discovery'; readonly payload: DiscoveryEventPayload }
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'zones'; readonly payload: GeofenceZoneEventPayload }
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'system'; readonly payload: SystemStatus }
-  | { readonly seq: number; readonly assetId: string; readonly type: 'tracks'; readonly payload: readonly WorldObject[] };
+  | { readonly seq: number; readonly assetId: string; readonly type: 'tracks'; readonly payload: readonly WorldObject[] }
+  | { readonly seq: number; readonly assetId: string; readonly type: 'cv-trace'; readonly payload: FrameLedger };
 
 /**
  * Mirrors `dto.UpdateLiveTopicsRequest` — the body of `PATCH /api/live/{connectionId}/topics`
@@ -4370,4 +4380,167 @@ export interface ControlCatalog {
 export interface AuxFunctionRequest {
   readonly function: number;
   readonly level: number;
+}
+
+// CV-ORCHESTRATION W5 — trace mirrors ------------------------------------------------------------
+// The engineer inspector's wire contract (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4/§4.8,
+// wave W5): `GET /api/streams/{streamId}/cv/trace?last=N` and the `cv-trace:<assetId>` SSE topic
+// both carry this shape. Appended at the end of this file (not interleaved with the W1/W2.8
+// ObjectState/WorldObject families above) per this wave's own file-scope convention, so a
+// concurrent wave editing those earlier sections never conflicts here.
+//
+// `CvTraceResponse#gate`/`#frame` are windowed rings on the *server* (`FrameGateLedger`'s own
+// coalescing, `FrameLedgerRing`'s own capacity); `core/cv-trace/cv-trace-store.ts` (wave W5.2) is
+// what caps the *client*-side ring the same size as the server's own `last`, merging `cv-trace:`
+// SSE arrivals on top of the initial `GET` — this file only mirrors the wire shape, it does no
+// windowing of its own.
+
+/**
+ * The runtime value list `GateOutcome` is derived from, in the same declaration order as the Java
+ * enum (`contexts/vision-perception/.../application/pipeline/GateOutcome.java`) — see
+ * `OBJECT_LIFECYCLES`'s own comment for why this is a pinned tuple rather than an inline union.
+ */
+export const GATE_OUTCOMES = ['SENT', 'PROBE', 'SKIPPED'] as const;
+
+/**
+ * Mirrors `application.pipeline.GateOutcome` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4) —
+ * what happened at one sampler deadline: `'SENT'` (a normal sample), `'PROBE'` (an outage-recovery
+ * probe, ignoring the sample deadline), or `'SKIPPED'` (no frame sent — {@link GateDecision.reason}
+ * says why).
+ */
+export type GateOutcome = (typeof GATE_OUTCOMES)[number];
+
+/**
+ * The runtime value list `GateReason` is derived from, in the same declaration order as the Java
+ * enum (`contexts/vision-perception/.../application/pipeline/GateReason.java`) — see
+ * `OBJECT_LIFECYCLES`'s own comment for why this is a pinned tuple rather than an inline union.
+ * This is the answer to §1.5's "why didn't the detector run this frame?" question.
+ */
+export const GATE_REASONS = [
+  'GATE_OFF',
+  'GATE_NO_DEMAND',
+  'PULL_MODE',
+  'OUTAGE_BACKOFF',
+  'DEADLINE_NOT_DUE',
+  'IN_FLIGHT_FULL',
+  'CV_UNAVAILABLE',
+] as const;
+
+/** Mirrors `application.pipeline.GateReason` — why a frame was skipped; see {@link GATE_REASONS}. */
+export type GateReason = (typeof GATE_REASONS)[number];
+
+/**
+ * Mirrors `GateDecisionResponse.DemandSnapshotResponse` (JSON key `demand`) — the demand facts
+ * `contexts/vision-perception` owns at the moment one gate decision was made. Known limitation
+ * (carried from the Java DTO's own javadoc): the `sse | pose | poll` breakdown of `viewerDemand`
+ * is not obtainable here — this is the single OR'd boolean.
+ */
+export interface DemandSnapshot {
+  readonly detectionEnabled: boolean;
+  readonly viewerDemand: boolean;
+  readonly policyAlwaysOn: boolean;
+}
+
+/**
+ * Mirrors `GateDecisionResponse` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4) — one sampler
+ * deadline's worth of gating, consecutive same-`reason` `'SKIPPED'` runs already coalesced by
+ * `FrameGateLedger` before this ever reaches the wire. **Disclosed plan-vs-code gap**: §4.4's prose
+ * describes a coalesced run as carrying "a count" — the actual Java type has no such field
+ * (coalescing *replaces* the previous entry's `atMillis`/`frameSequence` rather than counting), so
+ * this mirror does not invent one either; a coalesced run is visible only as one entry whose
+ * timestamp is the *last* occurrence, not the first.
+ *
+ * @property reason absent when `outcome` is not `'SKIPPED'` — absence of a reason, not a
+ *   dummy value (CLAUDE.md rule 10's "null means off" ban, same idiom as every other
+ *   `@JsonInclude(NON_NULL)` field in this file).
+ */
+export interface GateDecision {
+  readonly frameSequence: number;
+  readonly atMillis: number;
+  readonly outcome: GateOutcome;
+  readonly reason?: GateReason;
+  readonly demand: DemandSnapshot;
+}
+
+/**
+ * The runtime value list `LedgerOutcome` is derived from, in the same declaration order as the
+ * Java enum (`contexts/vision-perception/.../domain/model/LedgerOutcome.java`).
+ */
+export const LEDGER_OUTCOMES = ['RAN', 'SKIPPED', 'FAILED'] as const;
+
+/**
+ * Mirrors `domain.model.LedgerOutcome` — what happened to one contributor on one frame: `'RAN'`,
+ * `'SKIPPED'` (the budget refused it, or it declined itself — {@link LedgerEntry.reason} says
+ * why), or `'FAILED'` (it raised; the frame continued without its output).
+ */
+export type LedgerOutcome = (typeof LEDGER_OUTCOMES)[number];
+
+/**
+ * Mirrors `FrameLedgerResponse.LedgerEntryResponse` — one contributor's row on one frame. `reason`
+ * is always a string, never absent (mirrors the Java record's own non-null contract): empty string
+ * means "no reason given," a `SKIPPED` row's own reason, or `"<ExcType>: <message>"` for a
+ * `'FAILED'` row. `summary` is free-form facts the contributor chose to record — e.g. `detect.full`
+ * only ever records a detection *count*, never a box (`cv/cv-service/cv_service/orchestration/
+ * contributors/detect.py`) — this is the answer to §1.5's "what did each contributor do, and what
+ * did it cost?" question.
+ */
+export interface LedgerEntry {
+  readonly contributorId: string;
+  readonly outcome: LedgerOutcome;
+  readonly reason: string;
+  readonly costMillis: number;
+  readonly summary: Readonly<Record<string, string>>;
+}
+
+/**
+ * Mirrors `FrameLedgerResponse.ObjectEvidenceResponse` — one claim one contributor made about one
+ * object. `claim` is genuinely free-form (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4: "the
+ * claims themselves stay in the ledger... the mirror describes the object, the ledger describes
+ * the algorithm") and **not** part of the frozen §5 wire contract — most contributors record only
+ * scalar facts (a cost, a count, a distance); `cv/cv-service/cv_service/orchestration/contributors/
+ * predict.py`'s `predict.cv` is the one contributor whose claim carries a genuine per-track,
+ * per-frame box, under the free-form key `held` (format `"x,y,width,height"`, its own `_box_text`
+ * helper) alongside `predicted` (the extrapolated box) and `velocity`. A consumer must never assume
+ * any particular key exists — this is the answer to §1.5's "what did the platform believe about
+ * this object, and who said so?" question.
+ */
+export interface ObjectEvidence {
+  readonly contributorId: string;
+  readonly claim: Readonly<Record<string, string>>;
+}
+
+/**
+ * Mirrors `FrameLedgerResponse` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4) — one frame's
+ * complete contributor evidence, present only for a frame cv-service was actually asked to trace.
+ * `objects` keys are track ids as strings (a JSON object key can only be a string, mirroring the
+ * Java DTO's own `Map<String, ...>`).
+ */
+export interface FrameLedger {
+  readonly streamId: string;
+  readonly sequence: number;
+  readonly capturedAtMillis: number;
+  readonly levelServed: number;
+  readonly detectorReason: string;
+  readonly eligible: readonly string[];
+  readonly entries: readonly LedgerEntry[];
+  readonly objects: Readonly<Record<string, readonly ObjectEvidence[]>>;
+  readonly dropsSinceLast: number;
+  readonly gateWaitMillis: number;
+  readonly totalMillis: number;
+  readonly halted: boolean;
+}
+
+/**
+ * Mirrors `CvTraceResponse` — the body of `GET /api/streams/{streamId}/cv/trace?last=N`
+ * (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4) — the warm trace tier's three ledgers side by
+ * side: `gate` (why a frame was or was not sent to cv-service), `frame` (what cv-service's
+ * contributors actually did on the frames it was asked to trace), `world` (the current
+ * {@link WorldObject} fold, not windowed by `last` — one live snapshot, not a history). Never
+ * errors: an unknown or stopped stream reads as every list empty, never a 404/500.
+ */
+export interface CvTrace {
+  readonly streamId: string;
+  readonly gate: readonly GateDecision[];
+  readonly frame: readonly FrameLedger[];
+  readonly world: readonly WorldObject[];
 }
