@@ -79,10 +79,11 @@ import com.drones.vision.perception.application.stream.StreamService;
  * </ul>
  *
  * <h2>Inference sampling</h2>
- * Frames are sampled against a <b>deadline</b> derived from {@link
+ * Delegated to {@link FrameSampler} (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.9/K3, wave
+ * W8.0): frames are sampled against a <b>deadline</b> derived from {@link
  * PipelineConfig#inferenceFps()}: the first frame arriving at or after the
  * next deadline is sampled, and the schedule then advances by one interval
- * ({@link #sampleDue}). Because every deadline is served by exactly one
+ * ({@link FrameSampler#sampleDue}). Because every deadline is served by exactly one
  * frame, the achieved rate equals the requested rate for any source faster
  * than it — unlike the integer {@code sequence % everyNth} stride this
  * replaced, which could only approximate a target the source rate was not a
@@ -98,6 +99,14 @@ import com.drones.vision.perception.application.stream.StreamService;
  * measurement is not trusted and the configured assumption is reported
  * instead; the measured rate is sanity-clamped to guard against a
  * stalled/degenerate clock.
+ *
+ * <p>Whether a sampled frame actually reaches {@link DetectionPort#detect} is decided by {@link
+ * DetectionGate#classify} (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.9/K3, wave W8.2
+ * extraction) — the three-way gate (operator intent, viewer demand, the {@code
+ * DetectionPolicy.ALWAYS} opt-in), {@link OutageSupervisor}'s outage/probe state, and the in-flight
+ * bound, folded into one {@link GateVerdict}. This class turns that verdict into the same side
+ * effects the pre-W8.2 inline classification produced; see {@link DetectionGate}'s own javadoc for
+ * the full decision tree.
  *
  * <p>A sampled frame is only submitted to {@link DetectionPort#detect} if
  * fewer than {@link PipelineConfig#maxInFlightInferences()} calls are
@@ -149,8 +158,10 @@ import com.drones.vision.perception.application.stream.StreamService;
  *   <li><b>Detection failures</b> (an exceptionally-completed {@link
  *       java.util.concurrent.CompletionStage} from {@link
  *       DetectionPort#detect}, including timeouts) never close the pipeline
- *       and never touch the video path. The first failure enters a
- *       detection <i>outage</i>: exactly one {@code PIPELINE_ERROR} event is
+ *       and never touch the video path. The state machine deciding outage/probe/recovery is
+ *       {@link OutageSupervisor} (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.9/K3, wave
+ *       W8.1 extraction); this class keeps only the logging and event publish. The first failure
+ *       enters a detection <i>outage</i>: exactly one {@code PIPELINE_ERROR} event is
  *       published (naming the cause) and, until recovery, sampled frames are
  *       withheld from {@link #detectionPort} entirely — they are skipped
  *       just like the in-flight bound skips frames, and likewise never
@@ -177,8 +188,8 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     /**
      * The detection-outage backoff bounds from {@link StreamPipelineSettings#defaults()}, exposed
      * here purely so same-package tests can assert against them by name (docs/plans/active/LAYERING-REFACTOR-PLAN.md
-     * &sect;1.3 config extraction) — this pipeline's own working backoff state ({@link
-     * #backoffNanos}) always reads from the {@link StreamPipelineSettings} actually supplied to its
+     * &sect;1.3 config extraction) — {@link #outageSupervisor}'s own working backoff state always
+     * reads from the {@link StreamPipelineSettings} actually supplied to this pipeline's
      * constructor, not from these two constants, so a non-default settings object genuinely takes
      * effect at runtime.
      */
@@ -188,9 +199,6 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     static final long MAX_BACKOFF_NANOS = StreamPipelineSettings.defaults().detectionBackoffMaxNanos();
 
     private static final System.Logger LOG = System.getLogger(StreamPipeline.class.getName());
-
-    /** Unit conversion, not a tunable — a second in nanoseconds. */
-    private static final double NANOS_PER_SECOND = 1_000_000_000.0;
 
     private final StreamId streamId;
     private final Device device;
@@ -206,71 +214,20 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private volatile PipelineConfig config;
 
     /**
-     * Detection <b>demand</b> (docs/plans/done/CV-DEMAND-PLAN.md &sect;1, &sect;3.2) — the system-derived
-     * "someone is actually consuming the output" gate, independent of {@link #config}'s {@link
-     * PipelineConfig#detectionEnabled()} operator-intent gate. {@code volatile}, the same live-swap
-     * shape as {@link #config} itself: {@link #updateDetectionDemand} writes it from {@code
-     * DefaultStreamService}'s demand-poll scheduler thread, {@link #maybeDetect} reads it on the
-     * video thread, and a write is visible to the very next frame with no lock and no restart.
-     * Initializes to {@code true} — fail-open, so a pipeline whose {@code DefaultStreamService} was
-     * never given a {@code DetectionDemandPort} never has this field written at all, and {@link
-     * #maybeDetect} gates on {@link PipelineConfig#detectionEnabled()} alone, exactly as before this
-     * gate existed.
+     * Detection demand, the {@code DetectionPolicy.ALWAYS} opt-in, and the two gate-transition edges
+     * (docs/plans/done/CV-DEMAND-PLAN.md &sect;1/&sect;3.2/&sect;5/&sect;7, docs/plans/active/
+     * ALWAYS-ON-FLOW-PLAN.md wave D1/D2) — delegated to {@link DetectionGate} (docs/plans/active/
+     * CV-ORCHESTRATION-PLAN.md &sect;4.9/K3, wave W8.2 extraction), built directly in the constructor
+     * from this pipeline's very first {@link #config} exactly like {@link #sampler}/{@link
+     * #outageSupervisor} are. {@link #updateDetectionDemand}/{@link #updateDetectionPolicy} write it
+     * from {@code DefaultStreamService}'s demand-poll scheduler thread; {@link #maybeDetect} reads it
+     * on the video thread via {@link DetectionGate#classify}. {@link #detectionGateOpen()}/{@link
+     * #liveGateOpen()}/{@link #handleDetectionGateTransition()} below stay as pipeline-local
+     * delegating methods so every existing call site and javadoc {@code @link} keeps resolving
+     * unchanged. See {@link DetectionGate}'s own javadoc for the fail-open/fail-closed defaults and
+     * the two-independent-edges design this field used to document inline.
      */
-    private volatile boolean detectionDemand = true;
-
-    /**
-     * The per-asset {@code DetectionPolicy.ALWAYS} opt-in (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave
-     * D1) — a third, independent OR-term widening {@link #detectionGateOpen()} beyond {@link
-     * #detectionDemand}, deliberately <b>not</b> read by {@link #liveGateOpen()}: this field exists
-     * precisely so inference (and the durable path that follows it) can stay open while nobody is
-     * watching, which is the live plane's whole reason to close. {@code volatile}, written by {@link
-     * #updateDetectionPolicy} from the same {@code DefaultStreamService} demand-poll scheduler thread
-     * {@link #updateDetectionDemand} already writes from, read from the video thread inside {@link
-     * #maybeDetect} via {@link #detectionGateOpen()}.
-     *
-     * <p>Initializes to {@code false} — fail <b>closed</b>, the opposite direction from {@link
-     * #detectionDemand}'s fail-open {@code true}. {@link #detectionDemand}'s default protects
-     * detection that is already running today from stopping if its signal is never wired; this
-     * field's default protects against the opposite mistake — a pipeline whose {@code
-     * DefaultStreamService} was never given a {@code DetectionPolicyPort} (or whose lookup fails)
-     * must fall back to {@code ON_VIEW} (today's only behavior), never to free, uncapped, always-on
-     * inference for every asset. See docs/plans/active/ALWAYS-ON-FLOW-PLAN.md &sect;3: nothing bounds
-     * concurrent inference across streams, so {@code ALWAYS} must stay strictly opt-in.
-     */
-    private volatile boolean detectionPolicyAlwaysOn = false;
-
-    /**
-     * Guards {@link #gateWasOpen}/{@link #liveGateWasOpen} (docs/plans/done/CV-DEMAND-PLAN.md
-     * &sect;5/&sect;7's gate-close-clearing correction, widened by docs/plans/active/ALWAYS-ON-FLOW-PLAN.md
-     * wave D2 to two independently-tracked edges): {@link #updateConfig} (operator intent, an
-     * HTTP-request thread), {@link #updateDetectionDemand} and {@link #updateDetectionPolicy} (both
-     * {@code DefaultStreamService}'s demand-poll scheduler thread) can each close one or both gates,
-     * so the read-compare-write in {@link #handleDetectionGateTransition()} needs to be atomic across
-     * all three — without this lock two closes racing on those threads could each observe a gate as
-     * still "open" and both fire its clear, or an interleaved close/reopen could leave either {@code
-     * *WasOpen} field out of sync with reality.
-     */
-    private final Object gateLock = new Object();
-
-    /**
-     * Last observed value of {@link #detectionGateOpen()} (the inference/durable gate), read/written
-     * only under {@link #gateLock}. Seeded from the constructor's own {@link #config}/{@link
-     * #detectionDemand}/{@link #detectionPolicyAlwaysOn} so the very first genuine open&rarr;closed
-     * edge — not construction itself — is what triggers the first clear.
-     */
-    private boolean gateWasOpen;
-
-    /**
-     * Last observed value of {@link #liveGateOpen()} (the live-plane gate, docs/plans/active/
-     * ALWAYS-ON-FLOW-PLAN.md wave D2), read/written only under {@link #gateLock}. Tracked separately
-     * from {@link #gateWasOpen} because the two gates can close on different edges: a {@code
-     * DetectionPolicy.ALWAYS} asset losing its last viewer closes this one while {@link
-     * #gateWasOpen} stays {@code true} (inference/durable keep running) — see {@link
-     * #handleDetectionGateTransition()}. For any asset that has never opted into {@code ALWAYS} (the
-     * default), the two gates always agree and this field simply mirrors {@link #gateWasOpen}.
-     */
-    private boolean liveGateWasOpen;
+    private final DetectionGate gate;
 
     private final Flow.Publisher<VideoFrame> source;
     private final DetectionPort detectionPort;
@@ -338,12 +295,33 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final PipelineTrace trace;
 
     /**
-     * Chooses the rate {@link #sampleIntervalNanos} schedules deadlines at
+     * Chooses the rate {@link FrameSampler} schedules deadlines at
      * (docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R2). Built here rather than injected for the same
      * reason {@link #world} is: it is this pipeline's own per-stream bookkeeping, not a
      * substitutable collaborator.
      */
     private final DetectionRateController rateController;
+
+    /**
+     * Frame-arrival cadence measurement and the deadline-based sample schedule
+     * (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.9/K3, wave W8.0 extraction) — see {@link
+     * FrameSampler}'s own javadoc for why a deadline schedule, not a frame-count stride, and for the
+     * "asks, not owns" relationship it keeps with {@link #rateController}. Built here rather than
+     * injected, for the same reason as {@link #world}/{@link #rateController}: this pipeline's own
+     * per-stream bookkeeping, not a substitutable collaborator.
+     */
+    private final FrameSampler sampler;
+
+    /**
+     * The detection-outage/probe-backoff state machine (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+     * &sect;4.9/K3, wave W8.1 extraction) — see {@link OutageSupervisor}'s own javadoc for the
+     * backoff/probe discipline it owns. This class keeps the logging and the {@code PIPELINE_ERROR}
+     * event publish; {@link #outageSupervisor} reports only which edge (entering an outage,
+     * recovering from one) just occurred — see {@link #onDetectionFailure}/{@link
+     * #onDetectionSuccess}. Built here rather than injected, for the same reason as {@link
+     * #sampler}: this pipeline's own per-stream bookkeeping, not a substitutable collaborator.
+     */
+    private final OutageSupervisor outageSupervisor;
 
     /**
      * The clock {@link #pipelineLatency} measures durations with — deliberately <b>not</b> {@link
@@ -356,17 +334,6 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
 
     /** @see StreamPipelineSettings#cameraHfovDegrees() — {@code 0} disables pose compensation. */
     private final double cameraHfovDegrees;
-
-    // Frame-cadence and detection-outage tuning (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3 config
-    // extraction) -- read from the StreamPipelineSettings supplied to the constructor, defaulting
-    // to StreamPipelineSettings#defaults() when the caller doesn't supply one explicitly.
-    private final int assumedSourceFps;
-    private final double measuredFpsEwmaAlpha;
-    private final int warmupFrames;
-    private final double minMeasuredFps;
-    private final double maxMeasuredFps;
-    private final long detectionBackoffInitialNanos;
-    private final long detectionBackoffMaxNanos;
 
     private final AtomicInteger inFlightInferences = new AtomicInteger();
     private final AtomicBoolean closed = new AtomicBoolean(false);
@@ -384,39 +351,6 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     // being read for ego-motion compensation (see readTelemetry()/cameraAttitude()) -- cosmetic,
     // not a resilience concern like a detection failure is.
     private boolean telemetrySupplierFailureLogged = false;
-
-    // Frame-arrival cadence measurement state. Only ever touched from within
-    // onNext(), which Flow.Subscriber's contract serializes (signals are
-    // never delivered concurrently) -- volatile purely for cross-thread
-    // *visibility* between successive onNext calls, not for mutual exclusion.
-    private volatile long lastFrameArrivalNanos = -1L;
-    private volatile long framesObserved = 0L;
-    private volatile double measuredFps = -1.0;
-
-    // Deadline-based sampling state (docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R1), replacing the
-    // `sequence % everyNth` stride this class used to sample by. Same threading note as the cadence
-    // fields above: written only from onNext, volatile purely for visibility between successive
-    // calls. `sampleScheduleArmed` distinguishes "no deadline yet" from a legitimate deadline
-    // value, which a sentinel nanotime could not do -- nanoTime's origin is arbitrary and may be
-    // negative.
-    private volatile boolean sampleScheduleArmed = false;
-    private volatile long nextSampleAtNanos;
-    private volatile long lastSampleAtNanos;
-
-    // Detection-outage state. Unlike the frame-cadence fields above, this is
-    // genuinely touched from multiple threads without serialization: onNext
-    // (submitting a new sample) races with detect() completion callbacks
-    // (which may land on an arbitrary executor thread). All reads/writes go
-    // through the synchronized blocks below rather than volatile/Atomic
-    // fields, because entering an outage, doubling the backoff, and reading
-    // the backoff deadline must be observed as a single consistent unit --
-    // see maybeDetect()/outageDecision()'s javadoc for the race this avoids.
-    private final Object outageLock = new Object();
-    private boolean inOutage = false;
-    private boolean probeInFlight = false;
-    private long backoffNanos;
-    private long nextProbeAtNanos = 0L;
-    private long outageFailureCount = 0L;
 
     /**
      * The single canonical constructor (docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md Finding
@@ -451,13 +385,6 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         this.pullDetection = collaborators.pullDetection().orElse(null); // nullable: push-mode detection when absent (D5/D6)
         StreamPipelineSettings settings = collaborators.settings();
         this.cameraHfovDegrees = settings.cameraHfovDegrees();
-        this.assumedSourceFps = settings.assumedSourceFps();
-        this.measuredFpsEwmaAlpha = settings.measuredFpsEwmaAlpha();
-        this.warmupFrames = settings.warmupFrames();
-        this.minMeasuredFps = settings.minMeasuredFps();
-        this.maxMeasuredFps = settings.maxMeasuredFps();
-        this.detectionBackoffInitialNanos = settings.detectionBackoffInitialNanos();
-        this.detectionBackoffMaxNanos = settings.detectionBackoffMaxNanos();
         this.world = new WorldModel(settings.trackRetention(), WorldModel.DEFAULT_MEMORY_TTL, settings.renderTier(),
                 label -> this.eventEngine == null ? null : this.eventEngine.openEventId(label).orElse(null));
         this.trackingStats = new TrackingStatsWindow(settings.trackingStatsWindow());
@@ -473,12 +400,12 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                 this.pullDetection == null ? DetectionRateWindow.Transport.PUSH : DetectionRateWindow.Transport.PULL);
         this.trace = new PipelineTrace(settings);
         this.rateController = new DetectionRateController(settings.adaptiveRate(), settings.cameraHfovDegrees());
-        this.backoffNanos = this.detectionBackoffInitialNanos;
-        // Seeded from this.config/this.detectionDemand/this.detectionPolicyAlwaysOn, all already
-        // assigned above -- construction itself must never look like a close, only a later, genuine
-        // open->closed edge should.
-        this.gateWasOpen = detectionGateOpen();
-        this.liveGateWasOpen = liveGateOpen();
+        this.sampler = new FrameSampler(settings, this.nanoTimeSource);
+        this.outageSupervisor = new OutageSupervisor(settings, this.nanoTimeSource);
+        // DetectionGate seeds its own gateWasOpen/liveGateWasOpen from this.config, passed here --
+        // construction itself must never look like a close, only a later, genuine open->closed edge
+        // should. See DetectionGate's own constructor javadoc.
+        this.gate = new DetectionGate(this.config);
     }
 
     /**
@@ -603,7 +530,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * @param demanded whether something is currently consuming this stream's detections
      */
     public void updateDetectionDemand(boolean demanded) {
-        this.detectionDemand = demanded;
+        gate.updateDetectionDemand(demanded);
         handleDetectionGateTransition();
     }
 
@@ -614,7 +541,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      *         DetectionDemandPort} wired never observes this as {@code false}
      */
     public boolean detectionDemand() {
-        return detectionDemand;
+        return gate.detectionDemand();
     }
 
     /**
@@ -631,7 +558,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * @param alwaysOn whether this pipeline's asset currently has {@code DetectionPolicy.ALWAYS} set
      */
     public void updateDetectionPolicy(boolean alwaysOn) {
-        this.detectionPolicyAlwaysOn = alwaysOn;
+        gate.updateDetectionPolicy(alwaysOn);
         handleDetectionGateTransition();
     }
 
@@ -643,7 +570,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      *         this as {@code true}
      */
     public boolean detectionPolicyAlwaysOn() {
-        return detectionPolicyAlwaysOn;
+        return gate.detectionPolicyAlwaysOn();
     }
 
     /**
@@ -658,8 +585,8 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * switch, so this method rebuilds {@link #config} directly, taking effect on the very next
      * sampled/published frame exactly like every other hot knob {@link #updateConfig} swaps.
      *
-     * <p><b>Deliberately not fail-open the way {@link #detectionDemand} is</b> (see {@link
-     * TraceDemandPort}'s own javadoc for the full reasoning): {@link #detectionDemand}'s {@code true}
+     * <p><b>Deliberately not fail-open the way {@link #detectionDemand()} is</b> (see {@link
+     * TraceDemandPort}'s own javadoc for the full reasoning): {@link #detectionDemand()}'s {@code true}
      * default is safe only because it collapses back to detection's pre-demand-gating behavior
      * (detect unconditionally); {@code trace}'s pre-existing behavior is always {@code false} (no
      * profile has ever requested it), so this method is simply never called — leaving {@link
@@ -711,7 +638,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * @return the frame count, never negative; a plain volatile read off the hot path
      */
     public long framesObserved() {
-        return framesObserved;
+        return sampler.framesObserved();
     }
 
     /**
@@ -724,8 +651,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      *         separate emptiness check)
      */
     public long nanosSinceLastFrame() {
-        long lastArrival = lastFrameArrivalNanos;
-        return lastArrival < 0L ? Long.MAX_VALUE : nanoTimeSource.getAsLong() - lastArrival;
+        return sampler.nanosSinceLastFrame();
     }
 
     /**
@@ -820,7 +746,9 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      *         says how many were asked for and what became of them. Never {@code null}.
      */
     public DetectionRate detectionRate() {
-        return detectionRate.snapshot(sourceFps(), targetFps(), rateController.demandFps());
+        return detectionRate.snapshot(sampler.sourceFps(),
+                sampler.targetFps(rateController, effectiveInferenceFps(), config.maxInFlightInferences()),
+                rateController.demandFps());
     }
 
     /**
@@ -887,7 +815,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         if (closed.get()) {
             return;
         }
-        long now = recordArrival();
+        long now = sampler.recordArrival();
         try {
             latestFrame = frame;
             streamPublisherPort.publish(streamId, frame);
@@ -941,123 +869,11 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * Folds this frame's arrival into the source frame-rate measurement and returns the clock
-     * reading it used. Cannot throw (deliberately kept outside the publish/detect try-catch below,
-     * which only handles collaborator failures).
-     *
-     * <p><b>This is the only read of {@link #nanoTimeSource} per frame, and the value is threaded
-     * onward rather than re-read.</b> That seam is a <i>cadence</i> clock: the tests' fake advances
-     * one frame interval on every read, so it encodes "the pipeline reads me once per frame". A
-     * second read anywhere in {@code onNext} would silently double every fake source's rate. The
-     * same trap already cost {@link #pipelineLatency} a separate clock — see {@link
-     * #latencyNanoSource}.
-     *
-     * @return the arrival timestamp of this frame, for {@link #maybeDetect}'s deadline
-     */
-    private long recordArrival() {
-        long now = nanoTimeSource.getAsLong();
-        framesObserved++;
-        if (lastFrameArrivalNanos >= 0) {
-            long deltaNanos = now - lastFrameArrivalNanos;
-            if (deltaNanos > 0) {
-                double instantaneousFps = 1_000_000_000.0 / deltaNanos;
-                double blended = measuredFps < 0
-                        ? instantaneousFps // seed directly from the first sample rather than blending toward an
-                                            // arbitrary starting value, so a constant-cadence source converges
-                                            // immediately instead of drifting in slowly over many EWMA updates
-                        : measuredFpsEwmaAlpha * instantaneousFps + (1 - measuredFpsEwmaAlpha) * measuredFps;
-                measuredFps = clamp(blended, minMeasuredFps, maxMeasuredFps);
-            }
-        }
-        lastFrameArrivalNanos = now;
-        return now;
-    }
-
-    /**
-     * @return the source frame rate to report and to bound the sample rate by: the measurement once
-     *         it is trusted ({@link StreamPipelineSettings#warmupFrames()} arrivals observed), the
-     *         configured assumption until then.
-     */
-    private double sourceFps() {
-        boolean trustMeasurement = framesObserved >= warmupFrames && measuredFps >= 0;
-        return trustMeasurement ? measuredFps : assumedSourceFps;
-    }
-
-    /**
-     * Decides whether this frame serves a sample deadline, advancing the schedule when it does.
-     *
-     * <h2>Why a deadline and not {@code sequence % everyNth}</h2>
-     * The stride this replaces was {@code max(1, round(sourceFps / targetFps))} — an <b>integer</b>,
-     * so a 24 fps source asked for 10 fps could only ever be sampled at 12 or 8, never 10, and the
-     * stride was recomputed from a drifting EWMA on every frame, which moved the phase of {@code
-     * sequence % N} as well as its period. A deadline has neither problem: every deadline is served
-     * by exactly one frame, so the achieved rate equals the target for any source faster than it
-     * (docs/plans/done/CV-RATE-CONTROL-PLAN.md &sect;1, losses L1/L2).
-     *
-     * <h2>The late clamp</h2>
-     * When a frame arrives more than a whole interval after the deadline it serves, the schedule is
-     * restarted from {@code now} rather than advanced by one interval. Without that clamp a stalled
-     * source builds up deadline debt that fires as a catch-up burst on recovery — spending the
-     * scarcest resource in the system on frames whose moment has passed. The skipped deadlines are
-     * counted instead, because "the source cannot feed this rate" is a distinct diagnosis from
-     * "the detector cannot keep up" and has a different fix.
-     */
-    private boolean sampleDue(long now) {
-        long intervalNanos = sampleIntervalNanos();
-        if (!sampleScheduleArmed) {
-            sampleScheduleArmed = true;
-            armScheduleAt(now, now + intervalNanos);
-            return true;
-        }
-        if (now > lastSampleAtNanos && now < nextSampleAtNanos) {
-            return false;
-        }
-        if (now <= lastSampleAtNanos) {
-            // Degenerate clock (frozen, or stepped backwards): with no usable time base there is no
-            // rate to limit, so fail OPEN and sample. Failing closed would silently stop detection
-            // altogether the moment a clock skewed -- the loudest possible failure for the quietest
-            // possible cause. The old frame-count stride was immune to this by construction; a
-            // time-based schedule has to say what it does instead.
-            armScheduleAt(now, now + intervalNanos);
-            return true;
-        }
-        long advanced = nextSampleAtNanos + intervalNanos;
-        if (advanced <= now) {
-            detectionRate.recordMissedDeadlines((now - nextSampleAtNanos) / intervalNanos);
-            advanced = now + intervalNanos;
-        }
-        armScheduleAt(now, advanced);
-        return true;
-    }
-
-    /** Records that {@code now} served a deadline and that the next one falls at {@code nextAtNanos}. */
-    private void armScheduleAt(long now, long nextAtNanos) {
-        lastSampleAtNanos = now;
-        nextSampleAtNanos = nextAtNanos;
-    }
-
-    /** The gap between sample deadlines for the currently targeted rate; at least one nanosecond. */
-    private long sampleIntervalNanos() {
-        return Math.max(1L, Math.round(NANOS_PER_SECOND / targetFps()));
-    }
-
-    /**
-     * The rate being sampled at right now: {@link #effectiveInferenceFps()} raised by {@link
-     * #rateController} when the tracked target is about to leave its association budget, and exactly
-     * {@link #effectiveInferenceFps()} whenever it is not (or the loop is off). Read on every frame,
-     * so it is deliberately a few comparisons over volatile fields rather than any kind of scan.
-     */
-    private double targetFps() {
-        return rateController.targetFps(effectiveInferenceFps(), sourceFps(), config.maxInFlightInferences());
-    }
-
-    /**
      * The rate this pipeline actually samples frames at (docs/plans/done/TRACKING-PLAN.md &sect;5.D): {@link
      * PipelineConfig#inferenceFps()} normally, but {@code max(inferenceFps, followFps)} in {@link
      * TrackingMode#FOLLOW} — in {@code FOLLOW} the tracker wants frames faster than the detector
-     * does, and raising the sample rate is the whole of that change because {@link
-     * #sampleIntervalNanos} derives the deadline gap from this value on every frame, reading the
-     * volatile config live.
+     * does, and raising the sample rate is the whole of that change, since {@link FrameSampler}
+     * derives its deadline gap from this value on every frame, reading the volatile config live.
      *
      * <p>{@code OFF} and {@code ASSOCIATE} return {@code inferenceFps()} unchanged, so a stream that
      * is not following samples exactly as it did before tracking existed. {@code followFps} defaults
@@ -1073,27 +889,13 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                 : config.inferenceFps();
     }
 
-    private static double clamp(double value, double min, double max) {
-        return Math.max(min, Math.min(max, value));
-    }
-
-    /** Outcome of consulting outage state for a newly-sampled frame, see {@link #outageDecision()}. */
-    private enum OutageDecision {
-        /** No outage in progress: fall through to the normal in-flight-bounded path. */
-        NORMAL,
-        /** An outage is in progress but the backoff hasn't elapsed, or a probe is already outstanding. */
-        SKIP,
-        /** The backoff deadline has passed and no probe is outstanding: send exactly this one frame as a probe. */
-        PROBE
-    }
-
     /**
      * The <b>inference</b> gate (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md &sect;4 "the gate is three
      * questions, not two") — {@link #maybeDetect} and {@link PullResultSubscriber#onNext} both gate
      * on this, and {@link #onDetectionResult} re-checks it on entry: {@link
      * PipelineConfig#detectionEnabled()} (the operator's own per-stream choice) <b>and</b> ({@link
      * #detectionDemand()} (the system-derived "someone is actually watching" fact) <b>or</b> {@link
-     * #detectionPolicyAlwaysOn} (this asset's {@code DetectionPolicy.ALWAYS} opt-in, wave D1)).
+     * #detectionPolicyAlwaysOn()} (this asset's {@code DetectionPolicy.ALWAYS} opt-in, wave D1)).
      * A strict superset of the pre-D2 single gate — an asset that has never opted into {@code
      * ALWAYS} sees {@code detectionPolicyAlwaysOn} permanently {@code false}, so this collapses back
      * to exactly {@link #liveGateOpen()} and nothing that infers today stops inferring.
@@ -1104,79 +906,63 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * viewer's screen reads. See that method's own javadoc for exactly where the two are told apart.
      */
     private boolean detectionGateOpen() {
-        return config.detectionEnabled() && (detectionDemand || detectionPolicyAlwaysOn);
+        return gate.detectionGateOpen(config);
     }
 
     /**
      * The <b>live</b> gate (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md &sect;4) — exactly today's single
      * gate, unchanged: {@link PipelineConfig#detectionEnabled()} <b>and</b> {@link
-     * #detectionDemand()} alone, deliberately never widened by {@link #detectionPolicyAlwaysOn}. A
+     * #detectionDemand()} alone, deliberately never widened by {@link #detectionPolicyAlwaysOn()}. A
      * {@code DetectionPolicy.ALWAYS} asset's whole point is inference that outlives its last viewer,
      * which means this narrower gate is exactly what must still be able to close for it — see {@link
      * #onDetectionResult} for where this governs {@link #world}/{@link #trackingStats}/{@link
      * #rateController}/{@link #liveUpdatePublisherPort}.
      */
     private boolean liveGateOpen() {
-        return config.detectionEnabled() && detectionDemand;
+        return gate.liveGateOpen(config);
     }
 
     /**
-     * Detects a true&rarr;false transition of {@link #detectionGateOpen()} (inference/durable) and of
-     * {@link #liveGateOpen()} (live) independently, and clears exactly the state each one's closing
-     * makes stale (docs/plans/done/CV-DEMAND-PLAN.md &sect;5/&sect;7's gate-close-clearing correction,
-     * widened by docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave D2 to two edges): turning detection off
-     * (or losing the last viewer, or the last thing keeping inference demanded) means there will
-     * never be another answer on that plane, so holding the last one and re-serving it forever — the
-     * reported "turn on and off doesn't work" complaint — asserts something false. Called from
-     * {@link #updateConfig} (operator intent), {@link #updateDetectionDemand} (viewer demand) and
-     * {@link #updateDetectionPolicy} (this asset's {@code ALWAYS} opt-in); any of the three can close
-     * either gate, so the transition check lives here once instead of being duplicated at each call
-     * site.
+     * Turns {@link DetectionGate#handleTransition}'s reported {@link DetectionGate.Edge} into the
+     * state-clearing side effect each edge implies (docs/plans/done/CV-DEMAND-PLAN.md &sect;5/&sect;7's
+     * gate-close-clearing correction, widened by docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave D2 to
+     * two edges; the edge detection itself moved to {@link DetectionGate} in wave W8.2, this method
+     * keeps only the side effects — see that class's own javadoc for why): turning detection off (or
+     * losing the last viewer, or the last thing keeping inference demanded) means there will never be
+     * another answer on that plane, so holding the last one and re-serving it forever — the reported
+     * "turn on and off doesn't work" complaint — asserts something false. Called from {@link
+     * #updateConfig} (operator intent), {@link #updateDetectionDemand} (viewer demand) and {@link
+     * #updateDetectionPolicy} (this asset's {@code ALWAYS} opt-in); any of the three can close either
+     * gate, so the transition check lives here once instead of being duplicated at each call site.
      *
-     * <p><b>Two edges, two behaviors, checked in this order:</b>
-     * <ol>
-     *   <li>{@link #gateWasOpen} true&rarr;false (inference closes): {@link
-     *       #clearDetectionDerivedState()} — the full clear. Inference itself is stopping, so
-     *       nothing downstream of it — live <em>or</em> durable — will ever get a fresher answer
-     *       until it reopens. This is the only edge an asset that has never opted into {@code
-     *       ALWAYS} can ever take, so its behavior is byte-identical to before wave D2.</li>
-     *   <li>Otherwise, {@link #liveGateWasOpen} true&rarr;false (live closes while inference stays
-     *       open): {@link #clearLiveDerivedState()} — the live-only clear. This is reachable only for
-     *       a {@code DetectionPolicy.ALWAYS} asset losing its last viewer: durable persistence keeps
-     *       running (inference is still demanded), but there is no screen left to hold a fresh
-     *       answer for, so the live read models are wiped exactly as they would be if inference had
-     *       stopped too.</li>
-     * </ol>
-     * The {@code else} is deliberate, not an optimization: when both gates close on the same call
-     * (the ordinary, non-{@code ALWAYS} case), only the full clear runs — it already covers
-     * everything the live-only clear would, and running both would be a harmless but confusing
-     * double-clear of the same fields.
+     * <p><b>Two edges, two behaviors:</b> {@link DetectionGate.Edge#INFERENCE_CLOSED} runs {@link
+     * #clearDetectionDerivedState()} — the full clear. Inference itself is stopping, so nothing
+     * downstream of it — live <em>or</em> durable — will ever get a fresher answer until it reopens.
+     * This is the only edge an asset that has never opted into {@code ALWAYS} can ever take, so its
+     * behavior is byte-identical to before wave D2. {@link DetectionGate.Edge#LIVE_CLOSED} runs {@link
+     * #clearLiveDerivedState()} — the live-only clear. This is reachable only for a {@code
+     * DetectionPolicy.ALWAYS} asset losing its last viewer: durable persistence keeps running
+     * (inference is still demanded), but there is no screen left to hold a fresh answer for, so the
+     * live read models are wiped exactly as they would be if inference had stopped too. {@link
+     * DetectionGate#handleTransition} reports at most one edge per call — when both gates close on
+     * the same call (the ordinary, non-{@code ALWAYS} case), it reports only {@code
+     * INFERENCE_CLOSED}, since the full clear already covers everything the live-only clear would;
+     * see that method's own javadoc for the full ordering.
      *
      * <p>This is genuinely different from an <b>outage</b> ({@link #onDetectionFailure}): during an
      * outage the system is still trying and simply has no fresher answer <i>yet</i>, so holding the
      * last one is the honest thing, and that state is deliberately left untouched (see the outage
      * Gotcha in this module's {@code MODULE.md}). A closed gate has no "yet" — nothing will try again
      * until it reopens — so the two cases clear differently on purpose.
-     *
-     * <p>Keyed off each gate's current value compared against its own <em>last observed</em> one
-     * ({@link #gateWasOpen}/{@link #liveGateWasOpen}), not "which setter ran": {@link #updateConfig}
-     * is called for plain confidence/fps/label-filter patches too, and {@link #updateDetectionDemand}/
-     * {@link #updateDetectionPolicy} are called on every demand-poll tick regardless of whether
-     * anything actually changed, so only a genuine open&rarr;closed <i>edge</i> may clear anything —
-     * a repeated {@code false} must be a no-op here, not a re-clearing thrash. {@link #gateLock}
-     * makes the read-compare-write atomic across the callers' different threads.
      */
     private void handleDetectionGateTransition() {
-        boolean open = detectionGateOpen();
-        boolean liveOpen = liveGateOpen();
-        synchronized (gateLock) {
-            if (gateWasOpen && !open) {
-                clearDetectionDerivedState();
-            } else if (liveGateWasOpen && !liveOpen) {
-                clearLiveDerivedState();
+        DetectionGate.Edge edge = gate.handleTransition(config);
+        switch (edge) {
+            case INFERENCE_CLOSED -> clearDetectionDerivedState();
+            case LIVE_CLOSED -> clearLiveDerivedState();
+            case NONE -> {
+                // No edge fired -- a repeated false (e.g. every demand-poll tick) is a no-op here.
             }
-            gateWasOpen = open;
-            liveGateWasOpen = liveOpen;
         }
     }
 
@@ -1225,105 +1011,44 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * Gated first — before the outage/in-flight logic below — on {@link #detectionGateOpen()}: {@link
-     * PipelineConfig#detectionEnabled()} being {@code false} returns immediately, and so does neither
-     * {@link #detectionDemand()} nor {@link #detectionPolicyAlwaysOn} holding — so a disabled or
-     * (undemanded and not {@code DetectionPolicy.ALWAYS}) stream spends zero CPU on inference
-     * <i>and</i> stops probing during an outage too — nothing below this check ever runs. These are
-     * deliberately independent inputs rather than one merged flag — see {@code
-     * DetectionDemandPort}'s/{@code DetectionPolicyPort}'s own javadocs for why collapsing them would
-     * be wrong. Any one flipping this gate back open resumes detection on the next sampled frame,
-     * exactly where the (frozen, untouched) outage/backoff state left off.
-     *
-     * <p>Also gated on {@link #pullDetection} being absent (docs/plans/done/MEDIA-SOT-PLAN.md wave M5): in
-     * pull mode the worker runs its own (ported) deadline sampler and decides when to detect, so this
-     * pipeline's own sampler/in-flight bound/{@link #detectionPort} submission never runs — {@link
-     * PullResultSubscriber} is the whole of pull-mode detection. This is the one line push mode's own
-     * behavior depends on being a no-op for: {@code pullDetection} is {@code null} for every existing
-     * caller, so the check below always falls through exactly as it did before this capability existed.
-     *
-     * <p><b>Gate ledger.</b> {@link #detectionGateOpen()}'s single boolean expression is expanded
-     * below into its three component checks purely so each early return can record a distinct
-     * {@link GateReason} into {@link #trace} — same union of early returns as the single-expression
-     * form, only the classification is new. {@code cfg}/{@code demand}/{@code alwaysOn} are read
-     * once, together, into locals precisely so the recorded {@link DemandSnapshot} is guaranteed
-     * consistent with the decision itself.
+     * Classification delegated to {@link DetectionGate#classify} (docs/plans/active/
+     * CV-ORCHESTRATION-PLAN.md &sect;4.9/K3, wave W8.2 extraction) — this method turns the returned
+     * {@link GateVerdict} into exactly the side effects the original inline three-way {@code switch}
+     * produced: a {@link GateVerdict.Skip} records on {@link #trace} (plus a {@link #detectionRate}
+     * drop entry for {@link GateReason#OUTAGE_BACKOFF}/{@link GateReason#IN_FLIGHT_FULL} specifically,
+     * matching the original's own per-reason {@code detectionRate.record} calls, in the same order —
+     * record, then trace); a {@link GateVerdict.Send} claims an in-flight slot (skipped for a probe,
+     * which {@link OutageSupervisor#outageDecision()} already claimed by returning {@code PROBE}),
+     * records a {@code SUBMITTED} entry, then calls {@link #submitDetection} — the same order the
+     * original's {@code NORMAL}/{@code PROBE} branches used. {@link Optional#empty()} — the silent
+     * outage-backoff-deadline-not-yet-due case — is a true no-op, matching the original's own "one
+     * entry per deadline" comment. See {@link DetectionGate#classify}'s own javadoc for the full
+     * gate/pull-mode/outage/in-flight decision tree this replaces.
      */
     private void maybeDetect(VideoFrame frame, long now) {
-        PipelineConfig cfg = config;
-        boolean demand = detectionDemand;
-        boolean alwaysOn = detectionPolicyAlwaysOn;
-        DemandSnapshot snapshot = new DemandSnapshot(cfg.detectionEnabled(), demand, alwaysOn);
-        if (pullDetection != null) {
-            trace.recordSkip(frame, snapshot, GateReason.PULL_MODE);
+        Optional<GateVerdict> verdict = gate.classify(config, now, sampler, outageSupervisor,
+                effectiveInferenceFps(), rateController, detectionRate, inFlightInferences, pullDetection);
+        if (verdict.isEmpty()) {
             return;
         }
-        if (!cfg.detectionEnabled()) {
-            trace.recordSkip(frame, snapshot, GateReason.GATE_OFF);
-            return;
-        }
-        if (!(demand || alwaysOn)) {
-            trace.recordSkip(frame, snapshot, GateReason.GATE_NO_DEMAND);
-            return;
-        }
-        switch (outageDecision()) {
-            case PROBE -> {
-                // A probe is a LIVENESS check, not a sample: its cadence is the outage backoff, so
-                // it deliberately ignores the sample deadline. Letting the sampler gate it too would
-                // make two independent schedules interfere -- the backoff says "probe now" while the
-                // sampler says "not yet" -- delaying recovery by up to a full sample interval for no
-                // benefit. The backoff (>=1s) is always far longer than a sample interval, so this
-                // can never probe faster than the outage logic intends.
+        switch (verdict.get()) {
+            case GateVerdict.Send send -> {
+                if (!send.probe()) {
+                    inFlightInferences.incrementAndGet();
+                }
                 detectionRate.record(DetectionRateWindow.Outcome.SUBMITTED, now);
-                submitDetection(frame, true, snapshot);
+                submitDetection(frame, send.probe(), send.demand());
             }
-            case SKIP -> {
-                // Still backing off, or a probe is already in flight: never counted as in-flight.
-                // Consulted through the deadline so the counter stays comparable with the others --
-                // one entry per deadline, not one per frame arriving during a ten-second backoff.
-                if (sampleDue(now)) {
-                    detectionRate.record(DetectionRateWindow.Outcome.DROPPED_OUTAGE, now);
-                    trace.recordSkip(frame, snapshot, GateReason.OUTAGE_BACKOFF);
+            case GateVerdict.Skip skip -> {
+                switch (skip.reason()) {
+                    case OUTAGE_BACKOFF -> detectionRate.record(DetectionRateWindow.Outcome.DROPPED_OUTAGE, now);
+                    case IN_FLIGHT_FULL -> detectionRate.record(DetectionRateWindow.Outcome.DROPPED_IN_FLIGHT, now);
+                    default -> {
+                        // The other four reasons never had a detectionRate entry in the original either.
+                    }
                 }
+                trace.recordSkip(frame, skip.demand(), skip.reason());
             }
-            case NORMAL -> {
-                if (!sampleDue(now)) {
-                    trace.recordSkip(frame, snapshot, GateReason.DEADLINE_NOT_DUE);
-                    return;
-                }
-                if (inFlightInferences.get() >= config.maxInFlightInferences()) {
-                    // bounded in-flight: skip this sample rather than queue it
-                    detectionRate.record(DetectionRateWindow.Outcome.DROPPED_IN_FLIGHT, now);
-                    trace.recordSkip(frame, snapshot, GateReason.IN_FLIGHT_FULL);
-                    return;
-                }
-                inFlightInferences.incrementAndGet();
-                detectionRate.record(DetectionRateWindow.Outcome.SUBMITTED, now);
-                submitDetection(frame, false, snapshot);
-            }
-        }
-    }
-
-    /**
-     * Consults and, where it decides {@link OutageDecision#PROBE}, mutates
-     * outage state under {@link #outageLock} in a single atomic step —
-     * checking {@code nextProbeAtNanos} and claiming {@code probeInFlight}
-     * together, rather than as two separate lock-free reads, is what
-     * prevents a second concurrent probe from starting (or the very first
-     * backoff window from being skipped by a racing thread that observes
-     * {@code inOutage} freshly flipped {@code true} before its paired
-     * backoff fields are visible).
-     */
-    private OutageDecision outageDecision() {
-        synchronized (outageLock) {
-            if (!inOutage) {
-                return OutageDecision.NORMAL;
-            }
-            if (probeInFlight || nanoTimeSource.getAsLong() < nextProbeAtNanos) {
-                return OutageDecision.SKIP;
-            }
-            probeInFlight = true;
-            return OutageDecision.PROBE;
         }
     }
 
@@ -1357,7 +1082,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
             pipelineLatency.record(submittedAtNanos, completedAtNanos);
             rateController.recordRoundTrip(completedAtNanos - submittedAtNanos);
             if (isProbe) {
-                clearProbeInFlight();
+                outageSupervisor.clearProbeInFlight();
             } else {
                 inFlightInferences.decrementAndGet();
             }
@@ -1372,12 +1097,6 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         });
     }
 
-    private void clearProbeInFlight() {
-        synchronized (outageLock) {
-            probeInFlight = false;
-        }
-    }
-
     /**
      * Handles a failed inference. The first failure (from any in-flight
      * call, probe or not) enters the outage and is the only one that raises
@@ -1386,25 +1105,12 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * backoff (capped at {@link #MAX_BACKOFF_NANOS}) and reschedules the
      * next probe — a stray failure from a call that was already in flight
      * when the outage began must not perturb a backoff a probe may have
-     * already advanced.
+     * already advanced. State transitions themselves live on {@link #outageSupervisor}
+     * (see its own javadoc); this method's only remaining job is the logging/event side
+     * {@link OutageSupervisor} deliberately does not know about.
      */
     private void onDetectionFailure(Throwable throwable, boolean isProbe) {
-        boolean enteringOutage;
-        synchronized (outageLock) {
-            enteringOutage = !inOutage;
-            if (enteringOutage) {
-                inOutage = true;
-                backoffNanos = detectionBackoffInitialNanos;
-                outageFailureCount = 0;
-                nextProbeAtNanos = nanoTimeSource.getAsLong() + backoffNanos;
-            } else {
-                outageFailureCount++;
-                if (isProbe) {
-                    backoffNanos = Math.min(backoffNanos * 2, detectionBackoffMaxNanos);
-                    nextProbeAtNanos = nanoTimeSource.getAsLong() + backoffNanos;
-                }
-            }
-        }
+        boolean enteringOutage = outageSupervisor.recordFailure(isProbe);
         if (enteringOutage) {
             eventPublisher.publish(Event.of(streamId, EventType.PIPELINE_ERROR,
                     "detection outage: " + describeFailure(throwable)));
@@ -1416,20 +1122,15 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * alike). Always resets the backoff to its initial interval, and —
      * exactly when this success followed an active outage — clears the
      * outage and logs a recovery line (no second event is emitted; {@code
-     * PIPELINE_ERROR} is reserved for the outage's start).
+     * PIPELINE_ERROR} is reserved for the outage's start). State transitions
+     * themselves live on {@link #outageSupervisor}; this method's only remaining job is the
+     * recovery log line {@link OutageSupervisor} deliberately does not know about.
      */
     private void onDetectionSuccess(DetectionResult result) {
-        boolean recovered;
-        long failuresDuringOutage;
-        synchronized (outageLock) {
-            recovered = inOutage;
-            failuresDuringOutage = outageFailureCount;
-            inOutage = false;
-            backoffNanos = detectionBackoffInitialNanos;
-        }
-        if (recovered) {
+        OutageSupervisor.Recovery recovery = outageSupervisor.recordSuccess();
+        if (recovery.recovered()) {
             LOG.log(System.Logger.Level.INFO, () -> "stream " + streamId.value() + " detection recovered after "
-                    + failuresDuringOutage + " failed attempt(s) during the outage");
+                    + recovery.failuresDuringOutage() + " failed attempt(s) during the outage");
         }
         onDetectionResult(result);
     }
@@ -1663,7 +1364,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * <p><b>Wave D2 fix (Finding 6):</b> before this gate widened, a {@code DetectionPolicy.ALWAYS}
      * stream with no current viewer paid for the worker's continuous inference and then discarded
      * every result here — the cost of always-on with none of the benefit. Because {@link
-     * #detectionGateOpen()} now ORs in {@link #detectionPolicyAlwaysOn}, such a stream's results are
+     * #detectionGateOpen()} now ORs in {@link #detectionPolicyAlwaysOn()}, such a stream's results are
      * forwarded to {@link #onDetectionResult}, which itself keeps only the durable half open (see
      * that method's own javadoc) — the JVM finally keeps what it already paid for.
      *
