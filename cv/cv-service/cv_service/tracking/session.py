@@ -230,6 +230,9 @@ class StreamTrackingSession:
         pose: CameraPose = CameraPose(),
         detection_lag_millis: int = 0,
         dropped_frames: int = 0,
+        trace: bool = False,
+        frame_width: int = 0,
+        frame_height: int = 0,
     ) -> FrameOutcome:
         """Run one frame: resolve, budget, seed, orchestrate, fold.
 
@@ -239,6 +242,15 @@ class StreamTrackingSession:
         `dropped_frames` is the transport's count of frames discarded since
         the previous one it delivered -- ledger evidence only, never an input
         to a decision: the tracker cannot see a frame that never arrived.
+
+        `trace`/`frame_width`/`frame_height` (CV-ORCHESTRATION wave W5b,
+        plan §8 E23): when `trace` is true, the returned `FrameOutcome.
+        ledger.detections` carries `detect.full`'s own raw boxes for this
+        frame (see `FrameLedger.detections`'s own docstring for why never
+        `detect.roi`'s) and `frame_width`/`frame_height` this frame's pixel
+        size. Mirrors the wire's own `request.trace` gate (`grpc/servicers.
+        py`'s `_tracked_response`) rather than adding a second flag; `False`/
+        `0` -- every pre-W5b caller -- leaves the ledger exactly as before.
         """
         # TRACKING-V3-PLAN wave V1: resolved FIRST, unconditionally -- every
         # engine roster call reads the served level, so it has to be current
@@ -305,6 +317,17 @@ class StreamTrackingSession:
         self._sequence += 1
 
         tracker_millis = self._orchestrator().run(ctx, budget, ledger)
+        if trace:
+            # CV-ORCHESTRATION wave W5b: read straight off `ctx`, AFTER the
+            # run finishes -- the same "built after, from ctx and ledger"
+            # shape `_object_states` below already uses, never re-derived.
+            # `Key.DETECTIONS` is `detect.full`'s own key and only its own
+            # (the orchestrator's "one writer per key" invariant, `detect.
+            # roi` writes `Key.DETECTIONS_ROI`), so this is never the rescue
+            # pass's boxes even on a frame where it ran.
+            ledger.detections = tuple(ctx.get(Key.DETECTIONS) or ())
+            ledger.frame_width = frame_width
+            ledger.frame_height = frame_height
         ledger.gate_wait_ms = self._client.wait_ms
         ledger.total_ms = tracker_millis + self._client.wait_ms
         self._ledgers.append(ledger)

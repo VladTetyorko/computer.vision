@@ -309,6 +309,24 @@ def _tracked_detection(box: "object") -> "cv_pb2.Detection":
     return detection
 
 
+def _traced_detection_message(detection: "object") -> "cv_pb2.TracedDetection":
+    """One of `FrameLedger.detections`'s own raw boxes (CV-ORCHESTRATION
+    wave W5b) as a wire `TracedDetection`.
+
+    `detection` is duck-typed exactly like `cv_service.inference.detector.
+    Detection` -- `label`/`confidence`/`x`/`y`/`width`/`height`, never
+    imported as that type (`_tracked_detection` above and `tracking/track.
+    py`'s `observation_for` keep the same boundary, for the same `cv2`-free
+    reason)."""
+    return cv_pb2.TracedDetection(
+        label=detection.label,
+        confidence=detection.confidence,
+        box=cv_pb2.BoundingBox(
+            x=detection.x, y=detection.y, width=detection.width, height=detection.height
+        ),
+    )
+
+
 def _bounding_box(box: "Optional[object]") -> "Optional[cv_pb2.BoundingBox]":
     """`None` in, `None` out -- the absent-vs-zero rule of
     `tracking/objectstate.py`, kept intact across the one wire translation.
@@ -792,6 +810,12 @@ def _frame_ledger_message(ledger: FrameLedger) -> "cv_pb2.FrameLedger":
         gate_wait_ms=ledger.gate_wait_ms,
         total_ms=ledger.total_ms,
         halted=ledger.halted,
+        # CV-ORCHESTRATION wave W5b (fields 13-15): `()`/`0` on every
+        # untraced frame (`session.process()`'s own `trace` gate), so this
+        # is a no-op on the wire for every call that does not ask to trace.
+        detections=[_traced_detection_message(item) for item in ledger.detections],
+        frame_width=ledger.frame_width,
+        frame_height=ledger.frame_height,
     )
     # Kept per-contributor rather than merged into one map per track: "who
     # claimed this" is precisely the question a merged map cannot answer, and
@@ -1560,6 +1584,14 @@ class InferenceServicer(cv_pb2_grpc.InferenceServicer):
                     pose=_camera_pose_from_wire(request.camera_pose),
                     detection_lag_millis=capture_skew_millis,
                     dropped_frames=dropped_frames,
+                    # CV-ORCHESTRATION wave W5b: the same `request.trace`
+                    # `_tracked_response` gates the wire ledger attachment
+                    # on below, so the ledger's own `detections` are never
+                    # built for a call nobody is tracing. `width`/`height`
+                    # are already on this wire request either way.
+                    trace=request.trace,
+                    frame_width=request.width,
+                    frame_height=request.height,
                 )
                 if outcome.boxes is None:
                     return self._echo(request)

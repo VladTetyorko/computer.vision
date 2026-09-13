@@ -73,6 +73,26 @@ class FrameLedger:
     total_ms: float = 0.0
     #: True when a contributor halted the frame (no model resolved -> echo).
     halted: bool = False
+    #: CV-ORCHESTRATION wave W5b (E23): `detect.full`'s own raw boxes this
+    #: frame, captured at the source rather than reconstructed from a
+    #: client-side join of the `detections:` topic (plan §8 E23 -- that join
+    #: would hold detection demand open just to watch it, an observer effect
+    #: on the very gate being inspected). Never `detect.roi`'s rescue-pass
+    #: boxes: that pass writes the separate `Key.DETECTIONS_ROI`, so a frame
+    #: that rescued still reports what the FULL pass actually saw. Each item
+    #: is duck-typed like the inference detector's own `Detection` shape
+    #: (`label`/`confidence`/`x`/`y`/`width`/`height`) and never imported as
+    #: that type, the same boundary `tracking/track.py:observation_for`
+    #: already keeps so this package stays `cv2`/`numpy`-free. Populated
+    #: ONLY when `session.process()` was asked to trace this frame -- `()`
+    #: otherwise, so an untraced frame's ring entry costs exactly what it
+    #: cost before this wave.
+    detections: "tuple[object, ...]" = ()
+    #: This frame's pixel size, alongside `detections` -- `0` when not
+    #: carried (untraced, or a harness/test building a `FrameLedger` by hand
+    #: with no wire request to read it from).
+    frame_width: int = 0
+    frame_height: int = 0
 
     def record(self, entry: LedgerEntry) -> None:
         self.entries.append(entry)
