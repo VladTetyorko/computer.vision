@@ -20,6 +20,7 @@ import com.drones.vision.perception.application.pipeline.GateReason;
 import com.drones.vision.perception.application.pipeline.TrackingStats;
 import com.drones.vision.perception.application.profile.CvProfileService;
 import com.drones.vision.perception.application.profile.EffectiveProfile;
+import com.drones.vision.perception.application.profile.KnobSources;
 import com.drones.vision.perception.application.profile.ProfileSource;
 import com.drones.vision.perception.application.stream.ActiveStream;
 import com.drones.vision.perception.application.stream.PipelineConfigPatch;
@@ -181,7 +182,8 @@ class StreamControllerTest {
         traceDemand = new LiveAndPollTraceDemand(assetId -> false, Duration.ofSeconds(10));
         cvProfileService = mock(CvProfileService.class);
         when(cvProfileService.effective(any(), any(), any(), any())).thenAnswer(invocation -> new EffectiveProfile(
-                invocation.getArgument(0), null, null, ProfileSource.PLATFORM, invocation.getArgument(1)));
+                invocation.getArgument(0), null, null, ProfileSource.PLATFORM, invocation.getArgument(1),
+                KnobSources.platform(), null));
 
         mockMvc = mockMvcFor(currentUser);
     }

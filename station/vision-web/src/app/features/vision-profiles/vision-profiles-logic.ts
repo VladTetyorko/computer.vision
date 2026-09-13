@@ -51,6 +51,36 @@ export function canDeleteProfile(profile: CvProfile, canManage: boolean): boolea
   return canManage && !profile.builtIn;
 }
 
+// --- Profile-card display (wave W7, decision E22: a knob a profile leaves unset shows as
+// "Inherited," never a fabricated concrete value — §3.5 honesty rule) --------------------------
+
+/** The profile-card grid's own fallback text for any knob `profile` itself leaves unset. */
+export const INHERITED_KNOB_LABEL = 'Inherited';
+
+/** `profile.model` for the card grid — `undefined` (or, defensively, blank) reads as {@link
+ *  INHERITED_KNOB_LABEL}. */
+export function describeOptionalModel(model: string | undefined): string {
+  return model && model.trim().length > 0 ? model : INHERITED_KNOB_LABEL;
+}
+
+/** `profile.confidenceThreshold`/`profile.inferenceFps` for the card grid. */
+export function describeOptionalNumber(value: number | undefined): string {
+  return value === undefined ? INHERITED_KNOB_LABEL : String(value);
+}
+
+/** `profile.detectionEnabled`'s own three-way card state — the card's chip already distinguishes
+ *  On/Off by color; the third, unset state gets its own label rather than being folded into "Off"
+ *  (an inherited profile might well resolve to detection being ON once the fold actually runs). */
+export type DetectionCardState = 'ON' | 'OFF' | 'INHERITED';
+
+/** `profile.detectionEnabled` → the card's own three-way state. */
+export function describeDetectionCardState(value: boolean | undefined): DetectionCardState {
+  if (value === undefined) {
+    return 'INHERITED';
+  }
+  return value ? 'ON' : 'OFF';
+}
+
 // --- Draft editing (create / edit / fork) ----------------------------------------------------
 
 /**
@@ -62,87 +92,129 @@ export function canDeleteProfile(profile: CvProfile, canManage: boolean): boolea
  * source profile's own id while editing one in place — {@link draftToRequest} never reads it, it is
  * purely how the facade decides POST vs. PUT on submit.
  *
+ * **Wave W7 — a profile is a patch** (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7/§8, decision
+ * E22): every knob below is now individually inherit-capable, mirroring `CvProfile`'s own now-
+ * nullable fields — `undefined` (or, for {@link model}, blank text) means "leave this knob unset,
+ * inherit from the tier below," exactly like the wire contract itself. Three different encodings
+ * are used, deliberately, one per knob shape:
+ *
+ * - **Blank text = inherit** ({@link model}): a model has no legitimate "explicit blank" value of
+ *   its own, so plain blank text is unambiguous and needs no extra state.
+ * - **A separate `*Inherit` flag** ({@link labelFilterInherit}/{@link labelDenyFilterInherit}): an
+ *   EXPLICIT empty list (`[]`, "keep/deny nothing") is itself a real, meaningful value distinct from
+ *   "inherit" (`UpdateStreamConfigRequest#labelDenyFilter`'s own doc comment already establishes this
+ *   for the sibling live-PATCH field), so blank text alone cannot safely carry both meanings the way
+ *   {@link model}'s does — CLAUDE.md rule 10 forbids overloading one control's "empty" state to mean
+ *   two different things.
+ * - **A dedicated inherit sentinel on the `<select>` itself** ({@link trackingMode} via {@link
+ *   trackingModeSelectValue}, {@link trackingEngineId} via {@link engineSelectValue}, {@link
+ *   detectionEnabled} via {@link detectionSelectValue}): each of these already has its own real,
+ *   explicit "off"/"default" value distinct from unset (`'OFF'` is a real tracking mode; `''` is a
+ *   real "deployment default" engine; `false` is a real "detection off"), so the option list itself
+ *   grows one more entry rather than pairing the control with a checkbox.
+ *
+ * **Tracking is inherited per KNOB, not as one whole-group toggle** — a deliberate choice, not the
+ * only one available: `TrackingKnobPatch` (the domain patch this maps onto) is itself nullable
+ * field-by-field, so an operator who wants to override only the tracking *mode* can do exactly that
+ * and leave capability level/cadence inherited, rather than being forced to either restate every
+ * other knob's current effective value (fragile — a later change to a lower tier's own defaults
+ * would silently stop flowing through) or lose a partial override entirely. `KnobSources.tracking`
+ * itself is still one provenance value for the group as a whole (Java's own doc comment) — a coarser
+ * READ-side fact that does not constrain how granular this editor's WRITE side may be.
+ *
  * `labelFilterText`/`labelDenyFilterText` hold the allow/deny lists as one comma-or-newline-separated
  * string for a plain `<textarea>` — {@link parseLabelList}/{@link formatLabelList} are the only two
  * places that cross between this and `CvProfile#labelFilter`'s `readonly string[]`.
  *
  * `existingEventRule` is the loaded profile's own `eventRule`, shown read-only in the editor (§5.1:
  * start-time only, never part of `CvProfileRequest` — there is nothing to submit here even if a
- * control existed) — `null` when creating a brand-new profile, since none exists yet until the
- * backend assigns one at creation and a later read brings it back (§8 leaves "what the server
- * defaults eventRule to on create" to the backend; this UI has no control for it either way, honesty
- * rule §3.5 "no control without a backend endpoint").
+ * control existed) — `null` when creating a brand-new profile or when a loaded profile leaves the
+ * whole group unset (inherited), since this UI has no control for it either way (honesty rule §3.5
+ * "no control without a backend endpoint").
  *
- * `intent` (added wave W3.6, docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7) is the operator's "what
- * am I looking for" pick — `''` means no intent chosen, {@link draftToRequest}'s exact "omit `intent`
- * entirely" sentinel, and is what every existing create/edit/fork path still produces when the
- * intent picker is left alone, so today's fully-explicit flow has zero behavior change. Never
- * inferred from a loaded profile's `sources` in {@link draftFromProfile}/{@link forkDraftFromProfile}
- * — that provenance is create/update-response-only, not persisted on the profile itself (§4.7 "as
- * built in W2"), so a freshly-opened editor always starts with no intent selected, even for a
- * profile originally created via one.
+ * `intent` (added wave W3.6, docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7, corrected wave W7) is
+ * the operator's "what am I looking for" pick — `''` means no intent chosen, {@link
+ * draftToRequest}'s exact "omit `intent` entirely" sentinel. Persisted with the profile and resolved
+ * at FOLD time now (wave W7.1's `CvProfileResolver`), not at save time — see {@link draftToRequest}'s
+ * own doc comment. Never inferred from a loaded profile's own `intent` in {@link draftFromProfile}/
+ * {@link forkDraftFromProfile}: a freshly-opened editor always starts with no intent selected, even
+ * for a profile that already carries a persisted one, matching this app's existing "the intent picker
+ * is a one-shot action, not a persistent radio state" behavior (unchanged by this wave).
  */
 export interface ProfileDraft {
   readonly sourceId: string | null;
   readonly name: string;
   readonly description: string;
   readonly model: string;
-  readonly confidenceThreshold: number;
-  readonly inferenceFps: number;
+  readonly confidenceThreshold: number | undefined;
+  readonly inferenceFps: number | undefined;
   readonly labelFilterText: string;
+  readonly labelFilterInherit: boolean;
   readonly labelDenyFilterText: string;
-  readonly detectionEnabled: boolean;
-  readonly trackingMode: TrackingMode;
-  readonly trackingEngineId: string;
-  readonly trackingCapabilityLevel: number;
-  readonly trackingVerifyEveryMillis: number;
-  readonly trackingFollowFps: number;
+  readonly labelDenyFilterInherit: boolean;
+  readonly detectionEnabled: boolean | undefined;
+  readonly trackingMode: TrackingMode | undefined;
+  readonly trackingEngineId: string | undefined;
+  readonly trackingCapabilityLevel: number | undefined;
+  readonly trackingVerifyEveryMillis: number | undefined;
+  readonly trackingFollowFps: number | undefined;
   readonly existingEventRule: CvProfileEventRule | null;
   readonly intent: CvProfileIntent | '';
 }
 
-/** A fresh draft for "New profile" — `defaultModel` is the first roster entry (or `''` if the
- * roster hasn't loaded, which the editor's own required-field validation then catches). */
-export function emptyProfileDraft(defaultModel: string): ProfileDraft {
+/** A fresh draft for "New profile" — every knob starts unset/inherited (decision E22's own default:
+ *  a profile that overrides nothing is a safe no-op, falling all the way through to the platform's
+ *  own default `PipelineConfig`), not pre-filled with a plausible-looking concrete value. Corrected
+ *  from the pre-W7 shape, which pre-seeded a concrete `defaultModel`/`confidenceThreshold: 0.35`/etc.
+ *  — those were never a documented requirement, only a leftover of the old wholesale-profile model
+ *  where every knob had to be concrete for the record to be valid at all. */
+export function emptyProfileDraft(): ProfileDraft {
   return {
     sourceId: null,
     name: '',
     description: '',
-    model: defaultModel,
-    confidenceThreshold: 0.35,
-    inferenceFps: 2,
+    model: '',
+    confidenceThreshold: undefined,
+    inferenceFps: undefined,
     labelFilterText: '',
+    labelFilterInherit: true,
     labelDenyFilterText: '',
-    detectionEnabled: true,
-    trackingMode: 'OFF',
-    trackingEngineId: '',
-    trackingCapabilityLevel: 0,
-    trackingVerifyEveryMillis: 2000,
-    trackingFollowFps: 15,
+    labelDenyFilterInherit: true,
+    detectionEnabled: undefined,
+    trackingMode: undefined,
+    trackingEngineId: undefined,
+    trackingCapabilityLevel: undefined,
+    trackingVerifyEveryMillis: undefined,
+    trackingFollowFps: undefined,
     existingEventRule: null,
     intent: '',
   };
 }
 
-/** Populates a draft from `profile` for in-place editing — `sourceId` set, so the facade PUTs. */
+/** Populates a draft from `profile` for in-place editing — `sourceId` set, so the facade PUTs. Every
+ *  field round-trips `profile`'s own per-knob inherit state exactly: a knob `profile` itself leaves
+ *  unset shows as "Inherit" in the editor, never a fabricated concrete value. */
 export function draftFromProfile(profile: CvProfile): ProfileDraft {
+  const tracking = profile.tracking;
   return {
     sourceId: profile.id,
     name: profile.name,
     description: profile.description,
-    model: profile.model,
+    model: profile.model ?? '',
     confidenceThreshold: profile.confidenceThreshold,
     inferenceFps: profile.inferenceFps,
-    labelFilterText: formatLabelList(profile.labelFilter),
-    labelDenyFilterText: formatLabelList(profile.labelDenyFilter),
+    labelFilterText: profile.labelFilter ? formatLabelList(profile.labelFilter) : '',
+    labelFilterInherit: profile.labelFilter === undefined,
+    labelDenyFilterText: profile.labelDenyFilter ? formatLabelList(profile.labelDenyFilter) : '',
+    labelDenyFilterInherit: profile.labelDenyFilter === undefined,
     detectionEnabled: profile.detectionEnabled,
-    trackingMode: profile.tracking.mode,
-    trackingEngineId: profile.tracking.engineId,
-    trackingCapabilityLevel: profile.tracking.capabilityLevel,
-    trackingVerifyEveryMillis: profile.tracking.verifyEveryMillis,
-    trackingFollowFps: profile.tracking.followFps,
-    existingEventRule: profile.eventRule,
-    // Never inferred from `profile.sources` — see this interface's own doc comment on `intent`.
+    trackingMode: tracking?.mode,
+    trackingEngineId: tracking?.engineId,
+    trackingCapabilityLevel: tracking?.capabilityLevel,
+    trackingVerifyEveryMillis: tracking?.verifyEveryMillis,
+    trackingFollowFps: tracking?.followFps,
+    existingEventRule: profile.eventRule ?? null,
+    // Never inferred from `profile.intent` — see this interface's own doc comment on `intent`.
     intent: '',
   };
 }
@@ -156,20 +228,91 @@ export function forkDraftFromProfile(profile: CvProfile, existingNames: readonly
 /**
  * Applies an intent pick to `draft` (the editor's intent `<select>`, §4.7 wave W3.6).
  *
- * `CvProfileRequest#model` is always sent, and the server only seeds it from intent when the
- * request's own `model` is **blank** (`CvProfileRequest#toSpec()`, Java) — so picking an intent must
- * be able to blank the model select's own value. The **"no intent" → "an intent" transition** blanks
- * `draft.model` (deferring it to the platform, matching what an operator who has never touched Model
- * would expect from picking an intent); an **intent → a *different* intent** transition leaves
- * `draft.model` exactly as it is, so an operator's own explicit model choice — made any time after
- * the first intent pick — stays sticky even if the intent selection changes again, matching the
- * plan's own acceptance wording. This is the one and only place `intent` and `model` interact; every
- * other transition (picking a concrete model, in either intent state) goes through {@link
- * VisionProfilesFacade.patchDraft} untouched, per that facade's own single-field-at-a-time contract.
+ * `CvProfileRequest#model` blank means "leave this knob unset" (decision E22) — a blank `model`
+ * paired with a chosen `intent` is exactly what asks `CvProfileResolver` to seed `model` from that
+ * intent, now at FOLD time rather than at save time (**corrected wave W7** — the Java-side request no
+ * longer resolves this itself; see `CvProfileRequest`'s own doc comment in `models.ts`). Picking an
+ * intent must still be able to blank the model select's own value for that to happen. The **"no
+ * intent" → "an intent" transition** blanks `draft.model` (deferring it to the platform/intent,
+ * matching what an operator who has never touched Model would expect from picking an intent); an
+ * **intent → a *different* intent** transition leaves `draft.model` exactly as it is, so an
+ * operator's own explicit model choice — made any time after the first intent pick — stays sticky
+ * even if the intent selection changes again, matching the plan's own acceptance wording. This is the
+ * one and only place `intent` and `model` interact; every other transition (picking a concrete model,
+ * in either intent state) goes through {@link VisionProfilesFacade.patchDraft} untouched, per that
+ * facade's own single-field-at-a-time contract.
  */
 export function applyIntentToDraft(draft: ProfileDraft, intent: CvProfileIntent | ''): ProfileDraft {
   const model = draft.intent === '' && intent !== '' ? '' : draft.model;
   return { ...draft, intent, model };
+}
+
+// --- Tri-state `<select>` encodings (wave W7, decision E22) --------------------------------------
+// A plain HTML checkbox/blank-text cannot represent "inherit" for a knob that already has its own
+// real, explicit "off"/"default" value distinct from unset — see `ProfileDraft`'s own doc comment for
+// the full reasoning. Each pair below is one knob's own sentinel(s) plus the two pure conversions
+// the template uses at its `[ngModel]`/`(ngModelChange)` boundary; `ProfileDraft` itself always holds
+// the plain, already-inherit-capable domain type (`TrackingMode | undefined`, `string | undefined`,
+// `boolean | undefined`), never one of these wire-adjacent sentinel strings.
+
+/** `<select name="trackingMode">`'s own inherit sentinel — a real `TrackingMode` never equals this
+ *  string, so it round-trips unambiguously alongside the three real modes. */
+export const TRACKING_MODE_SELECT_INHERIT = 'INHERIT';
+
+/** `draft.trackingMode` → the tracking-mode `<select>`'s own string value. */
+export function trackingModeSelectValue(mode: TrackingMode | undefined): string {
+  return mode ?? TRACKING_MODE_SELECT_INHERIT;
+}
+
+/** The inverse of {@link trackingModeSelectValue}. */
+export function parseTrackingModeSelectValue(value: string): TrackingMode | undefined {
+  return value === TRACKING_MODE_SELECT_INHERIT ? undefined : (value as TrackingMode);
+}
+
+/** `<select name="trackingEngine">`'s own two sentinels: {@link ENGINE_SELECT_INHERIT} for "leave
+ *  this knob unset" and {@link ENGINE_SELECT_DEPLOYMENT_DEFAULT} for the real, explicit `''` engine
+ *  id ("use the deployment default engine"). Every other option value is a real tracker id from
+ *  `GET /api/cv/trackers`, which can never collide with either sentinel string. */
+export const ENGINE_SELECT_INHERIT = '__inherit__';
+export const ENGINE_SELECT_DEPLOYMENT_DEFAULT = '__deployment_default__';
+
+/** `draft.trackingEngineId` → the engine `<select>`'s own string value. */
+export function engineSelectValue(engineId: string | undefined): string {
+  if (engineId === undefined) {
+    return ENGINE_SELECT_INHERIT;
+  }
+  return engineId === '' ? ENGINE_SELECT_DEPLOYMENT_DEFAULT : engineId;
+}
+
+/** The inverse of {@link engineSelectValue}. */
+export function parseEngineSelectValue(value: string): string | undefined {
+  if (value === ENGINE_SELECT_INHERIT) {
+    return undefined;
+  }
+  return value === ENGINE_SELECT_DEPLOYMENT_DEFAULT ? '' : value;
+}
+
+/** `<select name="detectionEnabled">`'s own three-way values — a plain checkbox has only two states
+ *  and cannot represent "inherit" as a third (CLAUDE.md rule 10: never overload one control's
+ *  unchecked state to mean two different things). */
+export const DETECTION_SELECT_INHERIT = 'INHERIT';
+export const DETECTION_SELECT_ON = 'ON';
+export const DETECTION_SELECT_OFF = 'OFF';
+
+/** `draft.detectionEnabled` → the detection `<select>`'s own string value. */
+export function detectionSelectValue(value: boolean | undefined): string {
+  if (value === undefined) {
+    return DETECTION_SELECT_INHERIT;
+  }
+  return value ? DETECTION_SELECT_ON : DETECTION_SELECT_OFF;
+}
+
+/** The inverse of {@link detectionSelectValue}. */
+export function parseDetectionSelectValue(value: string): boolean | undefined {
+  if (value === DETECTION_SELECT_ON) {
+    return true;
+  }
+  return value === DETECTION_SELECT_OFF ? false : undefined;
 }
 
 /** `"mast-cams"` → `"Copy of mast-cams"`, then `"Copy of mast-cams (2)"`, `"Copy of mast-cams (3)"`, …
@@ -212,39 +355,47 @@ export function formatLabelList(labels: readonly string[]): string {
  * editor's Save button disables while this is non-empty, and the errors render as one `vision-notice`
  * rather than per-field messages (this page's forms are short enough that a single list reads fine,
  * matching `org-settings.html`'s own required-attribute-only validation for its simpler forms, but
- * named/explicit here since a confidence/fps range isn't expressible with a plain HTML `required`). */
+ * named/explicit here since a confidence/fps range isn't expressible with a plain HTML `required`).
+ *
+ * **Wave W7 — validates only SET knobs** (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7/§8,
+ * decision E22): an unset (inherited) knob has nothing of this draft's own to be wrong — its real
+ * value comes from a lower tier the fold, not this form, resolves — so every range check below is
+ * gated on the knob actually being present. **`model` is no longer required at all**, with or without
+ * an intent chosen: a profile that leaves every knob unset is a valid, if inert, patch (decision
+ * E22's own default — see {@link emptyProfileDraft}'s doc comment). Corrected from the pre-W7 rule,
+ * which required a concrete `model` unless an intent was picked — a leftover of the old
+ * wholesale-profile model where every knob had to be concrete for the record to be valid at all.
+ */
 export function validateDraft(draft: ProfileDraft): readonly string[] {
   const errors: string[] = [];
   if (draft.name.trim().length === 0) {
     errors.push('Name is required.');
   }
-  // A blank model is only valid while an intent is chosen (the server resolves it from that intent,
-  // `CvProfileRequest#toSpec()`) — see `applyIntentToDraft`'s own doc comment. With no intent chosen,
-  // today's exact rule holds unchanged: a concrete model is required.
-  if (draft.intent === '' && draft.model.trim().length === 0) {
-    errors.push('Choose a model.');
-  }
-  // Mirrors `IntentPolicyResolver.resolve`'s own `IllegalArgumentException` for `Intent.CUSTOM` with
-  // an empty/absent label filter — caught here so the operator sees it before submitting, not as a
-  // raw 400 from the server.
-  if (draft.intent === 'CUSTOM' && parseLabelList(draft.labelFilterText).length === 0) {
+  // Mirrors `CvProfileSpec`'s own `IllegalArgumentException` for `Intent.CUSTOM` with a null/empty
+  // `labelFilter` — caught here so the operator sees it before submitting, not as a raw 400 from the
+  // server. An inherited (unset) label filter fails this exact same way a request-sent empty list
+  // would: `CvProfileSpec` throws on CUSTOM whenever `labelFilter` is null OR empty, and "inherit"
+  // sends null.
+  if (draft.intent === 'CUSTOM' && (draft.labelFilterInherit || parseLabelList(draft.labelFilterText).length === 0)) {
     errors.push('Custom intent needs at least one class in the label filter.');
   }
-  if (!(draft.confidenceThreshold >= 0 && draft.confidenceThreshold <= 1)) {
+  if (draft.confidenceThreshold !== undefined && !(draft.confidenceThreshold >= 0 && draft.confidenceThreshold <= 1)) {
     errors.push('Confidence threshold must be between 0 and 1.');
   }
-  if (!(draft.inferenceFps >= 1)) {
+  if (draft.inferenceFps !== undefined && !(draft.inferenceFps >= 1)) {
     errors.push('Inference rate must be at least 1 fps.');
   }
-  if (draft.trackingMode !== 'OFF') {
-    if (!(draft.trackingCapabilityLevel >= 0)) {
+  if (draft.trackingMode !== undefined && draft.trackingMode !== 'OFF') {
+    if (draft.trackingCapabilityLevel !== undefined && !(draft.trackingCapabilityLevel >= 0)) {
       errors.push('Tracking capability level cannot be negative.');
     }
-    if (!(draft.trackingVerifyEveryMillis >= 0)) {
-      errors.push('Verify interval cannot be negative.');
-    }
-    if (!(draft.trackingFollowFps >= 0)) {
-      errors.push('Follow rate cannot be negative.');
+    if (draft.trackingMode === 'FOLLOW') {
+      if (draft.trackingVerifyEveryMillis !== undefined && !(draft.trackingVerifyEveryMillis >= 0)) {
+        errors.push('Verify interval cannot be negative.');
+      }
+      if (draft.trackingFollowFps !== undefined && !(draft.trackingFollowFps >= 0)) {
+        errors.push('Follow rate cannot be negative.');
+      }
     }
   }
   return errors;
@@ -254,42 +405,74 @@ export function validateDraft(draft: ProfileDraft): readonly string[] {
  * a `ProfileDraft` turns back into the wire shape. `eventRule` is never included (§5.1: start-time
  * only, not part of this request type at all).
  *
+ * **Wave W7 — omits every unset knob** (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7/§8, decision
+ * E22), mirroring `CvProfileRequest`'s own now-optional fields: an unset knob is sent as `undefined`
+ * (an absent JSON key, never a fabricated concrete value) rather than the draft's own placeholder.
+ * `model` blank means unset — see `ProfileDraft`'s own doc comment for why that encoding is safe here
+ * specifically. `labelFilter`/`labelDenyFilter` send `undefined` whenever their own `*Inherit` flag is
+ * set, **regardless of the textarea's own text** — otherwise {@link parseLabelList} runs as before,
+ * so an explicitly-emptied textarea still round-trips as the real "keep/deny nothing" `[]` value it
+ * always has. `tracking` is sent as `undefined` (the whole group left unset) only when every one of
+ * its five knobs is unset; otherwise each unset sub-knob is simply absent from the object, which is
+ * this wave's own genuinely per-knob tracking inherit (see `ProfileDraft`'s doc comment for why
+ * tracking is not a single whole-group toggle).
+ *
  * `intent` is omitted entirely (not sent as `null`) when `draft.intent === ''` — "no intent chosen"
  * — exactly {@link CvProfileRequest#intent}'s own "skip intent resolution entirely" sentinel.
- * `labelFilter` needs no equivalent special-casing for "leave this to the platform": {@link
- * parseLabelList}`('')` already returns `[]`, which is already the exact empty-list sentinel
- * `CvProfileRequest#toSpec()` checks for, so an untouched label-filter textarea already round-trips
- * correctly with zero changes here. */
+ */
 export function draftToRequest(draft: ProfileDraft): CvProfileRequest {
-  const tracking: CvProfileTracking = {
+  return {
+    name: draft.name.trim(),
+    description: draft.description.trim(),
+    model: draft.model.trim() === '' ? undefined : draft.model.trim(),
+    confidenceThreshold: draft.confidenceThreshold,
+    inferenceFps: draft.inferenceFps,
+    labelFilter: draft.labelFilterInherit ? undefined : parseLabelList(draft.labelFilterText),
+    labelDenyFilter: draft.labelDenyFilterInherit ? undefined : parseLabelList(draft.labelDenyFilterText),
+    detectionEnabled: draft.detectionEnabled,
+    tracking: draftTrackingPatch(draft),
+    intent: draft.intent === '' ? undefined : draft.intent,
+  };
+}
+
+/** {@link draftToRequest}'s own `tracking` sub-builder — `undefined` (the whole group unset) only
+ *  when every one of the five tracking knobs is itself unset; otherwise an object carrying exactly
+ *  the knobs `draft` sets, leaving the rest absent (per-knob inherit within the group). */
+function draftTrackingPatch(draft: ProfileDraft): CvProfileTracking | undefined {
+  if (
+    draft.trackingMode === undefined &&
+    draft.trackingEngineId === undefined &&
+    draft.trackingCapabilityLevel === undefined &&
+    draft.trackingVerifyEveryMillis === undefined &&
+    draft.trackingFollowFps === undefined
+  ) {
+    return undefined;
+  }
+  return {
     mode: draft.trackingMode,
     engineId: draft.trackingEngineId,
     capabilityLevel: draft.trackingCapabilityLevel,
     verifyEveryMillis: draft.trackingVerifyEveryMillis,
     followFps: draft.trackingFollowFps,
   };
-  return {
-    name: draft.name.trim(),
-    description: draft.description.trim(),
-    model: draft.model,
-    confidenceThreshold: draft.confidenceThreshold,
-    inferenceFps: draft.inferenceFps,
-    labelFilter: parseLabelList(draft.labelFilterText),
-    labelDenyFilter: parseLabelList(draft.labelDenyFilterText),
-    detectionEnabled: draft.detectionEnabled,
-    tracking,
-    intent: draft.intent === '' ? undefined : draft.intent,
-  };
 }
 
 /**
  * The save-toast text for `VisionProfilesFacade.saveDraft()` — names exactly which knob(s) `saved`'s
- * own `sources` reports as resolved from `intent`, e.g. `'"Vehicles patrol" saved — model resolved
- * from your Vehicles intent.'`. Never claims a knob was intent-resolved when its own `sources` entry
- * is absent (§3.5 honesty rule) — `intent === ''` alone (impossible to pair with a non-`undefined`
- * `sources` entry in practice, since the server can only have seeded a field from an intent that was
+ * own `sources` reports as left to `intent`, e.g. `'"Vehicles patrol" saved — model left to your
+ * Vehicles intent.'`. Never claims a knob was intent-seeded when its own `sources` entry is absent
+ * (§3.5 honesty rule) — `intent === ''` alone (impossible to pair with a non-`undefined` `sources`
+ * entry in practice, since the server can only have flagged a field against an intent that was
  * actually sent, but checked explicitly here too so this function never *names* an intent it cannot
- * point to) falls back to the plain saved/created message, same as reporting nothing resolved.
+ * point to) falls back to the plain saved/created message, same as reporting nothing deferred.
+ *
+ * **Wording corrected wave W7** (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7/§8, decision E22):
+ * this used to say "resolved from" — accurate under the pre-W7 contract, where the save request
+ * itself computed and stored a concrete value. Now `intent` is persisted unresolved and
+ * `CvProfileResolver` only seeds the knob later, at FOLD time (wave W7.1) — `saved.sources.model
+ * === 'INTENT'` means "this knob is left unset, and will be resolved from your intent whenever this
+ * profile's tier is read/applied," not "already resolved to some concrete value here." "Resolved
+ * from" would misstate that as a past, completed act.
  */
 export function saveOutcomeMessage(saved: CvProfile, intent: CvProfileIntent | '', isUpdate: boolean): string {
   const verb = isUpdate ? 'saved' : 'created';
@@ -297,17 +480,17 @@ export function saveOutcomeMessage(saved: CvProfile, intent: CvProfileIntent | '
   if (intent === '') {
     return plain;
   }
-  const resolvedKnobs: string[] = [];
+  const deferredKnobs: string[] = [];
   if (saved.sources.model === 'INTENT') {
-    resolvedKnobs.push('model');
+    deferredKnobs.push('model');
   }
   if (saved.sources.labelFilter === 'INTENT') {
-    resolvedKnobs.push('label filter');
+    deferredKnobs.push('label filter');
   }
-  if (resolvedKnobs.length === 0) {
+  if (deferredKnobs.length === 0) {
     return plain;
   }
-  return `"${saved.name}" ${verb} — ${resolvedKnobs.join(' and ')} resolved from your ${describeIntent(intent)} intent.`;
+  return `"${saved.name}" ${verb} — ${deferredKnobs.join(' and ')} left to your ${describeIntent(intent)} intent.`;
 }
 
 /** `CvProfileIntent` → the editor's own picker label, reused for the save-toast's "your … intent" clause. */

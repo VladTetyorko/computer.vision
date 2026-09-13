@@ -11,6 +11,7 @@ import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.perception.application.profile.CvProfileService;
 import com.drones.vision.perception.application.profile.EffectiveProfile;
+import com.drones.vision.perception.application.profile.KnobSources;
 import com.drones.vision.perception.application.profile.ProfileSource;
 import com.drones.vision.perception.domain.model.CvProfileId;
 import com.drones.vision.perception.domain.model.EventRuleConfig;
@@ -74,7 +75,7 @@ class StreamDetectionSupportTest {
         PipelineConfig intentSeededAssetConfig = new PipelineConfig(new ModelRef("yolo26n.pt", "latest"), 0.40, 10, 2,
                 Set.of("person"), EventRuleConfig.defaults(), true, TrackingConfig.defaults(), Set.of(), false);
         EffectiveProfile effective = new EffectiveProfile(assetId, CvProfileId.random(), "People (asset)",
-                ProfileSource.ASSET, intentSeededAssetConfig);
+                ProfileSource.ASSET, intentSeededAssetConfig, KnobSources.platform(), null);
         when(cvProfileService.effective(any(), any(), any(), any())).thenReturn(effective);
 
         // The session-tier "expert override" layer: this operator pins a stricter confidence

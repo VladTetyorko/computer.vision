@@ -27,10 +27,21 @@ public record CvProfileEventRuleResponse(List<String> labels, double confidenceT
     /**
      * Maps a profile's event rule to the wire.
      *
-     * @param eventRule the rule to map
-     * @return this shape's view of it
+     * <p>Wave W7.3 (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.7, decision E22):
+     * {@code eventRule} is now nullable on a persisted profile ({@code null} = inherit), so this
+     * factory is null-tolerant too — an EFFECTIVE fold's own {@code eventRule} is never {@code null}
+     * (a fold always resolves one), so this same method serves both call sites rather than one more
+     * narrow overload.
+     *
+     * @param eventRule the rule to map, or {@code null} when unset
+     * @return this shape's view of it, or {@code null} when {@code eventRule} is {@code null} — the
+     *         whole {@code eventRule} key is then omitted from the enclosing {@link
+     *         CvProfileResponse} by its own {@code @JsonInclude(NON_NULL)}
      */
     public static CvProfileEventRuleResponse from(EventRuleConfig eventRule) {
+        if (eventRule == null) {
+            return null;
+        }
         return new CvProfileEventRuleResponse(List.copyOf(eventRule.labels()), eventRule.confidenceThreshold(),
                 eventRule.consecutiveToOpen(), eventRule.absenceToClose().toSeconds());
     }

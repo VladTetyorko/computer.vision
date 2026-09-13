@@ -7,7 +7,6 @@ import com.drones.vision.perception.domain.model.CvProfileBinding;
 import com.drones.vision.perception.domain.model.CvProfileId;
 import com.drones.vision.perception.domain.model.EventRuleConfig;
 import com.drones.vision.perception.domain.model.ModelRef;
-import com.drones.vision.perception.domain.model.TrackingConfig;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -24,8 +23,8 @@ class CvProfileCacheTest {
     private static CvProfile profile(String name) {
         Instant now = Instant.parse("2026-01-01T00:00:00Z");
         return new CvProfile(CvProfileId.random(), name, "", false, GroupId.random(),
-                new ModelRef("yolo26n.pt", "latest"), 0.4, 10, List.of(), List.of(), true, TrackingConfig.off(),
-                EventRuleConfig.defaults(), now, now);
+                new ModelRef("yolo26n.pt", "latest"), 0.4, 10, List.of(), List.of(), true, null,
+                EventRuleConfig.defaults(), null, now, now);
     }
 
     @Test

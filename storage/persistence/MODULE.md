@@ -215,6 +215,7 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 | `V33__assignment_roles.sql` | `pilot_assignments.role` (`VARCHAR(16) NOT NULL DEFAULT 'PILOT'`), `users.must_change_password` (`BOOLEAN NOT NULL DEFAULT FALSE`) — the per-asset seat (`AssignmentRole`, PILOT/CREW) and the forced-password-change latch (AUTH-ROLES-PLAN.md §3.4/D13, wave B3); purely additive, no backfill logic needed beyond the column defaults; no trigger changes — `V21`'s `audit_row_change()` resolves every column via `to_jsonb(NEW/OLD)`, not a fixed list |
 | `V34__spring_session.sql` | `spring_session`/`spring_session_attributes` — a **byte-for-byte copy** of Spring Session JDBC 4.1.0's own official `org/springframework/session/jdbc/schema-postgresql.sql` (extracted from the jar, not hand-transcribed), so sessions survive an app restart (AUTH-ROLES-PLAN.md §3.6, wave B5); no entity/mapper/repository — this table is read/written entirely by Spring Session's own `JdbcIndexedSessionRepository`, wired in `vision-app`'s `PersistenceWiringConfiguration`/`AuthWiringConfiguration`, not by anything in this module; both tables added to `PostgresDockerIntegrationTest`'s `EXCLUDED_TABLES` (infrastructure, same classification as `flyway_schema_history`) |
 | `V35__event_history.sql` | `event_history` table (`EventHistoryPort`, `vision-platform`): domain-owned `id VARCHAR(64)` PK (`Event.id()` is a plain `String`, not a UUID-wrapper), nullable `stream_id UUID` (device-level events have none), `occurred_at TIMESTAMPTZ NOT NULL`, `type VARCHAR(32) NOT NULL`, `message TEXT NOT NULL`, `attributes JSONB NOT NULL DEFAULT '{}'::jsonb` (free-form `Map<String,String>`, same jsonb convention as every other map-typed column in this module); one index, `idx_event_history_occurred_at ON event_history (occurred_at DESC)`, for `findRecent`/`findSince`'s newest-first scan and the table-wide retention prune's `ORDER BY occurred_at DESC LIMIT`; no foreign key (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave B3) |
+| `V36__cv_profile_patch.sql` | drops `NOT NULL` on `cv_profiles.model_id`/`model_version`/`confidence_threshold`/`inference_fps`/`label_filter`/`label_deny_filter`/`detection_enabled`/`tracking`/`event_rule` (every knob but `id`/`name`/`description`/`built_in`/`group_id`/the timestamps) so a row can leave any of them unset = inherit; adds `ck_cv_profiles_model_pair CHECK ((model_id IS NULL) = (model_version IS NULL))`; adds nullable `intent TEXT` (enum name, parsed via `Intent#valueOf`, same convention as `cv_profile_bindings.scope_kind`). Existing rows untouched — every V29-seeded built-in and any prior operator-created profile already had every column set (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7, decision E22, wave W7.2) |
 
 A second, conditional Flyway location, `src/main/resources/db/seed/dev`, holds
 `V90001__dev_accounts.sql` (the `admin`/`manager`/`pilot` DEV-ONLY accounts) — it only joins Flyway's
@@ -438,6 +439,18 @@ buffered samples per open usage; `DEFAULT_BATCH_WINDOW_MILLIS` is non-zero on pu
   factory-internal timestamp the test cannot supply, it instead truncates **both sides** to millis right
   before comparing (`assertAssetRoundTrips`/`millisTruncated`) — same fix, applied after the fact instead
   of before.
+- **An unconfigured Jackson 3 `JsonMapper`/Hibernate's auto-detected `Jackson3JsonFormatMapper` FAILS
+  on an unrecognized JSON property by default** (`UnrecognizedPropertyException`) — it does not
+  silently ignore one, despite Jackson 2's community reputation for exactly that. Hit for real, not
+  hypothetically: pre-W7.2 `cv_profiles.tracking` rows store a full 10-field `TrackingConfig` object,
+  and `V36__cv_profile_patch.sql`/wave W7.2 retypes the column's Java side to the narrower 5-field
+  `TrackingKnobPatch` — every pre-existing row's extra keys (`lock` etc.) then failed to deserialize.
+  Fixed with a Jackson mix-in (`config.TrackingKnobPatchJsonMixin`, `@JsonIgnoreProperties(ignoreUnknown
+  = true)`, package-private — `domain.model.TrackingKnobPatch` itself stays framework-free) registered
+  on a custom `JsonMapper` passed into `new Jackson3JsonFormatMapper(mapper)` and installed via
+  `configuration.getProperties().put("hibernate.type.json_format_mapper", ...)` in `PersistenceUnit#start`
+  — scoped to exactly this one type, not a blanket ignore-unknown-properties setting across every jsonb
+  column in this schema (masking a real shape bug elsewhere is worse than one extra mix-in).
 
 ## Status
 
@@ -579,3 +592,14 @@ later wave. `PostgresDockerIntegrationTest` needed the same mechanical update at
 `DetectionResult` construction sites. No schema change, no new migration, no behavior change — noted
 here only because CLAUDE.md's module-docs rule calls for every touched module's doc to reflect its
 own change, however small.
+
+**CV-ORCHESTRATION wave W7.2 done** (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7, decision E22 —
+"a profile is a patch"). `V36__cv_profile_patch.sql` (see the migration ledger above) + `CvProfileEntity`
+widened to mirror `contexts/vision-perception`'s W7.0 domain rewrite: every knob but identity/timestamps
+now nullable, a new nullable `intent` column, `tracking` retyped `TrackingKnobPatch` (5 fields, not the
+10-field `TrackingConfig` it held before). One real defect found and fixed, not just a mechanical
+follow-through: pre-existing `tracking` jsonb rows failed to deserialize against the narrower type
+(`UnrecognizedPropertyException` — see the new Gotchas entry above for the fix, a scoped Jackson
+mix-in registered in `PersistenceUnit#start`). `./mvnw -B -pl storage/persistence -am test -DskipWeb` —
+**286** tests, `BUILD SUCCESS`, Docker ran (not skipped — real `postgres:16`, Flyway migrated through
+`V36`).

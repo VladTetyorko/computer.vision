@@ -3,6 +3,7 @@ import type {
   CvModel,
   CvProfile,
   CvProfileRequest,
+  CvProfileTracking,
   CvTracker,
   DetectionRate,
   DetectionResult,
@@ -408,18 +409,41 @@ export function resolvedConfigFromStream(config: StreamConfigResponse): Resolved
   };
 }
 
+function resolvedTrackingFromProfile(tracking: CvProfileTracking): ResolvedCvConfig['tracking'] {
+  // See {@link resolvedConfigFromProfile}'s own doc comment — the same fold guarantee applies to
+  // every one of `tracking`'s own five knobs.
+  return {
+    mode: tracking.mode!,
+    engineId: tracking.engineId!,
+    capabilityLevel: tracking.capabilityLevel!,
+    verifyEveryMillis: tracking.verifyEveryMillis!,
+    followFps: tracking.followFps!,
+  };
+}
+
 /** The asset's own effective profile, reduced to {@link ResolvedCvConfig} — what the *next* Start
  *  will actually apply (§3.1: "resolved once at stream start"), shown before a stream exists so the
- *  operator sees real intent rather than a blank/fabricated form. */
+ *  operator sees real intent rather than a blank/fabricated form.
+ *
+ * **Wave W7 — a profile is a patch** (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7/§8, decision
+ * E22): `CvProfile` itself is now a genuinely per-knob-inherit-capable patch, so every field below is
+ * typed `| undefined`. `profile` here is always `EffectiveCvProfile#profile` specifically, never a
+ * raw stored profile straight from `GET /api/cv/profiles` — `CvProfileResolver`'s own fold (wave
+ * W7.1) bottoms out at the PLATFORM tier's always-concrete defaults for every knob, so this
+ * particular `CvProfile` is contractually fully resolved even though its *type* doesn't say so. The
+ * non-null assertions below assert exactly that fold guarantee, not a fabricated fallback — mirrors
+ * the identical compromise already made on the Java side, where `CvProfileResponse` is reused
+ * verbatim for both a raw (possibly-patch) profile read and `fromEffective()`'s always-concrete
+ * result, rather than minting a second, statically-non-nullable DTO. */
 export function resolvedConfigFromProfile(profile: CvProfile): ResolvedCvConfig {
   return {
-    model: profile.model,
-    confidenceThreshold: profile.confidenceThreshold,
-    inferenceFps: profile.inferenceFps,
-    labelFilter: profile.labelFilter,
-    labelDenyFilter: profile.labelDenyFilter,
-    detectionEnabled: profile.detectionEnabled,
-    tracking: profile.tracking,
+    model: profile.model!,
+    confidenceThreshold: profile.confidenceThreshold!,
+    inferenceFps: profile.inferenceFps!,
+    labelFilter: profile.labelFilter!,
+    labelDenyFilter: profile.labelDenyFilter!,
+    detectionEnabled: profile.detectionEnabled!,
+    tracking: resolvedTrackingFromProfile(profile.tracking!),
   };
 }
 

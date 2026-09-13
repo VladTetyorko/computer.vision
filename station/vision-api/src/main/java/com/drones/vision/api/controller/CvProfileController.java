@@ -2,6 +2,7 @@ package com.drones.vision.api.controller;
 
 import com.drones.vision.api.dto.CvCoverageResponse;
 import com.drones.vision.api.dto.CvCoverageRowResponse;
+import com.drones.vision.api.dto.CvKnobSourcesResponse;
 import com.drones.vision.api.dto.CvProfileBindingRequest;
 import com.drones.vision.api.dto.CvProfileBindingResponse;
 import com.drones.vision.api.dto.CvProfileRequest;
@@ -97,7 +98,7 @@ public class CvProfileController {
     @GetMapping("/api/cv/profiles")
     public CvProfilesResponse list() {
         List<CvProfileResponse> profiles = cvProfileService.list(currentUser.userId(), currentUser.scope()).stream()
-                .map(profile -> CvProfileResponse.from(profile, CvProfileResponse.Sources.none())).toList();
+                .map(CvProfileResponse::from).toList();
         return new CvProfilesResponse(profiles);
     }
 
@@ -110,7 +111,7 @@ public class CvProfileController {
     @GetMapping("/api/cv/profiles/{id}")
     public CvProfileResponse get(@PathVariable String id) {
         CvProfile profile = cvProfileService.get(CvProfileId.of(id), currentUser.userId(), currentUser.scope());
-        return CvProfileResponse.from(profile, CvProfileResponse.Sources.none());
+        return CvProfileResponse.from(profile);
     }
 
     /**
@@ -124,7 +125,7 @@ public class CvProfileController {
     public CvProfileResponse create(@RequestBody CvProfileRequest request) {
         CvProfile created = cvProfileService.create(request.toSpec(), currentUser.ownership().groupId(),
                 currentUser.userId(), currentUser.authority());
-        return CvProfileResponse.from(created, CvProfileResponse.Sources.from(request.fieldSources()));
+        return CvProfileResponse.from(created);
     }
 
     /**
@@ -139,7 +140,7 @@ public class CvProfileController {
     public CvProfileResponse update(@PathVariable String id, @RequestBody CvProfileRequest request) {
         CvProfile updated = cvProfileService.update(CvProfileId.of(id), request.toSpec(), currentUser.userId(),
                 currentUser.authority());
-        return CvProfileResponse.from(updated, CvProfileResponse.Sources.from(request.fieldSources()));
+        return CvProfileResponse.from(updated);
     }
 
     /**
@@ -191,11 +192,12 @@ public class CvProfileController {
                 currentUser.scope());
         CvProfileResponse profile = resolved.source() == ProfileSource.PLATFORM
                 ? CvProfileResponse.platformDefault(resolved.config())
-                : CvProfileResponse.from(
+                : CvProfileResponse.fromEffective(
                         cvProfileService.get(resolved.profileId(), currentUser.userId(), currentUser.scope()),
-                        CvProfileResponse.Sources.none());
+                        resolved.config());
         return new EffectiveCvProfileResponse(resolved.assetId().value().toString(), profile,
-                resolved.source().name());
+                resolved.source().name(), CvKnobSourcesResponse.from(resolved.sources()),
+                resolved.intent() == null ? null : resolved.intent().name());
     }
 
     /**

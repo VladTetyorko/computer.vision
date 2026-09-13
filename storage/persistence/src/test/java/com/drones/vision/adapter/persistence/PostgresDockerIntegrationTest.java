@@ -34,6 +34,7 @@ import com.drones.vision.perception.domain.model.CvProfile;
 import com.drones.vision.perception.domain.model.CvProfileBinding;
 import com.drones.vision.perception.domain.model.CvProfileId;
 import com.drones.vision.perception.domain.model.BindingScope;
+import com.drones.vision.perception.domain.model.Intent;
 import com.drones.vision.learning.domain.model.Dataset;
 import com.drones.vision.learning.domain.model.DatasetId;
 import com.drones.vision.learning.domain.model.DatasetStatus;
@@ -81,6 +82,7 @@ import com.drones.vision.flight.domain.model.MessageObservation;
 import com.drones.vision.flight.domain.model.TrackCorrection;
 import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.perception.domain.model.TrackingConfig;
+import com.drones.vision.perception.domain.model.TrackingKnobPatch;
 import com.drones.vision.perception.domain.model.EventRuleConfig;
 import com.drones.vision.learning.domain.model.ModelStatus;
 import com.drones.vision.learning.domain.model.ModelTaskType;
@@ -201,6 +203,7 @@ import com.drones.vision.adapter.persistence.repository.JpaVehicleProfileReposit
 
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.EntityManagerFactory;
+import jakarta.persistence.PersistenceException;
 
 import org.hibernate.HibernateException;
 import org.hibernate.engine.jdbc.connections.spi.ConnectionProvider;
@@ -4150,6 +4153,14 @@ class PostgresDockerIntegrationTest {
      * separately proves the migration's own hand-written seed JSON decodes correctly; every test
      * here instead exercises a save written and read back through this same adapter, which is
      * self-consistent regardless of the exact jsonb wire format Hibernate's Jackson mapper chooses.
+     *
+     * <p>Wave W7.2 (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7, decision E22, {@code
+     * V36__cv_profile_patch.sql}): every knob but {@code id}/{@code name}/{@code description}/{@code
+     * builtIn}/{@code groupId}/the timestamps is now nullable, plus a new nullable {@code intent}.
+     * {@link #savedProfileRoundTripsEveryFieldIncludingTrackingAndEventRule} and friends below still
+     * build fully-specified profiles (this table's own established fixture shape); {@link
+     * #partialProfileWithEveryOptionalKnobNullRoundTripsAsInheritEverything} is the new one proving a
+     * profile can leave every knob to inherit.
      */
     @Nested
     class CvProfileRepositoryTests {
@@ -4159,7 +4170,18 @@ class PostgresDockerIntegrationTest {
         private CvProfile profile(CvProfileId id, GroupId groupId) {
             return new CvProfile(id, "mast-cams", "Fixed masts, low rate", false, groupId,
                     new ModelRef("yolo26n.pt", "latest"), 0.35, 2, List.of("person"), List.of("tree"), true,
-                    TrackingConfig.defaults(), EventRuleConfig.defaults(), NOW, NOW);
+                    knobPatchOf(TrackingConfig.defaults()), EventRuleConfig.defaults(), null, NOW, NOW);
+        }
+
+        /**
+         * Builds the {@link TrackingKnobPatch} a fully-specified profile mirroring {@code config}
+         * would carry — the five knobs a profile owns, taken from {@code config} itself rather than
+         * hand-typed, so a fixture here can never silently drift from {@link TrackingConfig}'s own
+         * defaults.
+         */
+        private TrackingKnobPatch knobPatchOf(TrackingConfig config) {
+            return new TrackingKnobPatch(config.mode(), config.engineId(), config.capabilityLevel(),
+                    config.verifyEveryMillis(), config.followFps());
         }
 
         @Test
@@ -4175,7 +4197,7 @@ class PostgresDockerIntegrationTest {
 
             CvProfile found = repository.findById(profile.id()).orElseThrow();
             assertEquals(profile, found);
-            assertEquals(TrackingConfig.defaults(), found.tracking());
+            assertEquals(knobPatchOf(TrackingConfig.defaults()), found.tracking());
             assertEquals(EventRuleConfig.defaults(), found.eventRule());
         }
 
@@ -4187,12 +4209,14 @@ class PostgresDockerIntegrationTest {
 
             CvProfile renamed = new CvProfile(id, "renamed", "still the same profile", false, groupId,
                     new ModelRef("yolo11n.pt", "latest"), 0.5, 5, List.of(), List.of(), false,
-                    TrackingConfig.off(), EventRuleConfig.defaults(), NOW, NOW.plusSeconds(60));
+                    knobPatchOf(TrackingConfig.off()), EventRuleConfig.defaults(), Intent.VEHICLES, NOW,
+                    NOW.plusSeconds(60));
             repository.save(renamed);
 
             CvProfile found = repository.findById(id).orElseThrow();
             assertEquals("renamed", found.name());
-            assertEquals(TrackingConfig.off(), found.tracking());
+            assertEquals(knobPatchOf(TrackingConfig.off()), found.tracking());
+            assertEquals(Intent.VEHICLES, found.intent());
             assertEquals(1, repository.findAllByGroup(groupId).size());
         }
 
@@ -4215,12 +4239,67 @@ class PostgresDockerIntegrationTest {
             CvProfile otherGroup = profile(CvProfileId.random(), GroupId.random());
             CvProfile builtIn = new CvProfile(CvProfileId.random(), "built-in-test", "seeded template", true, null,
                     new ModelRef("yolo26n.pt", "latest"), 0.4, 10, List.of(), List.of(), true,
-                    TrackingConfig.defaults(), EventRuleConfig.defaults(), NOW, NOW);
+                    knobPatchOf(TrackingConfig.defaults()), EventRuleConfig.defaults(), null, NOW, NOW);
             repository.save(owned);
             repository.save(otherGroup);
             repository.save(builtIn);
 
             assertEquals(List.of(owned), repository.findAllByGroup(groupId));
+        }
+
+        /**
+         * Wave W7.2's own new scenario: a profile that leaves every optional knob {@code null} —
+         * including {@code tracking}/{@code eventRule}, whole-unit inherits, and {@code intent} —
+         * must round-trip through the real jsonb/nullable-column schema exactly as it was saved, not
+         * coerce a {@code null} into some non-null platform value along the way.
+         */
+        @Test
+        void partialProfileWithEveryOptionalKnobNullRoundTripsAsInheritEverything() {
+            CvProfile partial = new CvProfile(CvProfileId.random(), "org-fps-only", "", false, GroupId.random(),
+                    null, null, null, null, null, null, null, null, null, NOW, NOW);
+
+            repository.save(partial);
+
+            CvProfile found = repository.findById(partial.id()).orElseThrow();
+            assertEquals(partial, found);
+            assertNull(found.model());
+            assertNull(found.confidenceThreshold());
+            assertNull(found.inferenceFps());
+            assertNull(found.labelFilter());
+            assertNull(found.labelDenyFilter());
+            assertNull(found.detectionEnabled());
+            assertNull(found.tracking());
+            assertNull(found.eventRule());
+            assertNull(found.intent());
+        }
+
+        /**
+         * {@code V36__cv_profile_patch.sql}'s {@code ck_cv_profiles_model_pair} CHECK constraint —
+         * {@code model_id}/{@code model_version} must be both {@code NULL} or both set. This can never
+         * happen through {@link com.drones.vision.adapter.persistence.mapper.CvProfileMapper} (it
+         * always writes both from one {@code ModelRef}, or neither), so this test reaches under the
+         * mapper with a raw native insert to prove the database itself, not just this build's own
+         * write path, refuses the inconsistent row.
+         */
+        @Test
+        void databaseRefusesAModelIdWithNoMatchingModelVersion() {
+            EntityManager em = entityManagerFactory.createEntityManager();
+            try {
+                em.getTransaction().begin();
+                assertThrows(PersistenceException.class, () -> em.createNativeQuery(
+                                "insert into cv_profiles (id, name, description, built_in, group_id, model_id, "
+                                        + "model_version, detection_enabled, created_at, updated_at) "
+                                        + "values (:id, 'bad-model-pair', '', false, :groupId, 'yolo26n.pt', null, "
+                                        + "true, now(), now())")
+                        .setParameter("id", UUID.randomUUID())
+                        .setParameter("groupId", UUID.randomUUID())
+                        .executeUpdate(), "model_id set with model_version null must violate the CHECK constraint");
+            } finally {
+                if (em.getTransaction().isActive()) {
+                    em.getTransaction().rollback();
+                }
+                em.close();
+            }
         }
 
         @Test
@@ -4962,6 +5041,17 @@ class PostgresDockerIntegrationTest {
      * CvProfileRepositoryPort#countBindingsFor(CvProfileId)} rather than {@code findAllBindings()},
      * since {@link CvProfileRepositoryTests} — sharing this same table — writes bindings of its own to
      * *other* profile ids.
+     *
+     * <p>Wave W7.2 (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7, decision E22): {@code
+     * V36__cv_profile_patch.sql} left every one of these four rows' {@code tracking} column
+     * byte-for-byte as {@code V29} wrote it — a full 10-field {@link TrackingConfig} JSON object,
+     * {@code lock} included. This test's {@code tracking} assertion below is therefore also the proof
+     * that this un-migrated, pre-W7 JSON still deserializes correctly now that the column is mapped
+     * to the narrower 5-field {@link TrackingKnobPatch} (entity javadoc's claim, verified here rather
+     * than assumed): Jackson matches the five fields both types spell identically and silently drops
+     * the five {@link TrackingKnobPatch} does not have ({@code redetectIouPercent}, {@code
+     * maxAgeFrames}, {@code minHits}, {@code reupdateMaxGapMillis}, and {@code lock} itself, which is
+     * absent from {@link TrackingKnobPatch} entirely, not merely null).
      */
     @Test
     void v29MigrationSeedsFourBuiltInCvProfilesWithZeroBindings() {
@@ -4973,6 +5063,9 @@ class PostgresDockerIntegrationTest {
                         true),
                 new Seed("0ca952cf-284a-4a33-b04c-0c9da6a64602", "military-vehicles", "orion12l.pt", 0.45, 5, true),
                 new Seed("5e0cd997-743f-4867-82c7-e2be176c23ad", "video-only", "yolo26n.pt", 0.40, 10, false));
+        TrackingKnobPatch defaultsAsAPatch = new TrackingKnobPatch(TrackingConfig.defaults().mode(),
+                TrackingConfig.defaults().engineId(), TrackingConfig.defaults().capabilityLevel(),
+                TrackingConfig.defaults().verifyEveryMillis(), TrackingConfig.defaults().followFps());
 
         for (Seed seed : seeds) {
             CvProfile profile = repository.findById(CvProfileId.of(seed.id())).orElseThrow(
@@ -4987,8 +5080,11 @@ class PostgresDockerIntegrationTest {
             assertEquals(seed.detectionEnabled(), profile.detectionEnabled());
             assertEquals(List.of(), profile.labelFilter());
             assertEquals(List.of(), profile.labelDenyFilter());
-            assertEquals(TrackingConfig.defaults(), profile.tracking(), seed.name() + " tracking must be the platform default");
+            assertEquals(defaultsAsAPatch, profile.tracking(),
+                    seed.name() + " tracking must decode the pre-W7.2 full TrackingConfig JSON into the "
+                            + "narrower TrackingKnobPatch, matching on every field the patch owns");
             assertEquals(EventRuleConfig.defaults(), profile.eventRule(), seed.name() + " eventRule must be the platform default");
+            assertNull(profile.intent(), seed.name() + " ships with no intent (a pre-W7.2 row, no such column existed)");
             assertEquals(0, repository.countBindingsFor(profile.id()), seed.name() + " must ship with zero bindings");
         }
     }
@@ -5049,6 +5145,53 @@ class PostgresDockerIntegrationTest {
                                     + "where table_name = 'cv_training_runs' and column_name = 'finished_at'")
                     .getSingleResult();
             assertEquals("YES", finishedAtNullable, "finished_at is null while a run is still RUNNING");
+        } finally {
+            em.close();
+        }
+    }
+
+    /**
+     * docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7, decision E22, wave W7.2 — proves {@code
+     * V36__cv_profile_patch.sql} applied cleanly on top of V1-V35: every one of the nine columns it
+     * names actually dropped {@code NOT NULL}, the new {@code intent} column exists and is nullable,
+     * and the {@code ck_cv_profiles_model_pair} CHECK constraint exists (its actual refusal behavior
+     * is exercised end-to-end by {@link CvProfileRepositoryTests#databaseRefusesAModelIdWithNoMatchingModelVersion}
+     * instead of repeated here, matching the "prove the migration's shape, not re-derive behavior
+     * another test already covers" split the V22/V30 tests above also follow).
+     */
+    @Test
+    void v36MigrationWidensCvProfilesToAPerKnobPatchOnTopOfV1ThroughV35() {
+        EntityManager em = entityManagerFactory.createEntityManager();
+        try {
+            for (String nowNullableColumn : List.of("model_id", "model_version", "confidence_threshold",
+                    "inference_fps", "label_filter", "label_deny_filter", "detection_enabled", "tracking",
+                    "event_rule")) {
+                String isNullable = (String) em.createNativeQuery(
+                                "select is_nullable from information_schema.columns "
+                                        + "where table_name = 'cv_profiles' and column_name = '" + nowNullableColumn
+                                        + "'")
+                        .getSingleResult();
+                assertEquals("YES", isNullable, "cv_profiles." + nowNullableColumn + " must now be nullable");
+            }
+
+            Object[] intentColumn = (Object[]) em.createNativeQuery(
+                            "select is_nullable, data_type from information_schema.columns "
+                                    + "where table_name = 'cv_profiles' and column_name = 'intent'")
+                    .getSingleResult();
+            assertEquals("YES", intentColumn[0], "cv_profiles.intent must be nullable -- no intent picked");
+            assertEquals("text", intentColumn[1]);
+
+            long modelPairConstraints = ((Number) em.createNativeQuery(
+                            "select count(*) from pg_constraint where conname = 'ck_cv_profiles_model_pair'")
+                    .getSingleResult()).longValue();
+            assertEquals(1, modelPairConstraints, "ck_cv_profiles_model_pair must exist");
+
+            // Every pre-W7.2 row (the four built-ins) fully specified every knob before this
+            // migration ran -- dropping NOT NULL must not have backfilled or rewritten a single one.
+            long nonNullModelIds = ((Number) em.createNativeQuery(
+                            "select count(*) from cv_profiles where built_in = true and model_id is not null")
+                    .getSingleResult()).longValue();
+            assertEquals(4, nonNullModelIds, "the four built-ins' pre-existing columns must be untouched");
         } finally {
             em.close();
         }

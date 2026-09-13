@@ -6,7 +6,26 @@ import { Notice } from '../../shared/ui/notice';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { SectionHeader } from '../../shared/ui/section-header';
 import type { BindingScope, CvCoverageRow, CvProfile } from '../../core/api/models';
-import { describeCoverageFilters, describeCoverageSource, isModelMissingOnWorker } from './vision-profiles-logic';
+import {
+  DETECTION_SELECT_INHERIT,
+  DETECTION_SELECT_OFF,
+  DETECTION_SELECT_ON,
+  ENGINE_SELECT_DEPLOYMENT_DEFAULT,
+  ENGINE_SELECT_INHERIT,
+  TRACKING_MODE_SELECT_INHERIT,
+  describeCoverageFilters,
+  describeCoverageSource,
+  describeDetectionCardState,
+  describeOptionalModel,
+  describeOptionalNumber,
+  detectionSelectValue,
+  engineSelectValue,
+  isModelMissingOnWorker,
+  parseDetectionSelectValue,
+  parseEngineSelectValue,
+  parseTrackingModeSelectValue,
+  trackingModeSelectValue,
+} from './vision-profiles-logic';
 import { VisionProfilesFacade } from './vision-profiles-facade';
 
 /**
@@ -48,6 +67,24 @@ export class VisionProfilesPage {
   protected readonly describeCoverageSource = describeCoverageSource;
   protected readonly describeCoverageFilters = describeCoverageFilters;
   protected readonly isModelMissingOnWorker = isModelMissingOnWorker;
+  protected readonly describeOptionalModel = describeOptionalModel;
+  protected readonly describeOptionalNumber = describeOptionalNumber;
+  protected readonly describeDetectionCardState = describeDetectionCardState;
+
+  // --- Editor tri-state `<select>` sentinels/conversions (wave W7, decision E22) — see
+  // `vision-profiles-logic.ts`'s own doc comments for why each knob below needs one. ---------------
+  protected readonly trackingModeSelectValue = trackingModeSelectValue;
+  protected readonly parseTrackingModeSelectValue = parseTrackingModeSelectValue;
+  protected readonly trackingModeInherit = TRACKING_MODE_SELECT_INHERIT;
+  protected readonly engineSelectValue = engineSelectValue;
+  protected readonly parseEngineSelectValue = parseEngineSelectValue;
+  protected readonly engineInherit = ENGINE_SELECT_INHERIT;
+  protected readonly engineDeploymentDefault = ENGINE_SELECT_DEPLOYMENT_DEFAULT;
+  protected readonly detectionSelectValue = detectionSelectValue;
+  protected readonly parseDetectionSelectValue = parseDetectionSelectValue;
+  protected readonly detectionInherit = DETECTION_SELECT_INHERIT;
+  protected readonly detectionOn = DETECTION_SELECT_ON;
+  protected readonly detectionOff = DETECTION_SELECT_OFF;
 
   protected trackByProfileId(_index: number, profile: CvProfile): string {
     return profile.id;

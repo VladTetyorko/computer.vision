@@ -220,7 +220,7 @@ export class VisionProfilesFacade {
       return;
     }
     this.formErrorsSignal.set([]);
-    this.draftSignal.set(emptyProfileDraft(this.models()[0]?.id ?? ''));
+    this.draftSignal.set(emptyProfileDraft());
   }
 
   openEdit(profile: CvProfile): void {

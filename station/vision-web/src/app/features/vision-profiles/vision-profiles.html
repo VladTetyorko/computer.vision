@@ -40,23 +40,29 @@
               <dl class="profile-card-facts">
                 <div>
                   <dt>Model</dt>
-                  <dd class="mono truncate" [title]="profile.model">{{ profile.model }}</dd>
+                  <dd class="mono truncate" [title]="describeOptionalModel(profile.model)">{{ describeOptionalModel(profile.model) }}</dd>
                 </div>
                 <div>
                   <dt>Confidence</dt>
-                  <dd class="mono">{{ profile.confidenceThreshold }}</dd>
+                  <dd class="mono">{{ describeOptionalNumber(profile.confidenceThreshold) }}</dd>
                 </div>
                 <div>
                   <dt>Rate</dt>
-                  <dd class="mono">{{ profile.inferenceFps }} fps</dd>
+                  <dd class="mono">{{ describeOptionalNumber(profile.inferenceFps) }}{{ profile.inferenceFps !== undefined ? ' fps' : '' }}</dd>
                 </div>
                 <div>
                   <dt>Detection</dt>
                   <dd>
-                    @if (profile.detectionEnabled) {
-                      <span class="chip ok">On</span>
-                    } @else {
-                      <span class="chip">Off</span>
+                    @switch (describeDetectionCardState(profile.detectionEnabled)) {
+                      @case ('ON') {
+                        <span class="chip ok">On</span>
+                      }
+                      @case ('OFF') {
+                        <span class="chip">Off</span>
+                      }
+                      @default {
+                        <span class="chip">Inherited</span>
+                      }
                     }
                   </dd>
                 </div>
@@ -152,18 +158,15 @@
               </select>
             </label>
             <label class="profile-field">
-              <span class="label">Model</span>
+              <span class="label">Model — blank inherits from the tier below</span>
               <select
                 name="model"
                 class="field-md"
                 [ngModel]="draft.model"
                 (ngModelChange)="facade.patchDraft({ model: $event })"
                 [disabled]="facade.saving()"
-                required
               >
-                <option value="" [disabled]="draft.intent === ''">
-                  {{ draft.intent === '' ? 'Choose a model…' : 'Resolved from intent' }}
-                </option>
+                <option value="">{{ draft.intent === '' ? 'Inherit' : 'Inherit — resolved from intent' }}</option>
                 @for (model of facade.models(); track model.id) {
                   <option [value]="model.id">
                     {{ model.displayName }}{{ isModelMissingOnWorker(model) ? ' — Missing on worker' : '' }}
@@ -180,8 +183,9 @@
                 min="0"
                 max="1"
                 step="0.05"
-                [ngModel]="draft.confidenceThreshold"
-                (ngModelChange)="facade.patchDraft({ confidenceThreshold: $event })"
+                placeholder="Inherit"
+                [ngModel]="draft.confidenceThreshold ?? null"
+                (ngModelChange)="facade.patchDraft({ confidenceThreshold: $event ?? undefined })"
                 [disabled]="facade.saving()"
               />
             </label>
@@ -194,24 +198,29 @@
                   class="field-sm mono"
                   min="1"
                   step="1"
-                  [ngModel]="draft.inferenceFps"
-                  (ngModelChange)="facade.patchDraft({ inferenceFps: $event })"
+                  placeholder="Inherit"
+                  [ngModel]="draft.inferenceFps ?? null"
+                  (ngModelChange)="facade.patchDraft({ inferenceFps: $event ?? undefined })"
                   [disabled]="facade.saving()"
                 />
                 <span class="faint">fps</span>
               </span>
             </label>
-            <label class="profile-check">
-              <input
-                type="checkbox"
+            <label class="profile-field">
+              <span class="label">Detection</span>
+              <select
                 name="detectionEnabled"
-                [ngModel]="draft.detectionEnabled"
-                (ngModelChange)="facade.patchDraft({ detectionEnabled: $event })"
+                class="field-sm"
+                [ngModel]="detectionSelectValue(draft.detectionEnabled)"
+                (ngModelChange)="facade.patchDraft({ detectionEnabled: parseDetectionSelectValue($event) })"
                 [disabled]="facade.saving()"
-              />
-              <span>Detection on</span>
+              >
+                <option [value]="detectionInherit">Inherit</option>
+                <option [value]="detectionOn">On</option>
+                <option [value]="detectionOff">Off</option>
+              </select>
             </label>
-            <label class="profile-field profile-field-wide">
+            <div class="profile-field profile-field-wide">
               <span class="label">Label filter (allow-list) — empty means every class</span>
               <textarea
                 name="labelFilter"
@@ -219,10 +228,20 @@
                 placeholder="person, car"
                 [ngModel]="draft.labelFilterText"
                 (ngModelChange)="facade.patchDraft({ labelFilterText: $event })"
-                [disabled]="facade.saving()"
+                [disabled]="facade.saving() || draft.labelFilterInherit"
               ></textarea>
-            </label>
-            <label class="profile-field profile-field-wide">
+              <label class="profile-check">
+                <input
+                  type="checkbox"
+                  name="labelFilterInherit"
+                  [ngModel]="draft.labelFilterInherit"
+                  (ngModelChange)="facade.patchDraft({ labelFilterInherit: $event })"
+                  [disabled]="facade.saving()"
+                />
+                <span>Inherit from the tier below (ignores the text above)</span>
+              </label>
+            </div>
+            <div class="profile-field profile-field-wide">
               <span class="label">Label deny-list</span>
               <textarea
                 name="labelDenyFilter"
@@ -230,22 +249,33 @@
                 placeholder="tree"
                 [ngModel]="draft.labelDenyFilterText"
                 (ngModelChange)="facade.patchDraft({ labelDenyFilterText: $event })"
-                [disabled]="facade.saving()"
+                [disabled]="facade.saving() || draft.labelDenyFilterInherit"
               ></textarea>
-            </label>
+              <label class="profile-check">
+                <input
+                  type="checkbox"
+                  name="labelDenyFilterInherit"
+                  [ngModel]="draft.labelDenyFilterInherit"
+                  (ngModelChange)="facade.patchDraft({ labelDenyFilterInherit: $event })"
+                  [disabled]="facade.saving()"
+                />
+                <span>Inherit from the tier below (ignores the text above)</span>
+              </label>
+            </div>
           </div>
 
-          <h3>Tracking</h3>
+          <h3>Tracking — every knob below inherits independently; only the ones you set here override</h3>
           <div class="profile-form-grid">
             <label class="profile-field">
               <span class="label">Mode</span>
               <select
                 name="trackingMode"
                 class="field-sm"
-                [ngModel]="draft.trackingMode"
-                (ngModelChange)="facade.patchDraft({ trackingMode: $event })"
+                [ngModel]="trackingModeSelectValue(draft.trackingMode)"
+                (ngModelChange)="facade.patchDraft({ trackingMode: parseTrackingModeSelectValue($event) })"
                 [disabled]="facade.saving()"
               >
+                <option [value]="trackingModeInherit">Inherit</option>
                 <option value="OFF">Off</option>
                 <option value="ASSOCIATE">Associate</option>
                 <option value="FOLLOW">Follow</option>
@@ -257,13 +287,14 @@
                 <select
                   name="trackingEngine"
                   class="field-md"
-                  [ngModel]="draft.trackingEngineId"
-                  (ngModelChange)="facade.patchDraft({ trackingEngineId: $event })"
+                  [ngModel]="engineSelectValue(draft.trackingEngineId)"
+                  (ngModelChange)="facade.patchDraft({ trackingEngineId: parseEngineSelectValue($event) })"
                   [disabled]="facade.saving()"
                 >
-                  <option value="">Deployment default</option>
+                  <option [value]="engineInherit">Inherit</option>
+                  <option [value]="engineDeploymentDefault">Use deployment default</option>
                   @for (tracker of facade.trackers(); track tracker.id) {
-                    @if (tracker.modes.includes(draft.trackingMode)) {
+                    @if (draft.trackingMode === undefined || tracker.modes.includes(draft.trackingMode)) {
                       <option [value]="tracker.id">{{ tracker.displayName }}</option>
                     }
                   }
@@ -277,8 +308,9 @@
                   class="field-sm mono"
                   min="0"
                   step="1"
-                  [ngModel]="draft.trackingCapabilityLevel"
-                  (ngModelChange)="facade.patchDraft({ trackingCapabilityLevel: $event })"
+                  placeholder="Inherit"
+                  [ngModel]="draft.trackingCapabilityLevel ?? null"
+                  (ngModelChange)="facade.patchDraft({ trackingCapabilityLevel: $event ?? undefined })"
                   [disabled]="facade.saving()"
                 />
               </label>
@@ -292,8 +324,9 @@
                       class="field-sm mono"
                       min="0"
                       step="100"
-                      [ngModel]="draft.trackingVerifyEveryMillis"
-                      (ngModelChange)="facade.patchDraft({ trackingVerifyEveryMillis: $event })"
+                      placeholder="Inherit"
+                      [ngModel]="draft.trackingVerifyEveryMillis ?? null"
+                      (ngModelChange)="facade.patchDraft({ trackingVerifyEveryMillis: $event ?? undefined })"
                       [disabled]="facade.saving()"
                     />
                     <span class="faint">ms</span>
@@ -308,8 +341,9 @@
                       class="field-sm mono"
                       min="0"
                       step="1"
-                      [ngModel]="draft.trackingFollowFps"
-                      (ngModelChange)="facade.patchDraft({ trackingFollowFps: $event })"
+                      placeholder="Inherit"
+                      [ngModel]="draft.trackingFollowFps ?? null"
+                      (ngModelChange)="facade.patchDraft({ trackingFollowFps: $event ?? undefined })"
                       [disabled]="facade.saving()"
                     />
                     <span class="faint">fps</span>

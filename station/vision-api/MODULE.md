@@ -1638,3 +1638,83 @@ cv/vision-proto,contexts/vision-perception,cv/grpc,station/vision-api -am test -
 vision-proto 5/0/0, vision-perception 839/0/0, adapter-cv-grpc 195/0/0, **vision-api 1121/0/0**
 (same count as W5b.2 — no new `@Test` method, only richer fixture data in the two existing
 examples), all green.
+**CV-ORCHESTRATION wave W7.3 done** (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7/§8, decision E22
+— "a profile is a patch"), rewriting every `dto.CvProfile*` type to mirror `contexts/vision-perception`'s
+W7.0/W7.1 nullable-patch domain shape and to report per-knob provenance on **every** read, not only a
+save-time response:
+
+- `CvProfileTrackingResponse` is now itself a fully-nullable 5-field patch (`mode`/`engineId`/
+  `capabilityLevel`/`verifyEveryMillis`/`followFps`, `@JsonInclude(NON_NULL)`), with `from(TrackingKnobPatch)`
+  (null-tolerant) and `fromResolved(TrackingConfig)` (an EFFECTIVE fold's own tracking, always present)
+  as two separately named factories rather than one overloaded method — replaces the old single
+  `from(TrackingConfig)`/`toTrackingConfig()` pair. `CvProfileEventRuleResponse#from(EventRuleConfig)`
+  is now null-tolerant the same way, serving both the raw-profile (nullable `eventRule`) and
+  EFFECTIVE (always-resolved) call sites with one method.
+- New `CvKnobSourcesResponse` (8 fields, one `String` per `KnobSources` component, no `@JsonInclude` —
+  every field is always present, `KnobSources`'s own compact constructor guarantees non-`null`) is the
+  wire view of a fold's real per-knob provenance across every bound tier, nested in
+  `EffectiveCvProfileResponse` alongside a new `intent` field (the matched tier's own persisted pick).
+- `CvProfileRequest#toSpec()` is now a straight, unresolved pass-through onto `CvProfileSpec` — every
+  knob nullable and carried through byte-identical to what the request said, `intent` never consulted
+  to seed `model`/`labelFilter` here (that is `CvProfileResolver`'s job now, at fold time, wave W7.1).
+  `fieldSources()` and the nested `CvProfileRequest.Sources` record are **deleted** — superseded by
+  `CvProfileResponse`'s own per-read `FieldSources` (below), since `intent` surviving on the saved
+  profile means "was this knob seeded from intent" is answerable from the profile alone, on every read,
+  not only by the one save request that happened to compute it.
+- `CvProfileResponse` widens every knob to nullable (mirroring `CvProfile` field-for-field) and gains
+  `intent`. Three static factories: `from(CvProfile)` (every plain `GET`/`list`/`create`/`update`),
+  `platformDefault(PipelineConfig)` (unchanged shape, now null-tolerant factories underneath), and new
+  `fromEffective(CvProfile matchedProfile, PipelineConfig config)` for `GET .../effective`'s nested
+  `profile` — identity/bookkeeping fields come from `matchedProfile`, but **every knob comes from
+  `config`** (the fold's own result), not `matchedProfile`'s own possibly-partial fields: under
+  per-knob inheritance the matched tier may leave several knobs unset (inherited from a lower tier), so
+  echoing its raw fields would misreport what actually runs. This is a deliberate behavior correction
+  relative to pre-W7 (which had no partial tiers to misreport).
+- **Disclosed deviation — `Sources` vs `FieldSources`:** the brief's design point widens the old
+  2-field `CvProfileResponse.Sources` (`model`/`labelFilter`) to 4 fields (`model`/
+  `confidenceThreshold`/`inferenceFps`/`labelFilter`), computed fresh from `CvProfile` on every read
+  instead of once at save time. Widening `Sources` *in place* was tried first and reverted: `dto.UpdateStreamConfigRequest`/
+  `dto.UpdateStreamConfigResponse` (the stream-config hot path, explicitly out of this wave's write
+  scope — see those types' own javadoc, cited above) directly reuse `Sources`'s original two-argument
+  constructor for their own live PATCH-path provenance reporting, and a 2→4 field widen breaks that
+  unrelated, untouched call site's compile. Fix: `Sources` stays byte-identical to its pre-W7.3 shape
+  (kept solely so `UpdateStreamConfigRequest`/`UpdateStreamConfigResponse` keep compiling unchanged); a
+  new sibling record, `CvProfileResponse.FieldSources` (4 fields, `of(CvProfile)`/`none()`), is what
+  `CvProfileResponse#sources()` is actually typed as now. Both records live in the same file; each
+  carries a javadoc note cross-referencing the other and explaining why two near-identical types exist.
+- `CvProfileController#effective` now builds `CvKnobSourcesResponse.from(resolved.sources())`/
+  `resolved.intent()` into `EffectiveCvProfileResponse`; `list`/`get`/`create`/`update` all simplified
+  to the single-argument `CvProfileResponse.from(profile)` (provenance no longer threads through the
+  controller — it is computed inside the DTO factory itself).
+- **Disclosed ordering deviation:** this wave's DTO/controller rework was written, and this MODULE.md
+  entry drafted, before wave W7.2's own persistence-side build had been re-verified green — Maven's
+  reactor topologically builds every upstream module through the full requested phase even under
+  `-pl <target> -am`, so `station/vision-app`'s own scoped build command failed at `station/vision-api`'s
+  MAIN SOURCE compile (a real compile error, `TrackingKnobPatch` vs `TrackingConfig`/`CvProfileSpec`'s
+  new arity) the moment W7.0's domain rewrite landed, regardless of which wave's turn it nominally was.
+  Completing W7.3's substance now, rather than a throwaway compile-only patch to be redone properly
+  later, was the only way to get either wave's own build green — W7.2 and W7.3 are still committed as
+  two separate, correctly file-scoped commits.
+
+Test files updated to the new shapes: `CvProfileControllerTest#profile()` (the fixture helper) now
+builds a `TrackingKnobPatch`/passes `intent=null` instead of `TrackingConfig.defaults()`, and both
+`effective(...)` tests' `new EffectiveProfile(...)` calls gained the two new trailing arguments
+(`KnobSources`/`Intent`) `EffectiveProfile` picked up in wave W7.1; `StreamControllerTest`/
+`StreamDetectionSupportTest` needed the identical `EffectiveProfile` arity fix at their own one
+construction site each (mechanical, unrelated to those files' actual W5b/hot-path subject matter).
+`CvProfileRequestTest`'s old 12 cases (the W2.6-era intent-fold/`fieldSources()` behavior this wave
+deletes) are replaced by a new 12 pinning `toSpec()`'s unresolved pass-through: `toSpecPassesEveryFieldThroughUnresolvedByteIdenticalToTheRequest`,
+`blankModelBecomesNullOnTheSpecRatherThanAnInvalidModelRef`, `nullModelStaysNullOnTheSpec`,
+`explicitModelBecomesAModelRefWithTheLatestSentinelVersion`, `intentTravelsToTheSpecUnresolvedRatherThanSeedingAnyField`,
+`emptyLabelFilterIsPassedThroughAsAnExplicitAllLabelsValueNotSeeded`, `nullLabelFilterStaysNullMeaningInherit`,
+`customIntentWithEmptyLabelFilterThrowsFromCvProfileSpecsOwnValidation`,
+`customIntentWithNonEmptyLabelFilterSucceedsAndPassesThroughVerbatim`,
+`nullTrackingStaysNullOnTheSpecMeaningInheritTheWholeGroup`,
+`explicitTrackingBecomesATrackingKnobPatchWithAllFiveKnobsSet`,
+`eventRuleIsAlwaysNullOnTheSpecSinceThisWireShapeNeverAcceptsIt`.
+
+`./mvnw -B -pl station/vision-api -am test -DskipWeb` — **1121** tests, `BUILD SUCCESS`. Full three-module
+command (`storage/persistence,station/vision-app -am test -DskipWeb`) also green: persistence **286**,
+vision-app **357** (see `storage/persistence/MODULE.md`'s own W7.2 entry). One unrelated pre-existing
+flake surfaced and fixed along the way, in `station/vision-app`'s own `PersistenceWiringTest` — see
+that module's MODULE.md.

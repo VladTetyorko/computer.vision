@@ -14,7 +14,6 @@ import com.drones.vision.perception.domain.model.CvProfileId;
 import com.drones.vision.perception.domain.model.EventRuleConfig;
 import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.perception.domain.model.PipelineConfig;
-import com.drones.vision.perception.domain.model.TrackingConfig;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTrailPort;
@@ -75,17 +74,17 @@ class DefaultCvProfileServiceTest {
 
     private static CvProfile builtIn(String name) {
         return new CvProfile(CvProfileId.random(), name, "", true, null, new ModelRef("yolo26n.pt", "latest"), 0.4,
-                10, List.of(), List.of(), true, TrackingConfig.off(), EventRuleConfig.defaults(), NOW, NOW);
+                10, List.of(), List.of(), true, null, EventRuleConfig.defaults(), null, NOW, NOW);
     }
 
     private static CvProfile owned(String name, GroupId groupId) {
         return new CvProfile(CvProfileId.random(), name, "", false, groupId, new ModelRef("yolo26n.pt", "latest"),
-                0.4, 10, List.of(), List.of(), true, TrackingConfig.off(), EventRuleConfig.defaults(), NOW, NOW);
+                0.4, 10, List.of(), List.of(), true, null, EventRuleConfig.defaults(), null, NOW, NOW);
     }
 
     private static CvProfileSpec spec(String name) {
         return new CvProfileSpec(name, "", new ModelRef("yolo26n.pt", "latest"), 0.4, 10, List.of(), List.of(), true,
-                TrackingConfig.off(), EventRuleConfig.defaults());
+                null, EventRuleConfig.defaults(), null);
     }
 
     private static Asset asset(AssetId id, CategoryId category, GroupId groupId) {

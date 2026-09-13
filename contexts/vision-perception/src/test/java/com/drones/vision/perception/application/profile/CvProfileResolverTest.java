@@ -12,6 +12,8 @@ import com.drones.vision.perception.domain.model.Intent;
 import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.perception.domain.model.TrackingConfig;
+import com.drones.vision.perception.domain.model.TrackingKnobPatch;
+import com.drones.vision.perception.domain.model.TrackingMode;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -34,7 +36,7 @@ class CvProfileResolverTest {
 
     private static CvProfile profile(String name, GroupId groupId, String modelId) {
         return new CvProfile(CvProfileId.random(), name, "", false, groupId, new ModelRef(modelId, "latest"), 0.4,
-                10, List.of(), List.of(), true, TrackingConfig.off(), EventRuleConfig.defaults(), NOW, NOW);
+                10, List.of(), List.of(), true, null, EventRuleConfig.defaults(), null, NOW, NOW);
     }
 
     /** Like {@link #profile(String, GroupId, String)}, but with a caller-chosen {@code
@@ -45,7 +47,7 @@ class CvProfileResolverTest {
     private static CvProfile profile(String name, GroupId groupId, ModelRef model, double confidenceThreshold,
                                       int inferenceFps, List<String> labelFilter) {
         return new CvProfile(CvProfileId.random(), name, "", false, groupId, model, confidenceThreshold,
-                inferenceFps, labelFilter, List.of(), true, TrackingConfig.off(), EventRuleConfig.defaults(), NOW,
+                inferenceFps, labelFilter, List.of(), true, null, EventRuleConfig.defaults(), null, NOW,
                 NOW);
     }
 
@@ -70,6 +72,8 @@ class CvProfileResolverTest {
         assertNull(resolved.profileId());
         assertNull(resolved.profileName());
         assertSame(platformDefault, resolved.config(), "unbound must fold to the exact same PipelineConfig instance");
+        assertEquals(KnobSources.platform(), resolved.sources(), "no tier bound means every knob reads PLATFORM");
+        assertNull(resolved.intent(), "no tier bound means no intent seeded anything");
     }
 
     @Test
@@ -200,42 +204,123 @@ class CvProfileResolverTest {
     }
 
     /**
-     * Patch-over-seed, tier 2: {@link CvProfileResolver}'s fold is wholesale-replace, never a
-     * per-knob merge across tiers -- this is the resolver's own documented contract (its class
-     * javadoc: "every CvProfile fully specifies every field... the more specific tier's complete
-     * config simply supersedes the previous tier's"), pinned here so a future change that tried to
-     * make the fold a genuine per-field merge across *tiers* (as opposed to within one profile's own
-     * creation, which is where the real per-knob patching in this codebase lives -- see the test
-     * above and CvProfileRequestTest) would fail loudly instead of silently changing behaviour.
+     * Wave W7.1 (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.7, decision E22): the fold across
+     * tiers is now genuinely per-knob, not wholesale-replace. This test replaces the pre-W7 {@code
+     * assetBindingReplacesEveryKnobWholesaleRatherThanOnlyTheOnesThatDifferFromCategory}, which pinned
+     * the opposite (now-false) contract -- an organization profile that sets only {@code
+     * inferenceFps} and an asset profile that sets only {@code model} must both survive the fold,
+     * each correctly attributed in {@link EffectiveProfile#sources()}.
      */
     @Test
-    void assetBindingReplacesEveryKnobWholesaleRatherThanOnlyTheOnesThatDifferFromCategory() {
+    void organizationInferenceFpsAndAssetModelBothPersistWithCorrectPerKnobSources() {
         AssetId assetId = AssetId.random();
         CategoryId categoryId = new CategoryId("quadcopter");
         GroupId groupId = GroupId.random();
 
-        CvProfile categoryProfile =
-                profile("people-vehicles", groupId, new ModelRef("yolo26n.pt", "latest"), 0.40, 10, List.of("person"));
-        // Differs from categoryProfile in exactly one field (confidenceThreshold) -- if the fold ever
-        // became a per-knob merge, model/inferenceFps/labelFilter below would leak in from
-        // categoryProfile instead of asset's own (identical, in this case) values.
-        CvProfile assetProfile =
-                profile("mast-cams", groupId, new ModelRef("yolo26n.pt", "latest"), 0.90, 10, List.of("person"));
+        CvProfile orgProfile = new CvProfile(CvProfileId.random(), "org-fps-only", "", false, groupId, null, null,
+                12, null, null, null, null, null, null, NOW, NOW);
+        CvProfile assetProfile = new CvProfile(CvProfileId.random(), "asset-model-only", "", false, groupId,
+                new ModelRef("orion12l.pt", "latest"), null, null, null, null, null, null, null, null, NOW, NOW);
 
         InMemoryCvProfileRepositoryPort repository = new InMemoryCvProfileRepositoryPort();
+        repository.save(orgProfile);
         repository.save(assetProfile);
-        repository.save(categoryProfile);
+        repository.saveBinding(new CvProfileBinding(BindingScope.ORGANIZATION, groupId.value().toString(), orgProfile.id(), NOW));
         repository.saveBinding(new CvProfileBinding(BindingScope.ASSET, assetId.value().toString(), assetProfile.id(), NOW));
-        repository.saveBinding(new CvProfileBinding(BindingScope.CATEGORY, categoryId.slug(), categoryProfile.id(), NOW));
         CvProfileResolver resolver =
                 new CvProfileResolver(new CvProfileCache(repository, new CvProfileCacheSettings(Duration.ofMinutes(5))));
+        PipelineConfig platformDefault = PipelineConfig.defaults();
+
+        EffectiveProfile resolved = resolver.resolve(assetId, categoryId, groupId, platformDefault);
+
+        assertEquals(ProfileSource.ASSET, resolved.source(), "asset is still the most specific bound tier");
+        assertEquals(assetProfile.id(), resolved.profileId());
+        assertEquals(12, resolved.config().inferenceFps(), "organization's own knob survives past the asset tier");
+        assertEquals(new ModelRef("orion12l.pt", "latest"), resolved.config().model(), "asset's own knob wins");
+        assertEquals(ProfileSource.ORGANIZATION, resolved.sources().inferenceFps());
+        assertEquals(ProfileSource.ASSET, resolved.sources().model());
+        assertEquals(platformDefault.confidenceThreshold(), resolved.config().confidenceThreshold(),
+                "a knob neither tier set still falls all the way through to the platform default");
+        assertEquals(ProfileSource.PLATFORM, resolved.sources().confidenceThreshold());
+        assertNull(resolved.intent(), "neither tier set an intent");
+    }
+
+    /**
+     * Wave W7.1: a tier's own {@code intent}, left to seed the four knobs {@link
+     * IntentPolicyResolver} actually resolves, is attributed to {@link ProfileSource#INTENT} in
+     * {@link EffectiveProfile#sources()} and survives past a more specific tier that only sets an
+     * unrelated knob -- while {@link EffectiveProfile#intent()} still names the organization tier,
+     * since the asset tier never set an intent of its own.
+     */
+    @Test
+    void organizationIntentSeedsFourKnobsAndAssetExplicitConfidenceThresholdWinsOverThem() {
+        AssetId assetId = AssetId.random();
+        CategoryId categoryId = new CategoryId("quadcopter");
+        GroupId groupId = GroupId.random();
+
+        CvProfile orgProfile = new CvProfile(CvProfileId.random(), "org-intent-people", "", false, groupId, null,
+                null, null, null, null, null, null, null, Intent.PEOPLE, NOW, NOW);
+        CvProfile assetProfile = new CvProfile(CvProfileId.random(), "asset-confidence-only", "", false, groupId,
+                null, 0.77, null, null, null, null, null, null, null, NOW, NOW);
+
+        InMemoryCvProfileRepositoryPort repository = new InMemoryCvProfileRepositoryPort();
+        repository.save(orgProfile);
+        repository.save(assetProfile);
+        repository.saveBinding(new CvProfileBinding(BindingScope.ORGANIZATION, groupId.value().toString(), orgProfile.id(), NOW));
+        repository.saveBinding(new CvProfileBinding(BindingScope.ASSET, assetId.value().toString(), assetProfile.id(), NOW));
+        CvProfileResolver resolver =
+                new CvProfileResolver(new CvProfileCache(repository, new CvProfileCacheSettings(Duration.ofMinutes(5))));
+        IntentPolicy peoplePolicy = IntentPolicyResolver.resolve(Intent.PEOPLE, List.of());
 
         EffectiveProfile resolved = resolver.resolve(assetId, categoryId, groupId, PipelineConfig.defaults());
 
-        assertEquals(assetProfile.id(), resolved.profileId());
-        assertEquals(0.90, resolved.config().confidenceThreshold(), "asset's own differing knob wins");
-        assertEquals(assetProfile.model(), resolved.config().model(), "asset's own matching knob is still asset's, not category's, value");
-        assertEquals(assetProfile.inferenceFps(), resolved.config().inferenceFps());
-        assertEquals(Set.copyOf(assetProfile.labelFilter()), resolved.config().labelFilter());
+        assertEquals(peoplePolicy.model(), resolved.config().model(), "intent-seeded, no tier set model explicitly");
+        assertEquals(peoplePolicy.classSet(), resolved.config().labelFilter());
+        assertEquals(peoplePolicy.rateCeiling(), resolved.config().inferenceFps());
+        assertEquals(0.77, resolved.config().confidenceThreshold(), "asset's own explicit knob outranks the intent seed");
+        assertEquals(ProfileSource.INTENT, resolved.sources().model());
+        assertEquals(ProfileSource.INTENT, resolved.sources().labelFilter());
+        assertEquals(ProfileSource.INTENT, resolved.sources().inferenceFps());
+        assertEquals(ProfileSource.ASSET, resolved.sources().confidenceThreshold());
+        assertEquals(Intent.PEOPLE, resolved.intent(), "the organization tier is the most specific one that set an intent");
+    }
+
+    /**
+     * Design point 1/3 (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.7): every one of the four
+     * built-in profiles (storage/persistence's {@code V29__cv_profiles.sql}) fully specifies every
+     * knob, so folding one through the resolver must still be byte-identical to calling its own
+     * {@link CvProfile#foldOnto(PipelineConfig)} directly -- the per-knob rewrite must not change
+     * behavior at all for a profile that never leaves anything to inherit.
+     */
+    @Test
+    void fourBuiltInShapedProfilesFoldThroughTheResolverByteIdenticalToFoldOntoDirectly() {
+        GroupId groupId = GroupId.random();
+        PipelineConfig platformDefault = PipelineConfig.defaults();
+        List<CvProfile> builtIns = List.of(
+                fullySpecified("people-vehicles", new ModelRef("yolo26n.pt", "latest"), 0.40, 10, List.of(), true),
+                fullySpecified("wide-search", new ModelRef("yoloe-26s-seg-pf.pt", "latest"), 0.30, 4, List.of(), true),
+                fullySpecified("military-vehicles", new ModelRef("orion12l.pt", "latest"), 0.45, 5, List.of(), true),
+                fullySpecified("video-only", new ModelRef("yolo26n.pt", "latest"), 0.40, 10, List.of(), false));
+
+        for (CvProfile builtIn : builtIns) {
+            AssetId assetId = AssetId.random();
+            CvProfileResolver resolver = resolverWith(builtIn,
+                    new CvProfileBinding(BindingScope.ASSET, assetId.value().toString(), builtIn.id(), NOW));
+
+            EffectiveProfile resolved =
+                    resolver.resolve(assetId, new CategoryId("quadcopter"), groupId, platformDefault);
+
+            assertEquals(builtIn.foldOnto(platformDefault), resolved.config(),
+                    builtIn.name() + " must fold byte-identical through the resolver as it does directly");
+        }
+    }
+
+    /** A profile with every one of the eight knobs set, mirroring a built-in row's own shape. */
+    private static CvProfile fullySpecified(String name, ModelRef model, double confidenceThreshold,
+                                             int inferenceFps, List<String> labelFilter, boolean detectionEnabled) {
+        return new CvProfile(CvProfileId.random(), name, "", true, null, model, confidenceThreshold, inferenceFps,
+                labelFilter, List.of(), detectionEnabled,
+                new TrackingKnobPatch(TrackingMode.ASSOCIATE, "", 0, 2000, 15), EventRuleConfig.defaults(), null,
+                NOW, NOW);
     }
 }

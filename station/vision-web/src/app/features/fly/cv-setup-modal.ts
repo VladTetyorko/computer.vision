@@ -155,20 +155,23 @@ export class CvSetupModal {
   readonly config = input<ResolvedCvConfig | undefined>(undefined);
 
   /** The asset's own effective CV profile — feeds "Save to this asset's profile"'s own create-vs-
-   *  update decision below (see {@link saveToAssetProfile}), and {@link effectiveProfile}'s own
-   *  `.source` tier feeds the resolved-source lines below when there is no fresher intent fact. */
+   *  update decision below (see {@link saveToAssetProfile}), and, as of wave W7, its own `sources`/
+   *  `intent` feed the resolved-source lines below with genuine per-knob provenance on every read
+   *  (see {@link confidenceSourceLine}/{@link classesSourceLine} and {@link resolvedSourceLine}'s own
+   *  doc comment) — no longer only a coarse whole-profile tier fallback. */
   readonly effectiveProfile = input<EffectiveCvProfile | undefined>(undefined);
 
   /**
-   * Per-knob request-time intent-resolution provenance (`CvProfileResponse.sources`, wave W3.0/
-   * W3.6, docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7) — feeds the Classes section's own
-   * resolved-source line (see {@link classesSourceLine}) via {@link resolvedSourceLine}'s
-   * precedence. **Always `undefined` today**: no host template binds this input yet — wave W3.3
-   * (landing concurrently in this same worktree) owns wiring a real value in from `cockpit.html`,
-   * and adding that binding site here would be out of this wave's own file scope. Degrades
-   * honestly with no binding at all: every resolved-source line below simply falls through to the
-   * profile-tier fact (or renders nothing), exactly as if intent had never resolved anything —
-   * never a blocked page, never a fabricated "Resolved from…" line.
+   * This session's own most recent hot-knob PATCH's per-knob intent-resolution provenance
+   * (`PatchStreamConfigResponse#sources`, wave W3.0/W3.3, bound from `CockpitFacade#lastConfigSources`
+   * — wired into `<vision-cv-setup-modal>` in `cockpit.html` as of wave W7.5, closing the "always
+   * `undefined`" gap this input carried since wave W3.4) — feeds {@link resolvedSourceLine}'s own
+   * first-priority check, ahead of {@link effectiveProfile}'s own `sources` (wave W7): a same-session
+   * live PATCH is a more immediate fact about the *running stream* than a profile-tier read can be.
+   * `undefined` before any hot-knob PATCH has been sent this session, or after an asset switch resets
+   * `CockpitFacade#lastConfigSources` — every resolved-source line below degrades honestly with no
+   * value at all, falling through to {@link effectiveProfile}'s own per-knob fact or rendering
+   * nothing, never a blocked page or a fabricated "Resolved from…" line.
    */
   readonly lastConfigSources = input<CvProfileSources | undefined>(undefined);
 
@@ -229,16 +232,17 @@ export class CvSetupModal {
   protected readonly hiddenClassTruth = HIDDEN_CLASS_TRUTH;
 
   /** Confidence's own resolved-source line (wave W3.4, {@link resolvedSourceLine}'s precedence) —
-   *  never `'INTENT'` in practice (`CvProfileSources` has no confidence field), so this only ever
-   *  renders the profile-tier fact or nothing. */
+   *  as of wave W7, `EffectiveCvProfile#sources.confidenceThreshold` is a real per-knob fact (the
+   *  fold can now seed confidence from an intent too), so this can report `'INTENT'` in practice,
+   *  unlike the pre-W7 "profile-tier fact or nothing" behavior this comment used to describe. */
   protected readonly confidenceSourceLine = computed(() =>
-    resolvedSourceLine(this.lastConfigSources(), this.effectiveProfile()?.source, 'confidenceThreshold'),
+    resolvedSourceLine(this.lastConfigSources(), this.effectiveProfile(), 'confidenceThreshold'),
   );
 
   /** Classes' own resolved-source line (wave W3.4) — shown alongside the existing "Applied: N of
    *  the classes…" line, never in place of it. */
   protected readonly classesSourceLine = computed(() =>
-    resolvedSourceLine(this.lastConfigSources(), this.effectiveProfile()?.source, 'labelFilter'),
+    resolvedSourceLine(this.lastConfigSources(), this.effectiveProfile(), 'labelFilter'),
   );
 
   protected readonly classQuery = signal('');

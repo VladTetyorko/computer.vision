@@ -127,7 +127,7 @@ public final class DefaultCvProfileService implements CvProfileService {
         Instant now = clock.get();
         CvProfile profile = new CvProfile(id, spec.name(), spec.description(), false, groupId, spec.model(),
                 spec.confidenceThreshold(), spec.inferenceFps(), spec.labelFilter(), spec.labelDenyFilter(),
-                spec.detectionEnabled(), spec.tracking(), spec.eventRule(), now, now);
+                spec.detectionEnabled(), spec.tracking(), spec.eventRule(), spec.intent(), now, now);
         CvProfile saved = cache.save(profile);
         audit(actor, id.value().toString(), AuditAction.CREATED, ACTION_CREATE, "CREATED",
                 "Created CV profile '" + saved.name() + "'");
@@ -153,7 +153,7 @@ public final class DefaultCvProfileService implements CvProfileService {
         }
         CvProfile updated = new CvProfile(id, spec.name(), spec.description(), false, existing.groupId(),
                 spec.model(), spec.confidenceThreshold(), spec.inferenceFps(), spec.labelFilter(),
-                spec.labelDenyFilter(), spec.detectionEnabled(), spec.tracking(), spec.eventRule(),
+                spec.labelDenyFilter(), spec.detectionEnabled(), spec.tracking(), spec.eventRule(), spec.intent(),
                 existing.createdAt(), clock.get());
         CvProfile saved = cache.save(updated);
         audit(actor, targetId, AuditAction.UPDATED, ACTION_UPDATE, "UPDATED", "Updated CV profile '" + saved.name() + "'");
@@ -208,7 +208,7 @@ public final class DefaultCvProfileService implements CvProfileService {
         CvProfileId newId = CvProfileId.random();
         CvProfile copy = new CvProfile(newId, newName, source.description(), false, groupId, source.model(),
                 source.confidenceThreshold(), source.inferenceFps(), source.labelFilter(), source.labelDenyFilter(),
-                source.detectionEnabled(), source.tracking(), source.eventRule(), now, now);
+                source.detectionEnabled(), source.tracking(), source.eventRule(), source.intent(), now, now);
         CvProfile saved = cache.save(copy);
         audit(actor, newId.value().toString(), AuditAction.CREATED, ACTION_FORK, "CREATED",
                 "Forked CV profile '" + saved.name() + "' from built-in '" + source.name() + "'");

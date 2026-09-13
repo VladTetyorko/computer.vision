@@ -285,8 +285,9 @@ public final class DefaultStreamService implements StreamService {
      * platform default" — unlike the patch-shaped {@code requestedTracking}. When a profile is
      * bound, its fields therefore replace {@code requestedConfig}'s wholesale (every field except
      * {@link PipelineConfig#maxInFlightInferences()}, always host capacity — see {@code
-     * CvProfile#toPipelineConfig}), so the plan's "an explicit per-call override still wins over a
-     * bound profile" is <b>not</b> fully honored end-to-end by this method alone. Achieving that
+     * CvProfile#foldOnto} and {@code CvProfileResolver#resolve}), so the plan's "an explicit per-call
+     * override still wins over a bound profile" is <b>not</b> fully honored end-to-end by this method
+     * alone. Achieving that
      * requires either the caller resolving {@code CvProfileService#effective} first and folding its
      * own explicit fields on top before calling this method (this method's own resolution then
      * becomes a same-answer, defense-in-depth check, safe as long as nothing rebinds between the two
