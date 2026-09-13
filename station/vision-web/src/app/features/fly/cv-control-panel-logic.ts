@@ -648,6 +648,20 @@ export function buildFollowLockPatch(trackId: number): UpdateStreamConfigRequest
   return { tracking: { mode: 'FOLLOW', lock: { trackId } } };
 }
 
+/**
+ * Click-to-follow's **point/untracked-box** patch body (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7
+ * D8, wave W3.5) — the sibling {@link buildFollowLockPatch} never had: wires `TargetLockRequest`'s
+ * `pointX`/`pointY` form, a zero-caller wire shape before this wave (R1 surprise 2). Same "always
+ * `mode: 'FOLLOW'` alongside the lock, in one call" convention as {@link buildFollowLockPatch} —
+ * `player.ts#onOverlayClick`'s `pointFollowed` output feeds this for both cases that output covers
+ * (an untracked box's own center, or a bare click on open video); see that output's own doc comment.
+ * Same honesty rule too: this patch alone never confirms a lock took — that still comes from the next
+ * tracks poll.
+ */
+export function buildPointLockPatch(pointX: number, pointY: number): UpdateStreamConfigRequest {
+  return { tracking: { mode: 'FOLLOW', lock: { pointX, pointY } } };
+}
+
 /** The "release" chip's own patch body — drops the current lock AND returns the stream to
  *  `ASSOCIATE`. Leaving `mode: FOLLOW` after a release (the pre-TRACK-FOLLOW behavior) strands the
  *  operator: cv-service's FOLLOW session without a lock emits detections with no track identities

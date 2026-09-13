@@ -46,6 +46,7 @@
           (latencyChanged)="facade.onLatency($event)"
           (transportChanged)="facade.onTransport($event)"
           (trackFollowed)="facade.followTrack($event)"
+          (pointFollowed)="facade.followPoint($event.x, $event.y)"
         />
 
         <!-- ---- The dock (docs/plans/active/FLY-FLOW-PLAN.md §3/§4 W1) — ONE bottom-center anchor stack

@@ -24,6 +24,7 @@ import {
   buildFollowLockPatch,
   buildHotKnobPatch,
   buildModelChangePatch,
+  buildPointLockPatch,
   buildProfileRequestFromConfig,
   buildReleaseLockPatch,
   buildTrackingEnginePatch,
@@ -601,6 +602,10 @@ describe('cv-control-panel-logic', () => {
 
     it('buildFollowLockPatch sets mode FOLLOW alongside the lock, in one call', () => {
       expect(buildFollowLockPatch(7)).toEqual({ tracking: { mode: 'FOLLOW', lock: { trackId: 7 } } });
+    });
+
+    it('buildPointLockPatch sets mode FOLLOW alongside a pointX/pointY lock, in one call (D8, wave W3.5)', () => {
+      expect(buildPointLockPatch(0.42, 0.61)).toEqual({ tracking: { mode: 'FOLLOW', lock: { pointX: 0.42, pointY: 0.61 } } });
     });
 
     it('buildReleaseLockPatch returns the stream to ASSOCIATE with the release (W7 live find: FOLLOW without a lock has no track identities, stranding every re-lock gesture)', () => {

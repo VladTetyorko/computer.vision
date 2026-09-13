@@ -1265,3 +1265,70 @@ export function placeLabels(
   }
   return placed;
 }
+
+// --- Click-to-follow: box or point (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7 D8, wave W3.5) ---------
+
+/**
+ * What an operator's click on the overlay resolved to — `player.ts#onOverlayClick`'s own hit-test
+ * (against `drawnBoxes`) already found (or didn't find) a box before calling
+ * {@link resolveOverlayClickTarget}; this is the *decision* that hit-test result maps to, extracted
+ * as a pure function per this codebase's own convention (favor pure-logic vitest over a component
+ * spec — there is no existing `player.spec.ts`/TestBed harness for this component, and one built from
+ * scratch for a single click handler would be disproportionate; see `click-to-follow.spec.ts`'s own
+ * doc comment for the wave's full reasoning).
+ *
+ * Wire convention (confirmed, not assumed — there is no other convention anywhere else on this wire
+ * for a bare point): `TargetLockRequest.pointX`/`pointY` (`core/api/models.ts`) is the exact same
+ * normalized `[0,1]` video-frame fraction {@link Detection}'s own `box` already uses — so `'point'`'s
+ * `x`/`y` here are that fraction directly, never pixels.
+ */
+export type OverlayClickTarget =
+  | { readonly kind: 'track'; readonly trackId: number }
+  | { readonly kind: 'point'; readonly x: number; readonly y: number }
+  | { readonly kind: 'none' };
+
+/**
+ * D8's three-way split:
+ *  - `hit` is a **tracked** detection (`track.id` set) → `'track'`, byte-identical to this app's
+ *    pre-W3.5 click-to-follow behavior (`trackFollowed`'s own wire, docs/plans/done/TRACKING-PLAN.md §4.D).
+ *  - `hit` is an **untracked** detection → `'point'` at that detection's own box center. No pixel
+ *    math needed: the box's normalized coordinates already are what the wire wants ({@link boxCenter},
+ *    reused verbatim from the unmatched-projection code above this section).
+ *  - **no hit** (`hit === null`, an open-canvas click) → the click's own CSS-pixel position
+ *    (`clickX`/`clickY`, already relative to the canvas — same coordinate space `drawnBoxes` itself
+ *    is in) normalized against `content`, the frame's *effective*, already crop-follow-transformed
+ *    content rect (the same one `drawDetections` paints every box against — `player.ts#onOverlayClick`
+ *    recomputes it via `letterboxRect` + `applyCropFollowToContentRect(cropFollowTransform(...))`,
+ *    mirroring `redrawOverlay`'s own two-step pipeline exactly, so this inversion is always consistent
+ *    with the forward mapping at any zoom). A result outside `[0,1]` on either axis means the click
+ *    landed in a letterbox bar, not on the video itself — `'none'`, matching this hit-test's existing
+ *    "click on nothing meaningful" posture (no lock request is sent). A result just inside the edge is
+ *    clamped defensively for float error ({@link clampUnit}, reused verbatim). `!(value > 0)` (rather
+ *    than `value <= 0`) is used for the degenerate-content guard so a `NaN` width/height — e.g. a
+ *    zero-dimension video between `phase() === 'playing'` and the first metadata tick — also falls
+ *    through to `'none'` instead of propagating a `NaN` point.
+ */
+export function resolveOverlayClickTarget(
+  hit: Detection | null,
+  clickX: number,
+  clickY: number,
+  content: { readonly x: number; readonly y: number; readonly width: number; readonly height: number },
+): OverlayClickTarget {
+  if (hit) {
+    const trackId = hit.track?.id;
+    if (trackId !== undefined) {
+      return { kind: 'track', trackId };
+    }
+    const center = boxCenter(hit.box);
+    return { kind: 'point', x: center.x, y: center.y };
+  }
+  if (!(content.width > 0) || !(content.height > 0)) {
+    return { kind: 'none' };
+  }
+  const x = (clickX - content.x) / content.width;
+  const y = (clickY - content.y) / content.height;
+  if (x < 0 || x > 1 || y < 0 || y > 1) {
+    return { kind: 'none' };
+  }
+  return { kind: 'point', x: clampUnit(x), y: clampUnit(y) };
+}

@@ -39,6 +39,7 @@ import {
   placeLabels,
   resolveDetectionTiers,
   resolveDisplayDetections,
+  resolveOverlayClickTarget,
   selectDetectionResult,
   shouldDrawOverlay,
   tierAlphaPercent,
@@ -491,9 +492,10 @@ export class Player {
 
   /**
    * Click-to-follow (docs/plans/done/TRACKING-PLAN.md §4.D, wave T7) — emits a track id when the operator
-   * clicks a **tracked** box in the overlay (an untracked box has no id to lock onto, and is
-   * deliberately a no-op click — the point/box lock forms the wire contract also allows are out of
-   * this wave's scope). The host (`CockpitFacade#followTrack`) is the one that actually PATCHes
+   * clicks a **tracked** box in the overlay. As of wave W3.5 (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7
+   * D8) an untracked box, or a bare click on open video, no longer no-ops — see {@link pointFollowed}
+   * for those two cases; this output keeps its exact pre-W3.5 name/shape/behavior for the tracked-box
+   * case only. The host (`CockpitFacade#followTrack`) is the one that actually PATCHes
    * `{tracking:{mode:'FOLLOW', lock:{trackId}}}` — this component never calls `VisionApi`/`FleetStore`
    * itself, same "dumb component, host owns the write" rule as `latencyChanged`/`transportChanged`
    * above. No optimistic UI here either: nothing in this component claims the lock took until a host
@@ -501,6 +503,21 @@ export class Player {
    * comment for docs/extracts/TRACKING-ORCHESTRATION.md §3.3's honesty rule.
    */
   readonly trackFollowed = output<number>();
+
+  /**
+   * Point/untracked-box lock (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7 D8, wave W3.5) — the wire's
+   * `TargetLockRequest.pointX`/`pointY` (`core/api/models.ts`) were a zero-caller form before this
+   * wave (R1 surprise 2); this output wires them to the same click gesture {@link trackFollowed} uses,
+   * for the two cases a click can land on that the id-only form can't express: an **untracked** box
+   * (emits that detection's own box center) or a **bare point** on open video, no box under the
+   * cursor at all (emits the click normalized against the frame's effective content rect). See
+   * `onOverlayClick`'s own doc comment for the exact three-way split and
+   * `detection-overlay-logic.ts#resolveOverlayClickTarget` for the pure decision this output relays.
+   * `x`/`y` are the identical normalized `[0,1]` video-frame fraction {@link Detection}'s own `box`
+   * already uses — never pixels. Same "dumb component, host owns the write" rule as
+   * {@link trackFollowed}: the host (`CockpitFacade#followPoint`) does the actual PATCH.
+   */
+  readonly pointFollowed = output<{ readonly x: number; readonly y: number }>();
 
   private readonly video = viewChild.required<ElementRef<HTMLVideoElement>>('video');
   private readonly overlayCanvas = viewChild.required<ElementRef<HTMLCanvasElement>>('overlay');
@@ -2645,11 +2662,23 @@ export class Player {
   }
 
   /**
-   * Click-to-follow's hit-test (docs/plans/done/TRACKING-PLAN.md §4.D) — reuses the exact same
-   * {@link drawnBoxes} hit-test {@link onOverlayMouseMove} already does; a click that lands on a
-   * **tracked** box emits its id via {@link trackFollowed}. A click on an untracked box, or on empty
-   * canvas, is a no-op — there is no id to lock onto (the wire's point/box lock forms are out of
-   * this wave's scope, see {@link trackFollowed}'s own doc comment).
+   * Click-to-follow's hit-test (docs/plans/done/TRACKING-PLAN.md §4.D, three-way split added wave W3.5,
+   * docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7 D8) — reuses the exact same {@link drawnBoxes}
+   * hit-test {@link onOverlayMouseMove} already does, then delegates the resulting decision to
+   * `detection-overlay-logic.ts#resolveOverlayClickTarget` (a pure function, unit-tested there):
+   *
+   *  - a **tracked** box hit → {@link trackFollowed} with its track id, unchanged from before this wave.
+   *  - an **untracked** box hit → {@link pointFollowed} at that box's own center (already the wire's
+   *    normalized `[0,1]` fraction — no pixel math).
+   *  - **no hit** (a bare click on open video) → {@link pointFollowed} at the click's own position,
+   *    normalized against this frame's *effective* content rect. That rect isn't retained as instance
+   *    state (`redrawOverlay` computes it fresh every frame and never stores it), so it's recomputed
+   *    here via the identical two-step pipeline `redrawOverlay` itself uses —
+   *    {@link letterboxRect} then `applyCropFollowToContentRect(cropFollowTransform(cropFollowState))`
+   *    — so the inversion stays consistent with the forward mapping {@link drawDetections} paints
+   *    every box against, at any crop-follow zoom. A click that lands in a letterbox bar (outside
+   *    `[0,1]` on either axis) is a no-op, matching this hit-test's pre-existing "nothing meaningful"
+   *    posture.
    */
   protected onOverlayClick(event: MouseEvent): void {
     const canvas = this.overlayCanvas().nativeElement;
@@ -2659,9 +2688,21 @@ export class Player {
     const hit = this.drawnBoxes.find(
       (box) => x >= box.x && x <= box.x + box.width && y >= box.y && y <= box.y + box.height,
     );
-    const trackId = hit?.detection.track?.id;
-    if (trackId !== undefined) {
-      this.trackFollowed.emit(trackId);
+    const video = this.video().nativeElement;
+    const content = applyCropFollowToContentRect(
+      this.letterboxRect(video.clientWidth, video.clientHeight, video.videoWidth, video.videoHeight),
+      cropFollowTransform(this.cropFollowState),
+    );
+    const target = resolveOverlayClickTarget(hit?.detection ?? null, x, y, content);
+    switch (target.kind) {
+      case 'track':
+        this.trackFollowed.emit(target.trackId);
+        break;
+      case 'point':
+        this.pointFollowed.emit({ x: target.x, y: target.y });
+        break;
+      case 'none':
+        break;
     }
   }
 

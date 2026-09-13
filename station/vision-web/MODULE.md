@@ -1664,3 +1664,176 @@ live working tree looked like at any given moment.
   a full-tree build taken mid-wave, but that number includes both siblings' own substantial
   concurrent work and is not attributable to this wave alone.
 - **Commit**: `feat(cv-orchestration W3.3): intent chips + one honest status line on the fly hero`.
+
+## Status — CV-ORCHESTRATION wave W3.5 (web): tap to follow — box or point (D8) (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7 D8, §6 W3 row) — 2026-09-13
+
+The last implementation step of wave W3 ("one operator act"). Wires the wire's own `TargetLockRequest.
+pointX`/`pointY` form (`core/api/models.ts`) — a **zero-caller** shape before this wave (§7 D8's own
+"R1 surprise 2") — to the click gesture `shared/player/player.ts#onOverlayClick` already had, so a tap
+on the video always does *something* useful: a tracked box locks by id (unchanged), an untracked box
+locks onto its own center, and a bare click on open video locks onto that point. §7 D8's own acceptance
+line ("click path to follow = 3, measured by the e2e spec") is the new `features/fly/click-to-follow.
+spec.ts`, described below.
+
+**Built on a heavily shared tree** — two sibling waves editing the exact same files concurrently for
+most of this wave's duration: W3.4 ("Tuning" modal, merged as `41d04ba8`, confirmed by its own commit
+message to make "zero changes" to `cockpit.ts`/`cockpit-facade.ts`) and W3.3 (intent chips + one honest
+hero status line, uncommitted for most of this wave's duration — at times adding ~90 uncommitted lines
+to `cockpit-facade.ts` and ~37 to `cockpit.html`, the exact two files this wave also needed — until it
+landed mid-wave as `a5ab10d3`, see the race disclosure below). Rather than a tree-wide `git stash`
+(refused for the same reason every prior wave in this file with a live sibling refused one — no safe
+way to isolate one agent's WIP from another's mid-edit in a shared index), `cockpit-facade.ts` and
+`cockpit.html` were cleaned via a repeatable per-file procedure while W3.3 was still uncommitted:
+(1) back up the current combined (mine + sibling's) working-tree content to a scratch file, (2) edit
+the working tree down to "HEAD plus only this wave's own hunks", (3) `git diff` to confirm nothing
+foreign remains, (4) commit that clean content via `git commit --only -- <this wave's paths>` (which
+ignores whatever else the shared index holds for every other path, sidestepping a second hazard found
+mid-wave: the sibling agent's own `git add` sweeps repeatedly re-staged its in-progress `models.ts`/
+`cockpit.css`/`fly-logic.ts`/`fly-logic.spec.ts`/`MODULE.md` changes, and once even re-contaminated this
+wave's own already-cleaned `cockpit-facade.ts`/`cockpit.html` working-tree content between verification
+passes), (5) restore the combined content back onto the working tree afterward so the sibling's
+uncommitted work was left exactly as found, never lost, never force-included.
+
+**Disclosed race, caught and fixed before this entry was written**: between the last "nothing foreign
+remains" check and the actual `git commit --only` call, the W3.3 sibling committed for real
+(`a5ab10d3`, landing on top of `41d04ba8`). Because the clean `cockpit-facade.ts`/`cockpit.html`/
+`cv-control-panel-logic.spec.ts`/`MODULE.md` content staged for this wave's commit had been computed
+against the *stale* pre-`a5ab10d3` HEAD, the first attempt at this wave's commit (since superseded via
+`git commit --amend` — the only amend in this wave, on a commit that had not been shared or built upon
+by anything else, per this repo's own "prefer a new commit" rule's own stated exception for a not-yet-
+shared local mistake) would have **silently reverted W3.3's now-permanent work** in those four files:
+removing its `systemStatus`/`flyHeroStatus`/`setIntent`/`lastConfigSourcesSignal` additions from
+`cockpit-facade.ts`, its hero-status/intent-chip markup from `cockpit.html`, its required `sources: {}`
+test fixtures from `cv-control-panel-logic.spec.ts` (which would have left a real, permanent `tsc`
+failure — `a5ab10d3` also made `PatchStreamConfigResponse.sources` a required field, so a reverted
+fixture omitting it no longer compiles once `a5ab10d3` is a real ancestor), and its own real MODULE.md
+section. Caught by re-running `git log --oneline` and noticing `a5ab10d3` where a draft used to be;
+fixed by re-deriving each of those four files as "`a5ab10d3`'s real content plus only this wave's own
+hunks on top" (the identical isolate-and-diff procedure above, just re-run against the corrected
+baseline) before finalizing the commit actually shipped. This file's own section is appended directly
+after W3.3's real, now-committed section (not before it, as an earlier draft of this same paragraph
+assumed while W3.3 was still in flight).
+
+**What changed:**
+
+- `shared/player/player.ts`: new `readonly pointFollowed = output<{ readonly x: number; readonly y:
+  number }>();`, a sibling to the existing `readonly trackFollowed = output<number>();` — added, not
+  replaced; every existing `trackFollowed` caller/binding is untouched. `onOverlayClick`'s hit-test
+  (`x`/`y` from `event.clientX/Y` minus the canvas's own bounding rect, matched against `drawnBoxes`,
+  unchanged) now delegates its *decision* to a new pure `resolveOverlayClickTarget` (`detection-overlay-
+  logic.ts`), a three-way `{kind:'track'|'point'|'none'}` discriminated union:
+  - **Tracked-box hit** (`hit.detection.track?.id !== undefined`) → `trackFollowed.emit(trackId)`,
+    byte-identical to pre-W3.5 behavior (regression-guarded by the first new spec case below).
+  - **Untracked-box hit** → `pointFollowed.emit({x, y})` at *that detection's own box center*
+    (`box.x + box.width/2`, `box.y + box.height/2`) — already the wire's normalized `[0,1]` fraction
+    (the same one `Detection.box` itself uses), so **no pixel math at all** for this branch.
+  - **No hit** (a bare click on open video) → the click's own CSS-pixel position is normalized against
+    the frame's *effective* content rect, recomputed via the identical two-step pipeline `redrawOverlay`
+    already uses for painting every box — `letterboxRect(...)` then `applyCropFollowToContentRect(
+    cropFollowTransform(cropFollowState))` — so this inversion stays consistent with the forward mapping
+    at any crop-follow zoom (proven by a dedicated round-trip spec case, below). A result outside `[0,1]`
+    on either axis (the click landed in a letterbox/pillarbox bar) is a no-op — no lock request sent, the
+    honest "nothing meaningful was clicked" posture this hit-test already had. A result just inside the
+    edge is clamped defensively for float error.
+  - **The box-center-vs-pixel-inversion distinction, spelled out**: an untracked box's center needs zero
+    unit conversion because a `Detection.box` is already normalized; a bare click is a raw CSS-pixel
+    coordinate that must be normalized against the *content* rect specifically (not the canvas/video
+    element's own full bounding rect) because `object-fit: contain` letterboxing and any active
+    crop-follow zoom both shrink/offset where "the video" actually renders relative to where the
+    `<canvas>` element itself sits.
+  - `resolveOverlayClickTarget` was extracted as a pure, standalone function rather than tested via a
+    `TestBed`/component harness — **judgment call**: no `player.spec.ts`/component-test precedent exists
+    anywhere in this codebase for `Player` (heavy dependencies: `WebrtcCertificateService`, an
+    unpolyfilled `ResizeObserver` in jsdom, `hls.js`, required `viewChild` DOM refs), and this codebase's
+    own convention already favors pure-logic vitest over component specs (`crop-follow-logic.spec.ts`
+    already mirrors this exact hit-test math the same way). 9 new `it()`s added to the existing
+    `detection-overlay-logic.spec.ts` (which already hosts every other pure overlay-logic spec): the
+    tracked-box regression case, the untracked-box-center case (float-safe via `toBeCloseTo`, since
+    `0.2 + 0.2/2 !== 0.3` exactly in JS), a bare click inside a zero-origin content rect, a bare click
+    inside a letterboxed (non-zero-origin) content rect, two letterbox-bar no-op cases (x axis and y
+    axis separately), a degenerate zero-area content rect (NaN-safety — `!(value > 0)` rather than
+    `value <= 0` so a `NaN` width/height also falls through to `'none'` instead of propagating a `NaN`
+    point), an exact-edge float-clamp case, and a **non-identity crop-follow zoom round-trip** case
+    (a `CropFollowState` fixture `{scale:2, centerX:0.75, centerY:0.75, anchorX:0.75, anchorY:0.75}`
+    mirroring `crop-follow-logic.spec.ts`'s own quadrant-pinned fixture) proving the forward mapping
+    (`applyCropFollowToContentRect`) and this inversion agree at a non-trivial zoom, not just at 1x.
+- `features/fly/cv-control-panel-logic.ts`: new `buildPointLockPatch(pointX: number, pointY: number):
+  UpdateStreamConfigRequest` — `{ tracking: { mode: 'FOLLOW', lock: { pointX, pointY } } }` — mirroring
+  `buildFollowLockPatch`'s exact "always pair `mode: 'FOLLOW'` with the lock, in one call" convention,
+  doc-commented and cross-referenced to `player.ts#pointFollowed`. One new test alongside
+  `buildFollowLockPatch`'s own.
+- `features/fly/cockpit-facade.ts`: new `followPoint(pointX: number, pointY: number): void`, a sibling
+  to `followTrack` (same file, immediately after it) — identical shape: reads `this.stream()?.streamId`,
+  no-ops with nothing running, otherwise `fleet.patchStreamConfig(streamId, buildPointLockPatch(pointX,
+  pointY)).then(() => this.seats.refreshNow())` — the same choke point `followTrack` already uses so a
+  crew member's read state and the dock's presence line catch up on the next tick rather than the
+  ordinary ~3s seat-poll cadence. No optimistic UI: nothing here claims the lock took until the next
+  tracks poll confirms it (docs/extracts/TRACKING-ORCHESTRATION.md §3.3's honesty rule, the same one
+  `followTrack` already follows).
+- `features/fly/cockpit.html`: **one line added** — `(pointFollowed)="facade.followPoint($event.x,
+  $event.y)"` immediately after the existing `(trackFollowed)="facade.followTrack($event)"` binding on
+  `<vision-player>`. Nothing else in this file was touched by this wave — the W3.3 sibling's own larger
+  edit to this same file (the hero status line + intent chip row, now permanently part of `a5ab10d3`)
+  was confirmed via `git diff` before every stage and surgically excluded from this wave's own commit,
+  then correctly preserved (not reverted) once `a5ab10d3` landed, per the race disclosure above.
+- **Deliberately not propagated**: `features/live/live.html` and `features/crew/crew.html` also bind
+  `(trackFollowed)` but were left untouched — matching the plan's own D8 scope (the Fly cockpit's tap
+  gesture only) and avoiding scope creep into two surfaces this wave was never asked to touch.
+- **New acceptance spec — `features/fly/click-to-follow.spec.ts`** (kept as its own file rather than
+  folded into `cockpit-facade.spec.ts`, which does not exist — there is no existing facade-level spec
+  file to fold into, and a new standalone file makes the 3-operator-act structure easiest to read as one
+  unit): drives real, non-mocked production functions for every click-to-follow-relevant step —
+  `resolveOverlayClickTarget` (the actual hit-test decision), `buildHotKnobPatch`/`buildFollowLockPatch`/
+  `buildPointLockPatch` (the actual patch bodies) — across two independent test cases, each asserting an
+  explicit **3-act** sequence and act count:
+  1. *Tracked-box path*: act 1 (start, a disclosed bare `vi.fn()` stand-in for `FleetStore#start`/
+     `VisionApi#startStream`'s call shape — carries no click-to-follow logic of its own, so a real
+     `CockpitFacade` instantiation was judged disproportionate here, see below), act 2 (`buildHotKnobPatch`
+     with `detectionEnabled: true` — "Turn on"), act 3 (a tracked `DetectionResult` fixture →
+     `resolveOverlayClickTarget` resolves `{kind:'track', trackId:7}` → `buildFollowLockPatch(7)`).
+     Asserts `acts.length === 3`, `startStream` called once, `patchStreamConfig`-shaped calls captured
+     twice, and the final patch equals `{tracking:{mode:'FOLLOW', lock:{trackId:7}}}`.
+  2. *Untracked-box point path*: identical structure, but the fixture detection carries no `track`; act 3
+     resolves `{kind:'point', x:0.4, y:0.5}` (that box's own center) → `buildPointLockPatch(0.4, 0.5)` →
+     final patch `{tracking:{mode:'FOLLOW', lock:{pointX:0.4, pointY:0.5}}}`.
+  - **Test-boundary judgment call**: `CockpitFacade` itself is not instantiated (~20 injected
+    collaborators, no existing harness anywhere in this codebase does so) — acts 2 and 3 call the real
+    production pure functions directly rather than routing through the facade's own methods, while act 1
+    ("start stream") is a disclosed spy stand-in, since it has no click-to-follow behavior to verify.
+  - **Zero drawer/modal state touched**: this file imports nothing from `core/ui/ui-store`,
+    `features/fly/cv-control-panel`, or `features/fly/cv-setup-modal`, and instantiates none of them —
+    confirmed by the file's own import list (`vitest`, `core/api/models` types, `shared/player/
+    detection-overlay-logic`, `features/fly/cv-control-panel-logic`).
+- **Role-gating**: unaffected — click-to-follow was already reachable by any operator who can already
+  reach the cockpit and see boxes; this wave adds no new gate and removes none.
+- **Dev parity**: unaffected — `vision.auth.enabled=false`'s dev admin resolves ADMIN/unbounded exactly
+  as before; no auth-conditional branch exists anywhere in this wave's diff.
+- **Degrades honestly**: a click in a letterbox bar, or on a degenerate (`NaN`/zero-area) content rect,
+  is a plain no-op — never a fabricated point sent to the wire. A failed `followPoint` PATCH degrades
+  exactly like `followTrack` already does: `fleet.patchStreamConfig` toasts and returns `null`, no
+  optimistic UI anywhere claims the lock took, and the next tracks poll is the only source of truth for
+  whether it actually did.
+- **Unit convention confirmed, not assumed**: `pointX`/`pointY` on `TargetLockRequest` (`core/api/
+  models.ts`) share the exact same normalized `[0,1]` video-frame fraction `Detection.box`/`BoundingBox`
+  already use on this same wire — checked directly against the existing type definitions rather than
+  guessed, since this was a zero-caller field with no existing usage example to copy.
+- **Verify chain**: `npx tsc --noEmit -p tsconfig.app.json` — 0 errors. `npx tsc --noEmit -p
+  tsconfig.spec.json` — 0 errors. `npm run test:ci` — **203 files / 3969 tests, all green**, run against
+  the fully-restored combined tree (this wave's own files, W3.3's then-still-uncommitted WIP, and
+  W3.4's already-merged commit, all present at once) — the same total W3.3's own section above
+  independently cites, confirming the shared tree was self-consistent at measurement time; re-confirmed
+  green again after `a5ab10d3` landed and this wave's own final commit was re-derived on top of it.
+  `shared/
+  player/no-client-rederivation.spec.ts` (wave W3.2's grep-based forbidden-identifier guard) spot-checked
+  directly (`npx vitest run` on that one file) and still passes — this wave introduces no client-side
+  velocity/label re-derivation. `ng build --configuration production` — green, the same two pre-existing
+  budget warnings only (initial bundle over 390 kB; `tactical-map.css` over 11 kB — neither touched by
+  this wave); raw measured totals on the same fully-restored combined tree: initial **437.13 kB raw /
+  122.59 kB transfer**, `cockpit` lazy chunk **140.58 kB raw / 29.63 kB transfer**. **No isolated
+  before/after bundle delta for this wave alone** — the same call every other wave sharing this tree
+  already made in this file (W3.2, W3.3, W3.6): a sibling agent held large, actively-uncommitted edits
+  in these same files for most of this wave's duration, so a stash-based before/after would measure the
+  sibling's edits appearing/disappearing, not this wave's own; this wave's own diff is small
+  (one output, one facade method, one patch-builder, one template line, all doc-comment-heavy) and lives
+  entirely inside the already-lazy `cockpit` chunk, never the eager initial bundle.
+- **Commit**: `feat(cv-orchestration W3.5): tap to follow — box or point (D8) + click-path acceptance spec`.

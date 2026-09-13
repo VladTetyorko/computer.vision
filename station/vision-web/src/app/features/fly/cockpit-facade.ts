@@ -32,7 +32,7 @@ import type { Transport } from '../../shared/player/player';
 import { cycleBoxesMode } from '../../shared/player/detection-overlay-logic';
 import { followMarkers, type DrawingDraft } from '../../shared/map/tactical-map/tactical-map-logic';
 import { canShowCommandPanel } from './flight-command-panel-logic';
-import { buildFollowLockPatch, buildHotKnobPatch, buildReleaseLockPatch, resolveCvConfig, type ResolvedCvConfig } from './cv-control-panel-logic';
+import { buildFollowLockPatch, buildHotKnobPatch, buildPointLockPatch, buildReleaseLockPatch, resolveCvConfig, type ResolvedCvConfig } from './cv-control-panel-logic';
 import { resolveDetectionEnabled, videoNotice } from './stream-state-logic';
 import {
   ALL_DRONES_OPTION_VALUE,
@@ -1232,6 +1232,25 @@ export class CockpitFacade {
     }
     const response = await this.fleet.patchStreamConfig(streamId, { intent });
     this.lastConfigSourcesSignal.set(response?.sources);
+  }
+
+  /**
+   * `<vision-player>`'s own `(pointFollowed)` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7 D8, wave
+   * W3.5) — the sibling {@link followTrack} never had: an operator's click landed on an **untracked**
+   * box, or on open video with no box under it, so there is no track id to lock onto, only a
+   * normalized `[0,1]` point (see `player.ts#pointFollowed`'s own doc comment for which of those two
+   * cases produced it, and `resolveOverlayClickTarget`'s for the exact split). Same choke point as
+   * {@link followTrack} in every other respect: a single PATCH always pairing `mode:'FOLLOW'` with the
+   * lock (`cv-control-panel-logic.ts#buildPointLockPatch`), no optimistic UI, `seats.refreshNow()`
+   * after — a crew member's read state and the dock's presence line catch up on the next tick instead
+   * of the ordinary ~3s seat-poll cadence. A no-op with nothing running has no stream to patch.
+   */
+  followPoint(pointX: number, pointY: number): void {
+    const streamId = this.stream()?.streamId;
+    if (!streamId) {
+      return;
+    }
+    void this.fleet.patchStreamConfig(streamId, buildPointLockPatch(pointX, pointY)).then(() => this.seats.refreshNow());
   }
 
   /**

@@ -38,6 +38,7 @@ import {
   placeLabels,
   resolveDetectionTiers,
   resolveDisplayDetections,
+  resolveOverlayClickTarget,
   selectDetectionResult,
   shouldDrawOverlay,
   tierAlphaPercent,
@@ -48,6 +49,7 @@ import {
   type DetectionTierContext,
   type LabelCandidate,
 } from './detection-overlay-logic';
+import { applyCropFollowToContentRect, cropFollowTransform, type CropFollowState } from './crop-follow-logic';
 import type { Detection, DetectionResult, WorldObject } from '../../core/api/models';
 
 function result(partial: Partial<DetectionResult> = {}): DetectionResult {
@@ -1221,5 +1223,78 @@ describe('placeLabels', () => {
     );
     const placed = placeLabels(candidates, new Map());
     expect(placed.length).toBe(MAX_PAINTED_LABELS);
+  });
+});
+
+// --- Click-to-follow: box or point (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7 D8, wave W3.5) ---------
+
+describe('resolveOverlayClickTarget', () => {
+  const content = { x: 0, y: 0, width: 200, height: 100 };
+
+  it('a tracked-box hit resolves to "track" with its id — unchanged from before this wave (regression guard)', () => {
+    const tracked = trackedDetection({}, 7);
+    expect(resolveOverlayClickTarget(tracked, 50, 50, content)).toEqual({ kind: 'track', trackId: 7 });
+  });
+
+  it('an untracked-box hit resolves to "point" at that detection\'s own box center — no pixel math, the wire fraction as-is', () => {
+    const untracked = fullDetection({ box: { x: 0.2, y: 0.4, width: 0.2, height: 0.2 } });
+    const target = resolveOverlayClickTarget(untracked, 999, 999, content);
+    expect(target.kind).toBe('point');
+    if (target.kind === 'point') {
+      expect(target.x).toBeCloseTo(0.3, 9); // 0.2 + 0.2/2, float-imprecise at the 17th digit
+      expect(target.y).toBeCloseTo(0.5, 9);
+    }
+  });
+
+  it('a bare click inside the content rect (no hit) resolves to "point" normalized against that rect', () => {
+    // Click at (50, 25) inside a 200x100 content rect anchored at the origin -> (0.25, 0.25).
+    expect(resolveOverlayClickTarget(null, 50, 25, content)).toEqual({ kind: 'point', x: 0.25, y: 0.25 });
+  });
+
+  it('a bare click offset by a non-zero content origin still normalizes correctly (letterboxed video, not full-bleed)', () => {
+    const letterboxed = { x: 40, y: 0, width: 120, height: 100 };
+    // Click at (100, 50) -> (100-40)/120 = 0.5, 50/100 = 0.5.
+    expect(resolveOverlayClickTarget(null, 100, 50, letterboxed)).toEqual({ kind: 'point', x: 0.5, y: 0.5 });
+  });
+
+  it('a bare click in a letterbox bar (outside the content rect on the x axis) is a no-op', () => {
+    const letterboxed = { x: 40, y: 0, width: 120, height: 100 };
+    expect(resolveOverlayClickTarget(null, 10, 50, letterboxed)).toEqual({ kind: 'none' });
+  });
+
+  it('a bare click in a letterbox bar (outside the content rect on the y axis) is a no-op', () => {
+    const pillarboxed = { x: 0, y: 20, width: 200, height: 60 };
+    expect(resolveOverlayClickTarget(null, 100, 5, pillarboxed)).toEqual({ kind: 'none' });
+  });
+
+  it('a degenerate (zero-area) content rect never propagates NaN — no-op, not a fabricated point', () => {
+    expect(resolveOverlayClickTarget(null, 10, 10, { x: 0, y: 0, width: 0, height: 0 })).toEqual({ kind: 'none' });
+  });
+
+  it('clamps a result that falls exactly on the edge back into [0,1] defensively for float error', () => {
+    // 200.00000000000003 / 200 is a hair over 1 in floating point.
+    const flaky = { x: 0, y: 0, width: 200, height: 100 };
+    expect(resolveOverlayClickTarget(null, 200, 100, flaky)).toEqual({ kind: 'point', x: 1, y: 1 });
+  });
+
+  it('a click just inside the video at a non-identity crop-follow zoom resolves consistently with the forward mapping drawDetections uses (D10 round trip)', () => {
+    // A settled x2 crop centered/anchored at (0.75, 0.75) — mirrors crop-follow-logic.spec.ts's own
+    // "pinned to a quadrant" fixture. The raw (pre-crop) letterboxed content is a plain 200x100 box;
+    // `onOverlayClick`'s own two-step pipeline (letterboxRect then applyCropFollowToContentRect) is
+    // reproduced here verbatim so this test proves the same round trip that component method performs.
+    const zoomed: CropFollowState = { scale: 2, centerX: 0.75, centerY: 0.75, anchorX: 0.75, anchorY: 0.75 };
+    const rawContent = { x: 0, y: 0, width: 200, height: 100 };
+    const effectiveContent = applyCropFollowToContentRect(rawContent, cropFollowTransform(zoomed));
+
+    // A detection sitting at raw normalized (0.8, 0.8) box center — inside the zoomed-in quadrant.
+    const forwardScreenX = effectiveContent.x + 0.8 * effectiveContent.width;
+    const forwardScreenY = effectiveContent.y + 0.8 * effectiveContent.height;
+
+    const target = resolveOverlayClickTarget(null, forwardScreenX, forwardScreenY, effectiveContent);
+    expect(target.kind).toBe('point');
+    if (target.kind === 'point') {
+      expect(target.x).toBeCloseTo(0.8, 9);
+      expect(target.y).toBeCloseTo(0.8, 9);
+    }
   });
 });
