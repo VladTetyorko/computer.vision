@@ -1,0 +1,230 @@
+{
+  "frame": [
+    {
+      "capturedAtMillis": 1700000000000,
+      "detections": [
+        {
+          "box": {
+            "height": 0.4,
+            "width": 0.3,
+            "x": 0.1,
+            "y": 0.2
+          },
+          "confidence": 0.87,
+          "label": "person"
+        },
+        {
+          "box": {
+            "height": 0.15,
+            "width": 0.2,
+            "x": 0.55,
+            "y": 0.6
+          },
+          "confidence": 0.64,
+          "label": "car"
+        }
+      ],
+      "detectorReason": "FULL",
+      "dropsSinceLast": 1,
+      "eligible": [
+        "detect",
+        "assoc",
+        "predict"
+      ],
+      "entries": [
+        {
+          "contributorId": "detect.full",
+          "costMillis": 12.5,
+          "outcome": "RAN",
+          "reason": "",
+          "summary": {
+            "detections": "2"
+          }
+        },
+        {
+          "contributorId": "assoc.cost",
+          "costMillis": 0.0,
+          "outcome": "SKIPPED",
+          "reason": "no detections",
+          "summary": {}
+        },
+        {
+          "contributorId": "predict.cv",
+          "costMillis": 3.1,
+          "outcome": "FAILED",
+          "reason": "RuntimeException: model unavailable",
+          "summary": {}
+        }
+      ],
+      "frameHeight": 1080,
+      "frameWidth": 1920,
+      "gateWaitMillis": 8.2,
+      "halted": false,
+      "levelServed": 2,
+      "objects": {
+        "7": [
+          {
+            "claim": {
+              "held": "0.11,0.21,0.29,0.39",
+              "predicted": "0.10,0.20,0.30,0.40",
+              "velocity": "0.01,-0.02"
+            },
+            "contributorId": "predict.cv"
+          }
+        ]
+      },
+      "sequence": 42,
+      "streamId": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "totalMillis": 24.6
+    },
+    {
+      "capturedAtMillis": 1700000000000,
+      "detections": [],
+      "detectorReason": "ROI_ONLY",
+      "dropsSinceLast": 0,
+      "eligible": [
+        "detect"
+      ],
+      "entries": [
+        {
+          "contributorId": "detect.full",
+          "costMillis": 6.0,
+          "outcome": "RAN",
+          "reason": "",
+          "summary": {
+            "detections": "0"
+          }
+        }
+      ],
+      "frameHeight": 0,
+      "frameWidth": 0,
+      "gateWaitMillis": 3.0,
+      "halted": false,
+      "levelServed": 1,
+      "objects": {},
+      "sequence": 43,
+      "streamId": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+      "totalMillis": 6.0
+    }
+  ],
+  "gate": [
+    {
+      "atMillis": 1700000000000,
+      "demand": {
+        "detectionEnabled": true,
+        "policyAlwaysOn": false,
+        "viewerDemand": true
+      },
+      "frameSequence": 0,
+      "outcome": "SENT"
+    },
+    {
+      "atMillis": 1700000000000,
+      "demand": {
+        "detectionEnabled": true,
+        "policyAlwaysOn": false,
+        "viewerDemand": true
+      },
+      "frameSequence": 1,
+      "outcome": "PROBE"
+    },
+    {
+      "atMillis": 1700000000000,
+      "demand": {
+        "detectionEnabled": false,
+        "policyAlwaysOn": false,
+        "viewerDemand": false
+      },
+      "frameSequence": 2,
+      "outcome": "SKIPPED",
+      "reason": "GATE_OFF"
+    },
+    {
+      "atMillis": 1700000000000,
+      "demand": {
+        "detectionEnabled": false,
+        "policyAlwaysOn": false,
+        "viewerDemand": false
+      },
+      "frameSequence": 3,
+      "outcome": "SKIPPED",
+      "reason": "GATE_NO_DEMAND"
+    },
+    {
+      "atMillis": 1700000000000,
+      "demand": {
+        "detectionEnabled": false,
+        "policyAlwaysOn": false,
+        "viewerDemand": false
+      },
+      "frameSequence": 4,
+      "outcome": "SKIPPED",
+      "reason": "PULL_MODE"
+    },
+    {
+      "atMillis": 1700000000000,
+      "demand": {
+        "detectionEnabled": false,
+        "policyAlwaysOn": false,
+        "viewerDemand": false
+      },
+      "frameSequence": 5,
+      "outcome": "SKIPPED",
+      "reason": "OUTAGE_BACKOFF"
+    },
+    {
+      "atMillis": 1700000000000,
+      "demand": {
+        "detectionEnabled": false,
+        "policyAlwaysOn": false,
+        "viewerDemand": false
+      },
+      "frameSequence": 6,
+      "outcome": "SKIPPED",
+      "reason": "DEADLINE_NOT_DUE"
+    },
+    {
+      "atMillis": 1700000000000,
+      "demand": {
+        "detectionEnabled": false,
+        "policyAlwaysOn": false,
+        "viewerDemand": false
+      },
+      "frameSequence": 7,
+      "outcome": "SKIPPED",
+      "reason": "IN_FLIGHT_FULL"
+    },
+    {
+      "atMillis": 1700000000000,
+      "demand": {
+        "detectionEnabled": false,
+        "policyAlwaysOn": false,
+        "viewerDemand": false
+      },
+      "frameSequence": 8,
+      "outcome": "SKIPPED",
+      "reason": "CV_UNAVAILABLE"
+    }
+  ],
+  "streamId": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+  "world": [
+    {
+      "event": {
+        "openEventId": "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+      },
+      "operator": {
+        "denied": false,
+        "follow": "HOLDING",
+        "followed": true
+      },
+      "render": {
+        "tier": "T1"
+      },
+      "state": {
+        "id": 7,
+        "lifecycle": "CONFIRMED",
+        "streamId": "dddddddd-dddd-dddd-dddd-dddddddddddd"
+      }
+    }
+  ]
+}

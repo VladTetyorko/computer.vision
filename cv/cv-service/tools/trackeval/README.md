@@ -283,6 +283,64 @@ of `metrics.compute` — track count, lifetimes, cost, and the coasting
 fraction, explicitly NOT an accuracy number (there is no known true position
 to score against unless the recording is separately hand-labelled later).
 
+## Replaying a saved trace
+
+`tools/trackeval/trace.py` (CV-ORCHESTRATION wave W5b, decision E23) is a
+third source for `replay_recording` above, alongside a synthetic scenario and
+a real-footage `Recording`: a `CvTrace` JSON, the file `station/vision-web`'s
+engineer inspector (`/manage/cv`, wave W5.4's "Save trace") downloads.
+
+**Why this needed its own wave.** W5 shipped "Save trace", but the file it
+produced could not actually replay here: `FrameLedger` carried a detection
+*count*, not boxes, and `ObjectState.detectorBox` only exists for a MATCHED
+object — every box the associator rejected was already gone by the time the
+trace was saved. Wave W5b fixed this at the source: `FrameLedger.detections`
+(cv-service's `orchestration/ledger.py`, the wire's `TracedDetection`, the
+domain `DetectorBox`, the web `TracedDetection` mirror) now carries
+`detect.full`'s own raw, pre-association boxes for the frame — **only** when
+the request traced, so an untraced call's ledger costs exactly what it cost
+before this wave.
+
+**Why the detector's raw boxes, not the tracker's own output.** A `CvTrace`
+also carries `world[]`, the tracker's own already-associated fold. Replaying
+THAT through the tracker would prove nothing — it is what the tracker
+already decided. `frame[].detections` is the real, pre-association fixture:
+the actual regression test.
+
+```bash
+PYTHONPATH="$PWD" .venv/bin/python -m tools.trackeval --trace my-trace.json
+```
+
+Or as a library call, the same `read_trace` → `replay_recording` →
+`metrics.summarize_recording` chain the CLI above runs:
+
+```python
+from tools.trackeval.trace import read_trace
+from tools.trackeval.recording import replay_recording
+
+recording = read_trace("my-trace.json")  # raises ValueError -- see below
+result = replay_recording(recording)     # ASSOCIATE only, same as any Recording
+```
+
+**What a trace replay cannot do:**
+
+- **No camera pose.** A `CvTrace` carries no `CameraPose` field at all — every
+  frame this reader builds keeps `RecordedFrame`'s own zero pose, so replay
+  runs **without** ego-motion compensation (`pose_gmc` never fires). A
+  gimbal-heavy clip will score differently replayed this way than it did
+  live, where real pose was available every frame.
+- **A pre-W5b trace cannot replay.** `read_trace` raises `ValueError` when the
+  trace's first frame (by `sequence`) carries no `frameWidth`/`frameHeight` —
+  a trace saved before this wave never carried a frame's pixel size, let
+  alone its raw boxes.
+- **At least two frames are required**, to compute `fps` from the median
+  consecutive `capturedAtMillis` delta; a shorter trace raises `ValueError`
+  too. A degenerate (non-positive) median delta is not an error — `fps`
+  becomes `0.0`, the same "unknown" sentinel `summarize_recording` already
+  treats specially, rather than a fabricated number.
+- **No ground truth**, same as any real-footage replay — `summarize_recording`
+  is the only scoring available, never `metrics.compute`'s IDSW/FM/MT table.
+
 ## Tests
 
 `tests/trackeval/` mirrors this package: `test_sequences.py` (determinism +
@@ -293,9 +351,15 @@ the divergence regression the 2026-08-14 instrument repair added, needs
 `numpy`), `test_metrics.py` (metric correctness on hand-built inputs,
 including coast ADE/FDE — pure stdlib, no `cv` extra needed at all),
 `test_recording.py` (record/write/read/replay round-trip against a
-synthetic "live" source, needs `numpy` to build that source), `test_main.py`
-(the CLI), `test_baseline_consistency.py` (`BASELINE.md`'s own table,
-diffed against a fresh `--all` run every `pytest -q`). Run from `cv/cv-service/`:
+synthetic "live" source, needs `numpy` to build that source), `test_trace.py`
+(`read_trace` against a hand-written `fixtures/min-trace.json` — sorting by
+sequence, fps/width/height derivation, both `ValueError` paths — and against
+`fixtures/cv-trace.wire.full.json`, a copy of `station/vision-api`'s own
+`CvTraceResponseWireContractTest` fixture proving this reader accepts what
+the Java side actually emits; pure stdlib, no `numpy` needed), `test_main.py`
+(the CLI, including `--trace`), `test_baseline_consistency.py`
+(`BASELINE.md`'s own table, diffed against a fresh `--all` run every
+`pytest -q`). Run from `cv/cv-service/`:
 
 ```bash
 PYTHONPATH="$PWD" .venv/bin/python -m pytest -q tests/trackeval/

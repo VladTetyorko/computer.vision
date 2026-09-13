@@ -3,7 +3,9 @@
 `docs/plans/done/TRACKING-V2-PLAN.md` §4 (wave C0). Deliberately thin --
 argument parsing and printing only. `sequences.py` builds the data,
 `replay.py` runs the real session, `metrics.py` scores it; nothing here
-reimplements any of the three.
+reimplements any of the three. `--trace` (CV-ORCHESTRATION wave W5b) is the
+same discipline applied to `recording.py`/`trace.py` instead: this module
+still only parses args and prints.
 
 Run from `cv-service/` with the source tree on `PYTHONPATH` (the worktree
 venv is symlinked, so `PYTHONPATH` is what makes imports resolve to THIS
@@ -11,6 +13,7 @@ checkout rather than another one):
 
     PYTHONPATH="$PWD" .venv/bin/python -m tools.trackeval --scenario occlusion --mode ASSOCIATE
     PYTHONPATH="$PWD" .venv/bin/python -m tools.trackeval --all
+    PYTHONPATH="$PWD" .venv/bin/python -m tools.trackeval --trace my-trace.json
 """
 
 from __future__ import annotations
@@ -26,7 +29,9 @@ from cv_service.tracking.params import MODE_ASSOCIATE, MODE_FOLLOW
 
 from tools.trackeval import golden as golden_module
 from tools.trackeval import metrics as metrics_module
+from tools.trackeval import recording as recording_module
 from tools.trackeval import replay as replay_module
+from tools.trackeval import trace as trace_module
 from tools.trackeval.sequences import DEFAULT_SEED, SCENARIOS, SMALL_TARGET_RELIABLE_SIZE
 
 _MODE_ALIASES: dict[str, str] = {"ASSOCIATE": MODE_ASSOCIATE, "FOLLOW": MODE_FOLLOW}
@@ -232,14 +237,57 @@ def _parse_args(argv: TypingSequence[str]) -> argparse.Namespace:
             "zero-delta gate (docs/plans/active/CV-ORCHESTRATION-PLAN.md P7/E15)."
         ),
     )
+    parser.add_argument(
+        "--trace",
+        default="",
+        metavar="FILE",
+        help=(
+            "replay a saved CvTrace JSON (station/vision-web's engineer inspector, "
+            "\"Save trace\" -- CV-ORCHESTRATION wave W5b, decision E23) instead of a "
+            "synthetic scenario: the detector's own raw, pre-association boxes for each "
+            "traced frame, through the real tracking session. Prints the same cost/"
+            "structural summary tools.trackeval.recording's real-footage path does, not "
+            "the --scenario/--all accuracy table -- a trace carries no ground truth to "
+            "score against, the same reason a real-footage recording.py replay has none. "
+            "Runs WITHOUT ego-motion compensation (a CvTrace carries no camera pose at "
+            "all) -- see README.md's 'Replaying a saved trace'."
+        ),
+    )
     args = parser.parse_args(argv)
-    if not args.all and args.scenario is None and not args.golden_dir:
-        parser.error("either --scenario NAME, --all or --golden-dir is required")
+    if not args.all and args.scenario is None and not args.golden_dir and not args.trace:
+        parser.error("either --scenario NAME, --all, --golden-dir or --trace FILE is required")
     return args
+
+
+def _print_recording_summary(summary: metrics_module.RecordingSummary) -> None:
+    """The smallest useful print for `metrics.RecordingSummary` -- `--all`/
+    `--scenario`'s `render_table` below is `Metrics`-shaped (IDSW/FM/MT/coast-
+    ADE columns a real-footage or trace replay has no ground truth to fill,
+    same reasoning `recording.RecordingReplayResult`'s own docstring gives),
+    so this is a second, deliberately plain renderer rather than forcing one
+    format to serve both shapes."""
+    print(f"name:                    {summary.name}")
+    print(f"total_frames:            {summary.total_frames}")
+    print(f"distinct_track_ids:      {summary.distinct_track_ids}")
+    print(f"mean_track_lifetime:     {summary.mean_track_lifetime_frames}")
+    print(f"median_track_lifetime:   {summary.median_track_lifetime_frames}")
+    print(f"detector_passes:         {summary.detector_passes}")
+    print(f"detector_passes_per_sec: {summary.detector_passes_per_sec:.2f}")
+    print(f"mean_tracker_millis:     {summary.mean_tracker_millis:.2f}")
+    print(f"p95_tracker_millis:      {summary.p95_tracker_millis:.2f}")
+    print(f"coast_frame_fraction:    {summary.coast_frame_fraction}")
 
 
 def main(argv: Optional[TypingSequence[str]] = None) -> None:
     args = _parse_args(sys.argv[1:] if argv is None else argv)
+    if args.trace:
+        recording = trace_module.read_trace(args.trace)
+        result = recording_module.replay_recording(recording)
+        summary = metrics_module.summarize_recording(
+            result.outcomes, fps=result.fps, coast_track_ids=result.coast_track_ids, name=result.name
+        )
+        _print_recording_summary(summary)
+        return
     if args.golden_dir:
         directory = Path(args.golden_dir)
         for scenario in sorted(SCENARIOS):
