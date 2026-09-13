@@ -1,0 +1,221 @@
+<div class="page">
+  <vision-page-bar
+    title="CV inspector"
+    icon="chip"
+    hint="Per-frame contributor list, per-object evidence, gate ledger, and process facts for one running stream — the engineer's own view of what each part of the CV pipeline did on a frame, and why. This page's own doc comment carries the full answer table."
+  >
+    <select
+      pageBarFilters
+      class="stream-select"
+      aria-label="Pick a stream to inspect"
+      [value]="facade.selectedStreamId() ?? ''"
+      (change)="onStreamChange($event)"
+    >
+      <option value="">— pick a stream —</option>
+      @for (stream of facade.streams(); track trackStream($index, stream)) {
+        <option [value]="stream.streamId">{{ stream.streamId }}</option>
+      }
+    </select>
+    <button
+      pageBarActions
+      type="button"
+      class="btn secondary"
+      [disabled]="!facade.canSaveTrace()"
+      title="Download the current gate/frame/world ledgers for this stream as JSON."
+      (click)="facade.saveTrace()"
+    >
+      Save trace
+    </button>
+  </vision-page-bar>
+
+  <section class="card">
+    <h2>Process facts</h2>
+    @if (facade.cvRow(); as row) {
+      <div class="process-row">
+        <span
+          class="chip"
+          [class.ok]="facade.healthSeverity(row.health) === 'ok'"
+          [class.warn]="facade.healthSeverity(row.health) === 'warn'"
+          [class.danger]="facade.healthSeverity(row.health) === 'danger'"
+        >{{ facade.healthLabel(row.health) }}</span>
+        <span>{{ row.detail }}</span>
+      </div>
+      @if (row.hint) {
+        <p class="process-hint">{{ row.hint }}</p>
+      }
+    } @else {
+      <p class="muted">Checking…</p>
+    }
+  </section>
+
+  @if (facade.selectedStreamId() === undefined) {
+    <vision-empty
+      title="Pick a stream"
+      message="Choose a running stream above to inspect its gate decisions, frame contributors, and object evidence."
+      icon="chip"
+    />
+  } @else {
+    <div class="grid12">
+      <section class="card col-6">
+        <h2>Gate ledger</h2>
+        @if (facade.gate().length > 0) {
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Frame</th>
+                  <th>At</th>
+                  <th>Outcome</th>
+                  <th>Reason</th>
+                  <th>Detect.</th>
+                  <th>Viewer</th>
+                  <th>Policy</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of facade.gate(); track trackGateRow($index, row)) {
+                  <tr>
+                    <td class="mono">{{ row.frameSequence }}</td>
+                    <td class="mono">{{ clockTime(row.atMillis) }}</td>
+                    <td>
+                      <span class="chip" [class.ok]="row.outcome === 'SENT'" [class.warn]="row.outcome === 'PROBE'">
+                        {{ row.outcome }}
+                      </span>
+                    </td>
+                    <td class="muted">{{ row.reason ?? '—' }}</td>
+                    <td>{{ row.demand.detectionEnabled ? 'yes' : 'no' }}</td>
+                    <td>{{ row.demand.viewerDemand ? 'yes' : 'no' }}</td>
+                    <td>{{ row.demand.policyAlwaysOn ? 'yes' : 'no' }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        } @else {
+          <vision-empty title="No gate decisions yet" message="Waiting for the next sampler deadline on this stream." />
+        }
+      </section>
+
+      <section class="card col-6">
+        <h2>Frame contributors</h2>
+        @if (facade.frame().length > 0) {
+          <select
+            class="frame-select"
+            aria-label="Pick a frame"
+            [value]="facade.selectedFrame()?.sequence ?? ''"
+            (change)="onFrameChange($event)"
+          >
+            @for (frameOption of facade.frame(); track trackFrameOption($index, frameOption)) {
+              <option [value]="frameOption.sequence">frame {{ frameOption.sequence }}</option>
+            }
+          </select>
+          @if (facade.selectedFrame(); as frame) {
+            <p class="muted frame-summary mono">
+              level {{ frame.levelServed }} · {{ frame.detectorReason }} · eligible: {{ frame.eligible.join(', ') || '—' }}
+              · drops {{ frame.dropsSinceLast }} · gate wait {{ frame.gateWaitMillis }}ms · total {{ frame.totalMillis }}ms
+              @if (frame.halted) {
+                · <span class="chip danger">halted</span>
+              }
+            </p>
+            @if (frame.entries.length > 0) {
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Contributor</th>
+                      <th>Outcome</th>
+                      <th>Reason</th>
+                      <th>Cost</th>
+                      <th>Summary</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (entry of frame.entries; track trackEntry($index, entry)) {
+                      <tr>
+                        <td class="mono">{{ entry.contributorId }}</td>
+                        <td>
+                          <span
+                            class="chip"
+                            [class.ok]="entry.outcome === 'RAN'"
+                            [class.warn]="entry.outcome === 'SKIPPED'"
+                            [class.danger]="entry.outcome === 'FAILED'"
+                          >{{ entry.outcome }}</span>
+                        </td>
+                        <td class="muted">{{ entry.reason || '—' }}</td>
+                        <td class="mono">{{ entry.costMillis }}ms</td>
+                        <td class="muted truncate" [title]="formatRecord(entry.summary)">{{ formatRecord(entry.summary) }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            } @else {
+              <p class="muted">No contributors recorded for this frame.</p>
+            }
+          }
+        } @else {
+          <vision-empty title="No traced frames yet" message="Waiting for cv-service to trace a frame on this stream." />
+        }
+      </section>
+
+      <section class="card col-12">
+        <h2>Object evidence</h2>
+        @if (facade.trackIds().length > 0) {
+          <select
+            class="track-select"
+            aria-label="Pick an object"
+            [value]="facade.selectedTrackId() ?? ''"
+            (change)="onTrackChange($event)"
+          >
+            <option value="">— pick an object —</option>
+            @for (id of facade.trackIds(); track trackId($index, id)) {
+              <option [value]="id">track {{ id }}</option>
+            }
+          </select>
+          @if (facade.selectedTrackId() !== undefined) {
+            @if (facade.selectedWorldObject(); as world) {
+              <p class="muted world-summary mono">
+                {{ world.state.lifecycle }}
+                @if (world.operator.follow) {
+                  · follow: {{ world.operator.follow }}
+                }
+                @if (world.operator.denied) {
+                  · <span class="chip danger">denied</span>
+                }
+                · render: {{ world.render.tier }}
+              </p>
+            } @else {
+              <p class="muted">No current world-model fold for this track — evidence only, below.</p>
+            }
+            @if (facade.evidenceRows().length > 0) {
+              <div class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Frame</th>
+                      <th>Contributor</th>
+                      <th>Claim</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    @for (row of facade.evidenceRows(); track trackEvidenceRow($index, row)) {
+                      <tr>
+                        <td class="mono">{{ row.frameSequence }}</td>
+                        <td class="mono">{{ row.contributorId }}</td>
+                        <td class="muted truncate" [title]="formatRecord(row.claim)">{{ formatRecord(row.claim) }}</td>
+                      </tr>
+                    }
+                  </tbody>
+                </table>
+              </div>
+            } @else {
+              <p class="muted">No evidence recorded for this track within the current ring.</p>
+            }
+          }
+        } @else {
+          <vision-empty title="No objects yet" message="No track has appeared in this stream's ledger or world model yet." />
+        }
+      </section>
+    </div>
+  }
+</div>

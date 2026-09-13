@@ -33,6 +33,7 @@ import { TRAINING_JOB_ROUTES } from './features/training-jobs/training-jobs.rout
 import { GEO_ROUTES } from './features/geo/geo.routes';
 import { CONTROLLER_ROUTES } from './features/controller/controller.routes';
 import { VISION_PROFILES_ROUTES } from './features/vision-profiles/vision-profiles.routes';
+import { CV_INSPECTOR_ROUTES } from './features/cv-inspector/cv-inspector.routes';
 import { authGuard } from './core/auth/auth-guard';
 import { landingGuard } from './core/shell/landing-guard';
 
@@ -83,6 +84,7 @@ export const routes: Routes = [
       ...GEO_ROUTES,
       ...CONTROLLER_ROUTES,
       ...VISION_PROFILES_ROUTES,
+      ...CV_INSPECTOR_ROUTES,
       ...SYSTEM_STATUS_ROUTES,
       // MODELS_ROUTES' static 'manage/training/models' must precede LABELING_ROUTES' param route
       // 'manage/training/:datasetId' — see MODELS_ROUTES' own doc comment. TRAINING_JOB_ROUTES has

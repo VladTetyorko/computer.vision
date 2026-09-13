@@ -1540,3 +1540,25 @@ sentinel under this frozen wire contract — see `CvProfileRequest#fieldSources(
 `CvProfileResponse.Sources`'s own javadoc. No `station/vision-web` change: `models.ts` has no
 exhaustive wire-contract-spec test for `CvProfile`/`CvProfileRequest` and no mirror of `intent` yet
 (still Java-only), so `sources` needed none either this wave.
+
+**W5.0 (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4/§4.8, engineer inspector wire contract):**
+new `dto.CvTraceResponseWireContractTest`, the same fixture-comparison idiom as
+`WorldObjectResponseWireContractTest` (W2.8) — builds a `full` `CvTraceResponse` covering every
+`GateReason` value (all seven, declaration order) plus a `SENT` and a `PROBE` `GateDecisionResponse`,
+one `FrameLedgerResponse` with a `RAN`/`SKIPPED`/`FAILED` `LedgerEntryResponse` triad and one
+`ObjectEvidenceResponse` claim shaped like cv-service's real `predict.cv` evidence (`predicted`/
+`held`/`velocity` keys, `cv/cv-service/cv_service/orchestration/contributors/predict.py`), and one
+`WorldObjectResponse`; and a `minimal` never-traced-this-stream shape (`gate`/`frame`/`world` all
+empty lists, per `CvTraceResponse`'s own "never errors" contract). Fixture committed at
+`station/vision-web/src/app/core/api/__fixtures__/cv-trace.wire.json`, consumed by W5.1's
+`cv-trace.wire.contract.spec.ts`. `./mvnw -B -pl station/vision-api -am test -DskipWeb` —
+**1113 tests, all green** (up from 1097 counted at W2.7; the gap includes tests added by other
+waves running on this same branch concurrently, not solely this step).
+
+**Plan-vs-code discrepancy disclosed here** (not acted on, since it is prose-only): §4.4's
+narrative describes coalesced `SKIPPED` gate entries as carrying "a count" that "rides along."
+Reading `contexts/vision-perception`'s `FrameGateLedger` shows coalescing instead *replaces* the
+previous entry's timestamp/frameSequence/demand snapshot outright — there is no `count` field
+anywhere on `GateDecision`/`GateDecisionResponse`, and this test does not fabricate one. A
+coalesced run is indistinguishable on the wire from a single decision at the same reason; only the
+refreshed `atMillis`/`frameSequence` say time passed.

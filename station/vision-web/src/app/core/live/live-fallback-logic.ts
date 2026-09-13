@@ -93,6 +93,18 @@ export function geoTopic(assetId: string): string {
   return `geo:${assetId}`;
 }
 
+/**
+ * `cv-trace:<assetId>` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4/§4.8, wave W5.1) — opt-in,
+ * ref-counted exactly like `telemetryTopic`/`detectionsTopic`/`geoTopic` above. Carries {@link
+ * FrameLedger} arrivals; unlike `geoTopic` (server-side ring capacity 1) the server does **not**
+ * cap this topic's history — `LiveStore` itself is latest-wins for this topic (mirroring
+ * `detectionsTopic`), and the client-side ring the engineer inspector actually reads from is
+ * `core/cv-trace/cv-trace-store.ts`'s own job (wave W5.2), not this store's.
+ */
+export function cvTraceTopic(assetId: string): string {
+  return `cv-trace:${assetId}`;
+}
+
 export interface RefCountResult {
   /** The topic's new subscriber count. */
   readonly count: number;

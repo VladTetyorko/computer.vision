@@ -1,0 +1,54 @@
+/* Reuses `.page`/`.card`/`.grid12`/`.col-*`/`.chip`/`.mono`/`.muted`/`.truncate`/`table`/`th`/`td`
+   from `src/styles.css` — no new colors, no bespoke elevation, same primitives
+   `features/system-status/system-status.css` and `features/audit/audit.css` already build on.
+   `.table-scroll`/`select { width }` mirror `audit.css`'s own identical notes: each control gets an
+   explicit width so it doesn't stretch to the full page-bar row once it wraps onto its own line, and
+   each table gets its own horizontal scroll box rather than ever squeezing the page. */
+
+.stream-select {
+  width: 16rem;
+}
+
+.frame-select,
+.track-select {
+  width: 12rem;
+  margin-bottom: var(--space-8);
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+table {
+  min-width: 32rem;
+}
+
+.process-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-8);
+  font-size: 0.9rem;
+}
+
+/* Same quiet, non-fault instructional tone as `system-status.css`'s `.subsystem-hint` — this page's
+   own local class rather than a borrowed name, per that file's own "`.hint` is not a global
+   primitive" note. */
+.process-hint {
+  margin: var(--space-4) 0 0;
+  font-size: 0.8rem;
+  color: var(--color-info-text);
+}
+
+.frame-summary,
+.world-summary {
+  margin: 0 0 var(--space-8);
+  font-size: 0.8rem;
+}
+
+@media (max-width: 640px) {
+  .stream-select,
+  .frame-select,
+  .track-select {
+    width: 100%;
+  }
+}

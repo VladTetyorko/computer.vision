@@ -283,6 +283,18 @@ export const NAV_MODES: readonly NavMode[] = [
         to: '/manage/geo/regions',
         requires: 'MANAGE_ORG',
       },
+      {
+        icon: 'chip',
+        name: 'CV inspector',
+        // New this wave (docs/plans/active/CV-ORCHESTRATION-PLAN.md §9 decision 3, wave W5.3) —
+        // the engineer audience's own surface (§4.8): per-frame contributor list, per-object
+        // evidence, gate ledger, and process facts for one picked stream. `/manage/cv` only, no
+        // fly-drawer tab (the decision's own wording) — the fly cockpit keeps its one honest status
+        // line instead (§4.8's Operator row).
+        description: 'Per-frame contributor list, per-object evidence, gate ledger, and process facts — the CV pipeline’s own debug surface.',
+        to: '/manage/cv',
+        requires: 'MANAGE_ORG',
+      },
     ],
   },
   {

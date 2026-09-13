@@ -42,6 +42,7 @@ import type {
   CvProfileBindingRequest,
   CvProfileRequest,
   CvProfilesResponse,
+  CvTrace,
   CvTrackersResponse,
   Dataset,
   DatasetsResponse,
@@ -288,6 +289,23 @@ export class VisionApi {
   getStreamTracks(streamId: string): Promise<StreamTracksResponse> {
     return firstValueFrom(
       this.http.get<StreamTracksResponse>(`/api/streams/${encodeURIComponent(streamId)}/tracks`),
+    );
+  }
+
+  /**
+   * The engineer inspector's warm trace tier (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4/§4.8,
+   * wave W5.2) — one request for all three ledgers side by side (`gate`/`frame`/`world`). Never
+   * errors server-side (see {@link CvTrace}'s own doc comment) — an unknown/stopped stream reads as
+   * every list empty, same idiom as `getStreamTracks`. **This call is itself trace demand**: it
+   * counts toward `TraceDemandPort#traceWanted` on the server exactly like an open `cv-trace:
+   * <assetId>` SSE subscription — `core/cv-trace/cv-trace-store.ts` relies on this to keep tracing
+   * flipped on across a live gap, not just to read the wire.
+   */
+  getCvTrace(streamId: string, last?: number): Promise<CvTrace> {
+    return firstValueFrom(
+      this.http.get<CvTrace>(`/api/streams/${encodeURIComponent(streamId)}/cv/trace`, {
+        params: last === undefined ? {} : { last },
+      }),
     );
   }
 
