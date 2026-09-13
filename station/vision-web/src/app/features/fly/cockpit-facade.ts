@@ -653,9 +653,14 @@ export class CockpitFacade {
   });
 
   /**
-   * Whether the `GET .../tracks` poll should be running right now (docs/plans/active/
-   * TRACK-FOLLOW-PLAN.md §3.5 "two feeds, two jobs") — driven into `DetectionsStore.followTracks`
-   * by the constructor effect below. The plan's own formula is "the Vision drawer is open OR the
+   * Whether a tracks session should be running right now (docs/plans/active/TRACK-FOLLOW-PLAN.md
+   * §3.5 "two feeds, two jobs") — driven into `DetectionsStore.followTracks` by the constructor
+   * effect below. Before wave W9 this gated the `GET .../tracks` poll directly, the only mechanism
+   * there was; now (decision E25) `DetectionsStore.tracks` is transport-aware like `results`, so this
+   * gates the tracks session's "wanted" state instead — `false` tears down both the poll and any live
+   * read, `true` lets `tracks()` resolve to live `tracks:<assetId>` data whenever it can, falling back
+   * to the same poll only without an asset id or while `LiveStore` isn't open (that class's own doc
+   * comment). The plan's own formula is "the Vision drawer is open OR the
    * per-frame lock is non-zero OR the last follow read was LOST"; the middle and last clauses are
    * exactly {@link lockedTrackId}/{@link follow} below. **The first clause is a deliberate
    * deviation**: `CockpitPage` owns the drawer's own open/closed `UiStore` and is out of this wave's
@@ -817,9 +822,10 @@ export class CockpitFacade {
       }
     });
 
-    // Drives the `GET .../tracks` poll (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.5, wave W4) — see
-    // {@link wantsTracksPoll}'s own doc comment for the `wanted` formula and its one documented
-    // deviation. No `trackingIdChanged` guard needed: `DetectionsStore.followTracks` (like
+    // Drives the tracks session (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.5, wave W4; transport-
+    // flipped wave W9 decision E25 — see {@link wantsTracksPoll}'s own doc comment for the `wanted`
+    // formula, its one documented deviation, and what "wanted" now actually gates). No
+    // `trackingIdChanged` guard needed: `DetectionsStore.followTracks` (like
     // `geo.track`/`grounding.track` above) already no-ops internally on an unchanged
     // `(streamId, wanted)` pair, so re-running this effect on every ~5s `stream()` poll tick is
     // harmless, exactly like those two.

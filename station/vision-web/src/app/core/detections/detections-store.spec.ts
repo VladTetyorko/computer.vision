@@ -46,6 +46,20 @@ function stubLiveStore(initialState: LiveConnectionState = 'closed') {
     }
     return existing;
   };
+  // Deliberately its own independent map, not derived from `worldObjectSignalFor` above — this is a
+  // fake, and `DetectionsStore.worldObjects`/`.tracks` each only ever call their own one accessor
+  // (`worldObjectsFor`/`tracksFor` respectively), so the two never need to agree here the way the
+  // real `LiveStore` now makes them (wave W9, decision E25 — `worldObjectsFor` derives from
+  // `tracksFor`'s own `.objects` field there; see that class's own doc comment).
+  const perAssetTracks = new Map<string, ReturnType<typeof signal<StreamTracksResponse | null>>>();
+  const tracksSignalFor = (assetId: string) => {
+    let existing = perAssetTracks.get(assetId);
+    if (existing === undefined) {
+      existing = signal<StreamTracksResponse | null>(null);
+      perAssetTracks.set(assetId, existing);
+    }
+    return existing;
+  };
   return {
     connectionState: stateSignal.asReadonly(),
     detectionsFor: vi.fn((assetId: string) => signalFor(assetId)),
@@ -54,9 +68,11 @@ function stubLiveStore(initialState: LiveConnectionState = 'closed') {
     worldObjectsFor: vi.fn((assetId: string) => worldObjectSignalFor(assetId)),
     trackWorldObjects: vi.fn(),
     untrackWorldObjects: vi.fn(),
+    tracksFor: vi.fn((assetId: string) => tracksSignalFor(assetId)),
     setState: (state: LiveConnectionState) => stateSignal.set(state),
     pushResult: (assetId: string, result: DetectionResult) => signalFor(assetId).set(result),
     pushWorldObjects: (assetId: string, objects: readonly WorldObject[]) => worldObjectSignalFor(assetId).set(objects),
+    pushTracks: (assetId: string, response: StreamTracksResponse) => tracksSignalFor(assetId).set(response),
   };
 }
 
@@ -619,6 +635,80 @@ describe('DetectionsStore', () => {
     store.followTracks('t-11', false);
     expect(store.tracks()).toBeNull();
     expect(poll?.stop).toHaveBeenCalledOnce();
+  });
+
+  // --- Tracks transport flip (CV-ORCHESTRATION wave W9, decision E25): tracks() now follows the
+  // same live/poll split as results(), reusing the store's already-known assetId (`track(streamId,
+  // assetId?)`) rather than a parameter on followTracks() itself. --------------------------------
+
+  it('followTracks resolves to the live tracks:<assetId> envelope and never polls once an assetId is in scope and LiveStore is open', async () => {
+    const getStreamTracks = vi.fn().mockResolvedValue(tracksResponse());
+    const api = stubApi(undefined, getStreamTracks);
+    const live = stubLiveStore('open');
+    const scheduler = stubScheduler();
+
+    const store = inject(api, { live, scheduler });
+    store.track('s-24', 'a-24'); // the detections-feed session establishes the live tracks:<assetId> subscription
+    store.followTracks('s-24', true);
+    await flush();
+
+    expect(getStreamTracks).not.toHaveBeenCalled(); // the poll fallback never runs while live resolves
+    expect(store.tracks()).toBeNull(); // nothing has arrived on the live topic yet — honest, not fabricated
+
+    const response = tracksResponse({ streamId: 's-24', lockedTrackId: 9 });
+    live.pushTracks('a-24', response);
+    expect(store.tracks()).toEqual(response);
+
+    store.followTracks('s-24', false);
+    store.reset();
+  });
+
+  it('followTracks still polls, unchanged, when no assetId is in scope even though LiveStore is open', async () => {
+    const response = tracksResponse({ streamId: 's-25', lockedTrackId: 3 });
+    const getStreamTracks = vi.fn().mockResolvedValue(response);
+    const api = stubApi(undefined, getStreamTracks);
+    const live = stubLiveStore('open');
+    const scheduler = stubScheduler();
+
+    const store = inject(api, { live, scheduler });
+    store.track('s-25'); // no assetId — LivePage/WallTile/CrewFacade-shaped session
+    store.followTracks('s-25', true);
+    await flush();
+
+    expect(getStreamTracks).toHaveBeenCalledWith('s-25');
+    expect(scheduler.lastFor(2_000)).toBeDefined();
+    expect(store.tracks()).toEqual(response);
+
+    store.followTracks('s-25', false);
+    store.reset();
+  });
+
+  it('switches the tracks session from poll to live, stopping the poll, when LiveStore opens mid-session', async () => {
+    const response = tracksResponse({ streamId: 's-26', lockedTrackId: 6 });
+    const getStreamTracks = vi.fn().mockResolvedValue(response);
+    const api = stubApi(undefined, getStreamTracks);
+    const live = stubLiveStore('connecting');
+    const scheduler = stubScheduler();
+
+    const store = inject(api, { live, scheduler });
+    store.track('s-26', 'a-26');
+    store.followTracks('s-26', true);
+    await flush();
+    const poll = scheduler.lastFor(2_000);
+    expect(poll?.stop).not.toHaveBeenCalled();
+    expect(store.tracks()).toEqual(response);
+
+    live.setState('open');
+    TestBed.tick(); // flushes the tracks-transport effect
+
+    expect(poll?.stop).toHaveBeenCalledOnce();
+    // Seeded from the live signal directly (no separate "seed the other side" step needed like
+    // results' own merge — tracks() just re-reads whichever source is now active).
+    live.pushTracks('a-26', tracksResponse({ streamId: 's-26', lockedTrackId: 8 }));
+    expect(store.tracks()?.lockedTrackId).toBe(8);
+
+    store.followTracks('s-26', false);
+    store.reset();
   });
 
   // --- D1 regression (docs/plans/active/TRACK-FOLLOW-PLAN.md §2.2 D1, wave W4): closing the Vision
