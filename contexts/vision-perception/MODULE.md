@@ -662,7 +662,7 @@ for their own share of the same wave):
 - **W2.9 (coordinator follow-up item 3)** — `PipelineTrace` extracted as one collaborator holding
   `FrameGateLedger`/`FrameLedgerRing`/the trace-demand fold (see its own bullet above for the full
   surface), in response to coordinator review that `StreamPipeline.java` had grown to 1801/1808
-  lines carrying this wave's additions inline. Final count: **1784 lines**, not the 1643 target.
+  lines carrying this wave's additions inline. Final count: **1784 lines**, not the 1643 target (cut to **1485** by wave W8, 2026-09-13 — see the W8 block in the `StreamPipeline` section).
   Git archaeology across every wave-W2 commit touching this file (`617e6a69` W2.2 +106 net,
   `cbd44202` W2.3 +113 net, `cdf17816` W2.5 +34 net, `423bb89b` W2.8 +8 net) shows the gap is not
   hiding unmoved ledger code: **100% of W2.5's +34** and the ledger-ring/read-model/trace-demand
