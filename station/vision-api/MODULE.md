@@ -1617,3 +1617,24 @@ asserting `{"intent":"CUSTOM"}` with no `labelFilter` is a 400 `BAD_REQUEST` bec
 `IntentPolicyResolver#resolve` throws for `CUSTOM` with empty/null `customClasses`). No
 `contexts/vision-perception`, `station/vision-web`, or other module change — Java-only, `vision-api`
 only, per this wave's scope.
+
+**2026-09-13, CV-ORCHESTRATION wave W5b.3 (trace replay, plan §8 E23).** `FrameLedgerResponse`
+gains `detections: [{label, confidence, box{x,y,width,height}}]`, `frameWidth`, `frameHeight`,
+mirroring the domain `FrameLedger`'s three new components (`contexts/vision-perception`'s own
+W5b.2 entry). A new nested `FrameLedgerResponse.DetectorBoxResponse(label, confidence, box)`
+reuses the existing `BoundingBoxResponse` — the same box shape `DetectionResponse` already uses —
+rather than a second box DTO, so the wire's `TracedDetection`/`Detection` boxes are byte-identical
+in shape even though their domain sources (`DetectorBox`/`Detection`) are deliberately unrelated
+types. `CvTraceResponseWireContractTest`'s `full` example now carries **two** `FrameLedger`s
+instead of one — `fullFrameLedger()` (unchanged shape, now also two distinct `DetectorBox`es at a
+1920×1080 frame size) and a new `fullFrameLedgerWithoutDetections()` (`detections: []`,
+`frameWidth`/`frameHeight: 0`, the untraced/pre-W5b shape) — covering both halves of the new
+fields' contract in the one committed fixture, per this wave's own instruction ("populated on one
+frame and empty on another"). `station/vision-web/src/app/core/api/__fixtures__/cv-trace.wire.json`
+regenerated from the test's own mismatch artifact (`cp target/cv-trace.wire.actual.json
+../vision-web/src/app/core/api/__fixtures__/cv-trace.wire.json`), not hand-edited — the frontend
+mirror types this fixture pins are W5b.4's job, not this step's. `./mvnw -B -pl
+cv/vision-proto,contexts/vision-perception,cv/grpc,station/vision-api -am test -DskipWeb`:
+vision-proto 5/0/0, vision-perception 839/0/0, adapter-cv-grpc 195/0/0, **vision-api 1121/0/0**
+(same count as W5b.2 — no new `@Test` method, only richer fixture data in the two existing
+examples), all green.
