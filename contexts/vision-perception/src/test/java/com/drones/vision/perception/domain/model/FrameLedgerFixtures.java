@@ -1,5 +1,6 @@
 package com.drones.vision.perception.domain.model;
 
+import com.drones.vision.kernel.BoundingBox;
 import com.drones.vision.kernel.StreamId;
 import java.time.Instant;
 import java.util.List;
@@ -33,6 +34,12 @@ public final class FrameLedgerFixtures {
         ObjectEvidence evidenceTwoA = new ObjectEvidence("assoc.cost", Map.of("iou", "0.62"));
         ObjectEvidence evidenceTwoB = new ObjectEvidence("memory.gallery", Map.of("distance", "0.23"));
 
+        // CV-ORCHESTRATION wave W5b: the detector's own raw boxes, distinct from every box any
+        // other fixture in this tree uses, so a codec bug that swapped these in for `entries`'/
+        // `objects`' boxes would fail a round trip rather than pass by coincidence.
+        DetectorBox detectionOne = new DetectorBox("car", 0.71, new BoundingBox(0.05, 0.06, 0.17, 0.18));
+        DetectorBox detectionTwo = new DetectorBox("person", 0.82, new BoundingBox(0.25, 0.26, 0.27, 0.28));
+
         return new FrameLedger(
                 StreamId.random(),
                 100L,
@@ -47,6 +54,9 @@ public final class FrameLedgerFixtures {
                 4,
                 5.5,
                 6.6,
-                true);
+                true,
+                List.of(detectionOne, detectionTwo),
+                1920,
+                1080);
     }
 }

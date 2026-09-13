@@ -158,7 +158,7 @@ class CvTraceResponseWireContractTest {
                 Map.of("predicted", "0.10,0.20,0.30,0.40", "held", "0.11,0.21,0.29,0.39",
                         "velocity", "0.01,-0.02"))));
         return new FrameLedger(STREAM_ID, 42L, AT, 2, "FULL", List.of("detect", "assoc", "predict"), entries,
-                objects, 1, 8.2, 24.6, false);
+                objects, 1, 8.2, 24.6, false, List.of(), 0, 0);
     }
 
     private static WorldObject fullWorld() {

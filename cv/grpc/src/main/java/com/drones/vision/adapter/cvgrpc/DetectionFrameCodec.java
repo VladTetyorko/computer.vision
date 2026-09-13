@@ -5,6 +5,7 @@ import com.drones.vision.perception.domain.model.CameraAttitude;
 import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.perception.domain.model.DetectionSource;
+import com.drones.vision.perception.domain.model.DetectorBox;
 import com.drones.vision.perception.domain.model.DetectorReason;
 import com.drones.vision.perception.domain.model.EvidenceSource;
 import com.drones.vision.perception.domain.model.FrameLedger;
@@ -325,15 +326,27 @@ final class DetectionFrameCodec {
                         .toList();
                 objects.put(entry.getKey(), claims);
             }
+            List<DetectorBox> detections = wire.getDetectionsList().stream()
+                    .map(DetectionFrameCodec::toDetectorBox)
+                    .toList();
             return Optional.of(new FrameLedger(streamId, wire.getSequence(),
                     Instant.ofEpochMilli(wire.getCapturedAtMillis()), wire.getLevelServed(), wire.getDetectorReason(),
                     wire.getEligibleList(), entries, objects, wire.getDropsSinceLast(), wire.getGateWaitMs(),
-                    wire.getTotalMs(), wire.getHalted()));
+                    wire.getTotalMs(), wire.getHalted(), detections, wire.getFrameWidth(), wire.getFrameHeight()));
         } catch (RuntimeException e) {
             LOG.log(System.Logger.Level.WARNING,
                     () -> "Dropping malformed FrameLedger on stream " + streamId + ": " + e.getMessage());
             return Optional.empty();
         }
+    }
+
+    /**
+     * Decodes one {@code TracedDetection} (CV-ORCHESTRATION wave W5b) into the domain {@link
+     * DetectorBox} — the detector's own raw output for a traced frame, never {@link Detection}: a
+     * detector has no identity, so this carries no {@link TrackRef} at all.
+     */
+    private static DetectorBox toDetectorBox(com.drones.vision.proto.v1.TracedDetection wire) {
+        return new DetectorBox(wire.getLabel(), wire.getConfidence(), toBoundingBox(wire.getBox()));
     }
 
     private static LedgerEntry toLedgerEntry(com.drones.vision.proto.v1.LedgerEntry wire) {
