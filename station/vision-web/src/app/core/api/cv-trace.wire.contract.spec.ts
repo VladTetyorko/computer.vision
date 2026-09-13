@@ -9,6 +9,7 @@ import {
   LEDGER_OUTCOMES,
   LedgerEntry,
   ObjectEvidence,
+  TracedDetection,
 } from './models';
 
 // This spec is the TypeScript half of CV-ORCHESTRATION wave W5.0/W5.1's "CvTrace reaches the wire"
@@ -19,6 +20,10 @@ import {
 // `./__fixtures__/cv-trace.wire.json`. This file loads that exact fixture and proves it satisfies
 // the `CvTrace` TypeScript type below -- key for key, no extra keys either way -- the same
 // `Record<keyof T, true>` technique `world-object.wire.contract.spec.ts` uses.
+//
+// `full.frame` carries two ledgers as of wave W5b (decision E23): frame[0] with the detector's own
+// raw `detections` at a non-zero frame size, frame[1] with the "not carried" shape (`detections: []`,
+// `frameWidth`/`frameHeight: 0`) -- both halves of the new fields' contract in one fixture.
 
 const cvTraceKeys: Record<keyof CvTrace, true> = {
   streamId: true,
@@ -48,6 +53,15 @@ const frameLedgerKeys: Record<keyof FrameLedger, true> = {
   gateWaitMillis: true,
   totalMillis: true,
   halted: true,
+  detections: true,
+  frameWidth: true,
+  frameHeight: true,
+};
+
+const tracedDetectionKeys: Record<keyof TracedDetection, true> = {
+  label: true,
+  confidence: true,
+  box: true,
 };
 
 const ledgerEntryKeys: Record<keyof LedgerEntry, true> = {
@@ -99,13 +113,34 @@ describe('CvTrace wire contract (fixture: __fixtures__/cv-trace.wire.json)', () 
   });
 
   it('full: frame keys match FrameLedger exactly, with a RAN/SKIPPED/FAILED entry triad', () => {
-    expect(full.frame).toHaveLength(1);
+    // Two ledgers (CV-ORCHESTRATION wave W5b): frame[0] carries the detector's raw boxes, frame[1]
+    // is the "not carried" shape (untraced, or a pre-W5b response) -- see the next test.
+    expect(full.frame).toHaveLength(2);
     const ledger = full.frame[0];
     expect(actualKeysOf(ledger)).toEqual(keysOf(frameLedgerKeys));
     expect(new Set(ledger.entries.map((e) => e.outcome))).toEqual(new Set(LEDGER_OUTCOMES));
     for (const entry of ledger.entries) {
       expect(actualKeysOf(entry)).toEqual(keysOf(ledgerEntryKeys));
     }
+  });
+
+  it('full: frame[0].detections carries the detector\'s raw boxes at a non-zero frame size', () => {
+    const ledger = full.frame[0] as unknown as FrameLedger;
+    expect(ledger.detections.length).toBeGreaterThan(0);
+    for (const detection of ledger.detections) {
+      expect(actualKeysOf(detection)).toEqual(keysOf(tracedDetectionKeys));
+      expect(actualKeysOf(detection.box)).toEqual(['height', 'width', 'x', 'y']);
+    }
+    expect(ledger.frameWidth).toBeGreaterThan(0);
+    expect(ledger.frameHeight).toBeGreaterThan(0);
+  });
+
+  it('full: frame[1].detections is the "not carried" shape -- empty list, zero frame size', () => {
+    const ledger = full.frame[1] as unknown as FrameLedger;
+    expect(actualKeysOf(ledger)).toEqual(keysOf(frameLedgerKeys));
+    expect(ledger.detections).toEqual([]);
+    expect(ledger.frameWidth).toBe(0);
+    expect(ledger.frameHeight).toBe(0);
   });
 
   it('full: objects carries a per-track evidence list, keyed by track id as a string', () => {

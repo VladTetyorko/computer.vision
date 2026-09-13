@@ -2076,4 +2076,52 @@ assumed while W3.3 was still in flight).
   sibling's edits appearing/disappearing, not this wave's own; this wave's own diff is small
   (one output, one facade method, one patch-builder, one template line, all doc-comment-heavy) and lives
   entirely inside the already-lazy `cockpit` chunk, never the eager initial bundle.
+
+## Status — CV-ORCHESTRATION wave W5b.4 (web): `FrameLedger`'s traced-detections mirror (docs/plans/active/CV-ORCHESTRATION-PLAN.md §8 E23, §6 W5b row) — 2026-09-13
+
+A saved `CvTrace` could not replay through `tools/trackeval` before this wave: `FrameLedger` only
+ever carried a detection *count*, and `ObjectState.detectorBox` exists only for matched objects, so
+every box the associator rejected was already lost by the time "Save trace" wrote its JSON.
+Decision E23 fixes this at the source (`FrameLedger` on the wire and in cv-service, waves
+W5b.0–W5b.3); this step is the frontend's own mirror of the result.
+
+- `core/api/models.ts`'s `FrameLedger` interface gains `detections: readonly TracedDetection[]`,
+  `frameWidth: number`, `frameHeight: number` (edited in place, per this wave's own instruction —
+  see the interface's own doc comment for the "empty + 0/0 means not carried" contract). New
+  `TracedDetection` type appended at the very end of the file under a fresh
+  `// CV-ORCHESTRATION W5b — traced detections` banner (a new banner, not the existing wave-W5 one
+  above it): `{ label: string, confidence: number, box: BoundingBox }`, reusing the existing
+  `BoundingBox` type — deliberately **not** shaped like `Detection`, since a detector has no track
+  identity to carry (mirrors `dto.FrameLedgerResponse.DetectorBoxResponse`/domain `DetectorBox`).
+- `cv-trace.wire.contract.spec.ts` updated: `frameLedgerKeys` gained the three new keys, a new
+  `tracedDetectionKeys` map, and the fixture's `full.frame` now has **two** ledger entries (this
+  wave's regenerated `cv-trace.wire.json`, from `station/vision-api`'s W5b.3) — two new `it` blocks
+  assert `frame[0]`'s populated `detections`/non-zero frame size and `frame[1]`'s empty/`0` "not
+  carried" shape, replacing the old single-ledger `toHaveLength(1)` assertion.
+  `cv-inspector-logic.spec.ts`, `core/cv-trace/cv-trace-store.spec.ts`, and
+  `core/cv-trace/cv-trace-logic.spec.ts` each build a hand-written `FrameLedger` fixture object —
+  all three gained `detections: []`, `frameWidth: 0`, `frameHeight: 0` so the object literal still
+  satisfies the widened interface (no test assertion depended on these three fields, so this is a
+  type-completeness fix only, not new coverage in those files).
+- `features/cv-inspector/cv-inspector.html`'s frame-summary line gained `· raw boxes {{
+  frame.detections.length }}` — the one-line addition this step's own instruction allowed ("only if
+  it is one line"). No `.ts`/`.css` change needed for this addition (three-file component already
+  intact, template-only edit).
+- **"Save trace" needs no change**: it already downloads the *entire* current `CvTrace` object
+  (`features/cv-inspector`'s existing download action serializes whatever `CvTrace` shape the wire
+  sends), so `detections`/`frameWidth`/`frameHeight` ride along automatically the moment
+  cv-service/vision-api start populating them — nothing in the download path names `FrameLedger`'s
+  fields explicitly.
+- **Worktree note, not a code defect**: this worktree's `station/vision-web/node_modules` had never
+  been installed (`npm ci` — 477 packages) before this step could run `npm run test:ci`; without it,
+  `npm run` fell through PATH to an unrelated system `/usr/bin/ng` binary (Debian's `nethack`
+  console client, not Angular's CLI), which is the actual source of a `panic: aborting due to
+  terminal initialize failure` this step hit first, before `npm ci`. Recorded here only because the
+  symptom is easy to misread as a code or environment regression; it was neither.
+- **Verify chain**: `npm run test:ci` — **208 test files / 4029 tests, all green** (up from the
+  pre-wave count; this run is the first full pass after `npm ci` repopulated `node_modules` in this
+  worktree, so no isolated before/after delta is meaningful here — see the note above). `npx tsc
+  --noEmit -p tsconfig.app.json` — 0 errors. `npx tsc --noEmit -p tsconfig.spec.json` — 0 errors. No
+  `features/vision-profiles/**`, `features/fly/**`, or other W7-scoped file touched (W7 runs
+  concurrently on `CvProfile*`/profile-as-patch, a disjoint file scope from this step).
 - **Commit**: `feat(cv-orchestration W3.5): tap to follow — box or point (D8) + click-path acceptance spec`.

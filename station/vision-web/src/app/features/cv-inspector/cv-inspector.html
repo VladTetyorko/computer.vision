@@ -113,6 +113,7 @@
             <p class="muted frame-summary mono">
               level {{ frame.levelServed }} · {{ frame.detectorReason }} · eligible: {{ frame.eligible.join(', ') || '—' }}
               · drops {{ frame.dropsSinceLast }} · gate wait {{ frame.gateWaitMillis }}ms · total {{ frame.totalMillis }}ms
+              · raw boxes {{ frame.detections.length }}
               @if (frame.halted) {
                 · <span class="chip danger">halted</span>
               }
