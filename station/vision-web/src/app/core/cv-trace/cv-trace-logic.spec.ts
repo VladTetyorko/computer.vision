@@ -16,6 +16,9 @@ function ledger(sequence: number): FrameLedger {
     gateWaitMillis: 0,
     totalMillis: 0,
     halted: false,
+    detections: [],
+    frameWidth: 0,
+    frameHeight: 0,
   };
 }
 

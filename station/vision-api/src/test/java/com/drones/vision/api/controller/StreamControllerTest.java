@@ -1894,7 +1894,7 @@ class StreamControllerTest {
         FrameLedger frame = new FrameLedger(streamId, 3, at, 1, "TRACE_REQUESTED", List.of("detect.full"),
                 List.of(new LedgerEntry("detect.full", LedgerOutcome.RAN, "", 12.5, Map.of())),
                 Map.of(9L, List.of(new ObjectEvidence("detect.full", Map.of("label", "person")))), 0, 5.0, 12.5,
-                false);
+                false, List.of(), 0, 0);
         when(streamService.frameLedger(eq(streamId), anyInt())).thenReturn(List.of(frame));
 
         ObjectState object = new ObjectState(9L, ObjectLifecycle.CONFIRMED, streamId, null, null, null, null, null,

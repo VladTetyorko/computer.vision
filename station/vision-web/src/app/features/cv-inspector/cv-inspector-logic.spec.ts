@@ -27,6 +27,9 @@ function frame(sequence: number, objects: FrameLedger['objects'] = {}): FrameLed
     gateWaitMillis: 0,
     totalMillis: 0,
     halted: false,
+    detections: [],
+    frameWidth: 0,
+    frameHeight: 0,
   };
 }
 

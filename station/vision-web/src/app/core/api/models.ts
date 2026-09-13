@@ -4514,6 +4514,11 @@ export interface ObjectEvidence {
  * complete contributor evidence, present only for a frame cv-service was actually asked to trace.
  * `objects` keys are track ids as strings (a JSON object key can only be a string, mirroring the
  * Java DTO's own `Map<String, ...>`).
+ *
+ * `detections`/`frameWidth`/`frameHeight` (CV-ORCHESTRATION wave W5b, decision E23, see the
+ * `TracedDetection` type below) are the detector's own raw boxes for this frame, before
+ * association — `detections: []` and `frameWidth`/`frameHeight: 0` together mean "not carried"
+ * (untraced, or a pre-W5b response), never a per-field `null`.
  */
 export interface FrameLedger {
   readonly streamId: string;
@@ -4528,6 +4533,9 @@ export interface FrameLedger {
   readonly gateWaitMillis: number;
   readonly totalMillis: number;
   readonly halted: boolean;
+  readonly detections: readonly TracedDetection[];
+  readonly frameWidth: number;
+  readonly frameHeight: number;
 }
 
 /**
@@ -4543,4 +4551,24 @@ export interface CvTrace {
   readonly gate: readonly GateDecision[];
   readonly frame: readonly FrameLedger[];
   readonly world: readonly WorldObject[];
+}
+
+// CV-ORCHESTRATION W5b — traced detections ---------------------------------------------------------
+// A saved CvTrace could not replay through tools/trackeval (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+// §8 E23): FrameLedger carried a detection *count*, and ObjectState.detectorBox only ever exists for
+// matched objects, so every box the associator rejected was lost. This wave captures the detector's
+// raw per-frame boxes at the source (FrameLedger.detections, only when the request traced) instead —
+// see FrameLedger's own doc comment above.
+
+/**
+ * Mirrors `FrameLedgerResponse.DetectorBoxResponse` — one of the detector's own raw boxes for a
+ * traced frame, *before* association (CV-ORCHESTRATION wave W5b, decision E23). Deliberately not
+ * shaped like `DetectionResponse`: a detector has no track identity, so this type carries no
+ * `track` field at all rather than one that is always absent — replaying the tracker's own output
+ * through the tracker would prove nothing; this is the raw fixture trackeval actually needs.
+ */
+export interface TracedDetection {
+  readonly label: string;
+  readonly confidence: number;
+  readonly box: BoundingBox;
 }

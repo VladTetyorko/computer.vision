@@ -167,7 +167,7 @@ class LiveUpdateRegistryTest {
     /** {@link FrameLedger}'s own trace tier (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4) -- a minimal, valid instance for {@code cv-trace} broadcast tests. */
     private static FrameLedger frameLedger(StreamId streamId, long frameSequence) {
         return new FrameLedger(streamId, frameSequence, Instant.now(), 1, "TRACE_REQUESTED", List.of(), List.of(),
-                Map.of(), 0, 1.0, 2.0, false);
+                Map.of(), 0, 1.0, 2.0, false, List.of(), 0, 0);
     }
 
     /**

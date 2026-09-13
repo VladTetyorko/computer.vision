@@ -803,6 +803,51 @@ class DetectionFrameCodecTest {
         assertEquals(3.0, ledger.gateWaitMillis());
         assertEquals(15.5, ledger.totalMillis());
         assertFalse(ledger.halted());
+        // CV-ORCHESTRATION wave W5b: an untraced ledger wire carries no `detections`/`frame_width`/
+        // `frame_height` at all -- proto3 zero values, decoded as the domain's own "not carried".
+        assertEquals(List.of(), ledger.detections());
+        assertEquals(0, ledger.frameWidth());
+        assertEquals(0, ledger.frameHeight());
+    }
+
+    @Test
+    void tracedDetectionsRoundTripAsTheDomainsDetectorBoxes() {
+        // CV-ORCHESTRATION wave W5b, decision E23: the detector's own raw boxes for a traced frame,
+        // never merged with anything the roi rescue pass or the tracker itself produced.
+        com.drones.vision.proto.v1.TracedDetection carWire = com.drones.vision.proto.v1.TracedDetection.newBuilder()
+                .setLabel("car")
+                .setConfidence(0.81f)
+                .setBox(com.drones.vision.proto.v1.BoundingBox.newBuilder()
+                        .setX(0.1f).setY(0.2f).setWidth(0.3f).setHeight(0.4f).build())
+                .build();
+        com.drones.vision.proto.v1.TracedDetection personWire = com.drones.vision.proto.v1.TracedDetection.newBuilder()
+                .setLabel("person")
+                .setConfidence(0.62f)
+                .setBox(com.drones.vision.proto.v1.BoundingBox.newBuilder()
+                        .setX(0.5f).setY(0.5f).setWidth(0.1f).setHeight(0.2f).build())
+                .build();
+        com.drones.vision.proto.v1.FrameLedger ledgerWire = com.drones.vision.proto.v1.FrameLedger.newBuilder()
+                .setStreamId(STREAM_ID.value().toString())
+                .setSequence(6)
+                .setCapturedAtMillis(CAPTURED_AT.toEpochMilli())
+                .addDetections(carWire)
+                .addDetections(personWire)
+                .setFrameWidth(1280)
+                .setFrameHeight(720)
+                .build();
+        DetectionResponse response = responseBuilder().setLedger(ledgerWire).build();
+
+        FrameLedger ledger = DetectionFrameCodec.decode(STREAM_ID, response).ledger().orElseThrow();
+
+        assertEquals(2, ledger.detections().size());
+        assertEquals("car", ledger.detections().get(0).label());
+        assertEquals(0.81, ledger.detections().get(0).confidence(), 1e-6);
+        assertEquals(0.1, ledger.detections().get(0).box().x(), 1e-6);
+        assertEquals(0.4, ledger.detections().get(0).box().height(), 1e-6);
+        assertEquals("person", ledger.detections().get(1).label());
+        assertEquals(0.62, ledger.detections().get(1).confidence(), 1e-6);
+        assertEquals(1280, ledger.frameWidth());
+        assertEquals(720, ledger.frameHeight());
     }
 
     @Test

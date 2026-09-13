@@ -758,6 +758,73 @@ def test_a_roi_rescue_does_not_double_age_the_rest_of_the_book():
     assert bystander_age_after == bystander_age_before + 1
 
 
+# -- traced ledger detections (CV-ORCHESTRATION wave W5b, plan §8 E23) ------
+
+
+def test_a_traced_frames_ledger_lists_the_detectors_own_raw_boxes():
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry, settings=dataclasses.replace(Settings(), track_roi_enabled=False))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    outcome = subject.process(
+        now_millis=0.0,
+        detect=detect_returning(det("car", x=0.1, y=0.2, w=0.3, h=0.4, confidence=0.75)),
+        frame=lambda: FRAME,
+        trace=True,
+        frame_width=640,
+        frame_height=480,
+    )
+
+    assert outcome.ledger is not None
+    assert len(outcome.ledger.detections) == 1
+    raw = outcome.ledger.detections[0]
+    assert (raw.label, raw.confidence, raw.x, raw.y, raw.width, raw.height) == (
+        "car", 0.75, 0.1, 0.2, 0.3, 0.4,
+    )
+    assert outcome.ledger.frame_width == 640
+    assert outcome.ledger.frame_height == 480
+
+
+def test_an_untraced_frames_ledger_lists_no_detector_boxes():
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry, settings=dataclasses.replace(Settings(), track_roi_enabled=False))
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+
+    # No `trace=`/`frame_width=`/`frame_height=` at all -- every pre-W5b
+    # call site, unchanged.
+    outcome = subject.process(
+        now_millis=0.0,
+        detect=detect_returning(det("car", x=0.1)),
+        frame=lambda: FRAME,
+    )
+
+    assert outcome.ledger is not None
+    assert outcome.ledger.detections == ()
+    assert outcome.ledger.frame_width == 0
+    assert outcome.ledger.frame_height == 0
+
+
+def test_a_traced_frames_ledger_never_carries_the_roi_rescue_passs_boxes():
+    # The exact scenario `test_roi_rescue_recovers_an_unmatched_confirmed_
+    # track_under_its_own_id` uses, traced: `detect.full` itself sees
+    # nothing this frame (only the rescue pass finds the object), so the
+    # ledger's `detections` must stay empty even though the frame's own
+    # `outcome.boxes` shows a recovered track.
+    registry = FakeRegistry(associator=cost_engine)
+    subject = session(registry, settings=roi_settings())
+    subject.apply_config(TrackingRequest(mode=MODE_ASSOCIATE, engine_id="cost", min_hits=1))
+    run(subject, now_millis=0.0, detections=[det("car", x=0.1, y=0.1, w=0.1, h=0.1)])
+
+    detect = RecordingDetect(full=[], roi_response=[det("car", x=0.1, y=0.1, w=0.1, h=0.1)])
+    outcome = subject.process(
+        now_millis=66.0, detect=detect, frame=lambda: FRAME, trace=True, frame_width=100, frame_height=100
+    )
+
+    assert len(detect.roi_calls) == 1  # the rescue pass genuinely ran
+    assert len(outcome.boxes) == 1  # ...and recovered the track
+    assert outcome.ledger.detections == ()  # but `detect.full` saw nothing
+
+
 # -- object memory (TRACKING-V2-PLAN wave C4) --------------------------------
 
 

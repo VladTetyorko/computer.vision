@@ -1,5 +1,6 @@
 package com.drones.vision.api.dto;
 
+import com.drones.vision.perception.domain.model.DetectorBox;
 import com.drones.vision.perception.domain.model.FrameLedger;
 import com.drones.vision.perception.domain.model.LedgerEntry;
 import com.drones.vision.perception.domain.model.LedgerOutcome;
@@ -28,12 +29,19 @@ import java.util.Map;
  * @param gateWaitMillis wall time inside the detector: queueing plus inference
  * @param totalMillis    the frame's total cost
  * @param halted         whether a contributor stopped the frame
+ * @param detections     the detector's own raw boxes this frame, before association — empty when
+ *                       not carried (CV-ORCHESTRATION wave W5b, decision E23; see {@link DetectorBox})
+ * @param frameWidth     this frame's pixel width alongside {@code detections}; {@code 0} when not
+ *                       carried
+ * @param frameHeight    this frame's pixel height alongside {@code detections}; {@code 0} when not
+ *                       carried
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record FrameLedgerResponse(String streamId, long sequence, long capturedAtMillis, int levelServed,
                                    String detectorReason, List<String> eligible, List<LedgerEntryResponse> entries,
                                    Map<String, List<ObjectEvidenceResponse>> objects, int dropsSinceLast,
-                                   double gateWaitMillis, double totalMillis, boolean halted) {
+                                   double gateWaitMillis, double totalMillis, boolean halted,
+                                   List<DetectorBoxResponse> detections, int frameWidth, int frameHeight) {
 
     /**
      * Maps a domain {@link FrameLedger} to its wire representation.
@@ -49,7 +57,9 @@ public record FrameLedgerResponse(String streamId, long sequence, long capturedA
         return new FrameLedgerResponse(ledger.streamId().value().toString(), ledger.sequence(),
                 ledger.capturedAt().toEpochMilli(), ledger.levelServed(), ledger.detectorReason(),
                 ledger.eligible(), ledger.entries().stream().map(LedgerEntryResponse::from).toList(), objects,
-                ledger.dropsSinceLast(), ledger.gateWaitMillis(), ledger.totalMillis(), ledger.halted());
+                ledger.dropsSinceLast(), ledger.gateWaitMillis(), ledger.totalMillis(), ledger.halted(),
+                ledger.detections().stream().map(DetectorBoxResponse::from).toList(), ledger.frameWidth(),
+                ledger.frameHeight());
     }
 
     /**
@@ -80,6 +90,23 @@ public record FrameLedgerResponse(String streamId, long sequence, long capturedA
     public record ObjectEvidenceResponse(String contributorId, Map<String, String> claim) {
         public static ObjectEvidenceResponse from(ObjectEvidence evidence) {
             return new ObjectEvidenceResponse(evidence.contributorId(), evidence.claim());
+        }
+    }
+
+    /**
+     * Wire mirror of {@link DetectorBox} (CV-ORCHESTRATION wave W5b, decision E23) — one of the
+     * detector's own raw boxes for a traced frame, before association. Reuses {@link
+     * BoundingBoxResponse}, the same box shape {@link DetectionResponse} already uses, rather than a
+     * second box DTO.
+     *
+     * @param label      class label
+     * @param confidence detection confidence, range [0,1]
+     * @param box        normalized bounding box
+     */
+    public record DetectorBoxResponse(String label, double confidence, BoundingBoxResponse box) {
+        public static DetectorBoxResponse from(DetectorBox detectorBox) {
+            return new DetectorBoxResponse(detectorBox.label(), detectorBox.confidence(),
+                    BoundingBoxResponse.from(detectorBox.box()));
         }
     }
 }

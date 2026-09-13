@@ -1,0 +1,63 @@
+{
+  "streamId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+  "gate": [],
+  "frame": [
+    {
+      "streamId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "sequence": 12,
+      "capturedAtMillis": 1700000000200,
+      "levelServed": 2,
+      "detectorReason": "FULL",
+      "eligible": ["detect"],
+      "entries": [],
+      "objects": {},
+      "dropsSinceLast": 0,
+      "gateWaitMillis": 4.0,
+      "totalMillis": 9.0,
+      "halted": false,
+      "detections": [
+        {"label": "person", "confidence": 0.71, "box": {"x": 0.30, "y": 0.35, "width": 0.10, "height": 0.20}}
+      ],
+      "frameWidth": 640,
+      "frameHeight": 480
+    },
+    {
+      "streamId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "sequence": 10,
+      "capturedAtMillis": 1700000000000,
+      "levelServed": 2,
+      "detectorReason": "FULL",
+      "eligible": ["detect"],
+      "entries": [],
+      "objects": {},
+      "dropsSinceLast": 0,
+      "gateWaitMillis": 5.0,
+      "totalMillis": 11.0,
+      "halted": false,
+      "detections": [
+        {"label": "person", "confidence": 0.88, "box": {"x": 0.10, "y": 0.15, "width": 0.12, "height": 0.22}},
+        {"label": "car", "confidence": 0.63, "box": {"x": 0.55, "y": 0.60, "width": 0.20, "height": 0.15}}
+      ],
+      "frameWidth": 640,
+      "frameHeight": 480
+    },
+    {
+      "streamId": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+      "sequence": 11,
+      "capturedAtMillis": 1700000000100,
+      "levelServed": 1,
+      "detectorReason": "ROI_ONLY",
+      "eligible": [],
+      "entries": [],
+      "objects": {},
+      "dropsSinceLast": 0,
+      "gateWaitMillis": 2.0,
+      "totalMillis": 4.0,
+      "halted": false,
+      "detections": [],
+      "frameWidth": 640,
+      "frameHeight": 480
+    }
+  ],
+  "world": []
+}

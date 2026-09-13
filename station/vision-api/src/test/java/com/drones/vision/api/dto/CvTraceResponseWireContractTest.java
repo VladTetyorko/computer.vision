@@ -1,11 +1,13 @@
 package com.drones.vision.api.dto;
 
+import com.drones.vision.kernel.BoundingBox;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.perception.application.pipeline.DemandSnapshot;
 import com.drones.vision.perception.application.pipeline.GateDecision;
 import com.drones.vision.perception.application.pipeline.GateOutcome;
 import com.drones.vision.perception.application.pipeline.GateReason;
 import com.drones.vision.perception.domain.model.DetectionEventId;
+import com.drones.vision.perception.domain.model.DetectorBox;
 import com.drones.vision.perception.domain.model.FollowState;
 import com.drones.vision.perception.domain.model.FrameLedger;
 import com.drones.vision.perception.domain.model.LedgerEntry;
@@ -93,7 +95,9 @@ class CvTraceResponseWireContractTest {
     @Test
     void cvTraceResponseMatchesTheCommittedFixture() throws IOException {
         CvTraceResponse full = new CvTraceResponse(STREAM_ID.value().toString(), fullGateDecisions(),
-                List.of(FrameLedgerResponse.from(fullFrameLedger())), List.of(WorldObjectResponse.from(fullWorld())));
+                List.of(FrameLedgerResponse.from(fullFrameLedger()),
+                        FrameLedgerResponse.from(fullFrameLedgerWithoutDetections())),
+                List.of(WorldObjectResponse.from(fullWorld())));
         // The never-traced-this-stream shape (CvTraceResponse's own "never errors" contract): every
         // list empty, not absent -- @JsonInclude(NON_NULL) applies to the record's own scalar/object
         // fields, never silently drops a populated List type to a missing key.
@@ -142,10 +146,11 @@ class CvTraceResponseWireContractTest {
     }
 
     /**
-     * One {@link FrameLedger} exercising all three {@link LedgerOutcome} values and one {@link
+     * One {@link FrameLedger} exercising all three {@link LedgerOutcome} values, one {@link
      * ObjectEvidence} claim, mirroring {@code predict.cv}'s real "held" box key ({@code
      * cv/cv-service/cv_service/orchestration/contributors/predict.py}) so the fixture's evidence
-     * shape matches what cv-service actually emits.
+     * shape matches what cv-service actually emits, and two {@link DetectorBox}es (CV-ORCHESTRATION
+     * wave W5b, decision E23) — the "populated" half of the fixture's detections/frame-size pair.
      */
     private static FrameLedger fullFrameLedger() {
         List<LedgerEntry> entries = List.of(
@@ -157,8 +162,23 @@ class CvTraceResponseWireContractTest {
         objects.put(7L, List.of(new ObjectEvidence("predict.cv",
                 Map.of("predicted", "0.10,0.20,0.30,0.40", "held", "0.11,0.21,0.29,0.39",
                         "velocity", "0.01,-0.02"))));
+        List<DetectorBox> detections = List.of(
+                new DetectorBox("person", 0.87, new BoundingBox(0.10, 0.20, 0.30, 0.40)),
+                new DetectorBox("car", 0.64, new BoundingBox(0.55, 0.60, 0.20, 0.15)));
         return new FrameLedger(STREAM_ID, 42L, AT, 2, "FULL", List.of("detect", "assoc", "predict"), entries,
-                objects, 1, 8.2, 24.6, false);
+                objects, 1, 8.2, 24.6, false, detections, 1920, 1080);
+    }
+
+    /**
+     * A second {@link FrameLedger} example, the "not carried" half of the detections/frame-size
+     * pair the fixture must cover: {@code detections} empty, {@code frameWidth}/{@code frameHeight}
+     * {@code 0} — the shape every untraced frame (or a pre-W5b cv-service response) decodes to.
+     */
+    private static FrameLedger fullFrameLedgerWithoutDetections() {
+        List<LedgerEntry> entries = List.of(
+                new LedgerEntry("detect.full", LedgerOutcome.RAN, "", 6.0, Map.of("detections", "0")));
+        return new FrameLedger(STREAM_ID, 43L, AT, 1, "ROI_ONLY", List.of("detect"), entries, Map.of(), 0, 3.0, 6.0,
+                false, List.of(), 0, 0);
     }
 
     private static WorldObject fullWorld() {

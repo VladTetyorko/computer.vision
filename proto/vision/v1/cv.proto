@@ -371,6 +371,16 @@ message ObjectClaims {
   repeated ObjectEvidence claims = 1;
 }
 
+// One raw detector box before association -- the wire-shaped facts trackeval's own
+// RecordedDetection keeps. Deliberately NOT `Detection`: that message's track fields would let
+// the tracker's own output back into a fixture meant to test the tracker against real detector
+// noise (CV-ORCHESTRATION wave W5b, decision E23).
+message TracedDetection {
+  string      label      = 1;
+  float       confidence = 2;
+  BoundingBox box        = 3;
+}
+
 // One frame's complete evidence. Bounded and in-memory (CV_LEDGER_RING frames per session);
 // never persisted, never pushed -- a client asks for it or it is forgotten.
 message FrameLedger {
@@ -386,6 +396,16 @@ message FrameLedger {
   double   gate_wait_ms         = 10;  // wall time inside the detector: queueing plus inference
   double   total_ms             = 11;
   bool     halted               = 12;  // a contributor stopped the frame (no model resolved)
+
+  // CV-ORCHESTRATION wave W5b (§4.9 "As built in W5", decision E23). Populated ONLY for a traced
+  // request: `detect.full`'s raw per-frame output, before association, in this frame's own
+  // normalized coordinates -- never the roi rescue pass's boxes, and never the tracker's own
+  // matched/predicted boxes (those already live on `ObjectState.Kinematics`). This is what lets
+  // a saved trace replay through `tools/trackeval` against real detector noise instead of the
+  // tracker's own prior output.
+  repeated TracedDetection detections = 13;
+  int32    frame_width           = 14;  // the source frame's width in pixels; 0 = not carried
+  int32    frame_height          = 15;  // the source frame's height in pixels; 0 = not carried
 }
 
 // What one live tracking session is doing right now.

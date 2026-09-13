@@ -39,11 +39,20 @@ import java.util.Map;
  *                       and non-negative
  * @param totalMillis    the frame's total cost; must be finite and non-negative
  * @param halted         whether a contributor stopped the frame (e.g. no model resolved)
+ * @param detections     the detector's own raw boxes this frame (CV-ORCHESTRATION wave W5b, decision
+ *                       E23) — populated only when this frame was traced, {@code List.of()}
+ *                       otherwise; defensively copied, never {@code null}; never the roi rescue
+ *                       pass's boxes, only the full-frame pass's
+ * @param frameWidth     the source frame's pixel width, alongside {@code detections}; {@code 0} means
+ *                       not carried (untraced, or a pre-W5b cv-service); must not be negative
+ * @param frameHeight    the source frame's pixel height, alongside {@code detections}; {@code 0}
+ *                       means not carried; must not be negative
  */
 public record FrameLedger(StreamId streamId, long sequence, Instant capturedAt, int levelServed,
                            String detectorReason, List<String> eligible, List<LedgerEntry> entries,
                            Map<Long, List<ObjectEvidence>> objects, int dropsSinceLast, double gateWaitMillis,
-                           double totalMillis, boolean halted) {
+                           double totalMillis, boolean halted, List<DetectorBox> detections, int frameWidth,
+                           int frameHeight) {
 
     public FrameLedger {
         if (streamId == null) {
@@ -80,8 +89,18 @@ public record FrameLedger(StreamId streamId, long sequence, Instant capturedAt, 
         if (!Double.isFinite(totalMillis) || totalMillis < 0) {
             throw new IllegalArgumentException("FrameLedger totalMillis must be finite and non-negative: " + totalMillis);
         }
+        if (detections == null) {
+            throw new IllegalArgumentException("FrameLedger detections must not be null");
+        }
+        if (frameWidth < 0) {
+            throw new IllegalArgumentException("FrameLedger frameWidth must not be negative: " + frameWidth);
+        }
+        if (frameHeight < 0) {
+            throw new IllegalArgumentException("FrameLedger frameHeight must not be negative: " + frameHeight);
+        }
         eligible = List.copyOf(eligible);
         entries = List.copyOf(entries);
+        detections = List.copyOf(detections);
         Map<Long, List<ObjectEvidence>> copied = new LinkedHashMap<>();
         for (Map.Entry<Long, List<ObjectEvidence>> entry : objects.entrySet()) {
             if (entry.getValue() == null) {
