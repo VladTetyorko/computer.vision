@@ -122,6 +122,42 @@
             </div>
           }
 
+          <!-- ---- Hero status line + intent chips (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+               §4.7/§4.8, wave W3.3) — the operator's one honest read of "is CV working right now",
+               plus four one-shot intent chips. Both render whenever a stream is live
+               (`facade.live()`), regardless of whether detection itself is currently on — unlike the
+               "Detection off" chip above (which only shows while it's off), an operator whose CV goes
+               `Degraded` mid-detection still needs to see it, and one already detecting may still
+               want to re-aim (e.g. People → Vehicles) without a round trip through "off" first.
+               Independent of the mutually-exclusive video-health chain above, same as the crew
+               camera-presence line immediately above this — an orthogonal fact, so it renders
+               alongside any of those three rather than displacing one. `.notice`/`.stream-state-chip`
+               reused verbatim from the video-flow pill above (only `'degraded'` gets the amber
+               fault chrome; `'off'`/`'on'`/`'warn'` all share the neutral pill — frontend-style's
+               "status colours mean state, nothing else"). -->
+          @if (facade.live()) {
+            <div [class.notice]="facade.heroStatus().tone === 'degraded'"
+                 [class.stream-state-chip]="facade.heroStatus().tone !== 'degraded'">
+              @if (facade.heroStatus().tone !== 'degraded') {
+                <span class="dot" aria-hidden="true"></span>
+              }
+              <span>{{ facade.heroStatus().text }}</span>
+            </div>
+            @if (!facade.watchMode()) {
+              <!-- One-shot only — no chip ever renders "selected" (there is no wire fact for "the
+                   stream's current intent," only its resolved effect, `CockpitFacade#lastConfigSources`
+                   — see that signal's own doc comment). "Custom" deliberately calls `requestCvSetup()`,
+                   not `facade.setIntent('CUSTOM')` — see `CockpitFacade#setIntent`'s own doc comment for
+                   why a bare Custom PATCH from here would always fail server-side. -->
+              <div class="intent-chip-row">
+                <button type="button" class="icon-btn" (click)="facade.setIntent('PEOPLE')">People</button>
+                <button type="button" class="icon-btn" (click)="facade.setIntent('VEHICLES')">Vehicles</button>
+                <button type="button" class="icon-btn" (click)="facade.setIntent('EVERYTHING')">Everything</button>
+                <button type="button" class="icon-btn" (click)="requestCvSetup()">Custom</button>
+              </div>
+            }
+          }
+
           <!-- ---- Idle/starting dock card (docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1, folded per
                FLY-FLOW-PLAN.md §3 S1/S2) — the two honest facts this app has for an asset nothing is
                currently streaming from (when a sample was last seen and where it last put the asset,

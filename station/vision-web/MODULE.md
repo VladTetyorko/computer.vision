@@ -1542,3 +1542,125 @@ disjoint the whole time via `git status`/`git diff --stat`, never touched.
   before or after.
 - **Commit**: `feat(cv-orchestration W3.4): Tuning modal — drop the tracking-mode picker,
   resolved-source lines`.
+
+## Status — CV-ORCHESTRATION wave W3.3 (web): intent chips + one honest status line on the Fly hero (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7/§4.8, §6 W3 row) — 2026-09-13
+
+Built on the same shared tree as waves W3.4 ("Tuning" modal rename, `features/fly/cv-setup-modal.*`/
+`cv-control-panel.*`) and W3.5 (tap-to-follow, `shared/player/**` + `cv-control-panel-logic.ts`'s
+`buildPointLockPatch`/`followPoint`) editing concurrently in real time — confirmed disjoint from
+both throughout via `git status`/`git diff` before every stage, never touched their files. (Note:
+the W3.4 entry immediately above this one twice mislabels the *tap-to-follow* sibling as "W3.3" —
+that work is W3.5's; this section is the actual W3.3.) This wave's own files were repeatedly
+overwritten mid-task by the concurrently-committing W3.4/W3.5 agents sharing this same working tree
+(their own Read-then-Write cycles raced this wave's edits to `cockpit-facade.ts`/`cockpit.html`/
+`cv-control-panel-logic.spec.ts` at least twice); every edit below was ultimately re-applied from a
+clean `git show HEAD:<path>` snapshot in a scratch directory and staged directly via
+`git hash-object -w` + `git update-index --cacheinfo` (never a plain `git add` on the live,
+still-being-written path), so this commit is guaranteed self-consistent regardless of what the
+live working tree looked like at any given moment.
+
+- **Part A — TS-mirror fix, `core/api/models.ts`**: `UpdateStreamConfigRequest` gained
+  `readonly intent?: CvProfileIntent` (~line 243) — the Java field has existed since wave W3.0;
+  this TS mirror was simply never added. `PatchStreamConfigResponse` (this file's own pre-existing
+  name for Java's `UpdateStreamConfigResponse`, not renamed here) gained `readonly sources:
+  CvProfileSources` (~line 278) as **required, not optional** — reusing `CvProfileSources` verbatim,
+  no new type — because the wire always sends a real `sources: {}`, never an omitted key; see that
+  type's own doc comment (wave W3.6) for the full Jackson `@JsonInclude(NON_NULL)`-suppresses-a-
+  null-*field*-not-a-non-null-*nested-object* finding, cited rather than re-derived a third time.
+  One object literal broke as a result: `cv-control-panel-logic.spec.ts`'s `reArmHint` describe
+  block (3 fixtures) — fixed by adding `sources: {}` to each, one line + comment per fixture, same
+  shape as wave W3.6's own identical fix to `CvProfile` fixtures elsewhere.
+- **Part B — intent chips, `cockpit.html`/`cockpit-facade.ts`**: a new row of four one-shot chips
+  (People/Vehicles/Everything/Custom) plus the status line (Part C) render in `cockpit.html`,
+  inside the `.dock`'s existing notice stack right after the crew camera-presence line, gated on
+  `facade.live()` — **regardless of whether detection is currently on**, unlike the "Turn on" chip
+  a few lines above (which only shows while detection is off): an operator whose CV goes `Degraded`
+  mid-detection still needs to see it, and one already detecting may still want to re-aim without a
+  round trip through "off" first. The chip row itself is additionally gated on `!facade.watchMode()`.
+  **No persistent "selected" state** by design — there is no wire fact for "the stream's current
+  intent," only its resolved *effect* (`model`/`labelFilter`), so every click is independent and
+  none ever renders pressed; "Turn on" remains the one required, separate act, and no chip bundles
+  `detectionEnabled: true`.
+  - New `CockpitFacade.setIntent(intent: CvProfileIntent): Promise<void>` — a single `{ intent }`
+    PATCH via `fleet.patchStreamConfig`, following `followTrack`'s exact fire-and-forget shape (no
+    optimistic UI, no new error handling: `patchStreamConfig` already toasts + returns `null` on
+    failure, so `null?.sources` degrades honestly to `undefined` for free).
+  - New `CockpitFacade.lastConfigSources` (private writable `lastConfigSourcesSignal`, exposed
+    `.asReadonly()`) — the most recent PATCH response's `sources`, captured by `setIntent`, reset to
+    `undefined` inside `selectAsset()` (alongside the other per-asset reset fields there) since a
+    prior asset's PATCH provenance has nothing honest to say about a new one. Exposed plainly for
+    wave W3.4's Tuning modal to read later (per that wave's own entry above, its `lastConfigSources`
+    input is wired but still always `undefined` — this facade signal is the value a future host
+    binding would feed it); no reader of it added in this wave beyond the signal itself, per the
+    brief's own "expose plainly, no gold-plating" instruction.
+  - **Disclosed judgment call — "Custom" chip never sends `setIntent('CUSTOM')`**: read
+    `IntentPolicyResolver.resolve()` (`contexts/vision-perception/.../profile/IntentPolicyResolver.java`)
+    directly — it throws `IllegalArgumentException` when `intent === CUSTOM` and the same request's
+    `labelFilter` is null/empty, and the Fly hero has no surface to collect custom classes inline, so
+    a literal one-shot `setIntent('CUSTOM')` chip would be a guaranteed-400 button. The "Custom" chip
+    instead calls the already-existing `cockpit.ts#requestCvSetup()` (opens the Tuning modal, which
+    already has that surface) — a deliberate deviation from "each chip always sends the intent PATCH,"
+    disclosed here and in the commit message. `setIntent` itself stays correct for all four
+    `CvProfileIntent` values for any future caller that does have classes in hand.
+  - New CSS: `.intent-chip-row` (`cockpit.css`, next to `.icon-btn`) — a `flex-wrap` row of the four
+    `.icon-btn` pills, same responsive wrap-to-two-lines fallback `.header-actions` already uses.
+    Chips reuse `.icon-btn` (not `.chip`, whose `--panel-raised`/`--border` tokens are for themed
+    panels, not a control floating directly over video — frontend-style §2's HUD rule).
+- **Part C — the hero's one status line, `fly-logic.ts`**: new pure `FlyHeroStatus` interface
+  (`{ text: string; tone: 'off'|'on'|'warn'|'degraded' }`) + `flyHeroStatus(detectionEnabled,
+  cvSubsystem, detectionState, worldObjects)`, plus 9 new `it()`s in `fly-logic.spec.ts` covering
+  all four branches, the health-exclusion cases (`OK`/`DISABLED` never "Degraded"; an `undefined`
+  subsystem read — no completed `/api/system/status` fetch yet — never guesses a fault either), the
+  N=0 edge case, and singular/plural (`1 object` vs `N objects`, a codebase-precedent pluralization
+  `cv-control-panel-logic.ts`'s own "N class(es) on screen" line already established; §4.8's own
+  wording never shows a singular example, so this is a minor, low-risk judgment call, not a
+  literal-text deviation from anything §4.8 actually specifies). Exact 4-state priority order:
+  1. `cvSubsystem` present and `health` is anything other than `'OK'`/`'DISABLED'`
+     (`'DEGRADED'`/`'DOWN'`/`'UNKNOWN'` all qualify) → `Degraded — <detail>` verbatim from
+     `SystemStatusStore#status()`'s `cv-service` subsystem row — wins regardless of `detectionOn`.
+  2. Else `!detectionOn` → `Off`.
+  3. Else `detections.tracks()?.detectionState === 'RUNNING_UNWATCHED'` → `On — no viewer`.
+  4. Else → `On — N objects`, `N` = `detections.worldObjects().filter(o => o.render.tier !==
+     'HIDDEN').length`, `N=0` rendering literally `On — 0 objects`, never a softened phrase.
+  `CockpitFacade.heroStatus` wires this from `detectionOn()`, `systemStatus.status()
+  ?.subsystems.find(s => s.id === 'cv-service')` (new private `systemStatus = inject(SystemStatusStore)`
+  — injected here, not in `cockpit.ts`, per `architecture.spec.ts`'s routed-page rule),
+  `detections.tracks()?.detectionState`, and `detections.worldObjects()`. Deliberately **not** a
+  reuse/edit of `cv-control-panel-logic.ts#detectionStatus` — that is the Tuning-drawer's own,
+  separate 7-way status line for a different audience (§4.8's own table lists Operator/hero and
+  Expert/Tuning-modal as two distinct rows); this is a second, independent derivation.
+  - **Tone vocabulary**: `'off'|'on'|'warn'|'degraded'` (new to this file, no existing union reused
+    — `detectionStatus`'s own `DetectionStatusKind` is a `kind`, not a `tone`, and explicitly carries
+    no color mapping). Rendered via the two chrome classes this cockpit already has: `'degraded'` →
+    `.notice` (amber fault chrome); `'off'`/`'on'`/`'warn'` all → `.stream-state-chip` (neutral HUD
+    pill) — `'warn'` is its own tone rather than folded into `'on'` only so a future pass can style
+    "on, unwatched" apart from "on, seeing things" without re-parsing `text`, not because it gets
+    different chrome today.
+  - **No new poll started**: `CockpitFacade`'s existing `wantsTracksPoll` computed already includes
+    `this.detectionOn()` in its formula — the tracks poll (and therefore `worldObjects()`/`tracks()`)
+    was already running whenever this status line's own "On" branches can be reached; confirmed by
+    reading that computed directly rather than assumed.
+- **Role-gating / dev parity**: unaffected — no new gate, no auth-conditional branch. `setIntent`
+  and the chip row are visible to any operator who can already reach the cockpit; `vision.auth.
+  enabled=false`'s dev admin sees identical behavior to any other ADMIN session, exactly as before.
+- **Degrades honestly**: a failed `setIntent` PATCH leaves `lastConfigSources` at `undefined` (never
+  a fabricated value) via the same `patchStreamConfig` toast-and-`null` path every other PATCH-sending
+  method here already relies on; `heroStatus` never guesses `Degraded` from a `cv-service` row it
+  hasn't actually read (`cvSubsystem === undefined` falls through to the ordinary Off/On branches).
+- **Verify chain**: `npx tsc --noEmit -p tsconfig.app.json` — 0 errors. `npx tsc --noEmit -p
+  tsconfig.spec.json` — 0 errors. `npm run test:ci` — **203 files / 3969 tests, all green**, measured
+  against this wave's own code before this final race-safe re-application; re-verified after
+  reconstruction by re-running the same suite against the reconstructed files copied back onto the
+  live tree. `ng build --configuration production` — green, same two pre-existing budget warnings
+  only (initial bundle over 390 kB; `tactical-map.css` over 11 kB), neither touched by this wave.
+  **Bundle delta**: not isolated via a stash-based before/after this time — both W3.4 and W3.5 held
+  actively uncommitted, disjoint-but-large edits in this same tree for most of this wave's duration
+  (unlike W3.4's own narrower ~90s window), so pathspec-stashing this wave's files back out would
+  not have produced a clean "before" baseline either — same shared-worktree call W3.2's entry made.
+  As a rough magnitude proxy instead: this wave's own diff (excluding the one-line spec fixture fix
+  and the new `fly-logic.spec.ts` tests, neither of which ship) is +21 lines `models.ts`, +68
+  `cockpit-facade.ts`, +11 `cockpit.css`, +36 `cockpit.html`, +70 `fly-logic.ts` — mostly doc
+  comments, not runtime code; the `cockpit` lazy chunk measured 140.58 kB raw / 29.63 kB transfer in
+  a full-tree build taken mid-wave, but that number includes both siblings' own substantial
+  concurrent work and is not attributable to this wave alone.
+- **Commit**: `feat(cv-orchestration W3.3): intent chips + one honest status line on the fly hero`.

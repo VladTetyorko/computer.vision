@@ -439,16 +439,19 @@ describe('cv-control-panel-logic', () => {
   });
 
   describe('reArmHint', () => {
+    // `sources: {}` on every fixture below (wave W3.3, mirroring wave W3.6's identical fix for
+    // `CvProfile`'s own now-required `sources` field): this test never sent a real PATCH request,
+    // so there is no `intent` to report provenance for.
     it('returns a hint when modelReArmed is true', () => {
-      expect(reArmHint({ streamId: 's-1', modelReArmed: true })).toMatch(/re-arming/i);
+      expect(reArmHint({ streamId: 's-1', modelReArmed: true, sources: {} })).toMatch(/re-arming/i);
     });
 
     it('returns null when modelReArmed is false', () => {
-      expect(reArmHint({ streamId: 's-1', modelReArmed: false })).toBeNull();
+      expect(reArmHint({ streamId: 's-1', modelReArmed: false, sources: {} })).toBeNull();
     });
 
     it('never claims the video was interrupted', () => {
-      expect(reArmHint({ streamId: 's-1', modelReArmed: true })).toMatch(/video keeps playing/i);
+      expect(reArmHint({ streamId: 's-1', modelReArmed: true, sources: {} })).toMatch(/video keeps playing/i);
     });
   });
 

@@ -222,6 +222,15 @@ export interface StartStreamRequest {
  * this class" act (the strip, the panel's class-chip checklist) actually writes — `labelFilter`
  * itself is left alone by that flow, reserved for the rarer model-intent allowlist (preset fill,
  * seeding on a model switch).
+ *
+ * `intent` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7, wave W3.0, mirrored here in wave
+ * W3.3 — the Java field existed one wave earlier than its TS mirror did) is `CvProfileIntent`'s
+ * live-PATCH twin: absent skips intent resolution entirely; a present value asks
+ * `IntentPolicyResolver` (server-side) to seed `model`/`labelFilter` **only for the fields this
+ * same request left absent** — an explicit `model` or `labelFilter` on the same request (even an
+ * explicit empty `labelFilter`, itself a real "keep all labels" value under this DTO's own
+ * null-means-unchanged contract) always wins over the intent's own choice. Identical
+ * absent-means-skip convention to `CvProfileRequest#intent` — see that field's own doc comment.
  */
 export interface UpdateStreamConfigRequest {
   readonly confidenceThreshold?: number;
@@ -231,6 +240,7 @@ export interface UpdateStreamConfigRequest {
   readonly detectionEnabled?: boolean;
   readonly model?: string;
   readonly tracking?: TrackingConfigRequest;
+  readonly intent?: CvProfileIntent;
 }
 
 /**
@@ -250,11 +260,22 @@ export interface UpdateStreamConfigRequest {
  * The Fly cockpit's own "Following #N" chip does **not** read this flag at all — see
  * `StreamTracksResponse#lockedTrackId`'s own doc comment for why a lock's confirmation comes from a
  * different, polled response instead (docs/extracts/TRACKING-ORCHESTRATION.md §3.3's honesty rule).
+ *
+ * `sources` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7, wave W3.0, mirrored here in wave
+ * W3.3) is this PATCH's own per-knob intent provenance — the Java name for this DTO is
+ * `UpdateStreamConfigResponse`, this file's own pre-existing naming mismatch, not renamed here.
+ * **Always present, never optional**, for the identical reason {@link CvProfileSources}'s own doc
+ * comment already documents in full for the sibling `CvProfile`/`CvProfileResponse` pair (Jackson's
+ * `@JsonInclude(NON_NULL)` suppresses a `null`-*valued* field, not a non-null nested object whose
+ * own fields are null) — this response reuses that exact same `Sources` Java type, so the wire
+ * always sends a real `sources: {}` for a PATCH that carried no `intent`, never an omitted key. See
+ * that doc comment for the full reasoning; not re-derived a third time here.
  */
 export interface PatchStreamConfigResponse {
   readonly streamId: string;
   readonly modelReArmed: boolean;
   readonly trackingChanged?: boolean;
+  readonly sources: CvProfileSources;
 }
 
 /**
