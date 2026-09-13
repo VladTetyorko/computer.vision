@@ -66,6 +66,7 @@ import com.drones.vision.perception.domain.model.DetectionRate;
 import com.drones.vision.perception.application.pipeline.GateDecision;
 import com.drones.vision.perception.domain.model.PipelineLatency;
 import com.drones.vision.perception.domain.model.TrackingStats;
+import com.drones.vision.perception.domain.model.TracksSnapshot;
 import com.drones.vision.perception.application.pipeline.UsageTracker;
 import com.drones.vision.perception.application.pipeline.VideoSourceRegistry;
 
@@ -679,6 +680,13 @@ public final class DefaultStreamService implements StreamService {
         Objects.requireNonNull(streamId, "streamId must not be null");
         RunningStream active = activeStreams.get(streamId);
         return active == null ? Optional.empty() : Optional.of(active.pipeline().detectionState());
+    }
+
+    @Override
+    public Optional<TracksSnapshot> tracksSnapshot(StreamId streamId) {
+        Objects.requireNonNull(streamId, "streamId must not be null");
+        RunningStream active = activeStreams.get(streamId);
+        return active == null ? Optional.empty() : Optional.of(active.pipeline().tracksSnapshot());
     }
 
     /**

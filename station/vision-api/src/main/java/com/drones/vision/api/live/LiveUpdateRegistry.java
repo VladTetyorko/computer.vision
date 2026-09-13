@@ -29,7 +29,7 @@ import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.perception.domain.model.DetectionEvent;
 import com.drones.vision.perception.domain.model.DetectionResult;
-import com.drones.vision.perception.domain.model.WorldObject;
+import com.drones.vision.perception.domain.model.TracksSnapshot;
 import com.drones.vision.platform.Event;
 import com.drones.vision.flight.domain.model.GeofenceZoneEvent;
 import com.drones.vision.map.domain.model.MapEvent;
@@ -367,10 +367,14 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      * One asset's latest-only {@link #publishDetections} payload, held together so {@link
      * #flushPending()} builds the {@code detections}/{@code tracks}/{@code cv-trace} envelopes from
      * one coherent snapshot instead of three independent reads (docs/plans/active/
-     * CV-ORCHESTRATION-PLAN.md §4.6, wave W2.8). {@code worldObjects} is {@link DetectionLiveUpdatePort
-     * #publishDetections}'s own per-result fold, carried verbatim -- this class never re-folds it.
+     * CV-ORCHESTRATION-PLAN.md §4.6/§4.9, waves W2.8/W9). {@code tracksSnapshot} is {@link
+     * DetectionLiveUpdatePort#publishDetections}'s own per-result snapshot, carried verbatim -- this
+     * class never re-folds or re-derives it. Widened from a bare {@code List<WorldObject>} in wave
+     * W9 alongside the port itself (see that method's own javadoc); {@link #flushPending()} still
+     * reads only {@link TracksSnapshot#objects()} off it here -- publishing the snapshot's other
+     * fields on the {@code tracks:} topic is wave W9.1's own change, not this one's.
      */
-    private record PendingDetection(DetectionResult result, List<WorldObject> worldObjects) {
+    private record PendingDetection(DetectionResult result, TracksSnapshot tracksSnapshot) {
     }
 
     /**
@@ -812,12 +816,12 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
     }
 
     @Override
-    public void publishDetections(AssetId assetId, DetectionResult result, List<WorldObject> worldObjects) {
+    public void publishDetections(AssetId assetId, DetectionResult result, TracksSnapshot tracksSnapshot) {
         Objects.requireNonNull(assetId, "assetId must not be null");
         Objects.requireNonNull(result, "result must not be null");
-        Objects.requireNonNull(worldObjects, "worldObjects must not be null");
+        Objects.requireNonNull(tracksSnapshot, "tracksSnapshot must not be null");
         // latest-only: a later put simply overwrites
-        pendingDetections.put(assetId, new PendingDetection(result, worldObjects));
+        pendingDetections.put(assetId, new PendingDetection(result, tracksSnapshot));
     }
 
     /**
@@ -998,7 +1002,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
             // DetectionResultResponse#objects above just used -- see WorldObjectResponse's own javadoc for why.
             LiveTopic tracksTopic = LiveTopic.tracks(assetId);
             List<WorldObjectResponse> objects =
-                    pending.worldObjects().stream().map(WorldObjectResponse::from).toList();
+                    pending.tracksSnapshot().objects().stream().map(WorldObjectResponse::from).toList();
             LiveEnvelopeResponse tracksEnvelope = new LiveEnvelopeResponse(sequencer.incrementAndGet(),
                     assetId.value().toString(), LiveTopicKind.TRACKS.wire(), objects);
             bufferFor(tracksTopic).append(tracksEnvelope);

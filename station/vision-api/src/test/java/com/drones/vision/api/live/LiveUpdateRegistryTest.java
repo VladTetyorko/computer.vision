@@ -61,6 +61,7 @@ import com.drones.vision.perception.domain.model.FrameLedger;
 import com.drones.vision.perception.domain.model.ObjectLifecycle;
 import com.drones.vision.perception.domain.model.ObjectState;
 import com.drones.vision.perception.domain.model.RenderTier;
+import com.drones.vision.perception.domain.model.TracksSnapshot;
 import com.drones.vision.perception.domain.model.WorldObject;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
@@ -162,6 +163,17 @@ class LiveUpdateRegistryTest {
     private static WorldObject worldObject(StreamId streamId, long id) {
         return new WorldObject(objectState(streamId, id), new WorldObject.Operator(false, false, null),
                 new WorldObject.EventLink(null), new WorldObject.Render(RenderTier.T1));
+    }
+
+    /**
+     * A minimal, valid {@link TracksSnapshot} carrying only {@code objects} (wave W9) -- these
+     * broadcast tests only ever exercise {@link LiveUpdateRegistry#publishDetections}'s world-fold
+     * half; the other six read models are exactly {@link TracksSnapshot#empty}'s emptiness.
+     */
+    private static TracksSnapshot tracksSnapshot(StreamId streamId, WorldObject... objects) {
+        TracksSnapshot empty = TracksSnapshot.empty(streamId);
+        return new TracksSnapshot(streamId, empty.tracks(), empty.stats(), empty.latency(), empty.rate(),
+                empty.detectionState(), empty.follow(), List.of(objects));
     }
 
     /** {@link FrameLedger}'s own trace tier (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4) -- a minimal, valid instance for {@code cv-trace} broadcast tests. */
@@ -679,10 +691,10 @@ class LiveUpdateRegistryTest {
         StreamId streamId = StreamId.random();
         LiveUpdateRegistry registry = registry();
 
-        registry.publishDetections(assetId, detectionResult(streamId, 0), List.of());
-        registry.publishDetections(assetId, detectionResult(streamId, 1), List.of());
+        registry.publishDetections(assetId, detectionResult(streamId, 0), TracksSnapshot.empty(streamId));
+        registry.publishDetections(assetId, detectionResult(streamId, 1), TracksSnapshot.empty(streamId));
         DetectionResult latest = detectionResult(streamId, 2);
-        registry.publishDetections(assetId, latest, List.of());
+        registry.publishDetections(assetId, latest, TracksSnapshot.empty(streamId));
 
         registry.flushPending();
 
@@ -704,7 +716,7 @@ class LiveUpdateRegistryTest {
         LiveUpdateRegistry registry = registry();
 
         registry.publishDetections(assetId, detectionResultWithMirror(streamId, 0, false),
-                List.of(worldObject(streamId, 1)));
+                tracksSnapshot(streamId, worldObject(streamId, 1)));
         registry.flushPending();
 
         List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.tracks(assetId)).snapshot();
@@ -728,7 +740,7 @@ class LiveUpdateRegistryTest {
         LiveUpdateRegistry registry = registry();
 
         registry.publishDetections(assetId, detectionResultWithMirror(streamId, 0, true),
-                List.of(worldObject(streamId, 1)));
+                tracksSnapshot(streamId, worldObject(streamId, 1)));
         registry.flushPending();
 
         List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.cvTrace(assetId)).snapshot();
@@ -749,7 +761,7 @@ class LiveUpdateRegistryTest {
         LiveUpdateRegistry registry = registry();
 
         registry.publishDetections(assetId, detectionResultWithMirror(streamId, 0, false),
-                List.of(worldObject(streamId, 1)));
+                tracksSnapshot(streamId, worldObject(streamId, 1)));
         registry.flushPending();
 
         assertEquals(0, registry.bufferFor(LiveTopic.cvTrace(assetId)).snapshot().size(),
