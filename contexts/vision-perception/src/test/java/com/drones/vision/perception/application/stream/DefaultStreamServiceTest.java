@@ -1564,7 +1564,7 @@ class DefaultStreamServiceTest {
         InMemoryCvProfileRepositoryPort repository = new InMemoryCvProfileRepositoryPort();
         CvProfile bound = new CvProfile(CvProfileId.random(), "mast-cams", "", false,
                 owningAsset.ownership().groupId(), new ModelRef("bound-model", "v9"), 0.77, 3, List.of(), List.of(),
-                true, TrackingConfig.off(), EventRuleConfig.defaults(), Instant.EPOCH, Instant.EPOCH);
+                true, null, EventRuleConfig.defaults(), null, Instant.EPOCH, Instant.EPOCH);
         repository.save(bound);
         repository.saveBinding(new CvProfileBinding(BindingScope.ASSET, owningAsset.id().value().toString(),
                 bound.id(), Instant.EPOCH));
@@ -1593,8 +1593,8 @@ class DefaultStreamServiceTest {
 
         InMemoryCvProfileRepositoryPort repository = new InMemoryCvProfileRepositoryPort();
         CvProfile categoryProfile = new CvProfile(CvProfileId.random(), "video-only", "", false, groupId,
-                new ModelRef("video-only-model", "v1"), 0.3, 4, List.of(), List.of(), false, TrackingConfig.off(),
-                EventRuleConfig.defaults(), Instant.EPOCH, Instant.EPOCH);
+                new ModelRef("video-only-model", "v1"), 0.3, 4, List.of(), List.of(), false, null,
+                EventRuleConfig.defaults(), null, Instant.EPOCH, Instant.EPOCH);
         repository.save(categoryProfile);
         repository.saveBinding(
                 new CvProfileBinding(BindingScope.CATEGORY, "simulated", categoryProfile.id(), Instant.EPOCH));

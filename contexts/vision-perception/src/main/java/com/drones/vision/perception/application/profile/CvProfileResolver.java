@@ -81,10 +81,10 @@ public final class CvProfileResolver {
                 matchAt(snapshot, BindingScope.CATEGORY, categoryId.slug(), ProfileSource.CATEGORY),
                 matchAt(snapshot, BindingScope.ASSET, assetId.value().toString(), ProfileSource.ASSET))
                 .stream().flatMap(Optional::stream).toList()) {
-            // Deliberately reassigns rather than accumulates a diff -- see this class's own javadoc:
-            // every CvProfile fully specifies every field, so "folding" one tier over another means
-            // the more specific tier's complete config simply supersedes the less specific one's.
-            folded = candidate.profile().toPipelineConfig(platformDefault);
+            // W7.0 compile-only rename (toPipelineConfig -> foldOnto); still wholesale-per-tier here --
+            // W7.1 replaces this loop with a genuine per-knob accumulation (docs/plans/active/
+            // CV-ORCHESTRATION-PLAN.md §4.7, decision E22).
+            folded = candidate.profile().foldOnto(platformDefault);
             mostSpecific = candidate;
         }
 

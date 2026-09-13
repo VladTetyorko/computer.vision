@@ -34,7 +34,7 @@ class CvProfileResolverTest {
 
     private static CvProfile profile(String name, GroupId groupId, String modelId) {
         return new CvProfile(CvProfileId.random(), name, "", false, groupId, new ModelRef(modelId, "latest"), 0.4,
-                10, List.of(), List.of(), true, TrackingConfig.off(), EventRuleConfig.defaults(), NOW, NOW);
+                10, List.of(), List.of(), true, null, EventRuleConfig.defaults(), null, NOW, NOW);
     }
 
     /** Like {@link #profile(String, GroupId, String)}, but with a caller-chosen {@code
@@ -45,7 +45,7 @@ class CvProfileResolverTest {
     private static CvProfile profile(String name, GroupId groupId, ModelRef model, double confidenceThreshold,
                                       int inferenceFps, List<String> labelFilter) {
         return new CvProfile(CvProfileId.random(), name, "", false, groupId, model, confidenceThreshold,
-                inferenceFps, labelFilter, List.of(), true, TrackingConfig.off(), EventRuleConfig.defaults(), NOW,
+                inferenceFps, labelFilter, List.of(), true, null, EventRuleConfig.defaults(), null, NOW,
                 NOW);
     }
 
