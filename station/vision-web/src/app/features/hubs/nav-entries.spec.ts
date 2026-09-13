@@ -211,12 +211,13 @@ describe('NAV_MODES', () => {
   describe('VISION — every entry MANAGE_ORG-gated', () => {
     const vision = NAV_MODES.find((mode) => mode.id === 'vision')!;
 
-    it('has exactly Profiles, CV training, CV model registry, Geo regions, in that order, all MANAGE_ORG-gated', () => {
+    it('has exactly Profiles, CV training, CV model registry, Geo regions, CV inspector, in that order, all MANAGE_ORG-gated', () => {
       expect(vision.entries.map((entry) => entry.name)).toEqual([
         'Profiles',
         'CV training',
         'CV model registry',
         'Geo regions',
+        'CV inspector',
       ]);
       for (const entry of vision.entries) {
         expect(entry.requires, entry.name).toBe('MANAGE_ORG');
@@ -228,6 +229,13 @@ describe('NAV_MODES', () => {
     it('Profiles targets /vision/profiles', () => {
       const profiles = vision.entries.find((entry) => entry.name === 'Profiles');
       expect(profiles?.to).toBe('/vision/profiles');
+    });
+
+    /** New this wave (docs/plans/active/CV-ORCHESTRATION-PLAN.md §9 decision 3, wave W5.3) — the
+     *  engineer inspector, `/manage/cv` only per that decision's own wording (no fly-drawer tab). */
+    it('CV inspector targets /manage/cv', () => {
+      const inspector = vision.entries.find((entry) => entry.name === 'CV inspector');
+      expect(inspector?.to).toBe('/manage/cv');
     });
   });
 
@@ -280,9 +288,12 @@ describe('NAV_MODES', () => {
    * changed entries was ever pilot-visible (every VISION entry, Profiles included, is `MANAGE_ORG`-gated)
    * — it still lands on the plan's own "10". **Wave W3 (docs/plans/active/CREW-CONTROL-PLAN.md §4)
    * moves both counts to +1** — "Crew seat" is ungated, so it joins both the pilot and manager
-   * lists alike: pilot 10 + 1 = 11, manager 19 + 1 = 20.
+   * lists alike: pilot 10 + 1 = 11, manager 19 + 1 = 20. **Wave W5.3
+   * (docs/plans/active/CV-ORCHESTRATION-PLAN.md §9 decision 3) moves the manager count to 21** —
+   * one new `MANAGE_ORG`-gated entry (CV inspector) joins Vision (+1): 20 + 1 = 21; the pilot count
+   * is unaffected (CV inspector is gated) and stays at 11.
    */
-  it('a PILOT sees exactly the plan\'s own 11 entries; a MANAGER/ADMIN sees 20 (19 + 1 new Crew seat — see this test\'s own doc comment)', () => {
+  it('a PILOT sees exactly the plan\'s own 11 entries; a MANAGER/ADMIN sees 21 (20 + 1 new CV inspector — see this test\'s own doc comment)', () => {
     const pilotVisible = visibleEntries(false);
     const managerVisible = visibleEntries(true);
 
@@ -300,7 +311,7 @@ describe('NAV_MODES', () => {
       'Settings',
     ]);
     expect(pilotVisible.length).toBe(11);
-    expect(managerVisible.length).toBe(20);
+    expect(managerVisible.length).toBe(21);
   });
 });
 

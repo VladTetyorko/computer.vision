@@ -77,6 +77,9 @@ const ROUTED_PAGES = [
   // The crew seat (docs/plans/active/CREW-CONTROL-PLAN.md §3.4, wave W3) — guarded from day one like
   // every other routed page above.
   'crew/crew',
+  // The engineer inspector (docs/plans/active/CV-ORCHESTRATION-PLAN.md §9 decision 3, wave W5.3) —
+  // guarded from day one like every other routed page above.
+  'cv-inspector/cv-inspector',
 ];
 
 // All feature .ts sources, inlined as raw strings at build time. Keys look like

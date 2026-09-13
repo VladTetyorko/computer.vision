@@ -1,0 +1,122 @@
+import { Injectable, computed, inject, signal } from '@angular/core';
+import { CvTraceStore } from '../../core/cv-trace/cv-trace-store';
+import { FleetStore } from '../../core/fleet/fleet-store';
+import { healthLabel, healthSeverity } from '../../core/system-status/system-status-logic';
+import { SystemStatusStore } from '../../core/system-status/system-status-store';
+import { allTrackIds, cvSubsystemRow, evidenceRowsFor, latestFrame, worldObjectFor } from './cv-inspector-logic';
+
+/**
+ * `/manage/cv`'s facade (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4/§4.8, wave W5.3) — the one
+ * seam the routed page injects (`core/ui/architecture.spec.ts`'s layering guard). Three collaborators:
+ *
+ * - {@link CvTraceStore} — page-provided (this page's own `providers`, alongside this facade), the
+ *   `gate`/`frame`/`world` ledgers for whichever stream is currently picked.
+ * - {@link FleetStore} — `providedIn: 'root'`, already polling; `streams()` fills the stream picker
+ *   with **running** streams only, per the plan's own §4.8 instruction.
+ * - {@link SystemStatusStore} — `providedIn: 'root'`, already polling app-wide; the process-facts
+ *   panel is a second reader of the same `cv-service` row `/manage/system` renders, exactly like
+ *   `SystemStatusFacade` itself reads it (see that facade's own class doc for the same precedent).
+ *
+ * **Deliberate scope cut, disclosed here (docs/plans/active/CV-ORCHESTRATION-CONTEXT.md carries the
+ * dated version)**: the stream picker tracks by `streamId` alone, never resolving an `assetId` to
+ * pass to `CvTraceStore.track()`'s low-latency live-merge parameter. `ActiveStream` carries a
+ * `deviceId`, not an `assetId`, and no client-side index maps a device back to the asset that owns
+ * it without an extra per-asset `AssetDetails` fetch this inspector has no other reason to make;
+ * `CvTraceStore`'s own class doc already establishes that its periodic poll (3s) is authoritative
+ * regardless of whether the live topic is also wired, so running poll-only here costs the inspector
+ * nothing but a few seconds of extra latency on `frame`, never a wrong or stale answer.
+ *
+ * **Process facts are stream-independent** — the `cv-service` row is a whole-process fact (queue
+ * depth, gate occupancy, capacity), not scoped to any one stream (§4.8's own audience table lists it
+ * under "Ops", not per-asset) — {@link cvRow} renders regardless of whether a stream is picked at all.
+ */
+@Injectable()
+export class CvInspectorFacade {
+  private readonly trace = inject(CvTraceStore);
+  private readonly fleet = inject(FleetStore);
+  private readonly statusStore = inject(SystemStatusStore);
+
+  /** Running streams only — the plan's own §4.8 instruction; a stream that already stopped has
+   *  nothing left to trace live, and its last-known trace stays reachable by re-picking it if it
+   *  restarts under the same id. */
+  readonly streams = this.fleet.streams;
+
+  private readonly selectedStreamIdSignal = signal<string | undefined>(undefined);
+  readonly selectedStreamId = this.selectedStreamIdSignal.asReadonly();
+
+  readonly gate = this.trace.gate;
+  readonly frame = this.trace.frame;
+  readonly world = this.trace.world;
+
+  /** The newest frame in the ring — the frame selector below defaults here until an engineer picks
+   *  an older one to look back at. */
+  readonly latestFrame = computed(() => latestFrame(this.frame()));
+
+  private readonly selectedFrameSequenceSignal = signal<number | undefined>(undefined);
+  readonly selectedFrameSequence = this.selectedFrameSequenceSignal.asReadonly();
+
+  /** The contributor-list panel's own subject — the explicitly selected frame if it is still in the
+   *  ring, else the latest one (covers both "never picked one" and "picked one that has since aged
+   *  out of the ring"). */
+  readonly selectedFrame = computed(() => {
+    const sequence = this.selectedFrameSequenceSignal();
+    if (sequence !== undefined) {
+      const found = this.frame().find((candidate) => candidate.sequence === sequence);
+      if (found !== undefined) {
+        return found;
+      }
+    }
+    return this.latestFrame();
+  });
+
+  /** Every track id the ring or the world fold currently knows about — the object-evidence panel's
+   *  own picker list. */
+  readonly trackIds = computed(() => allTrackIds(this.frame(), this.world()));
+
+  private readonly selectedTrackIdSignal = signal<number | undefined>(undefined);
+  readonly selectedTrackId = this.selectedTrackIdSignal.asReadonly();
+
+  readonly evidenceRows = computed(() => {
+    const trackId = this.selectedTrackIdSignal();
+    return trackId === undefined ? [] : evidenceRowsFor(this.frame(), trackId);
+  });
+
+  readonly selectedWorldObject = computed(() => {
+    const trackId = this.selectedTrackIdSignal();
+    return trackId === undefined ? undefined : worldObjectFor(this.world(), trackId);
+  });
+
+  /** The `cv-service` row — see class doc's "process facts are stream-independent" note. */
+  readonly cvRow = computed(() => cvSubsystemRow(this.statusStore.status()));
+  readonly healthLabel = healthLabel;
+  readonly healthSeverity = healthSeverity;
+
+  constructor() {
+    // Picks up the process-facts row even if this page opened before `SystemStatusStore`'s own
+    // first poll landed — mirrors `SystemStatusFacade`'s identical constructor-time `refresh()` call.
+    void this.statusStore.refresh();
+  }
+
+  /** Picking a stream (or `''`, the picker's own "— pick a stream —" placeholder option) starts or
+   *  stops `CvTraceStore` tracking it, and clears whichever frame/track was selected under the
+   *  previous stream — a `sequence`/track id from one stream has no meaning under another. */
+  selectStream(streamId: string): void {
+    this.selectedFrameSequenceSignal.set(undefined);
+    this.selectedTrackIdSignal.set(undefined);
+    if (streamId === '') {
+      this.selectedStreamIdSignal.set(undefined);
+      this.trace.reset();
+      return;
+    }
+    this.selectedStreamIdSignal.set(streamId);
+    this.trace.track(streamId);
+  }
+
+  selectFrame(sequence: number): void {
+    this.selectedFrameSequenceSignal.set(sequence);
+  }
+
+  selectTrack(trackId: number): void {
+    this.selectedTrackIdSignal.set(trackId);
+  }
+}
