@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type {
+  CvKnobSources,
   CvModel,
   CvProfile,
   CvTracker,
@@ -150,6 +151,24 @@ function cvProfile(partial: Partial<CvProfile> = {}): CvProfile {
     sources: {},
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
+    ...partial,
+  };
+}
+
+// `EffectiveCvProfile#sources` (wave W7 — every knob's own real provenance is reported on every
+// read, not just on save). These fixtures never depend on the exact tier — the tests below only
+// read `EffectiveCvProfile#profile`/`#source`, not `#sources` — so "everything from PLATFORM" is a
+// fine, honest default.
+function knobSources(partial: Partial<CvKnobSources> = {}): CvKnobSources {
+  return {
+    model: 'PLATFORM',
+    confidenceThreshold: 'PLATFORM',
+    inferenceFps: 'PLATFORM',
+    labelFilter: 'PLATFORM',
+    labelDenyFilter: 'PLATFORM',
+    detectionEnabled: 'PLATFORM',
+    tracking: 'PLATFORM',
+    eventRule: 'PLATFORM',
     ...partial,
   };
 }
@@ -373,7 +392,7 @@ describe('cv-control-panel-logic', () => {
     it('prefers the running stream config when both are available', () => {
       const config = resolveCvConfig(
         streamConfig({ model: 'from-stream.pt' }),
-        { assetId: 'a-1', profile: cvProfile({ model: 'from-profile.pt' }), source: 'ASSET' },
+        { assetId: 'a-1', profile: cvProfile({ model: 'from-profile.pt' }), source: 'ASSET', sources: knobSources() },
       );
       expect(config?.model).toBe('from-stream.pt');
     });
@@ -383,6 +402,7 @@ describe('cv-control-panel-logic', () => {
         assetId: 'a-1',
         profile: cvProfile({ model: 'from-profile.pt' }),
         source: 'PLATFORM',
+        sources: knobSources(),
       });
       expect(config?.model).toBe('from-profile.pt');
     });
@@ -403,7 +423,12 @@ describe('cv-control-panel-logic', () => {
 
   describe('effectiveProfileLine', () => {
     it('names the profile and its source once resolved', () => {
-      const effective: EffectiveCvProfile = { assetId: 'a-1', profile: cvProfile({ name: 'people-vehicles' }), source: 'ASSET' };
+      const effective: EffectiveCvProfile = {
+        assetId: 'a-1',
+        profile: cvProfile({ name: 'people-vehicles' }),
+        source: 'ASSET',
+        sources: knobSources(),
+      };
       expect(effectiveProfileLine('a-1', effective)).toBe('From profile "people-vehicles" (asset)');
     });
 

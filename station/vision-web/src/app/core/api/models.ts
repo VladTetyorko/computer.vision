@@ -438,45 +438,56 @@ export type BindingScope = 'ORGANIZATION' | 'CATEGORY' | 'ASSET';
 export type CvProfileIntent = 'PEOPLE' | 'VEHICLES' | 'EVERYTHING' | 'CUSTOM';
 
 /**
- * Mirrors `dto.CvProfileResponse.Sources` — per-knob provenance for the request that just
- * created/updated a `CvProfile`, reported on the `POST`/`PUT /api/cv/profiles` response only (never
- * on a plain `GET`/list/`effective` read — intent provenance is not persisted on `CvProfile` itself,
- * only on the response to the request that resolved it). `undefined` means "this knob came from the
- * request itself, unmodified"; `'INTENT'` is the only other possible value for either field.
+ * Mirrors `dto.CvProfileResponse.Sources` — the ORIGINAL two-knob (`model`/`labelFilter`) per-request
+ * provenance shape, reported on the `PATCH /api/streams/{id}/config` response only
+ * ({@link PatchStreamConfigResponse#sources}). `undefined` means "this knob came from the request
+ * itself, unmodified"; `'INTENT'` is the only other possible value for either field.
+ *
+ * **Wave W7 — superseded for `CvProfile` itself, kept for the stream-config hot path**
+ * (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7/§8, decision E22): `CvProfile#sources` no longer
+ * uses this type — see {@link CvProfileFieldSources} (four knobs, computed from a saved profile's own
+ * fields on every read, not only a save response). This type is kept, byte-identical to its pre-W7
+ * shape, solely because `UpdateStreamConfigRequest`/`PatchStreamConfigResponse` (the stream-config
+ * hot path, out of wave W7's file scope) directly reuse it for their own live PATCH-path
+ * provenance — the same disclosed deviation the Java side made, for the identical reason
+ * (`dto.CvProfileResponse.Sources`'s own javadoc).
  *
  * **Always present as a real object, never an absent top-level field or a bare `{}` vs. omitted
- * distinction to worry about**: `CvProfileResponse` is `@JsonInclude(NON_NULL)` at the class level,
- * which suppresses a `null`-*valued* field, but `sources` itself is never `null` — every call site
- * (`CvProfileController#create`/`#update`/`#get`/`#list`/`#effective`, verified by reading the
- * controller) passes a real `Sources` value, `Sources.none()` (both inner fields `null`) for a plain
- * read. `Sources` itself also carries `@JsonInclude(NON_NULL)`, which suppresses its own two
- * now-`null` fields — so the wire sends `sources: {}` for "no provenance to report", never omits the
- * key and never sends an explicit `null`. This is the same Jackson mechanism a sibling wave (W3.0)
- * independently found for `UpdateStreamConfigResponse.sources` (this exact same `Sources` type,
- * reused) — not a second, independent claim, the identical finding confirmed twice. Modeled here as
- * always-present with two independently-optional members, not as an optional top-level field.
+ * distinction to worry about** on {@link PatchStreamConfigResponse} — that interface's own doc
+ * comment has the full Jackson `@JsonInclude(NON_NULL)` reasoning, unchanged by this wave.
  *
  * Only `'INTENT'` is representable here even though the underlying Java `ProfileSource` enum has
  * four other members (`ASSET`/`CATEGORY`/`ORGANIZATION`/`PLATFORM`) — those describe which *tier* of
- * the binding fold resolved a profile at stream-start time (`EffectiveCvProfile#source`, already
- * separately typed here as `BindingScope | 'PLATFORM'`), a different question from this type's
- * "which knob did request-time intent resolution seed."
+ * the binding fold resolved a profile at stream-start time (`EffectiveCvProfile#source`/`#sources`),
+ * a different question from this type's "which knob did request-time intent resolution seed."
  */
 export interface CvProfileSources {
   readonly model?: 'INTENT';
   readonly labelFilter?: 'INTENT';
 }
 
-/** `CvProfile#tracking` — deliberately a narrower shape than `TrackingConfigRequest` (that request
+/**
+ * `CvProfile#tracking` — deliberately a narrower shape than `TrackingConfigRequest` (that request
  * also carries session-only knobs — `lock`, `redetectIouPercent`, `maxAgeFrames`, `minHits`,
- * `reupdateMaxGapMillis` — that a profile does not own; §5.1 lists exactly these five fields). */
+ * `reupdateMaxGapMillis` — that a profile does not own; §5.1 lists exactly these five fields).
+ *
+ * **Wave W7 — a per-knob patch** (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7/§8, decision
+ * E22): every field is now individually optional, mirroring `dto.CvProfileTrackingResponse`'s own
+ * now-nullable fields one for one — absent means "leave this knob unset (inherit)", exactly like
+ * every other `CvProfile` knob. This same interface also serves an EFFECTIVE read
+ * (`EffectiveCvProfile#profile.tracking`; `EffectiveCvProfile#sources.tracking` separately names
+ * which tier supplied the group as a whole) — a fold result always has every field present, but
+ * nothing here requires that; a raw, possibly-partial profile's own `tracking` is this same optional
+ * shape.
+ */
 export interface CvProfileTracking {
-  readonly mode: TrackingMode;
-  /** Empty string means "use the deployment default engine" — never a magic sentinel other than "". */
-  readonly engineId: string;
-  readonly capabilityLevel: number;
-  readonly verifyEveryMillis: number;
-  readonly followFps: number;
+  readonly mode?: TrackingMode;
+  /** Empty string means "use the deployment default engine" — a real, explicit value, distinct from
+   *  `undefined` ("inherit this knob"). */
+  readonly engineId?: string;
+  readonly capabilityLevel?: number;
+  readonly verifyEveryMillis?: number;
+  readonly followFps?: number;
 }
 
 /**
@@ -498,17 +509,19 @@ export interface CvProfileEventRule {
  * wire can omit it arbitrarily, but because the Java domain record validates it bidirectionally
  * (docs/plans/active/CV-SETTINGS-CONTEXT.md "W1 → W2/W3 handoff"): `builtIn === true` requires
  * `groupId` absent/null, `builtIn === false` requires it present — a built-in profile has no owning
- * org, a forked/custom one always does. `eventRule` is present on every read but never sent back on
+ * org, a forked/custom one always does. `eventRule` is present whenever set, but never sent back on
  * an update (see `CvProfileRequest`).
  *
- * `sources` (added wave W3.6, docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7) was missing from this
- * mirror entirely until this wave, even though the Java `CvProfileResponse` DTO it mirrors has
- * carried it since W2.8 — a real, previously-undocumented gap between this file and the wire it
- * claims to mirror 1:1, not an intentional omission (the plan's own W3 row said only that `sources`
- * "exist on profile create/update only," true of the Java side, but did not say the TS mirror never
- * got the field at all). **Always present** — see {@link CvProfileSources}'s own doc comment for why
- * every read of a `CvProfile` (`GET`, list, `effective`, create, update) carries a real object here,
- * `{}` when there is nothing to report.
+ * **Wave W7 — a profile is a patch** (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7/§8, decision
+ * E22): every knob below except identity/bookkeeping fields is now individually **optional** —
+ * absent means "unset, inherit from the tier below" (organization → category → asset → session), a
+ * genuinely per-knob fold rather than the old wholesale-per-tier one (`dto.CvProfileResponse`'s own
+ * javadoc has the full before/after). `intent` is new: the operator's persisted "what am I looking
+ * for" pick, resolved into `model`/`labelFilter`/etc at FOLD time now, not at save time — see
+ * {@link CvProfileRequest}'s own doc comment for why that moved. `sources` is now typed
+ * {@link CvProfileFieldSources} (four knobs, computed from this profile's own fields on every read)
+ * rather than the old, save-response-only {@link CvProfileSources} — see that type's own doc comment
+ * for why the two are separate types, not one widened in place.
  */
 export interface CvProfile {
   readonly id: string;
@@ -516,17 +529,18 @@ export interface CvProfile {
   readonly description: string;
   readonly builtIn: boolean;
   readonly groupId?: string;
-  readonly model: string;
-  readonly confidenceThreshold: number;
-  readonly inferenceFps: number;
-  readonly labelFilter: readonly string[];
-  readonly labelDenyFilter: readonly string[];
-  readonly detectionEnabled: boolean;
-  readonly tracking: CvProfileTracking;
-  readonly eventRule: CvProfileEventRule;
+  readonly model?: string;
+  readonly confidenceThreshold?: number;
+  readonly inferenceFps?: number;
+  readonly labelFilter?: readonly string[];
+  readonly labelDenyFilter?: readonly string[];
+  readonly detectionEnabled?: boolean;
+  readonly tracking?: CvProfileTracking;
+  readonly eventRule?: CvProfileEventRule;
+  readonly intent?: CvProfileIntent;
   readonly createdAt: string;
   readonly updatedAt: string;
-  readonly sources: CvProfileSources;
+  readonly sources: CvProfileFieldSources;
 }
 
 /** Mirrors `GET /api/cv/profiles`'s `200` body — the wrapped-list convention every list endpoint in
@@ -543,22 +557,33 @@ export interface CvProfilesResponse {
  * only changes by forking a new profile). `groupId` is never sent — POST always creates a
  * non-built-in profile for the caller's own org, and PUT never moves a profile between orgs.
  *
- * `intent` (added wave W3.6) mirrors `dto.CvProfileRequest#intent` — the same absent-means-"skip
- * intent resolution entirely" convention `UpdateStreamConfigRequest#intent` already established on
- * the sibling stream-config PATCH (wave W3.0): omitted (not `null`) leaves `model`/`labelFilter`
- * exactly as sent; a non-absent value asks the platform's `IntentPolicyResolver` to seed a blank
- * `model`/empty `labelFilter`, never overriding an explicit, non-blank one.
+ * **Wave W7 — a request is a patch too** (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7/§8,
+ * decision E22): every knob except `name`/`description` is now individually optional, mirroring
+ * `dto.CvProfileRequest`/`CvProfileSpec` field-for-field — absent (never an explicit blank/empty
+ * sentinel) leaves that knob unset on the created/updated profile, the same "inherit from below"
+ * meaning `CvProfile`'s own knobs carry.
+ *
+ * `intent` (added wave W3.6, corrected wave W7) mirrors `dto.CvProfileRequest#intent` — the same
+ * absent-means-"skip intent resolution entirely" convention `UpdateStreamConfigRequest#intent`
+ * already established on the sibling stream-config PATCH (wave W3.0), but the server no longer
+ * resolves it into `model`/`labelFilter` at save time: it is persisted with the profile and resolved
+ * later, at FOLD time, by `CvProfileResolver` (wave W7.1). **Corrected from the pre-W7 shape**, which
+ * did resolve `intent` into `model`/`labelFilter` here (a blank `model`/empty `labelFilter` asked the
+ * platform's `IntentPolicyResolver` to seed it, never overriding an explicit, non-blank one) and
+ * reported which fields it had seeded via a since-deleted server-side `fieldSources()` — see
+ * `dto.CvProfileResponse.FieldSources`'s own javadoc (Java) for the replacement: "was this knob
+ * seeded from intent" is now answerable by reading the saved profile alone, on every read.
  */
 export interface CvProfileRequest {
   readonly name: string;
   readonly description: string;
-  readonly model: string;
-  readonly confidenceThreshold: number;
-  readonly inferenceFps: number;
-  readonly labelFilter: readonly string[];
-  readonly labelDenyFilter: readonly string[];
-  readonly detectionEnabled: boolean;
-  readonly tracking: CvProfileTracking;
+  readonly model?: string;
+  readonly confidenceThreshold?: number;
+  readonly inferenceFps?: number;
+  readonly labelFilter?: readonly string[];
+  readonly labelDenyFilter?: readonly string[];
+  readonly detectionEnabled?: boolean;
+  readonly tracking?: CvProfileTracking;
   readonly intent?: CvProfileIntent;
 }
 
@@ -582,13 +607,27 @@ export interface CvProfileBindingRequest {
   readonly profileId?: string;
 }
 
-/** Mirrors `GET /api/cv/profiles/effective?assetId=…`'s `200` body — the profile that would actually
+/**
+ * Mirrors `GET /api/cv/profiles/effective?assetId=…`'s `200` body — the profile that would actually
  * apply to this asset's next stream start, plus which binding produced it (or `'PLATFORM'` when
- * nothing at all is bound, §3.1's "behavior-preserving with zero bindings" default). */
+ * nothing at all is bound, §3.1's "behavior-preserving with zero bindings" default).
+ *
+ * **Wave W7 — per-knob provenance on every read** (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+ * §4.7/§8, decision E22): `sources`/`intent` are new. `sources` reports, for every one of the fold's
+ * eight knobs, which tier (or `'INTENT'`) actually supplied it — not only `model`/`labelFilter`, and
+ * not only on a create/update response like the old, save-response-only {@link CvProfileSources}
+ * did; this is what lets a Tuning-modal reload keep showing an honest "resolved from…" line
+ * without depending on a still-live session PATCH. `intent` is the matched tier's own persisted
+ * pick, or absent when that tier set none. `profile.tracking`/`profile.eventRule` here always come
+ * from the fold's own resolved configuration (`dto.CvProfileResponse#fromEffective`'s own javadoc) —
+ * every knob present, never partial, even though `CvProfile`'s own type now allows it to be.
+ */
 export interface EffectiveCvProfile {
   readonly assetId: string;
   readonly profile: CvProfile;
   readonly source: BindingScope | 'PLATFORM';
+  readonly sources: CvKnobSources;
+  readonly intent?: CvProfileIntent;
 }
 
 /** One row of `GET /api/cv/coverage`'s `200` body — a per-asset resolved-profile summary
@@ -4543,4 +4582,55 @@ export interface CvTrace {
   readonly gate: readonly GateDecision[];
   readonly frame: readonly FrameLedger[];
   readonly world: readonly WorldObject[];
+}
+
+// CV-ORCHESTRATION W7 — profile as patch (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7/§8,
+// decision E22) -----------------------------------------------------------------------------------
+// Genuinely new provenance types the widened `CvProfile`/`CvProfileRequest`/`EffectiveCvProfile`
+// above (edited in place, per this wave's own "edit profile types in place, append new types here"
+// file-scope convention) reference. Kept here rather than inline so a diff against the pre-W7 file
+// shows exactly what is new.
+
+/**
+ * Mirrors `dto.CvProfileResponse.FieldSources` — per-knob provenance for the four knobs
+ * `IntentPolicyResolver` can seed (`model`/`confidenceThreshold`/`inferenceFps`/`labelFilter`),
+ * computed straight from one persisted `CvProfile`'s own fields on **every** read (`GET`, list,
+ * `effective`, create, update alike) — not only a save-time response, unlike the type it replaces as
+ * `CvProfile#sources` ({@link CvProfileSources}, kept only for the stream-config hot path — see that
+ * interface's own doc comment). `undefined` means "no provenance to report for this knob" (either
+ * the knob is set directly, or it is unset and the profile carries no `intent` to have seeded it
+ * from); `'INTENT'` is the only other possible value for any field. Always present as a real object,
+ * `{}` on the wire when there is nothing to report — the same `@JsonInclude(NON_NULL)` mechanism
+ * {@link CvProfileSources}'s own doc comment explains in full.
+ */
+export interface CvProfileFieldSources {
+  readonly model?: 'INTENT';
+  readonly confidenceThreshold?: 'INTENT';
+  readonly inferenceFps?: 'INTENT';
+  readonly labelFilter?: 'INTENT';
+}
+
+/** Which tier of the organization → category → asset → session fold (or `'INTENT'`, fold-time intent
+ * resolution) supplied one knob — the value type every {@link CvKnobSources} field carries. */
+export type CvKnobSourceTier = BindingScope | 'PLATFORM' | 'INTENT';
+
+/**
+ * Mirrors `dto.CvKnobSourcesResponse` — the wire view of `application.profile.KnobSources`: which
+ * tier (or `'INTENT'`) actually supplied each of `CvProfile`'s eight patchable knobs, across the
+ * WHOLE fold (organization → category → asset), nested in {@link EffectiveCvProfile}. Unlike
+ * {@link CvProfileFieldSources} (four knobs, one persisted profile's own fields in isolation), this
+ * reports the fold's real per-knob provenance across every bound tier — "this model came from your
+ * asset profile, but that confidence threshold is still the organization's." Every field is always
+ * present (never `undefined`) — `'PLATFORM'` is the fold's own floor before any bound tier has had a
+ * say, never an absent value.
+ */
+export interface CvKnobSources {
+  readonly model: CvKnobSourceTier;
+  readonly confidenceThreshold: CvKnobSourceTier;
+  readonly inferenceFps: CvKnobSourceTier;
+  readonly labelFilter: CvKnobSourceTier;
+  readonly labelDenyFilter: CvKnobSourceTier;
+  readonly detectionEnabled: CvKnobSourceTier;
+  readonly tracking: CvKnobSourceTier;
+  readonly eventRule: CvKnobSourceTier;
 }
