@@ -1640,3 +1640,23 @@ file in this module's own scope this step); full reactor `BUILD SUCCESS`. Wave W
 resolver's internal fold algorithm changed, inside `contexts/vision-perception`). This W2.7 pass is
 documentation-only — no source change; the count above is carried forward from W2.5's own measurement
 per this wave's "skip the tests" instruction, not re-run for this docs-only step.
+
+**CV-ORCHESTRATION wave W7.2 (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7, decision E22 — "a
+profile is a patch") touched exactly one test in this module.** `CvProfileWiringConfiguration`'s own
+beans are unaffected (same constructor signatures — only `contexts/vision-perception`'s domain shape
+and `storage/persistence`'s entity/migration changed underneath them). `PersistenceWiringTest#partialCvProfileWithOnlyIntentAndInferenceFpsRoundTripsThroughTheWiredJpaRepository`
+(added in an earlier W7.2 step to spot-check this module's own production wiring, not just
+`storage/persistence`'s directly-constructed `EntityManagerFactory`) started as a genuine flake: it
+seeded `createdAt`/`updatedAt` with a raw `Instant.now()` (nanosecond precision) and compared it
+byte-for-byte against the round-tripped value — `storage/persistence/MODULE.md`'s own Gotchas entry
+already documents that a Postgres `TIMESTAMPTZ` round-trip is lossy past millisecond precision. Fixed
+by truncating the seeded `Instant` to `ChronoUnit.MILLIS` before constructing the profile, the same
+precedent `PostgresDockerIntegrationTest` (`storage/persistence`) already established — not a new
+pattern invented here.
+
+`./mvnw -B -pl storage/persistence,station/vision-app -am test -DskipWeb` — this module: **357**
+tests, `BUILD SUCCESS`, Docker ran (Testcontainers `postgres:16`, Flyway migrated through `V36`). Full
+two-module command green; `station/vision-api`'s own W7.3 DTO/controller rework (a separate commit,
+`station/vision-api/MODULE.md`'s own entry) is what this module's `vision-api` dependency actually
+compiles against — see that entry for why W7.3 was written before this wave's own build could be
+re-verified (Maven's reactor `-am` dependency-graph ordering, not scope creep).

@@ -34,6 +34,7 @@ import com.drones.vision.adapter.persistence.entity.TrainingSampleEntity;
 import com.drones.vision.adapter.persistence.entity.UserEntity;
 import com.drones.vision.adapter.persistence.entity.ControlProfileEntity;
 import com.drones.vision.adapter.persistence.entity.VehicleProfileEntity;
+import com.drones.vision.perception.domain.model.TrackingKnobPatch;
 
 import com.zaxxer.hikari.HikariConfig;
 import com.zaxxer.hikari.HikariDataSource;
@@ -43,6 +44,10 @@ import javax.sql.DataSource;
 
 import org.flywaydb.core.Flyway;
 import org.hibernate.cfg.Configuration;
+import org.hibernate.type.format.jackson.Jackson3JsonFormatMapper;
+
+import tools.jackson.databind.cfg.MapperBuilder;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * Boots the persistence unit backing every {@code Jpa*Repository} in this module: migrates the
@@ -245,6 +250,20 @@ public final class PersistenceUnit {
         configuration.setProperty("hibernate.dialect", "org.hibernate.dialect.PostgreSQLDialect");
         // Flyway owns the schema; Hibernate only ever validates its entity mapping against it.
         configuration.setProperty("hibernate.hbm2ddl.auto", "validate");
+        // Wave W7.2 (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7, decision E22) narrowed the
+        // `tracking` jsonb column's Java type from the 10-field TrackingConfig to the 5-field
+        // TrackingKnobPatch without reshaping any stored row, on the assumption that Jackson would
+        // silently ignore the five extra JSON keys every pre-existing row still carries — that
+        // assumption was wrong (an unconfigured Jackson JsonMapper FAILS on an unrecognized
+        // property by default; see TrackingKnobPatchJsonMixin's own javadoc for how this was
+        // actually found). This replaces Hibernate's own auto-detected, zero-arg Jackson3JsonFormatMapper
+        // with an otherwise-identical one (same JacksonModule auto-discovery) carrying one extra
+        // mix-in scoped to exactly the type whose shape changed.
+        configuration.getProperties().put("hibernate.type.json_format_mapper", new Jackson3JsonFormatMapper(
+                JsonMapper.builderWithJackson2Defaults()
+                        .addModules(MapperBuilder.findModules(Jackson3JsonFormatMapper.class.getClassLoader()))
+                        .addMixIn(TrackingKnobPatch.class, TrackingKnobPatchJsonMixin.class)
+                        .build()));
         configuration.addAnnotatedClass(CategoryEntity.class);
         configuration.addAnnotatedClass(DeviceEntity.class);
         configuration.addAnnotatedClass(AssetEntity.class);
