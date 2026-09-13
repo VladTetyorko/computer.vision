@@ -2077,3 +2077,122 @@ assumed while W3.3 was still in flight).
   (one output, one facade method, one patch-builder, one template line, all doc-comment-heavy) and lives
   entirely inside the already-lazy `cockpit` chunk, never the eager initial bundle.
 - **Commit**: `feat(cv-orchestration W3.5): tap to follow — box or point (D8) + click-path acceptance spec`.
+
+## Status — CV-ORCHESTRATION wave W7 (web, steps W7.4/W7.5): a profile is a patch (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7/§8, decision E22, §6 W7 row) — 2026-09-13
+
+The web half of wave W7, on `feat/cv-orchestration-w7-profile-patch`, following four Java-side steps
+(W7.0 perception domain, W7.1 resolver, W7.2 persistence, W7.3 vision-api DTOs, commits `7d3926b4`/
+`7886789b`/`6781f533`/`89776c1c`, all documented in their own modules' `MODULE.md`/this plan's context
+log, not repeated here). Makes `CvProfile` a genuinely per-knob inherit-capable patch instead of a
+wholesale-per-tier record, `intent` persisted with the profile and resolved at fold time rather than at
+save time, and per-knob `sources` (real provenance) reported on every read — not only the response to a
+save, the pre-W7 contract's own limitation (W2's "As built" note had already flagged this gap and
+deferred the schema decision to this wave).
+
+**W7.4 — `core/api/models.ts` + `/vision/profiles`' editor (commit `1481b57d`):**
+
+- `models.ts` widened one for one against W7.0–W7.3's Java DTOs: `CvProfile`/`CvProfileRequest`/
+  `CvProfileTracking` knobs are all now optional (absent = inherit from the tier below). The original
+  2-field `CvProfileSources`/`Sources` (`model`/`labelFilter`, both `'INTENT'`-only) is kept
+  **byte-identical** — its doc comment now says explicitly it serves only `PatchStreamConfigResponse`
+  (the stream-config hot-knob PATCH response), not `CvProfile#sources` any more. `CvProfile#sources`'s
+  own type is the new `CvProfileFieldSources` (4 fields: model/confidenceThreshold/inferenceFps/
+  labelFilter). Two more new types — `CvKnobSources` (8 fields, one `CvKnobSourceTier` — `ASSET`/
+  `CATEGORY`/`ORGANIZATION`/`PLATFORM`/`INTENT` — per knob) and `EffectiveCvProfile#sources`/`#intent`
+  — carry the fold's own real per-knob provenance on `GET .../effective-profile`. Every new type is
+  appended under the required `// CV-ORCHESTRATION W7 — profile as patch` banner, after the W5b-owned
+  `CvTrace`/`FrameLedger`/`GateDecision`/`WorldObject`/`ObjectEvidence`/`LedgerEntry` section — confirmed
+  untouched (W5b lives entirely on the sibling `feat/cv-orchestration-w5b-trace-replay` branch, never
+  merged into this one).
+- `features/vision-profiles/` (`vision-profiles-logic.ts`/`.ts`/`.html`/`-facade.ts`): `ProfileDraft`
+  is now genuinely per-knob inherit-capable — see `ProfileDraft`'s own doc comment for the full
+  reasoning, summarized here: **blank text** means inherit for `model` (no legitimate "explicit blank"
+  value of its own); a **separate `*Inherit` boolean** for `labelFilterText`/`labelDenyFilterText` (an
+  explicit empty `[]`, "keep/deny nothing", is itself a real value distinct from "inherit" — blank text
+  alone cannot carry both meanings, CLAUDE.md rule 10); a **dedicated sentinel value on the `<select>`
+  itself** for `trackingMode`/`trackingEngineId`/`detectionEnabled` — each already has its own real,
+  explicit "off"/"default" value distinct from unset (`'OFF'`, `''`, `false`), so the option list grows
+  one more entry rather than pairing the control with a checkbox. **Tracking inherits per sub-knob, not
+  as one whole-group toggle** — a deliberate choice: `TrackingKnobPatch` (the domain patch this maps
+  onto) is itself nullable field-by-field, so an operator overriding only tracking mode can leave
+  capability level/cadence inherited rather than being forced to either restate every other knob's
+  current effective value or lose a partial override entirely.
+  `emptyProfileDraft()` no longer takes a `defaultModel` parameter — every knob starts unset (a
+  no-op patch that falls all the way through to the platform default is decision E22's own documented
+  default, not a leftover pre-seeded concrete value). `validateDraft` no longer requires a model at all,
+  with or without an intent chosen, and only range-checks a knob that is actually set — an unset knob
+  has nothing of this draft's own to be wrong, its value comes from whichever tier the fold resolves.
+  `draftToRequest` omits every unset knob from the wire body (`undefined`, an absent JSON key, never a
+  fabricated concrete value); `tracking` itself is omitted only when every one of its five sub-knobs is
+  unset. `saveOutcomeMessage`'s toast copy corrected **"resolved from" → "left to"** your intent — under
+  the new fold-time-resolution contract, saving no longer computes a concrete value for an intent-seeded
+  knob, it only flags it `INTENT` for the fold to seed later; "resolved from" misstated that as a
+  completed past act.
+  Template: Model/Confidence/Rate inputs bind `[ngModel]="draft.x ?? null"`/`(ngModelChange)="…?? undefined"`
+  with `placeholder="Inherit"`; Detection becomes a 3-way `<select>` (Inherit/On/Off) replacing a plain
+  checkbox; the label filter/deny-list `<textarea>`s each gain a sibling inherit checkbox — the wrapper
+  element for each had to change from `<label>` to `<div>` in the process, since a `<label>` may not
+  nest another `<label>` and each now contains both a `<textarea>` and a checkbox `<label>`; Tracking's
+  mode/engine `<select>`s each gain an explicit "Inherit" option.
+- **A downstream ripple, found and fixed, not part of this wave's own file list**:
+  `features/fly/cv-control-panel-logic.ts#resolvedConfigFromProfile`/new
+  `resolvedTrackingFromProfile` broke under the widened `CvProfile` type — `EffectiveCvProfile#profile`'s
+  knobs are contractually always concrete once `CvProfileResolver`'s fold bottoms out at the platform
+  tier's own defaults (wave W7.1), even though `CvProfile`'s own type now allows `undefined` on every
+  field. Fixed with explicit non-null assertions and a doc comment naming that fold guarantee, rather
+  than silently swallowing the compile error — mirrors the identical compromise already made Java-side
+  (`CvProfileResponse` reused verbatim for both a raw, possibly-partial profile read and
+  `fromEffective()`'s always-concrete result, rather than minting a second, statically-non-nullable
+  DTO). `cv-control-panel-logic.spec.ts`'s own `EffectiveCvProfile` test fixtures needed a `sources`
+  field added too (newly required, wave W7) — a small `knobSources()` helper added alongside the
+  existing `cvProfile()` one.
+- **Verify chain**: `npm run test:ci` — **208 files / 4043 tests, all green**, including new
+  coverage for `describeOptionalModel`/`describeOptionalNumber`/`describeDetectionCardState` and the
+  three tri-state select helper pairs. `npx tsc --noEmit -p tsconfig.app.json` / `-p
+  tsconfig.spec.json` — both 0 errors.
+
+**W7.5 — Tuning modal sources from the effective read (commit `d7a064c1`):**
+
+- `features/fly/cv-setup-modal-logic.ts#resolvedSourceLine` now takes the whole `EffectiveCvProfile`
+  (not a bare `EffectiveCvProfile['source']`) and reads real per-knob provenance straight off
+  `CvKnobSources` — the exact tier (`ASSET`/`CATEGORY`/`ORGANIZATION`/`PLATFORM`/`INTENT`) that supplied
+  *that specific knob's* resolved value, on **every** `GET .../effective-profile` read, not only the
+  response to a PATCH that just applied an intent. Replaces the pre-W7 two-tier approximation (one
+  coarse whole-profile tier reused as a fallback for every knob alike, unable to distinguish "this knob
+  came from the asset tier" from "this knob came from the category tier the asset profile itself
+  inherited"). Precedence, unchanged in shape: `lastConfigSources` (this session's own most recent
+  hot-knob PATCH, a live fact about the *running stream*) still wins when present, then the
+  effective-profile read's own per-knob fact, then nothing. An intent line now names the specific intent
+  ("Resolved from your Vehicles intent") whenever `EffectiveCvProfile#intent` is known — that data
+  simply did not exist on this wire shape before W7, so the pre-W7 generic "your intent pick" phrasing
+  is now only the fallback for the (should not normally happen once `intent` is itself persisted) case
+  where a knob is flagged `INTENT` with no intent value attached. `confidenceThreshold` is no longer a
+  documented exception either — W7.1's resolver now seeds it from an intent at fold time exactly like
+  `model`/`labelFilter`, so its own source line can report `INTENT` in practice now, unlike before.
+- **A real, separate wiring gap found and closed, not scope creep**: `CockpitFacade#lastConfigSources`
+  has existed since wave W3.3, but `<vision-cv-setup-modal>` in `cockpit.html` never actually bound it
+  as the `[lastConfigSources]` input — `resolvedSourceLine`'s own first-priority branch was permanently
+  dead code in production despite the facade carrying the exact data it needed. One line added:
+  `[lastConfigSources]="facade.lastConfigSources()"`.
+- **No dedicated `cockpit-facade.spec.ts` added.** `features/fly/click-to-follow.spec.ts`'s own doc
+  comment already establishes this codebase's precedent for `CockpitFacade` specifically: ~20 injected
+  collaborators, no existing harness anywhere in this tree instantiates one, and building one just to
+  prove a source line survives a reload would dwarf the thing being measured — test the real production
+  functions its methods delegate to instead. `cv-setup-modal-logic.spec.ts` gained a "survives a reload"
+  describe block that is exactly that proof: with **no** `lastConfigSources` fact at all (the state after
+  an asset switch or a fresh page load, before any hot-knob PATCH this session resets it — `cockpit-
+  facade.ts#selectAsset` resets `lastConfigSourcesSignal` to `undefined` on every switch), a fresh
+  `effective-profile` GET alone still produces the correct source line for every Tuning knob — the
+  pre-W7 contract could only get this right immediately after a save.
+- **Verify chain**: `npm run test:ci` — **208 files / 4048 tests, all green** (+5 over W7.4's own
+  4043-test total: the rewritten `resolvedSourceLine` spec's expanded coverage). `npx tsc --noEmit -p
+  tsconfig.app.json` / `-p tsconfig.spec.json` — both 0 errors.
+
+**Left undone, named honestly**: neither W7.4 nor W7.5 added a `modelSourceLine` computed signal —
+`TuningKnob` has carried `'model'` since wave W3.4 but no template in this codebase has ever rendered a
+resolved-source line for it (only Confidence and Classes do); adding one was judged out of this wave's
+own brief (fixing sourcing correctness for the knobs already wired, not adding a new rendered line) and
+is left as a small, disclosed gap for whichever wave next touches the Tuning modal's Model section.
+
+- **Commit**: `feat(cv-orchestration W7.4): per-knob inherit editor + models.ts mirror`,
+  `feat(cv-orchestration W7.5): Tuning modal sources from the effective read`.

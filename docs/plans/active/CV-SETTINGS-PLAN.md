@@ -148,6 +148,26 @@ snapshot of all profiles + bindings, rebuilt write-through on every mutation and
 in this tree and one node is the deployed shape. Cross-node invalidation is named as deferred to
 DOMAIN-SEPARATION W2's broker, not faked.
 
+> **2026-09-13 — corrected by CV-ORCHESTRATION-PLAN.md wave W7 (decision E22, "a profile is a
+> patch"):** the fold across Organization → Category → Asset above was, until this wave,
+> **wholesale-per-tier** — a `CvProfile` carried no per-knob inherit value, so a tier either supplied
+> every knob or none of them, and `sources`/`intent` could not survive a reload (W2's own "As built"
+> note recorded this as a known gap, deferred to this schema decision). W7 makes every knob on
+> `CvProfile`/`CvProfileRequest`/`CvProfileTracking` independently optional — `null`/absent means
+> "leave this knob unset, inherit from the tier below" — so the fold above is now genuinely per-knob:
+> an asset-tier profile that only overrides `confidenceThreshold` still inherits `model`/`labelFilter`/
+> tracking from whichever lower tier last set them, rather than being forced to restate the whole
+> record. `intent` (§4.7) is now persisted on the profile itself and resolved by `CvProfileResolver`
+> **at fold time**, not at request/save time — `IntentPolicyResolver` seeds `model`/`labelFilter`/
+> `confidenceThreshold`/`inferenceFps` for whichever knobs the matched tier still leaves unset. Every
+> read (not only the response to a save) now reports real per-knob provenance —
+> `KnobSources`/`CvKnobSourcesResponse`, one of `ASSET`/`CATEGORY`/`ORGANIZATION`/`PLATFORM`/`INTENT`
+> per knob — on `EffectiveCvProfileResponse#sources`, replacing the old save-time-only, 2-field
+> `CvProfileResponse.Sources` for that purpose (kept, unchanged, only for the stream-config hot-knob
+> PATCH response, which has its own separate, narrower provenance need). See
+> `docs/plans/active/CV-ORCHESTRATION-CONTEXT.md`'s 2026-09-13 W7 status-log entry for the full
+> wave breakdown (migration, resolver, DTOs, web editor, Tuning modal).
+
 ### 3.2 The model registry
 
 `RegisteredModel(ModelRef, boolean active)` becomes a **joined** read model: worker truth ∪ platform
