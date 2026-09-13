@@ -275,7 +275,10 @@ public class StreamController {
      *
      * @param streamId the running stream to update, as a canonical UUID string
      * @param request  the knobs to change; the whole body may be absent (a no-op patch)
-     * @return the updated stream's id, whether the model was re-armed, and whether tracking changed
+     * @return the updated stream's id, whether the model was re-armed, whether tracking changed, and
+     *         (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7, wave W3.0) per-knob provenance for
+     *         any {@code intent} the body carried, straight from {@link
+     *         UpdateStreamConfigRequest#fieldSources()}
      * @throws java.util.NoSuchElementException if {@code streamId} is unknown or not running on this
      *                                            instance (→404), or is running but the caller's
      *                                            scope may not reach its asset
@@ -298,7 +301,7 @@ public class StreamController {
         seatAccess.requireCameraSeat(id);
         UpdateOutcome outcome = streamService.updateConfig(id, patch);
         return new UpdateStreamConfigResponse(id.value().toString(), outcome.modelReArmed(),
-                outcome.trackingChanged());
+                outcome.trackingChanged(), body.fieldSources());
     }
 
     /**

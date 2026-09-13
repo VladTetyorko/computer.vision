@@ -47,6 +47,7 @@ import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.perception.domain.model.EvidenceSource;
 import com.drones.vision.perception.domain.model.FollowState;
+import com.drones.vision.perception.domain.model.Intent;
 import com.drones.vision.perception.domain.model.FollowStatus;
 import com.drones.vision.perception.domain.model.FrameLedger;
 import com.drones.vision.perception.domain.model.LedgerEntry;
@@ -986,6 +987,151 @@ class StreamControllerTest {
         ArgumentCaptor<PipelineConfigPatch> captor = ArgumentCaptor.forClass(PipelineConfigPatch.class);
         verify(streamService).updateConfig(eq(streamId), captor.capture());
         assertEquals(PipelineConfigPatch.NOTHING, captor.getValue());
+    }
+
+    // ---- docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7, wave W3.0: intent on the hot PATCH path ----
+
+    @Test
+    void updateConfigResolvesIntentPeopleToItsModelAndLabelFilterWhenNeitherIsSentExplicitly() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.updateConfig(eq(streamId), any())).thenReturn(new UpdateOutcome(false));
+
+        String body = """
+                {"intent":"PEOPLE"}
+                """;
+
+        mockMvc.perform(patch("/api/streams/{streamId}/config", streamId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<PipelineConfigPatch> captor = ArgumentCaptor.forClass(PipelineConfigPatch.class);
+        verify(streamService).updateConfig(eq(streamId), captor.capture());
+        PipelineConfigPatch patch = captor.getValue();
+        assertEquals("yolo26n.pt", patch.modelId());
+        assertEquals(Set.of("person"), patch.labelFilter());
+    }
+
+    @Test
+    void updateConfigResolvesIntentVehiclesToItsModelAndLabelFilterWhenNeitherIsSentExplicitly() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.updateConfig(eq(streamId), any())).thenReturn(new UpdateOutcome(false));
+
+        String body = """
+                {"intent":"VEHICLES"}
+                """;
+
+        mockMvc.perform(patch("/api/streams/{streamId}/config", streamId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<PipelineConfigPatch> captor = ArgumentCaptor.forClass(PipelineConfigPatch.class);
+        verify(streamService).updateConfig(eq(streamId), captor.capture());
+        PipelineConfigPatch patch = captor.getValue();
+        assertEquals("yolo26n.pt", patch.modelId());
+        assertEquals(Set.of("car", "truck", "bus", "motorcycle"), patch.labelFilter());
+    }
+
+    @Test
+    void updateConfigResolvesIntentEverythingToItsModelAndAnEmptyLabelFilterWhenNeitherIsSentExplicitly()
+            throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.updateConfig(eq(streamId), any())).thenReturn(new UpdateOutcome(false));
+
+        String body = """
+                {"intent":"EVERYTHING"}
+                """;
+
+        mockMvc.perform(patch("/api/streams/{streamId}/config", streamId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<PipelineConfigPatch> captor = ArgumentCaptor.forClass(PipelineConfigPatch.class);
+        verify(streamService).updateConfig(eq(streamId), captor.capture());
+        PipelineConfigPatch patch = captor.getValue();
+        assertEquals("yoloe-26s-seg-pf.pt", patch.modelId());
+        assertEquals(Set.of(), patch.labelFilter());
+    }
+
+    @Test
+    void updateConfigResolvesIntentCustomToItsModelButKeepsTheCallersOwnExplicitLabelFilter() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.updateConfig(eq(streamId), any())).thenReturn(new UpdateOutcome(false));
+
+        // Intent.CUSTOM has no fixed class set of its own -- IntentPolicyResolver#resolve throws for
+        // CUSTOM with no classes, so this body must send its own labelFilter. That labelFilter is
+        // then explicit under this DTO's own null-means-unchanged contract, so it wins over the
+        // intent's seed for that field, exactly as a non-CUSTOM intent's explicit labelFilter would.
+        String body = """
+                {"intent":"CUSTOM","labelFilter":["boat"]}
+                """;
+
+        mockMvc.perform(patch("/api/streams/{streamId}/config", streamId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<PipelineConfigPatch> captor = ArgumentCaptor.forClass(PipelineConfigPatch.class);
+        verify(streamService).updateConfig(eq(streamId), captor.capture());
+        PipelineConfigPatch patch = captor.getValue();
+        assertEquals("yoloe-26s-seg-pf.pt", patch.modelId());
+        assertEquals(Set.of("boat"), patch.labelFilter());
+    }
+
+    @Test
+    void updateConfigExplicitModelAndLabelFilterWinOverIntentsOwnResolvedValues() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.updateConfig(eq(streamId), any())).thenReturn(new UpdateOutcome(false));
+
+        String body = """
+                {"intent":"PEOPLE","model":"custom-model.pt","labelFilter":["dog"]}
+                """;
+
+        mockMvc.perform(patch("/api/streams/{streamId}/config", streamId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk());
+
+        ArgumentCaptor<PipelineConfigPatch> captor = ArgumentCaptor.forClass(PipelineConfigPatch.class);
+        verify(streamService).updateConfig(eq(streamId), captor.capture());
+        PipelineConfigPatch patch = captor.getValue();
+        assertEquals("custom-model.pt", patch.modelId());
+        assertEquals(Set.of("dog"), patch.labelFilter());
+    }
+
+    @Test
+    void updateConfigReturnsIntentSourcesInTheResponseWhenIntentIsSent() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.updateConfig(eq(streamId), any())).thenReturn(new UpdateOutcome(false));
+
+        String body = """
+                {"intent":"VEHICLES"}
+                """;
+
+        mockMvc.perform(patch("/api/streams/{streamId}/config", streamId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sources.model").value("INTENT"))
+                .andExpect(jsonPath("$.sources.labelFilter").value("INTENT"));
+    }
+
+    @Test
+    void updateConfigReturnsAnEmptySourcesObjectWhenNoIntentWasSent() throws Exception {
+        StreamId streamId = StreamId.random();
+        when(streamService.updateConfig(eq(streamId), any())).thenReturn(new UpdateOutcome(false));
+
+        String body = """
+                {"confidenceThreshold":0.5}
+                """;
+
+        // CvProfileResponse.Sources carries its own class-level @JsonInclude(NON_NULL), which omits
+        // a null model/labelFilter *within* the sources object -- but the sources object itself is
+        // never null here (Sources.none() is an explicit, non-null value, CLAUDE.md rule 10), and
+        // UpdateStreamConfigResponse has no @JsonInclude of its own, so the observed wire shape is a
+        // present, empty "sources":{} rather than the key being absent altogether.
+        mockMvc.perform(patch("/api/streams/{streamId}/config", streamId.value())
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.sources").exists())
+                .andExpect(jsonPath("$.sources.model").doesNotExist())
+                .andExpect(jsonPath("$.sources.labelFilter").doesNotExist());
     }
 
     // ---- docs/plans/done/MVP3-PLAN.md C-a: GET /api/streams/{streamId}/snapshot ----
