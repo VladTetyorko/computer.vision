@@ -79,10 +79,11 @@ import com.drones.vision.perception.application.stream.StreamService;
  * </ul>
  *
  * <h2>Inference sampling</h2>
- * Frames are sampled against a <b>deadline</b> derived from {@link
+ * Delegated to {@link FrameSampler} (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.9/K3, wave
+ * W8.0): frames are sampled against a <b>deadline</b> derived from {@link
  * PipelineConfig#inferenceFps()}: the first frame arriving at or after the
  * next deadline is sampled, and the schedule then advances by one interval
- * ({@link #sampleDue}). Because every deadline is served by exactly one
+ * ({@link FrameSampler#sampleDue}). Because every deadline is served by exactly one
  * frame, the achieved rate equals the requested rate for any source faster
  * than it — unlike the integer {@code sequence % everyNth} stride this
  * replaced, which could only approximate a target the source rate was not a
@@ -188,9 +189,6 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     static final long MAX_BACKOFF_NANOS = StreamPipelineSettings.defaults().detectionBackoffMaxNanos();
 
     private static final System.Logger LOG = System.getLogger(StreamPipeline.class.getName());
-
-    /** Unit conversion, not a tunable — a second in nanoseconds. */
-    private static final double NANOS_PER_SECOND = 1_000_000_000.0;
 
     private final StreamId streamId;
     private final Device device;
@@ -338,12 +336,22 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     private final PipelineTrace trace;
 
     /**
-     * Chooses the rate {@link #sampleIntervalNanos} schedules deadlines at
+     * Chooses the rate {@link FrameSampler} schedules deadlines at
      * (docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R2). Built here rather than injected for the same
      * reason {@link #world} is: it is this pipeline's own per-stream bookkeeping, not a
      * substitutable collaborator.
      */
     private final DetectionRateController rateController;
+
+    /**
+     * Frame-arrival cadence measurement and the deadline-based sample schedule
+     * (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.9/K3, wave W8.0 extraction) — see {@link
+     * FrameSampler}'s own javadoc for why a deadline schedule, not a frame-count stride, and for the
+     * "asks, not owns" relationship it keeps with {@link #rateController}. Built here rather than
+     * injected, for the same reason as {@link #world}/{@link #rateController}: this pipeline's own
+     * per-stream bookkeeping, not a substitutable collaborator.
+     */
+    private final FrameSampler sampler;
 
     /**
      * The clock {@link #pipelineLatency} measures durations with — deliberately <b>not</b> {@link
@@ -357,14 +365,9 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     /** @see StreamPipelineSettings#cameraHfovDegrees() — {@code 0} disables pose compensation. */
     private final double cameraHfovDegrees;
 
-    // Frame-cadence and detection-outage tuning (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3 config
+    // Detection-outage tuning (docs/plans/active/LAYERING-REFACTOR-PLAN.md &sect;1.3 config
     // extraction) -- read from the StreamPipelineSettings supplied to the constructor, defaulting
     // to StreamPipelineSettings#defaults() when the caller doesn't supply one explicitly.
-    private final int assumedSourceFps;
-    private final double measuredFpsEwmaAlpha;
-    private final int warmupFrames;
-    private final double minMeasuredFps;
-    private final double maxMeasuredFps;
     private final long detectionBackoffInitialNanos;
     private final long detectionBackoffMaxNanos;
 
@@ -384,24 +387,6 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     // being read for ego-motion compensation (see readTelemetry()/cameraAttitude()) -- cosmetic,
     // not a resilience concern like a detection failure is.
     private boolean telemetrySupplierFailureLogged = false;
-
-    // Frame-arrival cadence measurement state. Only ever touched from within
-    // onNext(), which Flow.Subscriber's contract serializes (signals are
-    // never delivered concurrently) -- volatile purely for cross-thread
-    // *visibility* between successive onNext calls, not for mutual exclusion.
-    private volatile long lastFrameArrivalNanos = -1L;
-    private volatile long framesObserved = 0L;
-    private volatile double measuredFps = -1.0;
-
-    // Deadline-based sampling state (docs/plans/done/CV-RATE-CONTROL-PLAN.md wave R1), replacing the
-    // `sequence % everyNth` stride this class used to sample by. Same threading note as the cadence
-    // fields above: written only from onNext, volatile purely for visibility between successive
-    // calls. `sampleScheduleArmed` distinguishes "no deadline yet" from a legitimate deadline
-    // value, which a sentinel nanotime could not do -- nanoTime's origin is arbitrary and may be
-    // negative.
-    private volatile boolean sampleScheduleArmed = false;
-    private volatile long nextSampleAtNanos;
-    private volatile long lastSampleAtNanos;
 
     // Detection-outage state. Unlike the frame-cadence fields above, this is
     // genuinely touched from multiple threads without serialization: onNext
@@ -451,11 +436,6 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         this.pullDetection = collaborators.pullDetection().orElse(null); // nullable: push-mode detection when absent (D5/D6)
         StreamPipelineSettings settings = collaborators.settings();
         this.cameraHfovDegrees = settings.cameraHfovDegrees();
-        this.assumedSourceFps = settings.assumedSourceFps();
-        this.measuredFpsEwmaAlpha = settings.measuredFpsEwmaAlpha();
-        this.warmupFrames = settings.warmupFrames();
-        this.minMeasuredFps = settings.minMeasuredFps();
-        this.maxMeasuredFps = settings.maxMeasuredFps();
         this.detectionBackoffInitialNanos = settings.detectionBackoffInitialNanos();
         this.detectionBackoffMaxNanos = settings.detectionBackoffMaxNanos();
         this.world = new WorldModel(settings.trackRetention(), WorldModel.DEFAULT_MEMORY_TTL, settings.renderTier(),
@@ -473,6 +453,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                 this.pullDetection == null ? DetectionRateWindow.Transport.PUSH : DetectionRateWindow.Transport.PULL);
         this.trace = new PipelineTrace(settings);
         this.rateController = new DetectionRateController(settings.adaptiveRate(), settings.cameraHfovDegrees());
+        this.sampler = new FrameSampler(settings, this.nanoTimeSource);
         this.backoffNanos = this.detectionBackoffInitialNanos;
         // Seeded from this.config/this.detectionDemand/this.detectionPolicyAlwaysOn, all already
         // assigned above -- construction itself must never look like a close, only a later, genuine
@@ -711,7 +692,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      * @return the frame count, never negative; a plain volatile read off the hot path
      */
     public long framesObserved() {
-        return framesObserved;
+        return sampler.framesObserved();
     }
 
     /**
@@ -724,8 +705,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      *         separate emptiness check)
      */
     public long nanosSinceLastFrame() {
-        long lastArrival = lastFrameArrivalNanos;
-        return lastArrival < 0L ? Long.MAX_VALUE : nanoTimeSource.getAsLong() - lastArrival;
+        return sampler.nanosSinceLastFrame();
     }
 
     /**
@@ -820,7 +800,9 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
      *         says how many were asked for and what became of them. Never {@code null}.
      */
     public DetectionRate detectionRate() {
-        return detectionRate.snapshot(sourceFps(), targetFps(), rateController.demandFps());
+        return detectionRate.snapshot(sampler.sourceFps(),
+                sampler.targetFps(rateController, effectiveInferenceFps(), config.maxInFlightInferences()),
+                rateController.demandFps());
     }
 
     /**
@@ -887,7 +869,7 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         if (closed.get()) {
             return;
         }
-        long now = recordArrival();
+        long now = sampler.recordArrival();
         try {
             latestFrame = frame;
             streamPublisherPort.publish(streamId, frame);
@@ -941,123 +923,11 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
-     * Folds this frame's arrival into the source frame-rate measurement and returns the clock
-     * reading it used. Cannot throw (deliberately kept outside the publish/detect try-catch below,
-     * which only handles collaborator failures).
-     *
-     * <p><b>This is the only read of {@link #nanoTimeSource} per frame, and the value is threaded
-     * onward rather than re-read.</b> That seam is a <i>cadence</i> clock: the tests' fake advances
-     * one frame interval on every read, so it encodes "the pipeline reads me once per frame". A
-     * second read anywhere in {@code onNext} would silently double every fake source's rate. The
-     * same trap already cost {@link #pipelineLatency} a separate clock — see {@link
-     * #latencyNanoSource}.
-     *
-     * @return the arrival timestamp of this frame, for {@link #maybeDetect}'s deadline
-     */
-    private long recordArrival() {
-        long now = nanoTimeSource.getAsLong();
-        framesObserved++;
-        if (lastFrameArrivalNanos >= 0) {
-            long deltaNanos = now - lastFrameArrivalNanos;
-            if (deltaNanos > 0) {
-                double instantaneousFps = 1_000_000_000.0 / deltaNanos;
-                double blended = measuredFps < 0
-                        ? instantaneousFps // seed directly from the first sample rather than blending toward an
-                                            // arbitrary starting value, so a constant-cadence source converges
-                                            // immediately instead of drifting in slowly over many EWMA updates
-                        : measuredFpsEwmaAlpha * instantaneousFps + (1 - measuredFpsEwmaAlpha) * measuredFps;
-                measuredFps = clamp(blended, minMeasuredFps, maxMeasuredFps);
-            }
-        }
-        lastFrameArrivalNanos = now;
-        return now;
-    }
-
-    /**
-     * @return the source frame rate to report and to bound the sample rate by: the measurement once
-     *         it is trusted ({@link StreamPipelineSettings#warmupFrames()} arrivals observed), the
-     *         configured assumption until then.
-     */
-    private double sourceFps() {
-        boolean trustMeasurement = framesObserved >= warmupFrames && measuredFps >= 0;
-        return trustMeasurement ? measuredFps : assumedSourceFps;
-    }
-
-    /**
-     * Decides whether this frame serves a sample deadline, advancing the schedule when it does.
-     *
-     * <h2>Why a deadline and not {@code sequence % everyNth}</h2>
-     * The stride this replaces was {@code max(1, round(sourceFps / targetFps))} — an <b>integer</b>,
-     * so a 24 fps source asked for 10 fps could only ever be sampled at 12 or 8, never 10, and the
-     * stride was recomputed from a drifting EWMA on every frame, which moved the phase of {@code
-     * sequence % N} as well as its period. A deadline has neither problem: every deadline is served
-     * by exactly one frame, so the achieved rate equals the target for any source faster than it
-     * (docs/plans/done/CV-RATE-CONTROL-PLAN.md &sect;1, losses L1/L2).
-     *
-     * <h2>The late clamp</h2>
-     * When a frame arrives more than a whole interval after the deadline it serves, the schedule is
-     * restarted from {@code now} rather than advanced by one interval. Without that clamp a stalled
-     * source builds up deadline debt that fires as a catch-up burst on recovery — spending the
-     * scarcest resource in the system on frames whose moment has passed. The skipped deadlines are
-     * counted instead, because "the source cannot feed this rate" is a distinct diagnosis from
-     * "the detector cannot keep up" and has a different fix.
-     */
-    private boolean sampleDue(long now) {
-        long intervalNanos = sampleIntervalNanos();
-        if (!sampleScheduleArmed) {
-            sampleScheduleArmed = true;
-            armScheduleAt(now, now + intervalNanos);
-            return true;
-        }
-        if (now > lastSampleAtNanos && now < nextSampleAtNanos) {
-            return false;
-        }
-        if (now <= lastSampleAtNanos) {
-            // Degenerate clock (frozen, or stepped backwards): with no usable time base there is no
-            // rate to limit, so fail OPEN and sample. Failing closed would silently stop detection
-            // altogether the moment a clock skewed -- the loudest possible failure for the quietest
-            // possible cause. The old frame-count stride was immune to this by construction; a
-            // time-based schedule has to say what it does instead.
-            armScheduleAt(now, now + intervalNanos);
-            return true;
-        }
-        long advanced = nextSampleAtNanos + intervalNanos;
-        if (advanced <= now) {
-            detectionRate.recordMissedDeadlines((now - nextSampleAtNanos) / intervalNanos);
-            advanced = now + intervalNanos;
-        }
-        armScheduleAt(now, advanced);
-        return true;
-    }
-
-    /** Records that {@code now} served a deadline and that the next one falls at {@code nextAtNanos}. */
-    private void armScheduleAt(long now, long nextAtNanos) {
-        lastSampleAtNanos = now;
-        nextSampleAtNanos = nextAtNanos;
-    }
-
-    /** The gap between sample deadlines for the currently targeted rate; at least one nanosecond. */
-    private long sampleIntervalNanos() {
-        return Math.max(1L, Math.round(NANOS_PER_SECOND / targetFps()));
-    }
-
-    /**
-     * The rate being sampled at right now: {@link #effectiveInferenceFps()} raised by {@link
-     * #rateController} when the tracked target is about to leave its association budget, and exactly
-     * {@link #effectiveInferenceFps()} whenever it is not (or the loop is off). Read on every frame,
-     * so it is deliberately a few comparisons over volatile fields rather than any kind of scan.
-     */
-    private double targetFps() {
-        return rateController.targetFps(effectiveInferenceFps(), sourceFps(), config.maxInFlightInferences());
-    }
-
-    /**
      * The rate this pipeline actually samples frames at (docs/plans/done/TRACKING-PLAN.md &sect;5.D): {@link
      * PipelineConfig#inferenceFps()} normally, but {@code max(inferenceFps, followFps)} in {@link
      * TrackingMode#FOLLOW} — in {@code FOLLOW} the tracker wants frames faster than the detector
-     * does, and raising the sample rate is the whole of that change because {@link
-     * #sampleIntervalNanos} derives the deadline gap from this value on every frame, reading the
-     * volatile config live.
+     * does, and raising the sample rate is the whole of that change, since {@link FrameSampler}
+     * derives its deadline gap from this value on every frame, reading the volatile config live.
      *
      * <p>{@code OFF} and {@code ASSOCIATE} return {@code inferenceFps()} unchanged, so a stream that
      * is not following samples exactly as it did before tracking existed. {@code followFps} defaults
@@ -1071,10 +941,6 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         return tracking.mode() == TrackingMode.FOLLOW
                 ? Math.max(config.inferenceFps(), tracking.followFps())
                 : config.inferenceFps();
-    }
-
-    private static double clamp(double value, double min, double max) {
-        return Math.max(min, Math.min(max, value));
     }
 
     /** Outcome of consulting outage state for a newly-sampled frame, see {@link #outageDecision()}. */
@@ -1281,13 +1147,15 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
                 // Still backing off, or a probe is already in flight: never counted as in-flight.
                 // Consulted through the deadline so the counter stays comparable with the others --
                 // one entry per deadline, not one per frame arriving during a ten-second backoff.
-                if (sampleDue(now)) {
+                if (sampler.sampleDue(now, rateController, effectiveInferenceFps(), config.maxInFlightInferences(),
+                        detectionRate)) {
                     detectionRate.record(DetectionRateWindow.Outcome.DROPPED_OUTAGE, now);
                     trace.recordSkip(frame, snapshot, GateReason.OUTAGE_BACKOFF);
                 }
             }
             case NORMAL -> {
-                if (!sampleDue(now)) {
+                if (!sampler.sampleDue(now, rateController, effectiveInferenceFps(), config.maxInFlightInferences(),
+                        detectionRate)) {
                     trace.recordSkip(frame, snapshot, GateReason.DEADLINE_NOT_DUE);
                     return;
                 }
