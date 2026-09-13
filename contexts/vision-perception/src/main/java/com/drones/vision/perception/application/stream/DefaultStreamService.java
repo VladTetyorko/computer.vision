@@ -62,10 +62,10 @@ import com.drones.vision.perception.application.pipeline.StreamPipeline;
 import com.drones.vision.perception.application.pipeline.StreamPipelineCollaborators;
 import com.drones.vision.perception.application.pipeline.StreamPipelineSettings;
 import com.drones.vision.perception.application.pipeline.SupervisedPublisher;
-import com.drones.vision.perception.application.pipeline.DetectionRate;
+import com.drones.vision.perception.domain.model.DetectionRate;
 import com.drones.vision.perception.application.pipeline.GateDecision;
-import com.drones.vision.perception.application.pipeline.PipelineLatency;
-import com.drones.vision.perception.application.pipeline.TrackingStats;
+import com.drones.vision.perception.domain.model.PipelineLatency;
+import com.drones.vision.perception.domain.model.TrackingStats;
 import com.drones.vision.perception.application.pipeline.UsageTracker;
 import com.drones.vision.perception.application.pipeline.VideoSourceRegistry;
 

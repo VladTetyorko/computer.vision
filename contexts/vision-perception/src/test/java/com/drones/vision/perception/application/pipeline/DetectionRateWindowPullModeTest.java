@@ -1,5 +1,6 @@
 package com.drones.vision.perception.application.pipeline;
 
+import com.drones.vision.perception.domain.model.DetectionRate;
 import com.drones.vision.perception.domain.model.PullTelemetry;
 import org.junit.jupiter.api.Test;
 

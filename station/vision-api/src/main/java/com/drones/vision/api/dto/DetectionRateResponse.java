@@ -1,6 +1,6 @@
 package com.drones.vision.api.dto;
 
-import com.drones.vision.perception.application.pipeline.DetectionRate;
+import com.drones.vision.perception.domain.model.DetectionRate;
 
 /**
  * The {@code "rate"} object of {@code GET /api/streams/{streamId}/tracks}

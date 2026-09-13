@@ -1,10 +1,10 @@
 package com.drones.vision.app.stream;
 
 import com.drones.vision.adapter.publishhls.MediamtxLiveFrameGrabber;
-import com.drones.vision.perception.application.pipeline.DetectionRate;
+import com.drones.vision.perception.domain.model.DetectionRate;
 import com.drones.vision.perception.application.pipeline.GateDecision;
-import com.drones.vision.perception.application.pipeline.PipelineLatency;
-import com.drones.vision.perception.application.pipeline.TrackingStats;
+import com.drones.vision.perception.domain.model.PipelineLatency;
+import com.drones.vision.perception.domain.model.TrackingStats;
 import com.drones.vision.perception.application.stream.ActiveStream;
 import com.drones.vision.perception.application.stream.PipelineConfigPatch;
 import com.drones.vision.perception.application.stream.StreamService;

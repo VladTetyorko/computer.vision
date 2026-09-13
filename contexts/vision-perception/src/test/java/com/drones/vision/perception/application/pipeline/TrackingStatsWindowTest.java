@@ -10,6 +10,7 @@ import com.drones.vision.kernel.StreamId;
 import com.drones.vision.perception.domain.model.TrackRef;
 import com.drones.vision.perception.domain.model.TrackState;
 import com.drones.vision.perception.domain.model.TrackingMode;
+import com.drones.vision.perception.domain.model.TrackingStats;
 import com.drones.vision.perception.domain.model.TrackingTelemetry;
 import org.junit.jupiter.api.Test;
 

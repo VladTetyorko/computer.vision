@@ -1,5 +1,7 @@
 package com.drones.vision.perception.application.pipeline;
 
+import com.drones.vision.perception.domain.model.PipelineLatency;
+
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;

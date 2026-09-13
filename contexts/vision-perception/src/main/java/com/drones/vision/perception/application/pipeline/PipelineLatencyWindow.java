@@ -1,5 +1,7 @@
 package com.drones.vision.perception.application.pipeline;
 
+import com.drones.vision.perception.domain.model.PipelineLatency;
+
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Arrays;

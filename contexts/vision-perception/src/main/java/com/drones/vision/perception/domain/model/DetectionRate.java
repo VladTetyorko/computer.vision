@@ -1,4 +1,4 @@
-package com.drones.vision.perception.application.pipeline;
+package com.drones.vision.perception.domain.model;
 
 import java.time.Duration;
 import java.util.Objects;

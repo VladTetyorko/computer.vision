@@ -20,10 +20,10 @@ import java.util.Optional;
 import java.util.Set;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.perception.application.pipeline.StreamPipeline;
-import com.drones.vision.perception.application.pipeline.DetectionRate;
+import com.drones.vision.perception.domain.model.DetectionRate;
 import com.drones.vision.perception.application.pipeline.GateDecision;
-import com.drones.vision.perception.application.pipeline.PipelineLatency;
-import com.drones.vision.perception.application.pipeline.TrackingStats;
+import com.drones.vision.perception.domain.model.PipelineLatency;
+import com.drones.vision.perception.domain.model.TrackingStats;
 
 /**
  * The lifecycle of live streams: start one for a device, stop it, list what is running.

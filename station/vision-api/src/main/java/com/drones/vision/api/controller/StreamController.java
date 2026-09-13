@@ -20,7 +20,7 @@ import com.drones.vision.api.dto.WorldObjectResponse;
 import com.drones.vision.api.security.SeatAccess;
 import com.drones.vision.api.security.StreamAccess;
 import com.drones.vision.api.support.StreamDetectionSupport;
-import com.drones.vision.perception.application.pipeline.TrackingStats;
+import com.drones.vision.perception.domain.model.TrackingStats;
 import com.drones.vision.perception.application.stream.StreamService;
 import com.drones.vision.perception.application.stream.TrackingConfigPatch;
 import com.drones.vision.perception.application.stream.PipelineConfigPatch;
