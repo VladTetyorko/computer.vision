@@ -1476,6 +1476,18 @@ practice.
 
 **Nothing in this brief was found wrong or unimplementable.**
 
+**Superseded in part by wave W9** (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.9, §8 decision E25):
+the `tracks:<assetId>` payload described above as "a raw JSON array of `WorldObjectResponse`" is, as
+of wave W9, the whole `StreamTracksResponse` snapshot (`stats`/`latency`/`rate`/`detectionState`/
+`follow`/`lockedTrackId` alongside `tracks`/`objects`) — the exact fields this section's own text
+said "have no live-topic equivalent yet" now do. `LiveStore.worldObjectsFor(assetId)` still returns
+exactly the array this section describes (now derived from `payload.objects` via a cached
+`computed()`, same signature/behavior) — it is no longer the payload itself; the new
+`LiveStore.tracksFor(assetId): Signal<StreamTracksResponse | null>` is. `DetectionsStore.tracks` (the
+poll this section says stays "additive to, not a replacement for" the topic) is now transport-aware
+exactly like `results` and only polls as a fallback. See wave W9's own dated section near the end of
+this file for the full change.
+
 ### Tests / build
 
 `npm run test:ci` — **200/200 files, 3917/3917 tests green** (this worktree's branch already carried
@@ -2125,3 +2137,70 @@ W5b.0–W5b.3); this step is the frontend's own mirror of the result.
   `features/vision-profiles/**`, `features/fly/**`, or other W7-scoped file touched (W7 runs
   concurrently on `CvProfile*`/profile-as-patch, a disjoint file scope from this step).
 - **Commit**: `feat(cv-orchestration W3.5): tap to follow — box or point (D8) + click-path acceptance spec`.
+
+## Status — CV-ORCHESTRATION wave W9.2 (web): the `tracks:` SSE flip reaches `DetectionsStore` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.9, §8 decision E25, §6 W9 row) — 2026-09-13
+
+Retires the last per-stream REST poll on a live surface. Wave W9.1 (`station/vision-api`, Java)
+widened the `tracks:<assetId>` SSE payload from a bare `WorldObject[]` (wave W3.1) to the whole
+`StreamTracksResponse` snapshot — the same assembly (`StreamTracksResponse.from(TracksSnapshot,
+Instant)`) both `GET /api/streams/{id}/tracks` and the live push now build from ("one assembly, two
+transports"). This step makes `DetectionsStore.tracks` transport-aware **exactly like `results`**, so
+the poll finally becomes the fallback it should always have been.
+
+**What changed:**
+
+- `core/api/models.ts`: `LiveEnvelope`'s `'tracks'` member payload type changed from `readonly
+  WorldObject[]` to `StreamTracksResponse` — the same type `GET /api/streams/{id}/tracks` already
+  returns. Doc comments on both the union member and `StreamTracksResponse` itself updated to
+  cross-reference each other and explain the widening.
+- `core/live/live-store.ts`: the existing ref-counted `trackWorldObjects`/`untrackWorldObjects`
+  subscription (wave W3.1, names kept unchanged for continuity — **not** a new track/untrack pair)
+  now backs a per-asset `StreamTracksResponse | null` signal, not a `WorldObject[]` one. New public
+  **`tracksFor(assetId): Signal<StreamTracksResponse | null>`** returns it directly;
+  **`worldObjectsFor(assetId)`** keeps its exact wave-W3.1 signature/behavior but is now a cached
+  `computed()` deriving `payload?.objects ?? []` — every existing W3.1/W3.2 consumer is unchanged.
+- `core/detections/detections-store.ts`: **`tracks`** is now a `computed()` reading
+  `live.tracksFor(assetId)` when the store's own already-known asset id (`track(streamId, assetId?)`
+  — no new parameter threaded through `followTracks`) is in scope and the live transport resolves
+  open (`resolveAssetScopedTransport`, the same `AssetScopedTransport` idiom `results` already uses).
+  New `tracksTransportSignal`/`tracksWanted` fields and a constructor `effect()` mirroring the
+  pre-existing `results`-transport effect drive the flip; `trackTracks`/`untrackTracks` rewritten
+  around a new private `applyTracksTransport`. `followTracks(streamId, wanted)` keeps its exact
+  two-argument signature. `CockpitFacade.wantsTracksPoll`'s formula is byte-identical; its doc
+  comments now describe what it actually gates post-flip (the tracks session's "wanted" state, not
+  the poll directly).
+- New `core/api/stream-tracks.wire.contract.spec.ts`: pins `Record<keyof StreamTracksResponse, true>`
+  (plus `StreamTrack`/`TrackStats`/`PipelineLatency`/`DetectionRate`/`FollowStatus`) against the
+  fixture `station/vision-api`'s `StreamTracksResponseWireContractTest` commits (wave W9.1) — same
+  `Record<keyof T, true>` technique as `cv-trace.wire.contract.spec.ts`/`world-object.wire.contract.spec.ts`.
+- `detections-store.spec.ts`: `stubLiveStore()` gained an independent `tracksFor`/`pushTracks` pair,
+  deliberately separate from the pre-existing, untouched `worldObjectsFor`/`pushWorldObjects` (since
+  `DetectionsStore.worldObjects`/`.tracks` each call only their own one accessor — simulating that
+  fidelity, not collapsing it). Three new cases prove: zero `GET .../tracks` requests once an asset id
+  is in scope and `LiveStore` is open, with `tracks()` reflecting the live envelope; the poll runs
+  unchanged, same as before this wave, when no asset id is in scope even though `LiveStore` is open;
+  and the tracks session flips from poll to live mid-session, stopping the poll, mirroring the
+  existing `results()`-transport test. Every pre-existing assertion in this file is unchanged.
+
+**Payload size** (measured against the committed fixture, one `tracks:<assetId>` envelope): **243
+bytes** before wave W9 (bare `WorldObject[]`) → **1,596 bytes** after (the whole
+`StreamTracksResponse`) — the payload now rides at frame cadence rather than poll cadence, a fact the
+next capacity/scale decision needs.
+
+**Not built (by this wave's own design):** `worldObjects`'s own subscription lifecycle is untouched —
+it still lives on the detections-feed `track()`/`teardownTracking()` pair (wave W3.1's scope), never
+this wave's demand-gated `trackTracks`/`untrackTracks`; the two lifecycles read the same underlying
+per-asset subscription through two different accessors but neither owns the other. No component
+template changed — this is a core/-layer transport flip only.
+
+**Nothing in this brief was found wrong or unimplementable.**
+
+### Tests / build
+
+`npm run test:ci` — **209/209 files, 4041/4041 tests green** (+1 file / +12 tests over wave W5b.4's
+208/4029: 9 in the new contract spec, 3 in `detections-store.spec.ts`). `npx tsc --noEmit` clean on
+both `tsconfig.app.json` and `tsconfig.spec.json`. No `features/vision-profiles/**`,
+`features/fly/cv-setup-modal*`, `features/fly/cv-tuning*`, or other W7-scoped file touched (W7 ran
+concurrently on `CvProfile*`/profile-as-patch, a disjoint file scope from this wave).
+
+- **Commit**: `feat(cv-orchestration W9.2): tracks: SSE flip reaches the web store`.

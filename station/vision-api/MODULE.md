@@ -1641,3 +1641,36 @@ cv/vision-proto,contexts/vision-perception,cv/grpc,station/vision-api -am test -
 vision-proto 5/0/0, vision-perception 839/0/0, adapter-cv-grpc 195/0/0, **vision-api 1121/0/0**
 (same count as W5b.2 — no new `@Test` method, only richer fixture data in the two existing
 examples), all green.
+
+**2026-09-13, CV-ORCHESTRATION wave W9.1 (`tracks:` SSE carries the whole `StreamTracksResponse`
+snapshot, plan §4.9/§8 decision E25).** "One assembly, two transports": `StreamTracksResponse.from(
+TracksSnapshot, Instant)` now owns every gating rule `GET /api/streams/{id}/tracks` used to compute
+inline — `stats`/`latency`/`rate`/`detectionState` presence, the `lockedTrackId` hoist from `follow`,
+`FollowResponse.from`, the `tracks[]` filter — carried verbatim from the old controller body.
+`StreamController#tracks` collapses to a 3-line delegation (`requireVisible` →
+`streamService.tracksSnapshot(id).orElse(TracksSnapshot.empty(id))` →
+`StreamTracksResponse.from(snapshot, now)`, see its own API-surface bullet above).
+`LiveUpdateRegistry#flushPending` now publishes that same `StreamTracksResponse` (built from the
+`PendingDetection`'s own `TracksSnapshot`, wave W9.0) onto `tracks:<assetId>` instead of the bare
+`List<WorldObjectResponse>` fold it carried before this wave — retiring the gap that made the REST
+poll the only way to learn `stats`/`latency`/`rate`/`follow` live; the ring buffer of 1 now hands a
+(re)subscribing connection the last full snapshot, not just the last object list. New
+`StreamTracksResponseWireContractTest` pins the wire shape against a committed fixture,
+`station/vision-web/src/app/core/api/__fixtures__/stream-tracks.wire.json` (`full`+`minimal`
+examples) — the same fixture wave W9.2's `stream-tracks.wire.contract.spec.ts`
+(`station/vision-web`) loads to pin the TS side. **Payload size, measured against that fixture**: one
+`tracks:` envelope was **243 bytes** before this wave (`WorldObject[]` only, wave W3.1) and is
+**1,596 bytes** after (the whole snapshot) — the payload now rides at frame cadence, not poll
+cadence, a fact the next capacity/scale decision needs. `StreamControllerTest`'s `/tracks` HTTP
+assertions (`.andExpect(...)` chains) are byte-identical to before; only the Mockito arrange lines
+changed, from stubbing five separate `StreamService` accessors to stubbing the one
+`tracksSnapshot(streamId)` the collapsed controller now actually calls — two tests (unknown/stopped
+stream, no lock issued) needed no stub at all, since an unstubbed mock already returns
+`Optional.empty()`, exactly `TracksSnapshot.empty(id)`'s own trigger. `LiveUpdateRegistryTest`'s
+tracks-topic assertions updated for the wider payload type. Scoped build (`./mvnw -B -pl
+contexts/vision-perception,station/vision-api,station/vision-app -am clean test -DskipWeb`):
+perception 874/874, **vision-api 1122/1122** (1121 baseline + 1 new contract test), vision-app
+355/355, `ArchitectureTest` 14/14, `ContextArchitectureTest` 5/5 — zero failures/errors. W9.0's
+prerequisite domain work is `contexts/vision-perception/MODULE.md`'s own W9.0a+W9.0 dated entry; W9.2
+(`station/vision-web`) is the store-side transport flip that finally lets `DetectionsStore.tracks`
+stop polling this endpoint by default.
