@@ -17,7 +17,7 @@ import com.drones.vision.api.dto.LiveConnectedResponse;
 import com.drones.vision.api.dto.LiveEnvelopeResponse;
 import com.drones.vision.api.dto.LiveSubscriptionResponse;
 import com.drones.vision.api.dto.MapEventPayload;
-import com.drones.vision.api.dto.WorldObjectResponse;
+import com.drones.vision.api.dto.StreamTracksResponse;
 import com.drones.vision.api.dto.SystemStatusResponse;
 import com.drones.vision.api.dto.TelemetrySampleResponse;
 import com.drones.vision.api.dto.UpdateLiveTopicsRequest;
@@ -55,6 +55,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.io.IOException;
 import java.net.URI;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -370,9 +371,9 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      * CV-ORCHESTRATION-PLAN.md §4.6/§4.9, waves W2.8/W9). {@code tracksSnapshot} is {@link
      * DetectionLiveUpdatePort#publishDetections}'s own per-result snapshot, carried verbatim -- this
      * class never re-folds or re-derives it. Widened from a bare {@code List<WorldObject>} in wave
-     * W9 alongside the port itself (see that method's own javadoc); {@link #flushPending()} still
-     * reads only {@link TracksSnapshot#objects()} off it here -- publishing the snapshot's other
-     * fields on the {@code tracks:} topic is wave W9.1's own change, not this one's.
+     * W9 alongside the port itself (see that method's own javadoc); {@link #flushPending()} builds
+     * the whole {@code tracks:} envelope from it via {@code StreamTracksResponse#from} (wave W9.1) --
+     * the same assembly {@code StreamController#tracks} itself calls.
      */
     private record PendingDetection(DetectionResult result, TracksSnapshot tracksSnapshot) {
     }
@@ -997,14 +998,16 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
             bufferFor(topic).append(envelope);
             broadcast(topic, envelope);
             // tracks/cv-trace ride the same PendingDetection, never a second port call (docs/plans/active/
-            // CV-ORCHESTRATION-PLAN.md §4.5/§4.4/§4.6, waves W2/W2.8) -- see LiveTopicKind#TRACKS/#CV_TRACE's
-            // own javadoc. tracks carries WorldObjectResponse (the fold), never the flat ObjectStateResponse
-            // DetectionResultResponse#objects above just used -- see WorldObjectResponse's own javadoc for why.
+            // CV-ORCHESTRATION-PLAN.md §4.5/§4.4/§4.6/§4.9, waves W2/W2.8/W9) -- see LiveTopicKind#TRACKS/
+            // #CV_TRACE's own javadoc. tracks now carries the whole StreamTracksResponse snapshot (wave W9,
+            // decision E25) -- the exact same assembly StreamController#tracks itself calls
+            // (StreamTracksResponse#from), "one assembly, two transports" -- retiring the bare
+            // WorldObjectResponse[] fold this topic used to carry, which made the per-stream /tracks poll
+            // the only way to learn stats/latency/rate/follow.
             LiveTopic tracksTopic = LiveTopic.tracks(assetId);
-            List<WorldObjectResponse> objects =
-                    pending.tracksSnapshot().objects().stream().map(WorldObjectResponse::from).toList();
+            StreamTracksResponse tracksPayload = StreamTracksResponse.from(pending.tracksSnapshot(), Instant.now());
             LiveEnvelopeResponse tracksEnvelope = new LiveEnvelopeResponse(sequencer.incrementAndGet(),
-                    assetId.value().toString(), LiveTopicKind.TRACKS.wire(), objects);
+                    assetId.value().toString(), LiveTopicKind.TRACKS.wire(), tracksPayload);
             bufferFor(tracksTopic).append(tracksEnvelope);
             broadcast(tracksTopic, tracksEnvelope);
             if (result.ledger().isPresent()) {

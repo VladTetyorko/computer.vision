@@ -56,7 +56,7 @@ import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.map.domain.model.Verification;
 import com.drones.vision.api.dto.FrameLedgerResponse;
-import com.drones.vision.api.dto.WorldObjectResponse;
+import com.drones.vision.api.dto.StreamTracksResponse;
 import com.drones.vision.perception.domain.model.FrameLedger;
 import com.drones.vision.perception.domain.model.ObjectLifecycle;
 import com.drones.vision.perception.domain.model.ObjectState;
@@ -704,10 +704,12 @@ class LiveUpdateRegistryTest {
     }
 
     /**
-     * docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.5/W2.5 -- the same {@code pendingDetections}
-     * drain loop that already broadcasts {@code detections:<assetId>} additionally broadcasts
-     * {@code tracks:<assetId>} whenever the result's {@code objects()} mirror is non-empty,
-     * independent of whether a {@code ledger()} was traced this frame.
+     * docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.5/§4.9/W2.5/W9 -- the same {@code
+     * pendingDetections} drain loop that already broadcasts {@code detections:<assetId>}
+     * additionally broadcasts {@code tracks:<assetId>} whenever the result's {@code objects()}
+     * mirror is non-empty, independent of whether a {@code ledger()} was traced this frame. Wave W9
+     * widened the payload from a bare {@code List<WorldObjectResponse>} to the whole {@link
+     * StreamTracksResponse} snapshot -- the same shape {@code GET /api/streams/{id}/tracks} returns.
      */
     @Test
     void aResultWithAPopulatedObjectMirrorBroadcastsOntoTheTracksTopic() {
@@ -723,9 +725,11 @@ class LiveUpdateRegistryTest {
         assertEquals(1, buffered.size(), "a populated object mirror must reach the tracks topic");
         assertEquals("tracks", buffered.get(0).type());
         Object payload = buffered.get(0).payload();
-        assertTrue(payload instanceof List<?>, "tracks payload must be a list of WorldObjectResponse");
-        assertEquals(1, ((List<?>) payload).size());
-        assertTrue(((List<?>) payload).get(0) instanceof WorldObjectResponse,
+        assertTrue(payload instanceof StreamTracksResponse,
+                "tracks payload must be the whole StreamTracksResponse snapshot (wave W9)");
+        StreamTracksResponse response = (StreamTracksResponse) payload;
+        assertEquals(streamId.value().toString(), response.streamId());
+        assertEquals(1, response.objects().size(),
                 "tracks must carry the WorldObject fold (operator/event/render), not the flat ObjectState mirror");
     }
 

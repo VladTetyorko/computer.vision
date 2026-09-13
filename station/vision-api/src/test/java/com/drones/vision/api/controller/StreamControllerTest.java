@@ -68,6 +68,7 @@ import com.drones.vision.perception.domain.model.TrackingCapability;
 import com.drones.vision.perception.domain.model.TrackingConfig;
 import com.drones.vision.perception.domain.model.TrackingMode;
 import com.drones.vision.perception.domain.model.TrackingTelemetry;
+import com.drones.vision.perception.domain.model.TracksSnapshot;
 import com.drones.vision.perception.domain.model.DetectionSource;
 import com.drones.vision.perception.domain.model.DetectorReason;
 import com.drones.vision.kernel.UserId;
@@ -1432,17 +1433,19 @@ class StreamControllerTest {
                 new TrackRef(7L, TrackState.CONFIRMED, DetectionSource.TRACKER, 0.012, -0.001, 143, true, 0.0, 0L));
         Instant firstSeen = Instant.parse("2026-08-11T10:22:31.104Z");
         Instant lastSeen = Instant.parse("2026-08-11T10:22:40.671Z");
-        when(streamService.tracks(streamId))
-                .thenReturn(List.of(new TrackedObject(7L, detection, firstSeen, lastSeen)));
-        when(streamService.trackingStats(streamId)).thenReturn(Optional.of(
-                new TrackingStats(TrackingMode.FOLLOW, "lk", Duration.ofSeconds(30), 12, 348, 0.034, 0.4, 0.9,
-                        DetectorReason.CADENCE, 7L, Map.of(TrackState.CONFIRMED, 3, TrackState.COASTING, 1))));
         // TRACK-FOLLOW-PLAN §3.1 decision 4: `lockedTrackId` is now sourced from `followStatus()`,
-        // not `stats` -- this stub is what actually hoists 7 to the top level post-repoint (the
-        // `TrackingStats.lockedTrackId()` above no longer feeds it at all).
-        when(streamService.followStatus(streamId)).thenReturn(Optional.of(
-                new FollowStatus(FollowState.HOLDING, 7L, "car", firstSeen, lastSeen, detection.box(), false, 0L,
-                        0.0)));
+        // not `stats` -- the FollowStatus below is what actually hoists 7 to the top level
+        // post-repoint (the TrackingStats.lockedTrackId() field no longer feeds it at all). Wave W9
+        // folds every one of these read models into one TracksSnapshot (CV-ORCHESTRATION-PLAN.md
+        // §4.9) -- StreamController#tracks now calls only streamService.tracksSnapshot(...).
+        when(streamService.tracksSnapshot(streamId)).thenReturn(Optional.of(new TracksSnapshot(streamId,
+                List.of(new TrackedObject(7L, detection, firstSeen, lastSeen)),
+                Optional.of(new TrackingStats(TrackingMode.FOLLOW, "lk", Duration.ofSeconds(30), 12, 348, 0.034, 0.4,
+                        0.9, DetectorReason.CADENCE, 7L, Map.of(TrackState.CONFIRMED, 3, TrackState.COASTING, 1))),
+                Optional.empty(), Optional.empty(), Optional.empty(),
+                Optional.of(new FollowStatus(FollowState.HOLDING, 7L, "car", firstSeen, lastSeen, detection.box(),
+                        false, 0L, 0.0)),
+                List.of())));
 
         mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
                 .andExpect(status().isOk())
@@ -1476,9 +1479,8 @@ class StreamControllerTest {
 
     @Test
     void tracksReturnsAnEmptyListAndNoStatsForAnUnknownOrStoppedStream() throws Exception {
-        when(streamService.tracks(any())).thenReturn(List.of());
-        when(streamService.trackingStats(any())).thenReturn(Optional.empty());
-        when(streamService.worldObjects(any())).thenReturn(List.of());
+        // streamService.tracksSnapshot is left unstubbed -- Optional.empty(), the same "unknown
+        // stream" default StreamController#tracks itself falls back to TracksSnapshot.empty(id) for.
 
         mockMvc.perform(get("/api/streams/{streamId}/tracks", StreamId.random().value()))
                 .andExpect(status().isOk())
@@ -1494,8 +1496,6 @@ class StreamControllerTest {
     @Test
     void tracksReportsTheObjectMirrorAlongsideTracks() throws Exception {
         StreamId streamId = StreamId.random();
-        when(streamService.tracks(streamId)).thenReturn(List.of());
-        when(streamService.trackingStats(streamId)).thenReturn(Optional.empty());
         ObjectState.Identity identity = new ObjectState.Identity("person", "person",
                 List.of(new ObjectState.LabelCandidate("person", 0.9)), 3);
         ObjectState.Kinematics kinematics = new ObjectState.Kinematics(new BoundingBox(0.1, 0.2, 0.3, 0.4), null,
@@ -1505,7 +1505,9 @@ class StreamControllerTest {
                 null);
         WorldObject worldObject = new WorldObject(object, new WorldObject.Operator(true, false, null),
                 new WorldObject.EventLink(null), new WorldObject.Render(RenderTier.T1));
-        when(streamService.worldObjects(streamId)).thenReturn(List.of(worldObject));
+        when(streamService.tracksSnapshot(streamId)).thenReturn(Optional.of(new TracksSnapshot(streamId, List.of(),
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                List.of(worldObject))));
 
         mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
                 .andExpect(status().isOk())
@@ -1536,9 +1538,9 @@ class StreamControllerTest {
         // TrackingStats.empty(..) reports no lastDetectorReason at all; the flow strip has no
         // rendering for a half-populated strip, so the whole object is omitted instead.
         StreamId streamId = StreamId.random();
-        when(streamService.tracks(streamId)).thenReturn(List.of());
-        when(streamService.trackingStats(streamId))
-                .thenReturn(Optional.of(TrackingStats.empty(TrackingMode.OFF, Duration.ofSeconds(30))));
+        when(streamService.tracksSnapshot(streamId)).thenReturn(Optional.of(new TracksSnapshot(streamId, List.of(),
+                Optional.of(TrackingStats.empty(TrackingMode.OFF, Duration.ofSeconds(30))), Optional.empty(),
+                Optional.empty(), Optional.empty(), Optional.empty(), List.of())));
 
         mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
                 .andExpect(status().isOk())
@@ -1552,9 +1554,11 @@ class StreamControllerTest {
         // rate cannot say why it fell short -- a starving source and a saturated detector look
         // identical from `effectiveFps` alone and have opposite fixes.
         StreamId streamId = StreamId.random();
-        when(streamService.tracks(streamId)).thenReturn(List.of());
-        when(streamService.detectionRate(streamId)).thenReturn(Optional.of(
-                new DetectionRate(Duration.ofSeconds(30), 24.0, 10.0, 18.0, 7.5, 15L, 5L, 0L, 3L)));
+        when(streamService.tracksSnapshot(streamId)).thenReturn(Optional.of(new TracksSnapshot(streamId, List.of(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(new DetectionRate(Duration.ofSeconds(30), 24.0, 10.0, 18.0, 7.5, 15L, 5L, 0L, 3L)),
+                Optional.empty(), Optional.empty(), List.of())));
 
         mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
                 .andExpect(status().isOk())
@@ -1575,8 +1579,9 @@ class StreamControllerTest {
         // docs/plans/done/CV-DEMAND-PLAN.md §3.6: "no boxes" has three causes an operator must be
         // able to tell apart, and this is how the wire distinguishes them.
         StreamId streamId = StreamId.random();
-        when(streamService.tracks(streamId)).thenReturn(List.of());
-        when(streamService.detectionState(streamId)).thenReturn(Optional.of(DetectionState.IDLE_NO_VIEWERS));
+        when(streamService.tracksSnapshot(streamId)).thenReturn(Optional.of(new TracksSnapshot(streamId, List.of(),
+                Optional.empty(), Optional.empty(), Optional.empty(),
+                Optional.of(DetectionState.IDLE_NO_VIEWERS), Optional.empty(), List.of())));
 
         mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
                 .andExpect(status().isOk())
@@ -1585,8 +1590,8 @@ class StreamControllerTest {
 
     @Test
     void tracksOmitsDetectionStateForAnUnknownOrStoppedStream() throws Exception {
-        when(streamService.tracks(any())).thenReturn(List.of());
-        when(streamService.detectionState(any())).thenReturn(Optional.empty());
+        // streamService.tracksSnapshot is left unstubbed -- Optional.empty(), the same "unknown
+        // stream" default StreamController#tracks itself falls back to TracksSnapshot.empty(id) for.
 
         mockMvc.perform(get("/api/streams/{streamId}/tracks", StreamId.random().value()))
                 .andExpect(status().isOk())
@@ -1597,10 +1602,11 @@ class StreamControllerTest {
     void tracksReportsTransportAndDecodeMillisP50ForAPullModeStream() throws Exception {
         // docs/plans/done/MEDIA-SOT-PLAN.md §5.4/§7, wave M5: the two additive fields.
         StreamId streamId = StreamId.random();
-        when(streamService.tracks(streamId)).thenReturn(List.of());
-        when(streamService.detectionRate(streamId)).thenReturn(Optional.of(
-                new DetectionRate(Duration.ofSeconds(30), 9.9, 10.0, 0.0, 9.5, 0L, 2L, 0L, 1L,
-                        DetectionRate.TRANSPORT_PULL, 4.0)));
+        when(streamService.tracksSnapshot(streamId)).thenReturn(Optional.of(new TracksSnapshot(streamId, List.of(),
+                Optional.empty(), Optional.empty(),
+                Optional.of(new DetectionRate(Duration.ofSeconds(30), 9.9, 10.0, 0.0, 9.5, 0L, 2L, 0L, 1L,
+                        DetectionRate.TRANSPORT_PULL, 4.0)),
+                Optional.empty(), Optional.empty(), List.of())));
 
         mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
                 .andExpect(status().isOk())
@@ -1611,9 +1617,11 @@ class StreamControllerTest {
     @Test
     void tracksReportsTransportPushAndZeroDecodeMillisForAPlainPushStream() throws Exception {
         StreamId streamId = StreamId.random();
-        when(streamService.tracks(streamId)).thenReturn(List.of());
-        when(streamService.detectionRate(streamId)).thenReturn(Optional.of(
-                new DetectionRate(Duration.ofSeconds(30), 24.0, 10.0, 18.0, 7.5, 15L, 5L, 0L, 3L)));
+        when(streamService.tracksSnapshot(streamId)).thenReturn(Optional.of(new TracksSnapshot(streamId, List.of(),
+                Optional.empty(),
+                Optional.empty(),
+                Optional.of(new DetectionRate(Duration.ofSeconds(30), 24.0, 10.0, 18.0, 7.5, 15L, 5L, 0L, 3L)),
+                Optional.empty(), Optional.empty(), List.of())));
 
         mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
                 .andExpect(status().isOk())
@@ -1624,9 +1632,10 @@ class StreamControllerTest {
     @Test
     void tracksOmitsTheRateObjectUntilADeadlineHasActuallyBeenServed() throws Exception {
         StreamId streamId = StreamId.random();
-        when(streamService.tracks(streamId)).thenReturn(List.of());
-        when(streamService.detectionRate(streamId))
-                .thenReturn(Optional.of(DetectionRate.empty(Duration.ofSeconds(30), 24.0, 10.0)));
+        when(streamService.tracksSnapshot(streamId)).thenReturn(Optional.of(new TracksSnapshot(streamId, List.of(),
+                Optional.empty(), Optional.empty(),
+                Optional.of(DetectionRate.empty(Duration.ofSeconds(30), 24.0, 10.0)), Optional.empty(),
+                Optional.empty(), List.of())));
 
         mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
                 .andExpect(status().isOk())
@@ -1644,9 +1653,8 @@ class StreamControllerTest {
 
     @Test
     void tracksOmitsFollowWhenNoLockHasEverBeenIssued() throws Exception {
-        // streamService.followStatus is left unstubbed -- Optional.empty(), the same "nothing to
+        // streamService.tracksSnapshot is left unstubbed -- Optional.empty(), the same "nothing to
         // report yet" default every other forgiving field on this endpoint already uses.
-        when(streamService.tracks(any())).thenReturn(List.of());
 
         mockMvc.perform(get("/api/streams/{streamId}/tracks", StreamId.random().value()))
                 .andExpect(status().isOk())
@@ -1658,10 +1666,11 @@ class StreamControllerTest {
         StreamId streamId = StreamId.random();
         Instant since = Instant.parse("2026-09-04T10:15:02.500Z");
         Instant lastSeenAt = Instant.parse("2026-09-04T10:15:06.700Z");
-        when(streamService.tracks(streamId)).thenReturn(List.of());
-        when(streamService.followStatus(streamId)).thenReturn(Optional.of(
-                new FollowStatus(FollowState.HOLDING, 7L, "person", since, lastSeenAt,
-                        new BoundingBox(0.41, 0.32, 0.08, 0.19), false, 0L, 0.0)));
+        when(streamService.tracksSnapshot(streamId)).thenReturn(Optional.of(new TracksSnapshot(streamId, List.of(),
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                Optional.of(new FollowStatus(FollowState.HOLDING, 7L, "person", since, lastSeenAt,
+                        new BoundingBox(0.41, 0.32, 0.08, 0.19), false, 0L, 0.0)),
+                List.of())));
 
         mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
                 .andExpect(status().isOk())
@@ -1688,10 +1697,10 @@ class StreamControllerTest {
         // literal JSON null (not omitted -- see FollowResponse's own javadoc for why the two differ).
         StreamId streamId = StreamId.random();
         Instant since = Instant.parse("2026-09-04T10:15:02.500Z");
-        when(streamService.tracks(streamId)).thenReturn(List.of());
-        when(streamService.followStatus(streamId))
-                .thenReturn(Optional.of(new FollowStatus(FollowState.REQUESTING, 0L, "", since, null, null, false,
-                        0L, 0.0)));
+        when(streamService.tracksSnapshot(streamId)).thenReturn(Optional.of(new TracksSnapshot(streamId, List.of(),
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                Optional.of(new FollowStatus(FollowState.REQUESTING, 0L, "", since, null, null, false, 0L, 0.0)),
+                List.of())));
 
         mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
                 .andExpect(status().isOk())
@@ -1712,10 +1721,11 @@ class StreamControllerTest {
         StreamId streamId = StreamId.random();
         Instant since = Instant.parse("2026-09-04T10:15:10.000Z");
         Instant lastSeenAt = Instant.parse("2026-09-04T10:15:06.700Z");
-        when(streamService.tracks(streamId)).thenReturn(List.of());
-        when(streamService.followStatus(streamId)).thenReturn(Optional.of(
-                new FollowStatus(FollowState.LOST, 7L, "person", since, lastSeenAt,
-                        new BoundingBox(0.41, 0.32, 0.08, 0.19), true, 0L, 0.0)));
+        when(streamService.tracksSnapshot(streamId)).thenReturn(Optional.of(new TracksSnapshot(streamId, List.of(),
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                Optional.of(new FollowStatus(FollowState.LOST, 7L, "person", since, lastSeenAt,
+                        new BoundingBox(0.41, 0.32, 0.08, 0.19), true, 0L, 0.0)),
+                List.of())));
 
         mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
                 .andExpect(status().isOk())
@@ -1732,10 +1742,11 @@ class StreamControllerTest {
         StreamId streamId = StreamId.random();
         Instant since = Instant.parse("2026-09-04T10:15:02.500Z");
         Instant lastSeenAt = Instant.parse("2026-09-04T10:15:06.700Z");
-        when(streamService.tracks(streamId)).thenReturn(List.of());
-        when(streamService.followStatus(streamId)).thenReturn(Optional.of(
-                new FollowStatus(FollowState.HOLDING, 7L, "person", since, lastSeenAt,
-                        new BoundingBox(0.41, 0.32, 0.08, 0.19), false, 8200L, 0.71)));
+        when(streamService.tracksSnapshot(streamId)).thenReturn(Optional.of(new TracksSnapshot(streamId, List.of(),
+                Optional.empty(), Optional.empty(), Optional.empty(), Optional.empty(),
+                Optional.of(new FollowStatus(FollowState.HOLDING, 7L, "person", since, lastSeenAt,
+                        new BoundingBox(0.41, 0.32, 0.08, 0.19), false, 8200L, 0.71)),
+                List.of())));
 
         mockMvc.perform(get("/api/streams/{streamId}/tracks", streamId.value()))
                 .andExpect(status().isOk())

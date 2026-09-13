@@ -102,12 +102,15 @@ enum LiveTopicKind {
      */
     SYSTEM("system"),
     /**
-     * Per-asset object mirror at frame cadence, opt-in (docs/plans/active/CV-ORCHESTRATION-PLAN.md
-     * §4.5/§5, wave W2) — {@code List<ObjectStateResponse>}, exactly {@code
-     * StreamTracksResponse#objects}'s own shape, published every time {@link #DETECTIONS} is (the
-     * same {@code DetectionResult}, riding a second topic) rather than gated by a separate demand
-     * signal — the first <em>live</em> path for object state; {@code GET /api/streams/{id}/tracks}
-     * remains the poll fallback for a client with no open connection. Ring-buffer capacity 1, same
+     * Per-asset track book at frame cadence, opt-in (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+     * §4.5/§4.9/§5, waves W2/W9) — the whole {@code com.drones.vision.api.dto.StreamTracksResponse}
+     * snapshot, the exact same shape and gating rules {@code GET /api/streams/{id}/tracks} returns
+     * ({@code StreamTracksResponse#from}, "one assembly, two transports"), published every time
+     * {@link #DETECTIONS} is (the same {@code DetectionResult}, riding a second topic) rather than
+     * gated by a separate demand signal. Before wave W9 this topic carried only the bare {@code
+     * List<WorldObjectResponse>} fold, which is why the REST poll used to be the only way to learn
+     * {@code stats}/{@code latency}/{@code rate}/{@code follow} live — that poll is now the fallback
+     * it should always have been, for a client with no open connection. Ring-buffer capacity 1, same
      * "freshest wins" treatment as {@link #DETECTIONS} (CLAUDE.md rule 9).
      */
     TRACKS("tracks"),
