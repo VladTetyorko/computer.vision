@@ -7,6 +7,7 @@ import type {
   DetectionResult,
   DevicesSnapshot,
   DiscoveryEventPayload,
+  FrameLedger,
   GeofenceZoneEventPayload,
   LiveConnected,
   LiveEnvelope,
@@ -19,6 +20,7 @@ import {
   type LiveConnectionState,
   SSE_RETRY_INTERVAL_MS,
   buildTopicsParam,
+  cvTraceTopic,
   decrementTopicRef,
   detectionsTopic,
   geoTopic,
@@ -71,7 +73,7 @@ const MAX_LIVE_ZONE_EVENTS = 200;
  * store's per-asset signals when live, falling back to their own polling otherwise (see their own
  * doc comments and `live-fallback-logic.ts#resolveAssetScopedTransport`).
  *
- * <h2>Eleven topics now, eleven projected stores — read before wiring a new consumer</h2>
+ * <h2>Twelve topics now, twelve projected stores — read before wiring a new consumer</h2>
  * The backend started with four topics (`fleet`, `event`, `telemetry:<assetId>`,
  * `detections:<assetId>`) and grew three more, always-on like `fleet`/`event`: `devices` and
  * `detection-events` (docs/plans/done/REALTIME-PLAN.md §4's backend follow-up batch), then `map`
@@ -142,6 +144,12 @@ const MAX_LIVE_ZONE_EVENTS = 200;
  *   before any connection can exist (see `systemStatus`'s own doc comment below). `SystemStatusStore`
  *   has no `activate()`/`release()` (the shell health dot needs `overall` on every page), so its own
  *   D1 gate is the live axis only — no demand axis to compose it with.
+ * - `cv-trace:<assetId>` ↔ `core/cv-trace/cv-trace-store.ts#CvTraceStore` (docs/plans/active/
+ *   CV-ORCHESTRATION-PLAN.md §4.4/§4.8, wave W5.1/W5.2) — the 12th topic, opt-in per-asset like
+ *   `telemetry:<assetId>`/`detections:<assetId>`/`geo:<assetId>`, **not** always-on. Carries
+ *   {@link FrameLedger}; this store is latest-wins for it (`cvTraceSignalFor`, same posture as
+ *   `detections`/`geo`) — the capped client-side ring the engineer inspector (`/manage/cv`) reads
+ *   from is `CvTraceStore`'s own job, matching the server's own `last` cap rather than this store's.
  *
  * `fleet`'s own {@link AssetSummary} polling is still done ad hoc by several pages (`fly.ts`'s own
  * picker refresh, `core/map/map-store.ts`, `asset-detail.ts`), with no single existing store class —
@@ -286,6 +294,9 @@ export class LiveStore {
   private readonly telemetrySignals = new Map<string, ReturnType<typeof signal<readonly TelemetrySample[]>>>();
   private readonly detectionsSignals = new Map<string, ReturnType<typeof signal<DetectionResult | undefined>>>();
   private readonly geoSignals = new Map<string, ReturnType<typeof signal<CorrectionResponse | undefined>>>();
+  /** Latest-wins, like `detectionsSignals` — the capped ring an inspector reads from is
+   *  `core/cv-trace/cv-trace-store.ts`'s own job (wave W5.2), not this store's. */
+  private readonly cvTraceSignals = new Map<string, ReturnType<typeof signal<FrameLedger | undefined>>>();
   /** Per-topic subscriber counts (docs/plans/done/REALTIME-PLAN.md §4, item 2) — see class doc's "Ref-counting". */
   private readonly topicRefs = new Map<string, number>();
 
@@ -342,6 +353,11 @@ export class LiveStore {
     return this.geoSignalFor(assetId);
   }
 
+  /** The latest live frame ledger for `assetId` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4, wave W5.1) — `undefined` until one arrives. */
+  cvTraceFor(assetId: string): Signal<FrameLedger | undefined> {
+    return this.cvTraceSignalFor(assetId);
+  }
+
   /** Ref-counted opt-in to `telemetry:<assetId>` — call once per consumer; pair with `untrackTelemetry`. */
   trackTelemetry(assetId: string): void {
     this.track(telemetryTopic(assetId));
@@ -372,6 +388,16 @@ export class LiveStore {
     this.untrack(geoTopic(assetId), assetId, this.geoSignals);
   }
 
+  /** Ref-counted opt-in to `cv-trace:<assetId>` — call once per consumer; pair with `untrackCvTrace`. */
+  trackCvTrace(assetId: string): void {
+    this.track(cvTraceTopic(assetId));
+  }
+
+  /** The matching teardown for `trackCvTrace` — call from the consumer's own `reset()`/destroy. */
+  untrackCvTrace(assetId: string): void {
+    this.untrack(cvTraceTopic(assetId), assetId, this.cvTraceSignals);
+  }
+
   private telemetrySignalFor(assetId: string): ReturnType<typeof signal<readonly TelemetrySample[]>> {
     let existing = this.telemetrySignals.get(assetId);
     if (existing === undefined) {
@@ -395,6 +421,15 @@ export class LiveStore {
     if (existing === undefined) {
       existing = signal<CorrectionResponse | undefined>(undefined);
       this.geoSignals.set(assetId, existing);
+    }
+    return existing;
+  }
+
+  private cvTraceSignalFor(assetId: string): ReturnType<typeof signal<FrameLedger | undefined>> {
+    let existing = this.cvTraceSignals.get(assetId);
+    if (existing === undefined) {
+      existing = signal<FrameLedger | undefined>(undefined);
+      this.cvTraceSignals.set(assetId, existing);
     }
     return existing;
   }
@@ -538,6 +573,11 @@ export class LiveStore {
         // Latest-wins, like `devices`/`detections` above — the server's own ring capacity 1 means
         // this is never a batch to merge, just the freshest sample replacing the last one.
         this.systemStatusSignal.set(envelope.payload);
+        return;
+      case 'cv-trace':
+        // Latest-wins, like `detections`/`geo` above — `core/cv-trace/cv-trace-store.ts` (wave
+        // W5.2) is what accumulates the capped ring an inspector actually reads from.
+        this.cvTraceSignalFor(envelope.assetId).set(envelope.payload);
         return;
     }
   }

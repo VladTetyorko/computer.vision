@@ -1162,3 +1162,56 @@ specs — the remaining +3 files/+61 tests already existed on this branch from u
 already-committed work ahead of this task, per `git status` showing only `models.ts` plus the two
 new spec files touched). `npx tsc --noEmit` clean on both `tsconfig.app.json` and
 `tsconfig.spec.json`.
+
+## Status — CV-ORCHESTRATION wave W5.1 (web): the engineer inspector's TS mirrors + the `cv-trace` live topic (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4/§4.8, §6 W5 row) — 2026-09-13
+
+Sequential wave (Java W5.0 → this web step W5.1 → W5.2 store → W5.3 page). Scope this step:
+`core/api/models.ts`, `core/live/live-store.ts`, `core/live/live-fallback-logic.ts`, plus two new
+spec files — no component, no route yet (that's W5.3).
+
+**New types, all appended at the end of `models.ts` under a `// CV-ORCHESTRATION W5 — trace
+mirrors` banner** (this wave's own file-scope convention, so a concurrent wave editing the
+W1/W2.8 sections above never conflicts here): `GATE_OUTCOMES`/`GateOutcome` and `GATE_REASONS`/
+`GateReason` (`as const` tuple + derived union, `OBJECT_LIFECYCLES`'s own idiom, pinned to
+`application.pipeline.GateOutcome`/`GateReason`'s declaration order), `DemandSnapshot`,
+`GateDecision` (`reason?` — absent when `outcome` isn't `'SKIPPED'`, the same "absence of a
+relation" idiom as every other `@JsonInclude(NON_NULL)` field in this file), `LEDGER_OUTCOMES`/
+`LedgerOutcome`, `LedgerEntry`, `ObjectEvidence` (`claim` is `Readonly<Record<string, string>>` —
+genuinely free-form, not part of the frozen §5 contract), `FrameLedger`, and `CvTrace`. `models.ts`
+grew from 4280 to 4485 lines.
+
+**Live wiring — ONLY the `'cv-trace'` member/case, per this wave's exclusive-scope constraint**
+(wave W3, running in parallel on a disjoint worktree, owns the `'tracks'` member and every
+`features/fly/**`/`shared/player/**`/`core/detections/**` file): `LiveEnvelope` gained one more
+discriminated-union member, `{ seq, assetId, type: 'cv-trace', payload: FrameLedger }` (12th topic,
+opt-in per-asset like `telemetry`/`detections`/`geo`). `live-fallback-logic.ts` gained
+`cvTraceTopic(assetId)` (`` `cv-trace:${assetId}` ``, same shape as `detectionsTopic`/`geoTopic`).
+`live-store.ts` gained `cvTraceSignals` (a `Map<assetId, Signal<FrameLedger | undefined>>`),
+`cvTraceFor(assetId)`, `trackCvTrace`/`untrackCvTrace`, and one `applyEnvelope` switch case —
+**latest-wins**, the same posture as `detections`/`geo`, not an accumulating log: the capped
+client-side ring an inspector actually reads from is `core/cv-trace/cv-trace-store.ts`'s own job
+(wave W5.2), matching the server's own `last` cap, not this store's concern. The class doc's
+topic count/enumeration and its `<h2>` heading were updated from eleven to twelve.
+
+**New tests:** `core/api/cv-trace.wire.contract.spec.ts` (the `Record<keyof T, true>` key-mapping
+technique `world-object.wire.contract.spec.ts` established) against the fixture W5.0 committed at
+`__fixtures__/cv-trace.wire.json` — asserts the full example's `gate` covers all seven `GateReason`
+values plus a `SENT`/`PROBE` pair (each missing the `reason` key), the `frame` ledger's entries
+cover all three `LedgerOutcome` values, and the `predict.cv` evidence row carries a `held` box
+string (this fixture's own shape, not a general `ObjectEvidence` guarantee — the type stays
+free-form). One assertion needed an `as unknown as FrameLedger` cast: the JSON-imported fixture's
+inferred literal type has no string index signature, so indexing `ledger.objects[trackId]` needs
+the real `FrameLedger` type in scope. Also added one case to `live-fallback-logic.spec.ts`'s
+existing `telemetryTopic`/`detectionsTopic` test, covering `cvTraceTopic`.
+
+**Environment note, not a code defect:** this worktree's `station/vision-web/node_modules` did not
+exist at the start of this wave (a fresh worktree checkout, never `npm install`ed) — running
+`test:ci` failed instantly with `panic: aborting due to terminal initialize failure` before any
+Angular/Vitest code ran at all. `npm install` (477 packages, from the committed `package-lock.json`)
+resolved it; this is a worktree-provisioning gap, not anything wrong with this app's own tooling.
+
+### Tests / build
+
+`npm run test:ci` — **201 files / 3919 tests, all green** (up from 198/3892 at wave W1's own count;
++3 files/+27 tests is this step's own two new spec files plus growth already on this branch from
+other concurrent waves, not solely this step's addition).
