@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { Detection, DetectionResult } from '../../core/api/models';
+import type { Detection, DetectionResult, WorldObject } from '../../core/api/models';
 import { STRIP_CHIP_CAP, STRIP_WINDOW_SECONDS, stripChips } from './detections-strip-logic';
 
 function detection(partial: Partial<Detection>): Detection {
@@ -13,8 +13,8 @@ function detection(partial: Partial<Detection>): Detection {
   };
 }
 
-/** A tracked detection — {@link detection}'s own shape plus a `track`, needed for the sticky-label
- *  grouping cases below (docs/plans/done/TRACK-IDENTITY-PLAN.md §L3 item 2). */
+/** A tracked detection — {@link detection}'s own shape plus a `track`, needed for the wire-label
+ *  grouping cases below (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6, wave W3.2). */
 function trackedDetection(partial: Partial<Detection>, trackId: number): Detection {
   return detection({
     track: { id: trackId, state: 'CONFIRMED', source: 'TRACKER', velocityX: 0, velocityY: 0, reupdated: false },
@@ -30,6 +30,22 @@ function result(partial: Partial<DetectionResult>): DetectionResult {
     inferenceMillis: 5,
     detections: [],
     ...partial,
+  };
+}
+
+/** A minimal {@link WorldObject} carrying just enough for {@link displayLabel}'s own lookup — `tier`
+ *  is irrelevant to `stripChips` (it never reads `render`), kept non-`'HIDDEN'` only for realism. */
+function worldObject(trackId: number, label?: string): WorldObject {
+  return {
+    state: {
+      id: trackId,
+      lifecycle: 'CONFIRMED',
+      streamId: 's-0',
+      ...(label !== undefined ? { identity: { label, labelRaw: label, candidates: [], stability: 1 } } : {}),
+    },
+    operator: { followed: false, denied: false },
+    event: {},
+    render: { tier: 'T1' },
   };
 }
 
@@ -79,22 +95,36 @@ describe('stripChips', () => {
     expect(stripChips([newer, tooOld])).toEqual([{ label: 'person', count: 1, hidden: false }]);
   });
 
-  it('groups a track whose raw label flips batch-to-batch under one sticky chip instead of churning between two', () => {
-    // Mirrors `detection-overlay-logic.spec.ts#electStickyLabels`'s own "incumbent holds under
-    // alternating noise" case: with matched, moderate confidence neither label ever leads by the
-    // switch margin, so the track's elected label stays its first observation, "plant" — even though
-    // the newest batch's own raw label is "helicopter". Pre-item-2, this would have surfaced as two
-    // separate chips (one per raw label, each blinking in as the other blinked out); the strip now
-    // shows the one stable identity the operator actually cares about.
-    const newer = result({
-      capturedAt: '2026-07-23T10:00:01Z',
-      detections: [trackedDetection({ label: 'helicopter', confidence: 0.5 }, 7)],
-    });
-    const older = result({
-      capturedAt: '2026-07-23T10:00:00Z',
-      detections: [trackedDetection({ label: 'plant', confidence: 0.5 }, 7)],
-    });
-    expect(stripChips([newer, older])).toEqual([{ label: 'plant', count: 1, hidden: false }]);
+  // --- Wire label grouping (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6, wave W3.2) -------------
+
+  it('groups a tracked detection under its world object\'s wire-elected label, not its raw per-batch label', () => {
+    // The world model already elected "plant" for track 7; the newest batch's own raw detector label
+    // is "helicopter" (a die-roll on an open-vocab model) — the wire label wins the grouping.
+    const r = result({ detections: [trackedDetection({ label: 'helicopter', confidence: 0.5 }, 7)] });
+    const worldObjectsById = new Map([[7, worldObject(7, 'plant')]]);
+    expect(stripChips([r], worldObjectsById)).toEqual([{ label: 'plant', count: 1, hidden: false }]);
+  });
+
+  it('a tracked detection with no matching world object yet falls back to its raw label — the transient pre-arrival gap', () => {
+    const r = result({ detections: [trackedDetection({ label: 'helicopter' }, 7)] });
+    expect(stripChips([r], new Map())).toEqual([{ label: 'helicopter', count: 1, hidden: false }]);
+  });
+
+  it('a tracked detection whose world object has no elected identity yet also falls back to its raw label', () => {
+    const r = result({ detections: [trackedDetection({ label: 'helicopter' }, 7)] });
+    const worldObjectsById = new Map([[7, worldObject(7)]]); // no `identity` group at all
+    expect(stripChips([r], worldObjectsById)).toEqual([{ label: 'helicopter', count: 1, hidden: false }]);
+  });
+
+  it('an untracked detection is never looked up at all — same raw label regardless of worldObjectsById', () => {
+    const r = result({ detections: [detection({ label: 'car' })] });
+    const worldObjectsById = new Map([[999, worldObject(999, 'unrelated')]]);
+    expect(stripChips([r], worldObjectsById)).toEqual([{ label: 'car', count: 1, hidden: false }]);
+  });
+
+  it('defaults worldObjectsById to empty — every label is used raw, unchanged from before wave W3.2', () => {
+    const r = result({ detections: [trackedDetection({ label: 'car' }, 7)] });
+    expect(stripChips([r])).toEqual([{ label: 'car', count: 1, hidden: false }]);
   });
 
   it('caps observed labels at the given cap', () => {
@@ -105,12 +135,12 @@ describe('stripChips', () => {
 
   it('marks an observed label hidden when it is in labelDenyFilter, keeping its real count', () => {
     const r = result({ detections: [detection({ label: 'person' }), detection({ label: 'person' })] });
-    expect(stripChips([r], ['person'])).toEqual([{ label: 'person', count: 2, hidden: true }]);
+    expect(stripChips([r], new Map(), ['person'])).toEqual([{ label: 'person', count: 2, hidden: true }]);
   });
 
   it('appends a denied label that no longer appears in results at all, count frozen at 0', () => {
     const r = result({ detections: [detection({ label: 'car' })] });
-    expect(stripChips([r], ['truck'])).toEqual([
+    expect(stripChips([r], new Map(), ['truck'])).toEqual([
       { label: 'car', count: 1, hidden: false },
       { label: 'truck', count: 0, hidden: true },
     ]);
@@ -118,12 +148,12 @@ describe('stripChips', () => {
 
   it('never double-counts a label that is both observed and denied', () => {
     const r = result({ detections: [detection({ label: 'person' })] });
-    expect(stripChips([r], ['person'])).toEqual([{ label: 'person', count: 1, hidden: true }]);
+    expect(stripChips([r], new Map(), ['person'])).toEqual([{ label: 'person', count: 1, hidden: true }]);
   });
 
   it('denied-only labels are still subject to the cap', () => {
     const denyFilter = Array.from({ length: STRIP_CHIP_CAP + 3 }, (_, i) => `d${i}`);
-    expect(stripChips([], denyFilter).length).toBe(STRIP_CHIP_CAP);
+    expect(stripChips([], new Map(), denyFilter).length).toBe(STRIP_CHIP_CAP);
   });
 
   it('defaults labelDenyFilter to [] — nothing renders hidden without an explicit deny-list', () => {

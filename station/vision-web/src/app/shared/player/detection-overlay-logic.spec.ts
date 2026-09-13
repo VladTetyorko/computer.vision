@@ -4,7 +4,6 @@ import {
   DEFAULT_DECLUTTER_LEVEL,
   DEFAULT_MODEL_KEY,
   DETECTION_STALE_CUTOFF_SECONDS,
-  EXTRAPOLATION_MATCH_GATE,
   EXTRAPOLATION_MAX_MS,
   LOCK_DIM_ALPHA_PERCENT,
   MAX_PAINTED_LABELS,
@@ -12,13 +11,10 @@ import {
   NOTABLE_TOP_K,
   STALE_FADE_ALPHA_PERCENT,
   STALE_FADE_BATCH_MULTIPLIER,
-  STICKY_LABEL_SWITCH_MARGIN,
-  STICKY_LABEL_SWITCH_STREAK,
-  STICKY_LABEL_VOTE_WINDOW,
   SUB_SCALE_PX,
   T2_ALPHA_PERCENT,
   TRAIL_WINDOW_MS,
-  applyStickyLabels,
+  UNMATCHED_MATCH_GATE_DISTANCE,
   averageBatchIntervalMs,
   canvasBackingSize,
   classBucket,
@@ -30,7 +26,6 @@ import {
   detectionTiers,
   detectionsPausedNotice,
   distinctModelKeys,
-  electStickyLabels,
   estimatedOnScreenAtMs,
   extrapolateDetections,
   findPredecessorResult,
@@ -41,16 +36,19 @@ import {
   modelHue,
   overlaySyncLatencySeconds,
   placeLabels,
+  resolveDetectionTiers,
+  resolveDisplayDetections,
   selectDetectionResult,
   shouldDrawOverlay,
   tierAlphaPercent,
   tierBoxColor,
   tiersForDeclutterLevel,
   trackTrails,
+  worldObjectsByTrackId,
   type DetectionTierContext,
   type LabelCandidate,
 } from './detection-overlay-logic';
-import type { Detection, DetectionResult } from '../../core/api/models';
+import type { Detection, DetectionResult, WorldObject } from '../../core/api/models';
 
 function result(partial: Partial<DetectionResult> = {}): DetectionResult {
   return {
@@ -526,130 +524,182 @@ function tierContext(partial: Partial<DetectionTierContext> = {}): DetectionTier
   };
 }
 
-// --- Sticky labels per track (docs/plans/done/TRACK-IDENTITY-PLAN.md §L3 item 1) ---------------------------
+// --- World objects from the wire (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6, wave W3.2) --------------
 
-/** Builds a `results` batch list (newest-first) from oldest-first `(label, confidence)` observations for
- *  one track — {@link electStickyLabels}/{@link electFromObservations}'s own replay direction, reversed
- *  here once so every test can state its scenario in the natural "what happened, in order" reading. */
-function observationBatches(trackId: number, observationsOldestFirst: readonly [string, number][]): DetectionResult[] {
-  return [...observationsOldestFirst]
-    .reverse()
-    .map(([label, confidence], index) =>
-      result({
-        frameSequence: index,
-        detections: [trackedDetection({ label, confidence }, trackId)],
-      }),
-    );
+/** A minimal {@link WorldObject} builder — every field {@link resolveDisplayDetections}/
+ *  {@link resolveDetectionTiers}/`worldObjectsByTrackId` actually read, nothing more. */
+function testWorldObject(
+  trackId: number,
+  tier: WorldObject['render']['tier'],
+  partial: { label?: string; box?: Detection['box']; predictedBox?: Detection['box'] } = {},
+): WorldObject {
+  return {
+    state: {
+      id: trackId,
+      lifecycle: 'CONFIRMED',
+      streamId: 's-0',
+      ...(partial.label !== undefined ? { identity: { label: partial.label, labelRaw: partial.label, candidates: [], stability: 1 } } : {}),
+      ...(partial.box !== undefined || partial.predictedBox !== undefined
+        ? {
+            kinematics: {
+              box: partial.box ?? partial.predictedBox!,
+              ...(partial.predictedBox !== undefined ? { predictedBox: partial.predictedBox } : {}),
+              horizonMillis: 0,
+              velocityX: 0,
+              velocityY: 0,
+              displacementX: 0,
+              displacementY: 0,
+              motionCompensated: false,
+            },
+          }
+        : {}),
+    },
+    operator: { followed: false, denied: false },
+    event: {},
+    render: { tier },
+  };
 }
 
-describe('electStickyLabels', () => {
-  it('a track with a single observation elects its own raw label', () => {
-    const elected = electStickyLabels(observationBatches(7, [['plant', 0.7]]));
-    expect(elected.get(7)).toBe('plant');
+describe('worldObjectsByTrackId', () => {
+  it('keys by state.id', () => {
+    const wo = testWorldObject(7, 'T1');
+    expect(worldObjectsByTrackId([wo]).get(7)).toBe(wo);
   });
 
-  it('incumbent holds under alternating noise — no single challenger ever leads by the margin', () => {
-    // Mirrors L1's own "incumbent holds under alternating noise" case (docs/plans/active/
-    // TRACK-IDENTITY-PLAN.md §L1 item 5): a die-roll label alternates every pass, but the two
-    // candidates' tallies stay within STICKY_LABEL_SWITCH_MARGIN of each other throughout, so the
-    // very first observation's label — "plant" — never actually gets out-voted.
-    const observations: [string, number][] = [
-      ['plant', 0.5],
-      ['helicopter', 0.5],
-      ['plant', 0.5],
-      ['helicopter', 0.5],
-      ['plant', 0.5],
-      ['helicopter', 0.5],
-    ];
-    const elected = electStickyLabels(observationBatches(7, observations));
-    expect(elected.get(7)).toBe('plant');
-  });
-
-  it('switches after a genuine streak — a challenger leading by the margin for STICKY_LABEL_SWITCH_STREAK passes in a row', () => {
-    expect(STICKY_LABEL_SWITCH_STREAK).toBe(3);
-    expect(STICKY_LABEL_SWITCH_MARGIN).toBe(1.5);
-    const observations: [string, number][] = [
-      ['plant', 0.3], // incumbent, low weight
-      ['helicopter', 0.9], // streak 1 (0.9 > 0.3 * 1.5)
-      ['helicopter', 0.9], // streak 2
-      ['helicopter', 0.9], // streak 3 — switches
-    ];
-    const elected = electStickyLabels(observationBatches(7, observations));
-    expect(elected.get(7)).toBe('helicopter');
-  });
-
-  it('does not switch one pass short of the required streak', () => {
-    const observations: [string, number][] = [
-      ['plant', 0.3],
-      ['helicopter', 0.9],
-      ['helicopter', 0.9], // only streak 2 — one short of STICKY_LABEL_SWITCH_STREAK (3)
-    ];
-    const elected = electStickyLabels(observationBatches(7, observations));
-    expect(elected.get(7)).toBe('plant');
-  });
-
-  it('only the most recent STICKY_LABEL_VOTE_WINDOW observations count', () => {
-    expect(STICKY_LABEL_VOTE_WINDOW).toBe(10);
-    // The true oldest observation ("phantom", high weight) falls outside the 10-observation window;
-    // if it were wrongly included, its weight would never be out-voted by the low-confidence "steady"
-    // run that follows (0.1 * 10 = 1.0 never exceeds 1.0 * 1.5), so the test only passes once windowing
-    // is applied correctly.
-    const observations: [string, number][] = [
-      ['phantom', 1.0],
-      ...Array.from({ length: 10 }, (): [string, number] => ['steady', 0.1]),
-    ];
-    const elected = electStickyLabels(observationBatches(7, observations));
-    expect(elected.get(7)).toBe('steady');
-  });
-
-  it('elects independently per track — one track cannot influence another', () => {
-    const trackSeven = observationBatches(7, [['plant', 0.5]]);
-    const trackNine = observationBatches(9, [['car', 0.5]]);
-    const merged: DetectionResult[] = trackSeven.map((batch, index) => ({
-      ...batch,
-      detections: [...batch.detections, ...trackNine[index].detections],
-    }));
-    const elected = electStickyLabels(merged);
-    expect(elected.get(7)).toBe('plant');
-    expect(elected.get(9)).toBe('car');
-  });
-
-  it('returns an empty map for no results', () => {
-    expect(electStickyLabels([]).size).toBe(0);
-  });
-
-  it('ignores untracked detections entirely — nothing to elect over', () => {
-    const untracked = result({ detections: [fullDetection({ label: 'car' })] });
-    expect(electStickyLabels([untracked]).size).toBe(0);
+  it('returns an empty map for no world objects', () => {
+    expect(worldObjectsByTrackId([]).size).toBe(0);
   });
 });
 
-describe('applyStickyLabels', () => {
-  it('leaves an untracked detection completely unchanged — same object reference', () => {
-    const untracked = fullDetection({ label: 'car' });
-    const [result0] = applyStickyLabels([untracked], new Map([[7, 'truck']]));
-    expect(result0).toBe(untracked);
+describe('resolveDisplayDetections', () => {
+  it('a matched, visible detection draws the wire\'s predictedBox and elected label', () => {
+    const box = { x: 0.4, y: 0.4, width: 0.1, height: 0.1 };
+    const tracked = trackedDetection({ label: 'helicopter' }, 7);
+    const selected = result({ detections: [tracked] });
+    const worldObjectsById = worldObjectsByTrackId([
+      testWorldObject(7, 'T1', { label: 'plant', predictedBox: box }),
+    ]);
+    const [displayed] = resolveDisplayDetections(selected, undefined, Date.parse(selected.capturedAt), worldObjectsById);
+    expect(displayed.label).toBe('plant');
+    expect(displayed.box).toEqual(box);
   });
 
-  it('swaps a tracked detection\'s label for its election entry, keeping every other field', () => {
-    const tracked = trackedDetection({ label: 'plant', confidence: 0.6 }, 7);
-    const [displayed] = applyStickyLabels([tracked], new Map([[7, 'helicopter']]));
-    expect(displayed.label).toBe('helicopter');
-    expect(displayed.confidence).toBe(0.6);
-    expect(displayed.box).toBe(tracked.box);
-    expect(displayed.track).toBe(tracked.track);
-  });
-
-  it('keeps the same object reference once the sticky label already equals the raw one — the L1-deployed no-op case', () => {
+  it('falls back to kinematics.box, then the raw detection box, when predictedBox/kinematics are absent', () => {
+    const box = { x: 0.4, y: 0.4, width: 0.1, height: 0.1 };
     const tracked = trackedDetection({ label: 'car' }, 7);
-    const [displayed] = applyStickyLabels([tracked], new Map([[7, 'car']]));
-    expect(displayed).toBe(tracked);
+    const selected = result({ detections: [tracked] });
+
+    const withKinematicsBox = worldObjectsByTrackId([testWorldObject(7, 'T1', { box })]);
+    const [viaKinematics] = resolveDisplayDetections(selected, undefined, Date.parse(selected.capturedAt), withKinematicsBox);
+    expect(viaKinematics.box).toEqual(box);
+
+    const withNoKinematics = worldObjectsByTrackId([testWorldObject(7, 'T1')]);
+    const [viaRaw] = resolveDisplayDetections(selected, undefined, Date.parse(selected.capturedAt), withNoKinematics);
+    expect(viaRaw.box).toBe(tracked.box);
   });
 
-  it('keeps the same object reference when the track has no election entry yet', () => {
+  it('falls back to the raw label when the world object has no elected identity yet', () => {
     const tracked = trackedDetection({ label: 'car' }, 7);
-    const [displayed] = applyStickyLabels([tracked], new Map());
-    expect(displayed).toBe(tracked);
+    const selected = result({ detections: [tracked] });
+    const worldObjectsById = worldObjectsByTrackId([testWorldObject(7, 'T1')]);
+    const [displayed] = resolveDisplayDetections(selected, undefined, Date.parse(selected.capturedAt), worldObjectsById);
+    expect(displayed.label).toBe('car');
+  });
+
+  it('a matched, HIDDEN detection is dropped from the returned list entirely', () => {
+    const hidden = trackedDetection({ label: 'car' }, 7);
+    const visible = trackedDetection({ label: 'person' }, 9);
+    const selected = result({ detections: [hidden, visible] });
+    const worldObjectsById = worldObjectsByTrackId([testWorldObject(7, 'HIDDEN'), testWorldObject(9, 'T1')]);
+    const displayed = resolveDisplayDetections(selected, undefined, Date.parse(selected.capturedAt), worldObjectsById);
+    expect(displayed.some((d) => d.track?.id === 7)).toBe(false);
+    expect(displayed.length).toBe(1);
+    expect(displayed[0].track?.id).toBe(9);
+  });
+
+  it('an unmatched detection (no track id) still runs through local projection, exactly as before this wave', () => {
+    const previous = result({
+      capturedAt: '2026-07-22T00:00:00.000Z',
+      detections: [fullDetection({ box: { x: 0.15, y: 0.15, width: 0.1, height: 0.1 } })],
+    });
+    const selectedDetection = fullDetection({ box: { x: 0.2, y: 0.15, width: 0.1, height: 0.1 } });
+    const selected = result({ capturedAt: '2026-07-22T00:00:01.000Z', detections: [selectedDetection] });
+    const targetMs = Date.parse(selected.capturedAt) + 500;
+
+    const [displayed] = resolveDisplayDetections(selected, previous, targetMs, new Map());
+    expect(displayed.box.x).toBeCloseTo(0.225, 10); // identical to extrapolateDetections's own gated-match case
+  });
+
+  it('a tracked detection with no world object yet (transient pre-arrival gap) also runs through local projection', () => {
+    const previous = result({
+      capturedAt: '2026-07-22T00:00:00.000Z',
+      detections: [trackedDetection({ box: { x: 0.15, y: 0.15, width: 0.1, height: 0.1 } }, 5)],
+    });
+    const selected = result({
+      capturedAt: '2026-07-22T00:00:01.000Z',
+      detections: [trackedDetection({ box: { x: 0.25, y: 0.15, width: 0.1, height: 0.1 } }, 5)],
+    });
+    const targetMs = Date.parse(selected.capturedAt) + 500;
+
+    const [displayed] = resolveDisplayDetections(selected, previous, targetMs, new Map());
+    expect(displayed.box.x).toBeCloseTo(0.3, 10); // identical to extrapolateDetections's own track-id-match case
+  });
+
+  it('reassembles in original detection order, mixing matched and unmatched', () => {
+    const matched = trackedDetection({ label: 'car' }, 7);
+    const unmatched = fullDetection({ label: 'bicycle', box: { x: 0.6, y: 0.6, width: 0.1, height: 0.1 } });
+    const selected = result({ detections: [unmatched, matched] });
+    const worldObjectsById = worldObjectsByTrackId([testWorldObject(7, 'T2')]);
+    const displayed = resolveDisplayDetections(selected, undefined, Date.parse(selected.capturedAt), worldObjectsById);
+    expect(displayed[0]).toBe(unmatched); // unmatched, no predecessor -> passes through raw, same reference
+    expect(displayed[1].track?.id).toBe(7);
+  });
+});
+
+describe('resolveDetectionTiers', () => {
+  it('a matched, visible detection uses the wire\'s own render.tier', () => {
+    const tracked = trackedDetection({ label: 'car' }, 7);
+    const worldObjectsById = worldObjectsByTrackId([testWorldObject(7, 'T2')]);
+    const tiers = resolveDetectionTiers([tracked], worldObjectsById, tierContext());
+    expect(tiers.get(tracked)).toBe('T2');
+  });
+
+  it('hover still promotes a matched detection to T0 over its server tier', () => {
+    const tracked = trackedDetection({ label: 'car' }, 7);
+    const worldObjectsById = worldObjectsByTrackId([testWorldObject(7, 'T2')]);
+    const tiers = resolveDetectionTiers([tracked], worldObjectsById, tierContext({ hoveredDetection: tracked }));
+    expect(tiers.get(tracked)).toBe('T0');
+  });
+
+  it('an unmatched detection is delegated to detectionTiers unchanged', () => {
+    const tiny = fullDetection({
+      label: 'tiny',
+      box: { x: 0, y: 0, width: UNDER_SUB_SCALE_FRACTION, height: UNDER_SUB_SCALE_FRACTION },
+    });
+    const tiers = resolveDetectionTiers([tiny], new Map(), tierContext());
+    expect(tiers.get(tiny)).toBe('T3'); // sub-scale, exactly detectionTiers's own rule
+  });
+
+  it('a HIDDEN world object never reaches here (resolveDisplayDetections already dropped it) — the caller-side ?? \'T2\' fallback is provably unreachable', () => {
+    const hidden = trackedDetection({ label: 'car' }, 7);
+    const selected = result({ detections: [hidden] });
+    const worldObjectsById = worldObjectsByTrackId([testWorldObject(7, 'HIDDEN')]);
+    const displayed = resolveDisplayDetections(selected, undefined, Date.parse(selected.capturedAt), worldObjectsById);
+    // Proof: `hidden` (or anything correlating to track 7) is absent from `displayed` — not merely
+    // absent from a tier map — so player.ts's `tiers.get(detection) ?? 'T2'` at the draw call site can
+    // never even be evaluated for it; there is nothing left in the list to iterate.
+    expect(displayed.length).toBe(0);
+    const tiers = resolveDetectionTiers(displayed, worldObjectsById, tierContext());
+    expect(tiers.size).toBe(0);
+  });
+
+  it('mixes matched and unmatched detections, each resolved by its own rule', () => {
+    const matched = trackedDetection({ label: 'car' }, 7);
+    const unmatched = fullDetection({ label: 'bicycle', box: { x: 0, y: 0, width: 0.2, height: 0.2 } });
+    const worldObjectsById = worldObjectsByTrackId([testWorldObject(7, 'T3')]);
+    const tiers = resolveDetectionTiers([matched, unmatched], worldObjectsById, tierContext());
+    expect(tiers.get(matched)).toBe('T3');
+    expect(tiers.get(unmatched)).toBe('T1'); // sole size-eligible remainder, wins the top-K ranking alone
   });
 });
 
@@ -841,7 +891,7 @@ describe('extrapolateDetections', () => {
       capturedAt: '2026-07-22T00:00:01.000Z',
       detections: [trackedDetection({ box: { x: 0.9, y: 0.9, width: 0.05, height: 0.05 } }, 3)],
     });
-    // Center jump of ~1.27 normalized units, far beyond EXTRAPOLATION_MATCH_GATE (0.15) — pass 1
+    // Center jump of ~1.27 normalized units, far beyond UNMATCHED_MATCH_GATE_DISTANCE (0.15) — pass 1
     // (track id) still fires regardless, since the tracker itself already vouches for the identity.
     const [projected] = extrapolateDetections(selected, previous, Date.parse(selected.capturedAt) + 1);
     expect(projected.box.x).toBeCloseTo(0.9009, 6);
@@ -856,7 +906,7 @@ describe('extrapolateDetections', () => {
     const selected = result({
       capturedAt: '2026-07-22T00:00:01.000Z',
       // Tracking just picked this object up this frame — selected carries a track, previous doesn't;
-      // center distance 0.05 is inside EXTRAPOLATION_MATCH_GATE (0.15), same label ('car' default).
+      // center distance 0.05 is inside UNMATCHED_MATCH_GATE_DISTANCE (0.15), same label ('car' default).
       // Center moves 0.2 -> 0.25 over 1s -> 0.05/s velocity.
       detections: [trackedDetection({ box: { x: 0.2, y: 0.15, width: 0.1, height: 0.1 } }, 9)],
     });
@@ -986,7 +1036,7 @@ describe('extrapolateDetections', () => {
     );
 
     // A 1ms max horizon still projects (default gate matches), but freezes almost immediately past capturedAt.
-    const [tinyHorizon] = extrapolateDetections(selected, previous, targetMs, 1, EXTRAPOLATION_MATCH_GATE);
+    const [tinyHorizon] = extrapolateDetections(selected, previous, targetMs, 1, UNMATCHED_MATCH_GATE_DISTANCE);
     expect(tinyHorizon.box.x).toBeCloseTo(0.20005, 8); // rawX (0.2) + velocity(0.00005/ms) * 1ms
     expect(tinyHorizon.box.x).not.toBe(selectedDetection.box.x);
   });

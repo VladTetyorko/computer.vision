@@ -1,5 +1,4 @@
-import type { Detection, DetectionResult } from '../../core/api/models';
-import { electStickyLabels } from './detection-overlay-logic';
+import type { Detection, DetectionResult, WorldObject } from '../../core/api/models';
 
 /**
  * Pure derivation behind `DetectionsStrip` (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-3, wave W5) —
@@ -13,16 +12,23 @@ import { electStickyLabels } from './detection-overlay-logic';
  * own `labelDenyFilter` from outside `results` entirely — a concern `deriveChips`'s existing callers
  * neither need nor expect.
  *
- * **Sliding-window aggregation + sticky labels (docs/plans/done/TRACK-IDENTITY-PLAN.md §L3 item 2)**:
- * `stripChips` used to scan only the single newest batch — the strip's own "person ×3" chips blinked in
- * and out at whatever cadence the CV pipeline batches at, and (before item 1) churned between multiple
- * distinct chips for the same physical object every time its raw label flipped. Both are fixed the same
- * way: aggregate over the last {@link STRIP_WINDOW_SECONDS} of `results` instead of `results[0]` alone
- * (`count` becomes *max concurrent* within the window, not a sum — the same object re-detected every
- * batch must not multiply its own count), and group by {@link electStickyLabels}'s election (imported
- * from `detection-overlay-logic.ts` rather than reimplemented — one election, shared by the canvas
- * overlay and this strip, so a chip's label and the box it corresponds to can never quietly disagree)
- * instead of each detection's raw per-batch label.
+ * **Sliding-window aggregation (docs/plans/done/TRACK-IDENTITY-PLAN.md §L3 item 2)**: `stripChips`
+ * used to scan only the single newest batch — the strip's own "person ×3" chips blinked in and out at
+ * whatever cadence the CV pipeline batches at. Fixed by aggregating over the last
+ * {@link STRIP_WINDOW_SECONDS} of `results` instead of `results[0]` alone (`count` becomes *max
+ * concurrent* within the window, not a sum — the same object re-detected every batch must not multiply
+ * its own count).
+ *
+ * **Wire label grouping, wave W3.2** (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6): a tracked
+ * detection groups under its {@link WorldObject}'s own `state.identity.label` (via
+ * `detection-overlay-logic.ts#worldObjectsByTrackId` — the identical lookup the canvas overlay itself
+ * now reads, so a chip's label and the box it corresponds to can never quietly disagree), replacing
+ * the client-side election this file used to import for the same purpose. This is a **per-current-
+ * track** lookup, not a historical replay: a track's label within the aggregation window is whatever
+ * the wire says *right now* for that track id, not what it was when each historical batch in the
+ * window was actually captured — there is no per-batch historical world-object snapshot retained to
+ * do better than that. A track with no world object yet (or on a caller that never threads one in)
+ * falls back to its raw per-batch label, unchanged.
  */
 
 /** One chip the strip renders: an aggregated label with its current-batch count and whether it is
@@ -56,13 +62,17 @@ function windowedResults(results: readonly DetectionResult[], windowSeconds: num
   return results.filter((result) => Date.parse(result.capturedAt) >= cutoffMs);
 }
 
-/** The label this detection should be grouped under — the {@link electStickyLabels} entry for a
- *  tracked detection (mirrors `detection-overlay-logic.ts#applyStickyLabels`'s own fallback rule: no
- *  election entry yet degrades to the raw label, never a fabricated guess), the raw label unchanged
- *  for an untracked one (no identity to elect over). */
-function displayLabel(detection: Detection, stickyLabels: ReadonlyMap<number, string>): string {
+/** The label this detection should be grouped under — the matching {@link WorldObject}'s own
+ *  `state.identity.label` for a tracked detection (mirrors
+ *  `detection-overlay-logic.ts#resolveDisplayDetections`'s own fallback rule: no world object, or one
+ *  with no elected identity yet, degrades to the raw label, never a fabricated guess), the raw label
+ *  unchanged for an untracked one (no world object to look up at all). */
+function displayLabel(detection: Detection, worldObjectsById: ReadonlyMap<number, WorldObject>): string {
   const trackId = detection.track?.id;
-  return trackId === undefined ? detection.label : (stickyLabels.get(trackId) ?? detection.label);
+  if (trackId === undefined) {
+    return detection.label;
+  }
+  return worldObjectsById.get(trackId)?.state.identity?.label ?? detection.label;
 }
 
 /**
@@ -75,10 +85,9 @@ function displayLabel(detection: Detection, stickyLabels: ReadonlyMap<number, st
  * documented order — the order its label was *first* encountered scanning the window newest-to-oldest);
  * denied-only labels are appended after, still subject to the same cap.
  *
- * Election ({@link electStickyLabels}) runs over the **full** `results` given, not just the windowed
- * slice — a track's vote window (item 1's own `STICKY_LABEL_VOTE_WINDOW`, 10 observations) can span
- * more history than this strip's own 5s aggregation window, and the two are deliberately independent
- * concerns (which label to call this track vs. how far back to count it as "currently present").
+ * `worldObjectsById` defaults to an empty map — the honest choice for a caller with no per-asset
+ * `DetectionsStore.worldObjects()` to thread in (or one whose asset hasn't produced any yet): every
+ * detection's raw label is used, unchanged, exactly as this file behaved before wave W3.2.
  *
  * `labelDenyFilter` defaults to `[]` — the honest choice for a caller with no deny-list context of
  * its own (Live page's read-only usage, `shared/player/detections-strip.ts`'s own `streamId`-gated
@@ -86,11 +95,11 @@ function displayLabel(detection: Detection, stickyLabels: ReadonlyMap<number, st
  */
 export function stripChips(
   results: readonly DetectionResult[],
+  worldObjectsById: ReadonlyMap<number, WorldObject> = new Map(),
   labelDenyFilter: readonly string[] = [],
   cap: number = STRIP_CHIP_CAP,
   windowSeconds: number = STRIP_WINDOW_SECONDS,
 ): readonly StripChip[] {
-  const stickyLabels = electStickyLabels(results);
   const windowed = windowedResults(results, windowSeconds);
 
   const maxCountByLabel = new Map<string, number>();
@@ -99,7 +108,7 @@ export function stripChips(
   for (const result of windowed) {
     const countsThisBatch = new Map<string, number>();
     for (const detection of result.detections) {
-      const label = displayLabel(detection, stickyLabels);
+      const label = displayLabel(detection, worldObjectsById);
       countsThisBatch.set(label, (countsThisBatch.get(label) ?? 0) + 1);
     }
     for (const [label, count] of countsThisBatch) {

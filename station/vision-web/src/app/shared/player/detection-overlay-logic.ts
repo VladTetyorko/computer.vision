@@ -1,4 +1,4 @@
-import type { Detection, DetectionResult } from '../../core/api/models';
+import type { Detection, DetectionResult, WorldObject } from '../../core/api/models';
 import type { Transport } from './player-recovery';
 import { CV_STATUS_FRESH_SECONDS } from '../../core/detections/detections-logic';
 
@@ -207,8 +207,13 @@ export const EXTRAPOLATION_MAX_MS = 800;
  * `vision.application.pipeline.extrapolation.match-gate` (`DetectionExtrapolator
  * .MATCH_GATE_DISTANCE`) — see {@link EXTRAPOLATION_MAX_MS}'s own comment on why this is hand-mirrored
  * rather than server-fetched.
+ *
+ * **Renamed, wave W3.2** (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6): this whole matching/
+ * projection pipeline is no longer invoked for every tracked object — {@link resolveDisplayDetections}
+ * scopes it to the *unmatched* subset only (no track id, or a track id with no {@link WorldObject}
+ * yet), so a name implying "every tracked object" would no longer be accurate.
  */
-export const EXTRAPOLATION_MATCH_GATE = 0.15;
+export const UNMATCHED_MATCH_GATE_DISTANCE = 0.15;
 
 function boxCenter(box: Detection['box']): { readonly x: number; readonly y: number } {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
@@ -314,8 +319,13 @@ function matchDetections(
  * (mirrors the server's exact clamp — the box's *origin*, not its center, is what gets clamped, so a
  * box already touching an edge can still project its far edge past `[0,1]`, byte-identical to the
  * server's own behavior).
+ *
+ * **Renamed, wave W3.2** (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6): only called for a
+ * detection {@link resolveDisplayDetections} has already classified as *unmatched* — no track id, or a
+ * track id with no {@link WorldObject} yet — never for an object the wire already has a `kinematics`
+ * fact for.
  */
-function extrapolateOne(selected: Detection, previous: Detection, deltaMs: number, extrapolateMs: number): Detection {
+function projectUnmatchedOne(selected: Detection, previous: Detection, deltaMs: number, extrapolateMs: number): Detection {
   const selectedCenter = boxCenter(selected.box);
   const previousCenter = boxCenter(previous.box);
   const velocityXPerMs = (selectedCenter.x - previousCenter.x) / deltaMs;
@@ -355,13 +365,19 @@ function extrapolateOne(selected: Detection, previous: Detection, deltaMs: numbe
  * `targetMs` further out than that **freezes** at exactly the capped projection rather than running
  * boxes off into the distance forever (a stalled/outaged detector holds its last known trajectory, it
  * doesn't keep inventing motion).
+ *
+ * **Scope narrowed, wave W3.2** (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6): still a generic,
+ * independently-testable function (every test below calls it directly), but its one production call
+ * site, {@link resolveDisplayDetections}, now feeds it only the *unmatched* subset of a batch — a
+ * detection with no track id, or a track id {@link WorldObject} hasn't reported yet. A matched,
+ * visible object reads its motion straight off the wire (`kinematics.predictedBox`/`box`) instead.
  */
 export function extrapolateDetections(
   selected: DetectionResult,
   previous: DetectionResult | undefined,
   targetMs: number,
   maxExtrapolationMs: number = EXTRAPOLATION_MAX_MS,
-  matchGate: number = EXTRAPOLATION_MATCH_GATE,
+  matchGate: number = UNMATCHED_MATCH_GATE_DISTANCE,
 ): readonly Detection[] {
   const selectedDetections = selected.detections;
   if (previous === undefined) {
@@ -388,7 +404,7 @@ export function extrapolateDetections(
     const previousIndex = matchedPreviousIndex[index];
     return previousIndex < 0
       ? detection
-      : extrapolateOne(detection, previousDetections[previousIndex], deltaMs, extrapolateMs);
+      : projectUnmatchedOne(detection, previousDetections[previousIndex], deltaMs, extrapolateMs);
   });
 }
 
@@ -424,6 +440,108 @@ export function findPredecessorResult(
     }
   }
   return undefined;
+}
+
+// --- Render tier / label / motion from the wire (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6,
+// wave W3.2) ----------------------------------------------------------------------------------------
+// `WorldModel` (vision-perception, server-side) now owns render tier, elected label, and tracked-
+// object motion for anything it has already folded a wire `WorldObject` for (the `tracks:<assetId>`
+// live topic, `core/detections/detections-store.ts#worldObjects`) — this is where the client stops
+// re-deriving those three facts for a *matched* detection and reads them off the wire instead. The
+// machinery above (`matchDetections`/{@link projectUnmatchedOne}/{@link extrapolateDetections}) keeps
+// earning its keep for the *unmatched* remainder: an untracked detection, or a tracked one whose world
+// object hasn't arrived yet — the two feeds are not frame-locked
+// (`core/detections/detections-store.ts#worldObjects`'s own doc comment) — still has the same HLS/WHEP
+// glass-to-glass staleness problem this file has always solved locally.
+
+/**
+ * `worldObjects` keyed by `state.id` (the track id — the correlation key against `Detection.track?.id`,
+ * both numeric ids from the same cv-service tracker) — the one lookup both
+ * {@link resolveDisplayDetections}/{@link resolveDetectionTiers} and
+ * `detections-strip-logic.ts#stripChips` build against, so a detection and a world object are never
+ * matched by two independently-written key functions.
+ */
+export function worldObjectsByTrackId(worldObjects: readonly WorldObject[]): ReadonlyMap<number, WorldObject> {
+  const byTrackId = new Map<number, WorldObject>();
+  for (const worldObject of worldObjects) {
+    byTrackId.set(worldObject.state.id, worldObject);
+  }
+  return byTrackId;
+}
+
+/**
+ * The one call `shared/player/player.ts#drawDetections` makes to decide what to draw — replacing the
+ * old three-function trio this file used to run for every batch: raw extrapolation, plus a client-side
+ * label-election stopgap and its own apply step (both retired, see this section's own header comment).
+ * Every detection in `selected.detections` falls into exactly one of three buckets:
+ *
+ *  - **Matched, visible** — `detection.track.id` maps (via `worldObjectsById`) to a {@link WorldObject}
+ *    whose `render.tier !== 'HIDDEN'`. Its box becomes the wire's own `kinematics.predictedBox` — a
+ *    server-frame-cadence coast to *this frame's instant*, **not** the same latency problem
+ *    {@link estimatedOnScreenAtMs}/this file's own HLS glass-to-glass math solves; using it anyway is a
+ *    deliberate, disclosed simplification, not an equivalent replacement — falling back to
+ *    `kinematics.box`, then the detection's own raw `box`. Its label becomes `identity.label` when
+ *    elected, else the detector's own raw label.
+ *  - **Matched, hidden** — maps to a `WorldObject` with `render.tier === 'HIDDEN'` (deny-filtered or
+ *    denied). Dropped from the returned list **entirely**, not merely left untiered — see
+ *    {@link resolveDetectionTiers}'s own doc comment for why "absent from the tier map" alone would not
+ *    be a safe way to hide a box on this codebase's own `?? 'T2'` fallback at the draw call site.
+ *  - **Unmatched** — no track id, or a track id with no world object yet, including every detection on
+ *    a host that never binds `worldObjects` at all (e.g. `features/command/asset-panel.html`, which
+ *    thereby degrades to exactly this file's pre-W3.2 behavior). Runs through the untouched
+ *    `matchDetections`/{@link extrapolateDetections} pipeline, scoped to just this subset — pass 1's
+ *    exact track-id match still matters here: it is what stops a same-label crossing-object swap during
+ *    the transient gap before a genuinely tracked object's first `tracks:` arrival.
+ *
+ * Reassembled in `selected.detections`' own original order. **One disclosed behavior change**: a
+ * genuinely-tracked detection with no matching world object yet no longer gets the historical
+ * multi-batch label smoothing the retired client-side election used to provide for every tracked
+ * detection — it shows its raw per-batch label until its first `tracks:` arrival, typically converging
+ * within a frame or two.
+ */
+export function resolveDisplayDetections(
+  selected: DetectionResult,
+  previous: DetectionResult | undefined,
+  targetMs: number,
+  worldObjectsById: ReadonlyMap<number, WorldObject>,
+  maxExtrapolationMs: number = EXTRAPOLATION_MAX_MS,
+  matchGate: number = UNMATCHED_MATCH_GATE_DISTANCE,
+): readonly Detection[] {
+  const selectedDetections = selected.detections;
+  const unmatched: Detection[] = [];
+  const unmatchedOriginalIndex: number[] = [];
+  const resolved: (Detection | undefined)[] = new Array(selectedDetections.length);
+
+  selectedDetections.forEach((detection, index) => {
+    const trackId = detection.track?.id;
+    const worldObject = trackId !== undefined ? worldObjectsById.get(trackId) : undefined;
+    if (worldObject === undefined) {
+      unmatchedOriginalIndex.push(index);
+      unmatched.push(detection);
+      return;
+    }
+    if (worldObject.render.tier === 'HIDDEN') {
+      return; // suppressed — `resolved[index]` stays undefined and is dropped by the filter below
+    }
+    resolved[index] = {
+      ...detection,
+      label: worldObject.state.identity?.label ?? detection.label,
+      box: worldObject.state.kinematics?.predictedBox ?? worldObject.state.kinematics?.box ?? detection.box,
+    };
+  });
+
+  const projectedUnmatched = extrapolateDetections(
+    { ...selected, detections: unmatched },
+    previous,
+    targetMs,
+    maxExtrapolationMs,
+    matchGate,
+  );
+  projectedUnmatched.forEach((detection, i) => {
+    resolved[unmatchedOriginalIndex[i]] = detection;
+  });
+
+  return resolved.filter((detection): detection is Detection => detection !== undefined);
 }
 
 /**
@@ -690,170 +808,12 @@ export function trackTrails(
   return byTrack;
 }
 
-// --- Sticky labels per track (docs/plans/done/TRACK-IDENTITY-PLAN.md §L3 item 1) ---------------------------
-// TRACK-IDENTITY-RESEARCH.md §1's six-layer chain (item 6, "SPA"): an open-vocabulary detector rolls a
-// ~4585-class die on every pass, and every downstream layer — including this one, before this wave —
-// repeated the newest roll verbatim: the painted text, the class-bucket hue ({@link classBucketHue}
-// below), and the hover tooltip all flipped in lockstep with the raw per-frame label. L1
-// (docs/plans/done/TRACK-IDENTITY-PLAN.md §L1, `cv/cv-service/cv_service/tracking/track.py`) is the
-// real fix — a server-side election, emitted on the wire — but ships from a different module on a
-// different runtime; this is the **stopgap + defense** for a cv-service deployment that hasn't (yet)
-// picked it up. {@link electStickyLabels} mirrors L1's contract (confidence-weighted tally,
-// switch-margin + switch-streak hysteresis) purely, client-side, over the batch history
-// `DetectionsStore` already retains (`core/detections/detections-store.ts#DETECTIONS_LIMIT`, up to 50)
-// — no new poll, no persisted per-track state of its own (see {@link electFromObservations}'s own doc
-// comment for why a from-scratch replay beats a stateful accumulator here). **Once L1 deploys and the
-// wire already carries elected labels, this converges to a no-op**: electing over an already-stable
-// input never finds a real challenger, so the incumbent never moves — the two ends do not fight, and
-// this wave never needs a removal step once L1 ships. Untracked detections have no track id to elect
-// over and pass through {@link applyStickyLabels} completely unchanged — raw label, same object
-// reference (`classBucket`'s own "no identity to elect over" case, `detections-strip-logic.ts#stripChips`
-// shares this exact election for its own sliding-window chips — see that module).
-
-/** Observations retained per track for the election tally — mirrors cv-service's own
- *  `CV_TRACK_LABEL_VOTE_WINDOW` (docs/plans/done/TRACK-IDENTITY-PLAN.md §L1 item 1), same default
- *  (10) so both ends of the wire reason about "recent" identically. */
-export const STICKY_LABEL_VOTE_WINDOW = 10;
-
-/** A challenger's confidence-weighted tally must exceed the incumbent's by this multiple before it can
- *  even start a switch streak — mirrors `CV_TRACK_LABEL_SWITCH_MARGIN` (default 1.5). */
-export const STICKY_LABEL_SWITCH_MARGIN = 1.5;
-
-/** Consecutive observations the challenger must keep leading by {@link STICKY_LABEL_SWITCH_MARGIN}
- *  before the elected label actually switches — mirrors `CV_TRACK_LABEL_SWITCH_STREAK` (default 3).
- *  "Consecutive" here means over the observation replay in {@link electFromObservations}, not a
- *  frame/wall-clock count — an observation that doesn't favor the challenger (including one of the
- *  incumbent's own label) breaks the streak, exactly as a vote against it would server-side. */
-export const STICKY_LABEL_SWITCH_STREAK = 3;
-
-interface TrackObservation {
-  readonly label: string;
-  readonly confidence: number;
-}
-
-/**
- * Replays one track's observations, oldest-first, through L1's own tally + margin + streak rule —
- * purely, from scratch, on every call. Deliberately **not** a running accumulator with its own
- * lifecycle: `DetectionsStore.results()` is already the persisted history, and a second stateful copy
- * would just be a second thing that could drift out of sync with it (docs/plans/active/
- * TRACK-IDENTITY-PLAN.md §L3 item 1's own "prefer a pure function… not a stateful class" guidance). At
- * the bound window size (10 observations) and typical on-screen track counts this recomputes cheaply
- * every redraw — the same "full rescan every call" trade `trackTrails` above already makes over the
- * identical `results` history.
- *
- * Election starts at the first observation in the window (L1's own "starts as the first confirmed
- * observation's label"). After each later observation, the tally is updated and the single
- * highest-scoring non-incumbent label is checked against the margin; a label that clears it extends a
- * streak (reset to 1 whenever a *different* label clears it, and to 0 whenever nothing clears it), and
- * once the streak reaches {@link STICKY_LABEL_SWITCH_STREAK} the election switches — the tally then
- * resets to just the new incumbent's own score, mirroring L1's "an old identity fades rather than
- * anchors forever" rather than letting a long-dead label's accumulated weight keep contesting every
- * future observation.
- */
-function electFromObservations(observationsOldestFirst: readonly TrackObservation[]): string {
-  const windowed = observationsOldestFirst.slice(
-    Math.max(0, observationsOldestFirst.length - STICKY_LABEL_VOTE_WINDOW),
-  );
-  let elected = windowed[0].label;
-  const tally = new Map<string, number>();
-  let streakLabel: string | null = null;
-  let streakLength = 0;
-
-  for (const observation of windowed) {
-    tally.set(observation.label, (tally.get(observation.label) ?? 0) + observation.confidence);
-
-    let challenger: string | null = null;
-    let challengerScore = 0;
-    for (const [label, score] of tally) {
-      if (label !== elected && score > challengerScore) {
-        challenger = label;
-        challengerScore = score;
-      }
-    }
-    if (challenger === null || challengerScore <= (tally.get(elected) ?? 0) * STICKY_LABEL_SWITCH_MARGIN) {
-      streakLabel = null;
-      streakLength = 0;
-      continue;
-    }
-
-    streakLength = challenger === streakLabel ? streakLength + 1 : 1;
-    streakLabel = challenger;
-    if (streakLength >= STICKY_LABEL_SWITCH_STREAK) {
-      elected = challenger;
-      tally.clear();
-      tally.set(elected, challengerScore);
-      streakLabel = null;
-      streakLength = 0;
-    }
-  }
-  return elected;
-}
-
-/**
- * Elects a display label per track id from `results` (`DetectionsStore`'s own newest-first batch
- * history) — {@link electFromObservations}'s own per-track replay, grouped once per call. Every
- * distinct track id present *anywhere* in `results` gets an entry, not only the ones in whichever
- * single batch is currently on screen — cheap at this data size (mirrors {@link trackTrails}'s
- * identical "scan the whole history every call" choice above) and means a track that briefly drops out
- * of the drawn batch (a coast, a matching-pass shortfall) doesn't lose its election the instant it
- * reappears.
- */
-export function electStickyLabels(results: readonly DetectionResult[]): ReadonlyMap<number, string> {
-  const observationsByTrack = new Map<number, TrackObservation[]>();
-  // `results` is newest-first; walk back-to-front once so each track's own list comes out
-  // oldest-first without a second reverse pass — the same idiom `trackTrails` above already uses.
-  for (let i = results.length - 1; i >= 0; i--) {
-    for (const detection of results[i].detections) {
-      const trackId = detection.track?.id;
-      if (trackId === undefined) {
-        continue;
-      }
-      const observation: TrackObservation = { label: detection.label, confidence: detection.confidence };
-      const existing = observationsByTrack.get(trackId);
-      if (existing) {
-        existing.push(observation);
-      } else {
-        observationsByTrack.set(trackId, [observation]);
-      }
-    }
-  }
-  const elected = new Map<number, string>();
-  for (const [trackId, observations] of observationsByTrack) {
-    elected.set(trackId, electFromObservations(observations));
-  }
-  return elected;
-}
-
-/**
- * Swaps a tracked detection's `label` for its {@link electStickyLabels} entry — the one call every
- * painted-text/color consumer needs (`formatDetectionLabel`, `formatTierLabel`, `classBucketHue` via
- * `tierBoxColor`, and the hover tooltip — `shared/player/player.ts#hoveredLabel` — which all read
- * `detection.label` and nothing else) rather than each threading a second "which label to actually
- * paint" argument through. An untracked detection (no track id to elect over) and a tracked one with no
- * election entry yet (its very first observation, before {@link electFromObservations} has anything to
- * replay) both pass through **unchanged, same object reference** — matching
- * {@link extrapolateDetections}'s own "unmatched detections pass through completely unchanged"
- * convention just above. A tracked detection whose sticky label happens to equal its raw one (the
- * common case once a track has settled, and the *only* case once cv-service's own L1 election is live —
- * see this section's header comment) also keeps its original reference: this is what "converges to a
- * no-op" means concretely, not merely in effect.
- */
-export function applyStickyLabels(
-  detections: readonly Detection[],
-  stickyLabels: ReadonlyMap<number, string>,
-): readonly Detection[] {
-  return detections.map((detection) => {
-    const trackId = detection.track?.id;
-    if (trackId === undefined) {
-      return detection;
-    }
-    const sticky = stickyLabels.get(trackId);
-    if (sticky === undefined || sticky === detection.label) {
-      return detection;
-    }
-    return { ...detection, label: sticky };
-  });
-}
+// --- Sticky labels per track: retired, wave W3.2 (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6) ---
+// This file's own client-side label-election stopgap (see TRACK-IDENTITY-PLAN.md §L3 item 1, and
+// `git log` on this file for its prior shape) is deleted outright — label election is now a
+// server-side WorldModel/ObjectState fact (`state.identity.label`, wire-elected), consumed via
+// {@link resolveDisplayDetections} above. See that function's own doc comment for the one disclosed
+// behavior change this causes for a detection with no world object yet.
 
 // --- HiDPI canvas backing store (docs/plans/done/MEDIA-SOT-PLAN.md §8 wave M8) -----------------------------
 // The overlay canvas used to size its backing store 1:1 with its CSS box (`canvas.width =
@@ -1032,6 +992,55 @@ export function detectionTiers(
 
   for (const detection of sizeEligible) {
     tiers.set(detection, notable.has(detection) ? 'T1' : 'T2');
+  }
+
+  return tiers;
+}
+
+/**
+ * The one call `shared/player/player.ts#drawDetections` makes to decide each detection's draw tier
+ * (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6, wave W3.2) — replacing the direct
+ * {@link detectionTiers} call for whichever of `displayDetections` {@link resolveDisplayDetections}
+ * already matched to a non-`HIDDEN` {@link WorldObject}. A `HIDDEN` one never reaches here at all —
+ * `resolveDisplayDetections` already dropped it from `displayDetections` — so this function's returned
+ * map is guaranteed to carry an entry for every detection it is given, exactly like
+ * {@link detectionTiers} on its own always has: `shared/player/player.ts`'s several
+ * `tiers.get(...) ?? 'T2'` fallbacks stay genuinely dead code, never load-bearing.
+ *
+ * A matched detection's tier is the server's own `render.tier` (`'T0'`-`'T3'` are byte-identical to
+ * {@link DetectionTier} by that wire type's own doc comment — a safe cast, `'HIDDEN'` never reaches
+ * here), unless `context.hoveredDetection` is this exact detection, which promotes it to `'T0'`
+ * regardless: hover is client-only UI state `WorldModel` explicitly does not compute
+ * (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6's own `render` row), so it is the one legitimate
+ * client-side override left over server tier assignment. `lockedTrackId`-based T0 needs no such
+ * override — a FOLLOW-locked object's `render.tier` is already `'T0'` server-side.
+ *
+ * Every unmatched detection (see {@link resolveDisplayDetections}'s own bucket doc) is delegated to
+ * {@link detectionTiers}, completely unchanged, scoped to just that subset — `context` (lock,
+ * trails, hover, content size, hovered class) is passed straight through.
+ */
+export function resolveDetectionTiers(
+  displayDetections: readonly Detection[],
+  worldObjectsById: ReadonlyMap<number, WorldObject>,
+  context: DetectionTierContext,
+): ReadonlyMap<Detection, DetectionTier> {
+  const tiers = new Map<Detection, DetectionTier>();
+  const unmatched: Detection[] = [];
+
+  for (const detection of displayDetections) {
+    const trackId = detection.track?.id;
+    const worldObject = trackId !== undefined ? worldObjectsById.get(trackId) : undefined;
+    if (worldObject === undefined) {
+      unmatched.push(detection);
+      continue;
+    }
+    tiers.set(detection, detection === context.hoveredDetection ? 'T0' : (worldObject.render.tier as DetectionTier));
+  }
+
+  if (unmatched.length > 0) {
+    for (const [detection, tier] of detectionTiers(unmatched, context)) {
+      tiers.set(detection, tier);
+    }
   }
 
   return tiers;

@@ -14,7 +14,7 @@ import {
 } from '@angular/core';
 import type HlsType from 'hls.js';
 import { WebrtcCertificateService } from './webrtc-certificate';
-import type { BoundingBox, Detection, DetectionResult } from '../../core/api/models';
+import type { BoundingBox, Detection, DetectionResult, WorldObject } from '../../core/api/models';
 import {
   DEFAULT_DECLUTTER_LEVEL,
   DEFAULT_MODEL_KEY,
@@ -25,28 +25,27 @@ import {
   T2_ALPHA_PERCENT,
   T2_STROKE_WIDTH_PX,
   TRAIL_WINDOW_MS,
-  applyStickyLabels,
   averageBatchIntervalMs,
   canvasBackingSize,
   detectionAlphaPercent,
   detectionModelKey,
-  detectionTiers,
   distinctModelKeys,
-  electStickyLabels,
   estimatedOnScreenAtMs,
-  extrapolateDetections,
   findPredecessorResult,
   formatDetectionLabel,
   formatTierLabel,
   modelHue,
   overlaySyncLatencySeconds,
   placeLabels,
+  resolveDetectionTiers,
+  resolveDisplayDetections,
   selectDetectionResult,
   shouldDrawOverlay,
   tierAlphaPercent,
   tierBoxColor,
   tiersForDeclutterLevel,
   trackTrails,
+  worldObjectsByTrackId,
   type BoxesMode,
   type DetectionTier,
   type LabelCandidate,
@@ -338,6 +337,10 @@ interface TierLabelCandidate {
  * Batches older than `STALE_FADE_BATCH_MULTIPLIER` observed intervals fade to reduced alpha, and
  * anything older than `DETECTION_STALE_CUTOFF_SECONDS` is not drawn at all (staleness honesty,
  * docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.4 — a paused feed must never look like a live one).
+ * A further optional `worldObjects` input (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6, wave
+ * W3.2) lets a per-asset `DetectionsStore` supply the world model's own render tier / elected label /
+ * motion per track id — see that input's own doc comment for the matched/unmatched split and the
+ * honest degrade for a caller that never binds it.
  *
  * **F2 digital crop-follow** (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1 item 4/D10, wave W6, off by
  * default via {@link cropFollowEnabled}): a client-side-only re-frame of the *view* toward whichever
@@ -397,6 +400,19 @@ export class Player {
 
   /** Recent detection batches (newest first) to draw as a vector overlay — see class doc. */
   readonly detections = input<readonly DetectionResult[]>([]);
+
+  /**
+   * The world model's per-object render tier / elected label / motion, keyed by track id
+   * (`core/detections/detections-store.ts#worldObjects` — the `tracks:<assetId>` live topic's
+   * frame-cadence snapshot, docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6, wave W3.2). Fed straight
+   * into {@link resolveDisplayDetections}/{@link resolveDetectionTiers} in `drawDetections` below,
+   * mirroring {@link lockedTrackId}'s own "host holds the value, this component only draws it"
+   * plumbing. A host with no per-asset `DetectionsStore` of its own (or one that simply never binds
+   * this input, e.g. `features/command/asset-panel.html`) leaves this at its `[]` default, which
+   * degrades every detection back to this file's own pre-W3.2 fully-client-derived tier/label/motion
+   * behavior — an honest degrade, not a broken one.
+   */
+  readonly worldObjects = input<readonly WorldObject[]>([]);
 
   /** The declutter level — `'all'`/`'priority'`/`'locked'` draw boxes (which tiers, specifically, is
    * {@link tiersForDeclutterLevel}'s job), `'off'` draws nothing (see `shouldDrawOverlay`'s doc).
@@ -615,9 +631,10 @@ export class Player {
       : 'Distance behind the live edge, measured continuously from the HLS buffer position.',
   );
 
-  /** Set from `drawnBoxes` (`onOverlayMouseMove`'s own hit-test) — already sticky-relabeled
-   *  (docs/plans/done/TRACK-IDENTITY-PLAN.md §L3 item 1: `redrawOverlay`'s `displayed` array, not the
-   *  raw `detections` input), so `hoveredLabel` below inherits the stable label with no further work. */
+  /** Set from `drawnBoxes` (`onOverlayMouseMove`'s own hit-test) — already wire-label-resolved for a
+   *  matched detection (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6, wave W3.2:
+   *  `drawDetections`'s `displayed` array, from `resolveDisplayDetections`, not the raw `detections`
+   *  input), so `hoveredLabel` below inherits the resolved label with no further work. */
   protected readonly hoveredDetection = signal<Detection | null>(null);
   /** The hover tooltip's own text — `formatDetectionLabel` so the tooltip and the canvas-drawn box
    * label always agree on whether a box is carrying a track id (docs/plans/done/TRACKING-PLAN.md §10). */
@@ -2283,45 +2300,34 @@ export class Player {
     results: readonly DetectionResult[],
     result: DetectionResult,
   ): void {
-    // Forward-projection (docs/plans/done/CV-CLEAN-FEED-PLAN.md §7, wave W7): `result`'s own boxes
-    // are up to one poll/arrival cycle stale relative to the instant actually on screen — mirrors the
-    // server's deleted `DetectionExtrapolator` (see `detection-overlay-logic.ts`'s own "Forward-
-    // projection" section header) so a moving object's box tracks the picture instead of trailing it.
-    // `onScreenAtMs` is the exact instant `selectDetectionResult` itself synced `result` against
-    // (`estimatedOnScreenAtMs`, shared rather than re-derived); `predecessor` is the batch immediately
-    // before it in `results`, giving the pair a velocity to project from.
+    // Wire-driven display resolution (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6, wave W3.2):
+    // `worldObjectsById` correlates this batch's detections against the world model's per-object
+    // render tier / elected label / motion (`this.worldObjects()`, keyed by track id) — see
+    // `detection-overlay-logic.ts#resolveDisplayDetections`'s own doc comment for the full
+    // matched/hidden/unmatched split. `onScreenAtMs`/`predecessor` are unchanged from before this wave
+    // (still needed for the *unmatched* subset's local forward-projection, mirroring the deleted
+    // server-side `DetectionExtrapolator` for whatever the wire hasn't caught up to yet).
     const onScreenAtMs = estimatedOnScreenAtMs(Date.now(), this.overlaySyncLatency());
     const predecessor = findPredecessorResult(results, result);
-    const projected = extrapolateDetections(result, predecessor, onScreenAtMs);
-
-    // Sticky labels (docs/plans/done/TRACK-IDENTITY-PLAN.md §L3 item 1): elected once per redraw
-    // from the *full* batch history (`results`, not just `projected`'s single batch — a track's recent
-    // votes span more than one batch), then swapped onto `projected`'s own tracked detections. Every
-    // downstream reader of `detection.label` — the box color (`tierBoxColor`/`classBucketHue` below),
-    // `formatDetectionLabel`/`formatTierLabel` (painted text + the hover tooltip, both fed straight
-    // off `displayed`/`drawnBoxes`), `detectionModelKey` (composite-mode color key) — inherits the
-    // stable label for free from this one substitution, with zero changes of its own; an untracked
-    // detection keeps its raw label and its original object reference, unchanged from before this wave.
-    const stickyLabels = electStickyLabels(results);
-    const displayed = applyStickyLabels(projected, stickyLabels);
+    const worldObjectsById = worldObjectsByTrackId(this.worldObjects());
+    const displayed = resolveDisplayDetections(result, predecessor, onScreenAtMs, worldObjectsById);
 
     // Priority tiers (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.2) — a pure function of what
     // this component already knows: the FOLLOW lock (fed in from the host, see `lockedTrackId`'s own
     // doc comment), the hovered box, and each track's recent trail (reused below for the trail layer
     // too, so the scan over `results` only runs once per redraw). Trails consume `displayed` too — the
     // newest batch's own entry (found by reference; `result` is one of `results`' own elements) is
-    // swapped for its projected+relabeled geometry before the scan, so a T0 trail's last point always
-    // lands exactly where the box drawn below actually is, never one raw capture behind it.
+    // swapped for its resolved geometry before the scan, so a T0 trail's last point always lands
+    // exactly where the box drawn below actually is, never one raw capture behind it.
     const trailResults = results.map((entry) => (entry === result ? { ...entry, detections: displayed } : entry));
     const trails = trackTrails(trailResults, Date.now(), TRAIL_WINDOW_MS);
 
-    // A held hover reference is re-anchored against this tick's freshly projected+relabeled objects: a
-    // matched detection gets a brand-new object every redraw (its box center advances with
-    // `onScreenAtMs`, and now possibly its label too), so a plain `===` against a reference captured a
-    // tick or more ago would silently stop matching for exactly the moving objects this wave exists to
-    // track. Track id survives both projection and relabeling unchanged, so it's the stable key; an
-    // untracked hover has no such anchor and simply clears — an honest degrade (no fabricated match),
-    // not a bug.
+    // A held hover reference is re-anchored against this tick's freshly resolved objects: a matched
+    // detection gets a brand-new object every redraw (its box/label may have just changed), so a plain
+    // `===` against a reference captured a tick or more ago would silently stop matching for exactly
+    // the moving/relabeled objects this resolution exists to track. Track id survives resolution
+    // unchanged, so it's the stable key; an untracked hover has no such anchor and simply clears — an
+    // honest degrade (no fabricated match), not a bug.
     const rawHovered = this.hoveredDetection();
     const hovered =
       rawHovered === null
@@ -2331,7 +2337,7 @@ export class Player {
           ) ?? null);
     const lockedTrackId = this.lockedTrackId();
     const lockActive = lockedTrackId !== 0;
-    const tiers = detectionTiers(displayed, {
+    const tiers = resolveDetectionTiers(displayed, worldObjectsById, {
       lockedTrackId,
       hoveredDetection: hovered,
       trails,
@@ -2342,11 +2348,10 @@ export class Player {
     const allowedTiers = tiersForDeclutterLevel(this.boxesMode());
     // >1 model actually mixed in *this* frame (`showModelLegend`'s own gate) — composite streams keep
     // per-model color instead of the class-bucket hue (research disposition table: "keep `modelHue`
-    // for the multi-model legend case"). Reads `displayed` (sticky-relabeled) rather than `projected` —
-    // a composite-mode `"model:label"` prefix survives election untouched (the election operates on
-    // whichever label string cv-service actually emitted, prefix included), so this gate is unaffected
-    // either way; using `displayed` here is about staying consistent with every other reader below, not
-    // a behavior change of its own.
+    // for the multi-model legend case"). Reads `displayed` (wire-resolved, for a matched detection)
+    // rather than the raw batch — a composite-mode `"model:label"` prefix survives label resolution
+    // untouched either way (neither the wire's `identity.label` nor a raw detector label strips it), so
+    // this gate is unaffected regardless of which detections in the batch are matched.
     const composite = distinctModelKeys(displayed).length >= 2;
 
     // Trails are T0-only now (docs/plans/done/CV-FLY-INTERACTION-RESEARCH.md §3.2/D8 — twelve parked

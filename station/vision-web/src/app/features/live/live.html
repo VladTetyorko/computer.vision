@@ -32,6 +32,7 @@
           [whepUrl]="facade.stream()?.whepUrl ?? null"
           [stopped]="facade.stopped()"
           [detections]="facade.detections.results()"
+          [worldObjects]="facade.detections.worldObjects()"
           [boxesMode]="facade.boxesMode()"
           [lockedTrackId]="facade.lockedTrackId()"
           [lostBox]="facade.lostBox()"

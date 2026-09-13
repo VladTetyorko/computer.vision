@@ -1246,3 +1246,163 @@ existing `it()` in `live-fallback-logic.spec.ts` rather than adding a new one). 
 clean on both `tsconfig.app.json` and `tsconfig.spec.json`. `ng build --configuration production` not
 run this wave (out of this brief's required verify chain — pure core/-layer wiring, no template or
 route change to bundle-measure).
+
+## Status — CV-ORCHESTRATION wave W3.2 (web): render tier + tracked-object motion/label from the wire — 2026-09-13
+
+Follows directly on wave W3.1 above — that wave wired the `tracks:<assetId>` live topic and
+`DetectionsStore.worldObjects()` but rendered nothing; this wave is where the canvas overlay, the
+detections strip, and the crop-follow HUD stop re-deriving render tier, elected label, and
+tracked-object motion client-side and read them off the `WorldObject`/`RenderTier` wire data instead
+(docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6/§6 W3 row: "delete client extrapolation-for-tracked
+and `electStickyLabels`... render tier from server... no client re-derivation of velocity or label for
+tracked objects (grep test)"). Scope was exactly `shared/player/**` plus the five `<vision-player>`
+host templates that bind `[detections]` — no `core/api/models.ts`, no `core/live/**`, no
+`core/detections/**`, no Java, matching the plan's own disjoint-wave file split.
+
+**What changed:**
+
+- `shared/player/detection-overlay-logic.ts`:
+  - New `worldObjectsByTrackId(worldObjects): ReadonlyMap<number, WorldObject>`, keyed by
+    `state.id` — the one lookup every consumer below shares, so a box, its tier, and its strip chip
+    can never disagree about which `WorldObject` a track id resolves to.
+  - New `resolveDisplayDetections(selected, previous, targetMs, worldObjectsById, maxExtrapolationMs?,
+    matchGate?)` replaces the old `extrapolateDetections` + `electStickyLabels` + `applyStickyLabels`
+    trio as `player.ts`'s call site. Partitions `selected.detections` into three groups per detection:
+    **matched + visible** (`box = state.kinematics?.predictedBox ?? state.kinematics?.box ??
+    detection.box`, `label = state.identity?.label ?? detection.label` — reads the wire directly, no
+    client motion or label logic at all), **matched + `render.tier === 'HIDDEN'`** (dropped from the
+    returned array entirely — not merely left off a tier map, so nothing downstream can accidentally
+    draw a suppressed box), and **unmatched** (no track id, or a track id with no `WorldObject` yet —
+    the transient pre-`tracks:`-arrival gap, see disclosure below) — the unmatched subset alone still
+    runs through the unchanged `matchDetections`/{@link projectUnmatchedOne} projection machinery
+    (still fed the *full* `previous`/`targetMs`, just a smaller `detections` array), then all three
+    groups are reassembled in original order.
+  - New `resolveDetectionTiers(displayDetections, worldObjectsById, context): ReadonlyMap<Detection,
+    DetectionTier>` replaces the direct `detectionTiers(...)` call. A matched detection's tier is
+    `'T0'` on hover-override (unchanged client concern — momentary UI feedback, not a wire fact) else
+    `worldObject.render.tier` cast to `DetectionTier` (server already resolves FOLLOW-lock T0 itself,
+    per W2.8 — only hover still needs a client override); unmatched detections still run through the
+    unchanged `detectionTiers` priority-tier function (T0 hover/lock > T3 sub-scale > T1 moving/top-K/
+    hovered-class > T2 everything else, research §3.2 — untouched this wave).
+  - **Renamed** (report's required exact final names): `extrapolateOne` → **`projectUnmatchedOne`**;
+    `EXTRAPOLATION_MATCH_GATE` → **`UNMATCHED_MATCH_GATE_DISTANCE`** (value `0.15`, unchanged).
+    `EXTRAPOLATION_MAX_MS` keeps its name (still the right name for what it now exclusively bounds:
+    the unmatched subset's own forward-projection horizon). `extrapolateDetections` keeps its name and
+    signature, now called only from inside `resolveDisplayDetections` on the unmatched subset.
+  - **Fully deleted**: `electStickyLabels`, `electFromObservations`, `applyStickyLabels`,
+    `STICKY_LABEL_VOTE_WINDOW`, `STICKY_LABEL_SWITCH_MARGIN`, `STICKY_LABEL_SWITCH_STREAK`, the
+    `TrackObservation` interface, and the "Sticky labels per track" section's own essay-length header
+    comment — replaced by a short note (in the new section's own header comment) citing this wave and
+    `WorldModel`/`ObjectState.identity` as the label's new source of truth, not restating the deleted
+    election algorithm's mechanics.
+- `shared/player/player.ts`: new `readonly worldObjects = input<readonly WorldObject[]>([]);`
+  (doc-commented like `lockedTrackId`/`hoveredClass` — a host that never binds it degrades honestly to
+  every detection running the unmatched/local-projection path, exactly today's pre-W3.2 behavior, never
+  a blocked page). `drawDetections` now computes `worldObjectsById = worldObjectsByTrackId(this.
+  worldObjects())` once per frame and calls the two new resolve functions in place of the deleted
+  four-call sequence. Every downstream use of `displayed`/`tiers` (the `t0TrackIds` loop, `trailResults`,
+  `drawOrder`, the `tiers.get(detection) ?? 'T2'` fallbacks) is untouched — it already assumed a
+  HIDDEN-filtered, fully-tier-covered list by construction, which now holds by construction one layer
+  earlier instead of by a second explicit check at each site.
+- `shared/player/detections-strip-logic.ts` — **not named in the original wave brief, found and
+  migrated in this same wave because it also imported `electStickyLabels`** (its own label-grouping
+  step) and would otherwise have kept a second, independent re-implementation of server-side label
+  election alive, defeating the point of the new grep spec below. `displayLabel(detection,
+  worldObjectsById)` replaces the old sticky-label call: a tracked detection groups under
+  `worldObjectsById.get(trackId)?.state.identity?.label ?? detection.label` — the identical lookup the
+  canvas overlay now uses, so a strip chip's label and the box it corresponds to can never quietly
+  disagree. `stripChips` gained `worldObjectsById: ReadonlyMap<number, WorldObject> = new Map()` as its
+  new 2nd parameter (before `labelDenyFilter`/`cap`/`windowSeconds`) — defaults to empty, the honest
+  choice for a caller with no per-asset `worldObjects()` to thread in (or an asset that hasn't produced
+  any yet): every label used raw, unchanged from before this wave. Documented as a **per-current-track**
+  lookup, not a historical replay: a track's label within the strip's aggregation window is whatever the
+  wire says *right now*, not what it was when each historical batch in the window was actually captured
+  — there is no retained per-batch world-object snapshot to do better than that.
+- `shared/player/detections-strip.ts`: `chips` computed now threads `worldObjectsByTrackId(this.store.
+  worldObjects())` into `stripChips`. Class doc comment's "Click" bullet reworded: a PATCH now sends the
+  wire-elected label an operator is looking at, not cv-service's raw per-frame label; a track with no
+  world object yet still shows (and can be denied by) its raw label for that one transient beat.
+- `shared/player/no-client-rederivation.spec.ts` (**new**) — a plain vitest test, no `TestBed`, per the
+  plan's own "no client re-derivation of velocity or label for tracked objects (grep test)" requirement.
+  Recursively scans every non-`.spec.ts` `.ts` file under `shared/player/` (`follow-hud/` included) and
+  fails if `extrapolateOne`, `electStickyLabels`, `STICKY_LABEL_`, or `EXTRAPOLATION_MATCH_GATE`
+  reappears anywhere — `.spec.ts` files are excluded so this file's own doc comment (and any other
+  spec's historical prose) can still name the retired identifiers without self-tripping. **Sanity-
+  checked**: a forbidden string was temporarily appended to `player.ts`, confirmed the spec fails
+  (`AssertionError: expected [ Array(1) ] to deeply equal []`, naming the exact file/substring), then
+  removed before this commit — the diff this wave ships contains no such marker.
+  - **Node-builtins gotcha**: this project has no `@types/node` (not a dependency, and this wave's own
+    build instructions say not to add one), so `fs`/`path`/`url` have no ambient types under
+    `tsconfig.spec.json`'s `types: ["vitest/globals"]`. New `shared/player/node-builtins.d.ts` supplies
+    minimal ambient declarations for just the handful of members this one spec calls. It has to be a
+    standalone global-script `.d.ts` (no top-level `import`/`export` of its own) rather than declared
+    inline in the spec file — TypeScript treats `declare module '...'` written inside a file that
+    already has its own imports (a "module" file, which the spec is, importing from `vitest`) as an
+    *augmentation* of an existing module, which fails with `TS2664` for `fs`/`path`/`url` (bare or
+    `node:`-prefixed) since nothing declares them without `@types/node`; a global script `.d.ts` has no
+    such restriction. Also found: `import.meta.url` is a genuine `file://` URL at runtime under this
+    builder, but passing `new URL('.', import.meta.url)` into `fileURLToPath` threw `TypeError: The URL
+    must be of scheme file` (a realm/identity mismatch between the WHATWG `URL` global available here and
+    the one Node's real `url` module expects) — fixed by passing the raw URL string straight to
+    `fileURLToPath` and taking `dirname()` of the result instead of constructing a new `URL`.
+- Host wiring — `[worldObjects]="..."` added immediately after each host's existing `[detections]`
+  binding, matching that file's own binding style exactly:
+  - `features/fly/cockpit.html` — `[worldObjects]="facade.detections.worldObjects()"`
+  - `features/live/live.html` — `[worldObjects]="facade.detections.worldObjects()"`
+  - `features/crew/crew.html` — `[worldObjects]="facade.detections.worldObjects()"`
+  - `features/wall/wall-focus.html` — `[worldObjects]="detections.worldObjects()"`
+  - `features/wall/wall-tile.html` — `[worldObjects]="detections.worldObjects()"`
+  - `features/command/asset-panel.html` — **left untouched**: it has no `[detections]` binding at all
+    (no overlay on that surface), so there is nothing to pair a `[worldObjects]` binding with.
+
+**Disclosure — the sticky-label transient-gap regression (my own finding, not in the wave brief):** a
+genuinely-tracked detection (`detection.track.id` set) that has no matching `WorldObject` yet — the
+narrow window between a track first appearing in a `detections:<assetId>` batch and its first
+`tracks:<assetId>` snapshot arriving — used to get the old `electStickyLabels` confidence-weighted,
+switch-margin/streak-gated smoothing across historical batches. After this wave it falls into the
+"unmatched" bucket and shows whatever raw label that one batch's detector produced, with no
+cross-batch smoothing, until the world object arrives (typically within one `tracks:` cadence tick).
+**Judged acceptable**: the gap is bounded and self-resolving (it closes the moment the world object
+shows up, at which point every downstream reader — overlay box, tier, and strip chip alike — converges
+on the server's own elected label simultaneously); the alternative of keeping a second, client-side
+election algorithm running *only* for this narrow window would resurrect exactly the duplicated-logic
+risk this wave exists to remove, for a cosmetic flicker lasting at most one tracking cadence tick on a
+detection that, by definition, has no confirmed track history to smooth from yet.
+
+**Not built / not touched:** `core/api/models.ts`, `core/live/**`, `core/detections/**`, any Java,
+`features/cv-inspector/`, `core/cv-trace/`, and the `'cv-trace'` `LiveEnvelope` member — all other
+waves' territory, per this wave's own file-scope allowlist. `features/command/asset-panel.html` — see
+above. No dev-parity concern arises: `worldObjects()` is fed purely by the live SSE topic wired in
+W3.1, which has no dependency on `vision.auth.enabled`; a dev-admin session with auth disabled sees the
+exact same wire-driven boxes/labels/tiers as any other session once its `tracks:` subscription is live,
+and degrades to the pre-W3.2 unmatched/local-projection path identically to any other session if it
+never arrives.
+
+### Tests / build
+
+`npm run test:ci` — **201/201 files, 3940/3940 tests green**. This wave's own isolated contribution
+(measured file-by-file against this wave's own `HEAD` versions, since a concurrent, still-in-progress
+sibling wave shares this worktree and also added tests elsewhere): `detection-overlay-logic.spec.ts`
+131 → 133 `it()`s (+2 net — the sticky-label describe blocks removed, `worldObjectsByTrackId`/
+`resolveDisplayDetections`/`resolveDetectionTiers` describe blocks added), `detections-strip-logic.
+spec.ts` 12 → 16 (+4 net), `no-client-rederivation.spec.ts` new (+1 file, +1 test) — **this wave's own
+delta is +1 file / +7 tests** against wave W3.1's recorded 200/3917 baseline above; the remaining +23
+tests/+0 files beyond that (3917 → 3940, 200 → 201 once this wave's own +1/+7 is subtracted) come from
+the concurrently-running, unrelated `vision-profiles`/`cv-control-panel-logic` wave sharing this same
+worktree, not from this wave's diff. All 10 spec files under `shared/player/` pass in isolation (350
+tests) as well as inside the full run. `npx tsc --noEmit` clean on both `tsconfig.app.json` and
+`tsconfig.spec.json`.
+
+`ng build --configuration production` — green, same two pre-existing warnings only (initial bundle
+over its 390 kB budget; `tactical-map.css` over its 11 kB component-style budget — both present before
+this branch). Raw measured total at this wave's own tree state: initial **436.41 kB raw / 122.32 kB
+transfer**. **No isolated before/after bundle delta for this wave alone was captured** — the standard
+method (a `git stash` scoped to this wave's own touched files, rebuild, restore, rebuild again) was
+judged too risky to run safely while a sibling agent has active uncommitted edits in this same shared
+worktree (the exact same call this file's own ALWAYS-ON-FLOW wave-C entry above made in an identical
+situation: "needed a tree-wide `git stash`, correctly refused while other waves were uncommitted").
+This wave's own real cost is expected to be small and template/logic-only (one new `input()`, two
+renamed/added pure functions, no new dependency, no new component) inside the already-lazy `cockpit`/
+`live`/`crew`/`wall` chunks, never the initial bundle.
+
+**Nothing in this wave's brief was found wrong or unimplementable.**

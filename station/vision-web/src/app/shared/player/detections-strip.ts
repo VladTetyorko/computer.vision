@@ -2,6 +2,7 @@ import { ChangeDetectionStrategy, Component, computed, inject, input, output } f
 import { DetectionsStore } from '../../core/detections/detections-store';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { HIDDEN_CLASS_TRUTH, toggleLabelDeny } from '../../core/detections/detections-logic';
+import { worldObjectsByTrackId } from './detection-overlay-logic';
 import { stripChips, STRIP_CHIP_CAP, type StripChip } from './detections-strip-logic';
 
 /**
@@ -25,14 +26,14 @@ import { stripChips, STRIP_CHIP_CAP, type StripChip } from './detections-strip-l
  *   ({@link hiddenClassTruth}) is shown once, at rest, whenever this mode is active. **Never** touches
  *   `labelFilter` (the allowlist) — see `toggleLabelDeny`'s own doc comment
  *   (`core/detections/detections-logic.ts`) for why a deny-list needs no staging the way the
- *   allowlist does. `chip.label` is now (docs/plans/done/TRACK-IDENTITY-PLAN.md §L3 item 2) the
- *   sticky/elected label for a tracked class, not necessarily cv-service's raw per-frame label — the
- *   PATCH deliberately sends that **displayed** string, since it is what the operator is actually
- *   pointing at when they click. Until cv-service's own L1 election ships, this can transiently
- *   under-suppress a still-flipping track (a raw label the operator never saw as a chip keeps slipping
- *   through the server-side deny filter for a beat) — an accepted, honestly-scoped gap of a
- *   client-side stopgap, closed for free once L1 lands (see `detection-overlay-logic.ts`'s own sticky-
- *   label section header for why the two converge).
+ *   allowlist does. `chip.label` is now (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6, wave W3.2)
+ *   the matching {@link WorldObject}'s own wire-elected label for a tracked class, not necessarily
+ *   cv-service's raw per-frame label — the PATCH deliberately sends that **displayed** string, since
+ *   it is what the operator is actually pointing at when they click. A track with no world object yet
+ *   (the transient gap before its first `tracks:` arrival) still shows its raw label, which can
+ *   transiently under-suppress a still-flipping track for that same beat — an accepted, honestly-
+ *   scoped gap, resolving itself once the world object arrives (see
+ *   `shared/player/detections-strip-logic.ts#stripChips`'s own doc comment).
  *
  * A denied label can never reappear in `DetectionsStore.results()` at all — `StreamPipeline`'s single
  * drop site runs pre-fan-out (docs/plans/done/CV-CLEAN-FEED-PLAN.md D-2) — so the candidate set
@@ -84,7 +85,12 @@ export class DetectionsStrip {
    *  {@link interactive} mode (read-only mode has no deny-list context of its own to be honest
    *  about — see `stripChips`'s own doc comment for why `[]` is the honest default there). */
   protected readonly chips = computed<readonly StripChip[]>(() =>
-    stripChips(this.store.results(), this.interactive() ? this.labelDenyFilter() : [], STRIP_CHIP_CAP),
+    stripChips(
+      this.store.results(),
+      worldObjectsByTrackId(this.store.worldObjects()),
+      this.interactive() ? this.labelDenyFilter() : [],
+      STRIP_CHIP_CAP,
+    ),
   );
 
   protected onChipEnter(label: string): void {
