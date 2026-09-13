@@ -24,6 +24,7 @@ import {
   buildFollowLockPatch,
   buildHotKnobPatch,
   buildModelChangePatch,
+  buildPointLockPatch,
   buildProfileRequestFromConfig,
   buildReleaseLockPatch,
   buildTrackingEnginePatch,
@@ -144,6 +145,9 @@ function cvProfile(partial: Partial<CvProfile> = {}): CvProfile {
     detectionEnabled: false,
     tracking: { mode: 'OFF', engineId: '', capabilityLevel: 0, verifyEveryMillis: 2000, followFps: 15 },
     eventRule: { labels: [], confidenceThreshold: 0.4, consecutiveToOpen: 1, absenceToCloseSeconds: 30 },
+    // `sources` is required (wave W3.6, always present on the wire) — this fixture reports none,
+    // matching a plain `GET`/list read with no originating create/update request to compare against.
+    sources: {},
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
     ...partial,
@@ -436,16 +440,19 @@ describe('cv-control-panel-logic', () => {
   });
 
   describe('reArmHint', () => {
+    // `sources: {}` on every fixture below (wave W3.3, mirroring wave W3.6's identical fix for
+    // `CvProfile`'s own now-required `sources` field): this test never sent a real PATCH request,
+    // so there is no `intent` to report provenance for.
     it('returns a hint when modelReArmed is true', () => {
-      expect(reArmHint({ streamId: 's-1', modelReArmed: true })).toMatch(/re-arming/i);
+      expect(reArmHint({ streamId: 's-1', modelReArmed: true, sources: {} })).toMatch(/re-arming/i);
     });
 
     it('returns null when modelReArmed is false', () => {
-      expect(reArmHint({ streamId: 's-1', modelReArmed: false })).toBeNull();
+      expect(reArmHint({ streamId: 's-1', modelReArmed: false, sources: {} })).toBeNull();
     });
 
     it('never claims the video was interrupted', () => {
-      expect(reArmHint({ streamId: 's-1', modelReArmed: true })).toMatch(/video keeps playing/i);
+      expect(reArmHint({ streamId: 's-1', modelReArmed: true, sources: {} })).toMatch(/video keeps playing/i);
     });
   });
 
@@ -595,6 +602,10 @@ describe('cv-control-panel-logic', () => {
 
     it('buildFollowLockPatch sets mode FOLLOW alongside the lock, in one call', () => {
       expect(buildFollowLockPatch(7)).toEqual({ tracking: { mode: 'FOLLOW', lock: { trackId: 7 } } });
+    });
+
+    it('buildPointLockPatch sets mode FOLLOW alongside a pointX/pointY lock, in one call (D8, wave W3.5)', () => {
+      expect(buildPointLockPatch(0.42, 0.61)).toEqual({ tracking: { mode: 'FOLLOW', lock: { pointX: 0.42, pointY: 0.61 } } });
     });
 
     it('buildReleaseLockPatch returns the stream to ASSOCIATE with the release (W7 live find: FOLLOW without a lock has no track identities, stranding every re-lock gesture)', () => {

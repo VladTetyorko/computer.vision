@@ -11,10 +11,12 @@ import type {
   CvCoverageRow,
   CvModel,
   CvProfile,
+  CvProfileIntent,
   CvTracker,
   GroupSummary,
 } from '../../core/api/models';
 import {
+  applyIntentToDraft,
   bindingSummaryLabel,
   canDeleteProfile,
   canEditProfile,
@@ -24,10 +26,13 @@ import {
   draftToRequest,
   emptyProfileDraft,
   forkDraftFromProfile,
+  isDetectionAlways,
   primaryGroupId,
+  saveOutcomeMessage,
   sortProfilesForDisplay,
   summarizeProfileBindings,
   validateDraft,
+  withDetectionPolicy,
   type ProfileDraft,
 } from './vision-profiles-logic';
 
@@ -87,6 +92,17 @@ export class VisionProfilesFacade {
    *  (a row's own Clear button, or the org-default Clear button) without blocking the rest of the page. */
   private readonly bindingBusyKeySignal = signal<string | null>(null);
 
+  /**
+   * The `attributes` map of the asset currently selected as the Bindings form's `ASSET`-scope
+   * target, keyed by `assetId` so a stale fetch racing a newer selection is never shown (D7, §4.7:
+   * "`cv.detection-policy = ALWAYS` gets a control on the asset binding in `/vision/profiles`").
+   * `null` while no `ASSET` target is selected, or while the fetch for the current one is still in
+   * flight — {@link detectionAlwaysOn} reads `null` the same honest way: never an invented/optimistic
+   * checked state before the real value is known.
+   */
+  private readonly bindingAssetAttributesSignal = signal<{ readonly assetId: string; readonly attributes: Record<string, string> } | null>(null);
+  private readonly detectionPolicySavingSignal = signal(false);
+
   readonly profiles = computed(() => sortProfilesForDisplay(this.profilesSignal()));
   readonly models = this.modelsSignal.asReadonly();
   readonly trackers = this.trackersSignal.asReadonly();
@@ -119,6 +135,14 @@ export class VisionProfilesFacade {
   readonly bindingProfileId = this.bindingProfileIdSignal.asReadonly();
   readonly bindingSaving = this.bindingSavingSignal.asReadonly();
   readonly bindingBusyKey = this.bindingBusyKeySignal.asReadonly();
+
+  /** `null` while loading/no `ASSET` target selected — see {@link bindingAssetAttributesSignal}'s own
+   * doc comment; otherwise the target asset's current always-on choice (D7). */
+  readonly detectionAlwaysOn = computed(() => {
+    const loaded = this.bindingAssetAttributesSignal();
+    return loaded ? isDetectionAlways(loaded.attributes) : null;
+  });
+  readonly detectionPolicySaving = this.detectionPolicySavingSignal.asReadonly();
 
   /** Every profile's own "bound to" summary, derived from {@link coverage} — see class doc. */
   readonly bindingSummaries = computed(() => summarizeProfileBindings(this.coverageSignal()));
@@ -232,7 +256,20 @@ export class VisionProfilesFacade {
     }
   }
 
-  /** Validates then POSTs (new/fork) or PUTs (edit) the current draft, per §5.1's frozen `CvProfileRequest`. */
+  /** The intent picker's own setter — routes through {@link applyIntentToDraft} rather than plain
+   * {@link patchDraft} because picking an intent may also blank `model` (see that function's own doc
+   * comment for exactly when). */
+  setIntent(intent: CvProfileIntent | ''): void {
+    const current = this.draftSignal();
+    if (current) {
+      this.draftSignal.set(applyIntentToDraft(current, intent));
+    }
+  }
+
+  /** Validates then POSTs (new/fork) or PUTs (edit) the current draft, per §5.1's frozen `CvProfileRequest`.
+   * The success toast names which knob(s) the server resolved from `draft.intent` ({@link
+   * saveOutcomeMessage}, §4.7 wave W3.6) — `saved.sources` is only ever meaningful on this create/
+   * update response, never on a later read (`CvProfile#sources`'s own doc comment). */
   async saveDraft(): Promise<void> {
     const draft = this.draftSignal();
     if (!draft) {
@@ -246,13 +283,9 @@ export class VisionProfilesFacade {
     this.savingSignal.set(true);
     try {
       const request = draftToRequest(draft);
-      if (draft.sourceId) {
-        await this.api.updateCvProfile(draft.sourceId, request);
-        this.toasts.ok(`"${request.name}" saved.`);
-      } else {
-        await this.api.createCvProfile(request);
-        this.toasts.ok(`"${request.name}" created.`);
-      }
+      const sourceId = draft.sourceId;
+      const saved = sourceId ? await this.api.updateCvProfile(sourceId, request) : await this.api.createCvProfile(request);
+      this.toasts.ok(saveOutcomeMessage(saved, draft.intent, sourceId !== null));
       await this.reloadAfterMutation();
       this.closeEditor();
     } catch (error) {
@@ -290,10 +323,65 @@ export class VisionProfilesFacade {
   setBindingScopeKind(kind: BindingScope): void {
     this.bindingScopeKindSignal.set(kind);
     this.bindingScopeIdSignal.set(kind === 'ORGANIZATION' ? (this.orgGroupId() ?? '') : '');
+    this.bindingAssetAttributesSignal.set(null);
   }
 
   setBindingScopeId(scopeId: string): void {
     this.bindingScopeIdSignal.set(scopeId);
+    if (this.bindingScopeKindSignal() === 'ASSET' && scopeId) {
+      void this.loadDetectionPolicyTarget(scopeId);
+    } else {
+      this.bindingAssetAttributesSignal.set(null);
+    }
+  }
+
+  /**
+   * Fetches the selected `ASSET` binding target's own current `attributes` for {@link
+   * detectionAlwaysOn} (D7) — the Bindings form's natural home for this control, since it already
+   * carries the chosen asset id and this page has no other per-asset detail read. One extra `GET
+   * /api/assets/{id}` per selection (this page has no already-fetched full asset elsewhere: {@link
+   * assets} is the summary roster the picker's own `<option>` list reads from, and `AssetSummary`
+   * already carries `attributes` in full — but re-fetching here, not reading that roster entry,
+   * guarantees the checkbox reflects the asset's live value rather than whatever `load()` cached at
+   * page-open, honest even if another tab changed it since).
+   */
+  private async loadDetectionPolicyTarget(assetId: string): Promise<void> {
+    this.bindingAssetAttributesSignal.set(null);
+    try {
+      const asset = await this.api.getAsset(assetId);
+      if (this.bindingScopeKindSignal() === 'ASSET' && this.bindingScopeIdSignal() === assetId) {
+        this.bindingAssetAttributesSignal.set({ assetId, attributes: asset.attributes });
+      }
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} failed to load asset attributes for the detection-policy control`, { error });
+      if (this.bindingScopeKindSignal() === 'ASSET' && this.bindingScopeIdSignal() === assetId) {
+        this.toasts.error(describeHttpError(error));
+      }
+    }
+  }
+
+  /** Toggles `cv.detection-policy` for the selected `ASSET` binding target — merges into the asset's
+   * full current `attributes` map and `PATCH`es it back (`AssetEdit#attributes` is a wholesale
+   * replacement, never a merge server-side; {@link withDetectionPolicy}'s own doc comment). */
+  async toggleDetectionAlways(): Promise<void> {
+    const loaded = this.bindingAssetAttributesSignal();
+    if (!loaded || !this.canManage() || this.detectionPolicySavingSignal()) {
+      return;
+    }
+    const nextAlways = !isDetectionAlways(loaded.attributes);
+    this.detectionPolicySavingSignal.set(true);
+    try {
+      const updated = await this.api.updateAsset(loaded.assetId, { attributes: withDetectionPolicy(loaded.attributes, nextAlways) });
+      this.bindingAssetAttributesSignal.set({ assetId: loaded.assetId, attributes: updated.attributes });
+      this.toasts.ok(
+        nextAlways ? 'Always-on detection enabled for this asset.' : 'Always-on detection turned off for this asset.',
+      );
+    } catch (error) {
+      console.warn(`${LOG_PREFIX} failed to update the detection policy for ${loaded.assetId}`, { error });
+      this.toasts.error(describeHttpError(error));
+    } finally {
+      this.detectionPolicySavingSignal.set(false);
+    }
   }
 
   setBindingProfileId(profileId: string): void {

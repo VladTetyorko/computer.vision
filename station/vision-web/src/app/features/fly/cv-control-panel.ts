@@ -27,8 +27,9 @@ import {
  * for" summary row (name + cost word, with a "Change…" door into the setup modal), the Boxes
  * declutter control, the "Following #N — release" lock chip, the two conditional honesty notices
  * (capability downgrade / lag-over-budget — surfaced only while they actually fire), and a
- * "Detection setup…" door at the bottom. Every *decision* control — the model intent cards,
- * confidence, the class checklist, tracking mode, and the collapsed Expert tier — moved to
+ * "Tuning…" door at the bottom (renamed from "Detection setup" in docs/plans/active/
+ * CV-ORCHESTRATION-PLAN.md §4.7, wave W3.4). Every *decision* control — the model intent cards,
+ * confidence, the class checklist, and the collapsed Expert tier — moved to
  * {@link CvSetupModal}, opened by {@link setupRequested} (`cockpit.ts` wires this to
  * `dialog.open('cv-setup')`, its own transient dialog `UiStore` group).
  *
@@ -89,7 +90,7 @@ export class CvControlPanel {
   /** Emitted by the Detect switch; the host (`CockpitFacade#setDetection`) owns the actual write. */
   readonly detectionEnabledChange = output<boolean>();
 
-  /** Emitted by the "Change…" and "Detection setup…" buttons alike — the host (`cockpit.ts`) owns
+  /** Emitted by the "Change…" and "Tuning…" buttons alike — the host (`cockpit.ts`) owns
    *  the actual `dialog.open('cv-setup')` call, mirroring `flight-command-panel.ts`'s own
    *  "component only reports the request, host owns the `UiStore` write" shape for its dialogs. */
   readonly setupRequested = output<void>();

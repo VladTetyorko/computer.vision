@@ -436,6 +436,17 @@
   background: var(--hud-bg-strong);
 }
 
+/* Hero intent-chip row (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7, wave W3.3) — four
+   `.icon-btn` pills side by side inside the `.dock`'s own single-column flex stack; `flex-wrap`
+   drops to two lines on a narrow phone rather than overflowing the dock's own `max-width`
+   (`.dock`'s own comment), same responsive fallback `.header-actions` above already uses. */
+.intent-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-8);
+}
+
 /* Synthetic-feed honesty pill (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md D6) — same frosted chrome
    as `.icon-btn` beside it, minus the pointer affordance: this states a fact, it isn't a control, so
    no `cursor: pointer`/`:hover` state. */

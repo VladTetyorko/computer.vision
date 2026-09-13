@@ -10,6 +10,7 @@ import {
   resolveAssetScopedTransport,
   telemetryTopic,
   trackSessionKey,
+  tracksTopic,
 } from './live-fallback-logic';
 import type { TelemetrySample } from '../api/models';
 
@@ -58,10 +59,11 @@ describe('trackSessionKey (docs/plans/done/REALTIME-PLAN.md §4 Phase R-c follow
   });
 });
 
-describe('telemetryTopic / detectionsTopic / cvTraceTopic', () => {
+describe('telemetryTopic / detectionsTopic / tracksTopic / cvTraceTopic', () => {
   it('builds the wire topic strings', () => {
     expect(telemetryTopic('a-1')).toBe('telemetry:a-1');
     expect(detectionsTopic('a-1')).toBe('detections:a-1');
+    expect(tracksTopic('a-1')).toBe('tracks:a-1');
     expect(cvTraceTopic('a-1')).toBe('cv-trace:a-1');
   });
 });

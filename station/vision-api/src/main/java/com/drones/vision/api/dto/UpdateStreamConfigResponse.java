@@ -16,18 +16,25 @@ package com.drones.vision.api.dto;
  *                     count, since the application layer stamps it with a fresh {@code lockSeq}).
  *                     Straight from {@code UpdateOutcome#trackingChanged()}. <b>Never implies a
  *                     re-arm</b>: tracking is a hot knob throughout
+ * @param sources      per-knob provenance for the same PATCH request's {@code intent}
+ *                     (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7, wave W3.0) — straight from
+ *                     {@link UpdateStreamConfigRequest#fieldSources()}; {@link
+ *                     CvProfileResponse.Sources#none()} when the request carried no {@code intent}
+ *                     at all
  */
-public record UpdateStreamConfigResponse(String streamId, boolean modelReArmed, boolean trackingChanged) {
+public record UpdateStreamConfigResponse(String streamId, boolean modelReArmed, boolean trackingChanged,
+                                          CvProfileResponse.Sources sources) {
 
     /**
      * The canonical constructor before docs/plans/done/TRACKING-PLAN.md wave T6 added {@code trackingChanged},
      * kept as a convenience constructor defaulting it to {@code false} — the same N-1-arg idiom used
-     * throughout this codebase.
+     * throughout this codebase. Now also defaults {@code sources} to the explicit {@link
+     * CvProfileResponse.Sources#none()} value, never a bare {@code null} (CLAUDE.md rule 10).
      *
      * @param streamId     the updated stream's id
      * @param modelReArmed whether the model swap re-armed the detector
      */
     public UpdateStreamConfigResponse(String streamId, boolean modelReArmed) {
-        this(streamId, modelReArmed, false);
+        this(streamId, modelReArmed, false, CvProfileResponse.Sources.none());
     }
 }

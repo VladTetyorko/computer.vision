@@ -1404,3 +1404,676 @@ subscription.
 `npm run test:ci` — **205 files / 3970 tests, all green** (+1 file/+11 tests over W5.4's own
 204/3959 — `cv-inspector-facade.spec.ts` new, 7 cases; `cv-inspector-logic.spec.ts` gained
 `assetIdForStream`'s own 4 cases).
+
+## Status — CV-ORCHESTRATION wave W3.1 (web): `tracks:<assetId>` live topic — 2026-09-13
+
+Small, disjoint-file wave inside the larger W3 web effort. Scope was exactly `core/api/models.ts`'s
+`LiveEnvelope` union, `core/live/live-fallback-logic.ts`, `core/live/live-store.ts`,
+`core/detections/detections-store.ts`, and their `.spec.ts` files — no component, no rendering. The
+backend (already merged) added a live SSE topic `tracks:<assetId>` carrying a raw JSON array of
+`WorldObjectResponse` (→ TS {@link WorldObject}, already mirrored in `models.ts` since wave W2.8) —
+the world model's frame-cadence snapshot of every object it currently knows about for that asset,
+richer than the flat `DetectionResult` the existing `detections:<assetId>` topic carries. **This
+step only wires the transport — topic string, per-asset signal, and subscription lifecycle. Nothing
+renders `WorldObject`/`RenderTier` yet; that's wave W3.2, a later, different step.**
+
+**What changed:**
+
+- `core/api/models.ts`: `LiveEnvelope` gained a 12th member, `{ seq, assetId, type: 'tracks',
+  payload: readonly WorldObject[] }` — a **raw array**, not wrapped in an object, straight from
+  `LiveUpdateRegistry`'s Java-side `List<WorldObjectResponse>`. Latest-wins, ring capacity 1
+  server-side, the exact same pattern `detections`/`geo` already establish — no new semantics
+  invented. The class doc comment gained a matching bullet stating plainly that this is
+  **additive to, not a replacement for**, `DetectionsStore`'s existing poll of `GET
+  /api/streams/{id}/tracks` (`trackTracks`/`tracks`) — that poll's other fields (`stats`, `latency`,
+  `rate`, `follow`, `lockedTrackId`) have no live-topic equivalent yet, only `objects` does.
+- `core/live/live-fallback-logic.ts`: new `tracksTopic(assetId)` → `` `tracks:${assetId}` ``,
+  sitting right next to `detectionsTopic`/`geoTopic`, same opt-in ref-counted contract. One new test
+  in `live-fallback-logic.spec.ts` (folded into the existing `telemetryTopic / detectionsTopic`
+  describe block, renamed to include `tracksTopic`).
+- `core/live/live-store.ts`: mirrors the `geo`/`detections` per-asset-signal machinery, but
+  array-typed (mirrors `telemetrySignals`' array-default pattern, since `WorldObject[]` is a list,
+  not a scalar-or-undefined). New private `worldObjectSignals` map (named to avoid any conceptual
+  collision with `DetectionsStore`'s own, unrelated `tracks` poll signal) + private
+  `worldObjectSignalFor(assetId)` helper, defaulting to `signal<readonly WorldObject[]>([])` — `[]`,
+  not `undefined`, since "no objects known yet" and "confirmed zero objects" both correctly render
+  as nothing to draw. Public surface: **`trackWorldObjects(assetId)`**, **`untrackWorldObjects(assetId)`**,
+  **`worldObjectsFor(assetId): Signal<readonly WorldObject[]>`** — deliberately distinct names from
+  `DetectionsStore.trackTracks`/`untrackTracks`/`tracks` (a different, pre-existing poll of the same
+  endpoint's other fields) so nobody confuses "the poll" with "the new live SSE snapshot." New
+  `applyEnvelope` case `'tracks'`: latest-wins `set()`, same one-line comment style as `'detections'`/
+  `'geo'`. Class doc comment gained a 12th bullet in the topic list, same prose pattern as the
+  existing `geo:<assetId>` bullet, citing this wave.
+- `core/detections/detections-store.ts`: piggybacks the new subscription on `DetectionsStore`'s
+  **existing detections-feed lifecycle** (`track()`/`teardownTracking()`), matching
+  LIVE-POLL-RETIREMENT-PLAN's D1 demand rule ("only while a viewer is mounted") — not the separate
+  tracks-poll lifecycle (`trackTracks`/`untrackTracks`), which stays untouched and independent.
+  `track(streamId, assetId?)` now also calls `live.trackWorldObjects(assetId)` when an assetId is
+  given; `teardownTracking()` now also calls `live.untrackWorldObjects(assetId)`. New public
+  computed **`worldObjects: Signal<readonly WorldObject[]>`** — `[]` when no asset id is in scope or
+  nothing has arrived yet; frame-cadence, live-only, no poll fallback (unlike `results` above) — an
+  honest empty array is this store's answer for a viewer with no live connection, same posture as
+  every other live-only signal in this app. Class doc comment gained a new, clearly separated
+  paragraph describing this as a **third, independent thing** this store now exposes (distinct from
+  both the detections-feed `results` and the tracks-poll `tracks`), consumed by wave W3.2 (not this
+  one) for server-assigned render tiers.
+- Tests: `detections-store.spec.ts`'s `stubLiveStore()` gained `trackWorldObjects`/
+  `untrackWorldObjects`/`worldObjectsFor` stubs and a `pushWorldObjects(assetId, objects)` helper,
+  mirroring the existing `detectionsFor`/`trackDetections`/`untrackDetections`/`pushResult` pattern
+  exactly. Five new tests prove: (1) `track(streamId, assetId)` subscribes and a pushed array
+  reflects on `worldObjects()`; (2) `track(streamId)` with no assetId never subscribes and
+  `worldObjects()` stays `[]`; (3) `reset()` releases the world-objects subscription; (4) re-tracking
+  a different assetId releases the old subscription and subscribes to the new one; (5) `worldObjects()`
+  is fully independent of the tracks-**poll** lifecycle — `trackTracks()`/`untrackTracks()` never
+  call `trackWorldObjects`/`untrackWorldObjects` and vice versa (mirrors the pre-existing "the tracks
+  poll is fully independent of the detections feed" test's structure).
+
+**Not built (by this wave's own design):** no component reads `worldObjects`, no renderer, no
+`RenderTier`-driven overlay. This step is wiring only — the topic, the signal, and the subscription
+lifecycle — exactly as scoped. `core/api/models.ts`'s `'cv-trace'` `LiveEnvelope` member (a different
+wave's territory) does not exist yet on this branch, so there was nothing to avoid touching there in
+practice.
+
+**Nothing in this brief was found wrong or unimplementable.**
+
+### Tests / build
+
+`npm run test:ci` — **200/200 files, 3917/3917 tests green** (this worktree's branch already carried
+200/3912 before this step, measured directly by reverting this wave's own six touched files to `HEAD`
+and re-running — the true local baseline, since `MODULE.md`'s last recorded wave-W1 entry above
+(198/3892) predates this branch's already-merged wave-W2.8 work, as that entry's own "Superseded in
+part by wave W2.8" paragraph already discloses; +5 tests are this step's own five new
+`detections-store.spec.ts` cases, 0 new files — the `tracksTopic` coverage was folded into an
+existing `it()` in `live-fallback-logic.spec.ts` rather than adding a new one). `npx tsc --noEmit`
+clean on both `tsconfig.app.json` and `tsconfig.spec.json`. `ng build --configuration production` not
+run this wave (out of this brief's required verify chain — pure core/-layer wiring, no template or
+route change to bundle-measure).
+
+## Status — CV-ORCHESTRATION wave W3.2 (web): render tier + tracked-object motion/label from the wire — 2026-09-13
+
+Follows directly on wave W3.1 above — that wave wired the `tracks:<assetId>` live topic and
+`DetectionsStore.worldObjects()` but rendered nothing; this wave is where the canvas overlay, the
+detections strip, and the crop-follow HUD stop re-deriving render tier, elected label, and
+tracked-object motion client-side and read them off the `WorldObject`/`RenderTier` wire data instead
+(docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6/§6 W3 row: "delete client extrapolation-for-tracked
+and `electStickyLabels`... render tier from server... no client re-derivation of velocity or label for
+tracked objects (grep test)"). Scope was exactly `shared/player/**` plus the five `<vision-player>`
+host templates that bind `[detections]` — no `core/api/models.ts`, no `core/live/**`, no
+`core/detections/**`, no Java, matching the plan's own disjoint-wave file split.
+
+**What changed:**
+
+- `shared/player/detection-overlay-logic.ts`:
+  - New `worldObjectsByTrackId(worldObjects): ReadonlyMap<number, WorldObject>`, keyed by
+    `state.id` — the one lookup every consumer below shares, so a box, its tier, and its strip chip
+    can never disagree about which `WorldObject` a track id resolves to.
+  - New `resolveDisplayDetections(selected, previous, targetMs, worldObjectsById, maxExtrapolationMs?,
+    matchGate?)` replaces the old `extrapolateDetections` + `electStickyLabels` + `applyStickyLabels`
+    trio as `player.ts`'s call site. Partitions `selected.detections` into three groups per detection:
+    **matched + visible** (`box = state.kinematics?.predictedBox ?? state.kinematics?.box ??
+    detection.box`, `label = state.identity?.label ?? detection.label` — reads the wire directly, no
+    client motion or label logic at all), **matched + `render.tier === 'HIDDEN'`** (dropped from the
+    returned array entirely — not merely left off a tier map, so nothing downstream can accidentally
+    draw a suppressed box), and **unmatched** (no track id, or a track id with no `WorldObject` yet —
+    the transient pre-`tracks:`-arrival gap, see disclosure below) — the unmatched subset alone still
+    runs through the unchanged `matchDetections`/{@link projectUnmatchedOne} projection machinery
+    (still fed the *full* `previous`/`targetMs`, just a smaller `detections` array), then all three
+    groups are reassembled in original order.
+  - New `resolveDetectionTiers(displayDetections, worldObjectsById, context): ReadonlyMap<Detection,
+    DetectionTier>` replaces the direct `detectionTiers(...)` call. A matched detection's tier is
+    `'T0'` on hover-override (unchanged client concern — momentary UI feedback, not a wire fact) else
+    `worldObject.render.tier` cast to `DetectionTier` (server already resolves FOLLOW-lock T0 itself,
+    per W2.8 — only hover still needs a client override); unmatched detections still run through the
+    unchanged `detectionTiers` priority-tier function (T0 hover/lock > T3 sub-scale > T1 moving/top-K/
+    hovered-class > T2 everything else, research §3.2 — untouched this wave).
+  - **Renamed** (report's required exact final names): `extrapolateOne` → **`projectUnmatchedOne`**;
+    `EXTRAPOLATION_MATCH_GATE` → **`UNMATCHED_MATCH_GATE_DISTANCE`** (value `0.15`, unchanged).
+    `EXTRAPOLATION_MAX_MS` keeps its name (still the right name for what it now exclusively bounds:
+    the unmatched subset's own forward-projection horizon). `extrapolateDetections` keeps its name and
+    signature, now called only from inside `resolveDisplayDetections` on the unmatched subset.
+  - **Fully deleted**: `electStickyLabels`, `electFromObservations`, `applyStickyLabels`,
+    `STICKY_LABEL_VOTE_WINDOW`, `STICKY_LABEL_SWITCH_MARGIN`, `STICKY_LABEL_SWITCH_STREAK`, the
+    `TrackObservation` interface, and the "Sticky labels per track" section's own essay-length header
+    comment — replaced by a short note (in the new section's own header comment) citing this wave and
+    `WorldModel`/`ObjectState.identity` as the label's new source of truth, not restating the deleted
+    election algorithm's mechanics.
+- `shared/player/player.ts`: new `readonly worldObjects = input<readonly WorldObject[]>([]);`
+  (doc-commented like `lockedTrackId`/`hoveredClass` — a host that never binds it degrades honestly to
+  every detection running the unmatched/local-projection path, exactly today's pre-W3.2 behavior, never
+  a blocked page). `drawDetections` now computes `worldObjectsById = worldObjectsByTrackId(this.
+  worldObjects())` once per frame and calls the two new resolve functions in place of the deleted
+  four-call sequence. Every downstream use of `displayed`/`tiers` (the `t0TrackIds` loop, `trailResults`,
+  `drawOrder`, the `tiers.get(detection) ?? 'T2'` fallbacks) is untouched — it already assumed a
+  HIDDEN-filtered, fully-tier-covered list by construction, which now holds by construction one layer
+  earlier instead of by a second explicit check at each site.
+- `shared/player/detections-strip-logic.ts` — **not named in the original wave brief, found and
+  migrated in this same wave because it also imported `electStickyLabels`** (its own label-grouping
+  step) and would otherwise have kept a second, independent re-implementation of server-side label
+  election alive, defeating the point of the new grep spec below. `displayLabel(detection,
+  worldObjectsById)` replaces the old sticky-label call: a tracked detection groups under
+  `worldObjectsById.get(trackId)?.state.identity?.label ?? detection.label` — the identical lookup the
+  canvas overlay now uses, so a strip chip's label and the box it corresponds to can never quietly
+  disagree. `stripChips` gained `worldObjectsById: ReadonlyMap<number, WorldObject> = new Map()` as its
+  new 2nd parameter (before `labelDenyFilter`/`cap`/`windowSeconds`) — defaults to empty, the honest
+  choice for a caller with no per-asset `worldObjects()` to thread in (or an asset that hasn't produced
+  any yet): every label used raw, unchanged from before this wave. Documented as a **per-current-track**
+  lookup, not a historical replay: a track's label within the strip's aggregation window is whatever the
+  wire says *right now*, not what it was when each historical batch in the window was actually captured
+  — there is no retained per-batch world-object snapshot to do better than that.
+- `shared/player/detections-strip.ts`: `chips` computed now threads `worldObjectsByTrackId(this.store.
+  worldObjects())` into `stripChips`. Class doc comment's "Click" bullet reworded: a PATCH now sends the
+  wire-elected label an operator is looking at, not cv-service's raw per-frame label; a track with no
+  world object yet still shows (and can be denied by) its raw label for that one transient beat.
+- `shared/player/no-client-rederivation.spec.ts` (**new**) — a plain vitest test, no `TestBed`, per the
+  plan's own "no client re-derivation of velocity or label for tracked objects (grep test)" requirement.
+  Recursively scans every non-`.spec.ts` `.ts` file under `shared/player/` (`follow-hud/` included) and
+  fails if `extrapolateOne`, `electStickyLabels`, `STICKY_LABEL_`, or `EXTRAPOLATION_MATCH_GATE`
+  reappears anywhere — `.spec.ts` files are excluded so this file's own doc comment (and any other
+  spec's historical prose) can still name the retired identifiers without self-tripping. **Sanity-
+  checked**: a forbidden string was temporarily appended to `player.ts`, confirmed the spec fails
+  (`AssertionError: expected [ Array(1) ] to deeply equal []`, naming the exact file/substring), then
+  removed before this commit — the diff this wave ships contains no such marker.
+  - **Node-builtins gotcha**: this project has no `@types/node` (not a dependency, and this wave's own
+    build instructions say not to add one), so `fs`/`path`/`url` have no ambient types under
+    `tsconfig.spec.json`'s `types: ["vitest/globals"]`. New `shared/player/node-builtins.d.ts` supplies
+    minimal ambient declarations for just the handful of members this one spec calls. It has to be a
+    standalone global-script `.d.ts` (no top-level `import`/`export` of its own) rather than declared
+    inline in the spec file — TypeScript treats `declare module '...'` written inside a file that
+    already has its own imports (a "module" file, which the spec is, importing from `vitest`) as an
+    *augmentation* of an existing module, which fails with `TS2664` for `fs`/`path`/`url` (bare or
+    `node:`-prefixed) since nothing declares them without `@types/node`; a global script `.d.ts` has no
+    such restriction. Also found: `import.meta.url` is a genuine `file://` URL at runtime under this
+    builder, but passing `new URL('.', import.meta.url)` into `fileURLToPath` threw `TypeError: The URL
+    must be of scheme file` (a realm/identity mismatch between the WHATWG `URL` global available here and
+    the one Node's real `url` module expects) — fixed by passing the raw URL string straight to
+    `fileURLToPath` and taking `dirname()` of the result instead of constructing a new `URL`.
+- Host wiring — `[worldObjects]="..."` added immediately after each host's existing `[detections]`
+  binding, matching that file's own binding style exactly:
+  - `features/fly/cockpit.html` — `[worldObjects]="facade.detections.worldObjects()"`
+  - `features/live/live.html` — `[worldObjects]="facade.detections.worldObjects()"`
+  - `features/crew/crew.html` — `[worldObjects]="facade.detections.worldObjects()"`
+  - `features/wall/wall-focus.html` — `[worldObjects]="detections.worldObjects()"`
+  - `features/wall/wall-tile.html` — `[worldObjects]="detections.worldObjects()"`
+  - `features/command/asset-panel.html` — **left untouched**: it has no `[detections]` binding at all
+    (no overlay on that surface), so there is nothing to pair a `[worldObjects]` binding with.
+
+**Disclosure — the sticky-label transient-gap regression (my own finding, not in the wave brief):** a
+genuinely-tracked detection (`detection.track.id` set) that has no matching `WorldObject` yet — the
+narrow window between a track first appearing in a `detections:<assetId>` batch and its first
+`tracks:<assetId>` snapshot arriving — used to get the old `electStickyLabels` confidence-weighted,
+switch-margin/streak-gated smoothing across historical batches. After this wave it falls into the
+"unmatched" bucket and shows whatever raw label that one batch's detector produced, with no
+cross-batch smoothing, until the world object arrives (typically within one `tracks:` cadence tick).
+**Judged acceptable**: the gap is bounded and self-resolving (it closes the moment the world object
+shows up, at which point every downstream reader — overlay box, tier, and strip chip alike — converges
+on the server's own elected label simultaneously); the alternative of keeping a second, client-side
+election algorithm running *only* for this narrow window would resurrect exactly the duplicated-logic
+risk this wave exists to remove, for a cosmetic flicker lasting at most one tracking cadence tick on a
+detection that, by definition, has no confirmed track history to smooth from yet.
+
+**Not built / not touched:** `core/api/models.ts`, `core/live/**`, `core/detections/**`, any Java,
+`features/cv-inspector/`, `core/cv-trace/`, and the `'cv-trace'` `LiveEnvelope` member — all other
+waves' territory, per this wave's own file-scope allowlist. `features/command/asset-panel.html` — see
+above. No dev-parity concern arises: `worldObjects()` is fed purely by the live SSE topic wired in
+W3.1, which has no dependency on `vision.auth.enabled`; a dev-admin session with auth disabled sees the
+exact same wire-driven boxes/labels/tiers as any other session once its `tracks:` subscription is live,
+and degrades to the pre-W3.2 unmatched/local-projection path identically to any other session if it
+never arrives.
+
+### Tests / build
+
+`npm run test:ci` — **201/201 files, 3940/3940 tests green**. This wave's own isolated contribution
+(measured file-by-file against this wave's own `HEAD` versions, since a concurrent, still-in-progress
+sibling wave shares this worktree and also added tests elsewhere): `detection-overlay-logic.spec.ts`
+131 → 133 `it()`s (+2 net — the sticky-label describe blocks removed, `worldObjectsByTrackId`/
+`resolveDisplayDetections`/`resolveDetectionTiers` describe blocks added), `detections-strip-logic.
+spec.ts` 12 → 16 (+4 net), `no-client-rederivation.spec.ts` new (+1 file, +1 test) — **this wave's own
+delta is +1 file / +7 tests** against wave W3.1's recorded 200/3917 baseline above; the remaining +23
+tests/+0 files beyond that (3917 → 3940, 200 → 201 once this wave's own +1/+7 is subtracted) come from
+the concurrently-running, unrelated `vision-profiles`/`cv-control-panel-logic` wave sharing this same
+worktree, not from this wave's diff. All 10 spec files under `shared/player/` pass in isolation (350
+tests) as well as inside the full run. `npx tsc --noEmit` clean on both `tsconfig.app.json` and
+`tsconfig.spec.json`.
+
+`ng build --configuration production` — green, same two pre-existing warnings only (initial bundle
+over its 390 kB budget; `tactical-map.css` over its 11 kB component-style budget — both present before
+this branch). Raw measured total at this wave's own tree state: initial **436.41 kB raw / 122.32 kB
+transfer**. **No isolated before/after bundle delta for this wave alone was captured** — the standard
+method (a `git stash` scoped to this wave's own touched files, rebuild, restore, rebuild again) was
+judged too risky to run safely while a sibling agent has active uncommitted edits in this same shared
+worktree (the exact same call this file's own ALWAYS-ON-FLOW wave-C entry above made in an identical
+situation: "needed a tree-wide `git stash`, correctly refused while other waves were uncommitted").
+This wave's own real cost is expected to be small and template/logic-only (one new `input()`, two
+renamed/added pure functions, no new dependency, no new component) inside the already-lazy `cockpit`/
+`live`/`crew`/`wall` chunks, never the initial bundle.
+
+**Nothing in this wave's brief was found wrong or unimplementable.**
+
+- **2026-09-13, docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7/§6, wave W3.6 (intent picker + resolved sources on `/vision/profiles`, `cv.detection-policy=ALWAYS` control):** built entirely inside `features/vision-profiles/**` plus one additive `core/api/models.ts` edit, on a shared tree with a concurrent unrelated agent editing `shared/player/**` and five `<vision-player>` host templates at the same time (confirmed disjoint throughout via `git status` — never touched).
+  - **Closes a real, previously-undocumented TS-mirror gap**: `CvProfile` (`core/api/models.ts`) had no `sources` field at all, even though `dto.CvProfileResponse` has carried one since wave W3.0 (`fieldSources()`/`Sources` record) — W3's own plan row never called this out. Added `readonly sources: CvProfileSources` as **required**, not optional, because the wire always sends it (see next bullet) and an optional field would let a caller silently forget to read it.
+  - **New types** (`core/api/models.ts`, ~line 400-535): `CvProfileIntent = 'PEOPLE'|'VEHICLES'|'EVERYTHING'|'CUSTOM'` (mirrors `domain.model.Intent`); `CvProfileSources { readonly model?: 'INTENT'; readonly labelFilter?: 'INTENT'; }`. `CvProfileRequest` gained optional `intent?: CvProfileIntent` (absent-means-skip-resolution, the identical convention W3.0 established for `UpdateStreamConfigRequest#intent`).
+  - **`sources` JSON-shape finding — verified, not assumed, and not a new independent claim**: read `CvProfileResponse.java` directly — the class carries `@JsonInclude(NON_NULL)` and every `Sources` field/record is populated via `Sources.none()`/`Sources.from(...)`, never left as a bare `null` reference; `Jackson NON_NULL` suppresses a `null`-valued field but **not** a non-null nested object whose own fields are null, so an all-absent `Sources{model:null,labelFilter:null}` still serializes as a present `"sources":{}`, never an omitted key. Cross-checked all 5 `CvProfileController` call sites (list/get/create/update/effective) via `grep -n "CvProfileResponse.from\|Sources.none\|fieldSources"` — every one passes a non-null `Sources`. This is static-code verification (reading the Java source and its call sites), not a written/run test, and it is **the same finding W3.0 already made** for the sibling `UpdateStreamConfigResponse.sources` — `CvProfileSources` reuses that exact `{model?, labelFilter?}` shape rather than asserting anything new.
+  - **Pure logic** (`vision-profiles-logic.ts` + spec): `ProfileDraft` gained `intent: CvProfileIntent | ''` — defaulted to `''` in `emptyProfileDraft`/`draftFromProfile`/`forkDraftFromProfile` and **never** inferred from a loaded profile's `sources` (a saved profile's `sources` describes what the *last save* resolved, not an editable intent the operator is now choosing — re-inferring it would silently re-apply a stale resolution on every open). New `applyIntentToDraft(draft, intent)`: blanks `model` only on the `'' → <intent>` transition; changing between two different intents, or an intent an operator has since typed a model over, never re-blanks it — the model stays whatever the operator's last explicit choice was, checked by 4 new tests covering exactly the blank/sticky/revert transitions. `labelFilter` needed no equivalent special-casing: `parseLabelList('') === []` already round-trips as the "leave to platform" sentinel the server checks for. `validateDraft` relaxed the model-required check to skip when an intent is chosen, and gained a friendly pre-submit error — `'Custom intent needs at least one class in the label filter.'` — when `intent === 'CUSTOM'` and the label filter parses empty, mirroring `IntentPolicyResolver.resolve`'s Java exception instead of letting the operator hit a raw 400. `draftToRequest` maps `''` → `undefined` for `intent`. New `saveOutcomeMessage(saved, intent, isUpdate)`/`describeIntent(intent)`: the post-save toast names exactly which knob(s) (`model`/`label filter`) were resolved from intent by reading `saved.sources` off the real response — it never claims a knob was intent-resolved when its `sources` entry is absent, and reads as a plain `"X" saved.`/`"X" created.` when no intent was chosen at all.
+  - **UI** (`vision-profiles.html`/`vision-profiles-facade.ts`): a new Intent `<select>` (none/People/Vehicles/Everything/Custom) ahead of the Model field, same `<select>` styling as every other form control on this page, wired through `facade.setIntent(intent)` → `applyIntentToDraft`. The Model select's blank option is now genuinely selectable and relabeled **"Resolved from intent"** only while an intent is chosen; with no intent chosen it reverts to exactly today's behavior — disabled, required, labeled "Choose a model…" — so an operator who never touches Intent sees no change at all. `saveDraft()` now captures the create/update response and feeds it to `saveOutcomeMessage` for the enriched toast.
+  - **D7 (`cv.detection-policy=ALWAYS`)**: placed inside the Bindings panel's existing `@case ('ASSET')` scope branch, gated on an asset actually being selected (`facade.bindingScopeId()`) — the only per-asset-detail spot already on this page, so no new page section was invented for one checkbox. Storage fact confirmed by reading `DetectionPolicy.java`: `Asset#attributes['cv.detection-policy']`, parsed case-insensitive/trimmed but written canonically **lowercase** `"always"`/`"on-view"` (uppercase silently fails to parse) — `withDetectionPolicy`/`isDetectionAlways` (new, `vision-profiles-logic.ts`) enforce the lowercase write and case-insensitive read. Because `AssetEdit.attributes` (`VisionApi#updateAsset`, `PATCH /api/assets/{id}`) **replaces the whole attributes map wholesale**, the facade does a read-merge-write: `setBindingScopeId` triggers a fresh `getAsset(assetId)` (never the page's already-loaded `AssetSummary.attributes` off the roster — that could be stale from page-load time, and this checkbox must reflect the asset's *live* value), and `toggleDetectionAlways()` merges the new key into that fetched map before PATCHing. The checkbox never shows an invented/optimistic state before the fetch resolves: `facade.detectionAlwaysOn()` is `true`/`false`/`null` (loading/unknown), the checkbox is `[disabled]` while `null` and shows "(loading…)", and a stale response is dropped by re-checking the scope kind/id still matches after the `await` before applying it.
+  - **One disclosed, minimal, out-of-strict-scope fix**: `features/fly/cv-control-panel-logic.spec.ts`'s `cvProfile()` test fixture built a full `CvProfile` object literal with no `sources` field; making `CvProfile.sources` required (this wave's own deliberate design, not an accident) broke `tsc --noEmit -p tsconfig.spec.json` there with `TS2322`. Fixed by adding one line, `sources: {},` (with a comment explaining a plain read with no originating create/update request reports none) — chosen over making `sources` optional, which would have avoided touching the file but contradicted this wave's explicit instruction to model the always-present shape honestly. No other line in that file was touched.
+  - **Role-gating**: unchanged — write actions (including the new intent field and the D7 checkbox) still gate on the same `canManageOrg` the rest of this page's mutations already use; `/vision/profiles` stays `orgGuard`-routed and rail-gated `managerOnly`, so a pilot never sees any of this wave's new affordances.
+  - **Dev parity**: unaffected — `vision.auth.enabled=false`'s dev admin resolves ADMIN/unbounded, so every gate above passes exactly as it does for a real manager; no new auth-conditional branch was added.
+  - **Degrades honestly**: a failed `getAsset` read for D7 leaves `detectionAlwaysOn()` at `null` (rendered as "(loading…)", disabled) rather than guessing off/on; a failed `saveDraft()` still surfaces through the existing `describeHttpError` → toast path unchanged; the save-outcome toast never fabricates an intent-resolution claim the response's own `sources` didn't make.
+  - **Foreign/pre-existing, not mine**: `shared/player/no-client-rederivation.spec.ts` (untracked, actively being authored by the concurrent unrelated agent this wave was told to ignore) fails both `tsc --noEmit -p tsconfig.spec.json` (no `@types/node` configured for its `node:fs`/`node:path`/`node:url` imports) and at runtime ("The URL must be of scheme file") — confirmed live/in-progress (content changed between checks), confirmed unrelated to any file this wave touched, left exactly as found.
+  - **Verify chain**: `npx tsc --noEmit -p tsconfig.app.json` — 0 errors. `npx tsc --noEmit -p tsconfig.spec.json` — 0 errors, including the foreign `shared/player/no-client-rederivation.spec.ts` (its 3 errors, present mid-wave while that concurrent agent's work was still in flight, were gone by this wave's final verify pass — resolved by that other agent, not by any file this wave touched). `npm run test:ci` — **201/201 files, 3940/3940 tests passing** (this wave's own contribution: +16 new tests / 0 new files, all in `vision-profiles-logic.spec.ts`: intent-draft defaults/never-inferred, `applyIntentToDraft`'s 4 blank/sticky/revert cases, `validateDraft`'s blank-model-with-intent + CUSTOM-needs-label-filter cases, `draftToRequest`'s intent-omitted/intent-carried cases, `saveOutcomeMessage`'s 4 cases, `describeIntent`, and the D7 `isDetectionAlways`/`withDetectionPolicy` describe block including case-insensitivity and merge-not-replace; confirmed via a pathspec-scoped `git stash push -u -- <this wave's 6 files>` baseline/restore, never a bare `git stash`, that reverting only this wave's files dropped the count by exactly 16 with no other file's tests affected). A mid-wave snapshot briefly saw 200/201 files with a foreign `shared/player` failure — gone by this final pass, confirming it was never this wave's own. `ng build --configuration production` — green, same one pre-existing budget warning only (initial bundle 46.41 kB over its 390 kB budget, pre-existing, not from this wave); **bundle delta** (same stash-based before/after method): initial bundle unchanged at 436.41 kB raw / 122.32 kB transfer (`vision-profiles` is lazy-loaded, so none of this wave's additions are eager); lazy chunk **`vision-profiles` 32.43 kB → 36.35 kB raw (+3.92 kB), 7.47 kB → 8.37 kB transfer (+0.90 kB)**.
+  - **Commit**: `feat(cv-orchestration W3.6): intent picker + resolved sources on /vision/profiles, detection-policy control` — this wave's launching task explicitly required this one commit (unlike every prior wave's own "not committed, staged-ready" note above), with an exact trailer overriding this session's own default attribution; see the commit itself for the final trailer text used.
+
+## Status — CV-ORCHESTRATION wave W3.4 (web): "Tuning" modal — drop the tracking-mode picker, resolved-source lines (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7, §9 decision E19/#4, §6 W3 row) — 2026-09-13
+
+Pure copy/removal/addition inside `CvSetupModal` (the same component, selector, and file names —
+this is a UX rename, not a refactor). Built on a shared tree with a concurrent sibling agent (W3.3)
+actively editing `core/api/models.ts`, `cockpit.html`, `cockpit-facade.ts`, `fly-logic.ts`,
+`cv-control-panel-logic.ts`/`.spec.ts`, and `shared/player/**` throughout this wave — confirmed
+disjoint the whole time via `git status`/`git diff --stat`, never touched.
+
+- **Part A — renamed to "Tuning"**: `cv-setup-modal.html`'s `aria-label`, `<h2>`, and close-button
+  `aria-label` all say "Tuning" now (`aria-label="Close Tuning"`); `cv-control-panel.html`'s door
+  button reads `Tuning…`. Every doc-comment in `cv-setup-modal.ts`/`cv-control-panel.ts`/
+  `cv-control-panel.html` that named "Detection setup" prose was updated to "Tuning" alongside a
+  pointer to this wave — component class name (`CvSetupModal`), selector (`vision-cv-setup-modal`),
+  file names, method names (`requestCvSetup`-shaped ones), and every CSS class encoding "setup"
+  (`.cv-setup-button`, `.cv-setup-footer`, `dialog.open('cv-setup')`) are all **untouched**, exactly
+  as scoped, so `cockpit.ts`'s import and `cockpit.html`'s usage site needed zero changes.
+  `cockpit.html` itself still says "Detection setup…" in its own comment prose (lines ~402, ~670) —
+  out of this wave's file scope (a sibling agent owns that file concurrently this run); left exactly
+  as found, disclosed here rather than risk-edited.
+- **Part B — E19, tracking-mode picker removed**: deleted the whole Off/Associate/Follow segmented
+  control section from `cv-setup-modal.html` (markup + its description switch), `onTrackingMode`
+  from `cv-setup-modal.ts`, and the `buildTrackingModePatch` import (the function itself is
+  untouched in `cv-control-panel-logic.ts` — out of this wave's file scope, and nothing else in this
+  component tree called it, confirmed by grep before deleting the import).
+  - **The now-possibly-dangling Expert gate**: `trackingMode` used to be a `signal<TrackingMode>`
+    written only by the deleted picker and read by three things — the Expert disclosure's capability-
+    ceiling/engine gate (`trackingMode() !== 'OFF'`), the Follow-only verify/follow-fps gate
+    (`trackingMode() === 'FOLLOW'`), and `engineOptionsForMode`'s own mode argument. Rather than
+    leaving a dangling write-only signal or inventing a fake mode, `trackingMode` became a
+    `computed<TrackingMode>(() => this.detections.tracks()?.stats?.mode ?? 'OFF')` — reading the
+    **actual running mode already available on this component** via the tracks poll's own `stats`
+    (the exact fact the pre-existing constructor `effect` was already syncing the old signal *from*,
+    every poll tick — so this is strictly less code, not new plumbing). All three read sites keep
+    working unchanged, now driven by server truth instead of a client write. `'OFF'` before the
+    first poll ever reports `stats` is the honest default (nothing known to be running yet). Server-
+    side confirmation (read-only, no Java touched): `TrackingConfig.java` — `PipelineConfig#defaults()`
+    ships `TrackingConfig.associate()`, i.e. ASSOCIATE is already the running default whenever
+    detection is on, matching E19's own text.
+  - The `trackingEngineId` sync effect keeps running (Engine stays an Expert-tier control per §4.7's
+    table — only the mode picker is removed) — split out of the effect that used to set both fields
+    together, since `trackingMode` no longer needs an effect to write it at all.
+- **Memory/cached-tracking toggle — confirmed no-op, not found anywhere**: grepped
+  case-insensitively for `memory`/`cached`/`remember` across all of `features/fly/` before touching
+  anything. Every hit is the unrelated "remembered streaming asset" navigation concept
+  (`fly-redirect-guard.ts`, `fly-logic.ts#rememberedStreamingAssetId`, `cockpit-facade.ts`'s "last
+  flown" bookmark) — a different feature entirely, not a CV tracking-memory switch. No such toggle
+  exists in this component or any sibling in this tree to remove; per this wave's own instructions,
+  nothing was invented to then delete. This is the same finding prior CV-ORCHESTRATION research
+  already made — confirmed again here, independently, before acting.
+- **Part C — resolved-source lines**: new `cv-setup-modal-logic.ts` (+ `.spec.ts`, 8 tests) — this
+  component previously delegated all its pure logic to the shared `cv-control-panel-logic.ts` (out
+  of this wave's file scope, shared with the sibling `cv-control-panel.ts`); a new sibling `-logic.ts`
+  file keeps this Tuning-modal-only concept out of that shared file rather than risk-editing it.
+  `resolvedSourceLine(sources: CvProfileSources | undefined, profileSource: EffectiveCvProfile['source']
+  | undefined, knob: 'model' | 'labelFilter' | 'confidenceThreshold'): string | null` — precedence:
+  (1) `sources[knob] === 'INTENT'` (only representable for `model`/`labelFilter`; `confidenceThreshold`
+  never checks — `CvProfileSources` has no such field, since request-time intent resolution never
+  seeds confidence, §4.9's "As built in W2" table) → `"Resolved from your intent pick"`; (2) else
+  `profileSource` present → `"From your asset/category/organization profile"` or `"Platform default"`
+  for `'PLATFORM'`; (3) else `null` (never a fabricated source). New input
+  `readonly lastConfigSources = input<CvProfileSources | undefined>(undefined);` — **always
+  `undefined` today**: no host template binds it yet (wave W3.3's own concern, landing concurrently
+  in this exact worktree); every resolved-source line below therefore falls through to the
+  profile-tier fact or renders nothing, never a blocked page. Wired as two new computeds,
+  `confidenceSourceLine`/`classesSourceLine`, rendered as an extra `<p class="muted hint">` line —
+  next to the Confidence slider, and alongside (never replacing) Classes' existing "Applied: N of the
+  classes…" line.
+  - **Ambiguous intent-name decision**: `CvProfileSources` only reports the tag `'INTENT'`, never
+    *which* intent resolved a knob, and this component has no chosen-intent value of its own to name
+    one with. Chose **option (b)** from the brief — phrased the sentence without naming the specific
+    intent (`"Resolved from your intent pick"`) — over adding a second speculative input this wave
+    has nothing yet to wire (it would sit dead until a sibling wave lands a value into it, exactly
+    the kind of premature plumbing CLAUDE.md rule 10 warns against).
+  - Deliberately **did not** add a resolved-source line to the "Looking for" model/intent-card
+    section, even though the brief allowed it optionally — see next bullet.
+- **Disclosed, not fixed — the "Looking for" overlap**: `cv-setup-modal.html`'s pre-existing "Looking
+  for" intent-card grid (`models()`-roster-driven, `onModelChange`) is a different, older mechanism
+  from the newer server-resolved `CvProfileIntent` enum (wave W3.0/W3.6's `/vision/profiles` picker).
+  Neither reads nor writes the other; this card grid never shows a resolved-source line, even though
+  §4.7's table describes an eventual "resolved from intent People (platform)" reading exactly there.
+  Left exactly as it was — noted in the template's own comment block and here — a known UX
+  inconsistency for a future wave to merge or reconcile, not this one's brief.
+- **Role-gating / dev parity**: unaffected by this wave — no new gate, no auth-conditional branch;
+  the existing `canManage` input (already threaded from `CockpitFacade#canManage`) is untouched, and
+  `vision.auth.enabled=false`'s dev admin sees identical behavior to any other ADMIN session, exactly
+  as before this wave.
+- **Degrades honestly**: `lastConfigSources` absent → every resolved-source line either falls to the
+  profile-tier fact or renders nothing, never a guess; the removed tracking-mode picker's read side
+  (`trackingMode`) defaults to `'OFF'` before any poll ever reports `stats`, never a fabricated
+  "running" state.
+- **Foreign/pre-existing, not mine**: at this wave's final verify pass, `npm run test:ci` showed
+  **1 failing test** in `shared/player/detection-overlay-logic.spec.ts` — confirmed via
+  `git diff --stat` to be a brand-new `it()` (`'an untracked-box hit resolves to "point"…'`) the
+  concurrent sibling agent (W3.3, working on click-to-follow per its own new untracked
+  `click-to-follow.spec.ts` in this same tree) was actively adding to a file this wave never touched;
+  present both times `test:ci` was run a minute apart. Left exactly as found — same "confirmed
+  unrelated, not this wave's" call as W3.6's own entry above made for a different foreign file.
+- **Verify chain**: `npx tsc --noEmit -p tsconfig.app.json` — 0 errors. `npx tsc --noEmit -p
+  tsconfig.spec.json` — 0 errors. `npm run test:ci` — **202 files / 3948 tests, all green**, measured
+  immediately after this wave's own 6 files were the *only* uncommitted change in the tree (before
+  the sibling's concurrent edits resumed); this wave's own isolated contribution is exactly **+1 file
+  / +8 tests** (`cv-setup-modal-logic.spec.ts`) against wave W3.6's recorded 201/3940 baseline above.
+  A later, final-state run (with the sibling's own further concurrent edits back in the tree)
+  reported 203 files / 3960 tests with the 1 foreign failure noted above — that delta (203−202 files,
+  3960−3948 tests, 1 failing) is entirely the sibling's own in-flight work, not this wave's.
+  `ng build --configuration production` — green, same two pre-existing budget warnings only (initial
+  bundle over its 390 kB budget; `tactical-map.css` over its 11 kB component budget). **Bundle
+  delta** (pathspec-scoped `git stash push -u -- <this wave's 6 files>`, confirmed via
+  `git stash list --format='%H %gs'` and restored via `git stash apply <sha>` + `git stash drop`,
+  never a bare `stash`/`pop`, exactly the precedent this file's own W3.6 entry set): measured in a
+  tight ~90-second window, lazy chunk **`cockpit` 138.93 kB → 138.69 kB raw (−0.24 kB), 29.31 kB →
+  29.28 kB transfer (−0.03 kB)** — a net *decrease*, expected since this wave deletes a whole picker
+  section/method/import and adds only two small computeds plus one new logic file. The eager
+  **initial bundle wobbled by ~0.3 kB raw across builds taken minutes apart** (436.41–436.72 kB) —
+  attributable to the concurrently-editing sibling's own in-flight changes to `cockpit.html`/
+  `cockpit-facade.ts`/`models.ts` (none of which this wave touched), not to anything in this diff;
+  `cv-setup-modal`/`cv-control-panel` are both inside the lazy `cockpit` chunk and were never eager
+  before or after.
+- **Commit**: `feat(cv-orchestration W3.4): Tuning modal — drop the tracking-mode picker,
+  resolved-source lines`.
+
+## Status — CV-ORCHESTRATION wave W3.3 (web): intent chips + one honest status line on the Fly hero (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7/§4.8, §6 W3 row) — 2026-09-13
+
+Built on the same shared tree as waves W3.4 ("Tuning" modal rename, `features/fly/cv-setup-modal.*`/
+`cv-control-panel.*`) and W3.5 (tap-to-follow, `shared/player/**` + `cv-control-panel-logic.ts`'s
+`buildPointLockPatch`/`followPoint`) editing concurrently in real time — confirmed disjoint from
+both throughout via `git status`/`git diff` before every stage, never touched their files. (Note:
+the W3.4 entry immediately above this one twice mislabels the *tap-to-follow* sibling as "W3.3" —
+that work is W3.5's; this section is the actual W3.3.) This wave's own files were repeatedly
+overwritten mid-task by the concurrently-committing W3.4/W3.5 agents sharing this same working tree
+(their own Read-then-Write cycles raced this wave's edits to `cockpit-facade.ts`/`cockpit.html`/
+`cv-control-panel-logic.spec.ts` at least twice); every edit below was ultimately re-applied from a
+clean `git show HEAD:<path>` snapshot in a scratch directory and staged directly via
+`git hash-object -w` + `git update-index --cacheinfo` (never a plain `git add` on the live,
+still-being-written path), so this commit is guaranteed self-consistent regardless of what the
+live working tree looked like at any given moment.
+
+- **Part A — TS-mirror fix, `core/api/models.ts`**: `UpdateStreamConfigRequest` gained
+  `readonly intent?: CvProfileIntent` (~line 243) — the Java field has existed since wave W3.0;
+  this TS mirror was simply never added. `PatchStreamConfigResponse` (this file's own pre-existing
+  name for Java's `UpdateStreamConfigResponse`, not renamed here) gained `readonly sources:
+  CvProfileSources` (~line 278) as **required, not optional** — reusing `CvProfileSources` verbatim,
+  no new type — because the wire always sends a real `sources: {}`, never an omitted key; see that
+  type's own doc comment (wave W3.6) for the full Jackson `@JsonInclude(NON_NULL)`-suppresses-a-
+  null-*field*-not-a-non-null-*nested-object* finding, cited rather than re-derived a third time.
+  One object literal broke as a result: `cv-control-panel-logic.spec.ts`'s `reArmHint` describe
+  block (3 fixtures) — fixed by adding `sources: {}` to each, one line + comment per fixture, same
+  shape as wave W3.6's own identical fix to `CvProfile` fixtures elsewhere.
+- **Part B — intent chips, `cockpit.html`/`cockpit-facade.ts`**: a new row of four one-shot chips
+  (People/Vehicles/Everything/Custom) plus the status line (Part C) render in `cockpit.html`,
+  inside the `.dock`'s existing notice stack right after the crew camera-presence line, gated on
+  `facade.live()` — **regardless of whether detection is currently on**, unlike the "Turn on" chip
+  a few lines above (which only shows while detection is off): an operator whose CV goes `Degraded`
+  mid-detection still needs to see it, and one already detecting may still want to re-aim without a
+  round trip through "off" first. The chip row itself is additionally gated on `!facade.watchMode()`.
+  **No persistent "selected" state** by design — there is no wire fact for "the stream's current
+  intent," only its resolved *effect* (`model`/`labelFilter`), so every click is independent and
+  none ever renders pressed; "Turn on" remains the one required, separate act, and no chip bundles
+  `detectionEnabled: true`.
+  - New `CockpitFacade.setIntent(intent: CvProfileIntent): Promise<void>` — a single `{ intent }`
+    PATCH via `fleet.patchStreamConfig`, following `followTrack`'s exact fire-and-forget shape (no
+    optimistic UI, no new error handling: `patchStreamConfig` already toasts + returns `null` on
+    failure, so `null?.sources` degrades honestly to `undefined` for free).
+  - New `CockpitFacade.lastConfigSources` (private writable `lastConfigSourcesSignal`, exposed
+    `.asReadonly()`) — the most recent PATCH response's `sources`, captured by `setIntent`, reset to
+    `undefined` inside `selectAsset()` (alongside the other per-asset reset fields there) since a
+    prior asset's PATCH provenance has nothing honest to say about a new one. Exposed plainly for
+    wave W3.4's Tuning modal to read later (per that wave's own entry above, its `lastConfigSources`
+    input is wired but still always `undefined` — this facade signal is the value a future host
+    binding would feed it); no reader of it added in this wave beyond the signal itself, per the
+    brief's own "expose plainly, no gold-plating" instruction.
+  - **Disclosed judgment call — "Custom" chip never sends `setIntent('CUSTOM')`**: read
+    `IntentPolicyResolver.resolve()` (`contexts/vision-perception/.../profile/IntentPolicyResolver.java`)
+    directly — it throws `IllegalArgumentException` when `intent === CUSTOM` and the same request's
+    `labelFilter` is null/empty, and the Fly hero has no surface to collect custom classes inline, so
+    a literal one-shot `setIntent('CUSTOM')` chip would be a guaranteed-400 button. The "Custom" chip
+    instead calls the already-existing `cockpit.ts#requestCvSetup()` (opens the Tuning modal, which
+    already has that surface) — a deliberate deviation from "each chip always sends the intent PATCH,"
+    disclosed here and in the commit message. `setIntent` itself stays correct for all four
+    `CvProfileIntent` values for any future caller that does have classes in hand.
+  - New CSS: `.intent-chip-row` (`cockpit.css`, next to `.icon-btn`) — a `flex-wrap` row of the four
+    `.icon-btn` pills, same responsive wrap-to-two-lines fallback `.header-actions` already uses.
+    Chips reuse `.icon-btn` (not `.chip`, whose `--panel-raised`/`--border` tokens are for themed
+    panels, not a control floating directly over video — frontend-style §2's HUD rule).
+- **Part C — the hero's one status line, `fly-logic.ts`**: new pure `FlyHeroStatus` interface
+  (`{ text: string; tone: 'off'|'on'|'warn'|'degraded' }`) + `flyHeroStatus(detectionEnabled,
+  cvSubsystem, detectionState, worldObjects)`, plus 9 new `it()`s in `fly-logic.spec.ts` covering
+  all four branches, the health-exclusion cases (`OK`/`DISABLED` never "Degraded"; an `undefined`
+  subsystem read — no completed `/api/system/status` fetch yet — never guesses a fault either), the
+  N=0 edge case, and singular/plural (`1 object` vs `N objects`, a codebase-precedent pluralization
+  `cv-control-panel-logic.ts`'s own "N class(es) on screen" line already established; §4.8's own
+  wording never shows a singular example, so this is a minor, low-risk judgment call, not a
+  literal-text deviation from anything §4.8 actually specifies). Exact 4-state priority order:
+  1. `cvSubsystem` present and `health` is anything other than `'OK'`/`'DISABLED'`
+     (`'DEGRADED'`/`'DOWN'`/`'UNKNOWN'` all qualify) → `Degraded — <detail>` verbatim from
+     `SystemStatusStore#status()`'s `cv-service` subsystem row — wins regardless of `detectionOn`.
+  2. Else `!detectionOn` → `Off`.
+  3. Else `detections.tracks()?.detectionState === 'RUNNING_UNWATCHED'` → `On — no viewer`.
+  4. Else → `On — N objects`, `N` = `detections.worldObjects().filter(o => o.render.tier !==
+     'HIDDEN').length`, `N=0` rendering literally `On — 0 objects`, never a softened phrase.
+  `CockpitFacade.heroStatus` wires this from `detectionOn()`, `systemStatus.status()
+  ?.subsystems.find(s => s.id === 'cv-service')` (new private `systemStatus = inject(SystemStatusStore)`
+  — injected here, not in `cockpit.ts`, per `architecture.spec.ts`'s routed-page rule),
+  `detections.tracks()?.detectionState`, and `detections.worldObjects()`. Deliberately **not** a
+  reuse/edit of `cv-control-panel-logic.ts#detectionStatus` — that is the Tuning-drawer's own,
+  separate 7-way status line for a different audience (§4.8's own table lists Operator/hero and
+  Expert/Tuning-modal as two distinct rows); this is a second, independent derivation.
+  - **Tone vocabulary**: `'off'|'on'|'warn'|'degraded'` (new to this file, no existing union reused
+    — `detectionStatus`'s own `DetectionStatusKind` is a `kind`, not a `tone`, and explicitly carries
+    no color mapping). Rendered via the two chrome classes this cockpit already has: `'degraded'` →
+    `.notice` (amber fault chrome); `'off'`/`'on'`/`'warn'` all → `.stream-state-chip` (neutral HUD
+    pill) — `'warn'` is its own tone rather than folded into `'on'` only so a future pass can style
+    "on, unwatched" apart from "on, seeing things" without re-parsing `text`, not because it gets
+    different chrome today.
+  - **No new poll started**: `CockpitFacade`'s existing `wantsTracksPoll` computed already includes
+    `this.detectionOn()` in its formula — the tracks poll (and therefore `worldObjects()`/`tracks()`)
+    was already running whenever this status line's own "On" branches can be reached; confirmed by
+    reading that computed directly rather than assumed.
+- **Role-gating / dev parity**: unaffected — no new gate, no auth-conditional branch. `setIntent`
+  and the chip row are visible to any operator who can already reach the cockpit; `vision.auth.
+  enabled=false`'s dev admin sees identical behavior to any other ADMIN session, exactly as before.
+- **Degrades honestly**: a failed `setIntent` PATCH leaves `lastConfigSources` at `undefined` (never
+  a fabricated value) via the same `patchStreamConfig` toast-and-`null` path every other PATCH-sending
+  method here already relies on; `heroStatus` never guesses `Degraded` from a `cv-service` row it
+  hasn't actually read (`cvSubsystem === undefined` falls through to the ordinary Off/On branches).
+- **Verify chain**: `npx tsc --noEmit -p tsconfig.app.json` — 0 errors. `npx tsc --noEmit -p
+  tsconfig.spec.json` — 0 errors. `npm run test:ci` — **203 files / 3969 tests, all green**, measured
+  against this wave's own code before this final race-safe re-application; re-verified after
+  reconstruction by re-running the same suite against the reconstructed files copied back onto the
+  live tree. `ng build --configuration production` — green, same two pre-existing budget warnings
+  only (initial bundle over 390 kB; `tactical-map.css` over 11 kB), neither touched by this wave.
+  **Bundle delta — corrected post-hoc (W3.7 docs pass, 2026-09-13)**: the paragraph originally here
+  said no isolated delta was possible on this shared tree; that was written before an isolated
+  measurement existed, and the pessimism doesn't hold. Re-measured via two disposable
+  `git worktree add --detach` checkouts (no shared index, no sibling contamination) — one at this
+  wave's own commit `a5ab10d3`, one at its parent `41d04ba8` — both with `node_modules` symlinked in:
+  lazy **`cockpit` chunk 138.69 kB → 140.35 kB raw (+1.66 kB), 29.26 kB → 29.55 kB transfer
+  (+0.29 kB)**; initial bundle **436.41 kB → 436.82 kB raw (+0.41 kB), 122.32 kB → 122.55 kB transfer
+  (+0.24 kB)** — noise-level, as expected for a wave that adds no new route and no new eager import.
+- **Commit**: `feat(cv-orchestration W3.3): intent chips + one honest status line on the fly hero`.
+
+## Status — CV-ORCHESTRATION wave W3.5 (web): tap to follow — box or point (D8) (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7 D8, §6 W3 row) — 2026-09-13
+
+The last implementation step of wave W3 ("one operator act"). Wires the wire's own `TargetLockRequest.
+pointX`/`pointY` form (`core/api/models.ts`) — a **zero-caller** shape before this wave (§7 D8's own
+"R1 surprise 2") — to the click gesture `shared/player/player.ts#onOverlayClick` already had, so a tap
+on the video always does *something* useful: a tracked box locks by id (unchanged), an untracked box
+locks onto its own center, and a bare click on open video locks onto that point. §7 D8's own acceptance
+line ("click path to follow = 3, measured by the e2e spec") is the new `features/fly/click-to-follow.
+spec.ts`, described below.
+
+**Built on a heavily shared tree** — two sibling waves editing the exact same files concurrently for
+most of this wave's duration: W3.4 ("Tuning" modal, merged as `41d04ba8`, confirmed by its own commit
+message to make "zero changes" to `cockpit.ts`/`cockpit-facade.ts`) and W3.3 (intent chips + one honest
+hero status line, uncommitted for most of this wave's duration — at times adding ~90 uncommitted lines
+to `cockpit-facade.ts` and ~37 to `cockpit.html`, the exact two files this wave also needed — until it
+landed mid-wave as `a5ab10d3`, see the race disclosure below). Rather than a tree-wide `git stash`
+(refused for the same reason every prior wave in this file with a live sibling refused one — no safe
+way to isolate one agent's WIP from another's mid-edit in a shared index), `cockpit-facade.ts` and
+`cockpit.html` were cleaned via a repeatable per-file procedure while W3.3 was still uncommitted:
+(1) back up the current combined (mine + sibling's) working-tree content to a scratch file, (2) edit
+the working tree down to "HEAD plus only this wave's own hunks", (3) `git diff` to confirm nothing
+foreign remains, (4) commit that clean content via `git commit --only -- <this wave's paths>` (which
+ignores whatever else the shared index holds for every other path, sidestepping a second hazard found
+mid-wave: the sibling agent's own `git add` sweeps repeatedly re-staged its in-progress `models.ts`/
+`cockpit.css`/`fly-logic.ts`/`fly-logic.spec.ts`/`MODULE.md` changes, and once even re-contaminated this
+wave's own already-cleaned `cockpit-facade.ts`/`cockpit.html` working-tree content between verification
+passes), (5) restore the combined content back onto the working tree afterward so the sibling's
+uncommitted work was left exactly as found, never lost, never force-included.
+
+**Disclosed race, caught and fixed before this entry was written**: between the last "nothing foreign
+remains" check and the actual `git commit --only` call, the W3.3 sibling committed for real
+(`a5ab10d3`, landing on top of `41d04ba8`). Because the clean `cockpit-facade.ts`/`cockpit.html`/
+`cv-control-panel-logic.spec.ts`/`MODULE.md` content staged for this wave's commit had been computed
+against the *stale* pre-`a5ab10d3` HEAD, the first attempt at this wave's commit (since superseded via
+`git commit --amend` — the only amend in this wave, on a commit that had not been shared or built upon
+by anything else, per this repo's own "prefer a new commit" rule's own stated exception for a not-yet-
+shared local mistake) would have **silently reverted W3.3's now-permanent work** in those four files:
+removing its `systemStatus`/`flyHeroStatus`/`setIntent`/`lastConfigSourcesSignal` additions from
+`cockpit-facade.ts`, its hero-status/intent-chip markup from `cockpit.html`, its required `sources: {}`
+test fixtures from `cv-control-panel-logic.spec.ts` (which would have left a real, permanent `tsc`
+failure — `a5ab10d3` also made `PatchStreamConfigResponse.sources` a required field, so a reverted
+fixture omitting it no longer compiles once `a5ab10d3` is a real ancestor), and its own real MODULE.md
+section. Caught by re-running `git log --oneline` and noticing `a5ab10d3` where a draft used to be;
+fixed by re-deriving each of those four files as "`a5ab10d3`'s real content plus only this wave's own
+hunks on top" (the identical isolate-and-diff procedure above, just re-run against the corrected
+baseline) before finalizing the commit actually shipped. This file's own section is appended directly
+after W3.3's real, now-committed section (not before it, as an earlier draft of this same paragraph
+assumed while W3.3 was still in flight).
+
+**What changed:**
+
+- `shared/player/player.ts`: new `readonly pointFollowed = output<{ readonly x: number; readonly y:
+  number }>();`, a sibling to the existing `readonly trackFollowed = output<number>();` — added, not
+  replaced; every existing `trackFollowed` caller/binding is untouched. `onOverlayClick`'s hit-test
+  (`x`/`y` from `event.clientX/Y` minus the canvas's own bounding rect, matched against `drawnBoxes`,
+  unchanged) now delegates its *decision* to a new pure `resolveOverlayClickTarget` (`detection-overlay-
+  logic.ts`), a three-way `{kind:'track'|'point'|'none'}` discriminated union:
+  - **Tracked-box hit** (`hit.detection.track?.id !== undefined`) → `trackFollowed.emit(trackId)`,
+    byte-identical to pre-W3.5 behavior (regression-guarded by the first new spec case below).
+  - **Untracked-box hit** → `pointFollowed.emit({x, y})` at *that detection's own box center*
+    (`box.x + box.width/2`, `box.y + box.height/2`) — already the wire's normalized `[0,1]` fraction
+    (the same one `Detection.box` itself uses), so **no pixel math at all** for this branch.
+  - **No hit** (a bare click on open video) → the click's own CSS-pixel position is normalized against
+    the frame's *effective* content rect, recomputed via the identical two-step pipeline `redrawOverlay`
+    already uses for painting every box — `letterboxRect(...)` then `applyCropFollowToContentRect(
+    cropFollowTransform(cropFollowState))` — so this inversion stays consistent with the forward mapping
+    at any crop-follow zoom (proven by a dedicated round-trip spec case, below). A result outside `[0,1]`
+    on either axis (the click landed in a letterbox/pillarbox bar) is a no-op — no lock request sent, the
+    honest "nothing meaningful was clicked" posture this hit-test already had. A result just inside the
+    edge is clamped defensively for float error.
+  - **The box-center-vs-pixel-inversion distinction, spelled out**: an untracked box's center needs zero
+    unit conversion because a `Detection.box` is already normalized; a bare click is a raw CSS-pixel
+    coordinate that must be normalized against the *content* rect specifically (not the canvas/video
+    element's own full bounding rect) because `object-fit: contain` letterboxing and any active
+    crop-follow zoom both shrink/offset where "the video" actually renders relative to where the
+    `<canvas>` element itself sits.
+  - `resolveOverlayClickTarget` was extracted as a pure, standalone function rather than tested via a
+    `TestBed`/component harness — **judgment call**: no `player.spec.ts`/component-test precedent exists
+    anywhere in this codebase for `Player` (heavy dependencies: `WebrtcCertificateService`, an
+    unpolyfilled `ResizeObserver` in jsdom, `hls.js`, required `viewChild` DOM refs), and this codebase's
+    own convention already favors pure-logic vitest over component specs (`crop-follow-logic.spec.ts`
+    already mirrors this exact hit-test math the same way). 9 new `it()`s added to the existing
+    `detection-overlay-logic.spec.ts` (which already hosts every other pure overlay-logic spec): the
+    tracked-box regression case, the untracked-box-center case (float-safe via `toBeCloseTo`, since
+    `0.2 + 0.2/2 !== 0.3` exactly in JS), a bare click inside a zero-origin content rect, a bare click
+    inside a letterboxed (non-zero-origin) content rect, two letterbox-bar no-op cases (x axis and y
+    axis separately), a degenerate zero-area content rect (NaN-safety — `!(value > 0)` rather than
+    `value <= 0` so a `NaN` width/height also falls through to `'none'` instead of propagating a `NaN`
+    point), an exact-edge float-clamp case, and a **non-identity crop-follow zoom round-trip** case
+    (a `CropFollowState` fixture `{scale:2, centerX:0.75, centerY:0.75, anchorX:0.75, anchorY:0.75}`
+    mirroring `crop-follow-logic.spec.ts`'s own quadrant-pinned fixture) proving the forward mapping
+    (`applyCropFollowToContentRect`) and this inversion agree at a non-trivial zoom, not just at 1x.
+- `features/fly/cv-control-panel-logic.ts`: new `buildPointLockPatch(pointX: number, pointY: number):
+  UpdateStreamConfigRequest` — `{ tracking: { mode: 'FOLLOW', lock: { pointX, pointY } } }` — mirroring
+  `buildFollowLockPatch`'s exact "always pair `mode: 'FOLLOW'` with the lock, in one call" convention,
+  doc-commented and cross-referenced to `player.ts#pointFollowed`. One new test alongside
+  `buildFollowLockPatch`'s own.
+- `features/fly/cockpit-facade.ts`: new `followPoint(pointX: number, pointY: number): void`, a sibling
+  to `followTrack` (same file, immediately after it) — identical shape: reads `this.stream()?.streamId`,
+  no-ops with nothing running, otherwise `fleet.patchStreamConfig(streamId, buildPointLockPatch(pointX,
+  pointY)).then(() => this.seats.refreshNow())` — the same choke point `followTrack` already uses so a
+  crew member's read state and the dock's presence line catch up on the next tick rather than the
+  ordinary ~3s seat-poll cadence. No optimistic UI: nothing here claims the lock took until the next
+  tracks poll confirms it (docs/extracts/TRACKING-ORCHESTRATION.md §3.3's honesty rule, the same one
+  `followTrack` already follows).
+- `features/fly/cockpit.html`: **one line added** — `(pointFollowed)="facade.followPoint($event.x,
+  $event.y)"` immediately after the existing `(trackFollowed)="facade.followTrack($event)"` binding on
+  `<vision-player>`. Nothing else in this file was touched by this wave — the W3.3 sibling's own larger
+  edit to this same file (the hero status line + intent chip row, now permanently part of `a5ab10d3`)
+  was confirmed via `git diff` before every stage and surgically excluded from this wave's own commit,
+  then correctly preserved (not reverted) once `a5ab10d3` landed, per the race disclosure above.
+- **Deliberately not propagated**: `features/live/live.html` and `features/crew/crew.html` also bind
+  `(trackFollowed)` but were left untouched — matching the plan's own D8 scope (the Fly cockpit's tap
+  gesture only) and avoiding scope creep into two surfaces this wave was never asked to touch.
+- **New acceptance spec — `features/fly/click-to-follow.spec.ts`** (kept as its own file rather than
+  folded into `cockpit-facade.spec.ts`, which does not exist — there is no existing facade-level spec
+  file to fold into, and a new standalone file makes the 3-operator-act structure easiest to read as one
+  unit): drives real, non-mocked production functions for every click-to-follow-relevant step —
+  `resolveOverlayClickTarget` (the actual hit-test decision), `buildHotKnobPatch`/`buildFollowLockPatch`/
+  `buildPointLockPatch` (the actual patch bodies) — across two independent test cases, each asserting an
+  explicit **3-act** sequence and act count:
+  1. *Tracked-box path*: act 1 (start, a disclosed bare `vi.fn()` stand-in for `FleetStore#start`/
+     `VisionApi#startStream`'s call shape — carries no click-to-follow logic of its own, so a real
+     `CockpitFacade` instantiation was judged disproportionate here, see below), act 2 (`buildHotKnobPatch`
+     with `detectionEnabled: true` — "Turn on"), act 3 (a tracked `DetectionResult` fixture →
+     `resolveOverlayClickTarget` resolves `{kind:'track', trackId:7}` → `buildFollowLockPatch(7)`).
+     Asserts `acts.length === 3`, `startStream` called once, `patchStreamConfig`-shaped calls captured
+     twice, and the final patch equals `{tracking:{mode:'FOLLOW', lock:{trackId:7}}}`.
+  2. *Untracked-box point path*: identical structure, but the fixture detection carries no `track`; act 3
+     resolves `{kind:'point', x:0.4, y:0.5}` (that box's own center) → `buildPointLockPatch(0.4, 0.5)` →
+     final patch `{tracking:{mode:'FOLLOW', lock:{pointX:0.4, pointY:0.5}}}`.
+  - **Test-boundary judgment call**: `CockpitFacade` itself is not instantiated (~20 injected
+    collaborators, no existing harness anywhere in this codebase does so) — acts 2 and 3 call the real
+    production pure functions directly rather than routing through the facade's own methods, while act 1
+    ("start stream") is a disclosed spy stand-in, since it has no click-to-follow behavior to verify.
+  - **Zero drawer/modal state touched**: this file imports nothing from `core/ui/ui-store`,
+    `features/fly/cv-control-panel`, or `features/fly/cv-setup-modal`, and instantiates none of them —
+    confirmed by the file's own import list (`vitest`, `core/api/models` types, `shared/player/
+    detection-overlay-logic`, `features/fly/cv-control-panel-logic`).
+- **Role-gating**: unaffected — click-to-follow was already reachable by any operator who can already
+  reach the cockpit and see boxes; this wave adds no new gate and removes none.
+- **Dev parity**: unaffected — `vision.auth.enabled=false`'s dev admin resolves ADMIN/unbounded exactly
+  as before; no auth-conditional branch exists anywhere in this wave's diff.
+- **Degrades honestly**: a click in a letterbox bar, or on a degenerate (`NaN`/zero-area) content rect,
+  is a plain no-op — never a fabricated point sent to the wire. A failed `followPoint` PATCH degrades
+  exactly like `followTrack` already does: `fleet.patchStreamConfig` toasts and returns `null`, no
+  optimistic UI anywhere claims the lock took, and the next tracks poll is the only source of truth for
+  whether it actually did.
+- **Unit convention confirmed, not assumed**: `pointX`/`pointY` on `TargetLockRequest` (`core/api/
+  models.ts`) share the exact same normalized `[0,1]` video-frame fraction `Detection.box`/`BoundingBox`
+  already use on this same wire — checked directly against the existing type definitions rather than
+  guessed, since this was a zero-caller field with no existing usage example to copy.
+- **Verify chain**: `npx tsc --noEmit -p tsconfig.app.json` — 0 errors. `npx tsc --noEmit -p
+  tsconfig.spec.json` — 0 errors. `npm run test:ci` — **203 files / 3969 tests, all green**, run against
+  the fully-restored combined tree (this wave's own files, W3.3's then-still-uncommitted WIP, and
+  W3.4's already-merged commit, all present at once) — the same total W3.3's own section above
+  independently cites, confirming the shared tree was self-consistent at measurement time; re-confirmed
+  green again after `a5ab10d3` landed and this wave's own final commit was re-derived on top of it.
+  `shared/
+  player/no-client-rederivation.spec.ts` (wave W3.2's grep-based forbidden-identifier guard) spot-checked
+  directly (`npx vitest run` on that one file) and still passes — this wave introduces no client-side
+  velocity/label re-derivation. `ng build --configuration production` — green, the same two pre-existing
+  budget warnings only (initial bundle over 390 kB; `tactical-map.css` over 11 kB — neither touched by
+  this wave); raw measured totals on the same fully-restored combined tree: initial **437.13 kB raw /
+  122.59 kB transfer**, `cockpit` lazy chunk **140.58 kB raw / 29.63 kB transfer**. **No isolated
+  before/after bundle delta for this wave alone** — the same call every other wave sharing this tree
+  already made in this file (W3.2, W3.3, W3.6): a sibling agent held large, actively-uncommitted edits
+  in these same files for most of this wave's duration, so a stash-based before/after would measure the
+  sibling's edits appearing/disappearing, not this wave's own; this wave's own diff is small
+  (one output, one facade method, one patch-builder, one template line, all doc-comment-heavy) and lives
+  entirely inside the already-lazy `cockpit` chunk, never the eager initial bundle.
+- **Commit**: `feat(cv-orchestration W3.5): tap to follow — box or point (D8) + click-path acceptance spec`.

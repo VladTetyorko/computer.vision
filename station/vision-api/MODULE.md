@@ -1562,3 +1562,58 @@ previous entry's timestamp/frameSequence/demand snapshot outright — there is n
 anywhere on `GateDecision`/`GateDecisionResponse`, and this test does not fabricate one. A
 coalesced run is indistinguishable on the wire from a single decision at the same reason; only the
 refreshed `atMillis`/`frameSequence` say time passed.
+
+**2026-09-13, wave W3.0 (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7): `intent` reaches the live
+`PATCH /api/streams/{streamId}/config` hot path**, wiring the same `IntentPolicyResolver` profile
+create/update already uses into `StreamController#updateConfig` too. `dto.UpdateStreamConfigRequest`
+grew from a 7-component to an **8-component** record (`Intent intent` appended, the last component);
+its existing 6-arg convenience constructor (defaulting `labelDenyFilter`) now also passes `null` for
+`intent`, and `EMPTY` passes one more `null` — no third constructor added (CLAUDE.md rule 10).
+`toPatch()` resolves `intent` (when non-`null`) via `IntentPolicyResolver.resolve(intent, labelFilter)`
+and seeds `model`/`labelFilter` only when this request's own fields were absent, then builds
+`PipelineConfigPatch` from the resolved values. New `fieldSources()` mirrors `CvProfileRequest`'s own
+method field-for-field but **returns `CvProfileResponse.Sources` directly** rather than a second,
+near-identical nested type — both DTOs report provenance for the same two knobs, so one type serves
+both. `dto.UpdateStreamConfigResponse` grew from a 3-component to a **4-component** record
+(`CvProfileResponse.Sources sources` appended); its 2-arg convenience constructor now defaults
+`sources` to the explicit `CvProfileResponse.Sources.none()` — never a bare `null` (rule 10 again:
+"a parameter may not mean 'off' by being `null`"). `StreamController#updateConfig` passes
+`body.fieldSources()` through as the response's 4th argument; `UpdateStreamConfigRequest.EMPTY`'s
+`intent` is `null`, so the no-body case still resolves to `Sources.none()` exactly as before this
+wave, byte-identical on the wire for every pre-existing caller that never sends `intent`.
+
+**Deliberately a *different* "was this explicit" test than `CvProfileRequest#toSpec()`/
+`#fieldSources()` use, and not an inconsistency to fix later:** `CvProfileRequest`'s fields are
+always-present with blank-string/empty-list as the "caller left this to the platform" sentinel,
+because that wire shape has no `null`. `UpdateStreamConfigRequest` is already a true partial-patch
+DTO where `null` itself means "not sent" and a non-`null` (even empty) `labelFilter` is a real,
+explicit value ("keep all labels" — this record's own pre-existing javadoc). So here the correct
+"was this explicit" test for both `toPatch()` and `fieldSources()` is plain `model == null`/
+`labelFilter == null`, not a blank/empty check — using the blank/empty test here would treat an
+operator's explicit "keep all labels" `labelFilter: []` as if it were absent and let intent overwrite
+it, which is exactly backwards for this DTO's contract.
+
+**Observed JSON shape for `sources` (verified with a throwaway direct-`JsonMapper` test, not just
+read from a doc comment):** when `intent` was sent, e.g. `{"intent":"VEHICLES"}`, the response's
+`sources` group is `{"model":"INTENT","labelFilter":"INTENT"}`. When no `intent` was sent at all, the
+observed shape is `"sources":{}` — **present as an empty object, not an absent key.** This is because
+`CvProfileResponse.Sources`'s own class-level `@JsonInclude(NON_NULL)` only omits a `null` field
+*inside* the `Sources` object; the `Sources` value itself (`Sources.none()`) is never `null` here
+(rule 10 — an explicit sentinel value, not a `null`), and `UpdateStreamConfigResponse` carries no
+`@JsonInclude` of its own to omit a non-null `sources` field. **This measured shape is at odds with
+`CvProfileResponse.Sources.none()`'s own javadoc claim** ("`@JsonInclude(NON_NULL)` still omits the
+whole `sources` group from the wire, exactly as a bare `null` used to") — for `UpdateStreamConfigResponse`
+that claim does not hold; the group is present as `{}`. That javadoc describes `CvProfileResponse`
+specifically, which was not re-verified end-to-end as part of this wave (out of this wave's scope —
+`contexts/vision-perception` and other DTOs were untouched), so this paragraph records the
+discrepancy rather than "fixing" that unrelated file's claim on unverified authority.
+
+`./mvnw -B -pl station/vision-api -am test -DskipWeb`: **1112 → 1120 tests, all green** (8 new
+`StreamControllerTest` cases: one per `Intent` value proving the resolved `model`/`labelFilter` reach
+`PipelineConfigPatch` unchanged from `IntentPolicyResolver`'s own values, an "explicit wins" case, two
+response-shape cases for `sources` with and without `intent`, and — added during the W3.8 merge review,
+closing a gap the javadoc already promised — `updateConfigReturns400ForIntentCustomWithNoLabelFilter`,
+asserting `{"intent":"CUSTOM"}` with no `labelFilter` is a 400 `BAD_REQUEST` because
+`IntentPolicyResolver#resolve` throws for `CUSTOM` with empty/null `customClasses`). No
+`contexts/vision-perception`, `station/vision-web`, or other module change — Java-only, `vision-api`
+only, per this wave's scope.

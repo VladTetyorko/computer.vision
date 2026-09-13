@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import type { AssetSummary, AssetUsage, AuthCapability, GeoPosition, Membership, ScopeKind, SeatHolderResponse } from '../../core/api/models';
+import type {
+  AssetSummary,
+  AssetUsage,
+  AuthCapability,
+  GeoPosition,
+  Membership,
+  ScopeKind,
+  SeatHolderResponse,
+  SubsystemStatus,
+  WorldObject,
+} from '../../core/api/models';
 import type { PreflightSummary } from '../../core/telemetry/flight-state-logic';
 import {
   ALL_DRONES_OPTION_VALUE,
@@ -10,6 +20,7 @@ import {
   crewCameraDockLine,
   dockPreflightSummaryLabel,
   earlierReplayableUsages,
+  flyHeroStatus,
   flyStage,
   isAllDronesOption,
   isAutostart,
@@ -514,5 +525,85 @@ describe('commandSurfaceVisible (docs/plans/active/CREW-CONTROL-PLAN.md §2.3 D1
   it('stays hidden when not commandable, watch mode or not', () => {
     expect(commandSurfaceVisible(false, false)).toBe(false);
     expect(commandSurfaceVisible(false, true)).toBe(false);
+  });
+});
+
+function worldObject(id: number, tier: WorldObject['render']['tier']): WorldObject {
+  return {
+    state: { id, lifecycle: 'CONFIRMED', streamId: 's-1' },
+    operator: { followed: false, denied: false },
+    event: {},
+    render: { tier },
+  };
+}
+
+function subsystem(health: SubsystemStatus['health'], detail = 'cv-service unreachable'): SubsystemStatus {
+  return { id: 'cv-service', label: 'CV service', health, detail };
+}
+
+describe('flyHeroStatus (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.8, wave W3.3 — the Fly hero’s own status line)', () => {
+  it('reports Degraded — <detail> verbatim, regardless of detectionEnabled, when cv-service health is DEGRADED', () => {
+    expect(flyHeroStatus(true, subsystem('DEGRADED', 'cv-service restarting'), 'RUNNING', [])).toEqual({
+      text: 'Degraded — cv-service restarting',
+      tone: 'degraded',
+    });
+    expect(flyHeroStatus(false, subsystem('DEGRADED', 'cv-service restarting'), undefined, [])).toEqual({
+      text: 'Degraded — cv-service restarting',
+      tone: 'degraded',
+    });
+  });
+
+  it('reports Degraded — <detail> for DOWN and UNKNOWN health too, wins over a RUNNING_UNWATCHED tracker state', () => {
+    expect(flyHeroStatus(true, subsystem('DOWN', 'cv-service crashed'), 'RUNNING_UNWATCHED', [])).toEqual({
+      text: 'Degraded — cv-service crashed',
+      tone: 'degraded',
+    });
+    expect(flyHeroStatus(true, subsystem('UNKNOWN', 'cv-service status unavailable'), 'RUNNING', [])).toEqual({
+      text: 'Degraded — cv-service status unavailable',
+      tone: 'degraded',
+    });
+  });
+
+  it('does not treat OK or DISABLED health as degraded', () => {
+    expect(flyHeroStatus(false, subsystem('OK'), undefined, [])).toEqual({ text: 'Off', tone: 'off' });
+    expect(flyHeroStatus(false, subsystem('DISABLED'), undefined, [])).toEqual({ text: 'Off', tone: 'off' });
+  });
+
+  it('does not guess a fault from a system-status read that has not completed yet', () => {
+    expect(flyHeroStatus(false, undefined, undefined, [])).toEqual({ text: 'Off', tone: 'off' });
+  });
+
+  it('reports Off when detection is not enabled, health permitting', () => {
+    expect(flyHeroStatus(false, subsystem('OK'), 'RUNNING', [worldObject(1, 'T0')])).toEqual({
+      text: 'Off',
+      tone: 'off',
+    });
+  });
+
+  it('reports On — no viewer when the tracker is running unwatched, without counting objects', () => {
+    expect(flyHeroStatus(true, subsystem('OK'), 'RUNNING_UNWATCHED', [worldObject(1, 'T0'), worldObject(2, 'T1')])).toEqual({
+      text: 'On — no viewer',
+      tone: 'warn',
+    });
+  });
+
+  it('reports On — N objects, counting only non-HIDDEN render tiers', () => {
+    const objects = [worldObject(1, 'T0'), worldObject(2, 'HIDDEN'), worldObject(3, 'T2')];
+    expect(flyHeroStatus(true, subsystem('OK'), 'RUNNING', objects)).toEqual({
+      text: 'On — 2 objects',
+      tone: 'on',
+    });
+  });
+
+  it('renders the N=0 edge case literally as On — 0 objects, never a softened phrase', () => {
+    expect(flyHeroStatus(true, subsystem('OK'), 'RUNNING', [])).toEqual({ text: 'On — 0 objects', tone: 'on' });
+    expect(flyHeroStatus(true, undefined, 'RUNNING', [])).toEqual({ text: 'On — 0 objects', tone: 'on' });
+  });
+
+  it('singularizes exactly one object', () => {
+    expect(flyHeroStatus(true, subsystem('OK'), 'RUNNING', [worldObject(1, 'T0')])).toEqual({
+      text: 'On — 1 object',
+      tone: 'on',
+    });
   });
 });

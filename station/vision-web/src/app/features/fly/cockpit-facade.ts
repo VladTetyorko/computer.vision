@@ -6,6 +6,7 @@ import { SettingsStore } from '../../core/settings/settings-store';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
+import { SystemStatusStore } from '../../core/system-status/system-status-store';
 import { SeatStore } from '../../core/seat/seat-store';
 import { EventsStore } from '../../core/events/events-store';
 import { GeofenceStore } from '../../core/geofence/geofence-store';
@@ -31,7 +32,7 @@ import type { Transport } from '../../shared/player/player';
 import { cycleBoxesMode } from '../../shared/player/detection-overlay-logic';
 import { followMarkers, type DrawingDraft } from '../../shared/map/tactical-map/tactical-map-logic';
 import { canShowCommandPanel } from './flight-command-panel-logic';
-import { buildFollowLockPatch, buildHotKnobPatch, buildReleaseLockPatch, resolveCvConfig, type ResolvedCvConfig } from './cv-control-panel-logic';
+import { buildFollowLockPatch, buildHotKnobPatch, buildPointLockPatch, buildReleaseLockPatch, resolveCvConfig, type ResolvedCvConfig } from './cv-control-panel-logic';
 import { resolveDetectionEnabled, videoNotice } from './stream-state-logic';
 import {
   ALL_DRONES_OPTION_VALUE,
@@ -42,6 +43,7 @@ import {
   crewCameraDockLine,
   dockPreflightSummaryLabel,
   earlierReplayableUsages,
+  flyHeroStatus,
   flyStage,
   isAllDronesOption,
   isAutostart,
@@ -55,6 +57,8 @@ import type {
   AssetDetails,
   AssetSummary,
   BoundingBox,
+  CvProfileIntent,
+  CvProfileSources,
   DetectionEvent,
   EffectiveCvProfile,
   FlightCapability,
@@ -139,6 +143,10 @@ export class CockpitFacade {
   readonly settings = inject(SettingsStore);
   readonly telemetry = inject(TelemetryStore);
   readonly detections = inject(DetectionsStore);
+  /** `providedIn: 'root'` singleton, injected here rather than read in `cockpit.ts` per
+   * `architecture.spec.ts`'s own rule (a routed page injects only its facade) — {@link heroStatus}
+   * below is its one reader in this cockpit. */
+  private readonly systemStatus = inject(SystemStatusStore);
   /** The asset's two seats (docs/plans/active/CREW-CONTROL-PLAN.md §3.1/§3.6, wave W4) — page-provided
    * like every other store here (`CockpitPage`'s own `providers` array), mirroring `features/crew/
    * crew-facade.ts`'s identical injection. The pilot's cockpit only ever reads the *camera* seat
@@ -314,6 +322,33 @@ export class CockpitFacade {
    * on but nothing has arrived recently", never a second, contradictory read on the same fact. */
   readonly detectionsPausedNotice = computed(() =>
     this.detectionOn() ? this.detections.pausedNotice() : null,
+  );
+
+  // --- Intent chips + hero status line (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7/§4.8, wave
+  // W3.3) -----------------------------------------------------------------------------------------
+  /** The most recent `PatchStreamConfigResponse#sources` this session has actually seen — i.e. the
+   *  provenance of a config PATCH this browser itself just sent, not a durable server fact (§6's own
+   *  "As built" note: `sources` reports provenance only on the create/update response itself, never
+   *  on a later `GET`). `undefined` before any PATCH this session, on a failed PATCH ({@link setIntent}
+   *  below degrades the same way {@link followTrack} already does), or once {@link selectAsset} moves
+   *  to a different asset — a PATCH response about the *previous* asset's stream has nothing honest
+   *  to say about this one. Read by a sibling wave (W3.4)'s Tuning modal; exposed plainly here with
+   *  no reader of its own yet in this file beyond that.
+   */
+  private readonly lastConfigSourcesSignal = signal<CvProfileSources | undefined>(undefined);
+  readonly lastConfigSources = this.lastConfigSourcesSignal.asReadonly();
+
+  /** The Fly hero's own one status line — see {@link flyHeroStatus}'s own doc comment for the exact
+   *  4-state priority order. `cv-service`'s row may be absent from `subsystems` entirely against a
+   *  server that predates it, or before the first `/api/system/status` read resolves; either way
+   *  `flyHeroStatus` treats an absent row as "no fault known", never a guessed one. */
+  readonly heroStatus = computed(() =>
+    flyHeroStatus(
+      this.detectionOn(),
+      this.systemStatus.status()?.subsystems.find((subsystem) => subsystem.id === 'cv-service'),
+      this.detections.tracks()?.detectionState,
+      this.detections.worldObjects(),
+    ),
   );
 
   // --- Deliberately-stopped state (docs/plans/done/MVP2-PLAN.md §S, S-b) — identical pair/rule to
@@ -1046,6 +1081,9 @@ export class CockpitFacade {
     this.explicitlyStopped.set(false);
     this.hasBeenLive.set(false);
     this.capabilities.set(undefined);
+    // A prior asset's PATCH provenance has nothing honest to say about this one — see
+    // `lastConfigSourcesSignal`'s own doc comment.
+    this.lastConfigSourcesSignal.set(undefined);
     void this.loadAsset(assetId);
   }
 
@@ -1164,6 +1202,55 @@ export class CockpitFacade {
     // crew-facade.ts#followTrack`'s identical choke point so the dock's crew-presence line/Vision
     // drawer's read-state catch up on the next tick rather than the ordinary ~3s seat-poll cadence.
     void this.fleet.patchStreamConfig(streamId, buildFollowLockPatch(trackId)).then(() => this.seats.refreshNow());
+  }
+
+  /**
+   * The Fly hero's own intent chips (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7, wave W3.3) —
+   * People/Vehicles/Everything, each a one-shot `{ intent }` PATCH with no other field bundled
+   * (never `detectionEnabled: true` — "Turn on" stays the operator's own separate, required act, per
+   * §4.7's own decision). No persistent "selected chip" state exists: there is no wire fact for
+   * "the stream's current intent," only its resolved *effect* (`model`/`labelFilter`), so unlike
+   * {@link followTrack} this never becomes a toggle — every click is independent and none renders
+   * pressed. Same no-optimistic-UI, no-extra-error-handling shape as {@link followTrack}:
+   * `fleet.patchStreamConfig` already toasts+returns `null` on failure (`FleetStore#patchStreamConfig`'s
+   * own doc comment), so `null?.sources` degrades {@link lastConfigSources} to `undefined` — the
+   * honest "nothing to report" state — for free, with no `.catch()` of our own to invent. A no-op
+   * with nothing running has no stream to patch.
+   *
+   * **`'CUSTOM'` is deliberately never sent by a hero chip** (a scope judgment call, disclosed in
+   * this wave's commit/MODULE.md entry): `IntentPolicyResolver.resolve` (server-side) throws when
+   * `intent === CUSTOM` and the same request's `labelFilter` is null/empty, and the hero has no
+   * surface to collect custom classes inline — `cockpit.ts#requestCvSetup()` (opening the Tuning
+   * modal, where that surface already exists) is what the "Custom" chip actually calls. This method
+   * itself stays correct for all four {@link CvProfileIntent} values for whichever future caller
+   * does have classes in hand.
+   */
+  async setIntent(intent: CvProfileIntent): Promise<void> {
+    const streamId = this.stream()?.streamId;
+    if (!streamId) {
+      return;
+    }
+    const response = await this.fleet.patchStreamConfig(streamId, { intent });
+    this.lastConfigSourcesSignal.set(response?.sources);
+  }
+
+  /**
+   * `<vision-player>`'s own `(pointFollowed)` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7 D8, wave
+   * W3.5) — the sibling {@link followTrack} never had: an operator's click landed on an **untracked**
+   * box, or on open video with no box under it, so there is no track id to lock onto, only a
+   * normalized `[0,1]` point (see `player.ts#pointFollowed`'s own doc comment for which of those two
+   * cases produced it, and `resolveOverlayClickTarget`'s for the exact split). Same choke point as
+   * {@link followTrack} in every other respect: a single PATCH always pairing `mode:'FOLLOW'` with the
+   * lock (`cv-control-panel-logic.ts#buildPointLockPatch`), no optimistic UI, `seats.refreshNow()`
+   * after — a crew member's read state and the dock's presence line catch up on the next tick instead
+   * of the ordinary ~3s seat-poll cadence. A no-op with nothing running has no stream to patch.
+   */
+  followPoint(pointX: number, pointY: number): void {
+    const streamId = this.stream()?.streamId;
+    if (!streamId) {
+      return;
+    }
+    void this.fleet.patchStreamConfig(streamId, buildPointLockPatch(pointX, pointY)).then(() => this.seats.refreshNow());
   }
 
   /**

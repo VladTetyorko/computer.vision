@@ -1,6 +1,6 @@
 import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
 import { VisionApi } from '../api/vision-api';
-import type { DetectionResult, StreamTracksResponse } from '../api/models';
+import type { DetectionResult, StreamTracksResponse, WorldObject } from '../api/models';
 import { PollScheduler } from '../poll-scheduler';
 import { LiveStore } from '../live/live-store';
 import { cvStatus, deriveChips, freshResults } from './detections-logic';
@@ -88,6 +88,15 @@ const DETECTIONS_LIMIT = 50;
  * open (the box overlay needs it continuously), while tracks-polling is scoped to `CvControlPanel`'s
  * own mounted lifetime — see {@link TRACKS_POLL_INTERVAL_MS}'s own doc comment for why that bound is
  * now free rather than a flag this store has to track.
+ *
+ * **A third, independent thing this store now exposes: {@link worldObjects}** (docs/plans/active/
+ * CV-ORCHESTRATION-PLAN.md §4.6, wave W3.1) — the world model's live `WorldObject[]` snapshot from
+ * the new `tracks:<assetId>` SSE topic (`LiveStore.trackWorldObjects`/`untrackWorldObjects`/
+ * `worldObjectsFor`). Tied 1:1 to the **detections-feed** subscription lifecycle above (`track()`/
+ * `teardownTracking()`), **not** the tracks-poll lifecycle two paragraphs up — it starts/stops
+ * exactly when `trackDetections`/`untrackDetections` do, for the same asset id. Frame-cadence,
+ * live-only — there is no poll fallback for this field. Wiring only: nothing in this store or wave
+ * renders a `WorldObject`/`RenderTier` — that's wave W3.2, a later, different step.
  */
 @Injectable()
 export class DetectionsStore {
@@ -171,6 +180,16 @@ export class DetectionsStore {
    *  opinion on operator intent, only on what has and hasn't arrived. */
   readonly pausedNotice = computed(() => detectionsPausedNotice(this.lastSeenAt(), this.nowSignal()));
 
+  /** The world model's latest per-asset object snapshot for the currently-tracked asset
+   *  (`tracks:<assetId>`, wave W3.1), or `[]` when no asset id is in scope or nothing has arrived
+   *  yet. Frame-cadence, live-only — there is no poll fallback for this field (unlike {@link results}
+   *  above); a viewer without an active SSE connection simply sees no server-assigned render tiers,
+   *  same honest-degrade posture as every other live-only signal in this app. */
+  readonly worldObjects = computed<readonly WorldObject[]>(() => {
+    const assetId = this.currentAssetIdSignal();
+    return assetId === undefined ? [] : this.live.worldObjectsFor(assetId)();
+  });
+
   constructor() {
     this.stopClock = this.scheduler.schedule(CLOCK_TICK_MS, () => this.nowSignal.set(Date.now()));
 
@@ -239,6 +258,7 @@ export class DetectionsStore {
     this.currentAssetIdSignal.set(assetId);
     if (assetId !== undefined) {
       this.live.trackDetections(assetId); // ref-counted; lasts for this whole track()/reset() session
+      this.live.trackWorldObjects(assetId); // ditto, for the tracks:<assetId> topic (wave W3.1) — see class doc
     }
     this.applyTransport(resolveAssetScopedTransport(this.live.connectionState(), assetId));
   }
@@ -310,6 +330,7 @@ export class DetectionsStore {
     const assetId = this.currentAssetIdSignal();
     if (assetId !== undefined) {
       this.live.untrackDetections(assetId);
+      this.live.untrackWorldObjects(assetId); // ditto, for the tracks:<assetId> topic (wave W3.1)
     }
   }
 

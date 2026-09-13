@@ -1,8 +1,8 @@
-<div class="backdrop" role="dialog" aria-modal="true" aria-label="Detection setup" (click)="closed.emit()">
+<div class="backdrop" role="dialog" aria-modal="true" aria-label="Tuning" (click)="closed.emit()">
   <div class="dialog card" (click)="$event.stopPropagation()">
     <header class="dialog-head">
       <div>
-        <h2>Detection setup</h2>
+        <h2>Tuning</h2>
         <p class="muted hint">
           @if (streamId()) {
             Changes below apply live to the running stream.
@@ -12,7 +12,7 @@
           }
         </p>
       </div>
-      <button type="button" class="btn secondary small" (click)="closed.emit()" aria-label="Close detection setup">×</button>
+      <button type="button" class="btn secondary small" (click)="closed.emit()" aria-label="Close Tuning">×</button>
     </header>
 
     @if (liveConfig(); as cfg) {
@@ -23,7 +23,16 @@
            The removed `kind` taxonomy chip stays removed (never rendered here). The open-vocab CPU
            line and the people/vehicles/buildings preset both live *inside* the selected open-vocab
            card now, not a section-level paragraph below the whole grid — "one line shown only when
-           that card is selected" reads as belonging to the card, not the section. -->
+           that card is selected" reads as belonging to the card, not the section.
+
+           **Disclosed overlap, not fixed here (wave W3.4):** this "Looking for" card grid is a
+           pre-existing, `models()`-roster-driven mechanism — a different system from the newer
+           server-resolved `intent` enum (`CvProfileIntent`, wave W3.0/W3.6's `/vision/profiles`
+           picker). Neither this section nor `onModelChange` reads or writes `intent`, so this card
+           grid never renders a resolved-source line the way Confidence/Classes below now do, even
+           though the plan's §4.7 table describes an eventual "resolved from intent People
+           (platform)" reading here. This wave's brief did not ask for a merge/removal of either
+           mechanism — left exactly as it was, a known UX inconsistency for a future wave. -->
       <section class="cv-section">
         <span class="label">Looking for</span>
         @if (models().length === 0) {
@@ -86,6 +95,9 @@
           [value]="cfg.confidenceThreshold"
           (input)="onConfidence($any($event.target).value)"
         />
+        @if (confidenceSourceLine(); as sourceLine) {
+          <p class="muted hint">{{ sourceLine }}</p>
+        }
       </section>
 
       <!-- ---- Classes — one merged section (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P2 §5). P1 had
@@ -108,6 +120,9 @@
           <p class="muted hint">
             Applied: {{ cfg.labelFilter.length }} of the classes below — the rest are hidden.
           </p>
+        }
+        @if (classesSourceLine(); as sourceLine) {
+          <p class="muted hint">{{ sourceLine }}</p>
         }
 
         @if (pendingLabels(); as pending) {
@@ -185,64 +200,6 @@
         <p class="muted hint">{{ hiddenClassTruth }}</p>
       </section>
 
-      <!-- ---- Tracking mode — the pilot's real path is click-to-follow in the video (still the
-           drawer's own "Following #N — release" chip, unchanged), which already switches mode
-           itself; this picker is for the occasional deliberate Associate/Off choice. Relocated
-           verbatim from the former "Tune" disclosure. -->
-      <section class="cv-section">
-        <span class="label">Tracking</span>
-        @if (!streamId()) {
-          <p class="muted hint">Start a stream to configure tracking — every control below is a live knob with no stream to PATCH yet.</p>
-        } @else {
-          <div class="segmented" role="tablist" aria-label="Tracking mode">
-            <button
-              type="button"
-              role="tab"
-              class="btn secondary small"
-              [class.active]="trackingMode() === 'OFF'"
-              [attr.aria-selected]="trackingMode() === 'OFF'"
-              (click)="onTrackingMode('OFF')"
-            >
-              Off
-            </button>
-            <button
-              type="button"
-              role="tab"
-              class="btn secondary small"
-              [class.active]="trackingMode() === 'ASSOCIATE'"
-              [attr.aria-selected]="trackingMode() === 'ASSOCIATE'"
-              (click)="onTrackingMode('ASSOCIATE')"
-            >
-              Associate
-            </button>
-            <button
-              type="button"
-              role="tab"
-              class="btn secondary small"
-              [class.active]="trackingMode() === 'FOLLOW'"
-              [attr.aria-selected]="trackingMode() === 'FOLLOW'"
-              (click)="onTrackingMode('FOLLOW')"
-            >
-              Follow
-            </button>
-          </div>
-
-          <p class="muted hint">
-            @switch (trackingMode()) {
-              @case ('OFF') {
-                Detections carry no id — today's behavior.
-              }
-              @case ('ASSOCIATE') {
-                Every detection keeps a stable #id across frames, through a brief occlusion.
-              }
-              @case ('FOLLOW') {
-                One locked target is tracked every frame; the detector drops to a periodic verify pass.
-              }
-            }
-          </p>
-        }
-      </section>
-
       <!-- ---- "Expert" — rates, ceiling, engine, cadences, flow strip, full readouts
            (docs/plans/done/CV-UX-RESEARCH.md §3/§7 wave U1). Relocated verbatim from the panel's
            former "Expert" disclosure (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1) — only the open-
@@ -283,7 +240,10 @@
 
             <!-- Capability ceiling (docs/plans/active/TRACKING-V3-BAND1-CONTEXT.md, wave J4) — a
                  request, never the outcome (invariant B5); what actually ran is the "Serving"
-                 readout further down. Only meaningful once tracking is on. -->
+                 readout further down. Only meaningful once tracking is on. `trackingMode()` here
+                 reads the server's own real running mode (E19, wave W3.4 removed the picker that
+                 used to write it) — this gate hides ceiling/engine/cadence controls exactly when
+                 there is nothing running to configure, same as before. -->
             @if (trackingMode() !== 'OFF') {
               <section class="cv-section">
                 <label class="label" for="tracking-capability-level">Capability ceiling</label>

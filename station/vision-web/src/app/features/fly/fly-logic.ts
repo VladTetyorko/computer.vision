@@ -3,11 +3,14 @@ import type {
   AssetSummary,
   AssetUsage,
   AuthCapability,
+  DetectionState,
   GeoPosition,
   Membership,
   ScopeKind,
   SeatHolderResponse,
   StreamState,
+  SubsystemStatus,
+  WorldObject,
 } from '../../core/api/models';
 import { hasCapability } from '../../core/auth/auth-logic';
 import { hasFix } from '../../core/geo/geo-logic';
@@ -598,4 +601,71 @@ export function crewCameraDockLine(camera: SeatHolderResponse): string | null {
  */
 export function commandSurfaceVisible(canShowCommands: boolean, watchMode: boolean): boolean {
   return canShowCommands && !watchMode;
+}
+
+// --- One honest status line (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7/§4.8, wave W3.3) ---
+// The Fly hero's own reading of "is CV working right now" — a different audience/surface from
+// `cv-control-panel-logic.ts#detectionStatus` (the Tuning drawer's own 7-way status line, read only
+// while that drawer is open): §4.8's own table lists them as two separate rows ("Operator (fly
+// hero): one status line, three honest states" vs. "Expert (Tuning modal): resolved-source line per
+// knob"), so this is a second, deliberately distinct derivation, not a reuse.
+
+/** {@link flyHeroStatus}'s own return shape — `tone` drives styling only (frontend-style's "status
+ *  colours mean state, nothing else"): `'degraded'` is the one genuine fault (the amber `.notice`
+ *  chrome `cockpit.html` already reserves for a real problem); `'off'`/`'on'`/`'warn'` are all
+ *  ordinary, non-fault facts and share this cockpit's neutral `.stream-state-chip` HUD pill — `'warn'`
+ *  is its own tone (not folded into `'on'`) purely so a future styling pass can tell "on, but nobody's
+ *  watching" apart from "on, and seeing things" without re-parsing `text`. */
+export interface FlyHeroStatus {
+  readonly text: string;
+  readonly tone: 'off' | 'on' | 'warn' | 'degraded';
+}
+
+/**
+ * The one status line `cockpit.html` shows next to the intent chips/Turn-on chip (§4.8's own
+ * mandated wording, verbatim): `"Degraded — <reason>"` · `"Off"` · `"On — no viewer"` ·
+ * `"On — N objects"`, in that priority order.
+ *
+ * 1. **Degraded wins regardless of `detectionEnabled`** — a `cvSubsystem` whose `health` is
+ *    anything other than `'OK'`/`'DISABLED'` (`'DEGRADED'`/`'DOWN'`/`'UNKNOWN'` all count; `'DISABLED'`
+ *    is excluded from fault framing by this platform's own rollup convention —
+ *    `system-status-logic.ts`'s `HEALTH_SEVERITY`/`verdictFor` both treat it as neutral, never a
+ *    fault) reports `cvSubsystem.detail` **verbatim** — that string is already the backend's own
+ *    honest sentence (`SubsystemStatus#detail`'s own doc comment), never a reason invented here.
+ *    `cvSubsystem === undefined` (no system-status read has completed yet, or this server predates
+ *    the `cv-service` row) is *not* treated as degraded — this app never claims a fault from a
+ *    signal it hasn't actually read a value for (mirrors `reachableSeverity`'s identical "don't
+ *    guess" rule).
+ * 2. `!detectionEnabled` → `"Off"` — the operator's own choice.
+ * 3. `detectionState === 'RUNNING_UNWATCHED'` → `"On — no viewer"` — this asset's own
+ *    `DetectionPolicy.ALWAYS` opt-in keeps the detector inferring with no viewer demand; no object
+ *    count is read in this branch; the same posture `detectionStatus`'s own `'running-unwatched'`
+ *    case already takes on the *stream's* rate, applied here to the *world model's* object count
+ *    instead — a live read model kept warm for nobody has nothing honest to count either.
+ * 4. Otherwise (`detectionState === 'RUNNING'`, or no tracks response has arrived yet this session
+ *    while detection is known on — `worldObjects` is `[]` either way until the first `tracks:`
+ *    snapshot lands, per `DetectionsStore.worldObjects`'s own doc comment) → `"On — N objects"`,
+ *    `N` counting every `worldObjects` entry **except** `render.tier === 'HIDDEN'` (an operator-
+ *    denied/hidden object is not honestly "seen" — same exclusion `detection-overlay-logic.ts#
+ *    resolveDisplayDetections` already applies when drawing boxes). `N === 0` still renders
+ *    `"On — 0 objects"`, never a softened phrase like "searching" — §4.8's own row names only these
+ *    four strings.
+ */
+export function flyHeroStatus(
+  detectionEnabled: boolean,
+  cvSubsystem: SubsystemStatus | undefined,
+  detectionState: DetectionState | undefined,
+  worldObjects: readonly WorldObject[],
+): FlyHeroStatus {
+  if (cvSubsystem !== undefined && cvSubsystem.health !== 'OK' && cvSubsystem.health !== 'DISABLED') {
+    return { text: `Degraded — ${cvSubsystem.detail}`, tone: 'degraded' };
+  }
+  if (!detectionEnabled) {
+    return { text: 'Off', tone: 'off' };
+  }
+  if (detectionState === 'RUNNING_UNWATCHED') {
+    return { text: 'On — no viewer', tone: 'warn' };
+  }
+  const visibleCount = worldObjects.filter((object) => object.render.tier !== 'HIDDEN').length;
+  return { text: `On — ${visibleCount} object${visibleCount === 1 ? '' : 's'}`, tone: 'on' };
 }
