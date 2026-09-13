@@ -1,25 +1,31 @@
 import { describe, expect, it } from 'vitest';
 import type { CvCoverageRow, CvProfile } from '../../core/api/models';
 import {
+  applyIntentToDraft,
   bindingSummaryLabel,
   canDeleteProfile,
   canEditProfile,
   canForkProfile,
   coverageRowClearTarget,
+  CV_DETECTION_POLICY_ATTRIBUTE_KEY,
   describeCoverageFilters,
   describeCoverageSource,
+  describeIntent,
   draftFromProfile,
   draftToRequest,
   emptyProfileDraft,
   forkDraftFromProfile,
   forkedProfileName,
   formatLabelList,
+  isDetectionAlways,
   isModelMissingOnWorker,
   parseLabelList,
   primaryGroupId,
+  saveOutcomeMessage,
   sortProfilesForDisplay,
   summarizeProfileBindings,
   validateDraft,
+  withDetectionPolicy,
 } from './vision-profiles-logic';
 
 function profile(partial: Partial<CvProfile> = {}): CvProfile {
@@ -38,6 +44,7 @@ function profile(partial: Partial<CvProfile> = {}): CvProfile {
     eventRule: { labels: ['person', 'car'], confidenceThreshold: 0.5, consecutiveToOpen: 3, absenceToCloseSeconds: 5 },
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
+    sources: {},
     ...partial,
   };
 }
@@ -121,12 +128,13 @@ describe('label list parsing', () => {
 });
 
 describe('draft construction', () => {
-  it('emptyProfileDraft seeds the given default model with sourceId null', () => {
+  it('emptyProfileDraft seeds the given default model with sourceId null and no intent', () => {
     const draft = emptyProfileDraft('yolo26n.pt');
     expect(draft.sourceId).toBeNull();
     expect(draft.model).toBe('yolo26n.pt');
     expect(draft.name).toBe('');
     expect(draft.existingEventRule).toBeNull();
+    expect(draft.intent).toBe('');
   });
 
   it('draftFromProfile carries sourceId and formats the label lists', () => {
@@ -137,10 +145,45 @@ describe('draft construction', () => {
     expect(draft.existingEventRule).toEqual(profile().eventRule);
   });
 
-  it('forkDraftFromProfile clears sourceId and de-dupes the name', () => {
+  it('draftFromProfile never infers an intent from the loaded profile — provenance is not persisted', () => {
+    const draft = draftFromProfile(profile({ sources: { model: 'INTENT', labelFilter: 'INTENT' } }));
+    expect(draft.intent).toBe('');
+  });
+
+  it('forkDraftFromProfile clears sourceId and de-dupes the name, and also starts with no intent', () => {
     const draft = forkDraftFromProfile(profile({ name: 'mast-cams' }), ['Copy of mast-cams']);
     expect(draft.sourceId).toBeNull();
     expect(draft.name).toBe('Copy of mast-cams (2)');
+    expect(draft.intent).toBe('');
+  });
+});
+
+describe('applyIntentToDraft', () => {
+  it('blanks a still-seeded model on the "no intent" → "an intent" transition', () => {
+    const draft = emptyProfileDraft('yolo26n.pt');
+    const next = applyIntentToDraft(draft, 'VEHICLES');
+    expect(next.intent).toBe('VEHICLES');
+    expect(next.model).toBe('');
+  });
+
+  it('leaves an already-blank model blank across an intent → a different intent transition', () => {
+    const draft = applyIntentToDraft(emptyProfileDraft('yolo26n.pt'), 'PEOPLE');
+    const next = applyIntentToDraft(draft, 'CUSTOM');
+    expect(next.model).toBe('');
+  });
+
+  it('never re-blanks a model the operator explicitly chose after picking an intent', () => {
+    const withIntent = applyIntentToDraft(emptyProfileDraft('yolo26n.pt'), 'PEOPLE');
+    const overridden = { ...withIntent, model: 'yolo26n-seg.pt' };
+    const nextIntent = applyIntentToDraft(overridden, 'VEHICLES');
+    expect(nextIntent.model).toBe('yolo26n-seg.pt');
+  });
+
+  it('reverting to no intent leaves model exactly as it is (blank or not)', () => {
+    const withIntent = applyIntentToDraft(emptyProfileDraft('yolo26n.pt'), 'PEOPLE');
+    const reverted = applyIntentToDraft(withIntent, '');
+    expect(reverted.intent).toBe('');
+    expect(reverted.model).toBe('');
   });
 });
 
@@ -174,6 +217,20 @@ describe('validateDraft', () => {
     const onDraft = { ...offDraft, trackingMode: 'ASSOCIATE' as const };
     expect(validateDraft(onDraft)).toContain('Tracking capability level cannot be negative.');
   });
+
+  it('a blank model is valid while an intent is chosen — the server resolves it', () => {
+    const draft = applyIntentToDraft({ ...emptyProfileDraft('yolo26n.pt'), name: 'x' }, 'VEHICLES');
+    expect(draft.model).toBe('');
+    expect(validateDraft(draft)).not.toContain('Choose a model.');
+  });
+
+  it('CUSTOM intent needs at least one class in the label filter', () => {
+    const draft = { ...emptyProfileDraft('yolo26n.pt'), name: 'x', intent: 'CUSTOM' as const, labelFilterText: '' };
+    expect(validateDraft(draft)).toContain('Custom intent needs at least one class in the label filter.');
+
+    const withClasses = { ...draft, labelFilterText: 'person' };
+    expect(validateDraft(withClasses)).not.toContain('Custom intent needs at least one class in the label filter.');
+  });
 });
 
 describe('draftToRequest', () => {
@@ -198,6 +255,72 @@ describe('draftToRequest', () => {
       followFps: 15,
     });
     expect((request as unknown as Record<string, unknown>)['eventRule']).toBeUndefined();
+  });
+
+  it('omits intent entirely when the draft has none — "skip intent resolution" per CvProfileRequest#intent', () => {
+    const request = draftToRequest({ ...emptyProfileDraft('yolo26n.pt'), name: 'x' });
+    expect(request.intent).toBeUndefined();
+  });
+
+  it('carries the chosen intent, and the blanked model that comes with it, straight through', () => {
+    const draft = applyIntentToDraft({ ...emptyProfileDraft('yolo26n.pt'), name: 'x' }, 'VEHICLES');
+    const request = draftToRequest(draft);
+    expect(request.intent).toBe('VEHICLES');
+    expect(request.model).toBe('');
+  });
+});
+
+describe('saveOutcomeMessage', () => {
+  it('is the plain saved/created message when no intent was chosen', () => {
+    expect(saveOutcomeMessage(profile({ name: 'mast-cams' }), '', true)).toBe('"mast-cams" saved.');
+    expect(saveOutcomeMessage(profile({ name: 'mast-cams' }), '', false)).toBe('"mast-cams" created.');
+  });
+
+  it('is the plain message when an intent was chosen but sources reports nothing resolved', () => {
+    expect(saveOutcomeMessage(profile({ name: 'mast-cams', sources: {} }), 'VEHICLES', true)).toBe('"mast-cams" saved.');
+  });
+
+  it('names the one resolved knob', () => {
+    const saved = profile({ name: 'mast-cams', sources: { model: 'INTENT' } });
+    expect(saveOutcomeMessage(saved, 'VEHICLES', true)).toBe('"mast-cams" saved — model resolved from your Vehicles intent.');
+  });
+
+  it('names both resolved knobs', () => {
+    const saved = profile({ name: 'mast-cams', sources: { model: 'INTENT', labelFilter: 'INTENT' } });
+    expect(saveOutcomeMessage(saved, 'PEOPLE', false)).toBe(
+      '"mast-cams" created — model and label filter resolved from your People intent.',
+    );
+  });
+});
+
+describe('describeIntent', () => {
+  it('labels every intent', () => {
+    expect(describeIntent('PEOPLE')).toBe('People');
+    expect(describeIntent('VEHICLES')).toBe('Vehicles');
+    expect(describeIntent('EVERYTHING')).toBe('Everything');
+    expect(describeIntent('CUSTOM')).toBe('Custom');
+  });
+});
+
+describe('detection policy (D7)', () => {
+  it('isDetectionAlways reads only the exact, case-insensitive, trimmed "always" value', () => {
+    expect(isDetectionAlways({ [CV_DETECTION_POLICY_ATTRIBUTE_KEY]: 'always' })).toBe(true);
+    expect(isDetectionAlways({ [CV_DETECTION_POLICY_ATTRIBUTE_KEY]: ' ALWAYS ' })).toBe(true);
+    expect(isDetectionAlways({ [CV_DETECTION_POLICY_ATTRIBUTE_KEY]: 'on-view' })).toBe(false);
+    expect(isDetectionAlways({ [CV_DETECTION_POLICY_ATTRIBUTE_KEY]: 'garbage' })).toBe(false);
+    expect(isDetectionAlways({})).toBe(false);
+  });
+
+  it('withDetectionPolicy merges the canonical lowercase value in, never replacing the rest of the map', () => {
+    const attributes = { registrationNumber: 'N123', [CV_DETECTION_POLICY_ATTRIBUTE_KEY]: 'on-view' };
+    expect(withDetectionPolicy(attributes, true)).toEqual({
+      registrationNumber: 'N123',
+      [CV_DETECTION_POLICY_ATTRIBUTE_KEY]: 'always',
+    });
+    expect(withDetectionPolicy(attributes, false)).toEqual({
+      registrationNumber: 'N123',
+      [CV_DETECTION_POLICY_ATTRIBUTE_KEY]: 'on-view',
+    });
   });
 });
 

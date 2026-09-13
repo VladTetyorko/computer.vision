@@ -144,6 +144,9 @@ function cvProfile(partial: Partial<CvProfile> = {}): CvProfile {
     detectionEnabled: false,
     tracking: { mode: 'OFF', engineId: '', capabilityLevel: 0, verifyEveryMillis: 2000, followFps: 15 },
     eventRule: { labels: [], confidenceThreshold: 0.4, consecutiveToOpen: 1, absenceToCloseSeconds: 30 },
+    // `sources` is required (wave W3.6, always present on the wire) — this fixture reports none,
+    // matching a plain `GET`/list read with no originating create/update request to compare against.
+    sources: {},
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
     ...partial,

@@ -136,6 +136,22 @@
               />
             </label>
             <label class="profile-field">
+              <span class="label">Intent — what are you looking for?</span>
+              <select
+                name="intent"
+                class="field-md"
+                [ngModel]="draft.intent"
+                (ngModelChange)="facade.setIntent($event)"
+                [disabled]="facade.saving()"
+              >
+                <option value="">(none — set every knob below explicitly)</option>
+                <option value="PEOPLE">People</option>
+                <option value="VEHICLES">Vehicles</option>
+                <option value="EVERYTHING">Everything</option>
+                <option value="CUSTOM">Custom (uses the label filter below)</option>
+              </select>
+            </label>
+            <label class="profile-field">
               <span class="label">Model</span>
               <select
                 name="model"
@@ -145,7 +161,9 @@
                 [disabled]="facade.saving()"
                 required
               >
-                <option value="" disabled>Choose a model…</option>
+                <option value="" [disabled]="draft.intent === ''">
+                  {{ draft.intent === '' ? 'Choose a model…' : 'Resolved from intent' }}
+                </option>
                 @for (model of facade.models(); track model.id) {
                   <option [value]="model.id">
                     {{ model.displayName }}{{ isModelMissingOnWorker(model) ? ' — Missing on worker' : '' }}
@@ -387,6 +405,21 @@
                     }
                   </select>
                 </label>
+                @if (facade.bindingScopeId()) {
+                  <label
+                    class="profile-check"
+                    title="Runs inference regardless of viewer demand — see the plan's own capacity note before enabling on more than a handful of assets."
+                  >
+                    <input
+                      type="checkbox"
+                      name="detectionAlways"
+                      [ngModel]="facade.detectionAlwaysOn() === true"
+                      (ngModelChange)="facade.toggleDetectionAlways()"
+                      [disabled]="facade.detectionAlwaysOn() === null || facade.detectionPolicySaving()"
+                    />
+                    <span>Always run detection for this asset{{ facade.detectionAlwaysOn() === null ? ' (loading…)' : '' }}</span>
+                  </label>
+                }
               }
             }
 

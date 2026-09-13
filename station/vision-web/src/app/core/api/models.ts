@@ -404,6 +404,48 @@ export interface CvModelsResponse {
  * for exactly one asset. Resolution picks the most specific bound profile, per §3.1. */
 export type BindingScope = 'ORGANIZATION' | 'CATEGORY' | 'ASSET';
 
+/**
+ * Mirrors `perception.domain.model.Intent` — the operator's one "what am I looking for" pick
+ * (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7) that `IntentPolicyResolver` folds into a
+ * starting `model`/class-set policy. Named `CvProfileIntent`, not the bare Java enum name `Intent`
+ * — this codebase avoids single-word exported type names that could collide with or shadow an
+ * unrelated concept elsewhere in this 4000+-line file (no such `Intent` export existed before this
+ * one; confirmed by grep). `CvProfileRequest#intent` and `ProfileDraft#intent`
+ * (`vision-profiles-logic.ts`) both use `''`/absent, never a fifth union member, to mean "no intent
+ * chosen" — see those two types' own doc comments.
+ */
+export type CvProfileIntent = 'PEOPLE' | 'VEHICLES' | 'EVERYTHING' | 'CUSTOM';
+
+/**
+ * Mirrors `dto.CvProfileResponse.Sources` — per-knob provenance for the request that just
+ * created/updated a `CvProfile`, reported on the `POST`/`PUT /api/cv/profiles` response only (never
+ * on a plain `GET`/list/`effective` read — intent provenance is not persisted on `CvProfile` itself,
+ * only on the response to the request that resolved it). `undefined` means "this knob came from the
+ * request itself, unmodified"; `'INTENT'` is the only other possible value for either field.
+ *
+ * **Always present as a real object, never an absent top-level field or a bare `{}` vs. omitted
+ * distinction to worry about**: `CvProfileResponse` is `@JsonInclude(NON_NULL)` at the class level,
+ * which suppresses a `null`-*valued* field, but `sources` itself is never `null` — every call site
+ * (`CvProfileController#create`/`#update`/`#get`/`#list`/`#effective`, verified by reading the
+ * controller) passes a real `Sources` value, `Sources.none()` (both inner fields `null`) for a plain
+ * read. `Sources` itself also carries `@JsonInclude(NON_NULL)`, which suppresses its own two
+ * now-`null` fields — so the wire sends `sources: {}` for "no provenance to report", never omits the
+ * key and never sends an explicit `null`. This is the same Jackson mechanism a sibling wave (W3.0)
+ * independently found for `UpdateStreamConfigResponse.sources` (this exact same `Sources` type,
+ * reused) — not a second, independent claim, the identical finding confirmed twice. Modeled here as
+ * always-present with two independently-optional members, not as an optional top-level field.
+ *
+ * Only `'INTENT'` is representable here even though the underlying Java `ProfileSource` enum has
+ * four other members (`ASSET`/`CATEGORY`/`ORGANIZATION`/`PLATFORM`) — those describe which *tier* of
+ * the binding fold resolved a profile at stream-start time (`EffectiveCvProfile#source`, already
+ * separately typed here as `BindingScope | 'PLATFORM'`), a different question from this type's
+ * "which knob did request-time intent resolution seed."
+ */
+export interface CvProfileSources {
+  readonly model?: 'INTENT';
+  readonly labelFilter?: 'INTENT';
+}
+
 /** `CvProfile#tracking` — deliberately a narrower shape than `TrackingConfigRequest` (that request
  * also carries session-only knobs — `lock`, `redetectIouPercent`, `maxAgeFrames`, `minHits`,
  * `reupdateMaxGapMillis` — that a profile does not own; §5.1 lists exactly these five fields). */
@@ -437,6 +479,15 @@ export interface CvProfileEventRule {
  * `groupId` absent/null, `builtIn === false` requires it present — a built-in profile has no owning
  * org, a forked/custom one always does. `eventRule` is present on every read but never sent back on
  * an update (see `CvProfileRequest`).
+ *
+ * `sources` (added wave W3.6, docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7) was missing from this
+ * mirror entirely until this wave, even though the Java `CvProfileResponse` DTO it mirrors has
+ * carried it since W2.8 — a real, previously-undocumented gap between this file and the wire it
+ * claims to mirror 1:1, not an intentional omission (the plan's own W3 row said only that `sources`
+ * "exist on profile create/update only," true of the Java side, but did not say the TS mirror never
+ * got the field at all). **Always present** — see {@link CvProfileSources}'s own doc comment for why
+ * every read of a `CvProfile` (`GET`, list, `effective`, create, update) carries a real object here,
+ * `{}` when there is nothing to report.
  */
 export interface CvProfile {
   readonly id: string;
@@ -454,6 +505,7 @@ export interface CvProfile {
   readonly eventRule: CvProfileEventRule;
   readonly createdAt: string;
   readonly updatedAt: string;
+  readonly sources: CvProfileSources;
 }
 
 /** Mirrors `GET /api/cv/profiles`'s `200` body — the wrapped-list convention every list endpoint in
@@ -469,6 +521,12 @@ export interface CvProfilesResponse {
  * start-time only, never accepted on an update — a profile's event rule is fixed at creation and
  * only changes by forking a new profile). `groupId` is never sent — POST always creates a
  * non-built-in profile for the caller's own org, and PUT never moves a profile between orgs.
+ *
+ * `intent` (added wave W3.6) mirrors `dto.CvProfileRequest#intent` — the same absent-means-"skip
+ * intent resolution entirely" convention `UpdateStreamConfigRequest#intent` already established on
+ * the sibling stream-config PATCH (wave W3.0): omitted (not `null`) leaves `model`/`labelFilter`
+ * exactly as sent; a non-absent value asks the platform's `IntentPolicyResolver` to seed a blank
+ * `model`/empty `labelFilter`, never overriding an explicit, non-blank one.
  */
 export interface CvProfileRequest {
   readonly name: string;
@@ -480,6 +538,7 @@ export interface CvProfileRequest {
   readonly labelDenyFilter: readonly string[];
   readonly detectionEnabled: boolean;
   readonly tracking: CvProfileTracking;
+  readonly intent?: CvProfileIntent;
 }
 
 /** Mirrors `domain.model.CvProfileBinding`. `scopeId` is a `GroupId`/`CategoryId` slug/`AssetId`
