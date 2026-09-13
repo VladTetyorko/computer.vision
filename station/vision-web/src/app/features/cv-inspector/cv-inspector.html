@@ -16,6 +16,16 @@
         <option [value]="stream.streamId">{{ stream.streamId }}</option>
       }
     </select>
+    <button
+      pageBarActions
+      type="button"
+      class="btn secondary"
+      [disabled]="!facade.canSaveTrace()"
+      title="Download the current gate/frame/world ledgers for this stream as JSON."
+      (click)="facade.saveTrace()"
+    >
+      Save trace
+    </button>
   </vision-page-bar>
 
   <section class="card">

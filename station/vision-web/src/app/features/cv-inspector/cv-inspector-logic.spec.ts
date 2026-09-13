@@ -1,6 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { allTrackIds, clockTime, cvSubsystemRow, evidenceRowsFor, formatRecord, latestFrame, worldObjectFor } from './cv-inspector-logic';
-import type { FrameLedger, SystemStatus, WorldObject } from '../../core/api/models';
+import {
+  allTrackIds,
+  clockTime,
+  cvSubsystemRow,
+  evidenceRowsFor,
+  formatRecord,
+  latestFrame,
+  serializeTrace,
+  traceFileName,
+  worldObjectFor,
+} from './cv-inspector-logic';
+import type { CvTrace, FrameLedger, SystemStatus, WorldObject } from '../../core/api/models';
 
 function frame(sequence: number, objects: FrameLedger['objects'] = {}): FrameLedger {
   return {
@@ -105,6 +115,38 @@ describe('formatRecord', () => {
 describe('clockTime', () => {
   it('renders a non-empty local time string for a given epoch millis', () => {
     expect(clockTime(1_700_000_000_000).length).toBeGreaterThan(0);
+  });
+});
+
+describe('traceFileName', () => {
+  it('embeds the stream id and a filesystem-safe timestamp, ending in .json', () => {
+    const name = traceFileName('stream-1', 1_700_000_000_000);
+    expect(name.startsWith('cv-trace-stream-1-')).toBe(true);
+    expect(name.endsWith('.json')).toBe(true);
+    expect(name).not.toContain(':');
+  });
+
+  it('two saves a second apart never collide', () => {
+    const first = traceFileName('stream-1', 1_700_000_000_000);
+    const second = traceFileName('stream-1', 1_700_000_001_000);
+    expect(first).not.toBe(second);
+  });
+});
+
+describe('serializeTrace', () => {
+  it('round-trips every ledger back to an equal object', () => {
+    const trace: CvTrace = {
+      streamId: 'stream-1',
+      gate: [],
+      frame: [frame(1, { '7': [{ contributorId: 'predict.cv', claim: { held: '0.1,0.2,0.3,0.4' } }] })],
+      world: [worldObject(7)],
+    };
+    expect(JSON.parse(serializeTrace(trace))).toEqual(trace);
+  });
+
+  it('is pretty-printed, not a single minified line', () => {
+    const trace: CvTrace = { streamId: 'stream-1', gate: [], frame: [], world: [] };
+    expect(serializeTrace(trace)).toContain('\n');
   });
 });
 

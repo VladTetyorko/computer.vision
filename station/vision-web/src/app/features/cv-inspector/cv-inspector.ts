@@ -31,6 +31,10 @@ import { CvInspectorFacade } from './cv-inspector-facade';
  * rule does not apply here (`.claude/skills/frontend-style/SKILL.md`'s own scope note); the calm
  * side-panel/table rules do, and are followed via the shared `.card`/`table`/`.chip` primitives, the
  * same ones `/manage/system` (`features/system-status/**`) already renders diagnostics with.
+ *
+ * **Save trace (wave W5.4)** — the page bar's own "Save trace" action (disabled until a stream is
+ * picked) downloads the currently-picked stream's ledgers as one JSON file — wave W5.5's own replay
+ * fixture. See {@link CvInspectorFacade}'s own doc comment for the download itself.
  */
 @Component({
   selector: 'vision-cv-inspector',

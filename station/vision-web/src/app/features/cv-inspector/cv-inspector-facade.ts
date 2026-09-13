@@ -3,7 +3,8 @@ import { CvTraceStore } from '../../core/cv-trace/cv-trace-store';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { healthLabel, healthSeverity } from '../../core/system-status/system-status-logic';
 import { SystemStatusStore } from '../../core/system-status/system-status-store';
-import { allTrackIds, cvSubsystemRow, evidenceRowsFor, latestFrame, worldObjectFor } from './cv-inspector-logic';
+import type { CvTrace } from '../../core/api/models';
+import { allTrackIds, cvSubsystemRow, evidenceRowsFor, latestFrame, serializeTrace, traceFileName, worldObjectFor } from './cv-inspector-logic';
 
 /**
  * `/manage/cv`'s facade (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4/§4.8, wave W5.3) — the one
@@ -29,6 +30,15 @@ import { allTrackIds, cvSubsystemRow, evidenceRowsFor, latestFrame, worldObjectF
  * **Process facts are stream-independent** — the `cv-service` row is a whole-process fact (queue
  * depth, gate occupancy, capacity), not scoped to any one stream (§4.8's own audience table lists it
  * under "Ops", not per-asset) — {@link cvRow} renders regardless of whether a stream is picked at all.
+ *
+ * **Save trace (wave W5.4)** — {@link saveTrace} captures exactly the `CvTrace` shape `GET
+ * .../cv/trace` itself would return for the currently-picked stream (`{streamId, gate, frame,
+ * world}`, built from this store's own live signals rather than issuing a fresh request — a second
+ * network round trip could observe a different moment than what the engineer is actually looking
+ * at), pretty-printed, via the app's existing client-side Blob-download convention
+ * (`features/onboarding/onboarding-facade.ts#downloadBlock`'s same `createObjectURL` → synthetic
+ * `<a download>` → `revokeObjectURL` idiom — not reused directly since that helper is typed around
+ * `ConfigBlock`, a different shape). The saved file is wave W5.5's own replay fixture.
  */
 @Injectable()
 export class CvInspectorFacade {
@@ -118,5 +128,27 @@ export class CvInspectorFacade {
 
   selectTrack(trackId: number): void {
     this.selectedTrackIdSignal.set(trackId);
+  }
+
+  /** `undefined` selectedStreamId means nothing to save yet — the page's own Save-trace button
+   *  binds `[disabled]` to `!canSaveTrace()` rather than hiding the action outright, so an engineer
+   *  who has picked a stream but sees an empty ring still gets an honest, if empty, file. */
+  readonly canSaveTrace = computed(() => this.selectedStreamIdSignal() !== undefined);
+
+  /** See class doc's "Save trace" paragraph. No-ops (rather than throwing) when no stream is picked —
+   *  the page's own button is `[disabled]` in that state, but this stays defensive against a future
+   *  caller that doesn't check {@link canSaveTrace} first. */
+  saveTrace(): void {
+    const streamId = this.selectedStreamIdSignal();
+    if (streamId === undefined) {
+      return;
+    }
+    const trace: CvTrace = { streamId, gate: this.gate(), frame: this.frame(), world: this.world() };
+    const url = URL.createObjectURL(new Blob([serializeTrace(trace)], { type: 'application/json' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = traceFileName(streamId, Date.now());
+    link.click();
+    URL.revokeObjectURL(url);
   }
 }

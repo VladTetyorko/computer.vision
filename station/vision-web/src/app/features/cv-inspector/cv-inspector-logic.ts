@@ -1,4 +1,4 @@
-import type { FrameLedger, SubsystemStatus, SystemStatus, WorldObject } from '../../core/api/models';
+import type { CvTrace, FrameLedger, SubsystemStatus, SystemStatus, WorldObject } from '../../core/api/models';
 
 /**
  * Pure, Angular-free logic behind `cv-inspector-facade.ts` (docs/plans/active/CV-ORCHESTRATION-PLAN.md
@@ -96,6 +96,27 @@ export function formatRecord(record: Readonly<Record<string, string>>): string {
  */
 export function clockTime(epochMillis: number): string {
   return new Date(epochMillis).toLocaleTimeString();
+}
+
+/**
+ * `Save trace` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.8, wave W5.4) — the exact filename a
+ * downloaded trace gets, factored out so it stays testable with no DOM/`Blob` involved: one file per
+ * stream per save, timestamped to the second so an engineer capturing several traces across a
+ * session never silently overwrites an earlier one. `:`/`.` are stripped from the ISO timestamp —
+ * both are legal in an ISO instant but `:` is a path separator on Windows and `.` would otherwise
+ * read as a second, spurious extension.
+ */
+export function traceFileName(streamId: string, nowMs: number): string {
+  const timestamp = new Date(nowMs).toISOString().replace(/[:.]/g, '-');
+  return `cv-trace-${streamId}-${timestamp}.json`;
+}
+
+/**
+ * The downloaded file's own content — pretty-printed so the "replay fixture" (§4.8's own phrase;
+ * wave W5.5 reads this same shape) is human-diffable, not a wall of minified JSON.
+ */
+export function serializeTrace(trace: CvTrace): string {
+  return JSON.stringify(trace, null, 2);
 }
 
 /**
