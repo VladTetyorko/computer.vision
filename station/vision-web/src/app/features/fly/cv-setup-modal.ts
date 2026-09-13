@@ -5,7 +5,8 @@ import { ToastService } from '../../core/toast.service';
 import { describeHttpError } from '../../core/api-error';
 import { DetectionsStore } from '../../core/detections/detections-store';
 import { HIDDEN_CLASS_TRUTH, isLabelDenied, toggleLabelDeny } from '../../core/detections/detections-logic';
-import type { EffectiveCvProfile, TrackingMode, UpdateStreamConfigRequest } from '../../core/api/models';
+import type { CvProfileSources, EffectiveCvProfile, TrackingMode, UpdateStreamConfigRequest } from '../../core/api/models';
+import { resolvedSourceLine } from './cv-setup-modal-logic';
 import {
   CAPABILITY_LEVEL_OPTIONS,
   DEFAULT_FOLLOW_FPS,
@@ -20,7 +21,6 @@ import {
   buildModelChangePatch,
   buildProfileRequestFromConfig,
   buildTrackingEnginePatch,
-  buildTrackingModePatch,
   buildVerifyCadencePatch,
   capabilityLevelHint,
   capabilityLevelLabel,
@@ -52,17 +52,23 @@ import {
 } from './cv-control-panel-logic';
 
 /**
- * The Fly cockpit's **Detection setup modal** (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1, §1
+ * The Fly cockpit's **Tuning modal** (renamed from "Detection setup" in docs/plans/active/
+ * CV-ORCHESTRATION-PLAN.md §4.7, wave W3.4 — same component, same selector/class name, copy only)
+ * (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1, §1
  * "Surface 2 — calm hands: decisions") — a centered dialog over the cockpit holding every
  * set-once/expert CV knob that used to live inside `cv-control-panel.ts`'s own "Tune"/"Expert"
  * disclosures: the "Looking for" model intent cards (each with a one-sentence "what it finds" plus
  * the honest cost word, P2 §1 item 2), one merged Classes section (search/toggle/add/clear over the
  * full roster, observed-recently labels sorted first, hidden/deny-listed labels marked and
  * un-hideable in place — P2 §5; **not** a separate "Seen now" list any more, see that section's own
- * doc comment below for why), confidence (reworded as a symptom axis, P2 §1 item 3), tracking mode,
- * and the collapsed Expert tier (fps floor — relabeled "Detector floor", P2 §1 item 4 — capability
- * ceiling, engine, cadences, flow strip, Serving/lag readouts). Opened by the panel's own
- * "Change…"/"Detection setup…" buttons ({@link CvControlPanel#setupRequested}); the panel keeps the
+ * doc comment below for why), confidence (reworded as a symptom axis, P2 §1 item 3), and the
+ * collapsed Expert tier (fps floor — relabeled "Detector floor", P2 §1 item 4 — capability
+ * ceiling, engine, cadences, flow strip, Serving/lag readouts). The Off/Associate/Follow tracking-
+ * mode picker that used to live here is **removed** (E19, docs/plans/active/
+ * CV-ORCHESTRATION-PLAN.md §4.7/§9, wave W3.4) — ASSOCIATE is always the running mode while
+ * detection is on, FOLLOW is entered only by tapping a box/point, OFF only through a bound profile;
+ * see {@link trackingMode}'s own doc comment. Opened by the panel's own
+ * "Change…"/"Tuning…" buttons ({@link CvControlPanel#setupRequested}); the panel keeps the
  * seconds-matter controls (Detect hero, a "Looking for" summary row, Boxes, the "Following #N" lock
  * chip, the two conditional honesty notices) — see that class's own doc comment for the full split.
  *
@@ -112,9 +118,11 @@ import {
  * mounted — a component-local field would forget the choice on every close).
  *
  * **Every tracking field now has a real readback on reopen** (wave W7, H6 —
- * docs/plans/active/CV-SETTINGS-PLAN.md §3.5 rule 3): `trackingMode`/`trackingEngineId` re-sync
- * from the tracks poll's own `stats` the instant this component mounts, unchanged from before the
- * split. `capabilityLevel`/`verifyEveryMillis`/`followFps` **used to have no readback at all** —
+ * docs/plans/active/CV-SETTINGS-PLAN.md §3.5 rule 3): `trackingEngineId` re-syncs from the tracks
+ * poll's own `stats` the instant this component mounts, unchanged from before the split;
+ * `trackingMode` (wave W3.4) reads that same `stats` directly as a `computed`, with nothing left to
+ * "sync" since nothing local ever writes it any more. `capabilityLevel`/`verifyEveryMillis`/
+ * `followFps` **used to have no readback at all** —
  * they reset to a hardcoded default on every reopen and otherwise just echoed whatever this browser
  * last clicked. They now seed from {@link config}'s own `tracking` object (`GET
  * /api/streams/{id}/config`, the exact same H6 fix `cv-control-panel.ts` never needed for this
@@ -147,8 +155,22 @@ export class CvSetupModal {
   readonly config = input<ResolvedCvConfig | undefined>(undefined);
 
   /** The asset's own effective CV profile — feeds "Save to this asset's profile"'s own create-vs-
-   *  update decision below (see {@link saveToAssetProfile}). */
+   *  update decision below (see {@link saveToAssetProfile}), and {@link effectiveProfile}'s own
+   *  `.source` tier feeds the resolved-source lines below when there is no fresher intent fact. */
   readonly effectiveProfile = input<EffectiveCvProfile | undefined>(undefined);
+
+  /**
+   * Per-knob request-time intent-resolution provenance (`CvProfileResponse.sources`, wave W3.0/
+   * W3.6, docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7) — feeds the Classes section's own
+   * resolved-source line (see {@link classesSourceLine}) via {@link resolvedSourceLine}'s
+   * precedence. **Always `undefined` today**: no host template binds this input yet — wave W3.3
+   * (landing concurrently in this same worktree) owns wiring a real value in from `cockpit.html`,
+   * and adding that binding site here would be out of this wave's own file scope. Degrades
+   * honestly with no binding at all: every resolved-source line below simply falls through to the
+   * profile-tier fact (or renders nothing), exactly as if intent had never resolved anything —
+   * never a blocked page, never a fabricated "Resolved from…" line.
+   */
+  readonly lastConfigSources = input<CvProfileSources | undefined>(undefined);
 
   /** The primary device's asset id — {@link saveToAssetProfile}'s write target; the action is a
    *  no-op with nothing to save into while this is `undefined`. */
@@ -205,6 +227,19 @@ export class CvSetupModal {
    *  the merged Classes section (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P2 §5 — the pre-P2 split
    *  across "Seen now" and "All classes" rendered this twice; the merge is also what fixed that). */
   protected readonly hiddenClassTruth = HIDDEN_CLASS_TRUTH;
+
+  /** Confidence's own resolved-source line (wave W3.4, {@link resolvedSourceLine}'s precedence) —
+   *  never `'INTENT'` in practice (`CvProfileSources` has no confidence field), so this only ever
+   *  renders the profile-tier fact or nothing. */
+  protected readonly confidenceSourceLine = computed(() =>
+    resolvedSourceLine(this.lastConfigSources(), this.effectiveProfile()?.source, 'confidenceThreshold'),
+  );
+
+  /** Classes' own resolved-source line (wave W3.4) — shown alongside the existing "Applied: N of
+   *  the classes…" line, never in place of it. */
+  protected readonly classesSourceLine = computed(() =>
+    resolvedSourceLine(this.lastConfigSources(), this.effectiveProfile()?.source, 'labelFilter'),
+  );
 
   protected readonly classQuery = signal('');
   protected readonly modelBusy = signal(false);
@@ -266,7 +301,20 @@ export class CvSetupModal {
   // from the pre-split panel beyond relocation; see this class's own doc comment for the "re-syncs
   // from stats vs. from `config`'s own readback" distinction between these fields.
 
-  protected readonly trackingMode = signal<TrackingMode>('OFF');
+  /**
+   * The actual **running** tracking mode, read from the tracks poll's own `stats.mode` — never a
+   * client-side choice any more (E19, docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7/§9 decision
+   * #4): the Off/Associate/Follow picker that used to write this signal is removed from the
+   * operator surface entirely. ASSOCIATE is the server's own default whenever detection is on
+   * (`PipelineConfig#defaults()`, confirmed by reading the Java); FOLLOW is entered exclusively by
+   * tapping a box/point (wave W3.5, not this component); OFF is reachable only through a bound
+   * profile (`/vision/profiles`, wave W3.6). This is now purely a *read* of that outcome — the
+   * Expert disclosure below still gates its capability-ceiling/engine/follow-cadence controls on
+   * it, so it has to keep reflecting the real running mode even with no picker writing to it.
+   * `'OFF'` before the first poll ever reports `stats` is the honest default: nothing is known to
+   * be running yet.
+   */
+  protected readonly trackingMode = computed<TrackingMode>(() => this.detections.tracks()?.stats?.mode ?? 'OFF');
   protected readonly trackingEngineId = signal('');
   protected readonly verifyEveryMillis = signal(DEFAULT_VERIFY_EVERY_MILLIS);
   protected readonly followFps = signal(DEFAULT_FOLLOW_FPS);
@@ -307,14 +355,14 @@ export class CvSetupModal {
       this.hotKnobPatch.cancel();
     });
 
-    // Re-syncs mode/engine from the wire's own ground truth the instant this component mounts (and
-    // on every poll after) — see this class's own doc comment for why this is honest (R11) rather
-    // than a lost operator choice: a click always fires its own fresh PATCH, the next poll simply
-    // confirms — or corrects — it. Unchanged logic from the pre-split panel, just relocated.
+    // Re-syncs the engine choice from the wire's own ground truth the instant this component
+    // mounts (and on every poll after) — an engine click always fires its own fresh PATCH, the
+    // next poll simply confirms — or corrects — it. `trackingMode` itself needs no such sync any
+    // more (E19): it is a `computed` reading the identical `stats` directly, never a signal a
+    // picker used to write.
     effect(() => {
       const stats = this.detections.tracks()?.stats;
       if (stats) {
-        this.trackingMode.set(stats.mode);
         this.trackingEngineId.set(stats.engineId);
       }
     });
@@ -353,11 +401,6 @@ export class CvSetupModal {
 
   protected onExpertToggle(event: Event): void {
     this.expertOpenChange.emit((event.target as HTMLDetailsElement).open);
-  }
-
-  protected onTrackingMode(mode: TrackingMode): void {
-    this.trackingMode.set(mode);
-    this.patchTracking(buildTrackingModePatch(mode));
   }
 
   protected onTrackingEngine(engineId: string): void {

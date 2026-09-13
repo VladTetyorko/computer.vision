@@ -1421,3 +1421,124 @@ renamed/added pure functions, no new dependency, no new component) inside the al
   - **Foreign/pre-existing, not mine**: `shared/player/no-client-rederivation.spec.ts` (untracked, actively being authored by the concurrent unrelated agent this wave was told to ignore) fails both `tsc --noEmit -p tsconfig.spec.json` (no `@types/node` configured for its `node:fs`/`node:path`/`node:url` imports) and at runtime ("The URL must be of scheme file") — confirmed live/in-progress (content changed between checks), confirmed unrelated to any file this wave touched, left exactly as found.
   - **Verify chain**: `npx tsc --noEmit -p tsconfig.app.json` — 0 errors. `npx tsc --noEmit -p tsconfig.spec.json` — 0 errors, including the foreign `shared/player/no-client-rederivation.spec.ts` (its 3 errors, present mid-wave while that concurrent agent's work was still in flight, were gone by this wave's final verify pass — resolved by that other agent, not by any file this wave touched). `npm run test:ci` — **201/201 files, 3940/3940 tests passing** (this wave's own contribution: +16 new tests / 0 new files, all in `vision-profiles-logic.spec.ts`: intent-draft defaults/never-inferred, `applyIntentToDraft`'s 4 blank/sticky/revert cases, `validateDraft`'s blank-model-with-intent + CUSTOM-needs-label-filter cases, `draftToRequest`'s intent-omitted/intent-carried cases, `saveOutcomeMessage`'s 4 cases, `describeIntent`, and the D7 `isDetectionAlways`/`withDetectionPolicy` describe block including case-insensitivity and merge-not-replace; confirmed via a pathspec-scoped `git stash push -u -- <this wave's 6 files>` baseline/restore, never a bare `git stash`, that reverting only this wave's files dropped the count by exactly 16 with no other file's tests affected). A mid-wave snapshot briefly saw 200/201 files with a foreign `shared/player` failure — gone by this final pass, confirming it was never this wave's own. `ng build --configuration production` — green, same one pre-existing budget warning only (initial bundle 46.41 kB over its 390 kB budget, pre-existing, not from this wave); **bundle delta** (same stash-based before/after method): initial bundle unchanged at 436.41 kB raw / 122.32 kB transfer (`vision-profiles` is lazy-loaded, so none of this wave's additions are eager); lazy chunk **`vision-profiles` 32.43 kB → 36.35 kB raw (+3.92 kB), 7.47 kB → 8.37 kB transfer (+0.90 kB)**.
   - **Commit**: `feat(cv-orchestration W3.6): intent picker + resolved sources on /vision/profiles, detection-policy control` — this wave's launching task explicitly required this one commit (unlike every prior wave's own "not committed, staged-ready" note above), with an exact trailer overriding this session's own default attribution; see the commit itself for the final trailer text used.
+
+## Status — CV-ORCHESTRATION wave W3.4 (web): "Tuning" modal — drop the tracking-mode picker, resolved-source lines (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7, §9 decision E19/#4, §6 W3 row) — 2026-09-13
+
+Pure copy/removal/addition inside `CvSetupModal` (the same component, selector, and file names —
+this is a UX rename, not a refactor). Built on a shared tree with a concurrent sibling agent (W3.3)
+actively editing `core/api/models.ts`, `cockpit.html`, `cockpit-facade.ts`, `fly-logic.ts`,
+`cv-control-panel-logic.ts`/`.spec.ts`, and `shared/player/**` throughout this wave — confirmed
+disjoint the whole time via `git status`/`git diff --stat`, never touched.
+
+- **Part A — renamed to "Tuning"**: `cv-setup-modal.html`'s `aria-label`, `<h2>`, and close-button
+  `aria-label` all say "Tuning" now (`aria-label="Close Tuning"`); `cv-control-panel.html`'s door
+  button reads `Tuning…`. Every doc-comment in `cv-setup-modal.ts`/`cv-control-panel.ts`/
+  `cv-control-panel.html` that named "Detection setup" prose was updated to "Tuning" alongside a
+  pointer to this wave — component class name (`CvSetupModal`), selector (`vision-cv-setup-modal`),
+  file names, method names (`requestCvSetup`-shaped ones), and every CSS class encoding "setup"
+  (`.cv-setup-button`, `.cv-setup-footer`, `dialog.open('cv-setup')`) are all **untouched**, exactly
+  as scoped, so `cockpit.ts`'s import and `cockpit.html`'s usage site needed zero changes.
+  `cockpit.html` itself still says "Detection setup…" in its own comment prose (lines ~402, ~670) —
+  out of this wave's file scope (a sibling agent owns that file concurrently this run); left exactly
+  as found, disclosed here rather than risk-edited.
+- **Part B — E19, tracking-mode picker removed**: deleted the whole Off/Associate/Follow segmented
+  control section from `cv-setup-modal.html` (markup + its description switch), `onTrackingMode`
+  from `cv-setup-modal.ts`, and the `buildTrackingModePatch` import (the function itself is
+  untouched in `cv-control-panel-logic.ts` — out of this wave's file scope, and nothing else in this
+  component tree called it, confirmed by grep before deleting the import).
+  - **The now-possibly-dangling Expert gate**: `trackingMode` used to be a `signal<TrackingMode>`
+    written only by the deleted picker and read by three things — the Expert disclosure's capability-
+    ceiling/engine gate (`trackingMode() !== 'OFF'`), the Follow-only verify/follow-fps gate
+    (`trackingMode() === 'FOLLOW'`), and `engineOptionsForMode`'s own mode argument. Rather than
+    leaving a dangling write-only signal or inventing a fake mode, `trackingMode` became a
+    `computed<TrackingMode>(() => this.detections.tracks()?.stats?.mode ?? 'OFF')` — reading the
+    **actual running mode already available on this component** via the tracks poll's own `stats`
+    (the exact fact the pre-existing constructor `effect` was already syncing the old signal *from*,
+    every poll tick — so this is strictly less code, not new plumbing). All three read sites keep
+    working unchanged, now driven by server truth instead of a client write. `'OFF'` before the
+    first poll ever reports `stats` is the honest default (nothing known to be running yet). Server-
+    side confirmation (read-only, no Java touched): `TrackingConfig.java` — `PipelineConfig#defaults()`
+    ships `TrackingConfig.associate()`, i.e. ASSOCIATE is already the running default whenever
+    detection is on, matching E19's own text.
+  - The `trackingEngineId` sync effect keeps running (Engine stays an Expert-tier control per §4.7's
+    table — only the mode picker is removed) — split out of the effect that used to set both fields
+    together, since `trackingMode` no longer needs an effect to write it at all.
+- **Memory/cached-tracking toggle — confirmed no-op, not found anywhere**: grepped
+  case-insensitively for `memory`/`cached`/`remember` across all of `features/fly/` before touching
+  anything. Every hit is the unrelated "remembered streaming asset" navigation concept
+  (`fly-redirect-guard.ts`, `fly-logic.ts#rememberedStreamingAssetId`, `cockpit-facade.ts`'s "last
+  flown" bookmark) — a different feature entirely, not a CV tracking-memory switch. No such toggle
+  exists in this component or any sibling in this tree to remove; per this wave's own instructions,
+  nothing was invented to then delete. This is the same finding prior CV-ORCHESTRATION research
+  already made — confirmed again here, independently, before acting.
+- **Part C — resolved-source lines**: new `cv-setup-modal-logic.ts` (+ `.spec.ts`, 8 tests) — this
+  component previously delegated all its pure logic to the shared `cv-control-panel-logic.ts` (out
+  of this wave's file scope, shared with the sibling `cv-control-panel.ts`); a new sibling `-logic.ts`
+  file keeps this Tuning-modal-only concept out of that shared file rather than risk-editing it.
+  `resolvedSourceLine(sources: CvProfileSources | undefined, profileSource: EffectiveCvProfile['source']
+  | undefined, knob: 'model' | 'labelFilter' | 'confidenceThreshold'): string | null` — precedence:
+  (1) `sources[knob] === 'INTENT'` (only representable for `model`/`labelFilter`; `confidenceThreshold`
+  never checks — `CvProfileSources` has no such field, since request-time intent resolution never
+  seeds confidence, §4.9's "As built in W2" table) → `"Resolved from your intent pick"`; (2) else
+  `profileSource` present → `"From your asset/category/organization profile"` or `"Platform default"`
+  for `'PLATFORM'`; (3) else `null` (never a fabricated source). New input
+  `readonly lastConfigSources = input<CvProfileSources | undefined>(undefined);` — **always
+  `undefined` today**: no host template binds it yet (wave W3.3's own concern, landing concurrently
+  in this exact worktree); every resolved-source line below therefore falls through to the
+  profile-tier fact or renders nothing, never a blocked page. Wired as two new computeds,
+  `confidenceSourceLine`/`classesSourceLine`, rendered as an extra `<p class="muted hint">` line —
+  next to the Confidence slider, and alongside (never replacing) Classes' existing "Applied: N of the
+  classes…" line.
+  - **Ambiguous intent-name decision**: `CvProfileSources` only reports the tag `'INTENT'`, never
+    *which* intent resolved a knob, and this component has no chosen-intent value of its own to name
+    one with. Chose **option (b)** from the brief — phrased the sentence without naming the specific
+    intent (`"Resolved from your intent pick"`) — over adding a second speculative input this wave
+    has nothing yet to wire (it would sit dead until a sibling wave lands a value into it, exactly
+    the kind of premature plumbing CLAUDE.md rule 10 warns against).
+  - Deliberately **did not** add a resolved-source line to the "Looking for" model/intent-card
+    section, even though the brief allowed it optionally — see next bullet.
+- **Disclosed, not fixed — the "Looking for" overlap**: `cv-setup-modal.html`'s pre-existing "Looking
+  for" intent-card grid (`models()`-roster-driven, `onModelChange`) is a different, older mechanism
+  from the newer server-resolved `CvProfileIntent` enum (wave W3.0/W3.6's `/vision/profiles` picker).
+  Neither reads nor writes the other; this card grid never shows a resolved-source line, even though
+  §4.7's table describes an eventual "resolved from intent People (platform)" reading exactly there.
+  Left exactly as it was — noted in the template's own comment block and here — a known UX
+  inconsistency for a future wave to merge or reconcile, not this one's brief.
+- **Role-gating / dev parity**: unaffected by this wave — no new gate, no auth-conditional branch;
+  the existing `canManage` input (already threaded from `CockpitFacade#canManage`) is untouched, and
+  `vision.auth.enabled=false`'s dev admin sees identical behavior to any other ADMIN session, exactly
+  as before this wave.
+- **Degrades honestly**: `lastConfigSources` absent → every resolved-source line either falls to the
+  profile-tier fact or renders nothing, never a guess; the removed tracking-mode picker's read side
+  (`trackingMode`) defaults to `'OFF'` before any poll ever reports `stats`, never a fabricated
+  "running" state.
+- **Foreign/pre-existing, not mine**: at this wave's final verify pass, `npm run test:ci` showed
+  **1 failing test** in `shared/player/detection-overlay-logic.spec.ts` — confirmed via
+  `git diff --stat` to be a brand-new `it()` (`'an untracked-box hit resolves to "point"…'`) the
+  concurrent sibling agent (W3.3, working on click-to-follow per its own new untracked
+  `click-to-follow.spec.ts` in this same tree) was actively adding to a file this wave never touched;
+  present both times `test:ci` was run a minute apart. Left exactly as found — same "confirmed
+  unrelated, not this wave's" call as W3.6's own entry above made for a different foreign file.
+- **Verify chain**: `npx tsc --noEmit -p tsconfig.app.json` — 0 errors. `npx tsc --noEmit -p
+  tsconfig.spec.json` — 0 errors. `npm run test:ci` — **202 files / 3948 tests, all green**, measured
+  immediately after this wave's own 6 files were the *only* uncommitted change in the tree (before
+  the sibling's concurrent edits resumed); this wave's own isolated contribution is exactly **+1 file
+  / +8 tests** (`cv-setup-modal-logic.spec.ts`) against wave W3.6's recorded 201/3940 baseline above.
+  A later, final-state run (with the sibling's own further concurrent edits back in the tree)
+  reported 203 files / 3960 tests with the 1 foreign failure noted above — that delta (203−202 files,
+  3960−3948 tests, 1 failing) is entirely the sibling's own in-flight work, not this wave's.
+  `ng build --configuration production` — green, same two pre-existing budget warnings only (initial
+  bundle over its 390 kB budget; `tactical-map.css` over its 11 kB component budget). **Bundle
+  delta** (pathspec-scoped `git stash push -u -- <this wave's 6 files>`, confirmed via
+  `git stash list --format='%H %gs'` and restored via `git stash apply <sha>` + `git stash drop`,
+  never a bare `stash`/`pop`, exactly the precedent this file's own W3.6 entry set): measured in a
+  tight ~90-second window, lazy chunk **`cockpit` 138.93 kB → 138.69 kB raw (−0.24 kB), 29.31 kB →
+  29.28 kB transfer (−0.03 kB)** — a net *decrease*, expected since this wave deletes a whole picker
+  section/method/import and adds only two small computeds plus one new logic file. The eager
+  **initial bundle wobbled by ~0.3 kB raw across builds taken minutes apart** (436.41–436.72 kB) —
+  attributable to the concurrently-editing sibling's own in-flight changes to `cockpit.html`/
+  `cockpit-facade.ts`/`models.ts` (none of which this wave touched), not to anything in this diff;
+  `cv-setup-modal`/`cv-control-panel` are both inside the lazy `cockpit` chunk and were never eager
+  before or after.
+- **Commit**: `feat(cv-orchestration W3.4): Tuning modal — drop the tracking-mode picker,
+  resolved-source lines`.
