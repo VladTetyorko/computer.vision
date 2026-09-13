@@ -10,6 +10,7 @@ import com.drones.vision.kernel.UserId;
 import com.drones.vision.perception.application.profile.CoverageRow;
 import com.drones.vision.perception.application.profile.CvProfileService;
 import com.drones.vision.perception.application.profile.EffectiveProfile;
+import com.drones.vision.perception.application.profile.KnobSources;
 import com.drones.vision.perception.application.profile.ProfileSource;
 import com.drones.vision.perception.domain.model.BindingScope;
 import com.drones.vision.perception.domain.model.CvProfile;
@@ -18,7 +19,8 @@ import com.drones.vision.perception.domain.model.CvProfileId;
 import com.drones.vision.perception.domain.model.EventRuleConfig;
 import com.drones.vision.perception.domain.model.ModelRef;
 import com.drones.vision.perception.domain.model.PipelineConfig;
-import com.drones.vision.perception.domain.model.TrackingConfig;
+import com.drones.vision.perception.domain.model.TrackingKnobPatch;
+import com.drones.vision.perception.domain.model.TrackingMode;
 import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.VisibilityScope;
@@ -81,7 +83,8 @@ class CvProfileControllerTest {
 
     private static CvProfile profile(CvProfileId id, boolean builtIn, GroupId groupId) {
         return new CvProfile(id, "people-vehicles", "Built-in template", builtIn, groupId, MODEL, 0.5, 10,
-                List.of("person", "car"), List.of(), true, TrackingConfig.defaults(), EventRuleConfig.defaults(),
+                List.of("person", "car"), List.of(), true,
+                new TrackingKnobPatch(TrackingMode.ASSOCIATE, "", 0, 2000, 15), EventRuleConfig.defaults(), null,
                 Instant.parse("2026-08-01T00:00:00Z"), Instant.parse("2026-08-01T00:00:00Z"));
     }
 
@@ -278,7 +281,7 @@ class CvProfileControllerTest {
         CvProfileId profileId = CvProfileId.random();
         when(cvProfileService.effective(eq(assetId), eq(platformDefault), eq(ownerId), eq(currentUser.scope())))
                 .thenReturn(new EffectiveProfile(assetId, profileId, "people-vehicles", ProfileSource.ASSET,
-                        platformDefault));
+                        platformDefault, KnobSources.platform(), null));
         when(cvProfileService.get(profileId, ownerId, currentUser.scope()))
                 .thenReturn(profile(profileId, false, GROUP_ID));
 
@@ -294,7 +297,8 @@ class CvProfileControllerTest {
     void effectiveSynthesizesThePlatformDefaultWhenNoBindingMatched() throws Exception {
         AssetId assetId = AssetId.random();
         when(cvProfileService.effective(eq(assetId), eq(platformDefault), eq(ownerId), eq(currentUser.scope())))
-                .thenReturn(new EffectiveProfile(assetId, null, null, ProfileSource.PLATFORM, platformDefault));
+                .thenReturn(new EffectiveProfile(assetId, null, null, ProfileSource.PLATFORM, platformDefault,
+                        KnobSources.platform(), null));
 
         mockMvc.perform(get("/api/cv/profiles/effective").param("assetId", assetId.value().toString()))
                 .andExpect(status().isOk())

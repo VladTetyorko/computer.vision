@@ -1,12 +1,9 @@
 package com.drones.vision.api.dto;
 
 import com.drones.vision.perception.application.profile.CvProfileSpec;
-import com.drones.vision.perception.application.profile.IntentPolicy;
-import com.drones.vision.perception.application.profile.IntentPolicyResolver;
-import com.drones.vision.perception.application.profile.ProfileSource;
-import com.drones.vision.perception.domain.model.EventRuleConfig;
 import com.drones.vision.perception.domain.model.Intent;
 import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.perception.domain.model.TrackingKnobPatch;
 
 import java.util.List;
 
@@ -17,42 +14,51 @@ import java.util.List;
  * excludes {@code id}/{@code builtIn}/{@code createdAt}/{@code updatedAt} (server-assigned),
  * {@code groupId} (never sent — the owning group comes from the caller's own scope, see {@code
  * CvProfileController}), and {@code eventRule} ({@link CvProfileEventRuleResponse}'s own javadoc:
- * start-time only, never accepted on an update).
+ * start-time only, never accepted on an update or a create — {@link #toSpec()} always passes
+ * {@code null} for it).
  *
- * <p>{@code intent} (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.7, wave W2.6, Java only —
- * no web surface consumes this field yet) is optional and additive: {@code null} leaves every
- * field below exactly as sent, byte-identical to before this wave. When non-{@code null}, {@link
- * #toSpec()} asks {@link IntentPolicyResolver} for the resolved {@link IntentPolicy} and uses it to
- * seed only the two fields that have an unambiguous "caller left this to the platform" sentinel
- * under this frozen wire shape — a blank {@code model} and an empty {@code labelFilter} — plus the
- * server-synthesized {@code eventRule}'s confidence, which this wire shape never exposes to a
- * caller at all. An explicit, non-blank {@code model} or non-empty {@code labelFilter} always wins
- * over the intent's own choice ("expert tier can still pin a model," &sect;4.7), and {@code
- * Intent#CUSTOM} means exactly that in practice: a caller who sends {@code CUSTOM} together with
- * its own {@code labelFilter} gets that list back unchanged, since a non-empty list already beats
- * the intent's seed. {@code confidenceThreshold}/{@code inferenceFps} are deliberately left alone
- * by this fold — see {@link IntentPolicy}'s own javadoc for why those two fields have no such
- * sentinel under this contract, and are therefore a disclosed, out-of-scope gap for this wave.
+ * <h2>Wave W7.3 — a request is a patch too (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.7,
+ * decision E22)</h2>
+ * Every knob below except {@link #intent()} is nullable, mirroring {@link CvProfileSpec}/{@link
+ * com.drones.vision.perception.domain.model.CvProfile} field-for-field: {@code null} (a blank {@code
+ * model}, an absent {@code tracking} object) leaves that knob unset on the created/updated profile —
+ * {@link #toSpec()} is a straight, unresolved pass-through onto {@link CvProfileSpec}, never
+ * consulting {@link #intent()} to seed any other field.
+ *
+ * <p><b>Corrected from the pre-W7.3 shape</b>, which resolved {@link #intent()} into {@code model}/
+ * {@code labelFilter}/a synthesized {@code eventRule} at save time via {@code IntentPolicyResolver},
+ * and reported which fields it had seeded through a since-deleted {@code fieldSources()} method.
+ * Decision E22's whole point is that {@link #intent()} survives on the saved {@link
+ * com.drones.vision.perception.domain.model.CvProfile} itself and is resolved at FOLD time by {@code
+ * CvProfileResolver} (wave W7.1) — resolving it a second time here, at save time, would both
+ * duplicate that logic and bake in a value that could go stale the moment {@code
+ * IntentPolicyResolver}'s own policy table changes. {@link CvProfileResponse#from(com.drones.vision.perception.domain.model.CvProfile)}'s
+ * {@code Sources} now answers "was this seeded from intent" by reading the saved profile itself, on
+ * every read — not by remembering what one particular save request happened to compute.
  *
  * @param name                human-readable name; must not be blank
  * @param description         human-readable description; must not be {@code null}, may be blank
  * @param model               the CV model id this profile should run — plain string, not a
  *                            versioned {@link ModelRef}; see {@link #toSpec()} for how a version is
- *                            synthesized; blank defers to {@code intent}'s own model when {@code
- *                            intent} is non-{@code null}
- * @param confidenceThreshold minimum confidence to keep a detection, [0,1]
- * @param inferenceFps        target inference sample rate; must be positive
- * @param labelFilter         labels to keep; empty means all labels; empty defers to {@code
- *                            intent}'s own class set when {@code intent} is non-{@code null}
- * @param labelDenyFilter     labels to drop even when {@code labelFilter} would keep them
- * @param detectionEnabled    whether a stream started from this profile runs detection at all
- * @param tracking            tracking configuration a stream started from this profile uses
- * @param intent              the operator's "what am I looking for" pick, or {@code null} to skip
- *                            intent resolution entirely and use the fields above exactly as sent
+ *                            synthesized; blank or {@code null} leaves the knob unset
+ * @param confidenceThreshold minimum confidence to keep a detection, [0,1], or {@code null} to leave
+ *                            unset
+ * @param inferenceFps        target inference sample rate; must be positive when set, or {@code
+ *                            null} to leave unset
+ * @param labelFilter         labels to keep; empty is an explicit "all labels"; {@code null} leaves
+ *                            the knob unset
+ * @param labelDenyFilter     labels to drop even when {@code labelFilter} would keep them; empty is
+ *                            an explicit "deny nothing"; {@code null} leaves the knob unset
+ * @param detectionEnabled    whether a stream started from this profile runs detection at all, or
+ *                            {@code null} to leave unset
+ * @param tracking            per-knob tracking overrides, or {@code null} to leave the whole group
+ *                            unset
+ * @param intent              the operator's "what am I looking for" pick, persisted with the profile
+ *                            and resolved later at fold time — {@code null} for none
  */
-public record CvProfileRequest(String name, String description, String model, double confidenceThreshold,
-                                int inferenceFps, List<String> labelFilter, List<String> labelDenyFilter,
-                                boolean detectionEnabled, CvProfileTrackingResponse tracking, Intent intent) {
+public record CvProfileRequest(String name, String description, String model, Double confidenceThreshold,
+                                Integer inferenceFps, List<String> labelFilter, List<String> labelDenyFilter,
+                                Boolean detectionEnabled, CvProfileTrackingResponse tracking, Intent intent) {
 
     /**
      * Sentinel {@link ModelRef#version()} used when a request only ever names a bare model id (no
@@ -65,80 +71,21 @@ public record CvProfileRequest(String name, String description, String model, do
     private static final String DEFAULT_MODEL_VERSION = "latest";
 
     /**
-     * Maps this request to an application-layer {@link CvProfileSpec}, resolving {@link #intent}
-     * (when present) to seed a blank {@code model}/empty {@code labelFilter} and the synthesized
-     * {@code eventRule}'s confidence threshold — see this record's own javadoc for exactly which
-     * fields intent can and cannot reach under today's wire shape.
+     * Maps this request straight onto an application-layer {@link CvProfileSpec} — every knob
+     * unresolved, {@link #intent()} carried through verbatim rather than resolved here (see this
+     * record's own javadoc for why that changed in wave W7.3).
      *
      * @return the spec {@link com.drones.vision.perception.application.profile.CvProfileService#create}/
      *         {@link com.drones.vision.perception.application.profile.CvProfileService#update} accept
-     * @throws IllegalArgumentException if {@code model} is blank and {@code intent} is {@code
-     *                                  null}, if {@code tracking.mode} is unknown, if {@code intent}
-     *                                  is {@code Intent#CUSTOM} and {@code labelFilter} is empty, or
-     *                                  if any field fails {@link CvProfileSpec}'s own validation
-     *                                  (&rarr; 400)
+     * @throws IllegalArgumentException if {@code name} is blank, {@code tracking.mode} is set but
+     *                                  unknown, {@code intent} is {@link Intent#CUSTOM} and {@code
+     *                                  labelFilter} is empty or unset, or any field fails {@link
+     *                                  CvProfileSpec}'s own validation (&rarr; 400)
      */
     public CvProfileSpec toSpec() {
-        IntentPolicy resolved = intent == null ? null : IntentPolicyResolver.resolve(intent, labelFilter);
-        String resolvedModel = model != null && !model.isBlank() ? model
-                : resolved != null ? resolved.model().id() : model;
-        List<String> resolvedLabelFilter = labelFilter != null && !labelFilter.isEmpty() ? labelFilter
-                : resolved != null ? List.copyOf(resolved.classSet()) : labelFilter;
-        EventRuleConfig eventRule = resolved == null ? EventRuleConfig.defaults()
-                : new EventRuleConfig(EventRuleConfig.defaults().labels(), resolved.reportThreshold(),
-                        EventRuleConfig.defaults().consecutiveToOpen(), EventRuleConfig.defaults().absenceToClose());
-        return new CvProfileSpec(name, description, new ModelRef(resolvedModel, DEFAULT_MODEL_VERSION),
-                confidenceThreshold, inferenceFps, resolvedLabelFilter, labelDenyFilter, detectionEnabled,
-                tracking.toTrackingConfig(), eventRule);
-    }
-
-    /**
-     * Which of this request's own knobs {@link #toSpec()} actually seeded from {@link #intent}
-     * rather than taking verbatim (docs/plans/active/CV-ORCHESTRATION-PLAN.md &sect;4.7, wave
-     * W2.8) — the per-knob provenance {@code CvProfileController#create}/{@code #update} attach to
-     * their response so a caller (W3's Tuning modal) can render "resolved from intent People,"
-     * matching {@link #toSpec()}'s own field-by-field logic exactly (a field reports {@link
-     * ProfileSource#INTENT} under precisely the condition that made {@link #toSpec()} use the
-     * intent's value for it, never a heuristic re-derivation).
-     *
-     * <p><b>Two of {@link CvProfileSpec}'s ten fields, and only two, can ever report {@link
-     * ProfileSource#INTENT} here</b> — {@code model} and {@code labelFilter} — because those are
-     * the only two fields this wire shape gives an unambiguous "caller left this to the platform"
-     * sentinel for (a blank string, an empty list). {@code confidenceThreshold}/{@code inferenceFps}
-     * can never report {@link ProfileSource#INTENT}, even though {@link IntentPolicyResolver} does
-     * compute an {@link IntentPolicy#detectFloor()} for them: those two request fields are bare
-     * primitives with no such sentinel under this frozen wire contract, so this method cannot tell
-     * "the caller explicitly sent 0.0" from "the caller left this to the platform" any more than
-     * {@link #toSpec()} itself can — see {@link IntentPolicy}'s own javadoc for the full disclosure.
-     * {@code description}/{@code detectionEnabled}/{@code tracking} are never intent-seeded at all
-     * ({@link #toSpec()} never reads {@code resolved} for them), so they have no representation
-     * here either — {@link Sources} carries only the two fields that can ever be non-{@code null}.
-     *
-     * @return {@code {model: null, labelFilter: null}} when {@link #intent} is {@code null} (intent
-     *         resolution was skipped entirely, so nothing could have been seeded)
-     */
-    public Sources fieldSources() {
-        if (intent == null) {
-            return new Sources(null, null);
-        }
-        ProfileSource modelSource = model == null || model.isBlank() ? ProfileSource.INTENT : null;
-        ProfileSource labelFilterSource = labelFilter == null || labelFilter.isEmpty() ? ProfileSource.INTENT : null;
-        return new Sources(modelSource, labelFilterSource);
-    }
-
-    /**
-     * Per-knob provenance for the two fields {@link #intent} can seed — see {@link #fieldSources()}.
-     * {@code null} means "this field came from the request itself, unmodified" (the "absence of a
-     * relation" idiom, CLAUDE.md rule 10) — the only other possible value is {@link
-     * ProfileSource#INTENT}, since {@link #fieldSources()} is never called with a tier-fold source
-     * in scope (this is a creation-time fact, not a resolution-time one — see {@link
-     * ProfileSource}'s own javadoc for that distinction).
-     *
-     * @param model       {@link ProfileSource#INTENT} iff this request's own {@code model} was
-     *                    blank and {@link #intent} supplied one instead
-     * @param labelFilter {@link ProfileSource#INTENT} iff this request's own {@code labelFilter}
-     *                    was empty and {@link #intent} supplied one instead
-     */
-    public record Sources(ProfileSource model, ProfileSource labelFilter) {
+        ModelRef modelRef = model == null || model.isBlank() ? null : new ModelRef(model, DEFAULT_MODEL_VERSION);
+        TrackingKnobPatch trackingPatch = tracking == null ? null : tracking.toTrackingKnobPatch();
+        return new CvProfileSpec(name, description, modelRef, confidenceThreshold, inferenceFps, labelFilter,
+                labelDenyFilter, detectionEnabled, trackingPatch, null, intent);
     }
 }
