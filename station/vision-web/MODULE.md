@@ -1162,3 +1162,87 @@ specs — the remaining +3 files/+61 tests already existed on this branch from u
 already-committed work ahead of this task, per `git status` showing only `models.ts` plus the two
 new spec files touched). `npx tsc --noEmit` clean on both `tsconfig.app.json` and
 `tsconfig.spec.json`.
+
+## Status — CV-ORCHESTRATION wave W3.1 (web): `tracks:<assetId>` live topic — 2026-09-13
+
+Small, disjoint-file wave inside the larger W3 web effort. Scope was exactly `core/api/models.ts`'s
+`LiveEnvelope` union, `core/live/live-fallback-logic.ts`, `core/live/live-store.ts`,
+`core/detections/detections-store.ts`, and their `.spec.ts` files — no component, no rendering. The
+backend (already merged) added a live SSE topic `tracks:<assetId>` carrying a raw JSON array of
+`WorldObjectResponse` (→ TS {@link WorldObject}, already mirrored in `models.ts` since wave W2.8) —
+the world model's frame-cadence snapshot of every object it currently knows about for that asset,
+richer than the flat `DetectionResult` the existing `detections:<assetId>` topic carries. **This
+step only wires the transport — topic string, per-asset signal, and subscription lifecycle. Nothing
+renders `WorldObject`/`RenderTier` yet; that's wave W3.2, a later, different step.**
+
+**What changed:**
+
+- `core/api/models.ts`: `LiveEnvelope` gained a 12th member, `{ seq, assetId, type: 'tracks',
+  payload: readonly WorldObject[] }` — a **raw array**, not wrapped in an object, straight from
+  `LiveUpdateRegistry`'s Java-side `List<WorldObjectResponse>`. Latest-wins, ring capacity 1
+  server-side, the exact same pattern `detections`/`geo` already establish — no new semantics
+  invented. The class doc comment gained a matching bullet stating plainly that this is
+  **additive to, not a replacement for**, `DetectionsStore`'s existing poll of `GET
+  /api/streams/{id}/tracks` (`trackTracks`/`tracks`) — that poll's other fields (`stats`, `latency`,
+  `rate`, `follow`, `lockedTrackId`) have no live-topic equivalent yet, only `objects` does.
+- `core/live/live-fallback-logic.ts`: new `tracksTopic(assetId)` → `` `tracks:${assetId}` ``,
+  sitting right next to `detectionsTopic`/`geoTopic`, same opt-in ref-counted contract. One new test
+  in `live-fallback-logic.spec.ts` (folded into the existing `telemetryTopic / detectionsTopic`
+  describe block, renamed to include `tracksTopic`).
+- `core/live/live-store.ts`: mirrors the `geo`/`detections` per-asset-signal machinery, but
+  array-typed (mirrors `telemetrySignals`' array-default pattern, since `WorldObject[]` is a list,
+  not a scalar-or-undefined). New private `worldObjectSignals` map (named to avoid any conceptual
+  collision with `DetectionsStore`'s own, unrelated `tracks` poll signal) + private
+  `worldObjectSignalFor(assetId)` helper, defaulting to `signal<readonly WorldObject[]>([])` — `[]`,
+  not `undefined`, since "no objects known yet" and "confirmed zero objects" both correctly render
+  as nothing to draw. Public surface: **`trackWorldObjects(assetId)`**, **`untrackWorldObjects(assetId)`**,
+  **`worldObjectsFor(assetId): Signal<readonly WorldObject[]>`** — deliberately distinct names from
+  `DetectionsStore.trackTracks`/`untrackTracks`/`tracks` (a different, pre-existing poll of the same
+  endpoint's other fields) so nobody confuses "the poll" with "the new live SSE snapshot." New
+  `applyEnvelope` case `'tracks'`: latest-wins `set()`, same one-line comment style as `'detections'`/
+  `'geo'`. Class doc comment gained a 12th bullet in the topic list, same prose pattern as the
+  existing `geo:<assetId>` bullet, citing this wave.
+- `core/detections/detections-store.ts`: piggybacks the new subscription on `DetectionsStore`'s
+  **existing detections-feed lifecycle** (`track()`/`teardownTracking()`), matching
+  LIVE-POLL-RETIREMENT-PLAN's D1 demand rule ("only while a viewer is mounted") — not the separate
+  tracks-poll lifecycle (`trackTracks`/`untrackTracks`), which stays untouched and independent.
+  `track(streamId, assetId?)` now also calls `live.trackWorldObjects(assetId)` when an assetId is
+  given; `teardownTracking()` now also calls `live.untrackWorldObjects(assetId)`. New public
+  computed **`worldObjects: Signal<readonly WorldObject[]>`** — `[]` when no asset id is in scope or
+  nothing has arrived yet; frame-cadence, live-only, no poll fallback (unlike `results` above) — an
+  honest empty array is this store's answer for a viewer with no live connection, same posture as
+  every other live-only signal in this app. Class doc comment gained a new, clearly separated
+  paragraph describing this as a **third, independent thing** this store now exposes (distinct from
+  both the detections-feed `results` and the tracks-poll `tracks`), consumed by wave W3.2 (not this
+  one) for server-assigned render tiers.
+- Tests: `detections-store.spec.ts`'s `stubLiveStore()` gained `trackWorldObjects`/
+  `untrackWorldObjects`/`worldObjectsFor` stubs and a `pushWorldObjects(assetId, objects)` helper,
+  mirroring the existing `detectionsFor`/`trackDetections`/`untrackDetections`/`pushResult` pattern
+  exactly. Five new tests prove: (1) `track(streamId, assetId)` subscribes and a pushed array
+  reflects on `worldObjects()`; (2) `track(streamId)` with no assetId never subscribes and
+  `worldObjects()` stays `[]`; (3) `reset()` releases the world-objects subscription; (4) re-tracking
+  a different assetId releases the old subscription and subscribes to the new one; (5) `worldObjects()`
+  is fully independent of the tracks-**poll** lifecycle — `trackTracks()`/`untrackTracks()` never
+  call `trackWorldObjects`/`untrackWorldObjects` and vice versa (mirrors the pre-existing "the tracks
+  poll is fully independent of the detections feed" test's structure).
+
+**Not built (by this wave's own design):** no component reads `worldObjects`, no renderer, no
+`RenderTier`-driven overlay. This step is wiring only — the topic, the signal, and the subscription
+lifecycle — exactly as scoped. `core/api/models.ts`'s `'cv-trace'` `LiveEnvelope` member (a different
+wave's territory) does not exist yet on this branch, so there was nothing to avoid touching there in
+practice.
+
+**Nothing in this brief was found wrong or unimplementable.**
+
+### Tests / build
+
+`npm run test:ci` — **200/200 files, 3917/3917 tests green** (this worktree's branch already carried
+200/3912 before this step, measured directly by reverting this wave's own six touched files to `HEAD`
+and re-running — the true local baseline, since `MODULE.md`'s last recorded wave-W1 entry above
+(198/3892) predates this branch's already-merged wave-W2.8 work, as that entry's own "Superseded in
+part by wave W2.8" paragraph already discloses; +5 tests are this step's own five new
+`detections-store.spec.ts` cases, 0 new files — the `tracksTopic` coverage was folded into an
+existing `it()` in `live-fallback-logic.spec.ts` rather than adding a new one). `npx tsc --noEmit`
+clean on both `tsconfig.app.json` and `tsconfig.spec.json`. `ng build --configuration production` not
+run this wave (out of this brief's required verify chain — pure core/-layer wiring, no template or
+route change to bundle-measure).

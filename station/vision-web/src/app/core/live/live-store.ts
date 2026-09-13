@@ -14,6 +14,7 @@ import type {
   MapEventPayload,
   SystemStatus,
   TelemetrySample,
+  WorldObject,
 } from '../api/models';
 import {
   type LiveConnectionState,
@@ -25,6 +26,7 @@ import {
   incrementTopicRef,
   mergeTelemetrySamples,
   telemetryTopic,
+  tracksTopic,
 } from './live-fallback-logic';
 
 export type { LiveConnectionState } from './live-fallback-logic';
@@ -142,6 +144,18 @@ const MAX_LIVE_ZONE_EVENTS = 200;
  *   before any connection can exist (see `systemStatus`'s own doc comment below). `SystemStatusStore`
  *   has no `activate()`/`release()` (the shell health dot needs `overall` on every page), so its own
  *   D1 gate is the live axis only — no demand axis to compose it with.
+ * - `tracks:<assetId>` ↔ `core/detections/detections-store.ts#DetectionsStore` (docs/plans/active/
+ *   CV-ORCHESTRATION-PLAN.md §4.6, wave W3.1) — the 12th topic, opt-in per-asset like
+ *   `telemetry:<assetId>`/`detections:<assetId>`/`geo:<assetId>` above, latest-wins with ring
+ *   capacity 1 server-side (same pattern as `detections`/`geo` — no new semantics). Payload is a
+ *   **raw `readonly {@link WorldObject}[]`**, not wrapped in an object — the world model's full
+ *   per-asset object mirror at frame cadence. **Additive to, not a replacement for**,
+ *   `DetectionsStore`'s existing `GET /api/streams/{id}/tracks` poll (`trackTracks`/`tracks`): that
+ *   poll's other fields (`stats`, `latency`, `rate`, `follow`, `lockedTrackId`) have no live-topic
+ *   equivalent yet — only `objects` does. Ref-counted via `trackWorldObjects`/`untrackWorldObjects`,
+ *   piggybacked on `DetectionsStore`'s own detections-feed subscription lifecycle (`track()`/
+ *   `teardownTracking()`), **not** the separate tracks-poll lifecycle — see that class's own doc
+ *   comment. Projected by `worldObjectsFor` below; no renderer reads it yet (wave W3.2's job).
  *
  * `fleet`'s own {@link AssetSummary} polling is still done ad hoc by several pages (`fly.ts`'s own
  * picker refresh, `core/map/map-store.ts`, `asset-detail.ts`), with no single existing store class —
@@ -286,6 +300,9 @@ export class LiveStore {
   private readonly telemetrySignals = new Map<string, ReturnType<typeof signal<readonly TelemetrySample[]>>>();
   private readonly detectionsSignals = new Map<string, ReturnType<typeof signal<DetectionResult | undefined>>>();
   private readonly geoSignals = new Map<string, ReturnType<typeof signal<CorrectionResponse | undefined>>>();
+  /** Per-asset `tracks:<assetId>` snapshots (wave W3.1) — this store's own SSE-fed array, distinct
+   *  from `DetectionsStore`'s own unrelated `tracks` poll signal (see class doc). */
+  private readonly worldObjectSignals = new Map<string, ReturnType<typeof signal<readonly WorldObject[]>>>();
   /** Per-topic subscriber counts (docs/plans/done/REALTIME-PLAN.md §4, item 2) — see class doc's "Ref-counting". */
   private readonly topicRefs = new Map<string, number>();
 
@@ -342,6 +359,12 @@ export class LiveStore {
     return this.geoSignalFor(assetId);
   }
 
+  /** The world model's latest per-asset object snapshot from `tracks:<assetId>` (frame cadence),
+   *  or `[]` before the first arrival / while not subscribed (wave W3.1). */
+  worldObjectsFor(assetId: string): Signal<readonly WorldObject[]> {
+    return this.worldObjectSignalFor(assetId);
+  }
+
   /** Ref-counted opt-in to `telemetry:<assetId>` — call once per consumer; pair with `untrackTelemetry`. */
   trackTelemetry(assetId: string): void {
     this.track(telemetryTopic(assetId));
@@ -372,6 +395,18 @@ export class LiveStore {
     this.untrack(geoTopic(assetId), assetId, this.geoSignals);
   }
 
+  /** Ref-counted opt-in to `tracks:<assetId>` (wave W3.1) — call once per consumer; pair with
+   *  `untrackWorldObjects`. Distinct from `DetectionsStore.trackTracks()`, which polls a different
+   *  endpoint for different fields — see this class's own doc comment. */
+  trackWorldObjects(assetId: string): void {
+    this.track(tracksTopic(assetId));
+  }
+
+  /** The matching teardown for `trackWorldObjects` — call from the consumer's own `reset()`/destroy. */
+  untrackWorldObjects(assetId: string): void {
+    this.untrack(tracksTopic(assetId), assetId, this.worldObjectSignals);
+  }
+
   private telemetrySignalFor(assetId: string): ReturnType<typeof signal<readonly TelemetrySample[]>> {
     let existing = this.telemetrySignals.get(assetId);
     if (existing === undefined) {
@@ -395,6 +430,15 @@ export class LiveStore {
     if (existing === undefined) {
       existing = signal<CorrectionResponse | undefined>(undefined);
       this.geoSignals.set(assetId, existing);
+    }
+    return existing;
+  }
+
+  private worldObjectSignalFor(assetId: string): ReturnType<typeof signal<readonly WorldObject[]>> {
+    let existing = this.worldObjectSignals.get(assetId);
+    if (existing === undefined) {
+      existing = signal<readonly WorldObject[]>([]);
+      this.worldObjectSignals.set(assetId, existing);
     }
     return existing;
   }
@@ -538,6 +582,10 @@ export class LiveStore {
         // Latest-wins, like `devices`/`detections` above — the server's own ring capacity 1 means
         // this is never a batch to merge, just the freshest sample replacing the last one.
         this.systemStatusSignal.set(envelope.payload);
+        return;
+      case 'tracks':
+        // Latest-wins snapshot, like `detections`/`geo` above — server ring capacity 1, never a batch to merge.
+        this.worldObjectSignalFor(envelope.assetId).set(envelope.payload);
         return;
     }
   }

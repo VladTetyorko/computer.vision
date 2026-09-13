@@ -93,6 +93,11 @@ export function geoTopic(assetId: string): string {
   return `geo:${assetId}`;
 }
 
+/** `tracks:<assetId>` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6, wave W3.1) — opt-in, ref-counted exactly like `telemetryTopic`/`detectionsTopic`/`geoTopic` above; the world model's per-asset object mirror at frame cadence, additive to (not a replacement for) `DetectionsStore`'s existing `GET .../tracks` poll for stats/latency/rate/follow. */
+export function tracksTopic(assetId: string): string {
+  return `tracks:${assetId}`;
+}
+
 export interface RefCountResult {
   /** The topic's new subscriber count. */
   readonly count: number;

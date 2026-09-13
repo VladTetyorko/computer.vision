@@ -5,7 +5,7 @@ import { DetectionsStore } from './detections-store';
 import { VisionApi } from '../api/vision-api';
 import { LiveStore, type LiveConnectionState } from '../live/live-store';
 import { PollScheduler } from '../poll-scheduler';
-import type { DetectionResult, StreamTracksResponse } from '../api/models';
+import type { DetectionResult, StreamTracksResponse, WorldObject } from '../api/models';
 import { CV_STATUS_FRESH_SECONDS } from './detections-logic';
 
 /** Lets the fire-and-forget promise chain inside `track()` settle before asserting. */
@@ -37,13 +37,26 @@ function stubLiveStore(initialState: LiveConnectionState = 'closed') {
     }
     return existing;
   };
+  const perAssetWorldObjects = new Map<string, ReturnType<typeof signal<readonly WorldObject[]>>>();
+  const worldObjectSignalFor = (assetId: string) => {
+    let existing = perAssetWorldObjects.get(assetId);
+    if (existing === undefined) {
+      existing = signal<readonly WorldObject[]>([]);
+      perAssetWorldObjects.set(assetId, existing);
+    }
+    return existing;
+  };
   return {
     connectionState: stateSignal.asReadonly(),
     detectionsFor: vi.fn((assetId: string) => signalFor(assetId)),
     trackDetections: vi.fn(),
     untrackDetections: vi.fn(),
+    worldObjectsFor: vi.fn((assetId: string) => worldObjectSignalFor(assetId)),
+    trackWorldObjects: vi.fn(),
+    untrackWorldObjects: vi.fn(),
     setState: (state: LiveConnectionState) => stateSignal.set(state),
     pushResult: (assetId: string, result: DetectionResult) => signalFor(assetId).set(result),
+    pushWorldObjects: (assetId: string, objects: readonly WorldObject[]) => worldObjectSignalFor(assetId).set(objects),
   };
 }
 
@@ -365,6 +378,94 @@ describe('DetectionsStore', () => {
     expect(live.untrackDetections).toHaveBeenCalledExactlyOnceWith('a-15');
     expect(live.trackDetections).toHaveBeenCalledWith('a-16');
     store.reset();
+  });
+
+  // --- worldObjects() / tracks:<assetId> live topic (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+  // §4.6, wave W3.1) — wiring only, piggybacked on the detections-feed subscription lifecycle above,
+  // never the separate tracks-POLL lifecycle below. ------------------------------------------------
+
+  function worldObject(id: number): WorldObject {
+    return {
+      state: { id, lifecycle: 'CONFIRMED', streamId: 's-wo' },
+      operator: { followed: false, denied: false },
+      event: {},
+      render: { tier: 'T1' },
+    };
+  }
+
+  it('track(streamId, assetId) subscribes to world objects, and a pushed array reflects on worldObjects()', () => {
+    const api = stubApi();
+    const live = stubLiveStore('open');
+
+    const store = inject(api, { live });
+    store.track('s-18', 'a-18');
+
+    expect(live.trackWorldObjects).toHaveBeenCalledExactlyOnceWith('a-18');
+    expect(store.worldObjects()).toEqual([]);
+
+    const objects = [worldObject(1), worldObject(2)];
+    live.pushWorldObjects('a-18', objects);
+    expect(store.worldObjects()).toEqual(objects);
+    store.reset();
+  });
+
+  it('track(streamId) with no assetId never subscribes to world objects — worldObjects() stays []', () => {
+    const api = stubApi();
+    const live = stubLiveStore('open');
+
+    const store = inject(api, { live });
+    store.track('s-19'); // no assetId
+
+    expect(live.trackWorldObjects).not.toHaveBeenCalled();
+    expect(store.worldObjects()).toEqual([]);
+    store.reset();
+  });
+
+  it('reset() releases the world-objects subscription', () => {
+    const api = stubApi();
+    const live = stubLiveStore('open');
+
+    const store = inject(api, { live });
+    store.track('s-20', 'a-20');
+    expect(live.trackWorldObjects).toHaveBeenCalledExactlyOnceWith('a-20');
+
+    store.reset();
+    expect(live.untrackWorldObjects).toHaveBeenCalledExactlyOnceWith('a-20');
+  });
+
+  it('re-tracking a different assetId releases the old world-objects subscription and subscribes to the new one', () => {
+    const api = stubApi();
+    const live = stubLiveStore('open');
+
+    const store = inject(api, { live });
+    store.track('s-21', 'a-21');
+    store.track('s-22', 'a-22');
+
+    expect(live.untrackWorldObjects).toHaveBeenCalledExactlyOnceWith('a-21');
+    expect(live.trackWorldObjects).toHaveBeenCalledWith('a-22');
+    store.reset();
+  });
+
+  it('worldObjects() is fully independent of the tracks-poll lifecycle — trackTracks()/untrackTracks() never touch trackWorldObjects()/untrackWorldObjects()', async () => {
+    const getStreamTracks = vi.fn().mockResolvedValue({ streamId: 's-23', lockedTrackId: 0, tracks: [], objects: [] });
+    const api = stubApi(undefined, getStreamTracks);
+    const live = stubLiveStore('open');
+
+    const store = inject(api, { live });
+    store.trackTracks('s-23');
+    await flush();
+
+    expect(live.trackWorldObjects).not.toHaveBeenCalled();
+    expect(live.untrackWorldObjects).not.toHaveBeenCalled();
+
+    store.track('s-23', 'a-23'); // the detections-feed session — the one that actually owns worldObjects()
+    expect(live.trackWorldObjects).toHaveBeenCalledExactlyOnceWith('a-23');
+
+    store.untrackTracks();
+    expect(live.untrackWorldObjects).not.toHaveBeenCalled(); // the poll teardown never touches it
+
+    store.reset();
+    expect(live.untrackWorldObjects).toHaveBeenCalledExactlyOnceWith('a-23'); // only reset() releases it
   });
 
   // --- Tracks poll (docs/plans/done/TRACKING-PLAN.md §4.E, folded in from CvControlPanel — wave W5,

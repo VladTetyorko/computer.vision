@@ -2368,6 +2368,18 @@ export interface DevicesSnapshot {
  * "honestly-limited" topic above, `system` *does* effectively arrive on connect — the sampler's
  * first tick runs at server startup, delay 0, so its ring buffer is already populated before any
  * connection can exist. `core/system-status/system-status-store.ts#SystemStatusStore` projects it.
+ *
+ * **`tracks` is the 12th, from docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6 (wave W3.1)** —
+ * `tracks:<assetId>`, opt-in like `telemetry`/`detections`/`geo` (not always-on), latest-wins with
+ * ring capacity 1 server-side — the exact same pattern `detections`/`geo` above already establish,
+ * no new semantics. The payload is a **raw `readonly {@link WorldObject}[]`, not wrapped in an
+ * object** — straight from `LiveUpdateRegistry`'s Java-side `List<WorldObjectResponse>` — the world
+ * model's full per-asset object mirror at frame cadence. This is **additive to, not a replacement
+ * for**, `core/detections/detections-store.ts#DetectionsStore`'s existing poll of `GET
+ * /api/streams/{id}/tracks` (`trackTracks`/`tracks`): that poll's other fields (`stats`, `latency`,
+ * `rate`, `follow`, `lockedTrackId`) have no live-topic equivalent yet — only `objects` does.
+ * `core/live/live-store.ts#LiveStore.worldObjectsFor` projects it; wiring only, no renderer reads it
+ * yet (that's wave W3.2).
  */
 export type LiveEnvelope =
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'fleet'; readonly payload: readonly AssetSummary[] }
@@ -2380,7 +2392,8 @@ export type LiveEnvelope =
   | { readonly seq: number; readonly assetId: string; readonly type: 'geo'; readonly payload: CorrectionResponse }
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'discovery'; readonly payload: DiscoveryEventPayload }
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'zones'; readonly payload: GeofenceZoneEventPayload }
-  | { readonly seq: number; readonly assetId?: undefined; readonly type: 'system'; readonly payload: SystemStatus };
+  | { readonly seq: number; readonly assetId?: undefined; readonly type: 'system'; readonly payload: SystemStatus }
+  | { readonly seq: number; readonly assetId: string; readonly type: 'tracks'; readonly payload: readonly WorldObject[] };
 
 /**
  * Mirrors `dto.UpdateLiveTopicsRequest` — the body of `PATCH /api/live/{connectionId}/topics`
