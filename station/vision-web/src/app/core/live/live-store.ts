@@ -1,4 +1,4 @@
-import { DestroyRef, Injectable, type Signal, inject, signal } from '@angular/core';
+import { DestroyRef, Injectable, type Signal, computed, inject, signal } from '@angular/core';
 import { VisionApi } from '../api/vision-api';
 import type {
   AssetSummary,
@@ -13,6 +13,7 @@ import type {
   LiveEnvelope,
   LiveEvent,
   MapEventPayload,
+  StreamTracksResponse,
   SystemStatus,
   TelemetrySample,
   WorldObject,
@@ -147,17 +148,21 @@ const MAX_LIVE_ZONE_EVENTS = 200;
  *   has no `activate()`/`release()` (the shell health dot needs `overall` on every page), so its own
  *   D1 gate is the live axis only — no demand axis to compose it with.
  * - `tracks:<assetId>` ↔ `core/detections/detections-store.ts#DetectionsStore` (docs/plans/active/
- *   CV-ORCHESTRATION-PLAN.md §4.6, wave W3.1) — the 12th topic, opt-in per-asset like
- *   `telemetry:<assetId>`/`detections:<assetId>`/`geo:<assetId>` above, latest-wins with ring
- *   capacity 1 server-side (same pattern as `detections`/`geo` — no new semantics). Payload is a
- *   **raw `readonly {@link WorldObject}[]`**, not wrapped in an object — the world model's full
- *   per-asset object mirror at frame cadence. **Additive to, not a replacement for**,
- *   `DetectionsStore`'s existing `GET /api/streams/{id}/tracks` poll (`trackTracks`/`tracks`): that
- *   poll's other fields (`stats`, `latency`, `rate`, `follow`, `lockedTrackId`) have no live-topic
- *   equivalent yet — only `objects` does. Ref-counted via `trackWorldObjects`/`untrackWorldObjects`,
- *   piggybacked on `DetectionsStore`'s own detections-feed subscription lifecycle (`track()`/
- *   `teardownTracking()`), **not** the separate tracks-poll lifecycle — see that class's own doc
- *   comment. Projected by `worldObjectsFor` below; no renderer reads it yet (wave W3.2's job).
+ *   CV-ORCHESTRATION-PLAN.md §4.6/§4.9, wave W3.1, widened wave W9 decision E25) — the 12th topic,
+ *   opt-in per-asset like `telemetry:<assetId>`/`detections:<assetId>`/`geo:<assetId>` above,
+ *   latest-wins with ring capacity 1 server-side (same pattern as `detections`/`geo` — no new
+ *   semantics). Payload is the **whole {@link StreamTracksResponse} snapshot** — the same shape and
+ *   gating rules `GET /api/streams/{id}/tracks` itself returns ("one assembly, two transports").
+ *   Ref-counted via `trackWorldObjects`/`untrackWorldObjects` (names kept from wave W3.1 — still
+ *   piggybacked on `DetectionsStore`'s own detections-feed subscription lifecycle, `track()`/
+ *   `teardownTracking()`), projected two ways: `tracksFor` exposes the raw snapshot (read by
+ *   `DetectionsStore.tracks` **only** while its own separate, demand-gated tracks lifecycle
+ *   (`trackTracks`/`followTracks`) resolves to live — see that class's own doc comment for why the
+ *   *subscription* here is unconditional but the *read* is gated), `worldObjectsFor` derives just
+ *   the `objects` field for the box-overlay pipeline (wave W3.2), unconditionally. Before wave W9
+ *   the payload was a raw `readonly {@link WorldObject}[]`, and `DetectionsStore`'s tracks poll was
+ *   the *only* way to learn `stats`/`latency`/`rate`/`follow`/`lockedTrackId` — that poll is now the
+ *   fallback it should always have been.
  * - `cv-trace:<assetId>` ↔ `core/cv-trace/cv-trace-store.ts#CvTraceStore` (docs/plans/active/
  *   CV-ORCHESTRATION-PLAN.md §4.4/§4.8, wave W5.1/W5.2) — the 13th topic, opt-in per-asset like
  *   `telemetry:<assetId>`/`detections:<assetId>`/`geo:<assetId>`, **not** always-on. Carries
@@ -308,9 +313,15 @@ export class LiveStore {
   private readonly telemetrySignals = new Map<string, ReturnType<typeof signal<readonly TelemetrySample[]>>>();
   private readonly detectionsSignals = new Map<string, ReturnType<typeof signal<DetectionResult | undefined>>>();
   private readonly geoSignals = new Map<string, ReturnType<typeof signal<CorrectionResponse | undefined>>>();
-  /** Per-asset `tracks:<assetId>` snapshots (wave W3.1) — this store's own SSE-fed array, distinct
-   *  from `DetectionsStore`'s own unrelated `tracks` poll signal (see class doc). */
-  private readonly worldObjectSignals = new Map<string, ReturnType<typeof signal<readonly WorldObject[]>>>();
+  /** Per-asset `tracks:<assetId>` snapshots (wave W3.1, widened to the whole {@link StreamTracksResponse}
+   *  wave W9, decision E25) — this store's own SSE-fed map, distinct from `DetectionsStore`'s own
+   *  separate, demand-gated tracks lifecycle (see class doc). `null` before the first arrival, same
+   *  "nothing measured yet, never a fabricated default" idiom as `detectionsSignals`. */
+  private readonly tracksSignals = new Map<string, ReturnType<typeof signal<StreamTracksResponse | null>>>();
+  /** `worldObjectsFor`'s own cached derivation of `tracksSignals`' `objects` field, one per asset —
+   *  kept separate so `worldObjectsFor` returns a stable `Signal` identity across calls (mirrors the
+   *  other per-asset caches in this class) rather than constructing a fresh `computed` every read. */
+  private readonly worldObjectsSignals = new Map<string, Signal<readonly WorldObject[]>>();
   /** Latest-wins, like `detectionsSignals` — the capped ring an inspector reads from is
    *  `core/cv-trace/cv-trace-store.ts`'s own job (wave W5.2), not this store's. */
   private readonly cvTraceSignals = new Map<string, ReturnType<typeof signal<FrameLedger | undefined>>>();
@@ -371,9 +382,27 @@ export class LiveStore {
   }
 
   /** The world model's latest per-asset object snapshot from `tracks:<assetId>` (frame cadence),
-   *  or `[]` before the first arrival / while not subscribed (wave W3.1). */
+   *  or `[]` before the first arrival / while not subscribed (wave W3.1) — derived from
+   *  {@link tracksFor}'s own `objects` field (wave W9), so this keeps working unchanged regardless
+   *  of that snapshot's now-wider shape. */
   worldObjectsFor(assetId: string): Signal<readonly WorldObject[]> {
-    return this.worldObjectSignalFor(assetId);
+    let existing = this.worldObjectsSignals.get(assetId);
+    if (existing === undefined) {
+      const tracks = this.tracksSignalFor(assetId);
+      existing = computed(() => tracks()?.objects ?? []);
+      this.worldObjectsSignals.set(assetId, existing);
+    }
+    return existing;
+  }
+
+  /** The whole latest per-asset `tracks:<assetId>` snapshot (frame cadence), or `null` before the
+   *  first arrival / while not subscribed (wave W9, decision E25) — the same ref-counted opt-in as
+   *  {@link trackWorldObjects}/{@link untrackWorldObjects} below; there is no separate track/untrack
+   *  pair for this accessor, since it reads the identical subscription `worldObjectsFor` already
+   *  projects a narrower view of. `DetectionsStore.tracks` reads this only while its own demand-gated
+   *  tracks lifecycle resolves to the live transport — see that class's own doc comment. */
+  tracksFor(assetId: string): Signal<StreamTracksResponse | null> {
+    return this.tracksSignalFor(assetId);
   }
 
   /** The latest live frame ledger for `assetId` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4, wave W5.1) — `undefined` until one arrives. */
@@ -411,16 +440,22 @@ export class LiveStore {
     this.untrack(geoTopic(assetId), assetId, this.geoSignals);
   }
 
-  /** Ref-counted opt-in to `tracks:<assetId>` (wave W3.1) — call once per consumer; pair with
-   *  `untrackWorldObjects`. Distinct from `DetectionsStore.trackTracks()`, which polls a different
-   *  endpoint for different fields — see this class's own doc comment. */
+  /** Ref-counted opt-in to `tracks:<assetId>` (wave W3.1; the topic itself widened wave W9) — call
+   *  once per consumer; pair with `untrackWorldObjects`. Names kept from wave W3.1 even though the
+   *  subscription now backs both {@link worldObjectsFor} and {@link tracksFor} — piggybacked on
+   *  `DetectionsStore`'s detections-feed lifecycle (`track()`/`teardownTracking()`), **not**
+   *  `DetectionsStore`'s own separate, demand-gated tracks lifecycle (`trackTracks`/`followTracks`)
+   *  — see this class's own doc comment. */
   trackWorldObjects(assetId: string): void {
     this.track(tracksTopic(assetId));
   }
 
   /** The matching teardown for `trackWorldObjects` — call from the consumer's own `reset()`/destroy. */
   untrackWorldObjects(assetId: string): void {
-    this.untrack(tracksTopic(assetId), assetId, this.worldObjectSignals);
+    this.untrack(tracksTopic(assetId), assetId, this.tracksSignals);
+    // Not ref-counted itself (`worldObjectsFor`'s own cache is a pure derivation, safe to drop and
+    // lazily recreate) — cleared here only so a retired asset id doesn't linger in this map forever.
+    this.worldObjectsSignals.delete(assetId);
   }
 
   /** Ref-counted opt-in to `cv-trace:<assetId>` — call once per consumer; pair with `untrackCvTrace`. */
@@ -460,11 +495,11 @@ export class LiveStore {
     return existing;
   }
 
-  private worldObjectSignalFor(assetId: string): ReturnType<typeof signal<readonly WorldObject[]>> {
-    let existing = this.worldObjectSignals.get(assetId);
+  private tracksSignalFor(assetId: string): ReturnType<typeof signal<StreamTracksResponse | null>> {
+    let existing = this.tracksSignals.get(assetId);
     if (existing === undefined) {
-      existing = signal<readonly WorldObject[]>([]);
-      this.worldObjectSignals.set(assetId, existing);
+      existing = signal<StreamTracksResponse | null>(null);
+      this.tracksSignals.set(assetId, existing);
     }
     return existing;
   }
@@ -619,8 +654,10 @@ export class LiveStore {
         this.systemStatusSignal.set(envelope.payload);
         return;
       case 'tracks':
-        // Latest-wins snapshot, like `detections`/`geo` above — server ring capacity 1, never a batch to merge.
-        this.worldObjectSignalFor(envelope.assetId).set(envelope.payload);
+        // Latest-wins snapshot, like `detections`/`geo` above — server ring capacity 1, never a batch
+        // to merge. Wave W9 (decision E25) widened this from a bare WorldObject[] array to the whole
+        // StreamTracksResponse; `worldObjectsFor` derives its own narrower view from `.objects`.
+        this.tracksSignalFor(envelope.assetId).set(envelope.payload);
         return;
       case 'cv-trace':
         // Latest-wins, like `detections`/`geo` above — `core/cv-trace/cv-trace-store.ts` (wave

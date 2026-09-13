@@ -3,11 +3,13 @@ package com.drones.vision.perception.application.pipeline;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.perception.domain.model.CameraAttitude;
 import com.drones.vision.perception.domain.model.Detection;
+import com.drones.vision.perception.domain.model.DetectionRate;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.perception.domain.model.FollowStatus;
 import com.drones.vision.perception.domain.model.FrameLedger;
 import com.drones.vision.perception.domain.model.ObjectState;
+import com.drones.vision.perception.domain.model.PipelineLatency;
 import com.drones.vision.perception.domain.model.StreamState;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.platform.Event;
@@ -20,6 +22,8 @@ import com.drones.vision.perception.domain.model.TargetLock;
 import com.drones.vision.perception.domain.model.TrackedObject;
 import com.drones.vision.perception.domain.model.TrackingConfig;
 import com.drones.vision.perception.domain.model.TrackingMode;
+import com.drones.vision.perception.domain.model.TrackingStats;
+import com.drones.vision.perception.domain.model.TracksSnapshot;
 import com.drones.vision.perception.domain.model.VideoFrame;
 import com.drones.vision.perception.domain.model.WorldObject;
 import com.drones.vision.perception.domain.port.DetectionPort;
@@ -752,6 +756,24 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
     }
 
     /**
+     * @return this stream's complete tracks-topic snapshot (docs/plans/active/
+     *         CV-ORCHESTRATION-PLAN.md §4.9, wave W9, decision E25) — every read model {@code GET
+     *         /api/streams/{id}/tracks} has ever assembled, read together so a single instant backs
+     *         both that REST read and the {@code tracks:} SSE topic push. Exactly {@link #tracks()},
+     *         {@link #trackingStats()}, {@link #pipelineLatency()}, {@link #detectionRate()}, {@link
+     *         #detectionState()}, {@link #followStatus()} and {@link #worldObjects()} — see each for
+     *         its own emptiness rule; {@code stats}/{@code latency}/{@code rate}/{@code
+     *         detectionState} are always present here (this pipeline is, by definition, running),
+     *         wrapped in {@link Optional} only so {@code station/vision-api}'s gating and {@code
+     *         StreamService#tracksSnapshot}'s "unknown stream" case share one shape. Never {@code
+     *         null}.
+     */
+    public TracksSnapshot tracksSnapshot() {
+        return new TracksSnapshot(streamId, tracks(), Optional.of(trackingStats()), Optional.of(pipelineLatency()),
+                Optional.of(detectionRate()), Optional.of(detectionState()), followStatus(), worldObjects());
+    }
+
+    /**
      * @param last how many of the most recent gate decisions to return; must not be negative
      * @return the most recent {@code last} {@link GateDecision}s {@link #maybeDetect} made, oldest
      *         first — the companion to {@link #detectionRate()}: that one aggregates the same
@@ -1196,27 +1218,30 @@ public final class StreamPipeline implements Flow.Subscriber<VideoFrame>, AutoCl
         // pass (`saw 2`, expected >=3) on every full-suite run. Both planes gate independently, so
         // the order between them is free -- and cheap in-memory updates belong before slow I/O.
         boolean live = liveGateOpen();
-        // Captured here, immediately after world.accept, rather than re-read from world.objects() at
-        // the publish call below: that read is a second, later snapshot of the same mutable fold, and
-        // could observe a concurrent stream's own accept() in between on a shared WorldModel instance.
-        // Capturing right after the fold that produced it, once, is what "this result's own world
-        // snapshot" (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6, wave W2.8) actually means.
-        List<WorldObject> foldedWorldObjects = List.of();
+        // Captured here, once, after every live-plane update below rather than re-read from
+        // tracksSnapshot() at the publish call: a later read is a second snapshot of the same
+        // mutable fold and windows, and could observe a concurrent stream's own accept() in between
+        // on a shared WorldModel instance. Capturing once, immediately after the updates that
+        // produced it, is what "this result's own snapshot" (docs/plans/active/
+        // CV-ORCHESTRATION-PLAN.md §4.6/§4.9, waves W2.8/W9) actually means -- for the world fold as
+        // before, and now for trackingStats/pipelineLatency/detectionRate/detectionState/follow too,
+        // so the tracks: push never lags its own frame's tracking counters by one result.
+        TracksSnapshot tracksSnapshot = null;
         if (live) {
             // world.accept runs where trackBook.accept/followTracker.accept used to, ahead of
             // eventEngine.accept below -- WorldModel's own javadoc "Event link is one frame behind"
             // section is the authoritative note for why that relative order is frozen, not a diff
             // artifact.
             world.accept(filtered, suppressedObjects(result, filtered));
-            foldedWorldObjects = world.objects();
             trackingStats.accept(filtered);
             rateController.observeDetections(filtered.detections(), config.tracking().redetectIouPercent());
+            tracksSnapshot = tracksSnapshot();
         }
         if (eventEngine != null) {
             eventEngine.accept(filtered);
         }
         if (live && liveUpdatePublisherPort != null && assetId != null) {
-            liveUpdatePublisherPort.publishDetections(assetId, filtered, foldedWorldObjects);
+            liveUpdatePublisherPort.publishDetections(assetId, filtered, tracksSnapshot);
         }
         if (!filtered.detections().isEmpty()) {
             detectionRepositoryPort.save(filtered);

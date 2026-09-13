@@ -59,7 +59,7 @@ Angular 21 SPA (driving adapter): the whole product UI — operator cockpit, man
 |---|---|
 | fleet | `FleetStore` (devices+streams, 5s poll; `run()` is the toast boundary). `summary-refresh-logic.ts` (pure, LIVE-POLL-RETIREMENT wave L8a): `invalidationDelayMs`, `listedAssetIds`, `anyNamesListedAsset`, plus `SUMMARY_INVALIDATION_DEBOUNCE_MS`/`SUMMARY_FLOOR_INTERVAL_MS` — the shared debounce arithmetic and event filter behind `CommandFacade`/`WallFacade`'s invalidation-driven `GET /api/fleet/summary`. |
 | live | `LiveStore` — one SSE connection, topic subscribe/unsubscribe, append-only log w/ per-consumer cursors. **Eleven topics since LIVE-POLL-RETIREMENT waves L3/L4/L5** (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §4.1/§4.2, 2026-09-06): `zoneEvents` (FIFO delta log, `MAX_LIVE_ZONE_EVENTS = 200`, mirroring `discoveryEvents`) carries `GeofenceZoneEventPayload` — `action` is `CREATED`/`UPDATED`/`DELETED`, and a `DELETED` payload's `zone` is the **last-known body in full**, not just an id, which is what lets `GeofenceStore`'s existing 10s Undo re-`POST` it; `systemStatus` (single latest-value signal, mirroring `devices`) carries the verbatim `SystemStatus` body, broadcast by a server-side sampler only when a subsystem actually changes. Both topics are **implicit on every connection** (`LiveUpdateRegistry` adds `LiveTopic.ZONES`/`SYSTEM` at register time), so neither needs a `topics=` query param or a ref-count. `zones` is delta-only — **no snapshot-on-connect** — so its consumer must own its own initial `GET`; `system` effectively *does* arrive on connect, because the sampler's first tick runs at server startup delay 0 and its ring buffer is capacity 1. |
-| telemetry / detections | `TelemetryStore`, `DetectionsStore` (`DETECTIONS_LIMIT=50` retained batches; **`followTracks(streamId, wanted: boolean)`**, docs/plans/active/TRACK-FOLLOW-PLAN.md §3.5, wave W4 — a thin `wanted`-boolean wrapper over `trackTracks`/`untrackTracks`, now driven by `CockpitFacade`'s own `wantsTracksPoll`-gated effect rather than by `CvControlPanel`'s mounted lifetime, so the `GET .../tracks` poll — and with it, the only way to observe a `LOST→HOLDING` recovery — survives a closed Vision drawer; see the `fly/` bullet below for D1). `telemetry-logic.ts#freshness(age)` → `'live'\|'aging'\|'stale'\|'none'` (wave H1, docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1) is now the one source of truth for "is this sample too old to act on", a thin relabel of the pre-existing `telemetryAgeSeverity` tiers (`fresh→live`, `amber→aging`, `red→stale`, `undefined→none`) — callers that need a UI-facing tri-state read this, not `telemetryAgeSeverity` directly. `humanAge(seconds)` → `12s` / `3m 10s` / `4h 2m` / `4d 2h` (always both units of its tier, including a zero remainder) is the one duration formatter for telemetry age across the OSD, the Controller drawer, and the cockpit's not-streaming card. |
+| telemetry / detections | `TelemetryStore`, `DetectionsStore` (`DETECTIONS_LIMIT=50` retained batches; **`followTracks(streamId, wanted: boolean)`**, docs/plans/active/TRACK-FOLLOW-PLAN.md §3.5, wave W4 — a thin `wanted`-boolean wrapper over `trackTracks`/`untrackTracks`, now driven by `CockpitFacade`'s own `wantsTracksPoll`-gated effect rather than by `CvControlPanel`'s mounted lifetime, so a tracks session — and with it, the only way to observe a `LOST→HOLDING` recovery — survives a closed Vision drawer; see the `fly/` bullet below for D1. **Transport-aware since CV-ORCHESTRATION wave W9 (decision E25):** `tracks()` now flips between `LiveStore.tracksFor(assetId)` (reusing whichever asset id `track(streamId, assetId?)` already established — no parameter added to `followTracks`) and the original `GET /api/streams/{id}/tracks` poll exactly like `results()` does, with the poll now only the fallback without an asset id or while `LiveStore` isn't open — see `DetectionsStore`'s own "Also owns GET .../tracks" doc comment). `telemetry-logic.ts#freshness(age)` → `'live'\|'aging'\|'stale'\|'none'` (wave H1, docs/plans/active/OPERATOR-UX-3-PLAN.md finding H1) is now the one source of truth for "is this sample too old to act on", a thin relabel of the pre-existing `telemetryAgeSeverity` tiers (`fresh→live`, `amber→aging`, `red→stale`, `undefined→none`) — callers that need a UI-facing tri-state read this, not `telemetryAgeSeverity` directly. `humanAge(seconds)` → `12s` / `3m 10s` / `4h 2m` / `4d 2h` (always both units of its tier, including a zero remainder) is the one duration formatter for telemetry age across the OSD, the Controller drawer, and the cockpit's not-streaming card. |
 | map-data | `LayersStore`, `MarksStore`, `DrawingsStore`, `TracksStore` — **all four are ref-counted `activate()`/`release()` since ALWAYS-ON-FLOW wave C3 (2026-09-06): the initial `GET` *and* the 30s poll both live under `activate()`, so nothing fetches until a consumer is mounted and nothing polls after the last one leaves. Every direct injector — a routed facade *or* a presentational child under `shared/map/map-controls/**` — must `activate()` in its constructor and `release()` from its own `DestroyRef.onDestroy`.** **Also gated on live itself since LIVE-POLL-RETIREMENT waves L1a/L1b/L1c (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1, 2026-09-06): each store's own `private applyTransport(liveAvailable: boolean)` composes `activeConsumers`-demand with `isLiveAvailable(LiveStore.connectionState())` — the 30s poll now runs only while a consumer is active *and* live is unavailable; a genuine transition into live does exactly one reconcile `GET`, a transition out immediately re-fetches once then resumes polling. `applyTransport` is copied into each store (not a shared helper — deliberate, keeps wave file scopes disjoint), each carrying a private `liveGated: boolean` field that starts `false` so the very first transport call is never treated as a spurious no-op (the boot-time double-fetch this guards against). **L1c, `LayersStore` only:** a layer arriving over the `map` SSE topic never carries `grants` (§4.3) — `applyLayerEvents` preserves the previously-known list, correct for everything except a grant **revocation**, which that fold cannot represent. `LayersStore` compensates with `scheduleGrantsReconcile()`, a raw-`setTimeout` ~1s debounce (not `PollScheduler` — matches `toast.service.ts`'s own precedent) fired off any `layer`-entity live delta, independent of `activeConsumers`.** + `layers-logic`/`mark-logic`/`drawings-logic`/`map-event-logic`. **`RouteStore` (new, docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.4, wave W3)** is page-provided, **not** `providedIn: 'root'` — an on-demand two-hop fetch (`listUsages` → `usageTimeline`, never `.../telemetry`), same posture as `FleetMapStore`/`WeatherStore` below, not the always-on/live-folding shape every other row in this line has; `route-logic.ts` (pure: `AssetRoute`/`RouteSpan`/`buildAssetRoute`/`routeUsageLimit`) |
 | map / geofence / weather | **`FleetMapStore`** — page-provided (not `providedIn: 'root'`; own lifetime *is* its demand signal, see below), now gated on live too since LIVE-POLL-RETIREMENT wave L7 (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §5 L7, 2026-09-06): **L7a** retires the 5s `GET /api/assets` poll in favour of `LiveStore.fleet()` (scoped per connection since wave L6) whenever live is `'open'` — same `applyTransport`/`liveGated` D1 gate as `map-data` below, collapsed to the live axis alone (no `activeConsumers` term — this store has no ref-count, construction/`DestroyRef` already bound its lifetime to the page). **L7b** moves the 2s per-streaming-asset telemetry poll behind `LiveStore.trackTelemetry(assetId)`/`telemetryFor(assetId)` — `reconcileTrackers` now subscribes/unsubscribes per tracker *as well as* scheduling/cancelling that poll, one `untrackTelemetry` for every `trackTelemetry`, on stop-tracking and on store teardown alike. **The 2s poll is gated, not deleted** (`applyTrackerTransport`, `TELEMETRY_POLL_INTERVAL_MS`): it runs only while live is unavailable *and* the tracker has resolved an open usage, and `applyTransport` starts/stops every tracker's poll on each transport transition. The wave first deleted it outright — the plan's L7b row said "retire" where its L7a neighbour said "gate per D1; the REST call stays as the not-open fallback" — and with SSE down that froze a streaming asset's marker at its one-time backfill position while it still reported `live: true`. D1 is the frozen rule; see LIVE-POLL-RETIREMENT-PLAN.md §9 finding 7. **L7c**: `telemetry:<assetId>` has no snapshot-on-connect, so each tracker still does exactly one `GET /api/usages/{id}/telemetry` backfill (`TelemetryStore`'s own precedent, reused) merged against live deltas via `mergeTelemetrySamples` (dedup by `(deviceId, at)`) — `trackTelemetry` fires before the backfill resolves, by design, so a live sample arriving mid-fetch is never lost or duplicated. **L7d**: the 1s clock stays, untouched, local-only. **Measured** (not cadence-derived) by `core/live/poll-rate.spec.ts`, that plan's §7 acceptance criterion 2 as a test rather than a browser session: −12 req/min plus −30×N for N streaming assets while live holds, the largest single reduction in that plan. That spec measures `/command`'s whole store set in both transports and asserts `document.hidden === false` first — `PollScheduler` pauses while hidden, so a background tab measures a flattering zero regardless of the code, which is how two earlier browser attempts were voided. `GeofenceStore` (**ref-counted `activate()`/`release()`, wave C3 — same contract as the `map-data` row above**; **and gated on live since LIVE-POLL-RETIREMENT wave L5b** — the 30s poll now runs only while a consumer is active *and* live is unavailable, with `LiveStore.zoneEvents()` folded on top through the same `processedLiveEventCount` cursor idiom `MarksStore` established for `map`: `CREATED`/`UPDATED` upsert by id, `DELETED` removes by id, both idempotent so a redelivery across a reconnect can neither duplicate a zone nor resurrect a deleted one. This store's former **"deliberately not gated on `isLiveAvailable()`"** stance (SCALE-100 §5 S6) is now **obsolete, not reversed** — its whole argument was that gating would hide a second operator's newly-drawn zone for a session because `LiveEnvelope` had no zone topic to project while paused, and wave L3 supplied exactly that topic; both that paragraph and the cross-reference to it have been deleted rather than left standing as a lie), `WeatherStore` |
 | identity | `AuthStore`, `OrgStore`, `SettingsStore` |
@@ -1476,6 +1476,18 @@ practice.
 
 **Nothing in this brief was found wrong or unimplementable.**
 
+**Superseded in part by wave W9** (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.9, §8 decision E25):
+the `tracks:<assetId>` payload described above as "a raw JSON array of `WorldObjectResponse`" is, as
+of wave W9, the whole `StreamTracksResponse` snapshot (`stats`/`latency`/`rate`/`detectionState`/
+`follow`/`lockedTrackId` alongside `tracks`/`objects`) — the exact fields this section's own text
+said "have no live-topic equivalent yet" now do. `LiveStore.worldObjectsFor(assetId)` still returns
+exactly the array this section describes (now derived from `payload.objects` via a cached
+`computed()`, same signature/behavior) — it is no longer the payload itself; the new
+`LiveStore.tracksFor(assetId): Signal<StreamTracksResponse | null>` is. `DetectionsStore.tracks` (the
+poll this section says stays "additive to, not a replacement for" the topic) is now transport-aware
+exactly like `results` and only polls as a fallback. See wave W9's own dated section near the end of
+this file for the full change.
+
 ### Tests / build
 
 `npm run test:ci` — **200/200 files, 3917/3917 tests green** (this worktree's branch already carried
@@ -2244,3 +2256,69 @@ is left as a small, disclosed gap for whichever wave next touches the Tuning mod
 
 - **Commit**: `feat(cv-orchestration W7.4): per-knob inherit editor + models.ts mirror`,
   `feat(cv-orchestration W7.5): Tuning modal sources from the effective read`.
+## Status — CV-ORCHESTRATION wave W9.2 (web): the `tracks:` SSE flip reaches `DetectionsStore` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.9, §8 decision E25, §6 W9 row) — 2026-09-13
+
+Retires the last per-stream REST poll on a live surface. Wave W9.1 (`station/vision-api`, Java)
+widened the `tracks:<assetId>` SSE payload from a bare `WorldObject[]` (wave W3.1) to the whole
+`StreamTracksResponse` snapshot — the same assembly (`StreamTracksResponse.from(TracksSnapshot,
+Instant)`) both `GET /api/streams/{id}/tracks` and the live push now build from ("one assembly, two
+transports"). This step makes `DetectionsStore.tracks` transport-aware **exactly like `results`**, so
+the poll finally becomes the fallback it should always have been.
+
+**What changed:**
+
+- `core/api/models.ts`: `LiveEnvelope`'s `'tracks'` member payload type changed from `readonly
+  WorldObject[]` to `StreamTracksResponse` — the same type `GET /api/streams/{id}/tracks` already
+  returns. Doc comments on both the union member and `StreamTracksResponse` itself updated to
+  cross-reference each other and explain the widening.
+- `core/live/live-store.ts`: the existing ref-counted `trackWorldObjects`/`untrackWorldObjects`
+  subscription (wave W3.1, names kept unchanged for continuity — **not** a new track/untrack pair)
+  now backs a per-asset `StreamTracksResponse | null` signal, not a `WorldObject[]` one. New public
+  **`tracksFor(assetId): Signal<StreamTracksResponse | null>`** returns it directly;
+  **`worldObjectsFor(assetId)`** keeps its exact wave-W3.1 signature/behavior but is now a cached
+  `computed()` deriving `payload?.objects ?? []` — every existing W3.1/W3.2 consumer is unchanged.
+- `core/detections/detections-store.ts`: **`tracks`** is now a `computed()` reading
+  `live.tracksFor(assetId)` when the store's own already-known asset id (`track(streamId, assetId?)`
+  — no new parameter threaded through `followTracks`) is in scope and the live transport resolves
+  open (`resolveAssetScopedTransport`, the same `AssetScopedTransport` idiom `results` already uses).
+  New `tracksTransportSignal`/`tracksWanted` fields and a constructor `effect()` mirroring the
+  pre-existing `results`-transport effect drive the flip; `trackTracks`/`untrackTracks` rewritten
+  around a new private `applyTracksTransport`. `followTracks(streamId, wanted)` keeps its exact
+  two-argument signature. `CockpitFacade.wantsTracksPoll`'s formula is byte-identical; its doc
+  comments now describe what it actually gates post-flip (the tracks session's "wanted" state, not
+  the poll directly).
+- New `core/api/stream-tracks.wire.contract.spec.ts`: pins `Record<keyof StreamTracksResponse, true>`
+  (plus `StreamTrack`/`TrackStats`/`PipelineLatency`/`DetectionRate`/`FollowStatus`) against the
+  fixture `station/vision-api`'s `StreamTracksResponseWireContractTest` commits (wave W9.1) — same
+  `Record<keyof T, true>` technique as `cv-trace.wire.contract.spec.ts`/`world-object.wire.contract.spec.ts`.
+- `detections-store.spec.ts`: `stubLiveStore()` gained an independent `tracksFor`/`pushTracks` pair,
+  deliberately separate from the pre-existing, untouched `worldObjectsFor`/`pushWorldObjects` (since
+  `DetectionsStore.worldObjects`/`.tracks` each call only their own one accessor — simulating that
+  fidelity, not collapsing it). Three new cases prove: zero `GET .../tracks` requests once an asset id
+  is in scope and `LiveStore` is open, with `tracks()` reflecting the live envelope; the poll runs
+  unchanged, same as before this wave, when no asset id is in scope even though `LiveStore` is open;
+  and the tracks session flips from poll to live mid-session, stopping the poll, mirroring the
+  existing `results()`-transport test. Every pre-existing assertion in this file is unchanged.
+
+**Payload size** (measured against the committed fixture, one `tracks:<assetId>` envelope): **243
+bytes** before wave W9 (bare `WorldObject[]`) → **1,596 bytes** after (the whole
+`StreamTracksResponse`) — the payload now rides at frame cadence rather than poll cadence, a fact the
+next capacity/scale decision needs.
+
+**Not built (by this wave's own design):** `worldObjects`'s own subscription lifecycle is untouched —
+it still lives on the detections-feed `track()`/`teardownTracking()` pair (wave W3.1's scope), never
+this wave's demand-gated `trackTracks`/`untrackTracks`; the two lifecycles read the same underlying
+per-asset subscription through two different accessors but neither owns the other. No component
+template changed — this is a core/-layer transport flip only.
+
+**Nothing in this brief was found wrong or unimplementable.**
+
+### Tests / build
+
+`npm run test:ci` — **209/209 files, 4041/4041 tests green** (+1 file / +12 tests over wave W5b.4's
+208/4029: 9 in the new contract spec, 3 in `detections-store.spec.ts`). `npx tsc --noEmit` clean on
+both `tsconfig.app.json` and `tsconfig.spec.json`. No `features/vision-profiles/**`,
+`features/fly/cv-setup-modal*`, `features/fly/cv-tuning*`, or other W7-scoped file touched (W7 ran
+concurrently on `CvProfile*`/profile-as-patch, a disjoint file scope from this wave).
+
+- **Commit**: `feat(cv-orchestration W9.2): tracks: SSE flip reaches the web store`.

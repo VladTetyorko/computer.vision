@@ -23,6 +23,7 @@ import com.drones.vision.perception.application.stream.StreamService;
 import com.drones.vision.perception.domain.model.Detection;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.perception.domain.model.ModelRef;
+import com.drones.vision.perception.domain.model.TracksSnapshot;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
 import com.drones.vision.platform.VisibilityScope;
@@ -176,7 +177,8 @@ class LiveAssetScopingTest {
         assertTrue(patchResponse.get("topics").toString().contains("detections:" + alphaAsset.value()),
                 "PATCH must grant a topic naming the caller's own assigned asset");
 
-        registry.publishDetections(alphaAsset, detectionResult(StreamId.random(), 0), List.of());
+        StreamId alphaStreamId = StreamId.random();
+        registry.publishDetections(alphaAsset, detectionResult(alphaStreamId, 0), TracksSnapshot.empty(alphaStreamId));
         awaitEnvelope(stream, "detections", alphaAsset);
 
         MvcResult resumed = alphaMvc.perform(get("/api/live")
@@ -216,7 +218,8 @@ class LiveAssetScopingTest {
         MvcResult bravoStream = connect(bravoMvc, "detections:" + bravoAsset.value());
         int alphaCountBefore = dataLines(alphaStream).size();
 
-        registry.publishDetections(bravoAsset, detectionResult(StreamId.random(), 0), List.of());
+        StreamId bravoStreamId = StreamId.random();
+        registry.publishDetections(bravoAsset, detectionResult(bravoStreamId, 0), TracksSnapshot.empty(bravoStreamId));
         awaitEnvelope(bravoStream, "detections", bravoAsset); // proves this flush cycle actually ran
 
         assertEquals(alphaCountBefore, dataLines(alphaStream).size(),

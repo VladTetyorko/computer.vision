@@ -1,9 +1,15 @@
 package com.drones.vision.api.dto;
 
 import com.drones.vision.perception.domain.model.DetectionState;
+import com.drones.vision.perception.domain.model.FollowState;
+import com.drones.vision.perception.domain.model.FollowStatus;
+import com.drones.vision.perception.domain.model.TrackingStats;
+import com.drones.vision.perception.domain.model.TracksSnapshot;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
+import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Response body for {@code GET /api/streams/{streamId}/tracks} (docs/plans/done/TRACKING-PLAN.md &sect;4.E's
@@ -64,5 +70,54 @@ public record StreamTracksResponse(String streamId, long lockedTrackId, List<Tra
     public StreamTracksResponse {
         tracks = List.copyOf(tracks);
         objects = List.copyOf(objects);
+    }
+
+    /**
+     * Assembles this response from a {@link TracksSnapshot} (wave W9, CV-ORCHESTRATION-PLAN.md
+     * §4.9, decision E25) — the gating rules below are carried verbatim from what used to be {@code
+     * StreamController#tracks}'s own inline logic, moved here so the REST read and the {@code
+     * tracks:} SSE topic push build from exactly one assembly ("one assembly, two transports").
+     *
+     * @param snapshot the snapshot to render; its {@code streamId} becomes this response's own
+     * @param now      the instant to compute {@link FollowResponse#lastSeenAgeMillis()} against —
+     *                 threaded through rather than read from {@link Instant#now()} here, so a caller
+     *                 building many responses from one instant (or a test) controls it explicitly
+     * @return the wire response for {@code snapshot}
+     */
+    public static StreamTracksResponse from(TracksSnapshot snapshot, Instant now) {
+        List<TrackResponse> tracks = snapshot.tracks().stream()
+                .filter(tracked -> tracked.detection().track() != null)
+                .map(TrackResponse::from)
+                .toList();
+        TrackingStats stats = snapshot.stats().orElse(null);
+        TrackStatsResponse statsResponse =
+                stats == null || stats.lastDetectorReason() == null ? null : TrackStatsResponse.from(stats);
+        // Gated on having sampled anything at all, NOT on `stats`: a stream with tracking off
+        // reports latency and no stats, which is the combination this endpoint most needs to serve.
+        PipelineLatencyResponse latencyResponse = snapshot.latency()
+                .filter(latency -> latency.samples() > 0L)
+                .map(PipelineLatencyResponse::from)
+                .orElse(null);
+        // Gated on a served deadline rather than on a completed one, so a stream whose samples are
+        // ALL being dropped -- the case this object exists to diagnose -- still reports why.
+        DetectionRateResponse rateResponse = snapshot.rate()
+                .filter(rate -> rate.due() > 0L)
+                .map(DetectionRateResponse::from)
+                .orElse(null);
+        DetectionState detectionState = snapshot.detectionState().orElse(null);
+        Optional<FollowStatus> follow = snapshot.follow();
+        // D4's bug fix: the confirmed-from-the-wire held target, sourced from the lock's own
+        // lifecycle rather than the decaying stats window. `follow.trackId()` itself stays at its
+        // last-bound value through LOST (so a re-acquire affordance can still name the target), so
+        // this top-level field is gated on state rather than reading FollowStatus::trackId directly.
+        long lockedTrackId = follow
+                .filter(status -> status.state() == FollowState.HOLDING || status.state() == FollowState.COASTING)
+                .map(FollowStatus::trackId)
+                .orElse(0L);
+        FollowResponse followResponse = follow.map(status -> FollowResponse.from(status, now)).orElse(null);
+        List<WorldObjectResponse> objects =
+                snapshot.objects().stream().map(WorldObjectResponse::from).toList();
+        return new StreamTracksResponse(snapshot.streamId().value().toString(), lockedTrackId, tracks, statsResponse,
+                latencyResponse, rateResponse, detectionState, followResponse, objects);
     }
 }

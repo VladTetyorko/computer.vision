@@ -8,11 +8,8 @@ import com.drones.vision.api.dto.FrameLedgerResponse;
 import com.drones.vision.api.dto.GateDecisionResponse;
 import com.drones.vision.api.dto.StartStreamRequest;
 import com.drones.vision.api.dto.StartStreamResponse;
-import com.drones.vision.api.dto.DetectionRateResponse;
-import com.drones.vision.api.dto.PipelineLatencyResponse;
 import com.drones.vision.api.dto.StreamConfigResponse;
 import com.drones.vision.api.dto.StreamTracksResponse;
-import com.drones.vision.api.dto.TrackResponse;
 import com.drones.vision.api.dto.TrackStatsResponse;
 import com.drones.vision.api.dto.UpdateStreamConfigRequest;
 import com.drones.vision.api.dto.UpdateStreamConfigResponse;
@@ -20,7 +17,6 @@ import com.drones.vision.api.dto.WorldObjectResponse;
 import com.drones.vision.api.security.SeatAccess;
 import com.drones.vision.api.security.StreamAccess;
 import com.drones.vision.api.support.StreamDetectionSupport;
-import com.drones.vision.perception.application.pipeline.TrackingStats;
 import com.drones.vision.perception.application.stream.StreamService;
 import com.drones.vision.perception.application.stream.TrackingConfigPatch;
 import com.drones.vision.perception.application.stream.PipelineConfigPatch;
@@ -28,11 +24,11 @@ import com.drones.vision.perception.application.stream.UpdateOutcome;
 import com.drones.vision.perception.domain.model.DetectionQuery;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.kernel.DeviceId;
-import com.drones.vision.perception.domain.model.DetectionState;
 import com.drones.vision.perception.domain.model.FollowState;
 import com.drones.vision.perception.domain.model.FollowStatus;
 import com.drones.vision.perception.domain.model.PipelineConfig;
 import com.drones.vision.kernel.StreamId;
+import com.drones.vision.perception.domain.model.TracksSnapshot;
 import com.drones.vision.perception.domain.model.VideoFrame;
 import com.drones.vision.perception.domain.port.DetectionRepositoryPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
@@ -382,40 +378,8 @@ public class StreamController {
     public StreamTracksResponse tracks(@PathVariable String streamId) {
         StreamId id = StreamId.of(streamId);
         streamAccess.requireVisible(id);
-        List<TrackResponse> tracks = streamService.tracks(id).stream()
-                .filter(tracked -> tracked.detection().track() != null)
-                .map(TrackResponse::from)
-                .toList();
-        TrackingStats stats = streamService.trackingStats(id).orElse(null);
-        TrackStatsResponse statsResponse =
-                stats == null || stats.lastDetectorReason() == null ? null : TrackStatsResponse.from(stats);
-        // Gated on having sampled anything at all, NOT on `stats`: a stream with tracking off
-        // reports latency and no stats, which is the combination this endpoint most needs to serve.
-        PipelineLatencyResponse latencyResponse = streamService.pipelineLatency(id)
-                .filter(latency -> latency.samples() > 0L)
-                .map(PipelineLatencyResponse::from)
-                .orElse(null);
-        // Gated on a served deadline rather than on a completed one, so a stream whose samples are
-        // ALL being dropped -- the case this object exists to diagnose -- still reports why.
-        DetectionRateResponse rateResponse = streamService.detectionRate(id)
-                .filter(rate -> rate.due() > 0L)
-                .map(DetectionRateResponse::from)
-                .orElse(null);
-        DetectionState detectionState = streamService.detectionState(id).orElse(null);
-        Optional<FollowStatus> follow = streamService.followStatus(id);
-        // D4's bug fix: the confirmed-from-the-wire held target, sourced from the lock's own
-        // lifecycle rather than the decaying stats window. `follow.trackId()` itself stays at its
-        // last-bound value through LOST (so a re-acquire affordance can still name the target), so
-        // this top-level field is gated on state rather than reading FollowStatus::trackId directly.
-        long lockedTrackId = follow
-                .filter(status -> status.state() == FollowState.HOLDING || status.state() == FollowState.COASTING)
-                .map(FollowStatus::trackId)
-                .orElse(0L);
-        FollowResponse followResponse = follow.map(status -> FollowResponse.from(status, Instant.now())).orElse(null);
-        List<WorldObjectResponse> objects =
-                streamService.worldObjects(id).stream().map(WorldObjectResponse::from).toList();
-        return new StreamTracksResponse(id.value().toString(), lockedTrackId, tracks, statsResponse, latencyResponse,
-                rateResponse, detectionState, followResponse, objects);
+        TracksSnapshot snapshot = streamService.tracksSnapshot(id).orElse(TracksSnapshot.empty(id));
+        return StreamTracksResponse.from(snapshot, Instant.now());
     }
 
     /**

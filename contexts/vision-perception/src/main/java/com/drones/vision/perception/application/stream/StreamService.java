@@ -11,6 +11,7 @@ import com.drones.vision.perception.domain.model.StopReason;
 import com.drones.vision.perception.domain.model.StreamState;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.perception.domain.model.TrackedObject;
+import com.drones.vision.perception.domain.model.TracksSnapshot;
 import com.drones.vision.perception.domain.model.VideoFrame;
 import com.drones.vision.perception.domain.model.WorldObject;
 
@@ -20,10 +21,10 @@ import java.util.Optional;
 import java.util.Set;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.perception.application.pipeline.StreamPipeline;
-import com.drones.vision.perception.application.pipeline.DetectionRate;
+import com.drones.vision.perception.domain.model.DetectionRate;
 import com.drones.vision.perception.application.pipeline.GateDecision;
-import com.drones.vision.perception.application.pipeline.PipelineLatency;
-import com.drones.vision.perception.application.pipeline.TrackingStats;
+import com.drones.vision.perception.domain.model.PipelineLatency;
+import com.drones.vision.perception.domain.model.TrackingStats;
 
 /**
  * The lifecycle of live streams: start one for a device, stop it, list what is running.
@@ -307,6 +308,20 @@ public interface StreamService {
      *         {@link #trackingStats(StreamId)}
      */
     Optional<DetectionState> detectionState(StreamId streamId);
+
+    /**
+     * A running stream's complete tracks-topic snapshot (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+     * &sect;4.9, wave W9, decision E25) — exactly {@link StreamPipeline#tracksSnapshot()}: every read
+     * model {@code GET /api/streams/{id}/tracks} assembles, bundled from one instant instead of five
+     * separate calls at potentially different instants. The single call both that REST endpoint and
+     * the {@code tracks:} SSE topic push are built from.
+     *
+     * @param streamId the stream to inspect
+     * @return the snapshot, or {@link Optional#empty()} if {@code streamId} is unknown or not
+     *         running on this instance — empty rather than a zeroed snapshot, for the same reason as
+     *         {@link #trackingStats(StreamId)}
+     */
+    Optional<TracksSnapshot> tracksSnapshot(StreamId streamId);
 
     /**
      * Whether a running stream's <b>video</b> is actually flowing right now

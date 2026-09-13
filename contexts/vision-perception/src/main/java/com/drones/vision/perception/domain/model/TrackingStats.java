@@ -1,8 +1,4 @@
-package com.drones.vision.perception.application.pipeline;
-
-import com.drones.vision.perception.domain.model.DetectorReason;
-import com.drones.vision.perception.domain.model.TrackState;
-import com.drones.vision.perception.domain.model.TrackingMode;
+package com.drones.vision.perception.domain.model;
 
 import java.time.Duration;
 import java.util.EnumMap;
@@ -15,15 +11,15 @@ import java.util.Objects;
  * /api/streams/{streamId}/tracks}'s {@code stats} object and the operator-facing flow strip.
  *
  * <p><b>Computed Java-side, from responses that already arrive.</b> Every field here is derived by
- * {@link TrackingStatsWindow} from the {@link com.drones.vision.perception.domain.model.TrackingTelemetry}
- * riding each {@link com.drones.vision.perception.domain.model.DetectionResult}. There is no new wire field, no
+ * {@code com.drones.vision.perception.application.pipeline.TrackingStatsWindow} from the {@link TrackingTelemetry}
+ * riding each {@link DetectionResult}. There is no new wire field, no
  * new endpoint, and no read-model concern inside cv-service (invariant P3) — which is also why this
  * works identically in every deployment placement, including onboard a companion computer where
  * nobody can read a log.
  *
  * @param mode               the tracking mode configured for the stream <i>at the moment of this
  *                           read</i> — a live config fact, not a window statistic, so it is passed
- *                           into {@link TrackingStatsWindow#snapshot(TrackingMode)} rather than
+ *                           into {@code TrackingStatsWindow#snapshot(TrackingMode)} rather than
  *                           cached per sample (the mode is a hot knob and may have changed within
  *                           the window)
  * @param engineId           the engine that is actually <i>serving</i>, from the newest sample's
@@ -86,8 +82,13 @@ public record TrackingStats(TrackingMode mode, String engineId, Duration window,
         return new TrackingStats(mode, "", window, 0L, 0L, 0.0, 0.0, 0.0, null, 0L, zeroedStates());
     }
 
-    /** All four {@link TrackState}s mapped to {@code 0}, the zero-filled base every histogram starts from. */
-    static Map<TrackState, Integer> zeroedStates() {
+    /**
+     * All four {@link TrackState}s mapped to {@code 0}, the zero-filled base every histogram starts
+     * from. Public since wave W9.0a (docs/plans/active/CV-ORCHESTRATION-PLAN.md decision E27) moved
+     * this record out of {@code TrackingStatsWindow}'s own package — {@code TrackingStatsWindow} is
+     * this method's one caller and still needs it.
+     */
+    public static Map<TrackState, Integer> zeroedStates() {
         Map<TrackState, Integer> states = new EnumMap<>(TrackState.class);
         for (TrackState state : TrackState.values()) {
             states.put(state, 0);

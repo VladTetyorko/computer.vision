@@ -1051,6 +1051,12 @@ export interface FollowStatus {
  * `follow` (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1, wave W3) is the lock's own lifecycle —
  * see {@link FollowStatus}'s doc comment for how it relates to `lockedTrackId`. Omitted when no
  * lock was ever issued or after release; never fabricated as a default object.
+ *
+ * **Also the `tracks:<assetId>` live-topic payload verbatim** (docs/plans/active/
+ * CV-ORCHESTRATION-PLAN.md §4.6/§4.9, wave W9, decision E25) — `StreamController#tracks` and
+ * `LiveUpdateRegistry`'s flush build this from the same Java assembly (`StreamTracksResponse.from`,
+ * "one assembly, two transports"), so this one TypeScript type mirrors both the REST poll body and
+ * the SSE envelope's `payload` — see {@link LiveEnvelope}'s own `tracks` member.
  */
 export interface StreamTracksResponse {
   readonly streamId: string;
@@ -2488,17 +2494,20 @@ export interface DevicesSnapshot {
  * first tick runs at server startup, delay 0, so its ring buffer is already populated before any
  * connection can exist. `core/system-status/system-status-store.ts#SystemStatusStore` projects it.
  *
- * **`tracks` is the 12th, from docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6 (wave W3.1)** —
- * `tracks:<assetId>`, opt-in like `telemetry`/`detections`/`geo` (not always-on), latest-wins with
- * ring capacity 1 server-side — the exact same pattern `detections`/`geo` above already establish,
- * no new semantics. The payload is a **raw `readonly {@link WorldObject}[]`, not wrapped in an
- * object** — straight from `LiveUpdateRegistry`'s Java-side `List<WorldObjectResponse>` — the world
- * model's full per-asset object mirror at frame cadence. This is **additive to, not a replacement
- * for**, `core/detections/detections-store.ts#DetectionsStore`'s existing poll of `GET
- * /api/streams/{id}/tracks` (`trackTracks`/`tracks`): that poll's other fields (`stats`, `latency`,
- * `rate`, `follow`, `lockedTrackId`) have no live-topic equivalent yet — only `objects` does.
- * `core/live/live-store.ts#LiveStore.worldObjectsFor` projects it; wiring only, no renderer reads it
- * yet (that's wave W3.2).
+ * **`tracks` is the 12th, from docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6 (wave W3.1, widened
+ * wave W9 decision E25)** — `tracks:<assetId>`, opt-in like `telemetry`/`detections`/`geo` (not
+ * always-on), latest-wins with ring capacity 1 server-side — the exact same pattern
+ * `detections`/`geo` above already establish, no new semantics. The payload is the **whole
+ * {@link StreamTracksResponse} snapshot** — the exact same shape and gating rules `GET
+ * /api/streams/{id}/tracks` itself returns (`StreamTracksResponse#from`, vision-api, "one assembly,
+ * two transports"). Before wave W9 this carried only a raw `readonly {@link WorldObject}[]`
+ * (`LiveUpdateRegistry`'s Java-side `List<WorldObjectResponse>`), which is why
+ * `core/detections/detections-store.ts#DetectionsStore` used to poll `GET /api/streams/{id}/tracks`
+ * unconditionally for `stats`/`latency`/`rate`/`follow`/`lockedTrackId` — that poll is now the
+ * fallback it should always have been, used only without an asset id in scope or while `LiveStore`
+ * isn't open (`DetectionsStore.tracks`'s own doc comment). `core/live/live-store.ts#LiveStore.tracksFor`
+ * projects the whole snapshot; `worldObjectsFor` is a derived view of its `objects` field alone, so
+ * every wave-W3.1 consumer is unchanged.
  *
  * **`cv-trace` is the 13th, from docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4/§4.8 (wave W5.1)**
  * — `cv-trace:<assetId>`, opt-in per-asset like `telemetry`/`detections`/`geo`, not always-on.
@@ -2521,7 +2530,7 @@ export type LiveEnvelope =
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'discovery'; readonly payload: DiscoveryEventPayload }
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'zones'; readonly payload: GeofenceZoneEventPayload }
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'system'; readonly payload: SystemStatus }
-  | { readonly seq: number; readonly assetId: string; readonly type: 'tracks'; readonly payload: readonly WorldObject[] }
+  | { readonly seq: number; readonly assetId: string; readonly type: 'tracks'; readonly payload: StreamTracksResponse }
   | { readonly seq: number; readonly assetId: string; readonly type: 'cv-trace'; readonly payload: FrameLedger };
 
 /**

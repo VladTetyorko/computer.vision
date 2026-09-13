@@ -1,6 +1,7 @@
 package com.drones.vision.perception.application.pipeline;
 
 import com.drones.vision.perception.domain.model.DetectionResult;
+import com.drones.vision.perception.domain.model.PipelineLatency;
 import com.drones.vision.perception.domain.port.PulledDetectionPort;
 
 import java.time.Instant;

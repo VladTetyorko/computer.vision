@@ -56,11 +56,12 @@ import com.drones.vision.kernel.Telemetry;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.map.domain.model.Verification;
 import com.drones.vision.api.dto.FrameLedgerResponse;
-import com.drones.vision.api.dto.WorldObjectResponse;
+import com.drones.vision.api.dto.StreamTracksResponse;
 import com.drones.vision.perception.domain.model.FrameLedger;
 import com.drones.vision.perception.domain.model.ObjectLifecycle;
 import com.drones.vision.perception.domain.model.ObjectState;
 import com.drones.vision.perception.domain.model.RenderTier;
+import com.drones.vision.perception.domain.model.TracksSnapshot;
 import com.drones.vision.perception.domain.model.WorldObject;
 import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
@@ -162,6 +163,17 @@ class LiveUpdateRegistryTest {
     private static WorldObject worldObject(StreamId streamId, long id) {
         return new WorldObject(objectState(streamId, id), new WorldObject.Operator(false, false, null),
                 new WorldObject.EventLink(null), new WorldObject.Render(RenderTier.T1));
+    }
+
+    /**
+     * A minimal, valid {@link TracksSnapshot} carrying only {@code objects} (wave W9) -- these
+     * broadcast tests only ever exercise {@link LiveUpdateRegistry#publishDetections}'s world-fold
+     * half; the other six read models are exactly {@link TracksSnapshot#empty}'s emptiness.
+     */
+    private static TracksSnapshot tracksSnapshot(StreamId streamId, WorldObject... objects) {
+        TracksSnapshot empty = TracksSnapshot.empty(streamId);
+        return new TracksSnapshot(streamId, empty.tracks(), empty.stats(), empty.latency(), empty.rate(),
+                empty.detectionState(), empty.follow(), List.of(objects));
     }
 
     /** {@link FrameLedger}'s own trace tier (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4) -- a minimal, valid instance for {@code cv-trace} broadcast tests. */
@@ -679,10 +691,10 @@ class LiveUpdateRegistryTest {
         StreamId streamId = StreamId.random();
         LiveUpdateRegistry registry = registry();
 
-        registry.publishDetections(assetId, detectionResult(streamId, 0), List.of());
-        registry.publishDetections(assetId, detectionResult(streamId, 1), List.of());
+        registry.publishDetections(assetId, detectionResult(streamId, 0), TracksSnapshot.empty(streamId));
+        registry.publishDetections(assetId, detectionResult(streamId, 1), TracksSnapshot.empty(streamId));
         DetectionResult latest = detectionResult(streamId, 2);
-        registry.publishDetections(assetId, latest, List.of());
+        registry.publishDetections(assetId, latest, TracksSnapshot.empty(streamId));
 
         registry.flushPending();
 
@@ -692,10 +704,12 @@ class LiveUpdateRegistryTest {
     }
 
     /**
-     * docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.5/W2.5 -- the same {@code pendingDetections}
-     * drain loop that already broadcasts {@code detections:<assetId>} additionally broadcasts
-     * {@code tracks:<assetId>} whenever the result's {@code objects()} mirror is non-empty,
-     * independent of whether a {@code ledger()} was traced this frame.
+     * docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.5/§4.9/W2.5/W9 -- the same {@code
+     * pendingDetections} drain loop that already broadcasts {@code detections:<assetId>}
+     * additionally broadcasts {@code tracks:<assetId>} whenever the result's {@code objects()}
+     * mirror is non-empty, independent of whether a {@code ledger()} was traced this frame. Wave W9
+     * widened the payload from a bare {@code List<WorldObjectResponse>} to the whole {@link
+     * StreamTracksResponse} snapshot -- the same shape {@code GET /api/streams/{id}/tracks} returns.
      */
     @Test
     void aResultWithAPopulatedObjectMirrorBroadcastsOntoTheTracksTopic() {
@@ -704,16 +718,18 @@ class LiveUpdateRegistryTest {
         LiveUpdateRegistry registry = registry();
 
         registry.publishDetections(assetId, detectionResultWithMirror(streamId, 0, false),
-                List.of(worldObject(streamId, 1)));
+                tracksSnapshot(streamId, worldObject(streamId, 1)));
         registry.flushPending();
 
         List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.tracks(assetId)).snapshot();
         assertEquals(1, buffered.size(), "a populated object mirror must reach the tracks topic");
         assertEquals("tracks", buffered.get(0).type());
         Object payload = buffered.get(0).payload();
-        assertTrue(payload instanceof List<?>, "tracks payload must be a list of WorldObjectResponse");
-        assertEquals(1, ((List<?>) payload).size());
-        assertTrue(((List<?>) payload).get(0) instanceof WorldObjectResponse,
+        assertTrue(payload instanceof StreamTracksResponse,
+                "tracks payload must be the whole StreamTracksResponse snapshot (wave W9)");
+        StreamTracksResponse response = (StreamTracksResponse) payload;
+        assertEquals(streamId.value().toString(), response.streamId());
+        assertEquals(1, response.objects().size(),
                 "tracks must carry the WorldObject fold (operator/event/render), not the flat ObjectState mirror");
     }
 
@@ -728,7 +744,7 @@ class LiveUpdateRegistryTest {
         LiveUpdateRegistry registry = registry();
 
         registry.publishDetections(assetId, detectionResultWithMirror(streamId, 0, true),
-                List.of(worldObject(streamId, 1)));
+                tracksSnapshot(streamId, worldObject(streamId, 1)));
         registry.flushPending();
 
         List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.cvTrace(assetId)).snapshot();
@@ -749,7 +765,7 @@ class LiveUpdateRegistryTest {
         LiveUpdateRegistry registry = registry();
 
         registry.publishDetections(assetId, detectionResultWithMirror(streamId, 0, false),
-                List.of(worldObject(streamId, 1)));
+                tracksSnapshot(streamId, worldObject(streamId, 1)));
         registry.flushPending();
 
         assertEquals(0, registry.bufferFor(LiveTopic.cvTrace(assetId)).snapshot().size(),

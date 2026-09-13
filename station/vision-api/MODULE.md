@@ -105,7 +105,7 @@ the full mechanism.
 | StreamController | GET | `/api/streams/{streamId}/detections?limit=` | Recent per-frame detections, each now also carrying `objects` (CV-ORCHESTRATION wave W1 step 5 — the per-identity mirror, `ObjectStateResponse`, never omitted, empty when no mirror was produced) — **deliberately still the flat mirror as of wave W2.8**, not `WorldObjectResponse`: the operator/event/render relations are a platform concern this durable/detections path must never carry, see `WorldObjectResponse`'s own javadoc | scope |
 | StreamController | GET | `/api/streams/{streamId}/snapshot` | Latest frame as downscaled JPEG (only binary, non-JSON response besides the HLS proxy) | scope |
 | StreamController | PATCH | `/api/streams/{streamId}/config` | Hot-patch confidence/fps/labelFilter/model/tracking — never interrupts video | scope |
-| StreamController | GET | `/api/streams/{streamId}/tracks` | Track book + duty-cycle stats + the held `FOLLOW` lock's own lifecycle (`follow`, TRACK-FOLLOW-PLAN §3.1 — omitted until a lock is issued) + `objects` — **as of wave W2.8, `List<WorldObjectResponse>`** (`{state, operator, event, render}`, sourced from `StreamService#worldObjects`, built from the same `WorldModel` fold `onDetectionResult` already ran; previously the flat `ObjectStateResponse` mirror, CV-ORCHESTRATION wave W1 step 5 — see `WorldObjectResponse`'s own javadoc for why `/detections` did **not** move with it); unlike `stats`/`latency`/`rate`/`follow`, always a JSON array, never omitted; never errors on unknown stream (empty `tracks`/`objects`) | scope |
+| StreamController | GET | `/api/streams/{streamId}/tracks` | Track book + duty-cycle stats + the held `FOLLOW` lock's own lifecycle (`follow`, TRACK-FOLLOW-PLAN §3.1 — omitted until a lock is issued) + `objects` (`List<WorldObjectResponse>`, `{state, operator, event, render}`, sourced from the same `TracksSnapshot#objects` fold, CV-ORCHESTRATION wave W2.8; unlike `stats`/`latency`/`rate`/`follow`, always a JSON array, never omitted); never errors on unknown stream (empty `tracks`/`objects`) — **as of wave W9 (decision E25)**, the handler itself is a 3-line collapse (`streamAccess.requireVisible` → `streamService.tracksSnapshot(id).orElse(TracksSnapshot.empty(id))` → `StreamTracksResponse.from(snapshot, Instant.now())`); every gating rule (stats/latency/rate/detectionState omission, `lockedTrackId` hoisting from `follow`) now lives in `StreamTracksResponse.from` itself, not here — the same assembly `LiveUpdateRegistry`'s `tracks:<assetId>` SSE push now calls too ("one assembly, two transports"), so this poll is the fallback it should always have been rather than the only way to learn these fields live | scope |
 | StreamController | GET | `/api/streams/{streamId}/cv/trace?last=N` | CV-ORCHESTRATION wave W2.5, docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4 — the warm trace tier's three ledgers side by side (`CvTraceResponse{streamId, gate, frame, world}`): `gate` (`GateDecisionResponse[]`, `contexts/vision-perception`'s `FrameGateLedger`, coalesced), `frame` (`FrameLedgerResponse[]`, `FrameLedgerRing`, empty unless tracing was ever requested for this stream), `world` (**as of wave W2.8, `List<WorldObjectResponse>`**, previously `ObjectStateResponse[]` — same `StreamService#worldObjects` source `/tracks` now uses, **not** windowed by `last`). `last` defaults to `DEFAULT_TRACE_LAST=50` when absent. **This read is itself trace demand** — polling this endpoint counts toward `TraceDemandPort#traceWanted` exactly like an open `cv-trace:<assetId>` SSE subscription (`StreamDetectionSupport#touchedTrace`). Never errors — unknown/stopped stream reads every list empty, same idiom as `/tracks` | scope |
 | HlsProxyController | GET | `/hls/{streamId}/**` | Reverse-proxy this asset's live HLS bytes to the mediamtx sidecar | scope (`StreamAccess#requireVisibleForHlsProxy`, checked **before** the upstream is ever contacted; fails closed on an unknown/stopped id — AUTH-ROLES-PLAN.md D10, wave B4 — unlike the other `StreamAccess`-gated rows above, which keep `requireVisible`'s no-op) — also now behind `SecurityConfig`'s secured chain's `authenticated()` rule (`/hls/**` joined `/api/**`/`/ws/**`) |
 | CvModelsController | GET | `/api/cv/models` | Detection-model roster — widened (CV-SETTINGS-PLAN §5.2) to serve the registry's live roster (`registrySource: true`) when `vision.cv.registry.enabled`, else the static config catalogue; never errors | open |
@@ -386,24 +386,27 @@ deleted" without a separate lookup. Buffer capacity mirrors `discoveryBuffer` (s
 `eventBufferCapacity`, FIFO, not latest-only — a `DELETED` a resuming viewer missed must still be
 delivered, not collapsed away by a later `UPDATED` to a different zone).
 
-**`tracks:<assetId>`/`cv-trace:<assetId>` (CV-ORCHESTRATION-PLAN.md §4.4/§4.5/§4.6/§5, waves
-W2.5/W2.8) — the live halves of `GET /api/streams/{id}/tracks`'s `objects` and
+**`tracks:<assetId>`/`cv-trace:<assetId>` (CV-ORCHESTRATION-PLAN.md §4.4/§4.5/§4.6/§4.9/§5, waves
+W2.5/W2.8/W9) — the live halves of `GET /api/streams/{id}/tracks` and
 `GET /api/streams/{id}/cv/trace`'s `frame`, piggybacked onto the existing `pendingDetections` drain
 loop rather than a new publish call site.** `pendingDetections` holds a `PendingDetection(DetectionResult
-result, List<WorldObject> worldObjects)` per asset (wave W2.8) — `publishDetections`'s own 3rd
-parameter (`contexts/vision-perception`'s `DetectionLiveUpdatePort`, extended this wave), carried
-verbatim so `detections`/`tracks`/`cv-trace` all come from one coherent snapshot per result instead
-of three independent reads. Every time one is drained for the `detections:<assetId>` topic,
-`flushPending` also (a) **unconditionally** publishes `List<WorldObjectResponse>` (from
-`pending.worldObjects()`, mapped `WorldObjectResponse::from` — **not** the flat `ObjectStateResponse`
-`DetectionResultResponse#objects` just used for the `detections:` envelope above it, see
-`WorldObjectResponse`'s own javadoc for why) onto `tracks:<assetId>` — `TRACKS` rides the exact same
-cadence as `DETECTIONS`, every drain, empty list included, since the fold is computed for free
-alongside `detections[]` whenever tracking is on; and (b) publishes one `FrameLedgerResponse` (from
-`result.ledger()`) onto `cv-trace:<assetId>` **only when `ledger()` is present** — most ticks carry no
-ledger at all (tracing must have been separately demanded via `TraceDemandPort`), so most ticks
-publish nothing on this topic. Both ring buffers are capacity-1 latest-wins (`LiveRingBuffer(1, true)`),
-same as `DETECTIONS`.
+result, TracksSnapshot tracksSnapshot)` per asset — `publishDetections`'s own 3rd parameter
+(`contexts/vision-perception`'s `DetectionLiveUpdatePort`; widened from a bare `List<WorldObject>` to
+the whole `TracksSnapshot` in wave W9), carried verbatim so `detections`/`tracks`/`cv-trace` all come
+from one coherent snapshot per result instead of three independent reads. Every time one is drained
+for the `detections:<assetId>` topic, `flushPending` also (a) **unconditionally** publishes the whole
+`StreamTracksResponse` snapshot (`StreamTracksResponse.from(pending.tracksSnapshot(), Instant.now())`
+— wave W9, decision E25) onto `tracks:<assetId>` — the exact same assembly `StreamController#tracks`
+itself now calls ("one assembly, two transports"; before W9 this topic carried only the bare
+`List<WorldObjectResponse>` fold, which is why the REST poll used to be the only way to learn
+`stats`/`latency`/`rate`/`follow` live). `TRACKS` rides the exact same cadence as `DETECTIONS`, every
+drain, since the snapshot is computed for free alongside `detections[]` whenever tracking is on; and
+(b) publishes one `FrameLedgerResponse` (from `result.ledger()`) onto `cv-trace:<assetId>` **only when
+`ledger()` is present** — most ticks carry no ledger at all (tracing must have been separately
+demanded via `TraceDemandPort`), so most ticks publish nothing on this topic. Both ring buffers are
+capacity-1 latest-wins (`LiveRingBuffer(1, true)`), same as `DETECTIONS` — a newly (re)subscribing
+connection now replays the last full `StreamTracksResponse` snapshot on `tracks:<assetId>`, not just
+the object fold.
 `LiveUpdateRegistry#watchingTrace(AssetId)` — `true` iff at least one live connection currently
 subscribes to that asset's `cv-trace:<assetId>` topic — is the SSE half of `LiveAndPollTraceDemand`'s
 OR (the poll half is `StreamDetectionSupport#touchedTrace`, a recent `GET .../cv/trace` timestamp).
@@ -1718,3 +1721,36 @@ command (`storage/persistence,station/vision-app -am test -DskipWeb`) also green
 vision-app **357** (see `storage/persistence/MODULE.md`'s own W7.2 entry). One unrelated pre-existing
 flake surfaced and fixed along the way, in `station/vision-app`'s own `PersistenceWiringTest` — see
 that module's MODULE.md.
+
+**2026-09-13, CV-ORCHESTRATION wave W9.1 (`tracks:` SSE carries the whole `StreamTracksResponse`
+snapshot, plan §4.9/§8 decision E25).** "One assembly, two transports": `StreamTracksResponse.from(
+TracksSnapshot, Instant)` now owns every gating rule `GET /api/streams/{id}/tracks` used to compute
+inline — `stats`/`latency`/`rate`/`detectionState` presence, the `lockedTrackId` hoist from `follow`,
+`FollowResponse.from`, the `tracks[]` filter — carried verbatim from the old controller body.
+`StreamController#tracks` collapses to a 3-line delegation (`requireVisible` →
+`streamService.tracksSnapshot(id).orElse(TracksSnapshot.empty(id))` →
+`StreamTracksResponse.from(snapshot, now)`, see its own API-surface bullet above).
+`LiveUpdateRegistry#flushPending` now publishes that same `StreamTracksResponse` (built from the
+`PendingDetection`'s own `TracksSnapshot`, wave W9.0) onto `tracks:<assetId>` instead of the bare
+`List<WorldObjectResponse>` fold it carried before this wave — retiring the gap that made the REST
+poll the only way to learn `stats`/`latency`/`rate`/`follow` live; the ring buffer of 1 now hands a
+(re)subscribing connection the last full snapshot, not just the last object list. New
+`StreamTracksResponseWireContractTest` pins the wire shape against a committed fixture,
+`station/vision-web/src/app/core/api/__fixtures__/stream-tracks.wire.json` (`full`+`minimal`
+examples) — the same fixture wave W9.2's `stream-tracks.wire.contract.spec.ts`
+(`station/vision-web`) loads to pin the TS side. **Payload size, measured against that fixture**: one
+`tracks:` envelope was **243 bytes** before this wave (`WorldObject[]` only, wave W3.1) and is
+**1,596 bytes** after (the whole snapshot) — the payload now rides at frame cadence, not poll
+cadence, a fact the next capacity/scale decision needs. `StreamControllerTest`'s `/tracks` HTTP
+assertions (`.andExpect(...)` chains) are byte-identical to before; only the Mockito arrange lines
+changed, from stubbing five separate `StreamService` accessors to stubbing the one
+`tracksSnapshot(streamId)` the collapsed controller now actually calls — two tests (unknown/stopped
+stream, no lock issued) needed no stub at all, since an unstubbed mock already returns
+`Optional.empty()`, exactly `TracksSnapshot.empty(id)`'s own trigger. `LiveUpdateRegistryTest`'s
+tracks-topic assertions updated for the wider payload type. Scoped build (`./mvnw -B -pl
+contexts/vision-perception,station/vision-api,station/vision-app -am clean test -DskipWeb`):
+perception 874/874, **vision-api 1122/1122** (1121 baseline + 1 new contract test), vision-app
+355/355, `ArchitectureTest` 14/14, `ContextArchitectureTest` 5/5 — zero failures/errors. W9.0's
+prerequisite domain work is `contexts/vision-perception/MODULE.md`'s own W9.0a+W9.0 dated entry; W9.2
+(`station/vision-web`) is the store-side transport flip that finally lets `DetectionsStore.tracks`
+stop polling this endpoint by default.
