@@ -76,6 +76,30 @@ that citation resolvable in one hop.
 
 The root `CLAUDE.md` holds the module index table. When adding a module, add its row there.
 
+## When a doc is worth splitting
+
+Size is the wrong proxy. Measure **narrative share** — the fraction of the file sitting in
+`## Status`-family sections plus dated lines — and split only above roughly **20%**:
+
+```bash
+python3 - <<'EOF'
+import io, re, glob, os
+for f in sorted(glob.glob('**/MODULE.md', recursive=True)):
+    if '.claude/worktrees' in f or 'node_modules' in f: continue
+    s = io.open(f, encoding='utf-8').read()
+    parts = re.split(r'(?m)^(##+ .*)$', s)
+    narr = sum(len(parts[i]) + len(parts[i+1]) for i in range(1, len(parts), 2)
+               if re.search(r'status|wave|history|changelog|done\b', parts[i], re.I))
+    dated = sum(len(l) for l in s.splitlines(True) if re.search(r'\b20\d\d-\d\d-\d\d\b', l))
+    print(f"{100*max(narr,dated)/len(s):3.0f}%  {len(s)/1024:5.0f}K  {os.path.dirname(f)}")
+EOF
+```
+
+Below ~20% a split costs an agent, a commit and a second file per module and returns a few
+kilobytes, while adding real risk — every split so far has needed hand-repair for a dropped or
+invented citation. A big doc with a small narrative share is **not** a candidate: its cost is API
+surface, and the fix for that is sharding by responsibility, not a history file.
+
 ## Verifying a split
 
 A set-based citation diff is not enough. It compares the *unique* paths before and after, so it

@@ -94,9 +94,10 @@ pointer is what keeps such a citation resolvable in one hop after the narrative 
 | **D5c** | `station/vision-api` | done `55f5736e` |
 | **D5d** | `contexts/vision-flight` | done `a97f50c8` |
 | **D5e** | `drone-link/mavlink-core`, then `drone-link/mavlink` | done `0ccfb12b`, `a05228d1` |
-| **D5f** | `cv/cv-service`, `contexts/vision-warehouse`, `storage/persistence` | running |
-| **D5g** | `video-input/rtsp` (**orphaned `MODULE-HISTORY.md` from the aborted run — overwrite wholesale, do not append**), `cv/grpc`, `contexts/vision-learning` | open |
-| **D5h** | *(optional)* the mid-size set: `cv/vision-proto` 32 KB, `device-discovery/onvif-mdns-v4l2` 34 KB, `contexts/vision-identity` 34 KB, `video-output/publish-hls` 31 KB, `core/vision-kernel` 27 KB, `contexts/vision-map` 27 KB, `core/vision-platform` 25 KB | open |
+| **D5f** | `cv/cv-service` 80→76 KB, `contexts/vision-warehouse` 66→56 KB | done `e820c900`; `storage/persistence` still running |
+| **D5g** | the three docs the narrative-share measurement says are worth an agent: `cv/vision-proto` (69% narrative — the worst in the repo), `video-input/rtsp` (28%, **orphaned `MODULE-HISTORY.md` — overwrite wholesale**), `cv/grpc` (25%) | running |
+| **D5h** | *(marginal, decide after D5g)* `core/vision-platform` 33%, `contexts/vision-identity` 29%, `core/vision-kernel` 24%, `device-discovery/onvif-mdns-v4l2` 23% — ~32 KB of narrative between all four, so one agent for the set, not four | open |
+| ~~**D5i**~~ | the remaining 9 docs — `contexts/vision-learning` 10%, `video-output/publish-hls` 4%, `contexts/vision-map` 5%, `contexts/vision-simulation` 3%, `video-input/mjpeg` 4%, `video-input/v4l2` 13%, `cv/tiles` 10%, `simulation-sources/sim` 12%, `contexts/vision-events` 9% | **retired, will not do** — see below |
 | **D5-lift** | lift pass on `station/vision-web`: D5a was mechanical, so still-current facts buried in the 435 KB of moved history are not yet in the contract | open |
 | **D6** | *(follow-up, not this branch)* shard `vision-web` / `vision-app` / `vision-api` / `vision-perception` API surface by responsibility, so an agent loads one feature's contract instead of all of them | open |
 
@@ -118,6 +119,41 @@ The seven heaviest docs, before → contract now (history is still on disk, just
 **The split has a floor, and four of these seven are already on it.** `vision-perception` only came down 181 → 138 KB because 105 KB of the remainder is genuine `## API surface` and 24 KB genuine `## Gotchas`; its `## Status` went from 364 lines of changelog to 2.7 KB, which is the whole of what a split can do there. 78 KB of `vision-api`'s 98 KB is a single ~190-row endpoint table. Going below this floor is D6, not D5 — it needs per-responsibility judgment plus a scripted repoint of the ~146 source files that cite these docs by path.
 
 **The higher-value outcome was recovery, not reduction.** Facts that existed only inside wave narrative and are now in the contract: the SSE topic set (`tracks:`, `cv-trace:`, `discovery`, `zones`, `system`), absent from `vision-api`'s API surface entirely; the force-arm magic split (2989 vs 21196) and that ArduPilot *silently bypasses pre-arm checks* on the wrong value; extension channels 9–16 using release sentinel 65534, not 0; and the three build traps now in `CLAUDE.md` §Build. Four stale facts were also corrected in passing — the session cookie is `same-site: strict`, not Lax; nearly every `vision.*.enabled` flag that compiles `false` is ON in `docker-compose.yml`; `RoutingFrameSink` calls `sendTo()`, not `broadcast`; and `vision-flight`'s "fully implemented" line omitted `SeatService`, `BatteryMonitor` and `LinkLossNotifier`.
+
+### Narrative share decides whether a doc is worth an agent
+
+After `cv-service` returned 4 KB and `vision-warehouse` 10 KB, I stopped splitting by file size and
+measured what fraction of each remaining doc is actually wave narrative (`## Status`-family sections
+plus dated lines). Size had been the wrong proxy the whole time:
+
+| Doc | Size | Narrative | Worth an agent? |
+|---|---:|---:|---|
+| `cv/vision-proto` | 31 KB | **69%** | yes — worst in the repo, and a *wire contract* doc at that |
+| `core/vision-platform` | 25 KB | 33% | marginal |
+| `contexts/vision-identity` | 33 KB | 29% | marginal |
+| `video-input/rtsp` | 58 KB | 28% | yes |
+| `cv/grpc` | 57 KB | 25% | yes |
+| `core/vision-kernel` | 26 KB | 24% | marginal |
+| `device-discovery/onvif-mdns-v4l2` | 33 KB | 23% | marginal |
+| `video-input/v4l2` | 16 KB | 13% | no |
+| `simulation-sources/sim` | 15 KB | 12% | no |
+| `contexts/vision-learning` | 44 KB | 10% | no — the clearest case that size misleads |
+| `cv/tiles` | 15 KB | 10% | no |
+| `contexts/vision-events` | 10 KB | 9% | no |
+| `contexts/vision-map` | 26 KB | 5% | no |
+| `video-output/publish-hls` | 30 KB | 4% | no |
+| `video-input/mjpeg` | 16 KB | 4% | no |
+| `contexts/vision-simulation` | 16 KB | 3% | no |
+
+**The rule this establishes: do not split a doc below ~20% narrative share.** Below that the split
+costs an agent, a commit and a second file per module, and buys back a few kilobytes — while adding
+real risk, since every split so far has had to be hand-repaired for dropped or invented citations.
+`contexts/vision-learning` is the clearest case: 44 KB, the 3rd-largest doc left, and only 10%
+narrative. Splitting it would have been pure churn.
+
+That retires nine docs from this plan for good. Their cost is API surface, and API surface is D6's
+problem, not D5's. The same is true of the four already on the floor (§ above) and of `cv-service`,
+whose 76 KB is 50 KB of env-var/gRPC/class-listing surface and 17 KB of Gotchas.
 
 ## 6. The build-discipline half
 
