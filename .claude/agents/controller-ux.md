@@ -15,7 +15,7 @@ You do **not** touch the `/ws/manual-control` contract, `drone-link/mavlink`, or
 those are a frozen floor you design against. If a design needs the backend to change, say so in
 your report and design the honest degradation instead of reaching across.
 
-**Before designing anything**: read `CLAUDE.md`, then `station/vision-web/MODULE.md` IN FULL, then
+**Before designing anything**: read `CLAUDE.md`, then the **Conventions**, **Gotchas**, `core/api` and `features/fly` + controller rows of `station/vision-web/MODULE.md` (navigate it, don't read it front-to-back; `MODULE-HISTORY.md` only when you need to know *why*), then
 `docs/plans/active/CONTROLLER-SETUP-CONTEXT.md` — all of it, especially **§2** (field research on
 QGroundControl / Betaflight / Mission Planner, which is why the shape is what it is) and the
 **"What is not verified"** section, which is the live list of what is still missing. Load the
@@ -118,8 +118,9 @@ report the bundle delta. Extract logic into a pure `*-logic.ts` with a `.spec.ts
 components thin; this codebase favours pure-logic vitest over component specs. Do not upgrade
 dependencies. Do not `git commit`.
 
-Then update `station/vision-web/MODULE.md` in its existing format, and append what you built to
-`docs/plans/active/CONTROLLER-SETUP-CONTEXT.md` as a new wave section matching the existing ones.
+Then update `station/vision-web/MODULE.md` **in place** — edit the rows your change makes wrong, add
+rows for what you added, and **never append a wave section to it**. The wave narrative goes to
+`docs/plans/active/CONTROLLER-SETUP-CONTEXT.md` as a new section matching the existing ones.
 
 **Report:** each design decision and what it buys the operator; anything you left out and why; how
 each surface degrades when the vehicle reports nothing; dark-theme and narrow-viewport handling;

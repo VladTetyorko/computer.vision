@@ -27,6 +27,14 @@ with a scripted repoint of every citation in the same commit; the `CODE` column 
 
 ---
 
+## 0. HARNESS — plans that change how agents work, not what the product does
+
+| Plan | State | What it changes |
+|---|---|---|
+| [AGENT-CONTEXT-DIET-PLAN](active/AGENT-CONTEXT-DIET-PLAN.md) | **in progress**, branch `chore/agent-context-diet-2` (D1–D3 done, D4–D5 open) | Module docs split into `MODULE.md` (contract, read always) + `MODULE-HISTORY.md` (wave narrative, read only to learn *why*); agent definitions read sections, not whole files; `CLAUDE.md` de-duplicated, four stale/missing entries fixed, build discipline stated once. No product code. |
+
+---
+
 ## 1. DONE — merged to `master`, archived in [`done/`](done/)
 
 | Plan | Merge | What shipped | CODE |

@@ -3,15 +3,42 @@ name: module-docs
 description: Create or refresh MODULE.md context files for the vision project's Maven modules. Use when module docs are missing, stale after a refactor, or when asked to document a module.
 ---
 
-# Module context docs (MODULE.md)
+# Module context docs
 
-Every Maven module (and `cv/cv-service/`) carries a `MODULE.md` at its root: a compact, current snapshot of what the module exposes, so that agents and humans get full working context WITHOUT re-reading sources.
+Every Maven module (and `cv/cv-service/`) carries **two** docs at its root. Only the first is ever
+loaded eagerly.
+
+| File | Holds | Read when |
+|---|---|---|
+| `MODULE.md` | purpose · deps · build/test · API surface · conventions · gotchas · current status | **always**, before touching the module |
+| `MODULE-HISTORY.md` | *"wave X done"*, dated entries, build logs, test counts, notes an agent wrote to itself | **only** when you need to know *why* something is the way it is |
+
+## The boundary
+
+> Keep a sentence in `MODULE.md` if it says **what is true now**.
+> Move it to `MODULE-HISTORY.md` if it says **what a wave did** — when, on what branch, with what
+> test counts, or what the agent learned on the way.
+
+Current state: *"`TargetLockRequest.pointX/pointY` exist on the DTO; nothing populates them."*
+History: *"wave W5 added `<vision-target-list>`; 3042 tests green; bundle +0 kB."*
 
 ## Rules
 
-1. **Read before touching.** Before modifying a module, read its `MODULE.md` (and those of modules it depends on). Only read actual sources when the doc is missing detail you need — and if it is, that's a doc bug: fix the doc too.
-2. **Update after touching.** Any task that changes a module's public surface, behavior, conventions, or gotchas MUST update that module's `MODULE.md` in the same task. Stale docs are worse than none.
-3. **Compact and factual.** Target ≤150 lines. Signatures over prose. No marketing, no history — current state only. Link, don't duplicate: architecture rationale lives in `ARCHITECTURE.md`, phase plans in `docs/*-PLAN.md`.
+1. **Read before touching** — `MODULE.md`, plus the `MODULE.md` of modules whose ports/models you
+   actually use. Read the *sections you need*, not the whole file, once a doc is long enough to have
+   a section index. Only open sources when the doc lacks detail you need — and when it does, that is
+   a doc bug: fix the doc in the same task.
+2. **Update in place** — a task that changes the public surface, behavior, conventions or gotchas
+   MUST edit the affected lines of `MODULE.md`. **Never append a wave/status section to it.** If the
+   wave is worth narrating, one entry at the top of `MODULE-HISTORY.md`; otherwise git and the plan
+   doc in `docs/plans/` already hold it. Stale docs are worse than none — but a doc that grows by one
+   changelog entry per wave is worse than stale, because every future agent pays to read it.
+3. **Compact and factual** — `MODULE.md` targets **≤200 lines**. Signatures over prose. No marketing,
+   no history, no build transcripts. Link, don't duplicate: rationale lives in `ARCHITECTURE.md`,
+   specs in `docs/plans/`.
+4. **Past 200 lines, add a section index** — a table at the top mapping topic → heading, so a reader
+   can jump. Past ~400, the module doc wants sharding by responsibility into `docs/` beside it, with
+   `MODULE.md` keeping the contract and routing to the rest.
 
 ## Required structure
 
@@ -34,8 +61,16 @@ Every Maven module (and `cv/cv-service/`) carries a `MODULE.md` at its root: a c
 <hard-won facts: quirks of libs, timing constraints, things that look wrong but are right>
 
 ## Status
-<what's real vs placeholder; which phase implements what's missing>
+<what is real vs placeholder vs flagged-off, right now. Current state only — no dated entries.>
+
+Wave-by-wave history: [`MODULE-HISTORY.md`](MODULE-HISTORY.md).
 ```
+
+That last pointer is **required**, not decorative: ~146 source files cite these docs by path, and some
+cite *"see MODULE.md's Status entry for why"*. Once the narrative moves, the pointer is what keeps
+that citation resolvable in one hop.
+
+`MODULE-HISTORY.md` is free-form, newest first, one `## <date> — <plan doc> wave <X>` per entry.
 
 ## Index
 
