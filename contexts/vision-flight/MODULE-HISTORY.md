@@ -225,7 +225,7 @@ placeholder row and added two) and the new
 this wave — see the wiring-breakage entry above. `station/vision-web` — **2559 tests / 139 files**,
 all green, unchanged.
 
-## FLEET-RADIO-PLAN.md wave R2 — refuse UNKNOWN-kind manual control
+## docs/plans/active/FLEET-RADIO-PLAN.md wave R2 — refuse UNKNOWN-kind manual control
 
 `ControlProfile.forKind(UNKNOWN)` returns an empty, unflyable `ChannelMap` (code `----`,
 displayName `"Unidentified vehicle"`) instead of the old centred four-axis map;
@@ -247,7 +247,7 @@ than edit; independently of that constraint, trusting an operator-supplied kind 
 classification is its own unresolved safety question, not a rushed addition here (carried into
 MODULE.md's own Status as a standing gap).
 
-## FLEET-RADIO-PLAN.md wave R4b — vehicle-kind-dependent emergency-stop (Java half)
+## docs/plans/active/FLEET-RADIO-PLAN.md wave R4b — vehicle-kind-dependent emergency-stop (Java half)
 
 `FlightCommandPort.emergencyStop`'s javadoc is rewritten to document the new vehicle-kind-dependent
 contract; no other source in this module changed — the plan's own scope line named
@@ -258,7 +258,7 @@ changes, because it never sees `mavType` and the decision belongs entirely to th
 (Hold)'` on a `ROVER`) — see `station/vision-web/MODULE.md` and this plan's own R4b note for what
 shipped and what is still open.
 
-## FLEET-RADIO-PLAN.md wave R1 — one vehicle taxonomy (no change here)
+## docs/plans/active/FLEET-RADIO-PLAN.md wave R1 — one vehicle taxonomy (no change here)
 
 The plan's own scope line names `VehicleKind.java`/`ControlProfile.java` for R1, but nothing in
 either needed to change: the new dodecarotor/decarotor/generic-multirotor `MAV_TYPE`s all resolve
@@ -268,7 +268,7 @@ table entry — the plan itself (and a direct operator instruction, 2026-08-26) 
 `ControlProfile.forKind(UNKNOWN)` still returned a flyable (if unsafe) default map at this point —
 closing that gap was R2's own scope (above), not R1's.
 
-## FLEET-RADIO-PLAN.md wave R3 (F3/F4/F17) — CH9+ fix and channel range narrowing
+## docs/plans/active/FLEET-RADIO-PLAN.md wave R3 (F3/F4/F17) — CH9+ fix and channel range narrowing
 
 `RcChannels`/`ControlBinding` both narrowed to `[1,16]` (F17); the CH9+ silent-drop (F3) and
 extension-channel release-sentinel (F4) defects were fixed on the `mavlink-core`/`adapter-mavlink`

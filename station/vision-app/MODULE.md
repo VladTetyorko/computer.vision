@@ -491,6 +491,9 @@ real handler, so it can't quietly outlive the gap it records.
   `VISION_API_RATE_LIMIT_ENABLED`, not `VISION_API_RATELIMIT_ENABLED`) — the wrong guess silently binds
   nothing and ships the flag green but inert.
 - **Real and default-off in both places:** mediamtx source-proxy (`vision.publish.source-proxy.enabled`).
+- Rationale for each default above lives in the plan doc that introduced it
+  (`docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md`, `docs/plans/active/DOMAIN-SEPARATION-W1.md`,
+  `docs/plans/done/*-PLAN.md` — linked per-bean above), not restated here.
 - `GET /api/system/status` is real (4 `SubsystemStatusPort` beans: cv-service, mavlink-link,
   video-publish, live-updates). `GET /api/system/events` is real (durable `Event` history, gated by
   `vision.events.history.enabled` above; the port itself always exists, only the recording decorator is

@@ -333,7 +333,7 @@ classes each get their own line in the build log and none of their own `.txt`. A
 per-module `Results:` line instead. An earlier pass through this wave mistook exactly that for a
 Docker-gate flake.
 
-## LIVE-POLL-RETIREMENT-PLAN.md waves L3+L4 (2026-09-06, branch `feat/live-topics-zones-system`, uncommitted at time of writing)
+## docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md waves L3+L4 (2026-09-06, branch `feat/live-topics-zones-system`, uncommitted at time of writing)
 
 L3: new `zones` SSE topic — `GeofenceLiveUpdatePort`/`GeofenceZoneEvent` (`contexts/vision-flight`),
 `GeofenceZoneEventPayload` (`dto/`), `LiveTopicKind.ZONES`/`LiveTopic.ZONES`, a `zonesBuffer` (FIFO,
@@ -379,7 +379,7 @@ install-then-`-pl`-without-`-am` recipe instead, which reuses `adapter-rtsp`'s a
 (default) and `=false` wiring tests. Docker ran for real. Nothing deferred except the pre-existing
 `everDropped`/`live-updates` `DEGRADED` defect, explicitly out of scope per this wave's own task spec.
 
-## ALWAYS-ON-FLOW-PLAN.md wave D1 (2026-09-06)
+## docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave D1 (2026-09-06)
 
 Confirmed `PATCH /api/assets/{id}` needed no change for a new per-asset `DetectionPolicy` opt-in
 (`contexts/vision-perception`'s new `DetectionPolicy.ATTRIBUTE_KEY = "cv.detection-policy"`, values
@@ -440,7 +440,7 @@ needed/not run — this module's tests are pure-unit/MockMvc, no Testcontainers 
 touched files. `vision-web`'s `drone-picker-facade.ts` was read for context, per instruction, but not
 modified, and self-corrects once the server stops over-sending.
 
-## CREW-CONTROL-PLAN.md wave W2 (2026-09-05, uncommitted at time of writing, branch `feat/crew-control`)
+## docs/plans/active/CREW-CONTROL-PLAN.md wave W2 (2026-09-05, uncommitted at time of writing, branch `feat/crew-control`)
 
 New `security.SeatAccess` (the one collaborator every guard calls — 5 params, at the constructor
 ceiling) + `security.SeatAccessSettings` (plain, framework-free settings record bridged from
@@ -487,7 +487,7 @@ disabled/pass-through `SeatAccess` threaded into their existing construction cal
 compiling, never a behavioral change. Nothing deferred to a later wave from this module's own scope;
 W3 (crew UI, vision-web) is a separate, concurrently-running agent's file scope, not this one's.
 
-## SOURCE-ONBOARDING-2-PLAN.md §3.2 wave C (2026-09-05, uncommitted at time of writing)
+## docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.2 wave C (2026-09-05, uncommitted at time of writing)
 
 C1 (`POST /api/discovery/inbox/{id}/attach`), C2 (new `DiscoveryStatusController`, `GET
 /api/discovery/status`), C3 (`SystemNetworkController`/`NetworkAddressResponse`/

@@ -75,3 +75,32 @@ that citation resolvable in one hop.
 ## Index
 
 The root `CLAUDE.md` holds the module index table. When adding a module, add its row there.
+
+## Verifying a split
+
+A set-based citation diff is not enough. It compares the *unique* paths before and after, so it
+passes while an agent quietly rewrites a heading from `docs/plans/active/AUTH-ROLES-PLAN.md` to a
+bare `AUTH-ROLES-PLAN.md` — the full path survives elsewhere in the body, so the set is unchanged.
+Three of the first seven splits did exactly this, 23 headings between them, and one of the 23 named
+a plan file that **does not exist** (`ZERO-CONFIG-ONBOARDING-PLAN.md`; the real doc is
+`ZERO-CONFIG-ONBOARDING-CONTEXT.md`).
+
+Run all four checks:
+
+```bash
+M=<module-path>
+# 1. no bare-filename headings
+grep -c '^## [A-Z0-9-]*-\(PLAN\|CONTEXT\)\.md' $M/MODULE-HISTORY.md   # must be 0
+# 2. every path cited actually exists on disk
+for f in $M/MODULE.md $M/MODULE-HISTORY.md; do
+  grep -o '\bdocs/[A-Za-z0-9/._-]*\.md' $f | sort -u |
+    while read -r p; do [ -f "$p" ] || echo "BROKEN $f -> $p"; done
+done
+# 3. no unique path lost across the pair
+diff <(git show HEAD:$M/MODULE.md | grep -o '\bdocs/[A-Za-z0-9/._-]*\.md' | sort -u) \
+     <(cat $M/MODULE.md $M/MODULE-HISTORY.md | grep -o '\bdocs/[A-Za-z0-9/._-]*\.md' | sort -u)
+# 4. no wave residue left in the contract
+grep -ci 'tests green\|Tests run:\|wave [A-Z][0-9]* done' $M/MODULE.md      # must be 0
+```
+
+Check 2 is the one that catches a fabricated citation, and it is the only check that does.

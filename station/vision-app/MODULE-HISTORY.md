@@ -1,6 +1,6 @@
 Wave-by-wave build history for `station/vision-app`. `MODULE.md` in this same directory is the contract — current beans, flags, and gotchas; read that first. This file exists only to answer *why*.
 
-## CV-ORCHESTRATION-PLAN.md — wave W7.2
+## docs/plans/active/CV-ORCHESTRATION-PLAN.md — wave W7.2
 
 **CV-ORCHESTRATION wave W7.2 (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7, decision E22 — "a
 profile is a patch") touched exactly one test in this module.** `CvProfileWiringConfiguration`'s own
@@ -684,7 +684,7 @@ Every build ran in the foreground with an explicit generous timeout, never backg
 
 ---
 
-## AUTH-ROLES-PLAN.md — wave B0b (plan closed)
+## docs/plans/active/AUTH-ROLES-PLAN.md — wave B0b (plan closed)
 
 **AUTH-ROLES-PLAN wave B0b done — plan closed** (docs/plans/active/AUTH-ROLES-PLAN.md §5) — flips
 `vision.auth.enabled`'s value in `application.yaml` from `false` to `true`. This closes the last gap
@@ -740,7 +740,7 @@ AUTH-ROLES-PLAN.md is now fully closed — B0b was its last open wave.
 
 ---
 
-## AUTH-ROLES-PLAN.md — wave B6
+## docs/plans/active/AUTH-ROLES-PLAN.md — wave B6
 
 **AUTH-ROLES-PLAN wave B6 done.** The `VisibilityScope`→`Authority` migration this wave's plan text
 scoped across `contexts/{warehouse,flight,perception,learning,map,identity}` and every `vision-api`
@@ -794,7 +794,7 @@ stays `false` by default, unchanged — the default-config bar held throughout. 
 
 ---
 
-## AUTH-ROLES-PLAN.md — wave B5
+## docs/plans/active/AUTH-ROLES-PLAN.md — wave B5
 
 **AUTH-ROLES-PLAN wave B5 done.** Sessions now survive a restart: `spring-session-jdbc` (new `pom.xml`
 dependency) backs the session store with the same Postgres this app already runs against
@@ -889,7 +889,7 @@ logout-teardown half of §3.6 (web-side, out of this backend wave). Waves B6/B0b
 
 ---
 
-## AUTH-ROLES-PLAN.md — wave B4
+## docs/plans/active/AUTH-ROLES-PLAN.md — wave B4
 
 **AUTH-ROLES-PLAN wave B4 done.** Per-asset command authority — `AssetAuthority`/
 `CapabilityAssetAuthority`, both new types in `vision-api`'s `security` package (see that module's own
@@ -949,7 +949,7 @@ from there, and `FlightCommandController`'s new edge gate sits strictly in front
 
 ---
 
-## AUTH-ROLES-PLAN.md — wave B3
+## docs/plans/active/AUTH-ROLES-PLAN.md — wave B3
 
 **AUTH-ROLES-PLAN wave B3 done.** `DevPrincipalResolver`/`SecurityContextPrincipalResolver` gained
 `role()`/`authority()` (the two methods `PrincipalResolver`, vision-api, widened to — B4's per-asset
@@ -987,7 +987,7 @@ open — see `docs/plans/active/AUTH-ROLES-PLAN.md`.
 
 ---
 
-## AUTH-ROLES-PLAN.md — wave B0a
+## docs/plans/active/AUTH-ROLES-PLAN.md — wave B0a
 
 **AUTH-ROLES-PLAN wave B0a done** (docs/plans/active/AUTH-ROLES-PLAN.md, D1) — config honesty only, no
 behavior change and the value stays `false`. `application.yaml`'s `vision.auth.enabled` comment block no
@@ -1014,7 +1014,7 @@ no new ArchUnit-relevant type).
 
 ---
 
-## FLY-CONTROL-UX-PLAN.md — wave BK1
+## docs/plans/active/FLY-CONTROL-UX-PLAN.md — wave BK1
 
 **FLY-CONTROL-UX-PLAN wave BK1 done.** `VisionOpsProperties` gained a second nested record, `Rc(int
 neutralTolerancePercent)` — default **5**, compact-constructor validated `[1,25]` (outside throws
@@ -1048,7 +1048,7 @@ detail). Nothing deferred.
 
 ---
 
-## ASSET-FLOWS-PLAN.md — wave BK3 (D6/S3 backend)
+## docs/plans/active/ASSET-FLOWS-PLAN.md — wave BK3 (D6/S3 backend)
 
 **ASSET-FLOWS wave BK3 (D6/S3 backend) done.** New `VisionOpsProperties` (`config/properties/`, prefix
 `vision.ops`, nested `Battery(int warningPercent, int criticalPercent)` — defaults 25/10,
@@ -1105,7 +1105,7 @@ for real throughout — not skipped. Nothing deferred on this side beyond the fl
 
 ---
 
-## MAVLINK-COMMANDS-PLAN.md — wave P4
+## docs/plans/active/MAVLINK-COMMANDS-PLAN.md — wave P4
 
 **MAVLINK-COMMANDS-PLAN.md wave P4 done** — closes the production gap P1 flagged in
 `drone-link/mavlink/MODULE.md`'s Gotchas: `TelemetryWiring#mavlinkFlightCommander` still called
@@ -1180,7 +1180,7 @@ surface — `mavlinkFlightCommander` gained two constructor parameters, not a ne
 
 ---
 
-## MAVLINK-COMMANDS-PLAN.md — wave P3
+## docs/plans/active/MAVLINK-COMMANDS-PLAN.md — wave P3
 
 **MAVLINK-COMMANDS wave P3 done — verified already wired, no wiring change.** The 2026-08-26
 architecture audit flagged that R3's codebase inventory could not confirm every production
@@ -1238,7 +1238,7 @@ through `V31`).
 
 ---
 
-## ZERO-CONFIG-ONBOARDING-PLAN.md — wave Z3
+## docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md — wave Z3
 
 **ZERO-CONFIG-ONBOARDING wave Z3 done.** New fifth `DeviceDiscoveryPort` bean, `mediamtxPathScanner`
 (`DiscoveryWiringConfiguration`), wired behind a two-flag `@ConditionalOnProperty` array (`vision.
@@ -1274,7 +1274,7 @@ unaffected — `MediamtxPathScanner` imports nothing from another adapter (only 
 
 ---
 
-## ZERO-CONFIG-ONBOARDING-PLAN.md — wave Z2c
+## docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md — wave Z2c
 
 **ZERO-CONFIG-ONBOARDING wave Z2c done.** New unconditional `DiscoveryInboxWiringConfiguration` (2
 beans: `discoveryInboxService`, gated `discoveryInboxRunner` — see the wiring-map table above) +
@@ -1311,7 +1311,7 @@ held throughout — every pre-existing green suite stayed green.
 
 ---
 
-## CV-SETTINGS-PLAN.md — wave W5 (2026-08-30)
+## docs/plans/active/CV-SETTINGS-PLAN.md — wave W5 (2026-08-30)
 
 **CV-SETTINGS wave W5 done (2026-08-30, uncommitted).** New unconditional `CvProfileWiringConfiguration`
 (4 beans, see the wiring-map table above) behind `CvProfileController` (vision-api). `TrainingWiringConfiguration`
@@ -1364,7 +1364,7 @@ behavior this wave deliberately changed (not accidentally broken), proven fixed 
 
 ---
 
-## WAREHOUSE-UX-PLAN.md — wave W8
+## docs/plans/active/WAREHOUSE-UX-PLAN.md — wave W8
 
 **WAREHOUSE-UX wave W8 done.** New unconditional `assetRowFacts` bean (see "Application-service beans"
 above) — no flag, no new port implementation. `./mvnw -B -pl station/vision-app -DskipWeb test` —
