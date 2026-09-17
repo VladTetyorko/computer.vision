@@ -155,6 +155,48 @@ That retires nine docs from this plan for good. Their cost is API surface, and A
 problem, not D5's. The same is true of the four already on the floor (§ above) and of `cv-service`,
 whose 76 KB is 50 KB of env-var/gRPC/class-listing surface and 17 KB of Gotchas.
 
+## 5b. Defects this plan found (none of them fixable on this branch)
+
+This is a docs-only plan and it touches no product code, so each of these needs an owner elsewhere.
+They are listed because relocating prose turned out to be an effective audit: every one of them was
+found by reading text that had sat unread inside a `## Status` section.
+
+### Code
+
+**`DetectionFrameCodec#toPullTelemetry` mis-detects pull mode.** cv-service now sets
+`DetectionResponse.dropped_frames` (field 19) under `DetectStream`, not only `DetectPulled`, from the
+same `LatestOnlyMailbox.dropped` counter push mode already kept. `toPullTelemetry` still decides
+"this is a pull response" by probing that all six diagnostic fields (16–21) are proto-zero, an
+inference the wire no longer supports — so a push response that dropped a frame decodes a non-`null`
+`PullTelemetry`. The method's javadoc states the assumption that was invalidated ("the shape a
+`DetectStream` response always has").
+
+*Latent, not live:* `StreamPipeline#recordPullTelemetry` is reachable only from the pull-mode
+driver's subscriber, and no API or web surface reads the accessor. It goes live the moment a push
+path consults it, and the value is actively wrong rather than merely present —
+`PullTelemetry(0, 0f, 0f, n, 0, 0)` feeds `decodeMillis = 0` into the rate controller's capacity
+ceiling. Fix belongs on the decode side: discriminate on the RPC that produced the response.
+Owner: whoever next takes a `cv/grpc` wave. Gotcha recorded in both `cv/grpc/MODULE.md` and
+`cv/cv-service/MODULE.md`.
+
+### Docs — corrected in place on this branch
+
+- **Two phantom citations**, both pre-dating this plan: `ZERO-CONFIG-ONBOARDING-PLAN.md` (never
+  existed; the doc is `…-CONTEXT.md`) and `PLATFORM-AUDIT-2026-08-21.md` (never existed; the audit is
+  six `PLATFORM-AUDIT-*.md` lane reports), the latter in two modules. A fabricated citation is worse
+  than a bare one — it reads as correct and sends the next agent nowhere.
+- **`cv-service` claimed `bytetrack` was "one env var away"** while the same file said it was retired.
+  `BUILTIN_ASSOCIATORS` is `{"cost"}` and `CV_TRACK_ASSOCIATE_ENGINE=bytetrack` silently resolves to
+  `cost` via `RETIRED_ASSOCIATORS`. An agent trusting that row would have A/B-tested two identical
+  configurations and believed the result.
+- **`adapter-persistence`'s `## Status` contradicted its own API surface** — 32 repositories through
+  `V34`, against a table two sections above saying 33 and a ledger saying `V36`.
+- **`adapter-cv-grpc` said "six gRPC services"**; there are three with Java callers, plus a
+  cv-service-internal `Detector`. `Inspect` was missing from `Inference`'s method list despite being
+  called in production, and `PipelineConfig.trace()` was documented as "false at every call site",
+  stale since `TraceDemandPort` began flipping it per stream.
+- Four stale facts corrected during D5a–D5e, listed in §5's measured-result note.
+
 ## 6. The build-discipline half
 
 Separate from doc size, three recurring costs were burning agent context and agent turns. All three
