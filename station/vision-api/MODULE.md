@@ -11,38 +11,48 @@ ArchUnit-enforced) · spring-boot-starter-web · spring-boot-starter-websocket (
 vision-app depends on — see Gotchas)
 **Build/test:** `./mvnw -B -pl station/vision-api test`
 
-## Package layout
+## Section index
 
-`controller/` (every `@RestController`, now including `AssetInventoryController`/
-`InventoryExportController` — WAREHOUSE-UX W3, `CvProfileController` — CV-SETTINGS W5,
-`DiscoveryInboxController` — ZERO-CONFIG-ONBOARDING Z2c, `DiscoveryStatusController` —
-SOURCE-ONBOARDING-2 wave C, `SeatController` — CREW-CONTROL W2) · `dto/` (wire
-records only, ~190 — house rule "zero DTO leakage": no domain type is ever serialized directly;
-CREW-CONTROL W2 added `SeatsResponse`/`SeatHolderResponse`/`TakeSeatRequest`) ·
-`security/` (`CurrentUser`/
-`PrincipalResolver`/`StreamAccess`/`OpenByDesign`/`AssetAuthority`/`CapabilityAssetAuthority`/
-`SeatAccess`/`SeatAccessSettings` — the
-authorization seam, see Conventions) ·
-`live/` (SSE connection registry, per-topic ring buffers, per-connection visibility filtering,
-`SystemStatusSampler` — LIVE-POLL-RETIREMENT-PLAN wave L4, the server-side change-detecting sampler
-that owns the `system` topic's schedule, see "Live updates" below) ·
-`ws/` (`/ws/manual-control` raw `WebSocketHandler`) · `proxy/` (`HlsProxyController` — a pass-through
-edge owning no application service) · `ratelimit/` (`RateLimitFilter`/`TokenBucket`, per-principal
-`/api/**` token bucket) · `support/` (edge-local helpers: `SnapshotJpegEncoder`, `CapabilityParsing`,
-`DeviceOriginParsing`, `RemediationOrchestrator`, `VisionApiProperties`, `SystemStatusReader` — LIVE-POLL-RETIREMENT
-wave L4a, `safeStatus`/`overall`/`worstHealth` extracted from `SystemStatusController` so
-`SystemStatusSampler` can reuse the exact same rollup logic, see "Live updates" below —
-`DiscoveryStatusFacts` — the
-plain (non-DTO) crossing-seam payload behind `GET /api/discovery/status`, `InventoryExportService` —
-WAREHOUSE-UX W3, the hand-rolled CSV behind `GET /api/inventory/export`; `AssetRowFacts` — WAREHOUSE-UX
-W8, bundles the `firmware`/`totalFlightSeconds` cross-context joins `AssetController` needs, see
-Conventions; `SeatSupport` — CREW-CONTROL W2, bundles `SeatAccess`'s device/stream→asset resolution,
-asset ownership, display-name lookup, and `FORCE`/`DENIED:SEAT_HELD` audit writes, see Conventions) ·
-`demo/` (property-gated
-demo-data seeding, deletable as one unit) · `exception/` (`ApiExceptionHandler` + api-local
-exceptions) · `config/` (MVC/WebSocket/SPA `@Configuration`).
+| Area | Where |
+|---|---|
+| Package layout (who owns what) | API surface → Package layout |
+| Authorization tags (`scope`/`manage`/`manageOrg`/`administer`/`open`/`unscoped`/…) | API surface → Authorization tags |
+| Full endpoint table (every controller, method, path, DTO, access tag) | API surface → Endpoints |
+| `/ws/manual-control` (engage/mayFly/seat/denial-code protocol) | API surface → `/ws/manual-control` |
+| Exception → HTTP status/code mapping | API surface → Error mapping |
+| SSE topics, payload shapes, scoping, buffering | API surface → Live updates |
+| Rate limiting | API surface → Rate limiting |
+| DTO shapes not fully spelled out in the endpoint table (assets/inventory/discovery/seats/CV/tracks) | API surface → DTO conventions |
+| Authorization, DI, validation, testing idioms | Conventions |
+| Hard-won quirks and deliberate deviations | Gotchas |
+| Feature flags, what's real/stubbed, known limitations | Status |
 
 ## API surface
+
+### Package layout
+
+`controller/` (every `@RestController`, including `AssetInventoryController`/
+`InventoryExportController`, `CvProfileController`, `DiscoveryInboxController`,
+`DiscoveryStatusController`, `SeatController`) · `dto/` (wire records only, ~190 — house rule "zero
+DTO leakage": no domain type is ever serialized directly) · `security/` (`CurrentUser`/
+`PrincipalResolver`/`StreamAccess`/`OpenByDesign`/`AssetAuthority`/`CapabilityAssetAuthority`/
+`SeatAccess`/`SeatAccessSettings` — the authorization seam, see Conventions) · `live/` (SSE
+connection registry, per-topic ring buffers, per-connection visibility filtering,
+`SystemStatusSampler` — the server-side change-detecting sampler that owns the `system` topic's
+schedule, `LiveAndPollTraceDemand implements TraceDemandPort` — the SSE half of trace demand, see
+"Live updates" below) · `ws/` (`/ws/manual-control` raw `WebSocketHandler`) · `proxy/`
+(`HlsProxyController` — a pass-through edge owning no application service) · `ratelimit/`
+(`RateLimitFilter`/`TokenBucket`, per-principal `/api/**` token bucket) · `support/` (edge-local
+helpers: `SnapshotJpegEncoder`, `CapabilityParsing`, `DeviceOriginParsing`, `RemediationOrchestrator`,
+`VisionApiProperties`, `SystemStatusReader` — `safeStatus`/`overall`/`worstHealth` extracted from
+`SystemStatusController` so `SystemStatusSampler` can reuse the exact same rollup logic —
+`DiscoveryStatusFacts` — the plain (non-DTO) crossing-seam payload behind `GET /api/discovery/status`,
+`InventoryExportService` — the hand-rolled CSV behind `GET /api/inventory/export`, `AssetRowFacts` —
+bundles the `firmware`/`totalFlightSeconds` cross-context joins `AssetController` needs, see
+Conventions, `SeatSupport` — bundles `SeatAccess`'s device/stream→asset resolution, asset ownership,
+display-name lookup, and `FORCE`/`DENIED:SEAT_HELD` audit writes, see Conventions) · `demo/`
+(property-gated demo-data seeding, deletable as one unit) · `exception/` (`ApiExceptionHandler` +
+api-local exceptions) · `config/` (MVC/WebSocket/SPA `@Configuration`).
 
 ### Authorization tags used in the table below
 
@@ -53,12 +63,12 @@ the full mechanism.
 | Tag | Means |
 |---|---|
 | `scope` | `CurrentUser#scope()`, a `VisibilityScope`. Single-resource read/write → **404** if out of scope (existence hidden). List read → silently filtered, never 403. |
-| `manage` | `authority.mayManageFleet(ownership)` (`CurrentUser#authority()`, wave B6 — was the now-deleted `scope.canManage(ownership)`) — visible but not manageable → **403**. |
-| `manageOrg` | `authority.mayManageOrg()` (ADMIN or MANAGER; wave B6 — was `scope.canManageOrg()`. A `VIEWER` now also resolves a `GROUPS`-shaped scope, contexts/vision-identity's own wave B6, but still fails this gate — `mayManageOrg()` additionally requires `Capability.MANAGE_ORG`, which `RoleAuthority` never grants `VIEWER`) → **403** otherwise. |
-| `administer` | `authority.mayAdminister()` (deployment-global, no group boundary; wave B6 — was `scope.canAdminister()`) → **403** otherwise. |
+| `manage` | `authority.mayManageFleet(ownership)` (`CurrentUser#authority()`) — visible but not manageable → **403**. |
+| `manageOrg` | `authority.mayManageOrg()` (ADMIN or MANAGER). A `VIEWER` also resolves a `GROUPS`-shaped scope (contexts/vision-identity) but still fails this gate — `mayManageOrg()` additionally requires `Capability.MANAGE_ORG`, which `RoleAuthority` never grants `VIEWER`) → **403** otherwise. |
+| `administer` | `authority.mayAdminister()` (deployment-global, no group boundary) → **403** otherwise. |
 | `self` | Filtered to the caller's own id; takes no target-user/asset parameter, so there is nothing to authorize against. |
 | `viewer:view`/`:contribute`/`:manage` | `MapAccessPolicy` gates via `CurrentUser#viewer()` — a model kept deliberately separate from `VisibilityScope` (see `contexts/vision-map/MODULE.md`). |
-| `own profile` | Gated by profile ownership inside the application service, not `VisibilityScope` — see `ControlProfileController` note below the table. |
+| `own profile` | Gated by profile ownership inside the application service, not `VisibilityScope` — see `ControlProfileController` note in Gotchas. |
 | `open` | `@OpenByDesign` — reachable by any authenticated caller by design. |
 | `unscoped` | **No check at all.** Named in `TEMPORARY_UNSCOPED` — a real, currently-open gap, not a decision. |
 
@@ -67,25 +77,25 @@ the full mechanism.
 | Controller | Method | Path | Does | Access |
 |---|---|---|---|---|
 | AssetController | POST | `/api/assets` | Create asset | manageOrg |
-| AssetController | GET | `/api/assets?includeDeleted=` | List assets — each row now carries `firmware`/`totalFlightSeconds` (WAREHOUSE-UX W8, see Conventions) | scope |
+| AssetController | GET | `/api/assets?includeDeleted=` | List assets — each row now carries `firmware`/`totalFlightSeconds` (see Conventions) | scope |
 | AssetController | GET | `/api/assets/{id}` | Asset detail — same `firmware`/`totalFlightSeconds` join as the list | scope |
 | AssetController | PATCH | `/api/assets/{id}` | Update asset | scope for `displayName`/`attributes` only; `category` (or any managed field) needs manage — see "Authority split" in Conventions |
 | AssetController | POST | `/api/assets/{id}/state` | Lifecycle transition (active/deactivated/deleted) | manage |
 | AssetController | DELETE | `/api/assets/{id}` | Soft delete (archive) | manage |
 | AssetController | POST | `/api/assets/{id}/devices` | Attach a device | manage |
 | AssetController | DELETE | `/api/assets/{id}/devices/{deviceId}` | Detach a device | manage |
-| AssetController | GET | `/api/usages/{usageId}/telemetry?limit=` | Raw (unwindowed) telemetry trail — the **latest** `limit` samples, ascending (COMMAND-MAP-FLOW-PLAN.md B1; was earliest-first) | **unscoped** (ledger: `AssetController#telemetry`) |
+| AssetController | GET | `/api/usages/{usageId}/telemetry?limit=` | Raw (unwindowed) telemetry trail — the **latest** `limit` samples, ascending (reads `TelemetryRepositoryPort#findLatestByUsage`, not `#findByUsage` — the `/command` fleet map polls this treating the last element as "current position") | **unscoped** (ledger: `AssetController#telemetry`) |
 | AssetInventoryController | POST | `/api/assets/{id}/custody` | Issue to a custodian / return to stock (`{action:ISSUE\|RETURN,custodianId?,location?}`) | manage (via `AssetCustodyService`) |
 | AssetInventoryController | POST | `/api/assets/{id}/inventory` | Ground / release / retire (`{action:GROUND\|RELEASE\|RETIRE,kind?,summary?}`) | manage (via `AssetCustodyService`) |
 | AssetInventoryController | GET | `/api/assets/{id}/maintenance` | List an asset's maintenance history, open and closed | scope (via `MaintenanceService`) |
 | AssetInventoryController | POST | `/api/assets/{id}/maintenance` | Open a maintenance record directly, without also grounding | manage (via `MaintenanceService`) |
 | AssetInventoryController | POST | `/api/assets/{id}/maintenance/{recordId}/close` | Close an open record | manage (via `MaintenanceService`) |
-| AssetInventoryController | GET | `/api/maintenance?state=open\|closed\|all&limit=` | Fleet-wide maintenance read across every in-scope asset, each row carrying `assetId`/`assetName`/`categoryId` (WAREHOUSE-UX W8) | scope (via `MaintenanceService#fleetWide`) |
+| AssetInventoryController | GET | `/api/maintenance?state=open\|closed\|all&limit=` | Fleet-wide maintenance read across every in-scope asset, each row carrying `assetId`/`assetName`/`categoryId` | scope (via `MaintenanceService#fleetWide`) |
 | InventoryExportController | GET | `/api/inventory/export?format=csv` | Hand-rolled CSV, one row per visible asset (id/name/category/serial/make/model/registration/inventoryState/custodian/location/lifecycle/createdAt/lastFlownAt) | scope |
 | AssetStreamController | POST | `/api/assets/{id}/stream` | Start the asset's video stream | scope |
 | AssetStreamController | DELETE | `/api/assets/{id}/stream` | Stop it (idempotent) | scope |
-| AssetSessionController | POST | `/api/assets/{id}/session` | Operator "engage" — opens/promotes a usage, no video, no device traffic; the response's `pilotId` is now `CurrentUser#userId()` (ASSET-FLOWS-PLAN §2 D1p, wave BK4 — passed straight through to `UsageTracker#engage`, the caller's own identity, never a request body field) | scope |
-| AssetSessionController | DELETE | `/api/assets/{id}/session` | Operator "disengage" (idempotent; demotes rather than closes if a stream is still running); records an `AuditTrailPort` entry (`AuditAction.UPDATED`/`AuditTargetType.ASSET`) naming the calling `CurrentUser#userId()` when something was actually engaged — no entry when nothing was (AUTH-ROLES-PLAN.md D17, wave B4; attribution only, no seat/arbitration logic — CREW-CONTROL's concern) | scope |
+| AssetSessionController | POST | `/api/assets/{id}/session` | Operator "engage" — opens/promotes a usage, no video, no device traffic; the response's `pilotId` is `CurrentUser#userId()`, passed straight through to `UsageTracker#engage` — the caller's own identity, never a request body field | scope |
+| AssetSessionController | DELETE | `/api/assets/{id}/session` | Operator "disengage" (idempotent; demotes rather than closes if a stream is still running); records an `AuditTrailPort` entry (`AuditAction.UPDATED`/`AuditTargetType.ASSET`) naming the calling `CurrentUser#userId()` when something was actually engaged — no entry when nothing was (attribution only, no seat/arbitration logic — that's `SeatAccess`'s job, below) | scope |
 | AssetStatsController | GET | `/api/assets/{id}/stats` | KPI tile row (flight time/count, last battery, …) | scope |
 | AssetImageController | PUT | `/api/assets/{id}/image` | Upload cover image (≤2 MB, `AssetImageRepositoryPort` called directly) | scope |
 | AssetImageController | GET | `/api/assets/{id}/image` | Fetch it | scope |
@@ -102,15 +112,15 @@ the full mechanism.
 | StreamController | POST | `/api/devices/{deviceId}/stream` | Start a stream on a device | scope |
 | StreamController | GET | `/api/streams` | List active streams | scope (filtered) |
 | StreamController | DELETE | `/api/streams/{streamId}` | Stop (idempotent no-op if unknown/stopped) | scope |
-| StreamController | GET | `/api/streams/{streamId}/detections?limit=` | Recent per-frame detections, each now also carrying `objects` (CV-ORCHESTRATION wave W1 step 5 — the per-identity mirror, `ObjectStateResponse`, never omitted, empty when no mirror was produced) — **deliberately still the flat mirror as of wave W2.8**, not `WorldObjectResponse`: the operator/event/render relations are a platform concern this durable/detections path must never carry, see `WorldObjectResponse`'s own javadoc | scope |
+| StreamController | GET | `/api/streams/{streamId}/detections?limit=` | Recent per-frame detections, each carrying `objects` (`List<ObjectStateResponse>`, the per-identity mirror, never omitted, empty when no mirror was produced) — deliberately still the flat mirror, not `WorldObjectResponse`: the operator/event/render relations are a platform concern this durable/detections path must never carry, see `WorldObjectResponse` in DTO conventions | scope |
 | StreamController | GET | `/api/streams/{streamId}/snapshot` | Latest frame as downscaled JPEG (only binary, non-JSON response besides the HLS proxy) | scope |
-| StreamController | PATCH | `/api/streams/{streamId}/config` | Hot-patch confidence/fps/labelFilter/model/tracking — never interrupts video | scope |
-| StreamController | GET | `/api/streams/{streamId}/tracks` | Track book + duty-cycle stats + the held `FOLLOW` lock's own lifecycle (`follow`, TRACK-FOLLOW-PLAN §3.1 — omitted until a lock is issued) + `objects` (`List<WorldObjectResponse>`, `{state, operator, event, render}`, sourced from the same `TracksSnapshot#objects` fold, CV-ORCHESTRATION wave W2.8; unlike `stats`/`latency`/`rate`/`follow`, always a JSON array, never omitted); never errors on unknown stream (empty `tracks`/`objects`) — **as of wave W9 (decision E25)**, the handler itself is a 3-line collapse (`streamAccess.requireVisible` → `streamService.tracksSnapshot(id).orElse(TracksSnapshot.empty(id))` → `StreamTracksResponse.from(snapshot, Instant.now())`); every gating rule (stats/latency/rate/detectionState omission, `lockedTrackId` hoisting from `follow`) now lives in `StreamTracksResponse.from` itself, not here — the same assembly `LiveUpdateRegistry`'s `tracks:<assetId>` SSE push now calls too ("one assembly, two transports"), so this poll is the fallback it should always have been rather than the only way to learn these fields live | scope |
-| StreamController | GET | `/api/streams/{streamId}/cv/trace?last=N` | CV-ORCHESTRATION wave W2.5, docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4 — the warm trace tier's three ledgers side by side (`CvTraceResponse{streamId, gate, frame, world}`): `gate` (`GateDecisionResponse[]`, `contexts/vision-perception`'s `FrameGateLedger`, coalesced), `frame` (`FrameLedgerResponse[]`, `FrameLedgerRing`, empty unless tracing was ever requested for this stream), `world` (**as of wave W2.8, `List<WorldObjectResponse>`**, previously `ObjectStateResponse[]` — same `StreamService#worldObjects` source `/tracks` now uses, **not** windowed by `last`). `last` defaults to `DEFAULT_TRACE_LAST=50` when absent. **This read is itself trace demand** — polling this endpoint counts toward `TraceDemandPort#traceWanted` exactly like an open `cv-trace:<assetId>` SSE subscription (`StreamDetectionSupport#touchedTrace`). Never errors — unknown/stopped stream reads every list empty, same idiom as `/tracks` | scope |
-| HlsProxyController | GET | `/hls/{streamId}/**` | Reverse-proxy this asset's live HLS bytes to the mediamtx sidecar | scope (`StreamAccess#requireVisibleForHlsProxy`, checked **before** the upstream is ever contacted; fails closed on an unknown/stopped id — AUTH-ROLES-PLAN.md D10, wave B4 — unlike the other `StreamAccess`-gated rows above, which keep `requireVisible`'s no-op) — also now behind `SecurityConfig`'s secured chain's `authenticated()` rule (`/hls/**` joined `/api/**`/`/ws/**`) |
-| CvModelsController | GET | `/api/cv/models` | Detection-model roster — widened (CV-SETTINGS-PLAN §5.2) to serve the registry's live roster (`registrySource: true`) when `vision.cv.registry.enabled`, else the static config catalogue; never errors | open |
+| StreamController | PATCH | `/api/streams/{streamId}/config` | Hot-patch confidence/fps/labelFilter/model/tracking/`intent` — never interrupts video; response reports per-knob `sources` (`CvProfileResponse.Sources`, see DTO conventions); `intent:"CUSTOM"` with no `labelFilter` is `400 BAD_REQUEST` | scope |
+| StreamController | GET | `/api/streams/{streamId}/tracks` | Track book + duty-cycle stats + the held `FOLLOW` lock's own lifecycle (`follow`, omitted until a lock is issued) + `objects` (`List<WorldObjectResponse>`, `{state, operator, event, render}`, always a JSON array, never omitted); never errors on unknown stream (empty `tracks`/`objects`) — the handler itself is a 3-line collapse (`streamAccess.requireVisible` → `streamService.tracksSnapshot(id).orElse(TracksSnapshot.empty(id))` → `StreamTracksResponse.from(snapshot, Instant.now())`); every gating rule (stats/latency/rate/detectionState omission, `lockedTrackId` hoisting from `follow`) lives in `StreamTracksResponse.from` itself, not here — the same assembly `LiveUpdateRegistry`'s `tracks:<assetId>` SSE push also calls ("one assembly, two transports"), so this poll is a fallback, not the only way to learn these fields live | scope |
+| StreamController | GET | `/api/streams/{streamId}/cv/trace?last=N` | The warm trace tier's three ledgers side by side (`CvTraceResponse{streamId, gate, frame, world}`, see DTO conventions for each nested shape); `last` defaults to `DEFAULT_TRACE_LAST=50` when absent. **This read is itself trace demand** — polling this endpoint counts toward `TraceDemandPort#traceWanted` exactly like an open `cv-trace:<assetId>` SSE subscription. Never errors — unknown/stopped stream reads every list empty | scope |
+| HlsProxyController | GET | `/hls/{streamId}/**` | Reverse-proxy this asset's live HLS bytes to the mediamtx sidecar | scope (`StreamAccess#requireVisibleForHlsProxy`, checked **before** the upstream is ever contacted; fails closed on an unknown/stopped id — unlike every other `StreamAccess` caller in this module, which keeps `requireVisible`'s no-op) — also behind `SecurityConfig`'s secured chain's `authenticated()` rule (`/hls/**` joined `/api/**`/`/ws/**`) |
+| CvModelsController | GET | `/api/cv/models` | Detection-model roster — widened (`docs/plans/active/CV-SETTINGS-PLAN.md` §5.2) to serve the registry's live roster (`registrySource: true`) when `vision.cv.registry.enabled`, else the static config catalogue; never errors | open |
 | CvTrackersController | GET | `/api/cv/trackers` | Static tracker-engine roster | open |
-| OpsThresholdsController | GET | `/api/ops/thresholds` | Battery urgency thresholds (ASSET-FLOWS-PLAN §2 D6) + RC neutral-stick tolerance (FLY-CONTROL-UX-PLAN §2/BK1) — `{"battery":{"warningPercent":25,"criticalPercent":10},"rc":{"neutralTolerancePercent":5}}`, frozen wire shape, values from `vision.ops.battery.*`/`vision.ops.rc.*` | open |
+| OpsThresholdsController | GET | `/api/ops/thresholds` | Battery urgency thresholds + RC neutral-stick tolerance — `{"battery":{"warningPercent":25,"criticalPercent":10},"rc":{"neutralTolerancePercent":5}}`, frozen wire shape, values from `vision.ops.battery.*`/`vision.ops.rc.*` | open |
 | CvProfileController | GET | `/api/cv/profiles` | List profiles the caller may see (every built-in + the caller's own group's) | scope |
 | CvProfileController | GET | `/api/cv/profiles/{id}` | Read one profile | scope |
 | CvProfileController | POST | `/api/cv/profiles` | Create a profile owned by the caller's own group (201) | manageOrg |
@@ -118,27 +128,27 @@ the full mechanism.
 | CvProfileController | DELETE | `/api/cv/profiles/{id}` | Delete a non-built-in, unbound profile (204) | manageOrg |
 | CvProfileController | PUT | `/api/cv/bindings` | Bind a profile to a scope (`ASSET`/`CATEGORY`/`ORGANIZATION`), replacing any prior binding at that exact scope | manageOrg |
 | CvProfileController | DELETE | `/api/cv/bindings` | Clear a scope's binding, idempotent (204) — body-carrying DELETE, the binding's natural key has no single path id | manageOrg |
-| CvProfileController | GET | `/api/cv/profiles/effective?assetId=` | The one profile `assetId` would start with right now, plus which layer of the asset→category→organization→platform fold supplied it (`source`) | scope |
+| CvProfileController | GET | `/api/cv/profiles/effective?assetId=` | The one profile `assetId` would start with right now, plus per-knob provenance (`CvKnobSourcesResponse`, 8 fields, one per bound tier's knob) and which `intent` (if any) the matched tier persisted — see DTO conventions | scope |
 | CvProfileController | GET | `/api/cv/coverage` | Fleet-wide "what CV will do on each asset" table, one row per visible asset | scope |
 | EventController | GET | `/api/events?sinceMs&limit` | Cross-stream debounced detection events, newest first | scope (filtered) |
 | EventController | GET | `/api/streams/{streamId}/events?limit` | One stream's events | scope |
 | FleetController | GET | `/api/fleet/summary?includeArchived=` | Per-category counts + attention list | scope |
 | ReadinessController | GET | `/api/assets/{assetId}/readiness` | One asset's onboarding-readiness report | scope |
 | ReadinessController | GET | `/api/fleet/readiness` | Readiness row per visible asset | scope |
-| FlightCommandController | POST | `/api/assets/{id}/return-home` | RTL | scope + `AssetAuthority#mayFly` (AUTH-ROLES-PLAN.md §3.8, wave B4) |
+| FlightCommandController | POST | `/api/assets/{id}/return-home` | RTL | scope + `AssetAuthority#mayFly` |
 | FlightCommandController | POST | `/api/assets/{id}/mode` | Flight-mode change | scope + `mayFly` |
 | FlightCommandController | POST | `/api/assets/{id}/arm` | Arm (optional `force`) | scope + `mayFly` |
 | FlightCommandController | POST | `/api/assets/{id}/disarm` | Disarm (optional `force`) | scope + `mayFly` |
 | FlightCommandController | POST | `/api/assets/{id}/emergency-stop` | Forced disarm, kept separate from `disarm{force}` for audit-trail clarity | scope + `mayFly` |
 | FlightCommandController | POST | `/api/assets/{id}/aux-function` | `MAV_CMD_DO_AUX_FUNCTION` | scope + `mayFly` |
 | FlightCommandController | GET | `/api/assets/{id}/flight-capabilities` | What this asset supports commanding | scope |
-| SeatController | GET | `/api/assets/{id}/seats` | Both seats' current holder/expiry + the caller's own `mayTakeFlight`/`mayTakeCamera`/`mayForceSeat` (CREW-CONTROL-PLAN.md §3.6, wave W2) | scope |
-| SeatController | POST | `/api/assets/{id}/seats/{kind}` | Take-or-renew (`kind` = `flight`\|`camera`); optional `{"force":true}` body, honoured only for a caller whose `mayForceSeat` is true and only against a *different* current holder — otherwise silently ignored, not rejected | scope + `SeatAccess` (§3.2 rules 2-4; 409 if held by another and not forced, 403 if the caller has no standing for that seat) |
+| SeatController | GET | `/api/assets/{id}/seats` | Both seats' current holder/expiry + the caller's own `mayTakeFlight`/`mayTakeCamera`/`mayForceSeat` | scope |
+| SeatController | POST | `/api/assets/{id}/seats/{kind}` | Take-or-renew (`kind` = `flight`\|`camera`); optional `{"force":true}` body, honoured only for a caller whose `mayForceSeat` is true and only against a *different* current holder — otherwise silently ignored, not rejected | scope + `SeatAccess` (409 if held by another and not forced, 403 if the caller has no standing for that seat) |
 | SeatController | DELETE | `/api/assets/{id}/seats/{kind}` | Release (idempotent for a free seat or the caller's own); a manager may evict another holder (204), firing the same RC-release hook a forced `POST` does | scope + `SeatAccess` (403 if held by another and the caller may not force) |
-| ControlProfileController | GET | `/api/control-profiles` | Caller's saved layouts + built-ins; every row now also carries `stickMode`/`forwardIsUp` (C15), a built-in reporting `TransmitterView.DEFAULT` | own profile |
+| ControlProfileController | GET | `/api/control-profiles` | Caller's saved layouts + built-ins; every row carries `stickMode`/`forwardIsUp`, a built-in reporting `TransmitterView.DEFAULT` | own profile |
 | ControlProfileController | GET | `/api/control-profiles/catalog` | Every enumerable setup choice (vehicle kinds, input kinds, functions, …) | own profile |
 | ControlProfileController | POST | `/api/control-profiles` | Create (copy of the built-in for that vehicle kind) | own profile |
-| ControlProfileController | PUT | `/api/control-profiles/{id}` | Replace the whole layout; body may also carry `stickMode?`/`forwardIsUp?` (C15's `TransmitterView`, both optional in both directions — an older client sends neither and gets the platform default; a `stickMode` outside 1-4 is a 400) | own profile |
+| ControlProfileController | PUT | `/api/control-profiles/{id}` | Replace the whole layout; body may also carry `stickMode?`/`forwardIsUp?` (both optional in both directions — an older client sends neither and gets the platform default; a `stickMode` outside 1-4 is a 400) | own profile |
 | ControlProfileController | POST | `/api/control-profiles/{id}/activate` | Activate (≤1 active per owner+vehicle-kind) | own profile |
 | ControlProfileController | DELETE | `/api/control-profiles/{id}` | Delete (not a built-in) | own profile |
 | DatasetController | POST | `/api/datasets` | Create dataset | scope (`DatasetService`, gated `vision.training.enabled`) |
@@ -155,7 +165,7 @@ the full mechanism.
 | TrainingJobController | POST | `/api/datasets/{id}/train` | Start a training job (uploads the dataset to cv-service over gRPC) | manageOrg + dataset scope |
 | TrainingJobController | GET | `/api/training/jobs/{jobId}` | Poll one in-flight job's live state | **unscoped** (ledger) |
 | TrainingJobController | GET | `/api/training/jobs` | List every tracked in-flight job | **unscoped** (ledger) |
-| TrainingJobController | GET | `/api/cv/training/runs?limit=` | Most recently started **persisted** training runs, newest-first (default limit 50) | manageOrg |
+| TrainingJobController | GET | `/api/cv/training/runs?limit=` | Most recently started **persisted** training runs, newest-first (default limit 50); `datasetName` resolved via a `DatasetRepositoryPort` injected directly (read-only driven port, see Conventions) | manageOrg |
 | TrainingJobController | GET | `/api/cv/training/runs/{runId}` | One persisted run's latest state | manageOrg |
 | OnboardingController | POST | `/api/onboarding/probe` | Pre-registration vehicle probe | **unscoped** (ledger — nothing yet exists to scope against) |
 | OnboardingController | GET | `/api/assets/{assetId}/profile` | Latest vehicle profile | scope |
@@ -163,7 +173,7 @@ the full mechanism.
 | OnboardingController | POST | `/api/assets/{assetId}/remediate` | Dispatch remediation actions | manage (audited) |
 | OnboardingController | GET | `/api/assets/{assetId}/usages/{usageId}/passport` | Flight passport | scope |
 | OnboardingController | GET | `/api/assets/{assetId}/usages/{usageId}/drift` | Parameter drift vs. previous flight | scope |
-| AssetParameterController | POST | `/api/assets/{id}/parameters` | Write one Tier-A/B vehicle parameter, explicit value + consent (FLEET-RADIO R5) | manage (Tier A)/administer (Tier B), audited |
+| AssetParameterController | POST | `/api/assets/{id}/parameters` | Write one Tier-A/B vehicle parameter, explicit value + consent required for **every** write regardless of tier (see Gotchas) | manage (Tier A)/administer (Tier B), audited |
 | CameraPoseController | GET | `/api/assets/{assetId}/camera-pose` | Stored fixed-camera pose | scope |
 | CameraPoseController | PUT | `/api/assets/{assetId}/camera-pose` | Set (create/replace) pose | manage |
 | CameraPoseController | DELETE | `/api/assets/{assetId}/camera-pose` | Remove pose (idempotent) | manage |
@@ -196,31 +206,31 @@ the full mechanism.
 | GeofenceController | PUT | `/api/geofences/{id}` | Replace a zone wholesale | administer |
 | GeofenceController | DELETE | `/api/geofences/{id}` | Delete a zone | administer |
 | DiscoveryController | POST | `/api/discovery/scan` | ONVIF/mDNS/V4L2 device scan | **unscoped** (ledger) |
-| DiscoveryInboxController | GET | `/api/discovery/inbox` | `{candidates, sources}` envelope — every reported discovery candidate (newest-reported first) plus one health row per discovery mechanism (BK6/A3) | manageOrg |
+| DiscoveryInboxController | GET | `/api/discovery/inbox` | `{candidates, sources}` envelope — every reported discovery candidate (newest-reported first) plus one health row per discovery mechanism | manageOrg |
 | DiscoveryInboxController | POST | `/api/discovery/inbox/{id}/register` | Register a candidate as a new asset | manageOrg (checked inside `DiscoveryInboxService#register`, ownership from `CurrentUser`, never the body — see Conventions) |
 | DiscoveryInboxController | POST | `/api/discovery/inbox/{id}/dismiss` | Dismiss a candidate (idempotent-in-effect: dismissing an already-dismissed candidate just re-stamps status) | manageOrg |
-| DiscoveryInboxController | POST | `/api/discovery/inbox/{id}/attach` | Atomically attach a candidate's suggested stream to an **existing** asset (`{"assetId":"..."}`) — 404 unknown candidate/out-of-scope asset, 409 no suggested stream or a duplicate stream, 422 candidate already `REGISTERED` to a different asset (SOURCE-ONBOARDING-2-PLAN.md §3.2 C1) | manageOrg |
-| DiscoveryInboxController | POST | `/api/discovery/inbox/{id}/restore` | Undo a dismiss — status back to `NEW`, `registeredAssetId` cleared (SOURCE-ONBOARDING-2-PLAN.md §3.2 C5) | manageOrg |
-| DiscoveryStatusController | GET | `/api/discovery/status` | Sweep cadence + telemetry/video intake facts + per-source health, for a live onboarding status panel (SOURCE-ONBOARDING-2-PLAN.md §3.2 C2 — "the most important endpoint in the plan") | manageOrg |
+| DiscoveryInboxController | POST | `/api/discovery/inbox/{id}/attach` | Atomically attach a candidate's suggested stream to an **existing** asset (`{"assetId":"..."}`) — 404 unknown candidate/out-of-scope asset, 409 no suggested stream or a duplicate stream, 422 candidate already `REGISTERED` to a different asset | manageOrg |
+| DiscoveryInboxController | POST | `/api/discovery/inbox/{id}/restore` | Undo a dismiss — status back to `NEW`, `registeredAssetId` cleared | manageOrg |
+| DiscoveryStatusController | GET | `/api/discovery/status` | Sweep cadence + telemetry/video intake facts + per-source health, for a live onboarding status panel | manageOrg |
 | SimulationController | POST | `/api/simulations` | Start a synthetic (or video-fed) simulated asset | manageOrg |
 | SimulationController | DELETE | `/api/simulations/{assetId}` | Stop it (idempotent) | scope |
-| AuthController | POST | `/api/auth/login` | Session login (always-200 dev admin when auth disabled); body `{username,password,kiosk?}` — a non-`VIEWER` requesting `kiosk:true` is refused `400 KIOSK_NOT_PERMITTED` *after* a real successful login, and the just-established session is torn down (AUTH-ROLES-PLAN.md §3.5/§3.7, wave B3) | open |
+| AuthController | POST | `/api/auth/login` | Session login (always-200 dev admin when auth disabled); body `{username,password,kiosk?}` — a non-`VIEWER` requesting `kiosk:true` is refused `400 KIOSK_NOT_PERMITTED` *after* a real successful login, and the just-established session is torn down | open |
 | AuthController | POST | `/api/auth/logout` | Invalidate session (idempotent) | open |
-| AuthController | GET | `/api/auth/me` | Caller's own identity; `MeResponse` now carries `capabilities[]`/`scopeKind`/`mustChangePassword` (wave B3) | open (Spring Security's chain itself 401s when auth is enabled and unauthenticated) |
-| BootstrapController | GET | `/api/auth/bootstrap` | `{"required": true|false}` — `true` iff `vision.auth.enabled` and no enabled user holds an `ADMIN` membership (AUTH-ROLES-PLAN.md §3.5, wave B3) | open, anonymous, `@OpenByDesign`, `permitAll` |
+| AuthController | GET | `/api/auth/me` | Caller's own identity; `MeResponse` carries `capabilities[]`/`scopeKind`/`mustChangePassword` | open (Spring Security's chain itself 401s when auth is enabled and unauthenticated) |
+| BootstrapController | GET | `/api/auth/bootstrap` | `{"required": true\|false}` — `true` iff `vision.auth.enabled` and no enabled user holds an `ADMIN` membership | open, anonymous, `@OpenByDesign`, `permitAll` |
 | BootstrapController | POST | `/api/auth/bootstrap` | Body `{username,displayName,email,password}` → `201 MeResponse`, session established. Refused once any admin exists (`409 ALREADY_INITIALIZED`) or the password fails policy (`400 WEAK_PASSWORD`) | open only while `required`, anonymous, `@OpenByDesign` |
 | AuthPasswordController | POST | `/api/auth/password` | Self-service password change, `{currentPassword,newPassword}` → `204`, clears `mustChangePassword`; `401` wrong current, `400 WEAK_PASSWORD`, `409 AUTH_DISABLED` when `vision.auth.enabled=false` | self |
-| AssignmentController | PUT | `/api/assets/{assetId}/pilots/{userId}` | Assign a pilot (idempotent); body `{"role"?: "PILOT"\|"CREW"}` — absent body/field defaults to `PILOT` (byte-identical to pre-B3 callers), AUTH-ROLES-PLAN.md §3.4, wave B3 | manage |
+| AssignmentController | PUT | `/api/assets/{assetId}/pilots/{userId}` | Assign a pilot (idempotent); body `{"role"?: "PILOT"\|"CREW"}` — absent body/field defaults to `PILOT` | manage |
 | AssignmentController | DELETE | `/api/assets/{assetId}/pilots/{userId}` | Unassign (idempotent) | manage |
-| AssignmentController | GET | `/api/assets/{assetId}/pilots` | List an asset's pilots; `PilotResponse` now carries `role` | scope |
-| AssignmentController | GET | `/api/me/assignments` | Caller's own assigned assets; `AssignmentResponse` now carries `role` (defaults to `PILOT` if `roleFor` finds no link — see Gotchas) | self |
+| AssignmentController | GET | `/api/assets/{assetId}/pilots` | List an asset's pilots; `PilotResponse` carries `role` | scope |
+| AssignmentController | GET | `/api/me/assignments` | Caller's own assigned assets; `AssignmentResponse` carries `role` (defaults to `PILOT` if `roleFor` finds no link — see Gotchas) | self |
 | ActivityController | GET | `/api/me/activity?limit=` | Caller's own audit entries | self |
 | AuditController | GET | `/api/audit?targetType=&targetId=&limit=` | Fleet-wide audit trail | manageOrg |
 | UserAdminController | GET | `/api/users` | List visible users | scope |
 | UserAdminController | POST | `/api/users` | Create/invite a user | manageOrg (via `UserService`) |
 | UserAdminController | POST | `/api/users/{id}/enabled` | Enable/disable a user | manageOrg |
-| UserAdminController | POST | `/api/users/{userId}/password` | Admin-resets a user's password, `{"newPassword"}` → `204`, sets `mustChangePassword=true`; `400 WEAK_PASSWORD` (AUTH-ROLES-PLAN.md D13, wave B3) | manageOrg |
-| UserAdminController | PUT | `/api/users/{userId}/memberships` | Wholesale-replaces a user's group memberships, `{"memberships":[{"groupId","role"}]}` → `200 UserResponse` (AUTH-ROLES-PLAN.md D14, wave B3) | manageOrg |
+| UserAdminController | POST | `/api/users/{userId}/password` | Admin-resets a user's password, `{"newPassword"}` → `204`, sets `mustChangePassword=true`; `400 WEAK_PASSWORD` | manageOrg |
+| UserAdminController | PUT | `/api/users/{userId}/memberships` | Wholesale-replaces a user's group memberships, `{"memberships":[{"groupId","role"}]}` → `200 UserResponse` | manageOrg |
 | GroupAdminController | GET | `/api/groups` | List visible groups | scope |
 | GroupAdminController | POST | `/api/groups` | Create a group | manageOrg (via `GroupService`) |
 | LiveController | GET | `/api/live?topics=` | Open an SSE connection (`text/event-stream`) | scope, per-topic (see "Live updates" below); gated by `vision.live.enabled` (default on) |
@@ -231,11 +241,13 @@ the full mechanism.
 | UsageTimelineController | GET | `/api/usages/by-stream/{streamId}` | "What happened to stream X" | scope |
 | AfterActionController | GET | `/api/assets/{assetId}/usages/{usageId}/after-action` | JSON manifest of the evidence package | scope + export authority (`AccessDeniedException`→403 if visible but not exportable) |
 | AfterActionController | GET | `/api/assets/{assetId}/usages/{usageId}/after-action/archive` | The ZIP archive, streamed (never buffered whole) | scope + export authority |
-| SystemStatusController | GET | `/api/system/status` | Subsystem health rollup; never errors — rollup logic now lives in `support/SystemStatusReader#read` (LIVE-POLL-RETIREMENT wave L4a), this controller's wire output unchanged; the same reader backs the `system` SSE topic's server-side sampler (see "Live updates" below) | **unscoped** (ledger — deliberately: no secrets exposed) |
-| SystemNetworkController | GET | `/api/system/network` | Host's site-local IPv4 addresses (each now carrying a `kind` — `LAN`/`VIRTUAL`/`UNKNOWN`, sorted kind-first) plus `mavlinkPort` and, when mediamtx publish is configured, `videoPushPort`/`videoPushPathPrefix` (SOURCE-ONBOARDING-2-PLAN.md §3.2 C3) | **unscoped** (ledger) |
-| SystemEventsController | GET | `/api/system/events?sinceMs&limit` | Durable platform-`Event` history, newest-first (ALWAYS-ON-FLOW-PLAN wave B3) — the notification bell/`/manage/system`'s reconnect backfill; empty unless `vision.events.history.enabled` | `@OpenByDesign` (see class javadoc — durably replays exactly what the already-unscoped `event` SSE topic broadcasts) |
+| SystemStatusController | GET | `/api/system/status` | Subsystem health rollup; never errors — rollup logic lives in `support/SystemStatusReader#read`, shared with the `system` SSE topic's server-side sampler (see "Live updates" below) | **unscoped** (ledger — deliberately: no secrets exposed) |
+| SystemNetworkController | GET | `/api/system/network` | Host's site-local IPv4 addresses (each carrying a `kind` — `LAN`/`VIRTUAL`/`UNKNOWN`, sorted kind-first) plus `mavlinkPort` and, when mediamtx publish is configured, `videoPushPort`/`videoPushPathPrefix` | **unscoped** (ledger) |
+| SystemEventsController | GET | `/api/system/events?sinceMs&limit` | Durable platform-`Event` history, newest-first — the notification bell/`/manage/system`'s reconnect backfill; empty unless `vision.events.history.enabled` | `@OpenByDesign` (durably replays exactly what the already-unscoped `event` SSE topic broadcasts) |
 | DemoController | GET | `/api/demo` | Demo-button availability probe | **unscoped** (ledger); gated by `vision.demo.enabled` (default on) |
 | DemoController | POST | `/api/demo/seed` | Seed demo assets/users/streams/zones/marks; fault-tolerant (failures land in `problems`, never an error status) | scope (`DemoScenario` resolves the acting user itself) |
+
+### `/ws/manual-control`
 
 `/ws/manual-control` (WebSocket, `ws/ManualControlWebSocketHandler`) is the streaming RC-control
 transport, outside the table above since it isn't a `@RestController` route. Its handshake resolves
@@ -243,102 +255,77 @@ transport, outside the table above since it isn't a `@RestController` route. Its
 can't) and every `engage` frame re-derives scope from that handshake — see the class javadoc for the
 full frame protocol.
 
-**AUTH-ROLES-PLAN wave B4 — the per-asset `mayFly` gate on `engage`.** `ManualControlHandshakeInterceptor`
-now also stashes `Authority` (`ATTR_AUTHORITY`) into the session's attribute map at handshake time,
-alongside the pre-existing `userId`/`scope` — the one point where the HTTP thread's `SecurityContext`
-is actually valid; a WebSocket message frame (`engage` included) is dispatched later on the
-container's own message thread, which carries none. `handleEngage` now checks
-`CapabilityAssetAuthority#mayFly(Authority, UserId, AssetId)` — the interface's `mayFly(AssetId)`
-overload cannot be used here since it reads the ambient `CurrentUser`, which would throw once auth is
-enabled — **exactly once, at engage**, denying `OUT_OF_SCOPE` before `ManualControlService#engage` is
-ever called; a revocation mid-session is never re-checked (the mid-flight rule, §3.7 clause 1). The
-handler's constructor was 4-arg at the time: `(ManualControlService, CapabilityAssetAuthority,
-watchdogTimeoutMillis, engageSlowThresholdMillis)` — depends on the *concrete* class, not the
-`AssetAuthority` interface, specifically to reach this explicit-actor overload (a second public method
-on `CapabilityAssetAuthority`, not part of the frozen 3-method `AssetAuthority` interface).
+**The per-asset `mayFly` gate on `engage`.** `ManualControlHandshakeInterceptor` stashes `Authority`
+(`ATTR_AUTHORITY`) into the session's attribute map at handshake time, alongside `userId`/`scope` —
+the one point where the HTTP thread's `SecurityContext` is actually valid; a WebSocket message frame
+(`engage` included) is dispatched later on the container's own message thread, which carries none.
+`handleEngage` checks `CapabilityAssetAuthority#mayFly(Authority, UserId, AssetId)` — a second,
+explicit-actor public method on the concrete class, not part of the frozen 3-method `AssetAuthority`
+interface (that interface's own `mayFly(AssetId)` overload reads the ambient `CurrentUser`, which
+would throw once auth is enabled) — exactly once, at engage, denying `OUT_OF_SCOPE` before
+`ManualControlService#engage` is ever called; a revocation mid-session is never re-checked (the
+mid-flight rule). The handler's constructor depends on the *concrete* `CapabilityAssetAuthority`
+class, not the `AssetAuthority` interface, specifically to reach this explicit-actor overload.
 
-**CREW-CONTROL wave W2 — the flight-seat gate on `engage` (docs/plans/active/CREW-CONTROL-PLAN.md
-§3.3).** The constructor gained a third parameter, `SeatAccess`, ahead of the two `@Value` longs —
-`(ManualControlService, CapabilityAssetAuthority, SeatAccess, watchdogTimeoutMillis,
-engageSlowThresholdMillis)`. `handleEngage` calls `SeatAccess#requireFlightSeat(UserId, AssetId)` —
-the explicit-actor overload, since (as above) the message thread carries no ambient `CurrentUser` —
-immediately after the `mayFly` check and before `ManualControlService#engage` is ever called; on
-`IllegalStateException` (seat held by another) the handler answers a `denied` frame with
-`code:"SEAT_HELD"` rather than letting the exception propagate (there is no HTTP layer here to map it),
-mirroring the REST controllers' 409 with a WS-native shape. Disabled by default
-(`vision.crew.enabled=false`) via `SeatAccess`'s own settings-driven no-op, not a second code path in
-this handler.
-
-**AUTH-ROLES-PLAN wave B4 — the same `mayFly` gate on `FlightCommandController`'s six REST commands.**
-Unlike the WebSocket handler, this controller *can* reach the ambient `CurrentUser`, so it injects
-the plain `AssetAuthority` interface (not the concrete class) and calls the interface's
-`mayFly(AssetId)` overload. A new private `requireMayFly(AssetId)` throws `AccessDeniedException`
-(→403 via `ApiExceptionHandler`, unchanged mapping) before any of `returnHome`/`setMode`/`arm`/
-`disarm`/`emergencyStop`/`auxFunction` ever calls `FlightCommandService` — deliberately redundant
-with that service's own pre-existing `scope().includes(...)` check in `contexts/vision-flight`
-(`DefaultFlightCommandService`, out of this module's reach): the edge gate is strictly narrower (adds
-the `COMMAND_FLIGHT` capability and, for an `ASSIGNED_ASSETS` caller, the `PILOT`-not-`CREW` seat
-narrowing), so the service's own check never actually fires once this one has denied — it stays as
-the scope-only backstop for any future caller that reaches the service directly. `GET
-/api/assets/{id}/flight-capabilities` (a read) is untouched — it keeps its existing 404-on-out-of-scope
+**`FlightCommandController`'s six REST commands use the same `mayFly` gate, differently.** Unlike the
+WebSocket handler, this controller *can* reach the ambient `CurrentUser`, so it injects the plain
+`AssetAuthority` interface and calls the interface's `mayFly(AssetId)` overload. A private
+`requireMayFly(AssetId)` throws `AccessDeniedException` (→403) before any of
+`returnHome`/`setMode`/`arm`/`disarm`/`emergencyStop`/`auxFunction` ever calls
+`FlightCommandService` — deliberately redundant with that service's own pre-existing
+`scope().includes(...)` check in `contexts/vision-flight` (out of this module's reach): the edge gate
+is strictly narrower (adds the `COMMAND_FLIGHT` capability and, for an `ASSIGNED_ASSETS` caller, the
+`PILOT`-not-`CREW` seat narrowing), so the service's own check never actually fires once this one has
+denied — it stays as the scope-only backstop for any future caller that reaches the service directly.
+`GET /api/assets/{id}/flight-capabilities` (a read) keeps its existing 404-on-out-of-scope
 convention, not this 403 gate.
 
-**CREW-CONTROL wave W2 — the seat gate, layered after `mayFly`/`mayOperateCamera`, on five REST
-controllers and the WS handler above.** `SeatAccess` (`security/SeatAccess.java`) is the one
-collaborator every guard calls — constructed from `SeatService` (contexts/vision-flight),
-`AssetAuthority`, `CurrentUser`, `SeatSupport`, and `SeatAccessSettings` (5 params, at the
-constructor ceiling, documented in its own javadoc). `requireFlightSeat(AssetId)`/`requireCameraSeat
-(AssetId|DeviceId|StreamId)` are pass-through no-ops when `vision.crew.enabled=false` (the opt-in
-guardrail: default config is byte-identical to pre-W2 behaviour) and otherwise take-or-renew the
-caller's own seat, throwing `IllegalStateException` (→409, "Asset `<uuid>` `<kind>` seat is held by
-`<displayName>`") only when a *different* user holds it — per §3.3 rule 3, a flight-seat holder never
-conflicts on the camera seat and instead silently preempts any prior camera holder. Insertion points:
-`FlightCommandController#returnHome/setMode/arm/disarm/emergencyStop/auxFunction` (lines 119, 137,
-157, 178, 202, 225) each call `seatAccess.requireFlightSeat(assetId)` immediately after the
-pre-existing `mayFly` check; `AssetStreamController#startStream/stopStream` (lines 135, 157) and
-`StreamController#start/stop/updateConfig`-family (lines 193, 242, 291) call
-`seatAccess.requireCameraSeat(...)`; `AssetSessionController#engage/disengage` (lines 125, 147) call
-`seatAccess.requireFlightSeat(assetId)`. Each of these four controllers' constructors gained a
-trailing `SeatAccess` parameter — `AssetStreamController` to 6 args, `StreamController` to 7 (both
-past the 5-arg ceiling, documented in their own javadoc following the pre-existing `StreamAccess`
-precedent at 6). `SeatController` (`controller/SeatController.java`) is a new, separate controller
-exposing `GET/POST/DELETE /api/assets/{id}/seats[/{kind}]` directly over `SeatAccess`'s
-`seats`/`takeSeat`/`releaseSeat` — see the Endpoints table and "DTO conventions" above. **FLEET-RADIO
-R2** added one additive `denied` reason code, `VEHICLE_UNIDENTIFIED`
-— no frame added/removed, no field renamed: `engage` now catches `vision-flight`'s
-`VehicleUnidentifiedException` (a subtype of, and ahead of, the existing `IllegalStateException`
-clause) and maps it straight to `new ManualControlDeniedFrame(CODE_VEHICLE_UNIDENTIFIED, e.getMessage())`
-instead of the generic `IllegalStateException` clause's own code — the message is one of three
-distinct, operator-facing sentences (`vision-flight`'s `UnidentifiedReason`-keyed text), never
-sniffed or rewritten here. `ManualControlDeniedFrame.code` is a plain `String`, not a closed enum, so
-this needed no wire-contract/DTO change at all.
+**The flight-seat gate on `engage` (docs/plans/active/CREW-CONTROL-PLAN.md §3.3).** The handler's
+constructor carries `(ManualControlService, CapabilityAssetAuthority, SeatAccess,
+watchdogTimeoutMillis, engageSlowThresholdMillis)`. `handleEngage` calls
+`SeatAccess#requireFlightSeat(UserId, AssetId)` — the explicit-actor overload, since the message
+thread carries no ambient `CurrentUser` — immediately after the `mayFly` check and before
+`ManualControlService#engage` is ever called; on `IllegalStateException` (seat held by another) the
+handler answers a `denied` frame with `code:"SEAT_HELD"` rather than letting the exception propagate
+(there is no HTTP layer here to map it), mirroring the REST controllers' 409 with a WS-native shape.
+Disabled by default (`vision.crew.enabled=false`) via `SeatAccess`'s own settings-driven no-op, not a
+second code path in this handler.
 
-**FLY-CONTROL-UX H1 — catch-all denial + engage-duration instrumentation.** Traced from a real
-report ("Control denied — the station never confirmed control"): `docs/plans/active/fly-control-ux/R3-handshake-denial.md`
-proved this is a client-local 4s abandon (`ManualControlClient`'s `ENGAGE_TIMEOUT_MS`) that fires
-only when *neither* an `engaged` nor a `denied` frame arrives, and that `engage()`'s whole path
+**The seat gate on five REST controllers, layered after `mayFly`/`mayOperateCamera`.** `SeatAccess`
+(`security/SeatAccess.java`) is the one collaborator every guard calls — constructed from
+`SeatService` (contexts/vision-flight), `AssetAuthority`, `CurrentUser`, `SeatSupport`, and
+`SeatAccessSettings` (5 params, at the constructor ceiling, documented in its own javadoc).
+`requireFlightSeat(AssetId)`/`requireCameraSeat(AssetId|DeviceId|StreamId)` are pass-through no-ops
+when `vision.crew.enabled=false` (default config is byte-identical to pre-seat-gate behaviour) and
+otherwise take-or-renew the caller's own seat, throwing `IllegalStateException` (→409, "Asset
+`<uuid>` `<kind>` seat is held by `<displayName>`") only when a *different* user holds it — a
+flight-seat holder never conflicts on the camera seat and instead silently preempts any prior camera
+holder. Call sites: `FlightCommandController#returnHome/setMode/arm/disarm/emergencyStop/auxFunction`
+each call `seatAccess.requireFlightSeat(assetId)` immediately after the `mayFly` check;
+`AssetStreamController#startStream/stopStream` and `StreamController#start/stop/updateConfig`-family
+call `seatAccess.requireCameraSeat(...)`; `AssetSessionController#engage/disengage` call
+`seatAccess.requireFlightSeat(assetId)`. `AssetStreamController`'s constructor carries 6 args,
+`StreamController`'s 7 (both past the 5-arg ceiling, documented in their own javadoc — `StreamController`
+was already at 6 for `StreamAccess` before the seat gate, so 7 continues an existing precedent).
+`SeatController` (`controller/SeatController.java`) is a separate controller exposing
+`GET/POST/DELETE /api/assets/{id}/seats[/{kind}]` directly over `SeatAccess`'s
+`seats`/`takeSeat`/`releaseSeat` — see the Endpoints table and "DTO conventions" below.
+
+**Denial codes.** `ManualControlDeniedFrame.code` is a plain `String`, not a closed enum. Beyond the
+three originally-documented causes (`AccessDeniedException`, `VehicleUnidentifiedException` →
+`VEHICLE_UNIDENTIFIED`, `IllegalStateException` including `SEAT_HELD`), `handleEngage` has a fourth,
+final `catch (RuntimeException e)` — it logs WARNING with the full stack trace and answers `denied`
+with the additive code `INTERNAL_ERROR`, a generic operator-facing sentence plus the exception's
+simple class name **only** (never its message, which could leak internals). This guarantees
+`handleEngage` never returns without a reply on an open socket; the `engaged` response DTO is built
+*before* `state.session` is assigned, so a failure composing it cannot leave local state claiming a
+session the client was told was denied. Every `engage` attempt's wall time is measured and logged —
+WARNING once it reaches `vision.rc.engage-slow-threshold-ms` (default 2000, `@Value`, vision-app's
+`application.yaml` documents the same default), DEBUG otherwise. `engage()`'s own path
 (`DefaultManualControlService` → `MavlinkManualControlSender` → `mavlink-core`'s
-`ManualControlService`) is local and ack-less — no vehicle round-trip exists to be slow, so a
-firing timeout is always a station fault. `handleEngage` now has a fourth, final
-`catch (RuntimeException e)` after the three documented types (`AccessDeniedException`/
-`VehicleUnidentifiedException`/`IllegalStateException`) — it logs WARNING with the full stack trace
-and still answers `denied` with the additive code `INTERNAL_ERROR`, a generic operator-facing
-sentence plus the exception's simple class name **only** (never its message, which could leak
-internals). This closes the one gap R3's trace could not rule out (an uncaught type — e.g. a plain
-`NoSuchElementException` from an unknown `assetId`, which `AssetService#details` throws and none of
-the three documented types cover) and guarantees `handleEngage` never returns without a reply on an
-open socket; the `engaged` response DTO is now built *before* `state.session` is assigned, so a
-failure composing it cannot leave local state claiming a session the client was told was denied.
-Every `engage` attempt's wall time is also measured and logged — WARNING once it reaches
-`vision.rc.engage-slow-threshold-ms` (default 2000, read via `@Value`, vision-app's `application.yaml`
-documents the same default), DEBUG otherwise — so a real "never confirmed" report is diagnosable from
-this station's own log instead of a bisect. Blocking audit (read-only, no bound added): every step
-under `engage()` — scope/readiness/maintenance checks (DB-backed, no live link, per
-`DefaultManualControlService`'s own javadoc), `MavlinkManualControlSender.engage` (a map read plus a
-non-blocking `ManualControlService(mavlink-core).engage`, which only checks `PeerDirectory` and calls
-`TxScheduler.repeat` — itself a non-blocking `ScheduledExecutorService.scheduleAtFixedRate`) — was
-traced and found to contain no wait, sleep, or socket read that could approach 4s; no bound was added
-because none was needed.
+`ManualControlService`) is local and ack-less by design — there is no vehicle round-trip to be slow,
+so a firing client-side timeout is always a station fault (see MODULE-HISTORY.md's H1 entry for the
+trace that established this).
 
 ### Error mapping (`ApiExceptionHandler`, body `{"error","message"}`)
 
@@ -349,88 +336,86 @@ because none was needed.
 | `AccessDeniedException` (platform) | 403 | `FORBIDDEN` — a scoped **command** against something the caller cannot see; never used for a scoped *read*, which 404s instead (see Conventions) |
 | `IllegalStateException` | 409 | `CONFLICT` |
 | `HlsUpstreamUnavailableException` | 502 | `BAD_GATEWAY` — upstream unreachable; a normal non-2xx *received* from upstream passes through verbatim instead |
-| `ProbeFailedException`, `DiscoveryCandidateAlreadyRegisteredException` | 422 | `UNPROCESSABLE_ENTITY` — the latter shares this status for `POST /api/discovery/inbox/{id}/attach` against a candidate already `REGISTERED` to a different asset (SOURCE-ONBOARDING-2-PLAN.md §3.2 C1) |
+| `ProbeFailedException`, `DiscoveryCandidateAlreadyRegisteredException` | 422 | `UNPROCESSABLE_ENTITY` — the latter shares this status for `POST /api/discovery/inbox/{id}/attach` against a candidate already `REGISTERED` to a different asset |
 | `PayloadTooLargeException` | 413 | `PAYLOAD_TOO_LARGE` |
 | `GeoServiceUnavailableException` | 503 | `SERVICE_UNAVAILABLE` — request was well-formed/authorized, the collaborator it proxies to (cv-service) is down |
+
+Per-endpoint business-rule codes that don't fit this cross-cutting table (`KIOSK_NOT_PERMITTED`,
+`WEAK_PASSWORD`, `ALREADY_INITIALIZED`, `AUTH_DISABLED`, the discovery-inbox 404/409/422 trio, `intent`
+validation 400s, …) are documented inline in the endpoint table's "Does"/"Access" columns instead —
+each has exactly one caller, so a second cross-cutting table would only add indirection.
 
 ### Live updates (`com.drones.vision.api.live`)
 
 One `LiveUpdateRegistry` implements all seven per-context live-update ports (`FleetLiveUpdatePort`,
 `TelemetryLiveUpdatePort`, `DetectionLiveUpdatePort`, `MapLiveUpdatePort`, `EventLiveUpdatePort`,
-`TrackCorrectionLiveUpdatePort`, and — LIVE-POLL-RETIREMENT-PLAN wave L3 — `GeofenceLiveUpdatePort`,
-`contexts/vision-flight`'s new port) and owns every SSE connection, process-local/single-instance
-only. Topics: `fleet`, `event`, `devices`, `detection-events`, `discovery`, `zones` (all always-on, no
-auth needed beyond the connection itself — see below for `discovery`'s own delta-only semantics), plus
-a tenth always-on topic `system` that carries no per-context port at all (see below), `map` and
-per-asset `telemetry:<id>`/`detections:<id>`/`geo:<id>`/`tracks:<id>`/`cv-trace:<id>` (individually
-authorized — see below; the last two, CV-ORCHESTRATION wave W2.5, are documented in their own
-paragraph further down).
+`TrackCorrectionLiveUpdatePort`, `GeofenceLiveUpdatePort` — `contexts/vision-flight`'s port) and owns
+every SSE connection, process-local/single-instance only. Topics: `fleet`, `event`, `devices`,
+`detection-events`, `discovery`, `zones` (all always-on, no auth needed beyond the connection itself
+— see below for `discovery`'s own delta-only semantics), plus a tenth always-on topic `system` that
+carries no per-context port at all (see below), `map` and per-asset `telemetry:<id>`/
+`detections:<id>`/`geo:<id>`/`tracks:<id>`/`cv-trace:<id>` (individually authorized — see below; the
+last two are documented in their own paragraph further down).
 Delivery is coalesced (leading+trailing, ~150ms default) per topic, not per connection, so exactly one
 resumable `seq` exists per topic; `Last-Event-ID` resumes from a per-topic ring buffer (FIFO or
 latest-only depending on topic). Tunables live in `VisionApiProperties.Live` (coalesce/heartbeat/buffer
 sizes/send-timeout/buffer-eviction/`systemSample`), bound from `vision.api.live.*`.
 
-**`zones` (LIVE-POLL-RETIREMENT-PLAN §3 D2/§4.1, wave L3) — geofence create/update/delete, never
-riding `map`.** Zones deliberately do not ride the pre-existing `map` topic: no `map -> flight`
-architecture edge exists (`ContextArchitectureTest`, vision-app), and zones are
-`contexts/vision-flight`'s own concept, not `vision-map`'s. Follows the one-port-per-context idiom
-exactly like `MapLiveUpdatePort`/`MapEvent`: `contexts/vision-flight` gained `GeofenceZoneEvent`
-(`Action{CREATED,UPDATED,DELETED}` + `GeofenceZone`) and `GeofenceLiveUpdatePort`
-(`publishZoneEvent(GeofenceZoneEvent)`), and `DefaultGeofenceService` publishes on every
-create/update/delete, immediately after `GeofenceMonitor#refresh()`. The envelope is
-`GeofenceZoneEventPayload{action, zone}` — `action` one of `"CREATED"`/`"UPDATED"`/`"DELETED"`, `zone`
-the same `GeofenceZoneResponse` shape `GET /api/geofences` already returns. **`DELETED` carries the
-last-known zone in full** — `DefaultGeofenceService#delete` captures `require(id)`'s return value
+**`zones` — geofence create/update/delete, never riding `map`.** Zones deliberately do not ride the
+pre-existing `map` topic: no `map -> flight` architecture edge exists (`ContextArchitectureTest`,
+vision-app), and zones are `contexts/vision-flight`'s own concept, not `vision-map`'s. Follows the
+one-port-per-context idiom exactly like `MapLiveUpdatePort`/`MapEvent`: `contexts/vision-flight`
+carries `GeofenceZoneEvent` (`Action{CREATED,UPDATED,DELETED}` + `GeofenceZone`) and
+`GeofenceLiveUpdatePort` (`publishZoneEvent(GeofenceZoneEvent)`), and `DefaultGeofenceService`
+publishes on every create/update/delete, immediately after `GeofenceMonitor#refresh()`. The envelope
+is `GeofenceZoneEventPayload{action, zone}` — `action` one of `"CREATED"`/`"UPDATED"`/`"DELETED"`,
+`zone` the same `GeofenceZoneResponse` shape `GET /api/geofences` already returns. **`DELETED` carries
+the last-known zone in full** — `DefaultGeofenceService#delete` captures `require(id)`'s return value
 before removing it, rather than discarding it, specifically so a subscriber can render "zone X was
 deleted" without a separate lookup. Buffer capacity mirrors `discoveryBuffer` (shares
 `eventBufferCapacity`, FIFO, not latest-only — a `DELETED` a resuming viewer missed must still be
 delivered, not collapsed away by a later `UPDATED` to a different zone).
 
-**`tracks:<assetId>`/`cv-trace:<assetId>` (CV-ORCHESTRATION-PLAN.md §4.4/§4.5/§4.6/§4.9/§5, waves
-W2.5/W2.8/W9) — the live halves of `GET /api/streams/{id}/tracks` and
+**`tracks:<assetId>`/`cv-trace:<assetId>` — the live halves of `GET /api/streams/{id}/tracks` and
 `GET /api/streams/{id}/cv/trace`'s `frame`, piggybacked onto the existing `pendingDetections` drain
 loop rather than a new publish call site.** `pendingDetections` holds a `PendingDetection(DetectionResult
 result, TracksSnapshot tracksSnapshot)` per asset — `publishDetections`'s own 3rd parameter
-(`contexts/vision-perception`'s `DetectionLiveUpdatePort`; widened from a bare `List<WorldObject>` to
-the whole `TracksSnapshot` in wave W9), carried verbatim so `detections`/`tracks`/`cv-trace` all come
-from one coherent snapshot per result instead of three independent reads. Every time one is drained
-for the `detections:<assetId>` topic, `flushPending` also (a) **unconditionally** publishes the whole
-`StreamTracksResponse` snapshot (`StreamTracksResponse.from(pending.tracksSnapshot(), Instant.now())`
-— wave W9, decision E25) onto `tracks:<assetId>` — the exact same assembly `StreamController#tracks`
-itself now calls ("one assembly, two transports"; before W9 this topic carried only the bare
-`List<WorldObjectResponse>` fold, which is why the REST poll used to be the only way to learn
-`stats`/`latency`/`rate`/`follow` live). `TRACKS` rides the exact same cadence as `DETECTIONS`, every
+(`contexts/vision-perception`'s `DetectionLiveUpdatePort`), carried verbatim so `detections`/`tracks`/
+`cv-trace` all come from one coherent snapshot per result instead of three independent reads. Every
+time one is drained for the `detections:<assetId>` topic, `flushPending` also (a) **unconditionally**
+publishes the whole `StreamTracksResponse` snapshot (`StreamTracksResponse.from(pending.tracksSnapshot(),
+Instant.now())`) onto `tracks:<assetId>` — the exact same assembly `StreamController#tracks` itself
+calls ("one assembly, two transports"). `TRACKS` rides the exact same cadence as `DETECTIONS`, every
 drain, since the snapshot is computed for free alongside `detections[]` whenever tracking is on; and
 (b) publishes one `FrameLedgerResponse` (from `result.ledger()`) onto `cv-trace:<assetId>` **only when
 `ledger()` is present** — most ticks carry no ledger at all (tracing must have been separately
 demanded via `TraceDemandPort`), so most ticks publish nothing on this topic. Both ring buffers are
 capacity-1 latest-wins (`LiveRingBuffer(1, true)`), same as `DETECTIONS` — a newly (re)subscribing
-connection now replays the last full `StreamTracksResponse` snapshot on `tracks:<assetId>`, not just
-the object fold.
+connection replays the last full `StreamTracksResponse` snapshot on `tracks:<assetId>`, not just an
+object list. **Payload size**: the `tracks:` envelope rides at frame cadence carrying the whole
+snapshot (~1.6KB), not the old ~243-byte bare object list — a fact worth weighing before any
+SSE-fan-out/scale decision.
 `LiveUpdateRegistry#watchingTrace(AssetId)` — `true` iff at least one live connection currently
 subscribes to that asset's `cv-trace:<assetId>` topic — is the SSE half of `LiveAndPollTraceDemand`'s
 OR (the poll half is `StreamDetectionSupport#touchedTrace`, a recent `GET .../cv/trace` timestamp).
-**`CV_TRACE` is deliberately removable from a stale-connection sweep the same way `DETECTIONS`/
+`CV_TRACE` is deliberately removable from a stale-connection sweep the same way `DETECTIONS`/
 `DETECTION_EVENTS`/… are (an inspector's connection dying should stop counting as trace demand); `TRACKS`
-is deliberately left at this method's pre-existing broader scope, matching `GEO`** — see the sweep
-method's own inline comment for the exact reasoning; do not "clean up" the asymmetry, it is
-intentional.
+is deliberately left at this method's broader scope, matching `GEO` — do not "clean up" the asymmetry,
+it is intentional (see the sweep method's own inline comment for the full reasoning).
 
-**`system` (LIVE-POLL-RETIREMENT-PLAN §3 D3/§4.2, wave L4) — a server-side sampler, not a port.**
-Unlike every other topic, nothing calls `LiveUpdateRegistry` through a per-context port to publish
-`system`; `live/SystemStatusSampler` (a plain `@Component`, gated the same way `LiveUpdateRegistry`
-itself is — `@ConditionalOnProperty(prefix="vision.live", name="enabled", matchIfMissing=true)`) owns
-its own `ScheduledExecutorService` and calls `LiveUpdateRegistry#publishSystemStatus(SystemStatusResponse)`
-— one new public method, no new port interface, no new constructor collaborator on the registry
-itself (`systemBuffer` is inline-field-initialized `new LiveRingBuffer(1, true)`, exactly like
-`fleetBuffer`). The envelope's payload is the verbatim `SystemStatusResponse` `GET /api/system/status`
-already returns — same shape `support/SystemStatusReader#read` builds for both callers (wave L4a
-extracted `safeStatus`/`overall`/`worstHealth` out of `SystemStatusController` for this reuse; that
-controller's own wire output is unchanged, guarded by its pre-existing, untouched test suite). The
-sampler ticks on its own schedule (`vision.api.live.systemSample`, default 5s, first tick at delay
-`0` so the buffer is populated before any connection can possibly arrive — `LiveUpdateRegistry` needs
-no `seedIfEmpty` case for `system` because of this) and broadcasts **only on change** — a genuine
-poll-to-push conversion, not a fixed-cadence relay.
+**`system` — a server-side sampler, not a port.** Unlike every other topic, nothing calls
+`LiveUpdateRegistry` through a per-context port to publish `system`; `live/SystemStatusSampler` (a
+plain `@Component`, gated the same way `LiveUpdateRegistry` itself is —
+`@ConditionalOnProperty(prefix="vision.live", name="enabled", matchIfMissing=true)`) owns its own
+`ScheduledExecutorService` and calls `LiveUpdateRegistry#publishSystemStatus(SystemStatusResponse)` —
+one public method, no port interface, no new constructor collaborator on the registry itself
+(`systemBuffer` is inline-field-initialized `new LiveRingBuffer(1, true)`, exactly like `fleetBuffer`).
+The envelope's payload is the verbatim `SystemStatusResponse` `GET /api/system/status` already
+returns — same shape `support/SystemStatusReader#read` builds for both callers. The sampler ticks on
+its own schedule (`vision.api.live.systemSample`, default 5s, first tick at delay `0` so the buffer is
+populated before any connection can possibly arrive — `LiveUpdateRegistry` needs no `seedIfEmpty` case
+for `system` because of this) and broadcasts **only on change** — a genuine poll-to-push conversion,
+not a fixed-cadence relay.
 
 **Self-feedback hazard and its frozen mitigation.** `live/LiveUpdateStatusProvider` reports on the
 `live-updates` subsystem (connection count, `LiveRingBuffer#everDropped()` across every buffer) — the
@@ -444,45 +429,41 @@ still rides in the broadcast payload (a subscriber still sees it), it just never
 own. Critically, `Fingerprint.overall` is **recomputed** via `SystemStatusReader#worstHealth` over the
 filtered (live-updates-excluded) list, never copied from `SystemStatusResponse#overall()` — so a
 `live-updates`-only health flip can't move the comparison's overall either. **Known, deliberately
-unfixed defect this mitigation route around**: `fleetBuffer` is `new LiveRingBuffer(1, true)`
+unfixed defect this mitigation routes around**: `fleetBuffer` is `new LiveRingBuffer(1, true)`
 (latest-only), and `LiveRingBuffer#everDropped()` is set by collapse-to-latest replacement, so
 `live-updates` already reports `DEGRADED` from the second fleet change onward with a misleading
-detail — exactly why the exclusion above is necessary, not merely a change-detection convenience. Out
-of scope for this wave to fix; see `LiveRingBuffer`'s own javadoc.
+detail — exactly why the exclusion above is necessary, not merely a change-detection convenience. See
+`LiveRingBuffer`'s own javadoc.
 
-**Discovery now also has a `discovery` SSE topic, added on top of the still-pollable inbox
-(SOURCE-ONBOARDING-2-PLAN.md §3.2 C4 — supersedes the Z2c "poll-only" call below for the delta
-case).** `LiveTopicKind.DISCOVERY`/`LiveTopic.DISCOVERY` is a ninth always-on topic (no
-per-connection authorization beyond the connection itself, same posture as `fleet`/`event`/
-`devices`/`detection-events`). The envelope is `DiscoveryEventPayload{action, candidate}` —
-`action` one of `"REPORTED"`/`"REGISTERED"`/`"DISMISSED"`/`"RESTORED"`, `candidate` the same
-`DiscoveryCandidateResponse` shape `GET /api/discovery/inbox` already returns. **Delta-only, never
-per-sweep**: `vision-app`'s `LiveUpdateDiscoveryInboxService` decorator only calls
+**`discovery` topic, on top of the still-pollable inbox.** `LiveTopicKind.DISCOVERY`/`LiveTopic.DISCOVERY`
+is a ninth always-on topic (no per-connection authorization beyond the connection itself, same posture
+as `fleet`/`event`/`devices`/`detection-events`). The envelope is `DiscoveryEventPayload{action,
+candidate}` — `action` one of `"REPORTED"`/`"REGISTERED"`/`"DISMISSED"`/`"RESTORED"`, `candidate` the
+same `DiscoveryCandidateResponse` shape `GET /api/discovery/inbox` already returns. **Delta-only,
+never per-sweep**: `vision-app`'s `LiveUpdateDiscoveryInboxService` decorator only calls
 `LiveUpdateRegistry#publishDiscoveryEvent` when a sweep's `ReportOutcome#changed()` is `true` (a
 genuinely new candidate, or a status/discovered-vs-not change — not a routine last-seen refresh) or
 on an operator verb (`register`/`dismiss`/`attach`/`restore`), so a client watching this topic sees
 exactly the events an operator would call "something happened," never the sweep's own cadence.
 Gated by `vision.discovery.live.enabled` (default **true** — see `vision-app`'s MODULE.md for the
-wiring). The original Z2c reasoning for keeping `GET /api/discovery/inbox` itself pollable, not SSE,
-is unchanged: a client without an open SSE connection still has a correct, if latent, view from
-polling; the two are complementary, not a replacement.
+wiring). `GET /api/discovery/inbox` itself stays pollable, not SSE-only: a client without an open SSE
+connection still has a correct, if latent, view from polling; the two are complementary, not a
+replacement.
 
-**`devices` now also fires on a real stream-state transition (SOURCE-ONBOARDING-2-PLAN.md §3.2 C6).**
-`LiveUpdateRegistry#publishDevicesSnapshot()` (a plain, no-arg re-broadcast of the current device
-list, pre-existing) is now additionally invoked by a real `StreamStateObserver` — wired in
-`vision-app`'s `ApplicationServiceWiring` — every time `DefaultStreamService` computes a stream-state
-transition (start/stop/error), not only on the triggers that already called it. Gated by
-`vision.live.stream-state-push.enabled` (default **true**); the observer itself is edge-triggered and
-fires synchronously, isolated from a throwing implementation by `DefaultStreamService` — see
-`vision-app`'s MODULE.md for the wiring.
+**`devices` also fires on a real stream-state transition.** `LiveUpdateRegistry#publishDevicesSnapshot()`
+(a plain, no-arg re-broadcast of the current device list) is additionally invoked by a real
+`StreamStateObserver` — wired in `vision-app`'s `ApplicationServiceWiring` — every time
+`DefaultStreamService` computes a stream-state transition (start/stop/error), not only on the triggers
+that already called it. Gated by `vision.live.stream-state-push.enabled` (default **true**); the
+observer itself is edge-triggered and fires synchronously, isolated from a throwing implementation by
+`DefaultStreamService` — see `vision-app`'s MODULE.md for the wiring.
 
-**`event` now has a durable counterpart (ALWAYS-ON-FLOW-PLAN wave B3).** The `event` topic itself is
-unchanged — still live-only, still lost on disconnect — but `GET /api/system/events` (own row in the
-endpoint table above, `SystemEventsController`) now durably replays the same `platform.Event`s this
-topic fans out, for a caller that missed them across a page load or a reconnect. Same
-open-to-any-connected-caller posture as the topic it backfills (`@OpenByDesign`, not scope-filtered —
-see that controller's own class javadoc for the full reasoning), empty unless `vision-app`'s
-`vision.events.history.enabled` is on.
+**`event` has a durable counterpart.** The `event` topic itself is live-only, lost on disconnect — but
+`GET /api/system/events` (own row in the endpoint table above, `SystemEventsController`) durably
+replays the same `platform.Event`s this topic fans out, for a caller that missed them across a page
+load or a reconnect. Same open-to-any-connected-caller posture as the topic it backfills
+(`@OpenByDesign`, not scope-filtered), empty unless `vision-app`'s `vision.events.history.enabled` is
+on. `DETECTION` is never durably recorded there (excluded at the publisher, not the controller).
 
 **Scoped delivery**: `MapVisibility` gates the `map` topic by `MapAccessPolicy.canView`; `LiveAssetAccess`
 gates per-asset `telemetry`/`detections`/`geo` by `StreamAccess.visibleAsset`. Both filter at
@@ -493,30 +474,22 @@ TTL — 5s for assets, 10s for map — with no `PATCH` needed to trigger it). Bo
 behind a `Predicate` field is invisible to `EndpointAuthorizationTest`'s static call-graph guard,
 which only recognizes a direct call to `CurrentUser.scope()`/`.viewer()` or a class named `*Access`.
 
-**`fleet` is filtered per connection too (fix/fleet-topic-scope), same mechanism as `map`.**
-`LiveUpdateRegistry#freshFleetEnvelope` builds its snapshot from the unscoped `AssetService#assets()`
-overload and `fleetBuffer` stays deliberately unfiltered (so a `Last-Event-ID` resume can re-filter
-against whatever the resuming viewer may see *now*, exactly like `map`) — narrowing happens only at
-delivery time, in `LiveConnection#project`, which replaced the old `mayReceive(envelope): boolean`.
-`project` returns a `LiveEnvelopeResponse` (nullable), not a `boolean`: a `map` event still resolves
-to either the same envelope or `null` (outright dropped for a connection that may not see its
-`layerId`), but a `fleet` envelope (identified by `type.equals(LiveTopicKind.FLEET.wire())` — never
-`instanceof List`, since the envelope's `payload` is an erased `Object`) is never dropped; its asset
-list is narrowed to `assetVisibility.test(assetId)`, and a viewer whose scope includes nothing still
-gets an envelope carrying an empty list, not silence. `project` returns the identical envelope
-instance when nothing needed filtering — load-bearing for `broadcast`'s serialize-once optimization
-(SCALE-100-PLAN §5 S2): `broadcast` still serializes an envelope exactly once and reuses that one
-`String` for every connection whose `project` returned that same instance back, paying a second,
-per-connection re-serialize only for a connection that actually got a narrower `map`/`fleet` view.
-The same projection now also runs on `connect()`'s snapshot/resume burst and `updateTopics()`'s
-newly-added-topic burst — both used to serialize an unfiltered envelope straight from the buffer,
-which was the actual leak (a fresh connection's seeded `fleet` snapshot, and any later resume, both
-carried every asset regardless of the caller's scope). Covered end-to-end by
-`LiveFleetScopingTest` (connect-time snapshot, broadcast delta, `Last-Event-ID` resume — proving the
-buffer stays unfiltered and is re-filtered per resuming viewer, UNBOUNDED-admin no-regression,
-empty-scope-viewer-gets-empty-list) and by three pure-unit cases in `LiveUpdateRegistryTest`
-(broadcast narrowing + UNBOUNDED no-regression, empty-list-not-dropped, and a same-instance
-assertion on a non-fleet/non-map topic guarding the serialize-once path).
+**`fleet` is filtered per connection too, same mechanism as `map`.** `LiveUpdateRegistry#freshFleetEnvelope`
+builds its snapshot from the unscoped `AssetService#assets()` overload and `fleetBuffer` stays
+deliberately unfiltered (so a `Last-Event-ID` resume can re-filter against whatever the resuming
+viewer may see *now*, exactly like `map`) — narrowing happens only at delivery time, in
+`LiveConnection#project`, which replaced the old `mayReceive(envelope): boolean`. `project` returns a
+`LiveEnvelopeResponse` (nullable), not a `boolean`: a `map` event still resolves to either the same
+envelope or `null` (outright dropped for a connection that may not see its `layerId`), but a `fleet`
+envelope (identified by `type.equals(LiveTopicKind.FLEET.wire())` — never `instanceof List`, since the
+envelope's `payload` is an erased `Object`) is never dropped; its asset list is narrowed to
+`assetVisibility.test(assetId)`, and a viewer whose scope includes nothing still gets an envelope
+carrying an empty list, not silence. `project` returns the identical envelope instance when nothing
+needed filtering — load-bearing for `broadcast`'s serialize-once optimization: `broadcast` still
+serializes an envelope exactly once and reuses that one `String` for every connection whose `project`
+returned that same instance back, paying a second, per-connection re-serialize only for a connection
+that actually got a narrower `map`/`fleet` view. The same projection also runs on `connect()`'s
+snapshot/resume burst and `updateTopics()`'s newly-added-topic burst.
 
 ### Rate limiting (`ratelimit/`)
 
@@ -529,28 +502,23 @@ would rate-limit the whole deployment as one user. 429 body reuses `ErrorRespons
 
 ### DTO conventions
 
-`@JsonInclude(Include.NON_NULL)` on every response DTO with an optional field, so an absent value is
-omitted from the JSON rather than serialized `null` — except where absent-vs-null is itself
-meaningful (`AfterActionManifestResponse`'s `endedAt:null` distinguishes "still flying" from
-"nothing to report", so it carries no `NON_NULL` annotation). Mapping/validation lives on the DTO
-records themselves (`toSpec()`, `toRegistration()`, …) — no mapper library. `AssetUsageResponse`
-carries `origin` (`STREAM` or `OPERATOR` — the only two `UsageOrigin` values today; a `TELEMETRY`
-value was considered and deliberately left out since nothing produces it, see
-`com.drones.vision.kernel.UsageOrigin`'s own javadoc) and (ASSET-FLOWS-PLAN §2 D1p, wave BK4)
-`pilotId` — the raw `UUID` string of `AssetUsage#pilotId()`, `null`/omitted when genuinely unknown,
-**no display-name resolution** at this layer (mirrors `MaintenanceRecordResponse#openedBy`'s own
+`ErrorResponse(error, message)` is the uniform error body every `ApiExceptionHandler` mapping
+returns (see "Error mapping" above). `AssetUsageResponse` carries `origin` (`STREAM` or `OPERATOR` —
+the only two `UsageOrigin` values today; a `TELEMETRY` value was considered and deliberately left out
+since nothing produces it, see `com.drones.vision.kernel.UsageOrigin`'s own javadoc) and `pilotId` —
+the raw `UUID` string of `AssetUsage#pilotId()`, `null`/omitted when genuinely unknown, **no
+display-name resolution** at this layer (mirrors `MaintenanceRecordResponse#openedBy`'s own
 precedent: id only, a caller resolves a name if it needs one). `UsageSummaryResponse` (the
 `GET /api/usages`/`GET /api/usages/by-stream/{id}` row shape) carries the same `pilotId` field, same
-nullability rule. `ErrorResponse(error, message)` is the
-uniform error body every `ApiExceptionHandler` mapping returns.
+nullability rule.
 
-**WAREHOUSE-UX W3 additions** — `IdentityResponse(serialNumber, make, model, registration)` /
+**Warehouse inventory DTOs** — `IdentityResponse(serialNumber, make, model, registration)` /
 `CustodyResponse(custodianId, location, since)`, both `@JsonInclude(NON_NULL)` with a static
-`from(Identity)`/`from(Custody)`; `AssetSummaryResponse`/`AssetDetailsResponse` each gained trailing
+`from(Identity)`/`from(Custody)`; `AssetSummaryResponse`/`AssetDetailsResponse` each carry trailing
 `identity`, `custody`, `inventoryState` (effective value, already a `String` name), `createdAt`,
 `updatedAt` fields. `IdentityRequest(serialNumber, make, model, registration)` is a shared top-level
 record (not nested per-DTO) so `CreateAssetRequest`/`UpdateAssetRequest` both reuse it via
-`toIdentity()`; `CreateAssetRequest` additionally gained a nested `CustodySpec(custodianId, location)`
+`toIdentity()`; `CreateAssetRequest` additionally carries a nested `CustodySpec(custodianId, location)`
 record (`toCustody()` returns `Custody.NONE` when `custodianId` is blank/absent, else stamps
 `Instant.now()` for `since`) — custody is create-time-only, there is no "custody" field on
 `UpdateAssetRequest` (custody changes go through `AssetInventoryController`'s dedicated endpoint, not
@@ -562,65 +530,55 @@ an unknown value — 400 via `ApiExceptionHandler`). `CreateMaintenanceRecordReq
 flightSecondsAt)` (`@JsonInclude(NON_NULL)` — `closedAt`/`flightSecondsAt` omitted, not `null`, when
 absent). `CreateCategoryRequest(id, name, parentId, connected, attributeHints)` /
 `UpdateCategoryRequest(name, parentId, connected, attributeHints)` mirror `CategorySpec`/
-`CategoryEdit` 1:1; `CategoryResponse` gained `connected`; `CategoryCountsResponse` gained
+`CategoryEdit` 1:1; `CategoryResponse` carries `connected`; `CategoryCountsResponse` carries
 `inStock`/`issued`/`inField`/`maintenance`/`retired`.
 
-**WAREHOUSE-UX W8 additions** — `FirmwareResponse(name, version)` (`@JsonInclude(NON_NULL)`, static
-`from(VehicleProfile)`) and `FleetMaintenanceRecordResponse(id, assetId, assetName, categoryId, kind,
-openedAt, closedAt, openedBy, summary, flightSecondsAt)` (`@JsonInclude(NON_NULL)`, static
-`from(MaintenanceRecordSummary)`) — the `GET /api/maintenance` row shape, `MaintenanceRecordResponse`'s
-fleet-wide sibling with `assetName`/`categoryId` joined in. `AssetSummaryResponse`/
-`AssetDetailsResponse` each gained trailing `firmware` (`FirmwareResponse`, nullable) and
-`totalFlightSeconds` (`Long`) fields — `firmware` absent when never probed or when the caller has no
-join to offer; `totalFlightSeconds` absent **only** when the caller has no join to offer, never for a
-genuine zero (a never-flown asset reports `0`). Both `from(...)` factories widened to take `firmware`/
-`totalFlightSeconds` as explicit parameters rather than gaining a second overload — see `AssetRowFacts`
-in Conventions for who supplies real values and who passes `null`.
+`FirmwareResponse(name, version)` (`@JsonInclude(NON_NULL)`, static `from(VehicleProfile)`) and
+`FleetMaintenanceRecordResponse(id, assetId, assetName, categoryId, kind, openedAt, closedAt,
+openedBy, summary, flightSecondsAt)` (`@JsonInclude(NON_NULL)`, static `from(MaintenanceRecordSummary)`)
+— the `GET /api/maintenance` row shape, `MaintenanceRecordResponse`'s fleet-wide sibling with
+`assetName`/`categoryId` joined in. `AssetSummaryResponse`/`AssetDetailsResponse` each carry trailing
+`firmware` (`FirmwareResponse`, nullable) and `totalFlightSeconds` (`Long`) fields — `firmware` absent
+when never probed or when the caller has no join to offer; `totalFlightSeconds` absent **only** when
+the caller has no join to offer, never for a genuine zero (a never-flown asset reports `0`). See
+`AssetRowFacts` in Conventions for who supplies real values and who passes `null`.
 
-**ZERO-CONFIG-ONBOARDING Z2c additions** — `DiscoveryCandidateResponse(id, method, name, address,
-suggestedCategory, suggestedStreamProtocol, suggestedStreamUri, suggestedStreamOptions, details,
-firstSeen, lastSeen, status, registeredAssetId)` (`@JsonInclude(NON_NULL)`, static
-`from(DiscoveryCandidate)`) carries `suggestedStreamOptions` as the **full** `Map<String,String>` —
-this is the one field this DTO exists to get right that its sibling `DiscoveredDeviceResponse`
-(`DiscoveryController`) documented-defect drops, so a reader must not copy that shape here.
-`RegisterDiscoveryCandidateRequest(displayName, category, attributes, identity)` builds a
-`RegisterFromCandidateCommand` via `toCommand(Ownership)` — the `Ownership` argument always comes from
-`CurrentUser#ownership()` in the controller, never a request field (see Conventions).
-`RegisterDiscoveryCandidateResponse(assetId, displayName, category)` is deliberately **not** the full
-`AssetDetailsResponse` shape — `register` only has the freshly-created `Asset` in hand (the service
-returns that, not the mutated `DiscoveryCandidate`), and building the full details response would need
-extra collaborators (`AssetRowFacts`, image lookup) this endpoint has no call to pull in; a caller
-wanting the full asset shape follows up with `GET /api/assets/{id}`, same posture as `AssetInventoryController`'s
-own after-mutation responses.
+**Discovery DTOs** — `DiscoveryCandidateResponse(id, method, name, address, suggestedCategory,
+suggestedStreamProtocol, suggestedStreamUri, suggestedStreamOptions, details, firstSeen, lastSeen,
+status, registeredAssetId)` (`@JsonInclude(NON_NULL)`, static `from(DiscoveryCandidate)`) carries
+`suggestedStreamOptions` as the **full** `Map<String,String>` — this is the one field this DTO exists
+to get right that its sibling `DiscoveredDeviceResponse` (`DiscoveryController`) documented-defect
+drops, so a reader must not copy that shape here. `RegisterDiscoveryCandidateRequest(displayName,
+category, attributes, identity)` builds a `RegisterFromCandidateCommand` via `toCommand(Ownership)` —
+the `Ownership` argument always comes from `CurrentUser#ownership()` in the controller, never a
+request field (see Conventions). `RegisterDiscoveryCandidateResponse(assetId, displayName, category)`
+is deliberately **not** the full `AssetDetailsResponse` shape — `register` only has the
+freshly-created `Asset` in hand, and building the full details response would need extra
+collaborators (`AssetRowFacts`, image lookup) this endpoint has no call to pull in; a caller wanting
+the full asset shape follows up with `GET /api/assets/{id}`.
 
-**ASSET-FLOWS wave BK6 (A3) — `GET /api/discovery/inbox` wire-contract change (docs/plans/active/ASSET-FLOWS-PLAN.md
-§2, frozen).** This endpoint used to answer a bare `DiscoveryCandidateResponse[]`; it now answers
-`DiscoveryInboxResponse(candidates, sources)` — an envelope, `candidates` carrying exactly that same
-array under its own key. `sources` is `List<DiscoverySourceResponse>`, `DiscoverySourceResponse(id,
-status)` (`status` the raw enum name, `"OK"`/`"UNREACHABLE"`, static `from(SourceHealth)`) — one row
-per registered `vision-warehouse` `DeviceDiscoveryPort`, from that context's new
-`DiscoveryService#health()`. This is the fix for the mediamtx push-registry scanner reporting
-"unreachable" identically to "reachable but empty" (both were `List.of()` from `scan()`, WARN-log
-only); a caller can now tell them apart without reading logs. **Breaking change, intentional per
-plan**: `register`/`dismiss` are unchanged (still bare `DiscoveryCandidateResponse`/
-`RegisterDiscoveryCandidateResponse`) — only `list` moved to the envelope. `vision-web`'s frontend
-still expects the old bare-array shape as of this wave; fixing that is wave WB2's job, out of this
-module's scope. `DiscoveryInboxController`'s constructor gained a third parameter,
-`DiscoveryService` (alongside the existing `DiscoveryInboxService`/`CurrentUser`) — no `vision-app`
-wiring change needed, since this controller has no explicit `@Bean` method (pure component-scan
-auto-wiring by type).
+`GET /api/discovery/inbox` answers `DiscoveryInboxResponse(candidates, sources)` — an envelope,
+`candidates` carrying the same `DiscoveryCandidateResponse[]` array it always did, under its own key.
+`sources` is `List<DiscoverySourceResponse>`, `DiscoverySourceResponse(id, status, lastScanAt)`
+(`status` the raw enum name, `"OK"`/`"UNREACHABLE"`, static `from(SourceHealth)`; `lastScanAt`
+`@JsonInclude(NON_NULL)`, `Instant`, absent for `SourceStatus.NEVER_SCANNED`) — one row per registered
+`vision-warehouse` `DeviceDiscoveryPort`, from that context's `DiscoveryService#health()`; this is
+what lets a caller distinguish "mediamtx push-registry scanner unreachable" from "reachable but
+empty" — both used to collapse to the same empty `List.of()`. `register`/`dismiss` are unchanged
+(still bare `DiscoveryCandidateResponse`/`RegisterDiscoveryCandidateResponse`) — only `list` moved to
+the envelope; this is an intentional asymmetry, not an oversight. `DiscoveryInboxController`'s
+constructor carries `(DiscoveryInboxService, CurrentUser, DiscoveryService)` — the third parameter
+needs no `vision-app` wiring change since this controller has no explicit `@Bean` method (pure
+component-scan auto-wiring by type).
 
-**SOURCE-ONBOARDING-2 wave C additions** — `AttachDiscoveryCandidateRequest(String assetId)` backs
-`POST /api/discovery/inbox/{id}/attach`; `DiscoveryEventPayload(String action,
-DiscoveryCandidateResponse candidate)` is the `discovery` SSE topic's envelope (see "Live updates"
-above). `DiscoverySourceResponse` gained a trailing `lastScanAt` (`@JsonInclude(NON_NULL)`,
-`Instant`, absent for `SourceStatus.NEVER_SCANNED`). Three new records back `GET
-/api/discovery/status` (`@JsonInclude(NON_NULL)` throughout): `TelemetryIntakeResponse(bound,
-bindAddress, lobbyHeld, datagramsReceived, bytesReceived, lastDatagramAt, framesDecoded,
-unclaimedSysids, claimedSysids)` mirrors `adapter-mavlink`'s `MavlinkIntakeStatus` field-for-field;
-`VideoIntakeResponse(pushPort, pathPrefix, readyPaths)` (no `@JsonInclude` on itself — the whole
-object is either present or the enclosing `videoIntake` field is absent, per
-`DiscoveryStatusResponse`'s own contract, not a per-field omission); `DiscoveryStatusResponse(int
+`AttachDiscoveryCandidateRequest(String assetId)` backs `POST /api/discovery/inbox/{id}/attach`;
+`DiscoveryEventPayload(String action, DiscoveryCandidateResponse candidate)` is the `discovery` SSE
+topic's envelope (see "Live updates" above). Three records back `GET /api/discovery/status`
+(`@JsonInclude(NON_NULL)` throughout): `TelemetryIntakeResponse(bound, bindAddress, lobbyHeld,
+datagramsReceived, bytesReceived, lastDatagramAt, framesDecoded, unclaimedSysids, claimedSysids)`
+mirrors `adapter-mavlink`'s `MavlinkIntakeStatus` field-for-field; `VideoIntakeResponse(pushPort,
+pathPrefix, readyPaths)` (no `@JsonInclude` on itself — the whole object is either present or the
+enclosing `videoIntake` field is absent, not a per-field omission); `DiscoveryStatusResponse(int
 sweepSeconds, Instant lastSweepAt, TelemetryIntakeResponse telemetryIntake, VideoIntakeResponse
 videoIntake, List<DiscoverySourceResponse> sources)` is the endpoint's top-level shape —
 `lastSweepAt`/`videoIntake` both omitted (not `null`) before the first sweep completes / when
@@ -628,16 +586,13 @@ mediamtx publish is unconfigured, respectively. `support/DiscoveryStatusFacts` i
 record (no Jackson annotations) — the crossing-seam payload a `vision-app`-supplied
 `Supplier<DiscoveryStatusFacts>` bean hands `DiscoveryStatusController`, kept deliberately separate
 from the wire DTOs above so this module's own `dto` package still contains only what actually
-serializes; see that record's own javadoc for why it crosses as a plain `Supplier` rather than a new
-port interface (`vision-api` has zero dependency on `adapter-mavlink`/`adapter-discovery`, and one
+serializes (`vision-api` has zero dependency on `adapter-mavlink`/`adapter-discovery`, and one
 implementation/one caller doesn't earn a new interface per `.claude/skills/java-clean-code/SKILL.md`
-§1). `NetworkAddressResponse` gained a trailing `kind` (`"LAN"`/`"VIRTUAL"`/`"UNKNOWN"` — see
-`LocalNetworkAddresses`'s own classification); `SystemNetworkResponse` gained trailing
-`videoPushPort`/`videoPushPathPrefix` (`@JsonInclude(NON_NULL)`, both absent together when mediamtx
-publish is unconfigured).
+§1). `NetworkAddressResponse` carries a trailing `kind` (`"LAN"`/`"VIRTUAL"`/`"UNKNOWN"`);
+`SystemNetworkResponse` carries trailing `videoPushPort`/`videoPushPathPrefix` (`@JsonInclude(NON_NULL)`,
+both absent together when mediamtx publish is unconfigured).
 
-**CREW-CONTROL wave W2 additions (docs/plans/active/CREW-CONTROL-PLAN.md §3.6, frozen wire
-contract)** — `SeatHolderResponse(holderUserId, holderDisplayName, expiresAt)`, deliberately **not**
+**Seat DTOs** — `SeatHolderResponse(holderUserId, holderDisplayName, expiresAt)`, deliberately **not**
 `@JsonInclude(NON_NULL)`: a free seat serializes all three fields as explicit JSON `null` rather than
 omitting them, because the frontend contract distinguishes "no holder" from "still loading" by key
 presence, not just falsiness — static `free()` factory returns the all-null instance. `SeatsResponse
@@ -650,81 +605,158 @@ needed). None of the three names a `SeatKind` field: `kind` is a path variable
 (`SeatController#parseKind`, case-insensitive `"flight"`/`"camera"` → 400 `IllegalArgumentException`
 on anything else), never a body field, so there is exactly one place a client can get it wrong.
 
+**Object/track DTOs (CV-ORCHESTRATION).** `dto.ObjectStateResponse` (`@JsonInclude(NON_NULL)`) mirrors
+the domain `ObjectState` (`contexts/vision-perception`) field-for-field, JSON keys matching
+`station/vision-web/src/app/core/api/models.ts`'s `ObjectState` exactly. Nested static records — one
+per facet, each with its own `static from(...)` — mirror the domain's own nested records one-for-one:
+`Identity`, `Kinematics`, `Belief`, `Provenance`, `MemoryFacts`, `LockFacts`, `Timing`,
+`LabelCandidate`. `Kinematics` reuses `BoundingBoxResponse` for all four box fields (`box`/
+`detectorBox`/`trackerBox`/`predictedBox` — no second box DTO) and is itself `@JsonInclude(NON_NULL)` —
+an individual source box is omitted, not zeroed, when that source produced nothing this frame. A
+`null` domain group (`identity`/`kinematics`/…) maps to a `null` DTO component, which `NON_NULL` then
+omits from the JSON entirely — this is the intended "absent is honest" behavior, not a bug.
+`DetectionResultResponse` carries `objects` (`List<ObjectStateResponse>`, never `null`, sourced from
+`DetectionResult#objects()`) — deliberately still the flat per-identity mirror (see the
+`/streams/{id}/detections` endpoint row above); this is unrelated to `WorldObjectResponse` below,
+which only `StreamTracksResponse`/`CvTraceResponse` use.
+
+`dto.WorldObjectResponse` is `{state, operator, event, render}` — `state` the same
+`ObjectStateResponse` verbatim, `operator`/`event`/`render` the platform-relation facets.
+`StreamTracksResponse#objects` and `CvTraceResponse#world` are both `List<WorldObjectResponse>`,
+sourced from `StreamService#worldObjects(StreamId)` — one `WorldModel` fold per result feeds both the
+REST reads and the `tracks:`/`cv-trace:` SSE topics (see "Live updates" above), never re-folded per
+surface.
+
+**Trace DTOs.** `CvTraceResponse{streamId, gate, frame, world}`: `gate` is `GateDecisionResponse[]`
+(`contexts/vision-perception`'s `FrameGateLedger`, coalesced — `GateReason` has seven declared values,
+including `SENT` and `PROBE`); `frame` is `FrameLedgerResponse[]` (`FrameLedgerRing`, empty unless
+tracing was ever requested for this stream); `world` is `List<WorldObjectResponse>`, not windowed by
+`last`. `FrameLedgerResponse` carries a `RAN`/`SKIPPED`/`FAILED` `LedgerEntryResponse` triad, an
+`ObjectEvidenceResponse` claim shape mirroring cv-service's real `predict.cv` evidence (`predicted`/
+`held`/`velocity` keys, `cv/cv-service/cv_service/orchestration/contributors/predict.py`), and
+`detections: [{label, confidence, box{x,y,width,height}}]` + `frameWidth`/`frameHeight` — a nested
+`FrameLedgerResponse.DetectorBoxResponse(label, confidence, box)` reuses `BoundingBoxResponse` (the
+same shape `DetectionResponse` uses) rather than a second box DTO, even though the domain sources
+(`DetectorBox`/`Detection`) are deliberately unrelated types; both fields are `detections: []`/
+`frameWidth`/`frameHeight: 0` on an untraced frame. `CvTraceResponse` never errors — `gate`/`frame`/
+`world` are all empty lists for a never-traced stream. Wire contracts for both `CvTraceResponse` and
+`StreamTracksResponse` are pinned by committed JSON fixtures shared with vision-web
+(`station/vision-web/src/app/core/api/__fixtures__/cv-trace.wire.json`,
+`.../stream-tracks.wire.json`) — see Conventions.
+
+**CV profile DTOs (`CvProfileController`'s family).** Every knob on `CvProfileRequest`/
+`CvProfileResponse`/`CvProfileTrackingResponse` is nullable, mirroring the domain `CvProfile`/
+`TrackingKnobPatch` field-for-field — a per-knob inheritance model where `null` means "inherit from
+the next-lower tier" (asset → category → organization → platform). `CvProfileRequest#toSpec()` is a
+straight, unresolved pass-through onto `CvProfileSpec` — every knob carried through byte-identical to
+what the request said; `intent` is never consulted here to seed `model`/`labelFilter` — that
+resolution happens in `CvProfileResolver`, at fold time, not at request time. `CvProfileTrackingResponse`
+has two separately named factories: `from(TrackingKnobPatch)` (null-tolerant, for a raw profile read)
+and `fromResolved(TrackingConfig)` (an EFFECTIVE fold's own tracking, always present).
+`CvProfileEventRuleResponse#from(EventRuleConfig)` is null-tolerant the same way, serving both call
+sites with one method. `CvProfileResponse` has three static factories: `from(CvProfile)` (every plain
+`GET`/`list`/`create`/`update`), `platformDefault(PipelineConfig)`, and `fromEffective(CvProfile
+matchedProfile, PipelineConfig config)` for `GET .../effective`'s nested `profile` — identity/
+bookkeeping fields come from `matchedProfile`, but **every knob comes from `config`** (the fold's own
+result), never from `matchedProfile`'s own possibly-partial fields, since under per-knob inheritance
+the matched tier may leave several knobs unset.
+
+`CvProfileResponse#sources()` is typed `CvProfileResponse.FieldSources` (4 fields: `model`/
+`confidenceThreshold`/`inferenceFps`/`labelFilter`, `of(CvProfile)`/`none()`), computed fresh from the
+profile on every read. `EffectiveCvProfileResponse` additionally carries `CvKnobSourcesResponse
+sources` (8 fields, one `String` per `KnobSources` component, always present, no `@JsonInclude`) — the
+fold's real per-knob provenance across every bound tier — and `intent` (the matched tier's own
+persisted pick). See Gotchas for why a second, older `CvProfileResponse.Sources` (2 fields) still
+exists alongside `FieldSources`.
+
+**Live PATCH-path provenance (`StreamController#updateConfig`).** `dto.UpdateStreamConfigRequest` is
+an 8-component partial-patch record (…`labelDenyFilter`, `intent`, the last two components); a `null`
+field means "not sent", distinct from `CvProfileRequest`'s blank/empty-as-sentinel convention (see
+Gotchas — do not unify the two). `toPatch()` resolves `intent` (when non-`null`) via
+`IntentPolicyResolver.resolve(intent, labelFilter)` and seeds `model`/`labelFilter` only when this
+request's own fields were `null`. `fieldSources()` returns `CvProfileResponse.Sources` (the older
+2-field record, reused here rather than `FieldSources`). `dto.UpdateStreamConfigResponse` is a
+4-component record ending in `CvProfileResponse.Sources sources`; its 2-arg convenience constructor
+defaults `sources` to `CvProfileResponse.Sources.none()` — never a bare `null` (CLAUDE.md rule 10).
+See Gotchas for the measured `sources: {}` (present-but-empty) JSON shape when no `intent` is sent.
+
 - **Out-of-scope single-resource reads answer 404, not 403.** A caller must never be able to prove a
   resource exists by the status code alone. `AccessDeniedException`→403 is reserved for a scoped
   **command** against something the caller can already see but may not act on (see the error table).
   `DatasetController#get` is a known, deliberate exception (403 for out-of-scope, per
-  `DatasetService#get`'s own frozen contract) — flagged here because it is the one place in this
-  module that breaks the rule on purpose.
+  `DatasetService#get`'s own frozen contract) — the one place in this module that breaks the rule on
+  purpose.
 - **`@OpenByDesign(reason=…)`** (`security/OpenByDesign.java`) marks a handler that deliberately
   performs no authority check. `EndpointAuthorizationTest` (vision-app, ArchUnit) walks every
   `@RestController` handler's own call graph looking for a call to `CurrentUser.scope()`/`.viewer()`
   or into a class whose name ends `Access`; a handler that reaches neither and isn't annotated (or
-  isn't named in its `TEMPORARY_UNSCOPED` ledger) fails the build. Currently annotated: `ActivityController#myActivity`,
-  `AssignmentController#myAssignments` (both self-scoped — no target parameter to check), `AuthController`'s
-  three handlers (login/logout/me — must work with no session), `CategoryController#list`/`GeofenceController#list`/
-  `CvModelsController#models`/`CvTrackersController#trackers` (deployment-wide reference data), `DeviceProbeController#probe`
-  (a caller-supplied protocol+uri names no existing asset), and `ControlProfileController` at the **class** level
-  (gated by profile ownership inside `ControlProfileService`, not by `VisibilityScope` — a layout describes one
-  person's transmitter, not an asset, so an operator with zero visible assets must still be able to configure it).
+  isn't named in its `TEMPORARY_UNSCOPED` ledger) fails the build. Currently annotated:
+  `ActivityController#myActivity`, `AssignmentController#myAssignments` (both self-scoped — no target
+  parameter to check), `AuthController`'s three handlers (login/logout/me — must work with no
+  session), `CategoryController#list`/`GeofenceController#list`/`CvModelsController#models`/
+  `CvTrackersController#trackers` (deployment-wide reference data), `DeviceProbeController#probe` (a
+  caller-supplied protocol+uri names no existing asset), and `ControlProfileController` at the
+  **class** level (gated by profile ownership inside `ControlProfileService`, not by
+  `VisibilityScope` — a layout describes one person's transmitter, not an asset, so an operator with
+  zero visible assets must still be able to configure it).
 - **The `TEMPORARY_UNSCOPED` ledger is a real, currently-open gap, not a design choice** — every
   endpoint tagged `unscoped` in the table above has no authority check at all today. It shrinks with
-  each LIVE-SCOPE-style wave; the test's own second assertion fails the build if an entry names a
-  handler that no longer exists, so it can't quietly go stale.
+  each scoping wave; the test's own second assertion fails the build if an entry names a handler that
+  no longer exists, so it can't quietly go stale.
 - Controllers are constructor-injected with application-service ports only, never an adapter
-  (ArchUnit-enforced) — the two documented exceptions are `HlsProxyController` (a raw `URI`, since it
-  is a byte-level proxy with no domain concept to depend on) and `AssetImageController` (calls
+  (ArchUnit-enforced). Documented exceptions: `HlsProxyController` (a raw `URI`, since it is a
+  byte-level proxy with no domain concept to depend on), `AssetImageController` (calls
   `AssetImageRepositoryPort` directly for reads *and* writes — storing/fetching bytes by asset id has
-  no business rule beyond what the controller itself already enforces).
+  no business rule beyond what the controller itself already enforces), and a **read-only driven port
+  injected directly for a simple resolve-by-id join** — `DatasetController`'s own documented
+  precedent, followed by `TrainingJobController`'s `DatasetRepositoryPort` (resolving `datasetName`
+  for `GET /api/cv/training/runs`).
 - Ids in path variables are canonical UUID strings, parsed via `XId.of(String)`; its
   `IllegalArgumentException` on a malformed UUID surfaces as 400 through the same mapping as domain
   validation — no controller-side translation needed.
 - **Authority split on `PATCH /api/assets/{id}`**: the one write whose gate depends on the request
   body, not just the caller. `AssetEdit#changesManagedFields()` decides — a body touching only
   `displayName`/`attributes` needs `scope` alone (so a PILOT may rename their own assigned aircraft);
-  a body touching `category` needs `manage`. Every other asset mutation always requires `manage`.
-  **ALWAYS-ON-FLOW-PLAN.md wave D1 (2026-09-06) confirmed this endpoint needed no change**: a
-  per-asset `DetectionPolicy` opt-in (`contexts/vision-perception`'s new
+  a body touching `category` needs `manage`. Every other asset mutation always requires `manage`. A
+  per-asset `DetectionPolicy` opt-in (`contexts/vision-perception`'s
   `DetectionPolicy.ATTRIBUTE_KEY = "cv.detection-policy"`, values `"on-view"`/`"always"`) is stored
   under this same free-form `attributes` map — this generic PATCH already round-trips it, so setting
   an asset's policy is just `PATCH {"attributes":{"cv.detection-policy":"always"}}` under the
-  `scope`-only authority level above, no new endpoint/DTO/wire contract added.
+  `scope`-only authority level above, no separate endpoint/DTO/wire contract.
 - Logging: `System.Logger`, not SLF4J — matches every other adapter/domain class in this codebase;
   SLF4J appears only in `vision-app`'s Spring-only devsupport beans.
-- **`AssetRowFacts` (`support/`, WAREHOUSE-UX W8) bundles two cross-context reads behind one
-  collaborator** — `firmwareOf(Asset)` (iterates the asset's devices, returns the first
+- **`AssetRowFacts` (`support/`) bundles two cross-context reads behind one collaborator** —
+  `firmwareOf(Asset)` (iterates the asset's devices, returns the first
   `VehicleProfileRepositoryPort#findLatest` hit) and `totalFlightSecondsByAsset()` (delegates to
-  `AssetUsageRepositoryPort`'s new aggregate). `AssetController` already sat at four constructor
-  params (`AssetService`, `CurrentUser`, `TelemetryRepositoryPort`, `AssetImageRepositoryPort`);
-  adding both `VehicleProfileRepositoryPort` and `AssetUsageRepositoryPort` directly would have meant
-  six, past the five-parameter ceiling (`.claude/skills/java-clean-code/SKILL.md` §3) — so both ports
-  are bundled into one new fifth parameter instead, the same "bundle into a collaborator" resolution
-  this file's own `AssetInventoryController`/`AssetStreamController` split documents for the same
-  ceiling. `AssetSummary`/domain records were **not** widened for this — see
-  `contexts/vision-warehouse/MODULE.md`'s W8 note for why. Two other call sites of
-  `AssetSummaryResponse.from`/`AssetDetailsResponse.from` — `AssetInventoryController#detailsResponse`
-  and `LiveUpdateRegistry#freshFleetEnvelope` — are already at their own five-parameter ceiling with no
-  room for `AssetRowFacts` either, and pass `null, null` explicitly (each documented in place) rather
-  than silently omitting the parameters; a caller wanting an accurate join after those endpoints
-  should follow up with `GET /api/assets/{id}`.
-- **`DiscoveryInboxController`'s three handlers split authorization the same way `AuditController`/
-  `GroupAdminController` already do, for the same reason each does it that way**: `list`/`dismiss` gate
-  explicitly in-controller (`currentUser.authority().mayManageOrg()`, wave B6 — was
-  `currentUser.scope().canManageOrg()` — throwing `AccessDeniedException` itself) because
-  `DiscoveryInboxService#candidates()`/`#dismiss(id, userId)` carry no scope parameter to check against
-  — same shape as `AuditController#list`, which has no application-service layer of its own to put the
-  check in either. `register` instead passes `currentUser.authority()` (wave B6, was `.scope()`) and
-  `currentUser.ownership()` straight through to `DiscoveryInboxService#register(...)`, which performs
-  its own `mayManageOrg()`+`includesGroup` checks internally (`vision-warehouse`, own wave B6 migration
-  — see that module's MODULE.md) — same shape as `GroupAdminController#create` delegating to
+  `AssetUsageRepositoryPort`'s aggregate). `AssetController` already sat at four constructor params
+  (`AssetService`, `CurrentUser`, `TelemetryRepositoryPort`, `AssetImageRepositoryPort`); adding both
+  `VehicleProfileRepositoryPort` and `AssetUsageRepositoryPort` directly would have meant six, past
+  the five-parameter ceiling (`.claude/skills/java-clean-code/SKILL.md` §3) — so both ports are
+  bundled into one new fifth parameter instead, the same "bundle into a collaborator" resolution this
+  file's own `AssetInventoryController`/`AssetStreamController` split documents for the same ceiling.
+  Two other call sites of `AssetSummaryResponse.from`/`AssetDetailsResponse.from` —
+  `AssetInventoryController#detailsResponse` and `LiveUpdateRegistry#freshFleetEnvelope` — are already
+  at their own five-parameter ceiling with no room for `AssetRowFacts` either, and pass `null, null`
+  explicitly (each documented in place) rather than silently omitting the parameters; a caller wanting
+  an accurate join after those endpoints should follow up with `GET /api/assets/{id}`.
+  `AssetRowFacts` carries no stereotype annotation and depends on ports from two different contexts —
+  `ContextArchitectureTest`'s `contextOf(...)` does not flag this since it only recognizes
+  `com.drones.vision.<context>` packages, not `vision-api`/`vision-app`/adapter code.
+- **`DiscoveryInboxController`'s three original handlers split authorization the same way
+  `AuditController`/`GroupAdminController` already do, for the same reason each does it that way**:
+  `list`/`dismiss` gate explicitly in-controller (`currentUser.authority().mayManageOrg()`, throwing
+  `AccessDeniedException` itself) because `DiscoveryInboxService#candidates()`/`#dismiss(id, userId)`
+  carry no scope parameter to check against — same shape as `AuditController#list`, which has no
+  application-service layer of its own to put the check in either. `register` instead passes
+  `currentUser.authority()` and `currentUser.ownership()` straight through to
+  `DiscoveryInboxService#register(...)`, which performs its own `mayManageOrg()`+`includesGroup`
+  checks internally (`vision-warehouse`) — same shape as `GroupAdminController#create` delegating to
   `GroupService`. All three still reach `CurrentUser.scope()`/`.authority()` directly inside the
   controller method body, so `EndpointAuthorizationTest`'s call-graph walk is satisfied without an
-  `@OpenByDesign`/ledger entry either way.
-- **`DiscoveryInboxController#attach`/`#restore` (SOURCE-ONBOARDING-2 wave C) gate the same way
-  `list`/`dismiss` already do** — explicit in-controller `currentUser.scope().canManageOrg()`
-  (`AccessDeniedException` on failure), since `DiscoveryInboxService#attach`/`#restore` carry no
-  scope parameter of their own to check against (same reasoning as the note above for `list`/
-  `dismiss`). `DiscoveryStatusController#status` gates the same way as its own single handler.
+  `@OpenByDesign`/ledger entry either way. `attach`/`restore` gate the same way `list`/`dismiss` do —
+  explicit in-controller `currentUser.scope().canManageOrg()`-equivalent check — since
+  `DiscoveryInboxService#attach`/`#restore` carry no scope parameter of their own either.
+  `DiscoveryStatusController#status` gates the same way as its own single handler.
 - **A conditionally-absent plain-value bean crossing the `vision-app`→`vision-api` boundary is taken
   through `ObjectProvider<T>`, never a plain, possibly-`null`-valued `T`.** `SystemNetworkController`'s
   `videoPushPort`/`videoPushPathPrefix` constructor parameters are `ObjectProvider<Integer>`/
@@ -734,29 +766,45 @@ on anything else), never a body field, so there is exactly one place a client ca
   genuinely conditionally-registered (`@ConditionalOnProperty`), never present-with-a-null-value —
   see that module's MODULE.md for the wiring side. `mavlinkPort` stays a plain `int` (unconditional,
   never absent), unaffected.
+- **`vision-api` never imports `org.springframework.security`.** `CurrentUser`/`PrincipalResolver`
+  (`security/`) is the seam through which the `SecurityContext` crosses — both `PrincipalResolver`
+  implementations live in `vision-app` (see that module's MODULE.md).
+- **`OpsThresholdsController` follows the `CvTrackersController`/`CvModelsController` precedent** — a
+  plain config-backed DTO bean built once in `vision-app`'s wiring and injected into a controller that
+  does nothing but return it — rather than the `OnboardingProperties` bridge-properties pattern
+  (`support/`), since there is exactly one caller and no per-request branching (`java-clean-code` §1:
+  a bridge type must earn its place).
+- **Wire contracts for the newer response DTOs are pinned by committed JSON fixtures shared with
+  vision-web**, not only by prose — `*WireContractTest` classes (e.g. `CvTraceResponseWireContractTest`,
+  `StreamTracksResponseWireContractTest`, `ObjectStateResponseTest`/`WorldObjectResponseWireContractTest`)
+  build a `full` and a `minimal` example and diff them against
+  `station/vision-web/src/app/core/api/__fixtures__/*.wire.json`; the corresponding
+  `*.wire.contract.spec.ts` in vision-web loads the same fixture to pin the TypeScript side. Regenerate
+  a fixture from the test's own mismatch artifact (`cp target/*.wire.actual.json
+  ../vision-web/src/app/core/api/__fixtures__/*.wire.json`), never hand-edit it.
 - Rationale for any of the above beyond what's stated here lives in the plan doc cited inline, under
   `docs/plans/`.
 
-**CV-ORCHESTRATION wave W1 step 5 additions** — `ObjectStateResponse(id, lifecycle, streamId, identity,
-kinematics, belief, provenance, memory, lock, timing)` (new file, `@JsonInclude(NON_NULL)`, static
-`from(ObjectState)`) mirrors `contexts/vision-perception`'s `ObjectState` field-for-field, JSON keys
-matching `station/vision-web`'s frozen TS interfaces exactly; nested DTO records `Identity`,
-`Kinematics`, `Belief`, `Provenance`, `MemoryFacts`, `LockFacts`, `Timing`, `LabelCandidate` mirror the
-domain's own nested records one-for-one, each with its own static `from(...)`. `Kinematics` reuses
-`BoundingBoxResponse` for all four box fields (no second box DTO) and is itself `@JsonInclude(NON_NULL)`
-— `detectorBox`/`trackerBox`/`predictedBox` are individually omitted (not zeroed) when that source
-produced nothing this frame, one level below the enclosing record's own group-level omission. A `null`
-domain group (`identity`/`kinematics`/…) maps to a `null` DTO component, which `NON_NULL` then omits
-from the JSON entirely — the intended honesty behavior carried down from the domain record's own
-javadoc, not a bug. `DetectionResultResponse` gained a trailing `objects` (`List<ObjectStateResponse>`,
-mapped from `DetectionResult#objects()`) and lost its 5-arg convenience constructor (zero call sites,
-CLAUDE.md rule 10 — `from(...)` now calls the canonical 7-arg form directly). `StreamTracksResponse`
-gained `objects` as its new **last** component (sourced from the new `StreamService#objects(StreamId)`,
-mapped in `StreamController#tracks`) and lost all **three** of its dead convenience constructors (zero
-call sites) — unlike `stats`/`latency`/`rate`/`follow`, `objects` is **not** covered by the class's own
-`NON_NULL` annotation in practice: it is a `List`, so an empty list still serializes as `[]`, matching
-`tracks`' own "always present, empty is honest" idiom rather than the "absent-object" idiom the four
-`Optional`-sourced fields use.
+## Conventions
+
+`@JsonInclude(Include.NON_NULL)` sits on every response DTO with an optional field, so an absent value
+is omitted from the JSON rather than serialized `null` — except where absent-vs-null is itself
+meaningful and documented per-DTO (e.g. `AfterActionManifestResponse`'s `endedAt:null` distinguishes
+"still flying" from "nothing to report", so it carries no `NON_NULL` annotation; `SeatHolderResponse`
+is another documented exception — see DTO conventions). Mapping/validation lives on the DTO records
+themselves (`toSpec()`, `toRegistration()`, …) — no mapper library.
+
+Every authorization decision reaches `CurrentUser.scope()`/`.authority()`/`.viewer()` or a class whose
+name ends `Access`, directly inside the handler method body — never hidden behind a stored
+`Predicate` field — so `EndpointAuthorizationTest`'s static call-graph guard can see it. See the
+"Authorization tags" table above for the five gate shapes (`scope`/`manage`/`manageOrg`/`administer`/
+`viewer:*`) and the DTO-conventions bullet list above for the exception→404-vs-403 rule and the
+`@OpenByDesign`/`TEMPORARY_UNSCOPED` mechanism.
+
+Ids in path variables parse via `XId.of(String)`, never a controller-side regex/format check — see
+the DTO-conventions bullet list for the full validation-idiom rules (constructor-injection-only,
+five-parameter ceiling + "bundle into a collaborator" resolution, the `org.springframework.security`
+import ban, `ObjectProvider<T>` for a conditionally-absent bean).
 
 ## Gotchas
 
@@ -765,11 +813,9 @@ call sites) — unlike `stats`/`latency`/`rate`/`follow`, `objects` is **not** c
   `SystemStatusController#status`, `DemoController#status`, `OnboardingController#probeCandidate`, and
   `UsageTimelineController#timeline`/`#recording` are genuinely unauthorized today** — no `403`/`404`
   from a caller who shouldn't see them, just a plain `200`. This is the `TEMPORARY_UNSCOPED` ledger
-  (`EndpointAuthorizationTest`, vision-app), not an oversight in this doc. `ModelRegistryController#models`
-  left this ledger when `GET /api/cv/registry/models` was deleted (CV-SETTINGS-PLAN §8 OQ5, folded into
-  `CvModelsController`'s widened `GET /api/cv/models`, which carries `@OpenByDesign` instead) —
-  `EndpointAuthorizationTest#theTemporaryLedgerHasNoStaleEntries` fails on a ledger entry naming a
-  handler that no longer exists, so removing it was mandatory, not tidiness.
+  (`EndpointAuthorizationTest`, vision-app), not an oversight in this doc. `EndpointAuthorizationTest#theTemporaryLedgerHasNoStaleEntries`
+  fails on a ledger entry naming a handler that no longer exists, so removing an entry when its
+  handler disappears is mandatory, not tidiness.
 - **`hasImage` is always `false` on the SSE `fleet` topic's live snapshot** — `AssetImageRepositoryPort`
   has no change-notification port of its own to announce an upload/delete through, and
   `LiveUpdateRegistry`'s constructor is already at the five-parameter ceiling
@@ -777,10 +823,10 @@ call sites) — unlike `stats`/`latency`/`rate`/`follow`, `objects` is **not** c
   `GET /api/assets`/`GET /api/assets/{id}` instead.
 - **`LiveController`'s constructor needs `@Qualifier("liveUpdateRegistry")`** — `vision-app` exposes
   the same `LiveUpdateRegistry` singleton under seven more bean names (one per `*LiveUpdatePort` it
-  implements, `GeofenceLiveUpdatePort` now the seventh, LIVE-POLL-RETIREMENT wave L3), so a plain
-  by-type autowire finds eight candidates and fails at context startup. `SystemStatusSampler`'s own
-  constructor needs the same qualifier for the same reason — it depends on the concrete
-  `LiveUpdateRegistry` type directly (there is no port for `system`, see "Live updates" above).
+  implements), so a plain by-type autowire finds eight candidates and fails at context startup.
+  `SystemStatusSampler`'s own constructor needs the same qualifier for the same reason — it depends on
+  the concrete `LiveUpdateRegistry` type directly (there is no port for `system`, see "Live updates"
+  above).
 - **`LiveUpdateRegistry`'s constructor takes `ObjectProvider<AssetService>`/`ObjectProvider<DeviceService>`/
   `ObjectProvider<StreamService>`/`ObjectProvider<DetectionEventRepositoryPort>`, not the plain types**
   — a genuine circular bean dependency (each of those services' `AuditTrailPort`/live-update port
@@ -794,23 +840,17 @@ call sites) — unlike `stats`/`latency`/`rate`/`follow`, `objects` is **not** c
 - **`EventController` is polling, not SSE**, and neither of its endpoints 404s for an unknown/stopped
   stream (empty list instead) — `StreamAccess.requireVisible` is a no-op for a stream that isn't
   currently running, so a *currently-running* stream out of scope is the only 404 case.
-- **`EventController` cannot cheaply carry generic `Event`s** (e.g. `PIPELINE_ERROR`) — `EventPublisherPort`
-  is fire-and-forget with no read side at all, and `Event`'s shape shares nothing with `DetectionEvent`'s.
-  **ALWAYS-ON-FLOW-PLAN wave B3** built exactly the `EventHistoryPort`-shaped read side this gotcha
-  predicted would be needed, behind a new, separate controller (`SystemEventsController`, `GET
-  /api/system/events`) rather than a third `EventController` endpoint — see that controller's own
-  Live-updates-adjacent section below and `core/vision-platform`/`storage/persistence`/`vision-app`'s
-  MODULE.mds for the port/adapter/decorator. `DETECTION` is still never durably recorded there either
-  (excluded at the publisher, not the controller) — this gotcha's underlying observation about
-  `EventController` itself remains true, only the "nothing else can carry `Event`s" half is now stale.
+  `EventController` cannot cheaply carry generic `Event`s (e.g. `PIPELINE_ERROR`) — `EventPublisherPort`
+  is fire-and-forget with no read side at all, and `Event`'s shape shares nothing with `DetectionEvent`'s;
+  `SystemEventsController` (`GET /api/system/events`) is the separate, `EventHistoryPort`-shaped read
+  side built for exactly this gap — see its own endpoint-table row and the "Live updates" `event`
+  paragraph. `DETECTION` is still never durably recorded there either.
 - **Usage-scoped reads are split across two controllers on purpose**: `AssetController` still owns the
-  original, unwindowed `.../telemetry` (unscoped, see ledger above) — now reading
-  `TelemetryRepositoryPort#findLatestByUsage` rather than `#findByUsage`
-  (COMMAND-MAP-FLOW-PLAN.md B1/D1: the `/command` fleet map polls this endpoint and was freezing once
-  a flight passed `limit` earliest-first samples; same wire contract, different window) —
-  `UsageTimelineController` owns the windowed/downsampled `.../timeline`, unaffected, which still
-  reads `#findByUsage` via `DefaultReplayService` in `vision-events`. Neither depends on the other's
-  presence.
+  original, unwindowed `.../telemetry` (unscoped, see ledger above), reading
+  `TelemetryRepositoryPort#findLatestByUsage` (the `/command` fleet map polls this endpoint and was
+  freezing once a flight passed `limit` earliest-first samples) — `UsageTimelineController` owns the
+  windowed/downsampled `.../timeline`, unaffected, which still reads `#findByUsage` via
+  `DefaultReplayService` in `vision-events`. Neither depends on the other's presence.
 - **`AfterActionController`'s two endpoints resolve the whole package synchronously before returning**,
   so a 404/403 always lands on the response before any streaming (ZIP or otherwise) starts — the
   archive endpoint's body is a `StreamingResponseBody` whose failure could not otherwise change an
@@ -828,28 +868,26 @@ call sites) — unlike `stats`/`latency`/`rate`/`follow`, `objects` is **not** c
   viewer B. Redirects are followed by hand (`Redirect.NEVER` + a bounded manual loop) specifically to
   keep each hop's `Set-Cookie` scoped to that one servlet request.
 - **`HlsProxyController` sends a mediamtx read credential as an outbound `Authorization: Basic`
-  header** (docs/plans/active/ASSET-FLOWS-PLAN.md &sect;2 S6): `VisionApiProperties.HlsProxy` grew two
-  components, `authUsername`/`authPassword` — `null`/blank `authUsername` (the `defaults()` factory's
-  value, matching every test that doesn't opt in) sends no header at all, which is the correct
-  behaviour for a `vision.publish.enabled=false`/no-mediamtx-auth setup. `vision-app`'s `PublishWiring`
-  is the only real caller that supplies a non-null value, sourced from the new `vision.media.auth.*`
-  `VisionMediaProperties` (defaults `vision-viewer`/`change-me` — see that module's own MODULE.md).
-  The header is built once in the constructor (`Base64` of `username:password`, empty string for a
-  `null` password) and resent on **every** hand-followed redirect hop, alongside the existing
-  Cookie/Range forwarding — mediamtx's own read-auth check runs on the redirect target, not the first
-  hop, so a header that only rode the initial request would silently 401 after the very first request
-  established the pinning cookie.
+  header**: `VisionApiProperties.HlsProxy` carries `authUsername`/`authPassword` — `null`/blank
+  `authUsername` (the `defaults()` factory's value, matching every test that doesn't opt in) sends no
+  header at all, which is the correct behaviour for a `vision.publish.enabled=false`/no-mediamtx-auth
+  setup. `vision-app`'s `PublishWiring` is the only real caller that supplies a non-null value,
+  sourced from `vision.media.auth.*` `VisionMediaProperties` (defaults `vision-viewer`/`change-me` —
+  see that module's own MODULE.md). The header is built once in the constructor (`Base64` of
+  `username:password`, empty string for a `null` password) and resent on **every** hand-followed
+  redirect hop, alongside the existing Cookie/Range forwarding — mediamtx's own read-auth check runs on
+  the redirect target, not the first hop, so a header that only rode the initial request would
+  silently 401 after the very first request established the pinning cookie.
 - **`HlsProxyController` is the one `StreamAccess` caller that fails closed on an unknown/stopped
-  stream id** (`requireVisibleForHlsProxy`, AUTH-ROLES-PLAN.md D10, wave B4) — every other caller
-  (`StreamController#stop`/`tracks`/`detections`, `EventController`, both above) deliberately keeps
-  `requireVisible`'s no-op, a documented "forgiving idiom" for a polling client. Changing the *shared*
-  method instead of adding this one would have silently broken those tests; the two methods read
-  identically for a *present-but-invisible* device (both throw) and differ only for an *absent* one.
-  `requireVisibleStream`'s own malformed-`streamId` short-circuit (a non-UUID path segment, e.g. a
-  test's placeholder `"stream-1"`) is unchanged and runs first — it never reaches `StreamAccess` at
-  all, so none of `HlsProxyControllerTest`'s wire-mechanics fixtures needed updating for this wave.
-- **`ControlProfileController`'s catalogue is served, not hardcoded in the SPA** (decision C8, and
-  CLAUDE.md rule 1). `ControlCatalogResponse.of(...)` is derived from the domain enums themselves —
+  stream id** (`requireVisibleForHlsProxy`) — every other caller (`StreamController#stop`/`tracks`/
+  `detections`, `EventController`, both above) deliberately keeps `requireVisible`'s no-op, a
+  documented "forgiving idiom" for a polling client. Changing the *shared* method instead of adding
+  this one would have silently broken those tests; the two methods read identically for a
+  *present-but-invisible* device (both throw) and differ only for an *absent* one.
+  `requireVisibleStream`'s own malformed-`streamId` short-circuit (a non-UUID path segment) is
+  unchanged and runs first — it never reaches `StreamAccess` at all.
+- **`ControlProfileController`'s catalogue is served, not hardcoded in the SPA** (CLAUDE.md rule 1).
+  `ControlCatalogResponse.of(...)` is derived from the domain enums themselves —
   `ControlInputKind#allows` decides which sources each kind lists, `SwitchPosition#auxFunctionLevel()`
   supplies each position's level, `ControlAction#dangerous()` supplies the danger flag. A client that
   invented its own copy of any of these would eventually offer a binding the server refuses, or —
@@ -871,886 +909,87 @@ call sites) — unlike `stats`/`latency`/`rate`/`follow`, `objects` is **not** c
   drives CH3 and arms the vehicle" is rejected by `ControlProfile`'s own compact constructor and
   surfaces as a 400 with the domain's own message. Nothing re-validates it here.
 - **`ControlCatalogResponse` carries a trailing `maxRcChannel`**, populated from
-  `RcChannels.RELAYED_CHANNELS` (8) — decision C8's rule ("the client invents nothing the server can
-  state") applied to the one number the setup page was still inventing: it used to offer CH1–18 while
-  the link relays only CH1–8, so ten of those choices were stored, displayed, and never sent.
+  `RcChannels.RELAYED_CHANNELS` (8) — "the client invents nothing the server can state" applied to the
+  one number the setup page was still inventing: it used to offer CH1–18 while the link relays only
+  CH1–8, so ten of those choices were stored, displayed, and never sent.
+- **`AssetParameterController` requires `consent` on every write, regardless of tier** — stricter than
+  `RemediationService#writeParameter`'s own `explicitConsent` parameter, which only actually gates
+  Tier B internally. Tier A (including `SYSID_THISMAV`/`MAV_SYSID`) would otherwise need no consent at
+  all, and this endpoint's whole reason to exist is carrying an explicit operator act.
+- **Parameter-name aliases are resolved, not assumed** — ArduPilot 4.7 renamed `SYSID_THISMAV` to
+  `MAV_SYSID`, and MAVLink has no "no such parameter" reply, so a wrong spelling would otherwise
+  silently no-op. `AssetParameterController#resolveSpelling` consults
+  `VehicleProfileService#latestProfile` only for names with more than one known alias
+  (`ParameterAliases#spellingsOf`), falling back to the requested spelling on any lookup failure.
+- **`security.StreamAccess`'s unowned-device/asset fallback checks `scope.isUnbounded()` directly, not
+  an `Authority` capability** — deliberately scope-only, unlike every other admin-shaped gate in this
+  module. Widening it to `Authority#mayAdminister()` would additionally require
+  `Capability.MANAGE_ORG`, which this fallback never needed; the two call sites
+  (`visible(DeviceId)`, `visibleAsset(AssetId, VisibilityScope)`) predate `Authority` entirely and
+  their behavior is intentionally unchanged.
+- **`LiveUpdateRegistry` has no `DiscoveryLiveUpdatePort`** — `vision-app`'s
+  `LiveUpdateDiscoveryInboxService` depends on the concrete `LiveUpdateRegistry` class directly instead
+  of a narrow per-context port, unlike every other topic's decorator. See that class's own javadoc in
+  `vision-app`'s MODULE.md for why.
+- **`SystemStatusResponse`'s cv-service row has no structured capacity field** — cv-service
+  capacity/queue facts fold into the existing free-text `detail` string instead (`cv/grpc`'s
+  `CvStatusProvider`), not a new structured field.
+- **`GateDecision`/`GateDecisionResponse` has no `count` field**, even though
+  `docs/plans/active/CV-ORCHESTRATION-PLAN.md` §4.4's prose describes coalesced `SKIPPED` gate entries
+  as carrying one. Reading `contexts/vision-perception`'s `FrameGateLedger` shows coalescing instead
+  *replaces* the previous entry's timestamp/frameSequence/demand snapshot outright — a coalesced run
+  is indistinguishable on the wire from a single decision at the same reason; only the refreshed
+  `atMillis`/`frameSequence` say time passed. Trust the code, not that paragraph of the plan.
+- **`UpdateStreamConfigRequest` and `CvProfileRequest` deliberately use *different* "was this explicit"
+  tests for the same-looking `model`/`labelFilter` fields — do not unify them.** `CvProfileRequest`
+  treats blank-string/empty-list as "left to the platform" (that wire shape has no `null`).
+  `UpdateStreamConfigRequest` is a true partial-patch DTO where `null` means "not sent" and an explicit
+  empty `labelFilter` means "keep all labels." Using the blank/empty test on
+  `UpdateStreamConfigRequest` would let `intent` silently overwrite an operator's explicit "keep all
+  labels," which is exactly backwards for that DTO's contract.
+- **`UpdateStreamConfigResponse#sources` serializes as `{}` (present, empty object), never an absent
+  key, when no `intent` was sent** — `CvProfileResponse.Sources`'s own `@JsonInclude(NON_NULL)` only
+  omits `null` *fields inside* `Sources`; `Sources.none()` itself is never `null` (rule 10 — an
+  explicit sentinel, not a `null`), and `UpdateStreamConfigResponse` carries no `@JsonInclude` of its
+  own to omit a non-null `sources` field. This is at odds with `CvProfileResponse.Sources.none()`'s own
+  javadoc claim of full omission — that javadoc describes `CvProfileResponse` specifically and does not
+  hold for `UpdateStreamConfigResponse`.
+- **`CvProfileResponse.Sources` (2 fields: `model`/`labelFilter`) and `CvProfileResponse.FieldSources`
+  (4 fields) are deliberately separate, near-identical types — do not merge them.** `Sources` exists
+  only so `UpdateStreamConfigRequest`/`UpdateStreamConfigResponse`'s live PATCH-path provenance keeps
+  compiling against its original two-argument shape; `FieldSources` is what `CvProfileResponse#sources()`
+  is actually typed as. Widening `Sources` in place was tried once and reverted because it broke that
+  unrelated, frozen call site.
+- **`TrainingRunResponse#loss`/`#map50` are boxed `Double`s that are never actually `null`**, even
+  though `vision-web`'s `models.ts` declares them `number | null` — the domain has no way to represent
+  "no progress reported yet" distinctly from a genuine `0.0`. `TrainingRunResponse` also drops
+  `TrainingRunRecord#message` entirely (`models.ts`'s `TrainingRun` has no such field). Both are
+  disclosed, permanent wire deviations, not bugs to fix.
+- **`RemediationOrchestrator` living in `support/` rather than as a fourth `vision-flight` application
+  service is a known layering gap, not a decision** (see its own javadoc). `AssetParameterController`
+  is the only `vision-api` caller of `vision-flight`'s `RemediationService#writeParameter`;
+  `RemediationOrchestrator`'s own `PARAM_WRITE` refusal path is untouched by that endpoint.
 
 ## Status
 
-**docs/plans/active/CONTROLLER-SETUP-CONTEXT.md Wave C15 done** (the operator's transmitter, not
-just their bindings — reconciled here as part of merging `feat/controller-setup-c15` onto master).
-`GET`/`PUT /api/control-profiles[/{id}]` now carry `stickMode`/`forwardIsUp` on every row
-(`ControlProfileResponse`), and `PUT` accepts them as optional fields on `UpdateControlProfileRequest`
-— absent means the platform default (`TransmitterView.DEFAULT`, mode 2/forward-up), a `stickMode`
-outside 1-4 is a 400. See "API surface" above for the full endpoint contract and the Gotchas block
-above for the `ControlProfileController`-specific gotchas C1-C8 already established (catalogue served
-not hardcoded, `AuxFunctionCatalog` seed list, ownership not `VisibilityScope`, domain-owned
-validation, `maxRcChannel`) — none of which this wave changed.
-
 Feature flags gating whole controllers/packages off by default: `vision.training.enabled` (false —
-`DatasetController`/`LabelingController`/`TrainingJobController` all 404
-like unmapped routes when off), `vision.cv.registry.enabled` (defaults to `vision.cv.enabled`'s own
-value via `application.yaml`'s `${vision.cv.enabled:false}` placeholder, **no longer** tied to
-`vision.training.enabled` since docs/plans/active/CV-SETTINGS-PLAN.md §5 — `ModelRegistryController`
-404s like an unmapped route when off), `vision.onboarding.probe.enabled` (false — `POST /api/onboarding/probe`
-answers 409, and so does `AssetParameterController#writeParameter` — see FLEET-RADIO R5 note below),
-`vision.geo.fixed-camera.enabled` (false — `CameraPoseController`/`MapTracksController`
-answer 409), `vision.api.rate-limit.enabled` (false, see "Rate limiting" above), `vision.auth.enabled`
-(false — every `CurrentUser` call resolves a fixed unbounded dev principal). On by default:
-`vision.live.enabled`, `vision.demo.enabled`. `CvProfileController` carries no flag at all —
-profiles ship unconditionally, built-ins exist regardless of `vision.cv.enabled`/`vision.cv.registry.enabled`.
+`DatasetController`/`LabelingController`/`TrainingJobController` all 404 like unmapped routes when
+off), `vision.cv.registry.enabled` (defaults to `vision.cv.enabled`'s own value via `application.yaml`'s
+`${vision.cv.enabled:false}` placeholder, deliberately decoupled from `vision.training.enabled`
+per `docs/plans/active/CV-SETTINGS-PLAN.md` §5 — `ModelRegistryController` 404s like an unmapped route
+when off), `vision.onboarding.probe.enabled` (false — `POST /api/onboarding/probe` answers 409, and so does
+`AssetParameterController#writeParameter`), `vision.geo.fixed-camera.enabled` (false —
+`CameraPoseController`/`MapTracksController` answer 409), `vision.crew.enabled` (false — the seat gate
+on `FlightCommandController`/`AssetStreamController`/`AssetSessionController`/`StreamController`/the
+WS handler is a pass-through no-op; `SeatController`'s own endpoints are unaffected by this flag),
+`vision.api.rate-limit.enabled` (false, see "Rate limiting" above), `vision.auth.enabled` (false —
+every `CurrentUser` call resolves a fixed unbounded dev principal). On by default: `vision.live.enabled`,
+`vision.demo.enabled`. `CvProfileController` carries no flag at all — profiles ship unconditionally,
+built-ins exist regardless of `vision.cv.enabled`/`vision.cv.registry.enabled`. SSE-specific flags
+(`vision.discovery.live.enabled`, `vision.live.stream-state-push.enabled`, `vision.events.history.enabled`)
+are covered per-topic in "Live updates" above.
 
 Multi-instance SSE fan-out is out of scope — `LiveUpdateRegistry` is explicitly process-local,
-single-instance. `RemediationOrchestrator` living in `support/` rather than as a fourth
-`vision-flight` application service is a known layering gap, not a decision (see its own javadoc).
+single-instance.
 
-**`docs/plans/active/FLEET-RADIO-PLAN.md` R2 done.** `ws/ManualControlWebSocketHandler` gained one
-`catch (VehicleUnidentifiedException e)` clause ahead of its existing `IllegalStateException` clause,
-mapping to a new, additive `denied` code `VEHICLE_UNIDENTIFIED` — see "Live updates"/`/ws/manual-control`
-above. `./mvnw -B -pl station/vision-api test` — **861 tests**, all green (2026-08-27; +2 from before
-this wave: `ManualControlWebSocketHandlerTest`'s new cases asserting the code is distinct and not
-message-sniffed into one of the other `denied` causes).
-
-**`docs/plans/active/FLEET-RADIO-PLAN.md` R5 done (2026-08-27).** New `AssetParameterController`
-(`POST /api/assets/{id}/parameters`, `dto.ParameterWriteRequest`/`ParameterWriteResponse`) — the one
-caller of `vision-flight`'s already-built `RemediationService#writeParameter` anywhere in
-`vision-api`; `RemediationOrchestrator`'s own `PARAM_WRITE` refusal is untouched (`git diff` empty).
-Adds no service/adapter/wiring — `RemediationService`/`VehicleProfileService` are already wired
-unconditionally (`OnboardingWiringConfiguration`), so this endpoint inherits the existing
-`VehicleConfigPort` flag-swap for free: with `vision.onboarding.probe.enabled` at its default
-(`false`) every write 409s from the same `NoopVehicleConfigPort`-caused "no active device this
-platform can configure" refusal every other onboarding endpoint already gives, proven by
-`AssetParameterFlagGatingTest` (`station/vision-app`) against a real, known-disarmed sim asset (not
-merely an asset with no telemetry at all — see that test's own javadoc for why the distinction
-matters). `consent` is enforced by `dto.ParameterWriteRequest#requireConsent` as a hard requirement
-for **every** write this controller dispatches — stricter than `RemediationService#writeParameter`'s
-own `explicitConsent` parameter, which only actually gates Tier B internally; Tier A (including
-`SYSID_THISMAV`/`MAV_SYSID`) would otherwise need no consent at all, and this endpoint's whole reason
-to exist is carrying an explicit operator act. Spelling resolution (F0 — ArduPilot 4.7 renamed
-`SYSID_THISMAV` to `MAV_SYSID`, and MAVLink has no "no such parameter" reply) is a private controller
-method, `resolveSpelling`, consulting `VehicleProfileService#latestProfile` only for names with more
-than one known alias (`ParameterAliases#spellingsOf`), falling back to the requested spelling on any
-lookup failure. `./mvnw -B -o -pl contexts/vision-flight,station/vision-api,station/vision-app test`
-— `vision-flight` **351** (unchanged — no source touched), `vision-api` **874** (+13,
-`AssetParameterControllerTest`), `vision-app` **271** (+1, `AssetParameterFlagGatingTest`), all
-green.
-
-**WAREHOUSE-UX wave W8 done.** New `GET /api/maintenance` (`AssetInventoryController#fleetMaintenance`)
-+ `firmware`/`totalFlightSeconds` joined onto `AssetController#list`/`#details`'s response rows via the
-new `AssetRowFacts` collaborator (see Conventions). `AssetControllerTest` **62** (+4), `station/vision-api`
-**901** (+8) total, all green; ArchUnit (`ArchitectureTest`/`ContextArchitectureTest`/
-`EndpointAuthorizationTest`) unaffected — `AssetRowFacts` carries no stereotype annotation and depends
-on ports from two different contexts, which `ContextArchitectureTest`'s `contextOf(...)` does not flag
-since it only recognizes `com.drones.vision.<context>` packages, not `vision-api`/`vision-app`/adapter
-code; `fleetMaintenance` reaches `currentUser.scope()` directly so needed no `TEMPORARY_UNSCOPED`
-ledger entry.
-
-**CV-SETTINGS wave W5 done (2026-08-30, uncommitted).** New `CvProfileController` (8 handlers: profile
-CRUD, `PUT`/`DELETE /api/cv/bindings`, `GET /api/cv/profiles/effective`, `GET /api/cv/coverage`) and
-11 new `dto/` records backing it (`CvProfileResponse`/`CvProfileTrackingResponse`/
-`CvProfileEventRuleResponse`/`CvProfilesResponse`/`CvProfileRequest`/`CvProfileBindingResponse`/
-`CvProfileBindingRequest`/`EffectiveCvProfileResponse`/`CvCoverageRowResponse`/`CvCoverageResponse`)
-plus `TrainingRunResponse`/`TrainingRunsResponse` — see the endpoint table above and Gotchas/Status for
-the wiring/exception-mapping decisions. Also: `GET /api/cv/models` widened to serve the registry's live
-roster when on; `GET /api/cv/registry/models` deleted (folded into the widened `/api/cv/models`);
-`POST /api/cv/registry/rollback` added; `TrainingJobController` gained `GET /api/cv/training/runs`
-(+`/{runId}`) reading `TrainingJobService`'s newly-persisted run history, resolving `datasetName` via a
-new `DatasetRepositoryPort` collaborator injected directly into the controller (the same
-"controllers call a driving-port service, driven ports only read-only" precedent `DatasetController`'s
-own javadoc already documents). Full write scope was `station/vision-api`/`station/vision-app` only —
-`contexts/vision-perception`/`contexts/vision-learning`/`contexts/vision-warehouse`/`storage/persistence`
-were read-only for this wave (already built by earlier CV-SETTINGS waves).
-
-Two deliberate DTO/wire deviations, both informational (frozen `models.ts` leaves no room to do
-otherwise without a `contexts/vision-learning` change, out of this wave's write scope):
-`TrainingRunResponse` drops `TrainingRunRecord#message` entirely (`models.ts`'s `TrainingRun` has no
-such field); `TrainingRunResponse#loss`/`#map50` are boxed `Double`s that are **always** populated from
-the domain's primitive `double` fields, never actually `null`, even though `models.ts` declares
-`number | null` — the domain has no way to represent "no progress reported yet" distinctly from a
-genuine `0.0`.
-
-`./mvnw -B -pl storage/persistence,station/vision-api,station/vision-app test -DskipWeb` (run as three
-separate synchronous foreground commands after an `-am` install — see `station/vision-app/MODULE.md`'s
-own W5 entry for why) — `storage/persistence` **260** (unchanged, read-only this wave; docker ran, not
-skipped), `station/vision-api` **932** (+31 from 901: `CvProfileControllerTest` ~20 new cases +
-`TrainingJobControllerTest`'s 9 new `runs`/`run` cases, net of the deleted
-`ModelRegistryControllerTest#models` case and its removed `GET /api/cv/registry/models` coverage),
-`station/vision-app` **278** (see that module's own MODULE.md entry) — all green, default-config bar
-held throughout.
-
-**ZERO-CONFIG-ONBOARDING wave Z2c done.** New `DiscoveryInboxController` (3 handlers: `list`,
-`register`, `dismiss` — see the endpoint table, DTO conventions, and the Conventions note above for the
-auth split and the deliberate poll-only-not-SSE decision) + 3 new `dto/` records
-(`DiscoveryCandidateResponse`/`RegisterDiscoveryCandidateRequest`/`RegisterDiscoveryCandidateResponse`).
-Also fixed a pre-existing compile break in `AfterActionAssemblerTest`'s `FakeAssetService` (missing
-`findDuplicateDevice` override, added trivially returning `Optional.empty()`) found while wiring this
-wave's own test — unrelated to discovery, but blocking the module's test compile either way.
-`./mvnw -B -pl storage/persistence,station/vision-api,station/vision-app test -DskipWeb` (after `-am
-install -Dmaven.test.skip=true` on the upstream context modules, then a separate `-am install
--DskipTests` on `drone-link/mavlink-core,drone-link/mavlink` specifically — see
-`station/vision-app/MODULE.md`'s own Z2c entry for why that second install was needed) —
-`station/vision-api` **941** (+9 over 932: `DiscoveryInboxControllerTest`'s 9 cases), `storage/persistence`
-**267** (+7, see that module's own MODULE.md entry), `station/vision-app` **293** (+15, see that
-module's own MODULE.md entry) — all green, Docker ran for real, default-config bar held throughout.
-
-**ASSET-FLOWS wave BK6 (A3) done.** `DiscoveryInboxController#list` now returns the
-`DiscoveryInboxResponse` envelope (`candidates` + `sources`) instead of a bare
-`DiscoveryCandidateResponse[]` — see the Conventions note above for the full wire-contract
-writeup and the reason it is an intentional breaking change. Two new `dto/` records
-(`DiscoveryInboxResponse`, `DiscoverySourceResponse`); the controller's constructor gained a third
-param, `DiscoveryService` (`vision-warehouse`'s `application.discovery` package). 1 new test,
-`DiscoveryInboxControllerTest#listCarriesSourceHealthAlongsideTheCandidateList`; every pre-existing
-`list` test's JSON-path assertions moved from `$[...]` to `$.candidates[...]`.
-`./mvnw -B -pl contexts/vision-warehouse -am install -DskipTests` then `./mvnw -B -pl
-station/vision-api -o test` (offline, no `-am` — a concurrent agent's in-progress, uncommitted
-`contexts/vision-flight` edit was mid-break on this shared branch at the time; resolving `vision-flight`
-from its last-known-good installed jar instead of rebuilding its currently-broken source avoided
-blocking on unrelated work, per CLAUDE.md's "never run reactor-wide builds while another agent's
-task holds modules red") — `station/vision-api` **944** tests, 0 failures (the exact delta from 941
-is not attributable to this wave alone: `git status` shows a sibling agent's concurrent, unrelated
-`OpsThresholdsController`/`BatteryThresholdsResponse` additions already present in this shared
-working tree).
-
-**ASSET-FLOWS wave BK4 (D1p) done.** `AssetSessionController#engage` now passes `CurrentUser#userId()`
-through to `UsageTracker#engage(AssetId, UserId)` (widened, CLAUDE.md rule 10 — every call site
-updated, no new overload); `AssetUsageResponse`/`UsageSummaryResponse` each gained a `pilotId` field
-(raw UUID string, `null`/omitted when unknown — see DTO conventions above and the endpoint table row
-above). No new Flyway migration (`storage/persistence`'s `V28` already carried the column
-schema-only). `./mvnw -B -pl station/vision-api -am test -DskipWeb` — **949** tests, 0 failures (+5
-over BK3's 944: `AssetSessionControllerTest#engagePassesTheCurrentUsersIdThroughToUsageTrackerEngage`
-plus new/strengthened pilot assertions in `AssetUsageResponseTest`/`UsageTimelineControllerTest`).
-Docker not needed for this module.
-
-**ASSET-FLOWS wave BK3 (D6/S3 backend) done.** New `OpsThresholdsController` (1 handler, `GET
-/api/ops/thresholds`, `@OpenByDesign` — display config, not fleet or per-user data, so any signed-in
-caller may read it) + 2 new `dto/` records, `BatteryThresholdsResponse(int warningPercent, int
-criticalPercent)` nested inside `OpsThresholdsResponse(BatteryThresholdsResponse battery)`, wire shape
-frozen exactly per docs/plans/active/ASSET-FLOWS-PLAN.md §2:
-`{"battery":{"warningPercent":25,"criticalPercent":10}}`. Followed the `CvTrackersController`/
-`CvModelsController` precedent (a plain config-backed DTO bean built once in `vision-app`'s wiring and
-injected into a controller that does nothing but return it) rather than the `OnboardingProperties`
-bridge-properties pattern (`support/`) — there is exactly one caller and no per-request branching, so a
-second bridge type would only add indirection (`java-clean-code` §1: an interface/bridge needs to earn
-its place). The controller throws nothing, so `ApiExceptionHandler` gained no new mapping. `station/
-vision-app`'s wiring is `OpsWiringConfiguration#opsThresholds(VisionOpsProperties)` — see that module's
-own MODULE.md entry for the properties record and its note on `ApplicationServiceWiring#batteryMonitor`
-(BK2, this same cycle), which reads the same two `vision.ops.battery.*` keys via raw `@Value` by
-deliberate design (converges on this wave's property keys/defaults, not a bug). New `OpsThresholdsControllerTest` (2 cases, MockMvc `standaloneSetup`, mirrors
-`CvTrackersControllerTest`): asserts the exact frozen JSON shape, and that the controller reflects
-whatever `OpsThresholdsResponse` it was built from (proving the values are `vision-app`'s wiring concern,
-not hardcoded here). `./mvnw -B -pl station/vision-api -am test` — **944** tests, 0 failures (net +2 over
-BK6's own 944 baseline is misleading by coincidence — see that wave's note above: this wave's 2 new
-`OpsThresholdsControllerTest` cases were already counted inside BK6's reported 944 since both waves'
-changes were concurrently present in this shared working tree at either wave's gate time). Also
-independently verified green inside the full `-am` reactor build gating BK3's own `station/vision-app`
-run (`station/vision-api` section of that log: 944, 0 failures). Docker not needed for this module
-(`vision-api` has no Testcontainers-backed test). Nothing deferred on the vision-api side.
-
-**FLY-CONTROL-UX-PLAN wave BK1 done.** New `RcThresholdsResponse(int neutralTolerancePercent)` `dto/`
-record — same one-field, no-validation wire-record shape `BatteryThresholdsResponse` already
-establishes (validation lives server-side in `vision-app`'s `VisionOpsProperties.Rc`, not on the wire
-DTO). `OpsThresholdsResponse` widened to `OpsThresholdsResponse(BatteryThresholdsResponse battery,
-RcThresholdsResponse rc)` — a second constructor parameter at the one record, not a new overload
-(CLAUDE.md rule 10); the only call site is `vision-app`'s `OpsWiringConfiguration#opsThresholds` (see
-that module's own MODULE.md entry), updated in the same wave. `OpsThresholdsController` gained no new
-endpoint and no new exception mapping — `GET /api/ops/thresholds` now serves `{"battery":{...},
-"rc":{"neutralTolerancePercent":5}}`; its Javadoc return line was updated to match. No new `@OpenByDesign`
-decision needed — the existing "display config, any signed-in caller may read it" reasoning already
-covers the RC tolerance. `OpsThresholdsControllerTest` gained no new test methods; its 2 existing cases
-were widened with `jsonPath("$.rc.neutralTolerancePercent")` assertions alongside the pre-existing
-`battery` ones, exercising both the frozen-default fixture and the "reflects whatever config it was
-built from" fixture.
-
-`./mvnw -B -pl station/vision-api -am test` — **951** tests, 0 failures, 0 errors (0 net new test
-*methods* from this wave — the 2 `OpsThresholdsControllerTest` cases were widened in place, not
-duplicated; the module's total moved from the 949 documented at BK4 to 951 from other concurrently-landed
-waves on this shared branch, not from this one). Docker not needed for this module. Also green in the
-same session: `station/vision-app` **326** (see that module's own MODULE.md entry). Nothing deferred.
-
-**FLY-CONTROL-UX-PLAN wave H1 done.** See "Live updates"/`/ws/manual-control` above for the catch-all
-denial + engage-duration instrumentation this wave added, and `docs/plans/active/fly-control-ux/R3-handshake-denial.md`
-for the trace that motivated it plus its own appended "Firmware note" (read-only rover-sim/firmware
-finding: F4's learned-peer authority gate also silently drops `RC_CHANNELS_OVERRIDE` from a second
-source, confirmed by reading the real sketch at `~/Arduino/ardupoilot-start/MavlinkUdpLink.cpp`
-outside this repo — no firmware file touched). Blocking audit found no wait/sleep/socket-read
-anywhere under `engage()` that could approach the web client's 4s abandon, so **no bound was added**
-in `drone-link/mavlink` or `contexts/vision-flight` — neither module was touched this wave.
-`ManualControlWebSocketHandlerTest` gained 3 new cases (14 → 17): unexpected-exception →
-`INTERNAL_ERROR` denied frame + WARNING log with stack trace (and that the exception's own message
-never reaches the client), a `NoSuchElementException` (unknown asset) instance of the same gap, and a
-0ms-threshold smoke test proving the duration log actually escalates to WARNING.
-`./mvnw -B -pl station/vision-api -am test` — **954** tests, 0 failures, 0 errors (951 → 954, +3, all
-new; nothing else changed). Docker not needed. `drone-link/mavlink`/`contexts/vision-flight` gates not
-run — this wave changed no file in either module.
-
-**COMMAND-MAP-FLOW-PLAN wave B1 done (D1 fix).** `AssetController#telemetry`
-(`GET /api/usages/{usageId}/telemetry`) now reads `TelemetryRepositoryPort#findLatestByUsage`
-instead of `#findByUsage` — the `/command` fleet map polls this endpoint treating the last array
-element as "current position", and `findByUsage`'s earliest-first window meant that element never
-changed again past `limit` samples (`docs/plans/active/COMMAND-MAP-FLOW-PLAN.md` D1). Wire contract
-unchanged: same path, same `limit` param, same `TelemetrySampleResponse[]` shape, same ascending
-order, same `200 []` on an unknown usage — only which window of the flight comes back. `AssetController`'s
-constructor is unchanged (still the same `TelemetryRepositoryPort` field, just a different method
-called on it). `AssetControllerTest`'s existing telemetry-block tests (`888`–`1018`) were repointed
-to stub/verify `findLatestByUsage` in place — no test methods added or removed here, since the
-port-level "latest window" / "ascending order" / "empty case" proofs live in
-`storage/persistence`'s `PostgresDockerIntegrationTest$TelemetryRepositoryTests` instead (271 → 274
-tests there). `./mvnw -B -pl station/vision-api test` — **954** tests, 0 failures, 0 errors (unchanged
-from before this wave — every edit here was a rename of an existing stub/verify call plus one
-javadoc rewrite, not a new test). Docker not needed for this module. Also green in the same session:
-`storage/persistence` **274** and `station/vision-app` **326** (both docker-ran, not skipped — see
-those modules' own MODULE.md entries). Nothing deferred; `vision-events`/`DefaultReplayService` and
-`UsageTimelineController` untouched by design (they own the earliest-first replay window, a
-different question — see plan §3.7/§5).
-
-**AUTH-ROLES-PLAN wave B3 done.** New `BootstrapController` (`GET`/`POST /api/auth/bootstrap`,
-`@OpenByDesign`, anonymous, `permitAll`), `AuthPasswordController` (`POST /api/auth/password`, self-
-service), and two new `UserAdminController` handlers (`POST /api/users/{userId}/password`,
-`PUT /api/users/{userId}/memberships`) — see "API surface" above for every new/widened endpoint
-shape. `AuthController#login` gained an optional `kiosk` body field; a non-`VIEWER` requesting a
-kiosk session is refused `400 KIOSK_NOT_PERMITTED` *after* a real credential check (so the
-already-established session is explicitly torn down via `SessionAuthenticator#logout`, not merely
-left to expire). `AssignmentController#assign`'s body gained an optional `role` field (`AssignAssetRequest#toRole()`,
-absent body/field → `PILOT`, byte-identical to every pre-B3 caller); `pilots()`/`myAssignments()` now
-enrich each entry with its `AssignmentRole` seat (`PilotResponse`/`AssignmentResponse`), the latter
-defaulting to `PILOT` when `AssignmentRepositoryPort#roleFor` finds no link (an assignment the
-`assignmentsFor` index still lists but whose seat lookup races an unassign — the same
-"index says yes, detail lookup says no → assume the safer/older answer" shape as other scope-adjacent
-reads in this module, not a new pattern). `MeResponse` gained `capabilities[]`/`scopeKind`/
-`mustChangePassword` — every existing field byte-identical. `PrincipalResolver` (`security/`) gained
-`role()`/`authority()` — both implementations live in `vision-app` (see that module's own MODULE.md);
-this module never imports `org.springframework.security` to use them. `DemoPeople#seed`/`DemoScenario`'s
-private `assign`/`grant` helpers were threaded with an explicit `UserId actor` parameter (the demo has
-no CREW story — every demo grant is the wide `AssignmentRole#PILOT` seat, documented in place).
-Error field naming: every new `ApiExceptionHandler` mapping this wave added
-(`KIOSK_NOT_PERMITTED`/`WEAK_PASSWORD`/`ALREADY_INITIALIZED`/`AUTH_DISABLED`) uses the pre-existing
-`ErrorResponse(String error, String message)` shape — the wire field is `error`, matching every
-mapping that predates this wave (`NOT_FOUND`/`FORBIDDEN`/etc.); nothing introduced a `code` field.
-`./mvnw -B -pl storage/persistence,station/vision-api,station/vision-app test -DskipWeb` — vision-api
-**961** tests (954 → 961, +7: 2 kiosk-login cases, 3 `UserAdminController` cases, 2 `AssignmentController`
-seat-enrichment cases), 0 failures. Also green in the same run: `storage/persistence` **276**
-(274 → 276, +2, `AssignmentRepositoryTests`) and `station/vision-app` **326** (unchanged test count —
-this wave's `vision-app` edits were mechanical call-site fixes for widened application-service
-signatures, not new tests). Docker ran (not skipped — Testcontainers started a real `postgres:16`,
-Flyway migrated through `V33`). Waves B4 (per-asset command authority)/B5 (Spring Session JDBC)/B6
-(migrate the ~34 `canManageOrg`/`canManage`/`canAdminister` call sites + the VIEWER-precedence flip)/
-B0b (flip `vision.auth.enabled`'s default) are open — see `docs/plans/active/AUTH-ROLES-PLAN.md`.
-
-**AUTH-ROLES-PLAN wave B4 done.** New `security.AssetAuthority` (interface, frozen 3-method shape
-per §3.9 — a join point shared with CREW-CONTROL-PLAN §3.7) + `CapabilityAssetAuthority` (the one
-implementation) — see "API surface"/"Live updates" above for every gated call site
-(`ManualControlWebSocketHandler#handleEngage`, `FlightCommandController`'s six commands,
-`HlsProxyController#proxy` via the new `StreamAccess#requireVisibleForHlsProxy`) and "Gotchas" for why
-the HLS gate is a second `StreamAccess` method rather than a change to the shared
-`requireVisible(StreamId)`. `AssetSessionController#disengage` now records an `AuditTrailPort` entry
-naming the calling user (D17) — attribution only; no seat/arbitration logic, which stays
-CREW-CONTROL's to add. `SecurityConfig`'s secured-chain matcher gained `/hls/**` (D10, `vision-app`).
-Deviations, each one-line: (1) `CapabilityAssetAuthority` gained a second public method,
-`mayFly(Authority, UserId, AssetId)`, not on the frozen interface — the WebSocket message thread has
-no `SecurityContext`, so the interface's ambient-`CurrentUser` `mayFly(AssetId)` cannot be called
-from `ManualControlWebSocketHandler` at all once auth is enabled; (2) D17 (actor attribution on
-disengage) was solved via the already-vision-api-reachable `AuditTrailPort` rather than widening
-`UsageTracker#disengage`'s signature or adding a field to `AssetUsage` — both of those modules were
-reserved for a concurrent agent's own wave; (3) `contexts/vision-flight`/`contexts/vision-identity`
-were not touched despite being named in the plan's literal B4 file list — every call site this wave
-actually needed lives in `vision-api`. `./mvnw -B -pl storage/persistence,station/vision-api,station/vision-app
-test -DskipWeb` — vision-api **979** (961 → 979, +18: 12 `CapabilityAssetAuthorityTest` + 2
-`ManualControlWebSocketHandlerTest` + 2 `AssetSessionControllerTest` + 2 `FlightCommandControllerTest`),
-`storage/persistence` unaffected at **276**, `station/vision-app` **328** (326 → 328, +2 — see that
-module's own MODULE.md). Docker ran for real (Testcontainers `postgres:16`, Flyway unchanged at
-`V33` — this wave added no migration). `vision.auth.enabled` stays `false` by default, unchanged;
-the default-config auth-off suites stayed green throughout. Waves B5/B6/B0b open.
-
-**AUTH-ROLES-PLAN wave B6 done.** The ~34 remaining `canManageOrg`/`canManage`/`canAdminister` call
-sites this wave's own plan text named are now migrated onto `Authority` everywhere (see "Authorization
-tags" table above, updated to `authority.mayManageOrg()`/`mayManageFleet(ownership)`/`mayAdminister()`)
-— by the time this wave reached vision-api, most controller production call sites had already migrated
-in an earlier pass of the same wave; what remained here was fixing the test fixtures and fixing one
-missed production call site:
-
-- **9 controller test fixtures** (`GeoRegionControllerTest`, `CameraPoseControllerTest`,
-  `GeofenceControllerTest`, `DiscoveryInboxControllerTest`, `CategoryControllerTest`,
-  `EventControllerTest`, `SimulationControllerTest`, `AssetControllerTest`, `DeviceControllerTest`) had
-  a `currentUserWithScope(VisibilityScope scope)`-style `CurrentUser` fake whose `authority()` override
-  threw `UnsupportedOperationException("<Controller> never calls authority()")` — written before this
-  wave's controllers actually started calling `authority()`. Once they did, every one of these 9 broke
-  (40 errors on the first honest, non-`-q` run). Fixed uniformly: `return new Authority(scope,
-  EnumSet.allOf(Capability.class))` — **full capabilities, deliberately**, so a PILOT/MANAGER-scope
-  test case still proves the *scope* gate, not a missing capability. `AssetControllerTest`/
-  `DeviceControllerTest` reference `com.drones.vision.platform.Capability` fully-qualified (no import)
-  since both already import `com.drones.vision.kernel.Capability` — a different type, unrelated device
-  capabilities (`VIDEO`, …) — under the same simple name.
-- **`AfterActionAssemblerTest`/`AssetParameterControllerTest`** — same "full capabilities, restricted
-  scope" pattern used deliberately where a test needs to prove a *scope* boundary causes a denial,
-  e.g. `AfterActionAssemblerTest#assembleThrowsAccessDeniedWhenTheViewerMaySeeButNotExportTheAsset`
-  builds `new Authority(VisibilityScope.assignedAssets(Set.of(assetId)), EnumSet.allOf(Capability.class))`
-  rather than a scope-only fixture, so the assertion is unambiguous about which axis failed.
-- **`security.StreamAccess`** — a genuine production call site this wave's earlier grep-based "zero
-  remaining callers" pass missed, surfaced only by running the plan's full multi-module `-am test`
-  build after `core/vision-platform` deleted the three methods outright (`NoSuchMethodError` at
-  runtime, 42+ cascading errors in `StreamControllerTest`/`HlsProxyControllerTest`/
-  `LiveAssetAccessDevPrincipalTest`). Two call sites, `visible(DeviceId)` and `visibleAsset(AssetId,
-  VisibilityScope)` — both an "unowned device/asset falls back to a caller whose scope is deployment-
-  wide" check. Fixed by replacing `scope.canAdminister()` with `scope.isUnbounded()` directly, **not**
-  by widening `StreamAccess` to carry an `Authority` — the deleted `canAdminister()`'s own body was
-  always exactly `kind == UNBOUNDED` (confirmed from `git log`), so `isUnbounded()` is a byte-identical
-  replacement; widening instead would have rippled into `StreamAccess`'s eight `StreamController`
-  callers for no behavior change, and would have made this fallback capability-gated
-  (`Authority#mayAdminister()` also requires `Capability.MANAGE_ORG`) when it never was before. Class
-  javadoc updated in three places to stop citing the now-deleted methods and to state plainly why this
-  fallback is deliberately scope-only.
-
-`./mvnw -B -pl station/vision-api test -DskipWeb` — **985/985** green, 0 failures/errors — the same
-count before and after this wave's fixes (every change here repaired an existing test's fixture or a
-production call site that would otherwise `NoSuchMethodError`; no test method was added or removed).
-The doc's last-recorded vision-api count (**979**, wave B4 entry above) predates an undocumented wave
-B5 (Spring Session JDBC — the `V34` migration this module's tests already exercise) that isn't this
-wave's to reconstruct; 985 is this wave's own before-and-after baseline, not a delta from 979. Plan's
-full green line (`core/vision-platform,contexts/vision-warehouse,contexts/vision-flight,
-contexts/vision-perception,contexts/vision-learning,contexts/vision-map,contexts/vision-identity,
-station/vision-api,station/vision-app -am test`) — **BUILD SUCCESS** end-to-end in the foreground (a
-first attempt was backgrounded and lost when the agent turn ended — backgrounded builds do not
-survive the turn that started them); see `core/vision-platform/MODULE.md`'s own B6 entry for the full
-per-module tally. Docker ran for real (Testcontainers `postgres:16`). `vision.auth.enabled` stays
-`false` by default, unchanged — the default-config bar held throughout. The plan's B1 text also asked
-for an ArchUnit rule banning new `canManageOrg`/`canManage`/`canAdminister` call sites (deferred there
-to this wave); it was never added and is now moot — the three methods are deleted outright, a stronger
-guarantee than any reflection-based check over a method that no longer exists to call (see
-`core/vision-platform/MODULE.md`'s B6 entry for the full reasoning). Wave B0b (flip
-`vision.auth.enabled`'s default) is the only item this plan still has open.
-**SOURCE-ONBOARDING-2-PLAN.md §3.2 wave C done (2026-09-05, uncommitted at time of writing).** C1
-(`POST /api/discovery/inbox/{id}/attach`), C2 (new `DiscoveryStatusController`, `GET
-/api/discovery/status`), C3 (`SystemNetworkController`/`NetworkAddressResponse`/
-`SystemNetworkResponse` widened for `kind` + mediamtx push facts), C4 (new `discovery` SSE topic),
-C5 (`POST /api/discovery/inbox/{id}/restore`) — see the endpoint table, exception-mapping table, DTO
-conventions, and "Live updates" section above for the full shapes; C6 (a real `StreamStateObserver`
-wired to `devices`) is wholly a `vision-app` change, noted in "Live updates" above and detailed in
-that module's own MODULE.md. Also fixed two pre-existing test compile breaks found while wiring this
-wave, unrelated to discovery/network but blocking this module's test compile either way: `git
-blame`-confirmed leftovers from an earlier, already-merged wave that widened `SourceHealth` to a
-3-arg canonical constructor (`id, status, lastScanAt`) without updating
-`DiscoveryInboxControllerTest`'s two `new SourceHealth("mediamtx", SourceStatus.UNREACHABLE)`
-2-arg call sites (fixed by adding `Instant.now()` as the third argument).
-
-**Deliberate deviation, documented in place**: `LiveUpdateDiscoveryInboxService` (the decorator that
-turns a `ReportOutcome#changed()` into a `discovery` SSE publish) lives in `vision-app` and depends
-directly on the **concrete** `LiveUpdateRegistry` class, not a new per-context `*LiveUpdatePort`
-interface — every other such decorator in this codebase depends on a narrow port instead. Adding a
-`DiscoveryLiveUpdatePort` to `contexts/vision-warehouse` would have meant writing outside this
-wave's file scope (that context belonged to earlier waves A/B); see that class's own javadoc in
-`vision-app` for the full reasoning.
-
-`./mvnw -B -pl core/vision-kernel,core/vision-platform,contexts/vision-warehouse,contexts/vision-identity,contexts/vision-flight,contexts/vision-perception,contexts/vision-map,contexts/vision-events,contexts/vision-learning,contexts/vision-simulation
-install -DskipTests` (this worktree's own source — the shared `~/.m2` local repo had been
-concurrently overwritten by another agent's build of the main checkout's identity module mid-task,
-surfacing as `VisibilityScope`-vs-`Authority` and `AssignmentService`/`UserService` signature
-mismatches with no relation to this wave's own edits; reinstalling from this worktree's source
-resolved it — see `station/vision-app/MODULE.md`'s own entry for the parallel adapter-module
-reinstall this same contamination required) then `./mvnw -B -pl
-storage/persistence,station/vision-api,station/vision-app test -DskipWeb` — `storage/persistence`
-**274** (unchanged, read-only this wave; docker ran, not skipped), `station/vision-api` **965**
-(+11 over 954: 7 new `DiscoveryInboxControllerTest` cases for `attach`/`restore`, 2 new
-`SystemNetworkControllerTest` cases for the video-push-facts present/absent cases, 2 new
-`LocalNetworkAddressesTest` cases for `VIRTUAL` classification + LAN-before-VIRTUAL sort order),
-`station/vision-app` **326** (unchanged in count from the prior B1 entry above — see that module's
-own MODULE.md for wave C's actual test-count delta there) — all green, default-config bar held
-throughout (`vision.discovery.live.enabled`/`vision.live.stream-state-push.enabled` both default
-**true**, proven by this same green run rather than a separate flag-off suite). Nothing deferred.
-
-**CREW-CONTROL-PLAN.md wave W2 done (2026-09-05, uncommitted at time of writing, branch
-`feat/crew-control`).** New `security.SeatAccess` (the one collaborator every guard calls — 5 params,
-at the constructor ceiling) + `security.SeatAccessSettings` (plain, framework-free settings record
-bridged from `vision-app`'s `VisionCrewProperties`) + `support.SeatSupport` (device/stream→asset
-resolution, display-name lookup, `FORCE`/`DENIED:SEAT_HELD` audit writes) + new `SeatController`
-(`GET`/`POST`/`DELETE /api/assets/{id}/seats[/{kind}]`, §3.6 frozen wire contract) + 3 new DTOs
-(`SeatsResponse`/`SeatHolderResponse`/`TakeSeatRequest`, see "DTO conventions" above) + the seat guard
-threaded into `FlightCommandController` (6 command handlers), `AssetStreamController`
-(start/stop), `AssetSessionController` (engage/disengage), `StreamController` (start/stop/
-updateConfig-family), and `ManualControlWebSocketHandler#handleEngage` — see the two "CREW-CONTROL
-wave W2" convention notes above (REST + WS) for exact insertion points and rule composition.
-`AssetAuthority`/`CapabilityAssetAuthority` already existed (AUTH-ROLES-PLAN wave B4) and needed no
-change; this wave only adds `SeatAccess` as a second, later-consulted gate.
-
-Deviations, each one-line: (1) fixed a genuine **pre-existing** compile defect unrelated to
-CREW-CONTROL, in `vision-app`'s `LiveFrameFallbackStreamService` (missing `StreamService#followStatus`
-override — `git blame`-confirmed leftover from an already-merged, unrelated commit,
-`29536635 feat(track-follow W2)`, that widened the interface without updating this one decorator);
-fixed minimally, matching the class's own "every other method delegates unchanged" pattern — see that
-module's own MODULE.md. (2) Four constructors pushed past the 5-arg ceiling — `SeatAccess` and
-`SeatSupport` land exactly at 5, `AssetStreamController` to 6, `StreamController` to 7 — each
-documented in its own javadoc; `StreamController` was already at 6 for `StreamAccess` before this
-wave, so 7 continues an existing precedent rather than opening a new one. (3) §3.6 worked one example
-(`force` on the flight seat only); this implementation generalizes `force`/`mayForceSeat` to both seat
-kinds symmetrically, since the plan's own rule table (§3.2) states the force rule kind-agnostically
-and a flight-only implementation would have been an arbitrary, undocumented asymmetry. (4) The
-explicit-actor overload `requireFlightSeat(UserId, AssetId)` trusts `mayFly=true` unconditionally
-(mirrors `CapabilityAssetAuthority`'s own explicit-actor precedent, AUTH-ROLES wave B4) since the WS
-handler already ran its own `mayFly` check immediately before calling it — documented in `SeatAccess`'s
-own javadoc, not re-derived here.
-
-`./mvnw -B -pl contexts/vision-flight,station/vision-api,station/vision-app test -DskipWeb` —
-`contexts/vision-flight` **447** (unchanged — W2's file scope excludes this module, which W1 already
-shipped), `station/vision-api` **1046** (+37 over 1009: 22 `SeatAccessTest` + 12 `SeatControllerTest`
-+ 1 `StreamControllerTest` case proving rule 3 — flight-seat holder never conflicts on the camera
-seat and preempts any prior camera holder — + 1 `ManualControlWebSocketHandlerTest` case proving the
-WS `SEAT_HELD` denial fires before `ManualControlService#engage` is ever called + 1
-`FlightCommandControllerTest` case), `station/vision-app` **334** (unchanged — no test file in this
-module's scope touched). All green, 0 failures/errors. Docker ran for real (Testcontainers
-`postgres:16`, Flyway migrated through `V34`). Default-config guardrail held: `vision.crew.enabled`
-defaults `false`, and every pre-existing test in all three modules is unmodified and still green
-under that default — the four pre-existing controller/WS-handler test files needed only a
-disabled/pass-through `SeatAccess` threaded into their existing construction call sites to keep
-compiling, never a behavioral change. Nothing deferred to a later wave from this module's own scope;
-W3 (crew UI, vision-web) is a separate, concurrently-running agent's file scope, not this one's.
-
-**fix/fleet-topic-scope: closed the `fleet`-topic visibility-scope leak.** `freshFleetEnvelope`'s
-unscoped `AssetService#assets()` snapshot used to reach every connection unfiltered — `mayReceive`
-only ever checked `map` events and per-asset envelopes, so a `fleet` envelope (neither) always
-passed. Replaced `LiveConnection#mayReceive(envelope): boolean` with `project(envelope):
-LiveEnvelopeResponse` (nullable) reusing the connection's existing `assetVisibility` predicate (the
-same one `LiveAssetAccess#deliveryPredicate` builds from `StreamAccess#visibleAsset`, which
-`AssetService#assets(scope, includeDeleted)` — i.e. `GET /api/assets` — already applies): `map`
-unchanged (envelope-or-null by `layerId`), per-asset unchanged (envelope-or-null by `assetId`),
-`fleet` now narrows its `List<AssetSummaryResponse>` to visible entries and **never** returns `null`
-(an empty list is correct for a viewer with nothing visible), everything else passes through as the
-identical instance (load-bearing for `broadcast`'s serialize-once reuse). Fixed all three call sites
-that used to hand a connection an unfiltered envelope: `broadcast` (rewritten to project first, reuse
-the one shared serialized `String` only when `project` returned the same instance back), `connect()`'s
-snapshot/resume burst, and `updateTopics()`'s newly-added-topic burst — the last two are what actually
-leaked in production, since a fresh connection's seeded `fleet` snapshot and any `Last-Event-ID`
-resume both replayed straight from the buffer with no per-viewer narrowing at all. `fleetBuffer`
-itself stays unfiltered by design, matching `map`'s buffer, so resume re-filters against the
-resuming viewer's *current* scope rather than the scope of whoever happened to seed the buffer.
-Fixed every now-false "only `map` is filtered" javadoc claim found by grep (`LiveUpdateRegistry`
-class doc, `broadcast`, the old `mayReceive`, `LiveTopicKind.FLEET`/`MAP`, `LiveTopic.MAP`,
-`LiveAssetAccess`, `LiveEnvelopeResponse`'s `@param payload`) — four more locations than the four
-named going in, since the claim had spread past them.
-
-No new collaborator, query, DTO field, or exception mapping — this is a pure delivery-filtering fix
-using a predicate the connection already carried; `ApiExceptionHandler`'s table is unchanged. No new
-endpoint or wire-shape change either: `fleet`'s envelope shape (`List<AssetSummaryResponse>`) is
-exactly what it always was, only which elements a given connection receives changed — nothing for a
-UI wave to react to beyond "you may now legitimately see fewer/zero assets in a `fleet` envelope,
-which was always the intended scope."
-
-Six required proofs, three end-to-end (`LiveFleetScopingTest`, MockMvc over the real
-`LiveController`/`LiveUpdateRegistry`/`LiveAssetAccess`/`StreamAccess` chain, mirroring
-`LiveAssetScopingTest`'s established pattern) plus three pure-unit (`LiveUpdateRegistryTest`,
-package-private `register()`/`publishFleetChanged()` seam): (1) a GROUPS-scoped viewer's fleet
-broadcast only carries its own visible assets — `aFleetBroadcastDeltaIsAlsoNarrowedToAGroupsScopedViewersScope`
-+ the pure-unit `broadcastNarrowsTheFleetEnvelopesAssetListPerConnectionWhileAnUnboundedViewerKeepsEverything`;
-(2) the connect-time seeded snapshot — the actual leak path — is already narrowed —
-`connectsSeededFleetSnapshotIsAlreadyNarrowedToAGroupsScopedViewersScope`; (3) a `Last-Event-ID`
-resume re-filters the buffer per resuming viewer, proving the buffer itself was never filtered —
-`aLastEventIdResumeReplaysTheUnfilteredBufferReFilteredPerViewer` (one admin connect seeds the shared
-buffer with both assets; a GROUPS-scoped resume sees only its own, an UNBOUNDED resume still sees
-both); (4) UNBOUNDED (admin) sees every asset, no regression — covered in both the end-to-end and
-pure-unit tests above; (5) a viewer whose scope includes nothing gets an envelope with an empty list,
-never a dropped one — `aViewerWithNothingVisibleReceivesAnEmptyFleetListNotADroppedEnvelope` +
-`aFleetBroadcastToAConnectionWithNothingVisibleStillDeliversAnEmptyListEnvelopeNotADroppedOne`; (6)
-non-fleet topics are byte-identical to before, guarding serialize-once —
-`nonFleetTopicsReuseTheIdenticalSerializedStringAcrossConnectionsGuardingSerializeOnce` asserts
-`assertSame` on the delivered `String` across two connections with divergent predicates.
-
-`./mvnw -B -pl station/vision-api -am test -DskipWeb` — `station/vision-api` **1060** (before this
-task's 8 new tests: **1052**), 0 failures/errors/skipped; full reactor summary (`kernel` through
-`vision-simulation` plus `vision-api` itself) all `SUCCESS`, `BUILD SUCCESS`, exit 0. No feature flag
-gates this change (it is a straight correctness fix, not opt-in behavior), so there is no
-default-config-off suite to separately hold green — every pre-existing test in this module's scope is
-unmodified and still passing under whatever config it always ran under. Docker not needed/not run —
-this module's tests are pure-unit/MockMvc, no Testcontainers dependency in the touched files.
-Nothing deferred; the fix, its three call sites, its javadoc corrections, and its six required proofs
-are complete in this task's scope (`station/vision-api` only — `vision-web`'s
-`drone-picker-facade.ts` was read for context, per instruction, but not modified, and self-corrects
-once the server stops over-sending).
-
-**LIVE-POLL-RETIREMENT-PLAN.md waves L3+L4 done (2026-09-06, branch `feat/live-topics-zones-system`,
-uncommitted at time of writing).** L3: new `zones` SSE topic — `GeofenceLiveUpdatePort`/
-`GeofenceZoneEvent` (`contexts/vision-flight`), `GeofenceZoneEventPayload` (`dto/`), `LiveTopicKind.ZONES`/
-`LiveTopic.ZONES`, a `zonesBuffer` (FIFO, shares `eventBufferCapacity`) and `publishZoneEvent` on
-`LiveUpdateRegistry` (now implementing seven ports). L4: new `system` SSE topic backed by
-`live/SystemStatusSampler` (a fellow vision-api class, not a per-context port) — `LiveUpdateRegistry`
-gained one public method (`publishSystemStatus`) and one inline-initialized buffer (`systemBuffer`,
-capacity-1 latest-only), **no new constructor collaborator**. L4a: `support/SystemStatusReader`
-extracted `safeStatus`/`overall`(now `worstHealth`, made public for reuse) out of
-`SystemStatusController` — that controller's wire output is unchanged, its own pre-existing test
-suite (`SystemStatusControllerTest`, untouched) is the guardrail. See "Live updates" above for the
-full topic/self-feedback-mitigation writeup, "Package layout" for the new
-`live/SystemStatusSampler`/`support/SystemStatusReader` classes, and "Gotchas" for the widened
-`@Qualifier("liveUpdateRegistry")` note.
-
-No new `ApiExceptionHandler` mapping — neither wave introduces a new HTTP-facing failure mode
-(`GeofenceLiveUpdatePort`/`SystemStatusSampler` are both fire-and-forget from the caller's point of
-view). No new REST endpoint — both waves are pure SSE-topic additions; `GET /api/geofences`'s existing
-CRUD endpoints are unchanged (see the endpoint table above), and `system`'s payload is the same
-`SystemStatusResponse` `GET /api/system/status` already returns.
-
-Tests added: `LiveUpdateRegistryTest` gained 3 (`publishZoneEventAppendsAZonesEnvelopeForEachAction`,
-`deletedZoneEventCarriesTheLastKnownZoneInFullOnTheWire`,
-`publishZoneEventReachesASubscribedConnection` — the last an end-to-end SSE-delivery proof via
-`register`); `LiveTopicTest` gained 1 (`parsesZonesAndSystemAsTheSharedConstants`); new
-`SystemStatusSamplerTest` (5 cases) proves the three L4d requirements plus one extra: (1)
-`unchangedStatusSampledRepeatedlyBroadcastsExactlyOnce`, (2)
-`aLiveUpdatesOnlyChangeNeverTriggersAnAdditionalBroadcast` (the self-feedback proof — `live-updates`
-moves its connection count then flips `OK`→`DEGRADED`, zero additional broadcasts), (3)
-`aRealSubsystemHealthChangeTriggersOneAdditionalBroadcast` (contrast case), plus
-`checkedAtAloneNeverTriggersABroadcast` and `constructorRejectsNullCollaborators`.
-`contexts/vision-flight`'s `DefaultGeofenceServiceTest` was widened in place (not new test methods) to
-assert publish-on-create/update/delete and the `DELETED`-carries-last-known-zone contract — see that
-module's own MODULE.md entry.
-
-`./mvnw -B -pl station/vision-api -am test -DskipWeb` — **1069/1069** green (1060 → 1069, +9: 3+1+5
-above). `./mvnw -B -pl core/vision-kernel,core/vision-platform,contexts/vision-warehouse,contexts/vision-identity,
-contexts/vision-flight,contexts/vision-perception,contexts/vision-map,contexts/vision-events,
-contexts/vision-learning,contexts/vision-simulation install -DskipTests` then `./mvnw -B -pl
-storage/persistence,station/vision-api,station/vision-app test -DskipWeb` (the `-am`-on-`vision-app`
-form was tried first and pulled in `adapter-rtsp` as a reactor dependency, whose
-`MediamtxDockerIntegrationTest` hit a genuine, pre-existing, unrelated Docker/network flake — RX side
-never connected to a real mediamtx container within its 1-minute bound; switched to the
-install-then-`-pl`-without-`-am` recipe instead, which reuses `adapter-rtsp`'s already-installed
-`~/.m2` jar untouched, since this task's file scope never touched that module) — `storage/persistence`
-**283/283** (unchanged, read-only this wave; Postgres Testcontainers ran for real), `station/vision-api`
-**1069/1069**, `station/vision-app` **354/354** (`LiveWiringTest` 5→6, `+systemStatusSamplerBeanExists`;
-`LiveDisabledWiringTest` renamed one test in place to also assert `SystemStatusSampler`'s bean absence
-— see that module's own MODULE.md entry) — all green, `BUILD SUCCESS`, default-config bar held
-throughout both `vision.live.enabled=true` (default) and `=false` wiring tests. Docker ran for real
-(not skipped). Nothing deferred except the pre-existing `everDropped`/`live-updates` `DEGRADED` defect,
-explicitly out of scope per this wave's own task spec (see "Live updates" above for why the L4
-mitigation routes around it rather than fixing it).
-
-**`docs/plans/active/CV-ORCHESTRATION-PLAN.md` wave W1 step 5 "wire mirror" done here** (this module's
-file scope: DTOs + `StreamController`). New `dto.ObjectStateResponse` — `@JsonInclude(NON_NULL)` wire
-mirror of the domain `ObjectState` (`contexts/vision-perception`, landed in an earlier W1 step), with
-one nested static record per facet (`Identity`, `Kinematics`, `Belief`, `Provenance`, `MemoryFacts`,
-`LockFacts`, `Timing`, `LabelCandidate`), a `static from(ObjectState)` factory on every record, and
-`Kinematics` reusing the shared `BoundingBoxResponse` for its `box`/`detectorBox`/`trackerBox`/
-`predictedBox`. A `null` domain group maps to a `null` DTO component, which `NON_NULL` then omits from
-the JSON entirely — the class javadoc calls this out explicitly as the intended "absent is honest,
-not a missing default" behavior, not the forbidden "null means the feature is off" (CLAUDE.md rule
-10 territory, but for a JSON contract instead of a constructor). JSON keys match the already-committed
-TypeScript mirror (`station/vision-web/src/app/core/api/models.ts`'s `ObjectState`) field-for-field —
-verified directly against that file, not just against the domain record.
-
-`DetectionResultResponse` gained a 7th component, `objects` (`List<ObjectStateResponse>`, never
-`null`, sourced from `DetectionResult#objects()`); `StreamTracksResponse` gained `objects` as its 9th
-and last component, `List.copyOf`'d in its compact constructor like `tracks` — unlike the `Optional`-
-sourced `stats`/`latency`/`rate`/`follow` fields, `objects` is always present as a JSON array, even
-`[]`, the same idiom `tracks` itself already uses. `StreamController#tracks` now calls the new
-`StreamService#objects(StreamId)` (see `contexts/vision-perception/MODULE.md`'s own W1 entry) and maps
-each element through `ObjectStateResponse::from`; an unknown/stopped stream reads as `[]`, never
-`null`, matching `tracks`'s own forgiving contract. Per CLAUDE.md rule 10, both DTOs' dead N-1-arg
-convenience constructors were deleted rather than growing a new overload — confirmed zero call sites
-for all four (`DetectionResultResponse`'s 5-arg ctor, `StreamTracksResponse`'s three) both before and
-after this change via `grep -rn "new DetectionResultResponse(\|new StreamTracksResponse("`; the only
-surviving call sites are each record's own canonical constructor invocation inside `from()`/
-`StreamController#tracks`. No `ApiExceptionHandler` mapping changed — this wave adds a field, not a
-new failure mode.
-
-**Superseded in part by wave W2.8** (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.6): the paragraph
-above describes wave W1's shape, where `StreamTracksResponse#objects` and `CvTraceResponse#world`
-still carried the flat `ObjectStateResponse` mirror. As of W2.8 both are retyped to
-`List<WorldObjectResponse>` (new file, `dto/WorldObjectResponse.java` — `{state, operator, event,
-render}`, `state` the same `ObjectStateResponse` verbatim) and sourced from the new
-`StreamService#worldObjects(StreamId)` rather than `#objects(StreamId)`. `DetectionResultResponse#objects`
-and the `detections:` SSE topic are **unchanged** — they deliberately keep the flat mirror, since the
-operator/event/render relations are a platform concern cv-service's own wire shape (and the durable/
-detections path mirroring it) must never carry. `LiveUpdateRegistry`'s `tracks:` envelope payload
-follows the same retype (see this file's `live` package section below) — it and the `/tracks`/`/cv/trace`
-REST reads now share one `WorldObjectResponse::from` mapping fed by one `WorldModel` fold per result,
-never re-folded per surface.
-
-`./mvnw -B -pl contexts/vision-perception,cv/grpc,station/vision-api,storage/persistence,contexts/vision-events,contexts/vision-learning,station/vision-app -am -DskipWeb test` —
-`station/vision-api` **1069 → 1074 tests, all green** (5 new: 4 `ObjectStateResponseTest` cases —
-`everyGroupAbsentSerializesToMissingKeysNotNulls`,
-`everyGroupPresentRoundTripsEveryLeafByPairwiseDistinctValue` (every leaf a pairwise-distinct value,
-proving no field is accidentally mapped from a sibling), `kinematicsOmitsIndividualSourceBoxesTheyDoNotClaim`,
-`idAndStreamIdMapToTheWireShapeExactly` — against the real Jackson setup (plain `JsonMapper`, the same
-direct-serialization pattern `ManualControlFrameDtoTest` already uses), not a mocked one; plus 1 new
-`StreamControllerTest#tracksReportsTheObjectMirrorAlongsideTracks`, and the pre-existing
-`tracksReturnsAnEmptyListAndNoStatsForAnUnknownOrStoppedStream` widened in place with an
-`objects`-is-`[]` assertion, not counted as a new method). `BUILD SUCCESS`, all green. See
-`contexts/vision-perception/MODULE.md` and `station/vision-app/MODULE.md` for those modules' own
-counts (**755 → 760** and **354 → 354** respectively — `vision-app`'s only change is a one-line
-`LiveFrameFallbackStreamService#objects` delegation, no test file in that module's scope was touched).
-Docker ran for real for this module's and `vision-app`'s own Testcontainers-based suites (confirmed via
-live Flyway migration through `V35` in the build log). `storage/persistence` IS in this wave's blast radius (W1 step 3
-updated seven `DetectionResult` call sites in `PostgresDockerIntegrationTest` plus
-`DetectionResultMapper#toDomain`) and its Docker suite ran for real: **283 tests, 0 failures**,
-including `PostgresDockerIntegrationTest$DetectionRepositoryTests`. **Do not read that class's own
-`surefire-reports/*.txt` and conclude it skipped** — the outer class holds no `@Test` method of its
-own, so its report honestly says `Tests run: 0` while its 35 `@Nested` classes each get their own
-line in the build log and none of their own `.txt`. A per-file tally over `surefire-reports/*.txt`
-therefore under-counts this module by an order of magnitude; trust Maven's per-module `Results:`
-line instead. An earlier pass through this wave mistook exactly that for a Docker-gate flake.
-
-`docs/plans/active/CV-ORCHESTRATION-PLAN.md` **wave W2.5 (`GET /api/streams/{id}/cv/trace`, TRACKS/
-CV_TRACE SSE, cv status capacity, commit `cdf17816`) and W2.6 (profile fold + `intent`, Java only,
-commit `fc0bfa00`) are done here.** W2.5: new `dto.CvTraceResponse`/`GateDecisionResponse`/
-`FrameLedgerResponse` (see the endpoint table's new `/cv/trace` row above), new `LiveTopicKind.TRACKS`/
-`.CV_TRACE` plus `LiveUpdateRegistry#watchingTrace(AssetId)` (see the "Live updates" section's own new
-paragraph above), new `live.LiveAndPollTraceDemand implements TraceDemandPort`
-(`contexts/vision-perception`'s new port — see that module's MODULE.md), and
-`StreamDetectionSupport` grew from a 5-component to a **6-component** record (`traceDemand` appended,
-nullable on the same "demand gate not wired at all" condition as `demand`, backing
-`#touchedTrace(StreamId)` — see that record's own javadoc). `SystemStatusResponse`'s cv-service row
-gained no new structured field — capacity facts fold into the existing free-text `detail` string
-(`cv/grpc`'s `CvStatusProvider`, that module's own MODULE.md). W2.6: `dto.CvProfileRequest` grew from
-a 9-component to a **10-component** record (`Intent intent` appended, nullable — `null` leaves every
-other field exactly as sent, byte-identical to before this wave); `toSpec()` resolves it via
-`contexts/vision-perception`'s new `IntentPolicyResolver` to seed a blank `model`/empty `labelFilter`/
-the synthesized `eventRule`'s confidence only — see that record's own javadoc and
-`contexts/vision-perception/MODULE.md`'s `IntentPolicy`/`IntentPolicyResolver` bullets for the full
-"which fields intent can and cannot reach" reasoning; no web surface consumes `intent` yet (Java-only
-wave, `docs/plans/active/CV-ORCHESTRATION-PLAN.md` §4.7/§4.8's Tuning modal is a later, UI-owned wave).
-`./mvnw -B -pl contexts/vision-perception,station/vision-api -am test` — `station/vision-api`
-**1074 → 1097 tests, all green** (new coverage: `LiveUpdateRegistryTest`'s
-`aResultWithAPopulatedObjectMirrorBroadcastsOntoTheTracksTopic`/
-`aResultWithATracedLedgerBroadcastsOntoTheCvTraceTopic`/
-`aResultWithNoLedgerNeverBroadcastsOntoTheCvTraceTopic`/`watchingTraceIsFalseWhenNoConnectionIsSubscribed`/
-`watchingTraceIsTrueOnceAConnectionSubscribesToThatAssetsCvTraceTopic`, plus 7 new
-`StreamControllerTest` cases for the `trace` endpoint); full `station/vision-app -am test` reactor
-(vision-perception/adapter-cv-grpc/vision-api/vision-web/vision-app) **`BUILD SUCCESS`**,
-`vision-app` itself **355 tests, all green**. No web-side DTO mirror change was needed for either
-step — `intent` is Java-only by design, and the trace DTOs have no `station/vision-web` consumer this
-wave. This W2.7 pass is documentation-only (this file, `cv/grpc`'s, `contexts/vision-perception`'s,
-`station/vision-app`'s and `storage/persistence`'s own MODULE.md) — no source change, counts above are
-carried forward from W2.5/W2.6's own measurement, not re-run for this docs-only step per this wave's
-"skip the tests" instruction.
-
-**W2.8 test/gap follow-up (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7):** W2.6 shipped
-`CvProfileRequest`'s `intent` fold without tests; closed here with `dto.CvProfileRequestTest` (12
-cases: null-intent passthrough, blank-model/empty-labelFilter seeding, an explicit value winning
-over the intent's own choice, `CUSTOM` returning the caller's own list unchanged, the synthesized
-`eventRule` confidence, and `fieldSources()`'s per-knob provenance) and `support.StreamDetectionSupportTest`
-(2 cases, new file — proves an asset-tier profile fold and the session-tier `StartStreamRequest#mergeOnto`
-override coexist in one resolved `PipelineConfig`, and that an unowned device skips the fold entirely).
-Also new: `CvProfileRequest#fieldSources()` → nested `CvProfileRequest.Sources(ProfileSource model,
-ProfileSource labelFilter)`, reporting `contexts/vision-perception`'s new `ProfileSource.INTENT` for
-exactly the two fields `toSpec()` actually seeded from `intent`; `CvProfileResponse` grew from a
-15-component to a **16-component** record (`Sources sources` appended, `@JsonInclude(NON_NULL)` —
-omitted, not `null`, for every read with no originating request) with its own nested
-`CvProfileResponse.Sources`, populated by `CvProfileController#create`/`#update` from
-`request.fieldSources()` so a caller (W3's Tuning modal) can render "resolved from intent People."
-**W2.10 fix:** the one-arg `from(CvProfile)` overload (silently delegating to `from(profile, null)`)
-was the withdrawn "null means the feature is off" convenience-overload pattern (CLAUDE.md rule 10)
-in static-factory form — removed. `CvProfileResponse.from(CvProfile, Sources)` is now the sole
-factory; `Sources.none()` (both fields `null`, so `@JsonInclude(NON_NULL)` still omits the group)
-is what every read-path caller (`list`, `get`, `effective`, `platformDefault`) passes explicitly. **Disclosed, permanent gap** (not a later-wave TODO):
-`confidenceThreshold`/`inferenceFps` have no `sources` representation at all, even though
-`IntentPolicyResolver` computes an `IntentPolicy#detectFloor()`/`#rateCeiling()` for them, because
-those two `CvProfileRequest` fields are bare primitives with no "caller left this to the platform"
-sentinel under this frozen wire contract — see `CvProfileRequest#fieldSources()`'s and
-`CvProfileResponse.Sources`'s own javadoc. No `station/vision-web` change: `models.ts` has no
-exhaustive wire-contract-spec test for `CvProfile`/`CvProfileRequest` and no mirror of `intent` yet
-(still Java-only), so `sources` needed none either this wave.
-
-**W5.0 (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4/§4.8, engineer inspector wire contract):**
-new `dto.CvTraceResponseWireContractTest`, the same fixture-comparison idiom as
-`WorldObjectResponseWireContractTest` (W2.8) — builds a `full` `CvTraceResponse` covering every
-`GateReason` value (all seven, declaration order) plus a `SENT` and a `PROBE` `GateDecisionResponse`,
-one `FrameLedgerResponse` with a `RAN`/`SKIPPED`/`FAILED` `LedgerEntryResponse` triad and one
-`ObjectEvidenceResponse` claim shaped like cv-service's real `predict.cv` evidence (`predicted`/
-`held`/`velocity` keys, `cv/cv-service/cv_service/orchestration/contributors/predict.py`), and one
-`WorldObjectResponse`; and a `minimal` never-traced-this-stream shape (`gate`/`frame`/`world` all
-empty lists, per `CvTraceResponse`'s own "never errors" contract). Fixture committed at
-`station/vision-web/src/app/core/api/__fixtures__/cv-trace.wire.json`, consumed by W5.1's
-`cv-trace.wire.contract.spec.ts`. `./mvnw -B -pl station/vision-api -am test -DskipWeb` —
-**1113 tests, all green** (up from 1097 counted at W2.7; the gap includes tests added by other
-waves running on this same branch concurrently, not solely this step).
-
-**Plan-vs-code discrepancy disclosed here** (not acted on, since it is prose-only): §4.4's
-narrative describes coalesced `SKIPPED` gate entries as carrying "a count" that "rides along."
-Reading `contexts/vision-perception`'s `FrameGateLedger` shows coalescing instead *replaces* the
-previous entry's timestamp/frameSequence/demand snapshot outright — there is no `count` field
-anywhere on `GateDecision`/`GateDecisionResponse`, and this test does not fabricate one. A
-coalesced run is indistinguishable on the wire from a single decision at the same reason; only the
-refreshed `atMillis`/`frameSequence` say time passed.
-
-**2026-09-13, wave W3.0 (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7): `intent` reaches the live
-`PATCH /api/streams/{streamId}/config` hot path**, wiring the same `IntentPolicyResolver` profile
-create/update already uses into `StreamController#updateConfig` too. `dto.UpdateStreamConfigRequest`
-grew from a 7-component to an **8-component** record (`Intent intent` appended, the last component);
-its existing 6-arg convenience constructor (defaulting `labelDenyFilter`) now also passes `null` for
-`intent`, and `EMPTY` passes one more `null` — no third constructor added (CLAUDE.md rule 10).
-`toPatch()` resolves `intent` (when non-`null`) via `IntentPolicyResolver.resolve(intent, labelFilter)`
-and seeds `model`/`labelFilter` only when this request's own fields were absent, then builds
-`PipelineConfigPatch` from the resolved values. New `fieldSources()` mirrors `CvProfileRequest`'s own
-method field-for-field but **returns `CvProfileResponse.Sources` directly** rather than a second,
-near-identical nested type — both DTOs report provenance for the same two knobs, so one type serves
-both. `dto.UpdateStreamConfigResponse` grew from a 3-component to a **4-component** record
-(`CvProfileResponse.Sources sources` appended); its 2-arg convenience constructor now defaults
-`sources` to the explicit `CvProfileResponse.Sources.none()` — never a bare `null` (rule 10 again:
-"a parameter may not mean 'off' by being `null`"). `StreamController#updateConfig` passes
-`body.fieldSources()` through as the response's 4th argument; `UpdateStreamConfigRequest.EMPTY`'s
-`intent` is `null`, so the no-body case still resolves to `Sources.none()` exactly as before this
-wave, byte-identical on the wire for every pre-existing caller that never sends `intent`.
-
-**Deliberately a *different* "was this explicit" test than `CvProfileRequest#toSpec()`/
-`#fieldSources()` use, and not an inconsistency to fix later:** `CvProfileRequest`'s fields are
-always-present with blank-string/empty-list as the "caller left this to the platform" sentinel,
-because that wire shape has no `null`. `UpdateStreamConfigRequest` is already a true partial-patch
-DTO where `null` itself means "not sent" and a non-`null` (even empty) `labelFilter` is a real,
-explicit value ("keep all labels" — this record's own pre-existing javadoc). So here the correct
-"was this explicit" test for both `toPatch()` and `fieldSources()` is plain `model == null`/
-`labelFilter == null`, not a blank/empty check — using the blank/empty test here would treat an
-operator's explicit "keep all labels" `labelFilter: []` as if it were absent and let intent overwrite
-it, which is exactly backwards for this DTO's contract.
-
-**Observed JSON shape for `sources` (verified with a throwaway direct-`JsonMapper` test, not just
-read from a doc comment):** when `intent` was sent, e.g. `{"intent":"VEHICLES"}`, the response's
-`sources` group is `{"model":"INTENT","labelFilter":"INTENT"}`. When no `intent` was sent at all, the
-observed shape is `"sources":{}` — **present as an empty object, not an absent key.** This is because
-`CvProfileResponse.Sources`'s own class-level `@JsonInclude(NON_NULL)` only omits a `null` field
-*inside* the `Sources` object; the `Sources` value itself (`Sources.none()`) is never `null` here
-(rule 10 — an explicit sentinel value, not a `null`), and `UpdateStreamConfigResponse` carries no
-`@JsonInclude` of its own to omit a non-null `sources` field. **This measured shape is at odds with
-`CvProfileResponse.Sources.none()`'s own javadoc claim** ("`@JsonInclude(NON_NULL)` still omits the
-whole `sources` group from the wire, exactly as a bare `null` used to") — for `UpdateStreamConfigResponse`
-that claim does not hold; the group is present as `{}`. That javadoc describes `CvProfileResponse`
-specifically, which was not re-verified end-to-end as part of this wave (out of this wave's scope —
-`contexts/vision-perception` and other DTOs were untouched), so this paragraph records the
-discrepancy rather than "fixing" that unrelated file's claim on unverified authority.
-
-`./mvnw -B -pl station/vision-api -am test -DskipWeb`: **1112 → 1120 tests, all green** (8 new
-`StreamControllerTest` cases: one per `Intent` value proving the resolved `model`/`labelFilter` reach
-`PipelineConfigPatch` unchanged from `IntentPolicyResolver`'s own values, an "explicit wins" case, two
-response-shape cases for `sources` with and without `intent`, and — added during the W3.8 merge review,
-closing a gap the javadoc already promised — `updateConfigReturns400ForIntentCustomWithNoLabelFilter`,
-asserting `{"intent":"CUSTOM"}` with no `labelFilter` is a 400 `BAD_REQUEST` because
-`IntentPolicyResolver#resolve` throws for `CUSTOM` with empty/null `customClasses`). No
-`contexts/vision-perception`, `station/vision-web`, or other module change — Java-only, `vision-api`
-only, per this wave's scope.
-
-**2026-09-13, CV-ORCHESTRATION wave W5b.3 (trace replay, plan §8 E23).** `FrameLedgerResponse`
-gains `detections: [{label, confidence, box{x,y,width,height}}]`, `frameWidth`, `frameHeight`,
-mirroring the domain `FrameLedger`'s three new components (`contexts/vision-perception`'s own
-W5b.2 entry). A new nested `FrameLedgerResponse.DetectorBoxResponse(label, confidence, box)`
-reuses the existing `BoundingBoxResponse` — the same box shape `DetectionResponse` already uses —
-rather than a second box DTO, so the wire's `TracedDetection`/`Detection` boxes are byte-identical
-in shape even though their domain sources (`DetectorBox`/`Detection`) are deliberately unrelated
-types. `CvTraceResponseWireContractTest`'s `full` example now carries **two** `FrameLedger`s
-instead of one — `fullFrameLedger()` (unchanged shape, now also two distinct `DetectorBox`es at a
-1920×1080 frame size) and a new `fullFrameLedgerWithoutDetections()` (`detections: []`,
-`frameWidth`/`frameHeight: 0`, the untraced/pre-W5b shape) — covering both halves of the new
-fields' contract in the one committed fixture, per this wave's own instruction ("populated on one
-frame and empty on another"). `station/vision-web/src/app/core/api/__fixtures__/cv-trace.wire.json`
-regenerated from the test's own mismatch artifact (`cp target/cv-trace.wire.actual.json
-../vision-web/src/app/core/api/__fixtures__/cv-trace.wire.json`), not hand-edited — the frontend
-mirror types this fixture pins are W5b.4's job, not this step's. `./mvnw -B -pl
-cv/vision-proto,contexts/vision-perception,cv/grpc,station/vision-api -am test -DskipWeb`:
-vision-proto 5/0/0, vision-perception 839/0/0, adapter-cv-grpc 195/0/0, **vision-api 1121/0/0**
-(same count as W5b.2 — no new `@Test` method, only richer fixture data in the two existing
-examples), all green.
-**CV-ORCHESTRATION wave W7.3 done** (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7/§8, decision E22
-— "a profile is a patch"), rewriting every `dto.CvProfile*` type to mirror `contexts/vision-perception`'s
-W7.0/W7.1 nullable-patch domain shape and to report per-knob provenance on **every** read, not only a
-save-time response:
-
-- `CvProfileTrackingResponse` is now itself a fully-nullable 5-field patch (`mode`/`engineId`/
-  `capabilityLevel`/`verifyEveryMillis`/`followFps`, `@JsonInclude(NON_NULL)`), with `from(TrackingKnobPatch)`
-  (null-tolerant) and `fromResolved(TrackingConfig)` (an EFFECTIVE fold's own tracking, always present)
-  as two separately named factories rather than one overloaded method — replaces the old single
-  `from(TrackingConfig)`/`toTrackingConfig()` pair. `CvProfileEventRuleResponse#from(EventRuleConfig)`
-  is now null-tolerant the same way, serving both the raw-profile (nullable `eventRule`) and
-  EFFECTIVE (always-resolved) call sites with one method.
-- New `CvKnobSourcesResponse` (8 fields, one `String` per `KnobSources` component, no `@JsonInclude` —
-  every field is always present, `KnobSources`'s own compact constructor guarantees non-`null`) is the
-  wire view of a fold's real per-knob provenance across every bound tier, nested in
-  `EffectiveCvProfileResponse` alongside a new `intent` field (the matched tier's own persisted pick).
-- `CvProfileRequest#toSpec()` is now a straight, unresolved pass-through onto `CvProfileSpec` — every
-  knob nullable and carried through byte-identical to what the request said, `intent` never consulted
-  to seed `model`/`labelFilter` here (that is `CvProfileResolver`'s job now, at fold time, wave W7.1).
-  `fieldSources()` and the nested `CvProfileRequest.Sources` record are **deleted** — superseded by
-  `CvProfileResponse`'s own per-read `FieldSources` (below), since `intent` surviving on the saved
-  profile means "was this knob seeded from intent" is answerable from the profile alone, on every read,
-  not only by the one save request that happened to compute it.
-- `CvProfileResponse` widens every knob to nullable (mirroring `CvProfile` field-for-field) and gains
-  `intent`. Three static factories: `from(CvProfile)` (every plain `GET`/`list`/`create`/`update`),
-  `platformDefault(PipelineConfig)` (unchanged shape, now null-tolerant factories underneath), and new
-  `fromEffective(CvProfile matchedProfile, PipelineConfig config)` for `GET .../effective`'s nested
-  `profile` — identity/bookkeeping fields come from `matchedProfile`, but **every knob comes from
-  `config`** (the fold's own result), not `matchedProfile`'s own possibly-partial fields: under
-  per-knob inheritance the matched tier may leave several knobs unset (inherited from a lower tier), so
-  echoing its raw fields would misreport what actually runs. This is a deliberate behavior correction
-  relative to pre-W7 (which had no partial tiers to misreport).
-- **Disclosed deviation — `Sources` vs `FieldSources`:** the brief's design point widens the old
-  2-field `CvProfileResponse.Sources` (`model`/`labelFilter`) to 4 fields (`model`/
-  `confidenceThreshold`/`inferenceFps`/`labelFilter`), computed fresh from `CvProfile` on every read
-  instead of once at save time. Widening `Sources` *in place* was tried first and reverted: `dto.UpdateStreamConfigRequest`/
-  `dto.UpdateStreamConfigResponse` (the stream-config hot path, explicitly out of this wave's write
-  scope — see those types' own javadoc, cited above) directly reuse `Sources`'s original two-argument
-  constructor for their own live PATCH-path provenance reporting, and a 2→4 field widen breaks that
-  unrelated, untouched call site's compile. Fix: `Sources` stays byte-identical to its pre-W7.3 shape
-  (kept solely so `UpdateStreamConfigRequest`/`UpdateStreamConfigResponse` keep compiling unchanged); a
-  new sibling record, `CvProfileResponse.FieldSources` (4 fields, `of(CvProfile)`/`none()`), is what
-  `CvProfileResponse#sources()` is actually typed as now. Both records live in the same file; each
-  carries a javadoc note cross-referencing the other and explaining why two near-identical types exist.
-- `CvProfileController#effective` now builds `CvKnobSourcesResponse.from(resolved.sources())`/
-  `resolved.intent()` into `EffectiveCvProfileResponse`; `list`/`get`/`create`/`update` all simplified
-  to the single-argument `CvProfileResponse.from(profile)` (provenance no longer threads through the
-  controller — it is computed inside the DTO factory itself).
-- **Disclosed ordering deviation:** this wave's DTO/controller rework was written, and this MODULE.md
-  entry drafted, before wave W7.2's own persistence-side build had been re-verified green — Maven's
-  reactor topologically builds every upstream module through the full requested phase even under
-  `-pl <target> -am`, so `station/vision-app`'s own scoped build command failed at `station/vision-api`'s
-  MAIN SOURCE compile (a real compile error, `TrackingKnobPatch` vs `TrackingConfig`/`CvProfileSpec`'s
-  new arity) the moment W7.0's domain rewrite landed, regardless of which wave's turn it nominally was.
-  Completing W7.3's substance now, rather than a throwaway compile-only patch to be redone properly
-  later, was the only way to get either wave's own build green — W7.2 and W7.3 are still committed as
-  two separate, correctly file-scoped commits.
-
-Test files updated to the new shapes: `CvProfileControllerTest#profile()` (the fixture helper) now
-builds a `TrackingKnobPatch`/passes `intent=null` instead of `TrackingConfig.defaults()`, and both
-`effective(...)` tests' `new EffectiveProfile(...)` calls gained the two new trailing arguments
-(`KnobSources`/`Intent`) `EffectiveProfile` picked up in wave W7.1; `StreamControllerTest`/
-`StreamDetectionSupportTest` needed the identical `EffectiveProfile` arity fix at their own one
-construction site each (mechanical, unrelated to those files' actual W5b/hot-path subject matter).
-`CvProfileRequestTest`'s old 12 cases (the W2.6-era intent-fold/`fieldSources()` behavior this wave
-deletes) are replaced by a new 12 pinning `toSpec()`'s unresolved pass-through: `toSpecPassesEveryFieldThroughUnresolvedByteIdenticalToTheRequest`,
-`blankModelBecomesNullOnTheSpecRatherThanAnInvalidModelRef`, `nullModelStaysNullOnTheSpec`,
-`explicitModelBecomesAModelRefWithTheLatestSentinelVersion`, `intentTravelsToTheSpecUnresolvedRatherThanSeedingAnyField`,
-`emptyLabelFilterIsPassedThroughAsAnExplicitAllLabelsValueNotSeeded`, `nullLabelFilterStaysNullMeaningInherit`,
-`customIntentWithEmptyLabelFilterThrowsFromCvProfileSpecsOwnValidation`,
-`customIntentWithNonEmptyLabelFilterSucceedsAndPassesThroughVerbatim`,
-`nullTrackingStaysNullOnTheSpecMeaningInheritTheWholeGroup`,
-`explicitTrackingBecomesATrackingKnobPatchWithAllFiveKnobsSet`,
-`eventRuleIsAlwaysNullOnTheSpecSinceThisWireShapeNeverAcceptsIt`.
-
-`./mvnw -B -pl station/vision-api -am test -DskipWeb` — **1121** tests, `BUILD SUCCESS`. Full three-module
-command (`storage/persistence,station/vision-app -am test -DskipWeb`) also green: persistence **286**,
-vision-app **357** (see `storage/persistence/MODULE.md`'s own W7.2 entry). One unrelated pre-existing
-flake surfaced and fixed along the way, in `station/vision-app`'s own `PersistenceWiringTest` — see
-that module's MODULE.md.
-
-**2026-09-13, CV-ORCHESTRATION wave W9.1 (`tracks:` SSE carries the whole `StreamTracksResponse`
-snapshot, plan §4.9/§8 decision E25).** "One assembly, two transports": `StreamTracksResponse.from(
-TracksSnapshot, Instant)` now owns every gating rule `GET /api/streams/{id}/tracks` used to compute
-inline — `stats`/`latency`/`rate`/`detectionState` presence, the `lockedTrackId` hoist from `follow`,
-`FollowResponse.from`, the `tracks[]` filter — carried verbatim from the old controller body.
-`StreamController#tracks` collapses to a 3-line delegation (`requireVisible` →
-`streamService.tracksSnapshot(id).orElse(TracksSnapshot.empty(id))` →
-`StreamTracksResponse.from(snapshot, now)`, see its own API-surface bullet above).
-`LiveUpdateRegistry#flushPending` now publishes that same `StreamTracksResponse` (built from the
-`PendingDetection`'s own `TracksSnapshot`, wave W9.0) onto `tracks:<assetId>` instead of the bare
-`List<WorldObjectResponse>` fold it carried before this wave — retiring the gap that made the REST
-poll the only way to learn `stats`/`latency`/`rate`/`follow` live; the ring buffer of 1 now hands a
-(re)subscribing connection the last full snapshot, not just the last object list. New
-`StreamTracksResponseWireContractTest` pins the wire shape against a committed fixture,
-`station/vision-web/src/app/core/api/__fixtures__/stream-tracks.wire.json` (`full`+`minimal`
-examples) — the same fixture wave W9.2's `stream-tracks.wire.contract.spec.ts`
-(`station/vision-web`) loads to pin the TS side. **Payload size, measured against that fixture**: one
-`tracks:` envelope was **243 bytes** before this wave (`WorldObject[]` only, wave W3.1) and is
-**1,596 bytes** after (the whole snapshot) — the payload now rides at frame cadence, not poll
-cadence, a fact the next capacity/scale decision needs. `StreamControllerTest`'s `/tracks` HTTP
-assertions (`.andExpect(...)` chains) are byte-identical to before; only the Mockito arrange lines
-changed, from stubbing five separate `StreamService` accessors to stubbing the one
-`tracksSnapshot(streamId)` the collapsed controller now actually calls — two tests (unknown/stopped
-stream, no lock issued) needed no stub at all, since an unstubbed mock already returns
-`Optional.empty()`, exactly `TracksSnapshot.empty(id)`'s own trigger. `LiveUpdateRegistryTest`'s
-tracks-topic assertions updated for the wider payload type. Scoped build (`./mvnw -B -pl
-contexts/vision-perception,station/vision-api,station/vision-app -am clean test -DskipWeb`):
-perception 874/874, **vision-api 1122/1122** (1121 baseline + 1 new contract test), vision-app
-355/355, `ArchitectureTest` 14/14, `ContextArchitectureTest` 5/5 — zero failures/errors. W9.0's
-prerequisite domain work is `contexts/vision-perception/MODULE.md`'s own W9.0a+W9.0 dated entry; W9.2
-(`station/vision-web`) is the store-side transport flip that finally lets `DetectionsStore.tracks`
-stop polling this endpoint by default.
+Wave-by-wave history: [`MODULE-HISTORY.md`](MODULE-HISTORY.md).
