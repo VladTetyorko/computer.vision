@@ -88,9 +88,36 @@ pointer is what keeps such a citation resolvable in one hop after the narrative 
 | **D1** | `module-docs/SKILL.md` rewritten around the two-file law + progressive disclosure | done |
 | **D2** | root `CLAUDE.md`: C2, C3, C4 fixed; `## Build` section added (see §6) | done |
 | **D3** | all 7 `.claude/agents/*.md`: "IN FULL" → progressive; append → update-in-place; C1 fixed | done |
-| **D4** | `station/vision-app` + `drone-link/mavlink` split — the recipe proven | done 09-13, **lost in §7, redo** |
-| **D5** | the remaining 11 oversized module docs split, one agent per file, disjoint scopes, **committed in batches** | open |
+| **D4** | `station/vision-app` + `drone-link/mavlink` split — the recipe proven | done 09-13, lost in §7, **redone under D5** |
+| **D5a** | `station/vision-web` — the only doc with a mechanical boundary (line 342/343); moved bytes, did not judge them | done `94b620ab` |
+| **D5b** | `station/vision-app` + `contexts/vision-perception` | done `1f1ce1e9` |
+| **D5c** | `station/vision-api` | done `55f5736e` |
+| **D5d** | `contexts/vision-flight` | done `a97f50c8` |
+| **D5e** | `drone-link/mavlink-core`, then `drone-link/mavlink` | done `0ccfb12b`, `a05228d1` |
+| **D5f** | `cv/cv-service`, `contexts/vision-warehouse`, `storage/persistence` | running |
+| **D5g** | `video-input/rtsp` (**orphaned `MODULE-HISTORY.md` from the aborted run — overwrite wholesale, do not append**), `cv/grpc`, `contexts/vision-learning` | open |
+| **D5h** | *(optional)* the mid-size set: `cv/vision-proto` 32 KB, `device-discovery/onvif-mdns-v4l2` 34 KB, `contexts/vision-identity` 34 KB, `video-output/publish-hls` 31 KB, `core/vision-kernel` 27 KB, `contexts/vision-map` 27 KB, `core/vision-platform` 25 KB | open |
+| **D5-lift** | lift pass on `station/vision-web`: D5a was mechanical, so still-current facts buried in the 435 KB of moved history are not yet in the contract | open |
 | **D6** | *(follow-up, not this branch)* shard `vision-web` / `vision-app` / `vision-api` / `vision-perception` API surface by responsibility, so an agent loads one feature's contract instead of all of them | open |
+
+### Measured result of D5a–D5e
+
+The seven heaviest docs, before → contract now (history is still on disk, just no longer eagerly read):
+
+| Doc | Before | Contract | History |
+|---|---:|---:|---:|
+| `station/vision-web/MODULE.md` | 672 KB | 238 KB | 435 KB |
+| `contexts/vision-perception/MODULE.md` | 181 KB | 138 KB | 56 KB |
+| `station/vision-app/MODULE.md` | 184 KB | 85 KB | 112 KB |
+| `station/vision-api/MODULE.md` | 169 KB | 98 KB | 74 KB |
+| `contexts/vision-flight/MODULE.md` | 114 KB | 95 KB | 22 KB |
+| `drone-link/mavlink/MODULE.md` | 108 KB | 66 KB | 56 KB |
+| `drone-link/mavlink-core/MODULE.md` | 80 KB | 50 KB | 52 KB |
+| **total** | **1.51 MB** | **770 KB** | **806 KB** |
+
+**The split has a floor, and four of these seven are already on it.** `vision-perception` only came down 181 → 138 KB because 105 KB of the remainder is genuine `## API surface` and 24 KB genuine `## Gotchas`; its `## Status` went from 364 lines of changelog to 2.7 KB, which is the whole of what a split can do there. 78 KB of `vision-api`'s 98 KB is a single ~190-row endpoint table. Going below this floor is D6, not D5 — it needs per-responsibility judgment plus a scripted repoint of the ~146 source files that cite these docs by path.
+
+**The higher-value outcome was recovery, not reduction.** Facts that existed only inside wave narrative and are now in the contract: the SSE topic set (`tracks:`, `cv-trace:`, `discovery`, `zones`, `system`), absent from `vision-api`'s API surface entirely; the force-arm magic split (2989 vs 21196) and that ArduPilot *silently bypasses pre-arm checks* on the wrong value; extension channels 9–16 using release sentinel 65534, not 0; and the three build traps now in `CLAUDE.md` §Build. Four stale facts were also corrected in passing — the session cookie is `same-site: strict`, not Lax; nearly every `vision.*.enabled` flag that compiles `false` is ON in `docker-compose.yml`; `RoutingFrameSink` calls `sendTo()`, not `broadcast`; and `vision-flight`'s "fully implemented" line omitted `SeatService`, `BatteryMonitor` and `LinkLossNotifier`.
 
 ## 6. The build-discipline half
 
