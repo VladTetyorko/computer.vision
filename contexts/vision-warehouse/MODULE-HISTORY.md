@@ -63,7 +63,7 @@ argument types).
 
 ## docs/plans/active/ASSET-FLOWS-PLAN.md — wave BK4
 
-§2 (D1p) — closes `PLATFORM-AUDIT-2026-08-21.md`'s R1 gap #4/T4 ("every
+§2 (D1p) — closes `docs/plans/active/PLATFORM-AUDIT-DB.md` gap #4/T4 ("every
 flight record is anonymous"). Widened `AssetUsage` with a nullable `pilotId: UserId` (11th component) and `UsageSessionService#open` with
 a trailing `UserId pilotIdOrNull` parameter — both widened in place per CLAUDE.md rule 10, every
 call site across the repo updated, no new overload. `UsageSummary` grew the same field for the

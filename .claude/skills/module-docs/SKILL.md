@@ -127,4 +127,24 @@ diff <(git show HEAD:$M/MODULE.md | grep -o '\bdocs/[A-Za-z0-9/._-]*\.md' | sort
 grep -ci 'tests green\|Tests run:\|wave [A-Z][0-9]* done' $M/MODULE.md      # must be 0
 ```
 
-Check 2 is the one that catches a fabricated citation, and it is the only check that does.
+Check 2 is the one that catches a fabricated citation, and it is the only check that does — but it
+only sees citations written as a `docs/...` path. A **bare** filename that resolves nowhere slips
+past it, which is how `PLATFORM-AUDIT-2026-08-21.md` sat in two module docs for weeks: no file has
+ever had that name (the 2026-08-21 audit is six `docs/plans/active/PLATFORM-AUDIT-*.md` lane
+reports). So also run check 2b, repo-wide:
+
+```bash
+python3 - <<'EOF'
+import io, re, glob, os
+real = {os.path.basename(f) for f in glob.glob('docs/**/*.md', recursive=True)}
+real |= {'CLAUDE.md', 'ARCHITECTURE.md', 'SKILL.md', 'MODULE.md', 'MODULE-HISTORY.md'}
+for f in sorted(glob.glob('**/MODULE*.md', recursive=True)):
+    if '.claude/worktrees' in f: continue
+    for m in re.finditer(r'(?<![/\w-])([A-Z][A-Z0-9-]{3,}\.md)', io.open(f, encoding='utf-8').read()):
+        if m.group(1) not in real:
+            print(f'{f}: {m.group(1)}')
+EOF
+```
+
+Anything it prints is either a phantom or a doc that has been renamed or moved. Resolve it to a real
+path — never delete the citation, since the fact it supports is usually still true.
