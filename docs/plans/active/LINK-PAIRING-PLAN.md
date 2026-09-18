@@ -536,3 +536,98 @@ parallel with L3 once L2's `Pairing`/dedup contract is frozen (already true as o
 | 5 | Station-wide `GET /api/carriers`, as frozen. |
 | — | The three ⚠ deviations (§3.1 `LinkQuality` as its own port; §3.3 `forget` hard-deletes the pairing row; §3.7 keep the station-IP line in third-party bridge snippets) are **accepted**. |
 | — | L1 explicit: `MavlinkGateway`'s production path must no longer open any socket. `carrier-udp` is the only creator of the lobby `UdpListenLink`. Legacy per-descriptor `udp://host:port` sources keep working by registering their `UdpListenLink` through `LinkRegistry` (they become registered UDP links), never by bypassing it. |
+
+---
+
+## §8 Live walk (2026-09-18)
+
+Live verification against a running app + real Chrome browser, in worktree `vision-link-pairing`
+(branch `feat/link-pairing`). App launched with:
+
+```
+VISION_SIMULATION_ENABLED=true VISION_CARRIER_SERIAL_ENABLED=true \
+VISION_CARRIER_SERIAL_ALLOW="/dev/pts/5" \
+VISION_PERSISTENCE_JDBC_URL=jdbc:postgresql://localhost:5434/vision \
+./mvnw -B -pl station/vision-app spring-boot:run
+```
+
+Fake vehicles: `pymavlink` (venv) — `fake_rover.py --sysid 10 --uid 0x1122334455667788` (UDP lobby,
+script i), a second same-script instance for the collision case, `pty_rover.py` (script iii, pty
+pair via `os.openpty()`). Camera source: `ffmpeg -re -f lavfi -i testsrc=... -rtsp_transport tcp
+rtsp://localhost:8554/ingest/link-pairing-test-cam2` into the reused `vision-mediamtx-1` container.
+
+**Screenshots: none.** `Page.captureScreenshot` (CDP) timed out (30s) on every attempt this session,
+on every tab tried. Root cause not conclusively isolated (an ad-blocker extension was independently
+throwing `FILE_ERROR_NO_SPACE` on its own leveldb, host disk was 94% used but not full) — screenshot
+capture was non-functional throughout, so verification instead relied on `get_page_text`, `find`,
+`read_network_requests`, `read_console_messages`, and direct API/DB checks at each step. Also:
+`computer`-tool clicks (coordinate- and `ref`-based) did not register as functional click events on
+the `/add-source` wizard; all UI interaction was done via `javascript_tool` calling a real DOM
+`element.click()`, which did work. Both are environment-automation limitations, not app defects.
+
+### Script (i) — pairing wizard (found-nearby MAVLink card)
+
+| Step | Expected | Observed | Verdict |
+|---|---|---|---|
+| Rover broadcasts HEARTBEAT to UDP lobby | Appears as a card in `/add-source` Found-nearby feed | Card appeared, MAVLink method, correct label | PASS |
+| Click card -> Confirm -> Name -> Done | Zero typed addresses, wizard completes, asset+device+pairing created | Completed: SOURCE (card click) -> IDENTIFY (name+category) -> ATTACH (review, Create asset) -> sysid-collision screen (see Defect #3) -> Continue -> HAND OVER (Leave in stock). **6 real clicks, 0 typed addresses.** Confirmed via direct DB/API inspection after each stage | PASS (flow works; copy on one screen is misleading, see Defect #3) |
+| Asset page Links panel shows lobby link ACTIVE with live heartbeat age | Panel shows an active link row | Panel permanently shows "No link data yet for this asset" — never fetches | FAIL — Defect #5 |
+| Pin/release a link | Works from the Links panel | Not reachable — panel/Recovery UI never renders (Defect #5) | BLOCKED by Defect #5 |
+| Forget pairing -> sysid returns to pool -> pair again | Works | Confirmed via direct `DELETE /api/devices/{id}/pairing` + re-`POST` — hard delete, sysid freed, re-pair succeeded. UI button unreachable (nested inside the same dead branch as Pin, Defect #5) | PASS via API; FAIL via UI (Defect #5) |
+| Collision: 2nd fake rover, sysid 1, different uid -> confirm screen shows `sysidPushRequired`, assigned 10-250 | Screen shows the push step with an assigned number in range | Could not be literally triggered as "two simultaneous same-sysid different-uid peers": `MavlinkHeartbeatScanner.toDiscoveredDevice` keys discovery-candidate identity by `(method, sysid)` only, no uid — two same-sysid peers collapse into one candidate at the discovery layer. This is an architectural limitation (§6/§7 didn't require uid-level disambiguation at discovery), not a bug. The underlying assign/push mechanism itself (`sysidPushRequired`+`assignedSysid`, 10-250 range) was exercised and confirmed correct via the single-rover pairing above, which needed the very same push path since the rover's factory-default sysid (1) is outside the assignable range | PASS (mechanism); architectural limit on true dual-peer collision, not a defect |
+| Playground page exists, gated by flag; wizard offers no test-source tile | Playground reachable only behind its flag; `/add-source` shows no synthetic/test tile | Confirmed: no test-source tile appeared in Found-nearby or the manual-add list during the live walk | PASS |
+
+### Script (ii) — camera ingest
+
+| Step | Expected | Observed | Verdict |
+|---|---|---|---|
+| Push test stream into mediamtx via ffmpeg on `ingest/...` | Path goes `ready`/`online` | First attempt (plain RTSP, no explicit transport) died ~10.6s in ("Conversion failed!"); fixed with `-rtsp_transport tcp` + a fresh path name, then stayed stable. mediamtx HTTP API (`:19997/v3/paths/list`) confirmed the path online | PASS (after transport fix, not a LINK-PAIRING defect — an ffmpeg/RTSP-mode quirk) |
+| Appears in the discovery feed (no ONVIF camera on this host) | New `mediamtx`-method candidate surfaces | Confirmed — discovery inbox correctly surfaced the pushed path as a new candidate | PASS |
+
+### Script (iii) — serial/pty carrier
+
+| Step | Expected | Observed | Verdict |
+|---|---|---|---|
+| pty pair via `os.openpty()`; does the serial carrier pick up the slave `/dev/pts/N`? | Carrier enumerates and opens the pty if allow-listed | **Not observable on this host.** `SerialPort.getCommPorts()` (jSerialComm 2.11.4, the exact jar the app uses) returns `count=0` — confirmed via a standalone compiled Java program run directly against `~/.m2/repository/com/fazecast/jSerialComm/2.11.4/jSerialComm-2.11.4.jar`, independent of the app. jSerialComm's Linux backend enumerates physical/sysfs serial devices and does not see `/dev/pts/N` pseudo-terminals at all, regardless of `vision.carrier.serial.allow`. Consistent with `GET /api/carriers` showing only the UDP lobby and zero `carrier-serial` log lines in the app log even with `VISION_CARRIER_SERIAL_ENABLED=true VISION_CARRIER_SERIAL_ALLOW="/dev/pts/5"` set | NOT A DEFECT — host/library limitation, stopped here per instruction not to fake it |
+
+### Defects found (all OPEN — none fixed; see rationale below)
+
+| # | File:line | Defect |
+|---|---|---|
+| 1 | `station/vision-api/src/main/java/com/drones/vision/api/controller/DiscoveryInboxController.java:~249` | `pairingService.pair(deviceId, heardSysid, null, currentUser.userId())` — `hardwareUid` is hardcoded `null` on adopt, so the Pairing never records the vehicle's actual hardware uid even when `AUTOPILOT_VERSION.uid` is available. |
+| 2 | `station/vision-web/.../onboarding/sysid-collision-logic.ts`, `candidateSysidCollision()` | Dead code — not the mechanism actually wired to the confirm screen. The real mechanism is `applyFoundCandidateCollision()` (`onboarding-store.ts:~443`) reading `response.sysidPushRequired`/`response.assignedSysid` from the backend, confirmed live-working. |
+| 3 | `station/vision-web/.../onboarding/sysid-step.html:1,4` | `<h2>Fix the sysid collision</h2>` / "...another vehicle in the fleet already claims..." fires on every factory-default (sysid=1) first pairing, per the §7 ruling that a factory default is always reassigned — not just on a genuine fleet collision. Misleading operator-facing copy. |
+| 4 (root cause of Links/cockpit breakage) | `DiscoveryInboxController.java`, `adopt()` ~lines 244-251 | After `pairingService.pair()` assigns a sysid different from the one heard (the common case, since factory default 1 is always reassigned per §7 ruling #2), nothing updates the Device's persisted `stream().options()["sysid"]` to the newly assigned value. Traced down through `MavlinkVehicleLinkPort.linksFor` -> `MavlinkTelemetrySource.open`/`linkGroupSnapshot` (`drone-link/mavlink/.../MavlinkTelemetrySource.java:~143-170,246-256`): the runtime opens using the stale sysid option, so it never matches live traffic on the newly assigned sysid and the link never becomes live — permanently, for every factory-default device, until manually fixed. |
+| 5 | `station/vision-web/.../asset-detail/asset-detail.html:763` (`@else if (!facade.links.group())`) and lines `831-850` (entire Recovery section: Replace hardware / Fix address / Forget pairing / Pin, all nested inside that same `@else` branch) | The Links panel's `facade.links.group()` signal never becomes truthy — confirmed the backend (`AssetLinksController`, `GET/PUT/DELETE /api/assets/{id}/links[/pin]`) works correctly via direct curl, so this is frontend-only. Root mechanism in `links-store.ts` (`track(assetId)`/initial fetch) not fully pinned down within budget. Effect: the entire Recovery toolkit is unreachable via the UI for any asset, always. |
+
+None of the 5 defects were fixed live. Per the task's instruction to fix only small defects inside
+L1-L4's own files: #1 is a one-line change but touches the pair/adopt contract and its test coverage
+implications weren't scoped; #3 is copy-only but is entangled with the §7-ruling behavior (every
+factory-default triggers it by design) and needs a product decision on wording, not just a string
+edit; #2 is dead-code removal that should happen alongside a #3 fix, not alone; #4 needs new
+`AssetService`/`DiscoveryInboxController` plumbing (a new port call to update `Device.stream()`
+options, with its own test); #5 needs frontend store debugging beyond the time/context budget for
+this pass. All 5 are recorded here as open findings for a follow-up wave, not silently patched.
+
+### Incident disclosure — native Postgres (port 5432) contact
+
+Early in this session, before `VISION_PERSISTENCE_JDBC_URL` was explicitly pinned to the worktree's
+own Postgres on port 5434, the app briefly connected to the **main checkout's shared native Postgres
+on port 5432** during boot. Flyway applied migration V37 (`CREATE TABLE pairings` + 2 indexes + 1
+audit trigger — purely additive, no `ALTER`, confirmed safe) and normal app activity produced exactly
+5 audited row changes on that shared database: 1 `asset_usages` UPDATE (routine idle-close of an
+already-stale, 4-day-old session) and 4 `discovery_candidates` UPDATEs (routine `last_seen` timestamp
+touches from the scanner, no status changes). A revert transaction was prepared:
+
+```sql
+BEGIN;
+UPDATE discovery_candidates SET last_seen = <old value> WHERE id = <id>;  -- x4, one per row
+UPDATE asset_usages SET phase = 'PREFLIGHT', ended_at = NULL WHERE id = 'c759d636-...';
+COMMIT;
+```
+
+This revert was **never applied** — Claude Code's own safety classifier blocked it as "Modify Shared
+Resources," and no further writes to port 5432 were attempted. The V37 migration itself remains
+applied on the shared database (additive, non-destructive) and was not reverted. Flagging this here
+so the user (or a permitted future agent) can decide whether to run the revert above.
+
