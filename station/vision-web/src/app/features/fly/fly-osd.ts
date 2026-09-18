@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
-import { TelemetryStore } from '../../core/telemetry/telemetry-store';
+import { TelemetryFacade } from '../../core/telemetry/telemetry-facade';
 import { batterySeverity, humanAge, telemetryAgeSeverity } from '../../core/telemetry/telemetry-logic';
 import { ThresholdsStore } from '../../core/ops/thresholds-store';
 import { gpsFixLabel, gpsSeverity } from '../../core/telemetry/flight-state-logic';
@@ -106,7 +106,7 @@ import type { Transport } from '../../shared/player/player';
   styleUrl: './fly-osd.css',
 })
 export class FlyOsd {
-  protected readonly store = inject(TelemetryStore);
+  protected readonly store = inject(TelemetryFacade);
   /** The one served severity source (S3, docs/plans/active/ASSET-FLOWS-PLAN.md §2 D6) —
    *  {@link batterySeverityTier} below now reads this instead of `batterySeverity`'s own old fixed
    *  45/20 pair, so the OSD's battery color and the fleet attention list's can never disagree again. */

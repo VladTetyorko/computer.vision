@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { TelemetryStore } from '../../core/telemetry/telemetry-store';
-import { DetectionsStore } from '../../core/detections/detections-store';
+import { TelemetryFacade } from '../../core/telemetry/telemetry-facade';
+import { DetectionsFacade } from '../../core/detections/detections-facade';
 import { SeatFacade } from '../../core/seat/seat-facade';
 import { UiStore } from '../../core/ui/ui-store';
 import { Player } from '../../shared/player/player';
@@ -65,7 +65,7 @@ type CrewPanelId = 'vision' | 'map';
   styleUrl: './crew.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Own instance per route activation, identical convention to `CockpitPage`/`LivePage`.
-  providers: [TelemetryStore, DetectionsStore, SeatFacade, CrewFacade],
+  providers: [TelemetryFacade, DetectionsFacade, SeatFacade, CrewFacade],
 })
 export class CrewSeatPage {
   /** Bound from the route by `withComponentInputBinding()` (`crew.routes.ts` names the segment

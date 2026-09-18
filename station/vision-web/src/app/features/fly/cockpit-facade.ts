@@ -4,8 +4,8 @@ import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { SettingsFacade } from '../../core/settings/settings-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
-import { TelemetryStore } from '../../core/telemetry/telemetry-store';
-import { DetectionsStore } from '../../core/detections/detections-store';
+import { TelemetryFacade } from '../../core/telemetry/telemetry-facade';
+import { DetectionsFacade } from '../../core/detections/detections-facade';
 import { SystemStatusStore } from '../../core/system-status/system-status-store';
 import { SeatFacade } from '../../core/seat/seat-facade';
 import { EventsStore } from '../../core/events/events-store';
@@ -141,8 +141,8 @@ export class CockpitFacade {
 
   readonly fleet = inject(FleetStore);
   readonly settings = inject(SettingsFacade);
-  readonly telemetry = inject(TelemetryStore);
-  readonly detections = inject(DetectionsStore);
+  readonly telemetry = inject(TelemetryFacade);
+  readonly detections = inject(DetectionsFacade);
   /** `providedIn: 'root'` singleton, injected here rather than read in `cockpit.ts` per
    * `architecture.spec.ts`'s own rule (a routed page injects only its facade) — {@link heroStatus}
    * below is its one reader in this cockpit. */

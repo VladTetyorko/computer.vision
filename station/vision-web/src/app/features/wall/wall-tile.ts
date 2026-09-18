@@ -14,7 +14,7 @@ import { Player, type BoxesMode } from '../../shared/player/player';
 import { Icon } from '../../shared/ui/icon';
 import { IconButton } from '../../shared/ui/icon-button';
 import { FollowHud } from '../../shared/player/follow-hud/follow-hud';
-import { DetectionsStore } from '../../core/detections/detections-store';
+import { DetectionsFacade } from '../../core/detections/detections-facade';
 import type { FollowStatus } from '../../core/api/models';
 import type { WallTileModel } from './wall-logic';
 
@@ -73,7 +73,7 @@ const PREROLL_MARGIN = '250px';
   selector: 'vision-wall-tile',
   imports: [Player, Icon, IconButton, FollowHud],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [DetectionsStore],
+  providers: [DetectionsFacade],
   templateUrl: './wall-tile.html',
   styleUrl: './wall-tile.css',
 })
@@ -94,7 +94,7 @@ export class WallTile {
   readonly focused = output<string>();
 
   protected readonly visible = signal(true);
-  protected readonly detections = inject(DetectionsStore);
+  protected readonly detections = inject(DetectionsFacade);
 
   protected readonly reasonsTooltip = computed(() => this.tile().reasons.map((reason) => reason.text).join(' '));
 

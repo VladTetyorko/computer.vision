@@ -2784,3 +2784,41 @@ plain, self-contained, eagerly-constructed class with no dependency on effects r
 all).
 
 - **Commit** (suggested; this agent does not commit per its task — the orchestrator commits each wave): `feat(ngrx N3): the live slice — SSE connection as an NgRx slice + LiveGateway seam, and an auth.effects.ts eager-injection fix`.
+
+## Status — NGRX-MIGRATION wave N5: telemetry, detections, cv-trace (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N5) — 2026-09-18
+
+Three per-asset slices, converted with the idiom N2/N3 already established — `Record` keying rather
+than injector scoping, poll-vs-live gating read through selectors over the `live` slice rather than
+by injecting `LiveFacade` into an effect. Two things are worth recording beyond that.
+
+**The plan's poll-vs-live convention does not hold for `cv-trace`, and forcing it would have been
+wrong.** Everywhere else in this app a live topic *replaces* a poll: the poller pauses while SSE is
+up. `cv-trace` runs both **concurrently, on purpose**. Its `gate`/`world` fields have no live topic
+at all — the 3 s poll is their only freshness source — while `frame` is a ring the poll
+authoritatively replaces every tick, into which a live `cv-trace:<assetId>` arrival merely merges
+between ticks (`appendFrameLedger`) to cut latency. A live frame is never trusted *over* the next
+poll. So `CvTraceFacade` has no transport selector and does not inject `LiveFacade`: subscription is
+a plain RxJS resource in `cv-trace.effects.ts#session$` dispatching `LivePageActions.cvTraceTracked`/
+`cvTraceUntracked`, and live frames arrive through `LiveSocketActions.envelopeReceived`. A wave that
+"fixes" this asymmetry to match the other slices will silently drop `gate`/`world` freshness.
+
+**One failure asymmetry is deliberate and was preserved.** `pollFailed` no-ops everywhere — last
+known good stays on screen — *except* detections' `tracksPollFailed`, which explicitly nulls the
+tracks response. That mirrors the old stores' catch branches exactly; it is the difference between
+"we still believe the last reading" and "we no longer know what is being tracked", and the second
+must not render as the first.
+
+### Tests / build
+
+`npm run test:ci` — **240/240 files, 4 492/4 492 tests green** (+6 files / +49 tests over N3's
+234/4 443). `npx tsc --noEmit` clean on both configs. `npx ng build --configuration production` —
+exit 0. Bundle measured against this wave's own base (`93af4a4d`) via `git stash -u`: **505.87 →
+515.83 kB raw, 143.74 → 146.49 kB transfer (+9.96 kB raw / +2.75 kB transfer)**.
+
+**The bundle trend, stated honestly.** Every wave so far has *added* net bytes despite deleting the
+store it replaced: N1 +0.89, N2 +12.47, N3 +5.04, N5 +9.96 kB raw. An NgRx slice — model, actions,
+reducer, effects, facade, plus `@ngrx/entity`/`createFeature` machinery — is simply more shipped code
+than the hand-rolled class it replaces. The earlier expectation that deletions would claw the engine
+cost back is not holding, and nothing in the remaining waves suggests it will. The initial bundle is
+now **15.83 kB over the 500 kB warning budget** (the 550 kB error budget still keeps builds green);
+that is a decision for the owner at N9, not a number to quietly bump.

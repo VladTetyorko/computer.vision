@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
-import { DetectionsStore } from '../../core/detections/detections-store';
+import { DetectionsFacade } from '../../core/detections/detections-facade';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { HIDDEN_CLASS_TRUTH, toggleLabelDeny } from '../../core/detections/detections-logic';
 import { worldObjectsByTrackId } from './detection-overlay-logic';
@@ -53,7 +53,7 @@ import { stripChips, STRIP_CHIP_CAP, type StripChip } from './detections-strip-l
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class DetectionsStrip {
-  protected readonly store = inject(DetectionsStore);
+  protected readonly store = inject(DetectionsFacade);
   private readonly fleet = inject(FleetStore);
 
   /** The running stream's id — binding this switches the strip into its interactive mode (see class

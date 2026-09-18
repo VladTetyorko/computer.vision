@@ -1,6 +1,6 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
-import { CvTraceStore } from '../../core/cv-trace/cv-trace-store';
+import { CvTraceFacade } from '../../core/cv-trace/cv-trace-facade';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { healthLabel, healthSeverity } from '../../core/system-status/system-status-logic';
 import { SystemStatusStore } from '../../core/system-status/system-status-store';
@@ -62,7 +62,7 @@ import {
 @Injectable()
 export class CvInspectorFacade {
   private readonly api = inject(VisionApi);
-  private readonly trace = inject(CvTraceStore);
+  private readonly trace = inject(CvTraceFacade);
   private readonly fleet = inject(FleetStore);
   private readonly statusStore = inject(SystemStatusStore);
 

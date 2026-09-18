@@ -3,8 +3,8 @@ import { Router } from '@angular/router';
 import type { BoxesMode, Transport } from '../../shared/player/player';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { SettingsFacade } from '../../core/settings/settings-facade';
-import { TelemetryStore } from '../../core/telemetry/telemetry-store';
-import { DetectionsStore } from '../../core/detections/detections-store';
+import { TelemetryFacade } from '../../core/telemetry/telemetry-facade';
+import { DetectionsFacade } from '../../core/detections/detections-facade';
 import { GeofenceStore } from '../../core/geofence/geofence-store';
 import { MarksStore } from '../../core/map-data/marks-store';
 import { LayersStore } from '../../core/map-data/layers-store';
@@ -45,8 +45,8 @@ export class LiveFacade {
   private readonly router = inject(Router);
   readonly fleet = inject(FleetStore);
   readonly settings = inject(SettingsFacade);
-  readonly telemetry = inject(TelemetryStore);
-  readonly detections = inject(DetectionsStore);
+  readonly telemetry = inject(TelemetryFacade);
+  readonly detections = inject(DetectionsFacade);
 
   /**
    * The two shared operational-picture stores (both `providedIn: 'root'`, started at boot) —

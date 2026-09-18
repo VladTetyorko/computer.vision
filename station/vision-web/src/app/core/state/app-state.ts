@@ -4,8 +4,14 @@ import { provideState, provideStore } from '@ngrx/store';
 
 import { authEffects } from '../auth/state/auth.effects';
 import { authFeature } from '../auth/state/auth.reducer';
+import { cvTraceEffects } from '../cv-trace/state/cv-trace.effects';
+import { cvTraceFeature } from '../cv-trace/state/cv-trace.reducer';
+import { detectionsEffects } from '../detections/state/detections.effects';
+import { detectionsFeature } from '../detections/state/detections.reducer';
 import { liveEffects } from '../live/state/live.effects';
 import { liveFeature } from '../live/state/live.reducer';
+import { telemetryEffects } from '../telemetry/state/telemetry.effects';
+import { telemetryFeature } from '../telemetry/state/telemetry.reducer';
 import { sidebarEffects } from '../shell/state/sidebar.effects';
 import { sidebarHydrator } from '../shell/state/sidebar.hydration';
 import { sidebarFeature } from '../shell/state/sidebar.reducer';
@@ -73,6 +79,9 @@ export function provideAppState() {
     provideState(seatFeature),
     provideState(authFeature),
     provideState(liveFeature),
+    provideState(telemetryFeature),
+    provideState(detectionsFeature),
+    provideState(cvTraceFeature),
     provideEffects(
       themeEffects,
       sidebarEffects,
@@ -82,6 +91,9 @@ export function provideAppState() {
       seatEffects,
       authEffects,
       liveEffects,
+      telemetryEffects,
+      detectionsEffects,
+      cvTraceEffects,
     ),
   ]);
 }

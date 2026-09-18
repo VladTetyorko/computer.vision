@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
 import { FleetStore } from '../../core/fleet/fleet-store';
-import { DetectionsStore } from '../../core/detections/detections-store';
+import { DetectionsFacade } from '../../core/detections/detections-facade';
 import type { EffectiveCvProfile, UpdateStreamConfigRequest } from '../../core/api/models';
 import type { BoxesMode } from '../../shared/player/player';
 import { DECLUTTER_LEVELS, DEFAULT_DECLUTTER_LEVEL, declutterLevelLabel } from '../../shared/player/detection-overlay-logic';
@@ -132,7 +132,7 @@ export class CvControlPanel {
   /** Recent detection results and the tracks poll (`GET .../tracks`) alike — host-provided
    *  (`cockpit.ts`'s own `providers`), the same instance `CvSetupModal`, the detections strip, and
    *  `CockpitFacade` all share. See class doc's own "The tracks poll is still owned here" paragraph. */
-  protected readonly detections = inject(DetectionsStore);
+  protected readonly detections = inject(DetectionsFacade);
 
   // --- "Looking for" summary row (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1 §1.1 item 2) -------
 

@@ -4,8 +4,8 @@ import { UiStore } from '../../core/ui/ui-store';
 import { Player, type BoxesMode } from '../../shared/player/player';
 import { StreamInfoPanel } from '../../shared/player/stream-info-panel';
 import { DECLUTTER_LEVELS, declutterLevelLabel } from '../../shared/player/detection-overlay-logic';
-import { TelemetryStore } from '../../core/telemetry/telemetry-store';
-import { DetectionsStore } from '../../core/detections/detections-store';
+import { TelemetryFacade } from '../../core/telemetry/telemetry-facade';
+import { DetectionsFacade } from '../../core/detections/detections-facade';
 import { TelemetryOsd } from './telemetry-osd';
 import { TacticalMap } from '../../shared/map/tactical-map/tactical-map';
 import { DetectionsStrip } from '../../shared/player/detections-strip';
@@ -35,7 +35,7 @@ import { LiveFacade } from './live-facade';
   templateUrl: './live.html',
   styleUrl: './live.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [TelemetryStore, DetectionsStore, LiveFacade],
+  providers: [TelemetryFacade, DetectionsFacade, LiveFacade],
 })
 export class LivePage {
   /** Bound from the route by `withComponentInputBinding()`. */

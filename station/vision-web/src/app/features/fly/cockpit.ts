@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, effect, inject, input, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { TelemetryStore } from '../../core/telemetry/telemetry-store';
-import { DetectionsStore } from '../../core/detections/detections-store';
+import { TelemetryFacade } from '../../core/telemetry/telemetry-facade';
+import { DetectionsFacade } from '../../core/detections/detections-facade';
 import { WeatherStore } from '../../core/weather/weather-store';
 import { GeoStore } from '../../core/geo/geo-store';
 import { SeatFacade } from '../../core/seat/seat-facade';
@@ -111,10 +111,10 @@ type CockpitDialog = 'stop' | 'cv-setup';
   // `WeatherStore` (docs/plans/done/OPS-CORE-PLAN.md §W) is page-provided too — see that class's own doc
   // comment for why it can't be a shared root singleton. `SeatFacade` (docs/plans/active/CREW-CONTROL-
   // PLAN.md §3.6, wave W4) is page-provided for the identical reason, mirroring `features/crew/crew.ts`'s
-  // own providers array. `CockpitFacade` shares this same injector so its own `inject(TelemetryStore)`/
-  // `inject(DetectionsStore)`/`inject(WeatherStore)`/`inject(SeatFacade)` resolve to these exact
+  // own providers array. `CockpitFacade` shares this same injector so its own `inject(TelemetryFacade)`/
+  // `inject(DetectionsFacade)`/`inject(WeatherStore)`/`inject(SeatFacade)` resolve to these exact
   // instances (see `CockpitFacade`'s own doc comment).
-  providers: [TelemetryStore, DetectionsStore, WeatherStore, GeoStore, SeatFacade, CockpitFacade, GroundingStore],
+  providers: [TelemetryFacade, DetectionsFacade, WeatherStore, GeoStore, SeatFacade, CockpitFacade, GroundingStore],
 })
 export class CockpitPage {
   /** Bound from the route by `withComponentInputBinding()` (`cockpit.routes.ts` names the segment

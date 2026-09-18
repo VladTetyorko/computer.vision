@@ -3,7 +3,7 @@ import { FleetStore } from '../../core/fleet/fleet-store';
 import { VisionApi } from '../../core/api/vision-api';
 import { ToastService } from '../../core/toast.service';
 import { describeHttpError } from '../../core/api-error';
-import { DetectionsStore } from '../../core/detections/detections-store';
+import { DetectionsFacade } from '../../core/detections/detections-facade';
 import { HIDDEN_CLASS_TRUTH, isLabelDenied, toggleLabelDeny } from '../../core/detections/detections-logic';
 import type { CvProfileSources, EffectiveCvProfile, TrackingMode, UpdateStreamConfigRequest } from '../../core/api/models';
 import { resolvedSourceLine } from './cv-setup-modal-logic';
@@ -201,7 +201,7 @@ export class CvSetupModal {
   private readonly toasts = inject(ToastService);
   /** Read-only here — see this class's own doc comment for why `trackTracks`/`untrackTracks` are
    *  never called from this component. */
-  protected readonly detections = inject(DetectionsStore);
+  protected readonly detections = inject(DetectionsFacade);
 
   protected readonly hasStream = computed(() => !!this.streamId());
 

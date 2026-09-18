@@ -7,7 +7,7 @@ import { ToastService } from '../../core/toast.service';
 import { UndoToastService } from '../../shared/ui/undo-toast.service';
 import { pluralize } from '../../shared/ui/text-logic';
 import { PollScheduler } from '../../core/poll-scheduler';
-import { TelemetryStore } from '../../core/telemetry/telemetry-store';
+import { TelemetryFacade } from '../../core/telemetry/telemetry-facade';
 import { EventsStore } from '../../core/events/events-store';
 import { LiveFacade } from '../../core/live/live-facade';
 import { LinksStore } from '../../core/pairing/links-store';
@@ -110,7 +110,7 @@ export class AssetDetailFacade {
   private readonly toasts = inject(ToastService);
   private readonly undoToast = inject(UndoToastService);
   private readonly auth = inject(AuthFacade);
-  private readonly telemetry = inject(TelemetryStore);
+  private readonly telemetry = inject(TelemetryFacade);
   private readonly events = inject(EventsStore);
   /** Named `liveStore`, not `live` — this class already has a `live` computed (whether *this asset*
    *  is currently streaming, see below); this is the generic SSE connection singleton. */

@@ -2,8 +2,8 @@ import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { SettingsFacade } from '../../core/settings/settings-facade';
-import { TelemetryStore } from '../../core/telemetry/telemetry-store';
-import { DetectionsStore } from '../../core/detections/detections-store';
+import { TelemetryFacade } from '../../core/telemetry/telemetry-facade';
+import { DetectionsFacade } from '../../core/detections/detections-facade';
 import { SeatFacade } from '../../core/seat/seat-facade';
 import { AuthFacade } from '../../core/auth/auth-facade';
 import { canManageOrg } from '../../core/org/org-logic';
@@ -71,8 +71,8 @@ export class CrewFacade {
 
   readonly fleet = inject(FleetStore);
   readonly settings = inject(SettingsFacade);
-  readonly telemetry = inject(TelemetryStore);
-  readonly detections = inject(DetectionsStore);
+  readonly telemetry = inject(TelemetryFacade);
+  readonly detections = inject(DetectionsFacade);
   readonly seats = inject(SeatFacade);
 
   readonly activeAssetId = signal<string | undefined>(undefined);
