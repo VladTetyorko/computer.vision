@@ -4,7 +4,7 @@ import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
 import { WeatherStore } from '../../core/weather/weather-store';
 import { GeoStore } from '../../core/geo/geo-store';
-import { SeatStore } from '../../core/seat/seat-store';
+import { SeatFacade } from '../../core/seat/seat-facade';
 import { UiStore } from '../../core/ui/ui-store';
 import { Player } from '../../shared/player/player';
 import { FollowHud } from '../../shared/player/follow-hud/follow-hud';
@@ -109,12 +109,12 @@ type CockpitDialog = 'stop' | 'cv-setup';
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Own instance per route activation, identical convention to `LivePage`/`AssetDetailPage`.
   // `WeatherStore` (docs/plans/done/OPS-CORE-PLAN.md §W) is page-provided too — see that class's own doc
-  // comment for why it can't be a shared root singleton. `SeatStore` (docs/plans/active/CREW-CONTROL-
+  // comment for why it can't be a shared root singleton. `SeatFacade` (docs/plans/active/CREW-CONTROL-
   // PLAN.md §3.6, wave W4) is page-provided for the identical reason, mirroring `features/crew/crew.ts`'s
   // own providers array. `CockpitFacade` shares this same injector so its own `inject(TelemetryStore)`/
-  // `inject(DetectionsStore)`/`inject(WeatherStore)`/`inject(SeatStore)` resolve to these exact
+  // `inject(DetectionsStore)`/`inject(WeatherStore)`/`inject(SeatFacade)` resolve to these exact
   // instances (see `CockpitFacade`'s own doc comment).
-  providers: [TelemetryStore, DetectionsStore, WeatherStore, GeoStore, SeatStore, CockpitFacade, GroundingStore],
+  providers: [TelemetryStore, DetectionsStore, WeatherStore, GeoStore, SeatFacade, CockpitFacade, GroundingStore],
 })
 export class CockpitPage {
   /** Bound from the route by `withComponentInputBinding()` (`cockpit.routes.ts` names the segment

@@ -1,6 +1,6 @@
 import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { hasCapability } from '../../core/auth/auth-logic';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { LiveStore } from '../../core/live/live-store';
@@ -41,7 +41,7 @@ const HIDE_SIMULATED_KEY = 'vision.fly.hideSimulated';
  * picker visit is typically brief. Narrowing this page's own dependencies to what it actually
  * displays is a deliberate simplification of the split, not an oversight.
  *
- * **`AuthStore` (docs/plans/done/OPS-UX-PLAN.md §2 A2)** — the one addition this wave makes. `emptyState`
+ * **`AuthFacade` (docs/plans/done/OPS-UX-PLAN.md §2 A2)** — the one addition this wave makes. `emptyState`
  * feeds `drone-picker.html`'s empty leg entirely from `fly-logic.ts#pickerEmptyStateCopy`: `scopeKind`
  * decides the wording (`ASSIGNED_ASSETS` ⇒ PILOT copy vs the MANAGER/ADMIN copy), `capabilities`
  * decides the CTA, `memberships` names the PILOT's group (docs/plans/active/AUTH-ROLES-PLAN.md §3.2,
@@ -73,7 +73,7 @@ const HIDE_SIMULATED_KEY = 'vision.fly.hideSimulated';
 @Injectable()
 export class DronePickerFacade {
   private readonly api = inject(VisionApi);
-  private readonly auth = inject(AuthStore);
+  private readonly auth = inject(AuthFacade);
   private readonly scheduler = inject(PollScheduler);
   private readonly live = inject(LiveStore);
 

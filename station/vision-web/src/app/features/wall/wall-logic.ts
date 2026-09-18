@@ -97,7 +97,7 @@ export interface BuildWallTilesInput {
 
 /**
  * `wallDensity` → the 3-stop segmented control (§3.1, replacing the old `Tiles per row` `<select>`,
- * D11) — `value` is the number `SettingsStore.wallDensity` persists (unchanged key/type, so an
+ * D11) — `value` is the number `SettingsFacade.wallDensity` persists (unchanged key/type, so an
  * existing 2/3/4/5/6 value from before this wave still resolves via {@link tileMinPx}'s own clamp),
  * `tileMinPx` feeds `repeat(auto-fill, minmax(var(--tile-min), 1fr))` directly.
  */

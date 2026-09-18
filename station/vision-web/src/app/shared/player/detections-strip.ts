@@ -21,7 +21,7 @@ import { stripChips, STRIP_CHIP_CAP, type StripChip } from './detections-strip-l
  *   `<vision-player [hoveredClass]>`, which temporarily promotes every box of that class to T1
  *   (`shared/player/detection-overlay-logic.ts#detectionTiers`). Pure client-side, never PATCHes.
  * - **Click** a chip toggles it in {@link labelDenyFilter} (`CockpitFacade#resolvedCvConfig`, wave
- *   W7 — no more `SettingsStore` draft) and PATCHes `FleetStore.patchStreamConfig` immediately, then
+ *   W7 — no more `SettingsFacade` draft) and PATCHes `FleetStore.patchStreamConfig` immediately, then
  *   emits {@link configChanged} on success so the host re-reads the wire (H6) — the honest, one-time disclosure
  *   ({@link hiddenClassTruth}) is shown once, at rest, whenever this mode is active. **Never** touches
  *   `labelFilter` (the allowlist) — see `toggleLabelDeny`'s own doc comment
@@ -62,7 +62,7 @@ export class DetectionsStrip {
   protected readonly interactive = computed(() => !!this.streamId());
 
   /** The stream's own currently-resolved deny-list (`CockpitFacade#resolvedCvConfig()?.
-   *  labelDenyFilter`, wave W7 — no more `SettingsStore` draft) — only meaningful in
+   *  labelDenyFilter`, wave W7 — no more `SettingsFacade` draft) — only meaningful in
    *  {@link interactive} mode; the host simply never binds it in read-only mode (see class doc's
    *  own "Read-only" paragraph), same as {@link streamId}. */
   readonly labelDenyFilter = input<readonly string[]>([]);

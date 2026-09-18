@@ -2,7 +2,7 @@ import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angul
 import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet/fleet-store';
-import { SettingsStore } from '../../core/settings/settings-store';
+import { SettingsFacade } from '../../core/settings/settings-facade';
 import { ToastService } from '../../core/toast.service';
 import { UndoToastService } from '../../shared/ui/undo-toast.service';
 import { pluralize } from '../../shared/ui/text-logic';
@@ -26,7 +26,7 @@ import { LayersStore } from '../../core/map-data/layers-store';
 import { DrawingsStore } from '../../core/map-data/drawings-store';
 import { TracksStore } from '../../core/map-data/tracks-store';
 import { followMarkers } from '../../shared/map/tactical-map/tactical-map-logic';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { canManageOrg } from '../../core/org/org-logic';
 import { describeHttpError } from '../../core/api-error';
 import { findVideoDevice } from '../../core/fleet/device-logic';
@@ -109,7 +109,7 @@ export class AssetDetailFacade {
   private readonly router = inject(Router);
   private readonly toasts = inject(ToastService);
   private readonly undoToast = inject(UndoToastService);
-  private readonly auth = inject(AuthStore);
+  private readonly auth = inject(AuthFacade);
   private readonly telemetry = inject(TelemetryStore);
   private readonly events = inject(EventsStore);
   /** Named `liveStore`, not `live` — this class already has a `live` computed (whether *this asset*
@@ -117,7 +117,7 @@ export class AssetDetailFacade {
   private readonly liveStore = inject(LiveStore);
 
   readonly fleet = inject(FleetStore);
-  readonly settings = inject(SettingsStore);
+  readonly settings = inject(SettingsFacade);
 
   /** Gates the Pilots drill-in trigger itself — a non-manager should never see the affordance, not
    *  just find an empty drawer behind it (`PilotsCard`'s own internal gate stays as a second layer). */
@@ -449,7 +449,7 @@ export class AssetDetailFacade {
 
   /**
    * The cockpit-link band's primary CTA — remembers this asset as Fly's active pick
-   * (`SettingsStore.flyAssetId`, the same field `FlyPage#selectAsset` itself writes) so `/fly` lands
+   * (`SettingsFacade.flyAssetId`, the same field `FlyPage#selectAsset` itself writes) so `/fly` lands
    * directly in the cockpit for it, then navigates. Works whether or not the asset is streaming.
    */
   openCockpit(): void {

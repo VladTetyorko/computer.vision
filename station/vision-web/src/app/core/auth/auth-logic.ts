@@ -1,16 +1,16 @@
 import type { AuthCapability, MeResponse, Role, ScopeKind } from '../api/models';
 
 /**
- * Pure decision logic behind `core/auth/auth-store.ts`/`auth-guard.ts` and the login/identity-chip
+ * Pure decision logic behind `core/auth/auth-facade.ts`/`auth-guard.ts` and the login/identity-chip
  * components (docs/plans/done/U-AUTH-PLAN.md wave 4) — kept framework-free and unit-tested here so those
  * consumers stay dumb: a component/guard only ever reads a signal and calls one of these.
  */
 
 /**
- * The store's own boot lifecycle: `'loading'` until the first `GET /api/auth/me` settles, then
- * either `'anon'` (no session, or the backend was unreachable — see `AuthStore.loadMe`'s own doc
- * comment) or `'authed'` (a real session, or the dev-disabled admin — see `needsLogin` below for
- * why the two are treated identically from here on).
+ * The slice's own boot lifecycle: `'loading'` until the first `GET /api/auth/me` settles, then
+ * either `'anon'` (no session, or the backend was unreachable — see `core/auth/state/auth.effects.ts`'s
+ * `bootMe$` doc comment) or `'authed'` (a real session, or the dev-disabled admin — see `needsLogin`
+ * below for why the two are treated identically from here on).
  */
 export type AuthStatus = 'loading' | 'anon' | 'authed';
 

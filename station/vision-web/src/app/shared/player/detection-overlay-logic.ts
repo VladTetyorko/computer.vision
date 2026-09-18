@@ -34,7 +34,7 @@ const DECLUTTER_CYCLE = DECLUTTER_LEVELS;
  *  whole tier system in this wave exists to move away from). */
 export const DEFAULT_DECLUTTER_LEVEL: BoxesMode = 'priority';
 
-/** Type guard for a persisted `declutterLevel` value (`core/settings/settings-store.ts` — H12, wave
+/** Type guard for a persisted `declutterLevel` value (`core/settings/settings-facade.ts` — H12, wave
  *  W7: the one shared, persisted declutter preference) — a corrupt/pre-wave `localStorage` value
  *  (`undefined`, a stale `'overlay'`/`'burned'` literal, anything not one of the four current
  *  {@link DECLUTTER_LEVELS}) is rejected here rather than adopted, mirroring every other persisted

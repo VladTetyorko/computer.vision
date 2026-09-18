@@ -15,7 +15,7 @@ import {
 import { FormsModule } from '@angular/forms';
 import type * as Leaflet from 'leaflet';
 import type { RouteMode } from '../../../core/api/models';
-import { SettingsStore, type MapLayerId } from '../../../core/settings/settings-store';
+import { SettingsFacade, type MapLayerId } from '../../../core/settings/settings-facade';
 import { ThemeFacade } from '../../../core/shell/theme-facade';
 import {
   MAP_LAYERS,
@@ -86,7 +86,7 @@ export class FlightPlanDialog {
   readonly cancelled = output<void>();
 
   protected readonly layers = MAP_LAYERS;
-  protected readonly settings = inject(SettingsStore);
+  protected readonly settings = inject(SettingsFacade);
   protected readonly theme = inject(ThemeFacade);
 
   /** The layer actually rendered (docs/plans/done/VISUAL-REFRESH-PLAN.md F7) — see `FleetMap`'s identical

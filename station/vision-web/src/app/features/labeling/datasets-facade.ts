@@ -1,7 +1,7 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
 import { TrainingStore } from '../../core/training/training-store';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { UiStore } from '../../core/ui/ui-store';
 import { canManageOrg } from '../../core/org/org-logic';
 import type { Category } from '../../core/api/models';
@@ -26,7 +26,7 @@ import { canSubmitDataset, parseClassesInput } from './datasets-logic';
  */
 @Injectable()
 export class DatasetsFacade {
-  private readonly auth = inject(AuthStore);
+  private readonly auth = inject(AuthFacade);
   private readonly api = inject(VisionApi);
 
   readonly training = inject(TrainingStore);

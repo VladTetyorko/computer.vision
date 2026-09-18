@@ -331,7 +331,7 @@ export class LayersStore {
     this.layersSignal.update((layers) => applyLayerEvents(layers, [{ entity: 'layer', action: 'updated', layerId: layer.layerId, layer }]));
   }
 
-  /** One explained toast per failure, mirroring `OrgStore.run`/`FleetStore.run`'s shared seam. */
+  /** One explained toast per failure, mirroring `OrgFacade.run`/`FleetStore.run`'s shared seam. */
   private async run<T>(action: () => Promise<T>): Promise<T | null> {
     try {
       return await action();

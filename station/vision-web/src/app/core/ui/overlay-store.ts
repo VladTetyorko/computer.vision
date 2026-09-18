@@ -128,7 +128,7 @@ export class GlobalOverlayStore {
   /**
    * Registers `id`'s owning DOM — called once by each overlay's own component as soon as its trigger
    * exists (`identity-chip.ts`/`notification-bell.ts` do it from an `effect()` over a `viewChild`,
-   * since the shell only renders once `AuthStore.user()` resolves, so the trigger isn't there on the
+   * since the shell only renders once `AuthFacade.user()` resolves, so the trigger isn't there on the
    * very first tick). `root` must contain `trigger` — see the class doc's "outside-click without
    * fighting the trigger" paragraph for why that containment is the entire mechanism. Re-registering
    * the same `id` (e.g. the sidebar's mobile-sheet hamburger, which is removed from the DOM and

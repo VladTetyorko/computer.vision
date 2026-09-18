@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { EventsStore } from './events-store';
 import { VisionApi } from '../api/vision-api';
 import { PollScheduler } from '../poll-scheduler';
-import { SettingsStore } from '../settings/settings-store';
+import { SettingsFacade } from '../settings/settings-facade';
 import { LiveStore, type LiveConnectionState } from '../live/live-store';
 import type { DetectionEvent } from '../api/models';
 
@@ -60,7 +60,7 @@ function create(options: {
   const api = { events: options.events ?? vi.fn().mockResolvedValue([]) };
   const providers: unknown[] = [
     { provide: VisionApi, useValue: api },
-    { provide: SettingsStore, useValue: stubSettings(options.eventNotifications ?? false) },
+    { provide: SettingsFacade, useValue: stubSettings(options.eventNotifications ?? false) },
   ];
   if (options.scheduler) {
     providers.push({ provide: PollScheduler, useValue: options.scheduler });

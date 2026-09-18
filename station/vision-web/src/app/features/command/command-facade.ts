@@ -1,7 +1,7 @@
 import { DestroyRef, Injectable, type Signal, computed, effect, inject, signal, untracked } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { canAdminister } from '../../core/auth/auth-logic';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { buildTestDroneRequest } from '../../core/fleet/simulation-logic';
@@ -110,7 +110,7 @@ export class CommandFacade {
    *  `devices-facade.ts`, `alerts-facade.ts`, `roster-facade.ts`, `replay-library-facade.ts`). */
   private readonly route = inject(ActivatedRoute);
   private readonly api = inject(VisionApi);
-  private readonly auth = inject(AuthStore);
+  private readonly auth = inject(AuthFacade);
   private readonly fleet = inject(FleetStore);
   private readonly mapStore = inject(FleetMapStore);
   private readonly geofence = inject(GeofenceStore);
@@ -392,12 +392,12 @@ export class CommandFacade {
   readonly addingTestDrone = this.addingTestDroneSignal.asReadonly();
 
   // --- "Set up this station" checklist (docs/plans/done/OPS-UX-PLAN.md §3 B2) ------------------------------
-  // UNBOUNDED-scope-only (`canAdminister(AuthStore.scopeKind())`, docs/plans/active/AUTH-ROLES-PLAN.md
+  // UNBOUNDED-scope-only (`canAdminister(AuthFacade.scopeKind())`, docs/plans/active/AUTH-ROLES-PLAN.md
   // §3.2, wave W2 — moved off `topRole === 'ADMIN'` for the same reason `canManageOrg`/
   // `canAdministerRegistry` did) — an ADMIN is the one session that can act on every row (create a
   // group, create a user, add a source, assign a pilot), so a MANAGER/PILOT landing on `/command` never
   // sees a checklist pointing at doors they can't open. **Dev parity**: with `vision.auth.enabled=false`
-  // the backend's fixed dev principal resolves to `scopeKind: 'UNBOUNDED'` (`AuthStore`'s own class doc
+  // the backend's fixed dev principal resolves to `scopeKind: 'UNBOUNDED'` (`AuthFacade`'s own class doc
   // comment, "Dev parity" paragraph) — so this gate is effectively "everyone" on a default install,
   // which is the *right* call here (unlike, say, `core/shell/landing-logic.ts`'s stricter decision for a
   // different question): a fresh unsecured station genuinely needs this setup walked through by whoever

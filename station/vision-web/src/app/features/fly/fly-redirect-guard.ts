@@ -1,7 +1,7 @@
 import { inject } from '@angular/core';
 import { Router, type CanActivateFn } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
-import { SettingsStore } from '../../core/settings/settings-store';
+import { SettingsFacade } from '../../core/settings/settings-facade';
 import { rememberedStreamingAssetId } from './fly-logic';
 
 /**
@@ -15,7 +15,7 @@ import { rememberedStreamingAssetId } from './fly-logic';
  *    drone, streaming or not (a manager drilling into an idle drone from Command is still a real,
  *    intentional ask), so this redirects unconditionally, no fleet fetch needed at all.
  *    `rememberedStreamingAssetId` is deliberately never consulted for this branch.
- * 2. **The remembered drone (`SettingsStore.flyAssetId`) is still actually streaming** — see
+ * 2. **The remembered drone (`SettingsFacade.flyAssetId`) is still actually streaming** — see
  *    `fly-logic.ts#rememberedStreamingAssetId`'s own doc comment for exactly what "still" means.
  *
  * Neither branch fetches `getAsset`/validates the id beyond `rememberedStreamingAssetId`'s own
@@ -73,7 +73,7 @@ export const flyRedirectGuard: CanActivateFn = async (route) => {
   }
 
   const api = inject(VisionApi);
-  const settings = inject(SettingsStore);
+  const settings = inject(SettingsFacade);
   try {
     const assets = await api.listAssets();
     const remembered = rememberedStreamingAssetId(assets, settings.flyAssetId());

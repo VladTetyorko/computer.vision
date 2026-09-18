@@ -5,7 +5,7 @@ import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
 import { ToastService } from '../../core/toast.service';
 import { FleetStore } from '../../core/fleet/fleet-store';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { canManageOrg } from '../../core/org/org-logic';
 import type { Dataset, SampleStatus, TrainingJobResponse, TrainingSample } from '../../core/api/models';
 import {
@@ -57,7 +57,7 @@ export class DatasetDetailFacade {
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
   private readonly router = inject(Router);
-  private readonly auth = inject(AuthStore);
+  private readonly auth = inject(AuthFacade);
 
   readonly fleet = inject(FleetStore);
 

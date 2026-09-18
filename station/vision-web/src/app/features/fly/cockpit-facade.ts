@@ -2,12 +2,12 @@ import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angul
 import { ActivatedRoute, Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet/fleet-store';
-import { SettingsStore } from '../../core/settings/settings-store';
+import { SettingsFacade } from '../../core/settings/settings-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
 import { SystemStatusStore } from '../../core/system-status/system-status-store';
-import { SeatStore } from '../../core/seat/seat-store';
+import { SeatFacade } from '../../core/seat/seat-facade';
 import { EventsStore } from '../../core/events/events-store';
 import { GeofenceStore } from '../../core/geofence/geofence-store';
 import { GeoStore } from '../../core/geo/geo-store';
@@ -26,7 +26,7 @@ import { ageSeconds, humanAge, selectOpenUsage, telemetryDevices } from '../../c
 import { canCommandReturnHome, deriveDiagnostics, derivePreflight, flightBanner, preflightSummary } from '../../core/telemetry/flight-state-logic';
 import { capitalizeLabel, filterEvents, formatConfidence } from '../../core/events/events-logic';
 import { parseWindLimitMps } from '../../core/weather/weather-logic';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { canManageOrg } from '../../core/org/org-logic';
 import type { Transport } from '../../shared/player/player';
 import { cycleBoxesMode } from '../../shared/player/detection-overlay-logic';
@@ -73,7 +73,7 @@ const ASSET_POLL_INTERVAL_MS = 5_000;
  * `PanelState`/`UiStore` and stays exactly as it was (docs/plans/done/UI-REDESIGN-PLAN.md D-D: the map inset is
  * a glanceable, separately-persisted toggle, not a tool-rail drawer, and per docs/plans/done/UI-ARCHITECTURE-PLAN.md
  * a non-mutually-exclusive toggle like this one lives in the feature facade, not `UiStore`). See
- * `core/panel-state.ts`'s own doc comment for why this isn't routed through `SettingsStore`. */
+ * `core/panel-state.ts`'s own doc comment for why this isn't routed through `SettingsFacade`. */
 const MAP_VISIBLE_KEY = 'vision.fly.mapVisible';
 
 /**
@@ -137,10 +137,10 @@ export class CockpitFacade {
   /** Named `liveStore`, not `live` — this class already has a public `live` computed (below,
    * "stream() !== undefined"), unrelated to `LiveStore`'s own connection state. */
   private readonly liveStore = inject(LiveStore);
-  private readonly auth = inject(AuthStore);
+  private readonly auth = inject(AuthFacade);
 
   readonly fleet = inject(FleetStore);
-  readonly settings = inject(SettingsStore);
+  readonly settings = inject(SettingsFacade);
   readonly telemetry = inject(TelemetryStore);
   readonly detections = inject(DetectionsStore);
   /** `providedIn: 'root'` singleton, injected here rather than read in `cockpit.ts` per
@@ -152,7 +152,7 @@ export class CockpitFacade {
    * crew-facade.ts`'s identical injection. The pilot's cockpit only ever reads the *camera* seat
    * (`cameraSeatHeldByOther`/`cameraSeatHolderLabel` below); the flight seat is this pilot's own by
    * construction of being on this page at all and has no reader here. */
-  readonly seats = inject(SeatStore);
+  readonly seats = inject(SeatFacade);
   readonly events = inject(EventsStore);
   readonly geofence = inject(GeofenceStore);
   /** Visual-geolocation corrections (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3/§3.4/§3.8, wave H6) — the
@@ -262,7 +262,7 @@ export class CockpitFacade {
   readonly videoNotice = computed(() => videoNotice(this.live(), this.streamState()));
 
   // --- CV profile hierarchy / live config read-back (docs/plans/active/CV-SETTINGS-PLAN.md §3, wave
-  // W7) — the one honest replacement for the deleted `SettingsStore` CV-defaults draft (H2). Two
+  // W7) — the one honest replacement for the deleted `SettingsFacade` CV-defaults draft (H2). Two
   // independent reads, merged by `resolveCvConfig`: the asset's own effective profile
   // ({@link effectiveProfile}, §3.1's hierarchy — what the *next* Start will apply) and, once a
   // stream exists, that stream's own live config ({@link streamConfig}, `GET .../config` — H6's real
@@ -302,7 +302,7 @@ export class CockpitFacade {
    * **The one place this cockpit decides where a detection control's position comes from**
    * (docs/plans/done/STREAM-STATE-PLAN.md §3.1) — the running stream's own server-side intent while
    * something is running, the asset's own resolved CV config otherwise (wave W7 — previously this
-   * browser's `SettingsStore` draft; see {@link resolvedCvConfig}'s own doc comment for why that
+   * browser's `SettingsFacade` draft; see {@link resolvedCvConfig}'s own doc comment for why that
    * changed). The rail's off-dot, the video-surface "Turn on" chip and the drawer's Detect switch
    * all read this one value, so they cannot disagree with each other or with the backend.
    */
@@ -608,7 +608,7 @@ export class CockpitFacade {
   readonly latencySeconds = signal<number | null>(null);
   readonly transport = signal<Transport>('hls');
   /** The shared, persisted declutter level (docs/plans/active/CV-SETTINGS-PLAN.md wave W7, H12) —
-   * aliases `SettingsStore.declutterLevel` directly (the exact same `WritableSignal` instance, not a
+   * aliases `SettingsFacade.declutterLevel` directly (the exact same `WritableSignal` instance, not a
    * copy), so this facade, `LiveFacade` and `WallTile` all read/write one preference instead of each
    * keeping its own unshared in-memory signal. `cockpit.html` still binds `[boxesMode]="facade.
    * boxesMode()"` / `(boxesModeChange)="facade.boxesMode.set($event)"` unchanged — only what's behind
@@ -860,7 +860,7 @@ export class CockpitFacade {
     });
 
     // Seats (docs/plans/active/CREW-CONTROL-PLAN.md §3.1/§3.6, wave W4) — keyed on `activeAssetId()`
-    // alone, mirroring `geo.track()`/`grounding.track()` immediately above: `SeatStore.track()` is
+    // alone, mirroring `geo.track()`/`grounding.track()` immediately above: `SeatFacade.track()` is
     // already a no-op for an unchanged assetId, so no derived-primitive guard needed here either.
     effect(() => {
       const assetId = this.activeAssetId();

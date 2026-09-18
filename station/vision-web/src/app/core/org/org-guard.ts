@@ -1,6 +1,6 @@
 import { inject } from '@angular/core';
 import { Router, type CanActivateFn } from '@angular/router';
-import { AuthStore } from '../auth/auth-store';
+import { AuthFacade } from '../auth/auth-facade';
 import { canManageOrg } from './org-logic';
 
 /**
@@ -9,7 +9,7 @@ import { canManageOrg } from './org-logic';
  * org route is still inside that guard's children wrapper, so a signed-out user hits `/login`
  * first): this guard only adds the role check on top.
  *
- * Awaits `AuthStore.ready` first — the boot-time `GET /api/auth/me` — so the decision runs against
+ * Awaits `AuthFacade.ready` first — the boot-time `GET /api/auth/me` — so the decision runs against
  * the *resolved* session's `capabilities`, never a transitional `undefined` that would bounce a
  * manager away on a cold navigation. **Dev parity**: when `authEnabled === false` the dev principal
  * resolves to the full capability set (`MeResponse#devAdmin`), so `canManageOrg` is `true` and the
@@ -18,7 +18,7 @@ import { canManageOrg } from './org-logic';
  * own shape.
  */
 export const orgGuard: CanActivateFn = async () => {
-  const auth = inject(AuthStore);
+  const auth = inject(AuthFacade);
   const router = inject(Router);
 
   await auth.ready;

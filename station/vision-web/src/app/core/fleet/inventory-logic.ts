@@ -125,7 +125,7 @@ export function effectiveInventoryStateChip(
 
 /**
  * Who is looking, as far as the verb matrix is concerned — the client-side mirror of the server's
- * own `Authority` (`capabilities` × `scope`), read once off `AuthStore` and threaded through
+ * own `Authority` (`capabilities` × `scope`), read once off `AuthFacade` and threaded through
  * {@link vehicleRowActions} rather than re-derived per verb. Built by {@link inventoryActor}.
  *
  * **Scope is deliberately absent.** The server already scopes every inventory read
@@ -148,7 +148,7 @@ export interface InventoryActor {
   readonly userId?: string;
 }
 
-/** `AuthStore`'s two reads (`capabilities()`, `user()?.userId`) folded into one {@link InventoryActor} — the only mapping from session to matrix input, so a page/facade never spells out three `can(...)` calls of its own. */
+/** `AuthFacade`'s two reads (`capabilities()`, `user()?.userId`) folded into one {@link InventoryActor} — the only mapping from session to matrix input, so a page/facade never spells out three `can(...)` calls of its own. */
 export function inventoryActor(
   capabilities: readonly AuthCapability[] | null | undefined,
   userId: string | undefined,

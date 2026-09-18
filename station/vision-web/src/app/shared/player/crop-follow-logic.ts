@@ -102,7 +102,7 @@ export const IDENTITY_CROP_FOLLOW_STATE: CropFollowState = {
 };
 
 export interface CropFollowStepInput {
-  /** The per-viewer setting (`SettingsStore.cropFollowEnabled`), passed straight through. */
+  /** The per-viewer setting (`SettingsFacade.cropFollowEnabled`), passed straight through. */
   readonly enabled: boolean;
   /**
    * The locked track's own box this redraw, in normalized `[0,1]` frame coordinates — `null` when

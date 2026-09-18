@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { App, type RouteDataNode, routeTreeHasFullBleed } from './app';
 import { FleetStore } from './core/fleet/fleet-store';
 import { LeafletWarmup } from './core/leaflet-warmup';
-import { AuthStore } from './core/auth/auth-store';
+import { AuthFacade } from './core/auth/auth-facade';
 import { hasCapability } from './core/auth/auth-logic';
 import type { AuthCapability } from './core/api/models';
 import { EventsStore } from './core/events/events-store';
@@ -16,7 +16,7 @@ import { provideAppState } from './core/state/app-state';
 
 /**
  * `App` pulls in `AppSidebar`, which in turn mounts `IdentityChip`/`NotificationBell`, each with
- * their own deep store graph (`AuthStore`, `FleetStore`, `EventsStore`, `LiveStore`, `VisionApi`) —
+ * their own deep store graph (`AuthFacade`, `FleetStore`, `EventsStore`, `LiveStore`, `VisionApi`) —
  * every one of those is overridden with a minimal, side-effect-free fake here (no HTTP, no polling,
  * no real `EventSource`) purely so the shell can mount at all; none of their own behavior is under
  * test in this file (see each store's own spec, and `shared/ui/app-sidebar/app-sidebar.spec.ts` for
@@ -44,7 +44,7 @@ function fakeLiveStore(connectionState: 'connecting' | 'open' | 'closed' = 'open
 }
 
 /** Mirrors the real policy table closely enough for a fixture (docs/plans/active/AUTH-ROLES-PLAN.md §3.2,
- *  wave W2) — `AppSidebar`'s `modes` computed now calls `AuthStore.can(entry.requires)`, so this fake
+ *  wave W2) — `AppSidebar`'s `modes` computed now calls `AuthFacade.can(entry.requires)`, so this fake
  *  needs a `capabilities()`/`can()` pair even though nothing in this file exercises role-gating
  *  itself (`app-sidebar.spec.ts` owns that). This file's `topRole` type never includes `VIEWER`, so
  *  the table doesn't need that row either. */
@@ -57,7 +57,7 @@ const ROLE_CAPABILITIES: Record<'ADMIN' | 'MANAGER' | 'PILOT', readonly AuthCapa
 /** `authEnabled` defaults to `false` — this app's own real default (`vision.auth.enabled=false`),
  *  so every existing call site here keeps exercising dev parity unless a test opts into a "real"
  *  secured session (docs/plans/done/OPS-UX-PLAN.md §2 A6's own dedicated tests below). */
-function fakeAuthStore(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT', authEnabled = false) {
+function fakeAuthFacade(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT', authEnabled = false) {
   const capabilities = topRole ? ROLE_CAPABILITIES[topRole] : [];
   return {
     user: () => (topRole ? { topRole, displayName: 'Test User', username: 'test' } : null),
@@ -101,7 +101,7 @@ function render(
       ]),
       { provide: FleetStore, useValue: fakeFleetStore(options.reachable) },
       { provide: LeafletWarmup, useValue: { schedule: () => {} } },
-      { provide: AuthStore, useValue: fakeAuthStore(options.topRole, options.authEnabled) },
+      { provide: AuthFacade, useValue: fakeAuthFacade(options.topRole, options.authEnabled) },
       { provide: EventsStore, useValue: fakeEventsStore() },
       { provide: LiveStore, useValue: fakeLiveStore(options.connectionState) },
       { provide: VisionApi, useValue: {} },

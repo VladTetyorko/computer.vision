@@ -1,6 +1,6 @@
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { UiStore } from '../../core/ui/ui-store';
 import { ToastService } from '../../core/toast.service';
@@ -56,7 +56,7 @@ const PROGRESS_POLL_INTERVAL_MS = 3_000;
 @Injectable()
 export class RegionManagerFacade {
   private readonly api = inject(VisionApi);
-  private readonly auth = inject(AuthStore);
+  private readonly auth = inject(AuthFacade);
   private readonly scheduler = inject(PollScheduler);
   private readonly toasts = inject(ToastService);
 

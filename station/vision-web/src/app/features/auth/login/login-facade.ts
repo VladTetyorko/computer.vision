@@ -1,22 +1,22 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { AuthStore } from '../../../core/auth/auth-store';
+import { AuthFacade } from '../../../core/auth/auth-facade';
 
 /**
  * `LoginPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — thin, mirroring how thin the page already
- * was: owns the two field signals and forwards straight to `AuthStore.login()`, exactly as
+ * was: owns the two field signals and forwards straight to `AuthFacade.login()`, exactly as
  * `LoginPage` did inline before this refactor (byte-for-byte the same busy/error/canSubmit rules —
- * `AuthStore` was already doing every real decision, this only moves *where* the plumbing sits).
+ * `AuthFacade` was already doing every real decision, this only moves *where* the plumbing sits).
  */
 @Injectable()
 export class LoginFacade {
-  private readonly auth = inject(AuthStore);
+  private readonly auth = inject(AuthFacade);
   private readonly router = inject(Router);
 
   readonly username = signal('');
   readonly password = signal('');
 
-  /** `AuthStore`'s own signals, re-exposed as this page's read-model — single source, not copied. */
+  /** `AuthFacade`'s own signals, re-exposed as this page's read-model — single source, not copied. */
   readonly busy = this.auth.loginBusy;
   readonly error = this.auth.loginError;
 

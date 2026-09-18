@@ -1,21 +1,21 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 
 /**
  * `SetupPage`'s facade (docs/plans/active/AUTH-ROLES-PLAN.md wave W3) — mirrors `LoginFacade`'s own
- * thinness: owns the form's field signals and forwards straight to `AuthStore.bootstrap()`, which
+ * thinness: owns the form's field signals and forwards straight to `AuthFacade.bootstrap()`, which
  * carries every real decision (busy state, what "success" means, what the inline error says).
  *
- * Unlike `LoginFacade`, `busy`/`error` are **not** re-exposed `AuthStore` signals — `bootstrap()`
+ * Unlike `LoginFacade`, `busy`/`error` are **not** re-exposed `AuthFacade` signals — `bootstrap()`
  * is a one-shot call with no store-level in-flight/error state of its own (there is nothing else
  * in the app that would ever need to observe "is a bootstrap attempt in flight" except this one
- * page), so this facade owns that pair locally instead of growing `AuthStore` two more signals for
+ * page), so this facade owns that pair locally instead of growing `AuthFacade` two more signals for
  * a single caller.
  */
 @Injectable()
 export class SetupFacade {
-  private readonly auth = inject(AuthStore);
+  private readonly auth = inject(AuthFacade);
   private readonly router = inject(Router);
 
   readonly username = signal('');

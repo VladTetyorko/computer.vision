@@ -13,7 +13,7 @@ import {
 } from '@angular/core';
 import type * as Leaflet from 'leaflet';
 import type { GeoPosition } from '../../core/api/models';
-import { SettingsStore, type MapLayerId } from '../../core/settings/settings-store';
+import { SettingsFacade, type MapLayerId } from '../../core/settings/settings-facade';
 import { ThemeFacade } from '../../core/shell/theme-facade';
 import {
   MAP_LAYERS,
@@ -92,7 +92,7 @@ export class ReplayMap {
    */
   readonly correctedTrail = input<readonly GeoPosition[]>([]);
 
-  protected readonly settings = inject(SettingsStore);
+  protected readonly settings = inject(SettingsFacade);
   protected readonly theme = inject(ThemeFacade);
   protected readonly layers = MAP_LAYERS;
   protected readonly tilesOk = signal(true);

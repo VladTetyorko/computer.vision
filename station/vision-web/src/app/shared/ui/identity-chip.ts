@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { initialsFor, topRoleLabel } from '../../core/auth/auth-logic';
 import { canManageOrg } from '../../core/org/org-logic';
 import { GlobalOverlayStore } from '../../core/ui/overlay-store';
@@ -11,11 +11,11 @@ import { GlobalOverlayStore } from '../../core/ui/overlay-store';
  * piece of this app's broader responsive pass (the plan's own framing: "build it responsive from
  * the start so it sets the pattern") — see `identity-chip.css` for the collapse rule.
  *
- * **Renders nothing while `user()` is `null`** (`AuthStore`'s `'loading'` status, or a genuinely
+ * **Renders nothing while `user()` is `null`** (`AuthFacade`'s `'loading'` status, or a genuinely
  * anonymous session about to be redirected by the guard) — no placeholder/skeleton swapped in
  * afterward, the same "hide entirely rather than show a stale/fake state" rule
  * `shared/ui/weather-chip.ts` already follows for its own always-null-until-ready reading. Injects
- * `AuthStore` directly (root-provided, one instance app-wide) rather than taking inputs — there is
+ * `AuthFacade` directly (root-provided, one instance app-wide) rather than taking inputs — there is
  * exactly one session in this app, nothing for a host page to parameterize.
  *
  * **Account settings** (docs/plans/done/UI-REDESIGN-PLAN.md Wave 1, F4's "(shell) → `/settings` via profile
@@ -60,7 +60,7 @@ import { GlobalOverlayStore } from '../../core/ui/overlay-store';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class IdentityChip {
-  protected readonly auth = inject(AuthStore);
+  protected readonly auth = inject(AuthFacade);
   protected readonly overlays = inject(GlobalOverlayStore);
   private readonly host = inject(ElementRef<HTMLElement>);
   /** Optional, not `.required()` — see the class doc's "signal-backed open state" paragraph for why

@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AppSidebar } from './app-sidebar';
-import { AuthStore } from '../../../core/auth/auth-store';
+import { AuthFacade } from '../../../core/auth/auth-facade';
 import { FleetStore } from '../../../core/fleet/fleet-store';
 import { EventsStore } from '../../../core/events/events-store';
 import { LiveStore } from '../../../core/live/live-store';
@@ -51,7 +51,7 @@ function fakeSystemStatusStore(overall: OverallHealth | undefined) {
   return { overall: () => overall };
 }
 
-function fakeAuthStore(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT') {
+function fakeAuthFacade(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT') {
   const capabilities = topRole ? ROLE_CAPABILITIES[topRole] : [];
   return {
     user: () => (topRole ? { topRole, displayName: 'Test User', username: 'test' } : null),
@@ -82,7 +82,7 @@ function render(options: {
         { path: 'manage/system', component: StubPage },
       ]),
       { provide: FleetStore, useValue: fakeFleetStore(options) },
-      { provide: AuthStore, useValue: fakeAuthStore(options.topRole) },
+      { provide: AuthFacade, useValue: fakeAuthFacade(options.topRole) },
       { provide: EventsStore, useValue: fakeEventsStore() },
       { provide: LiveStore, useValue: fakeLiveStore(options.connectionState) },
       // `overall` defaults to `'OK'` — not `undefined` — so every pre-existing test in this file

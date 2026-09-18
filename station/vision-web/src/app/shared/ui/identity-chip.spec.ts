@@ -2,8 +2,9 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { describe, expect, it, vi } from 'vitest';
 import { IdentityChip } from './identity-chip';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { VisionApi } from '../../core/api/vision-api';
+import { provideAppState } from '../../core/state/app-state';
 import { GlobalOverlayStore } from '../../core/ui/overlay-store';
 import type { AuthCapability, MeResponse, Role, ScopeKind } from '../../core/api/models';
 
@@ -46,10 +47,10 @@ async function render(me: MeResponse | null) {
     authLogout: vi.fn().mockResolvedValue(undefined),
   };
   TestBed.configureTestingModule({
-    providers: [provideRouter([]), AuthStore, { provide: VisionApi, useValue: api }],
+    providers: [provideRouter([]), provideAppState(), { provide: VisionApi, useValue: api }],
   });
-  const store = TestBed.inject(AuthStore);
-  await store.ready;
+  const facade = TestBed.inject(AuthFacade);
+  await facade.ready;
   const fixture = TestBed.createComponent(IdentityChip);
   fixture.detectChanges();
   return fixture;

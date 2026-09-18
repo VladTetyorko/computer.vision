@@ -4,7 +4,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
 import { ToastService } from '../../core/toast.service';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { canManageOrg } from '../../core/org/org-logic';
 import { SectionHeader } from '../../shared/ui/section-header';
 import { EmptyState } from '../../shared/ui/empty-state';
@@ -56,7 +56,7 @@ export class PilotsCard {
 
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
-  private readonly auth = inject(AuthStore);
+  private readonly auth = inject(AuthFacade);
 
   protected readonly canManage = computed(() => canManageOrg(this.auth.capabilities()));
 

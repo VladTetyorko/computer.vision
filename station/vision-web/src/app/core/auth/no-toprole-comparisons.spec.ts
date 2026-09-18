@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
  * no `TestBed`, mirroring `core/ui/architecture.spec.ts`'s own `import.meta.glob(..., '?raw')` technique
  * (this suite runs in the Angular unit-test builder's browser-like bundle, where `node:fs` is
  * unavailable). W2 moved every web "may I…" gate off a raw `MeResponse#topRole` comparison onto
- * `AuthStore.capabilities()`/`hasCapability` or `AuthStore.scopeKind()`/`canAdminister` — `topRole` alone
+ * `AuthFacade.capabilities()`/`hasCapability` or `AuthFacade.scopeKind()`/`canAdminister` — `topRole` alone
  * was never a reliable stand-in once `VIEWER` existed, and it carries no information about a
  * MANAGER's `GROUPS` scope vs an ADMIN's `UNBOUNDED` one. `core/auth/auth-logic.ts` is the one place
  * allowed to reason about `topRole` directly (`topRoleLabel`, the identity chip's badge) — everywhere

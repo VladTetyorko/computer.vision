@@ -1,8 +1,8 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { canManageOrg } from '../../core/org/org-logic';
-import { SettingsStore } from '../../core/settings/settings-store';
+import { SettingsFacade } from '../../core/settings/settings-facade';
 import { ThemeFacade } from '../../core/shell/theme-facade';
 import { ToastService } from '../../core/toast.service';
 
@@ -23,14 +23,14 @@ import { ToastService } from '../../core/toast.service';
  * spirit to Interface/Notifications than to a fleet-wide default, so it stays on the account page.
  *
  * **Tiles-per-row is gone from here entirely** (docs/extracts/design/11-settings.md's own "delete, don't
- * duplicate" call, task 5) — `SettingsStore.wallDensity` is still the one signal both this app and
+ * duplicate" call, task 5) — `SettingsFacade.wallDensity` is still the one signal both this app and
  * the Wall read/write; only this page's second `<select>` control is deleted.
  * `features/wall/wall.html`'s own `[pageBarFilters]` control (`WallFacade.setDensity`) is untouched
  * and is now the *only* place that writes it.
  */
 @Injectable()
 export class AccountSettingsFacade {
-  readonly settings = inject(SettingsStore);
+  readonly settings = inject(SettingsFacade);
   readonly fleet = inject(FleetStore);
   /** Backs the page's own "Appearance" section (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/Wave 1) — the same
    *  `ThemeFacade` the sidebar-footer switch calls directly, injected here instead because
@@ -40,7 +40,7 @@ export class AccountSettingsFacade {
    *  `facade.theme.setTheme(...)`, the same direct-field idiom `facade.settings`/`facade.fleet`
    *  already use above rather than this class growing passthrough wrapper methods. */
   readonly theme = inject(ThemeFacade);
-  private readonly auth = inject(AuthStore);
+  private readonly auth = inject(AuthFacade);
   private readonly toasts = inject(ToastService);
 
   /**

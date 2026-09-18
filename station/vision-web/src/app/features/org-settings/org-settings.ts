@@ -16,7 +16,7 @@ import { OrgSettingsFacade } from './org-settings-facade';
  * Two sections behind a segmented tab (this app's `.segmented` idiom, `styles.css`): **Users**
  * (list + invite form + enable/disable toggle) and **Groups** (hierarchy tree + create form). Dumb
  * by convention (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — every fetch/mutation and its one-toast handling
- * lives in `OrgStore`, every pure derivation (group tree, role options) in `core/org/org-logic.ts`,
+ * lives in `OrgFacade`, every pure derivation (group tree, role options) in `core/org/org-logic.ts`,
  * and all of it is orchestrated by `OrgSettingsFacade`, which this component injects exclusively.
  * Reuses the existing management-page look wholesale (`.page`/`.card`/`.btn`/`.chip`/`.segmented`/
  * `.empty`), no new colors. Responsive: the page is a single scrolling column of cards; each list row

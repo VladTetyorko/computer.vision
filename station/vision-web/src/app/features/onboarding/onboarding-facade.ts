@@ -1,5 +1,5 @@
 import { Injectable, computed, inject } from '@angular/core';
-import { SettingsStore } from '../../core/settings/settings-store';
+import { SettingsFacade } from '../../core/settings/settings-facade';
 import { ToastService } from '../../core/toast.service';
 import { OnboardingStore } from './onboarding-store';
 import {
@@ -126,7 +126,7 @@ const SOURCE_MODE_OPTIONS: readonly SourceModeOption[] = [
 
 /**
  * `OnboardingPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — orchestrates `OnboardingStore`/
- * `SettingsStore`/`ToastService`. `OnboardingStore` already owns the wizard's whole step machine/
+ * `SettingsFacade`/`ToastService`. `OnboardingStore` already owns the wizard's whole step machine/
  * draft state/HTTP orchestration (this component's own page-provided "component store"); this facade
  * adds the page-local read-models/commands every step component needs (label maps, per-row
  * summaries, the rail's own items, the waiting room's live intake render, the clipboard/download
@@ -150,7 +150,7 @@ const SOURCE_MODE_OPTIONS: readonly SourceModeOption[] = [
 @Injectable()
 export class OnboardingFacade {
   readonly store = inject(OnboardingStore);
-  readonly settings = inject(SettingsStore);
+  readonly settings = inject(SettingsFacade);
   private readonly toasts = inject(ToastService);
 
   /** Two steps for equipment, four/five otherwise — see `onboarding-logic.ts#visibleSteps`'s own doc comment. */

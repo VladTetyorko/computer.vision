@@ -5,7 +5,7 @@ import type { StreamState } from '../../core/api/models';
  * position from**, applied identically by the Detect switch (`cv-control-panel.html`), the tool
  * rail's off-dot and the video-surface "Turn on" chip (`cockpit.html`).
  *
- * Before this plan every one of those rendered `SettingsStore`'s own draft, which is this browser's
+ * Before this plan every one of those rendered `SettingsFacade`'s own draft, which is this browser's
  * localStorage — so switching drone, reloading, or opening a second tab could show a switch position
  * that was simply false for the stream in front of the operator (`STREAM-STATE-CONTEXT.md` D1).
  *

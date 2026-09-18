@@ -460,7 +460,7 @@ export class Player {
 
   /**
    * F2 digital crop-follow's own per-viewer toggle (docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1 item
-   * 4, wave W6) — `SettingsStore.cropFollowEnabled`, passed straight through, host-owned like every
+   * 4, wave W6) — `SettingsFacade.cropFollowEnabled`, passed straight through, host-owned like every
    * other input on this component. Defaults `false`: a host that never binds this (asset-detail,
    * Command's asset panel, replay, or any Fly/Live/Wall build predating this wave's own host wiring)
    * gets the exact identity behavior this file had before crop-follow existed — no visual change, not
