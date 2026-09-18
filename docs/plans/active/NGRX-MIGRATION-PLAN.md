@@ -4,7 +4,7 @@
 final result I need a well structured ngrx application … with all the reducers, actions, effects and
 so on."*
 
-**State:** N0–N3 **BUILT** 2026-09-18 on `feat/ngrx-migration` (`b0e0ce19`), not yet on `master`. 8 slices done, **25 hand-rolled stores remain**. Waves N4–N9 open.
+**State:** N0–N3 + N5 **BUILT** 2026-09-18 on `feat/ngrx-migration` (`91143666`), not yet on `master`. 11 slices done, **22 hand-rolled stores remain**. N6/N7 in flight; N4, N8, N9 open.
 
 ---
 
@@ -202,7 +202,27 @@ Promise-returning method is added to `VisionApi` after N0 — new endpoints land
 | N2 | **BUILT**, `1a3da7f0` — `settings`, `org`, `seat`, `auth`; all four legacy classes deleted. `seat` keys state by `assetId` instead of relying on injector scoping; `core/state/dispatch-bridge.ts#dispatchAndAwait` keeps `Promise`-returning facade commands |
 | N1+N2 merged | `f70afb09` — **231/231 files · 4 387/4 387 tests green**, production build exit 0 at **500.83 kB raw / 142.55 kB transfer** (835 B over the 500 kB *warning* budget, under the 550 kB error budget; left as a warning on purpose) |
 | N3 | **BUILT**, `b0e0ce19` — the `live` slice + `core/live/live-gateway.ts` (the seam owning the one `EventSource`; specs fake it, jsdom never needs one). 26 consumers rewired, `LiveStore` deleted. **234/234 files · 4 443/4 443 tests green**, build exit 0, bundle 500.83 → 505.87 kB raw |
-| N4–N9 | open |
+| N5 | **BUILT**, `91143666` — `telemetry`, `detections`, `cv-trace`; 24 consumers rewired, all three classes deleted. **240/240 files · 4 492/4 492 tests green**, build exit 0, bundle 505.87 → 515.83 kB raw |
+| N6, N7 | in flight |
+| N4, N8, N9 | open |
+
+### The bundle expectation was wrong — recorded, not quietly dropped
+
+This section previously assumed waves that *delete* a hand-rolled store would claw back the engine's
+45 kB. Four waves in, that is false: **N1 +0.89, N2 +12.47, N3 +5.04, N5 +9.96 kB raw**, every one
+after deleting the class it replaced. A slice (model + actions + reducer + effects + facade, plus
+`createFeature`/`@ngrx/entity` machinery) ships more code than the class it replaces. The initial
+bundle is now ~15.8 kB over the 500 kB **warning** budget, still under the 550 kB error budget.
+**This is an owner decision at N9** — raise the budget, or spend a wave on route-level code-splitting
+for the slices only one feature needs — not a number for a wave to bump on its way past.
+
+### N5 found a convention that does not generalise
+
+Poll-vs-live is *exclusive* everywhere except `cv-trace`, where poll and live run **concurrently by
+design**: `gate`/`world` have no live topic at all (the 3 s poll is their only freshness source) and
+`frame` is a ring the poll authoritatively replaces every tick, into which a live arrival merely
+merges between ticks. `CvTraceFacade` therefore has no transport selector. A later wave that
+"regularises" this will silently drop `gate`/`world` freshness.
 
 ### Two things N3 established that later waves must not undo
 

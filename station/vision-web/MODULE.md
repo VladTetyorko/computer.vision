@@ -133,13 +133,18 @@ dispatches its own `bootRequested()` rather than waiting on `ROOT_EFFECTS_INIT`,
 its `ready: Promise<void>` race-free — see that class's doc comment for the `ENVIRONMENT_INITIALIZER`
 ordering argument.
 
-**Cost, measured on the merged tree after N3:** **505.87 kB raw / 143.74 kB transfer** (this wave:
-+5.04 kB raw / +~1.1 kB transfer over N1+N2's own 500.83 kB / 142.6 kB), against a pre-NgRx baseline
-of 442.45 kB / 123.81 kB. The engine itself was 45 kB of that at N0; N1, N2 and N3 added the rest.
-`angular.json` budgets the initial bundle at 500 kB warn / 550 kB error, so **the build is green but
-now 5.87 kB over the warning line** (835 bytes of that already there before N3) — deliberately left
-there rather than bumped, because the warning is the only signal left and waves N4–N8 each *delete* a
-hand-rolled store. Re-measure per wave; never add two waves' separately-measured deltas together.
+**Cost, measured on the merged tree after N5:** **515.83 kB raw / 146.49 kB transfer**, against a
+pre-NgRx baseline of 442.45 kB / 123.81 kB. The engine itself was 45 kB of that at N0; the slice
+waves added the rest. `angular.json` budgets the initial bundle at 500 kB warn / 550 kB error — the
+build is green on the error budget and knowingly **~15.8 kB over the warning line**, left there
+rather than bumped so the cost stays visible.
+
+**The migration is a net bundle cost, not a wash — say so rather than hoping.** Every wave so far
+added bytes *despite* deleting the store it replaced (N1 +0.89, N2 +12.47, N3 +5.04, N5 +9.96 kB
+raw): a slice — model, actions, reducer, effects, facade, plus `createFeature`/`@ngrx/entity`
+machinery — ships more code than the hand-rolled class it replaces. What is bought with it is one
+state engine instead of 32 re-implementations, and that is the trade to judge. Re-measure per wave;
+never add two waves' separately-measured deltas together.
 
 **`live` is the first slice to isolate a genuinely non-serializable resource** (docs/plans/active/
 NGRX-MIGRATION-PLAN.md §8) — the browser's own `EventSource`. `core/live/live-gateway.ts#LiveGateway`
