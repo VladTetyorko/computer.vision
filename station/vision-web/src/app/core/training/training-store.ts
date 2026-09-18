@@ -10,9 +10,9 @@ const LOG_PREFIX = '[training]';
 
 /**
  * The `features/labeling/**` surface's source of truth for the dataset list (docs/plans/done/CV-TRAINING-PLAN.md
- * Wave T5) — `providedIn: 'root'`, mirroring `OrgStore`'s posture: lazy, not self-initializing
+ * Wave T5) — `providedIn: 'root'`, mirroring `OrgFacade`'s posture: lazy, not self-initializing
  * (`DatasetsPage`'s own facade calls {@link refresh} once it's actually reached, the same "don't hit
- * an admin-flavored endpoint from app boot" reasoning `OrgStore`'s own doc comment gives, even though
+ * an admin-flavored endpoint from app boot" reasoning `OrgFacade`'s own doc comment gives, even though
  * this surface itself isn't role-gated — see below).
  *
  * **Feature gating, done honestly, with no dedicated "is training enabled" endpoint** (the plan names
@@ -25,7 +25,7 @@ const LOG_PREFIX = '[training]';
  * {@link disabled} — read by `DatasetsPage` (and, via a direct-navigation dataset/sample-detail
  * facade's own 404 handling, degraded the same honest way) to render `vision-empty`, never a blocked
  * page or a fabricated dataset list (CLAUDE.md's own "degrade honestly" rule). Every *other* failure
- * (network down, 5xx, a genuine 403) stays a toast, exactly like `OrgStore`/`FleetStore`.
+ * (network down, 5xx, a genuine 403) stays a toast, exactly like `OrgFacade`/`FleetStore`.
  *
  * Only the dataset **list** + create/delete live here — one dataset's samples and one sample's
  * annotations are page-local, single-consumer state, so `DatasetDetailFacade`/`SampleEditorFacade`
@@ -93,7 +93,7 @@ export class TrainingStore {
     return result ?? false;
   }
 
-  /** Runs a mutation, turning any failure into one explained toast (mirrors `OrgStore.run`/`FleetStore.run`). */
+  /** Runs a mutation, turning any failure into one explained toast (mirrors `OrgFacade.run`/`FleetStore.run`). */
   private async run<T>(action: () => Promise<T>): Promise<T | null> {
     try {
       return await action();

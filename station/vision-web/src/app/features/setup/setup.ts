@@ -22,7 +22,7 @@ import { SetupFacade } from './setup-facade';
  * visitor with literally no session, and should look like siblings, not like two different apps.
  *
  * Dumb by this codebase's convention: every real decision (busy state, the inline error's text,
- * what "success" means) lives in `SetupFacade`/`AuthStore.bootstrap()` — this component only wires
+ * what "success" means) lives in `SetupFacade`/`AuthFacade.bootstrap()` — this component only wires
  * the form to the facade.
  */
 @Component({

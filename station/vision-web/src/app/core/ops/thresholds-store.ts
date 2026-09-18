@@ -15,7 +15,7 @@ const LOG_PREFIX = '[ops-thresholds]';
  *
  * **Fetch-once, not a `PollScheduler` poller** — unlike `SystemStatusStore`'s recurring 15s cadence,
  * `vision.ops.battery.*` is process-level config, not telemetry: it cannot change without a server
- * restart, so one fetch per SPA session is enough (mirrors `AuthStore`'s own one-shot `/api/me` read
+ * restart, so one fetch per SPA session is enough (mirrors `AuthFacade`'s own one-shot `/api/me` read
  * far more than `FleetStore`'s recurring one).
  *
  * **Degrades honestly on a failed/slow fetch**: {@link battery} always returns a real, usable value

@@ -1,6 +1,6 @@
 import { inject } from '@angular/core';
 import { Router, type CanActivateFn } from '@angular/router';
-import { AuthStore } from './auth-store';
+import { AuthFacade } from './auth-facade';
 import { anonymousDestination, needsLogin } from './auth-logic';
 
 /**
@@ -10,14 +10,14 @@ import { anonymousDestination, needsLogin } from './auth-logic';
  * themselves (see that file's own comment for the wrapper; those two get `loginGuard`/`setupGuard`
  * below instead).
  *
- * Awaits `AuthStore.ready` first — the store's own boot-time `loadMe()` — so the very first
+ * Awaits `AuthFacade.ready` first — the store's own boot-time `loadMe()` — so the very first
  * navigation of a session is decided against the *resolved* session, never the transitional
  * `'loading'` status; this is what keeps a fresh page load from ever briefly activating a
- * protected route and then yanking the user to `/login` a beat later (see `AuthStore`'s own class
+ * protected route and then yanking the user to `/login` a beat later (see `AuthFacade`'s own class
  * doc, "No boot-time render flash"). The actual "needs login at all" decision is entirely
  * `auth-logic.ts#needsLogin`'s, kept pure and unit-tested there — this function is wiring only.
  *
- * Once it's clear the visitor needs to go somewhere, `AuthStore.bootstrapRequired()` is checked
+ * Once it's clear the visitor needs to go somewhere, `AuthFacade.bootstrapRequired()` is checked
  * (and only then — a resolved, already-anonymous visitor is the one case that ever needs the
  * extra round trip, not every navigation) so a fresh station with nobody to sign in as sends the
  * visitor to `/setup` instead of a login form with no account behind it
@@ -28,7 +28,7 @@ import { anonymousDestination, needsLogin } from './auth-logic';
  * useful meaning).
  */
 export const authGuard: CanActivateFn = async (_route, state) => {
-  const auth = inject(AuthStore);
+  const auth = inject(AuthFacade);
   const router = inject(Router);
 
   await auth.ready;
@@ -52,7 +52,7 @@ export const authGuard: CanActivateFn = async (_route, state) => {
  * so it has no session-based check of its own beyond the bootstrap latch.
  */
 export const loginGuard: CanActivateFn = async () => {
-  const auth = inject(AuthStore);
+  const auth = inject(AuthFacade);
   const router = inject(Router);
 
   if (await auth.bootstrapRequired()) {
@@ -69,7 +69,7 @@ export const loginGuard: CanActivateFn = async () => {
  * stale "create the first admin" form sitting on screen for anyone who still has the URL.
  */
 export const setupGuard: CanActivateFn = async () => {
-  const auth = inject(AuthStore);
+  const auth = inject(AuthFacade);
   const router = inject(Router);
 
   if (await auth.bootstrapRequired()) {

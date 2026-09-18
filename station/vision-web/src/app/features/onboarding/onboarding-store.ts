@@ -1,7 +1,7 @@
 import { DestroyRef, Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { DiscoveryInboxStore } from '../../core/discovery/discovery-inbox-store';
 import { PollScheduler } from '../../core/poll-scheduler';
@@ -187,7 +187,7 @@ export class OnboardingStore {
   private readonly fleet = inject(FleetStore);
   private readonly toasts = inject(ToastService);
   private readonly route = inject(ActivatedRoute);
-  private readonly auth = inject(AuthStore);
+  private readonly auth = inject(AuthFacade);
   private readonly discoveryInbox = inject(DiscoveryInboxStore);
   private readonly poll = inject(PollScheduler);
   private readonly webSerial = inject(WebSerialGateway);

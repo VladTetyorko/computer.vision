@@ -488,8 +488,8 @@ export class VisionApi {
   // --- Seats (docs/plans/active/CREW-CONTROL-PLAN.md §3.6, frozen — byte-exact) ------------------
   // Both seats are always present in the response, holder fields explicit `null` when free. With
   // `vision.crew.enabled=false` (default) the endpoint reports both seats free and every `may*` true
-  // — `core/seat/seat-store.ts` treats a `404` (feature not deployed at all) the same way, never as
-  // an error to surface.
+  // — `core/seat/state/seat.effects.ts` treats a `404` (feature not deployed at all) the same way,
+  // never as an error to surface.
 
   /** `200` `SeatsResponse` — `404` unknown or out-of-visibility asset (a read hides existence);
    * `400` bad UUID. */
@@ -500,7 +500,7 @@ export class VisionApi {
   }
 
   /** Take-or-renew, idempotent for the current holder — this is the seat heartbeat
-   * (`SeatStore`'s renewal cadence is `ttlMs / 3`, never hard-coded). `409` held by another; `403`
+   * (the seat renewal effect's cadence is `ttlMs / 3`, never hard-coded). `409` held by another; `403`
    * caller lacks authority for this `kind`; `404` unknown asset; `400` bad UUID or unknown kind. The
    * body may be omitted entirely — `force` is honoured only for a caller with `mayForceSeat`, which
    * this wave never sets. */
@@ -1442,7 +1442,7 @@ export class VisionApi {
     return firstValueFrom(this.http.post<void>('/api/auth/password', request));
   }
 
-  /** An admin/manager sets another user's password on their behalf (`POST /api/users/{id}/password`) — always forces `mustChangePassword` on the target. `core/org/org-store.ts` is the only caller. */
+  /** An admin/manager sets another user's password on their behalf (`POST /api/users/{id}/password`) — always forces `mustChangePassword` on the target. `core/org/org-facade.ts` is the only caller. */
   adminSetPassword(id: string, request: AdminSetPasswordRequest): Promise<void> {
     return firstValueFrom(
       this.http.post<void>(`/api/users/${encodeURIComponent(id)}/password`, request),
@@ -1458,13 +1458,13 @@ export class VisionApi {
 
   // --- Org settings: users, groups (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2's frozen contract) --------
   // ADMIN/MANAGER-only surfaces server-side; the UI additionally role-gates the route + nav link so
-  // a pilot never reaches them (`core/org/org-guard.ts`). `core/org/org-store.ts` is the only caller.
+  // a pilot never reaches them (`core/org/org-guard.ts`). `core/org/org-facade.ts` is the only caller.
 
   listUsers(): Promise<UserSummary[]> {
     return firstValueFrom(this.http.get<UserSummary[]>('/api/users'));
   }
 
-  /** Invite/create a user. A `403` (grant above the inviter's own scope) or `409` (username taken) rejects — `core/org/org-store.ts` turns each into one explained toast. */
+  /** Invite/create a user. A `403` (grant above the inviter's own scope) or `409` (username taken) rejects — `core/org/org-facade.ts` turns each into one explained toast. */
   createUser(request: CreateUserRequest): Promise<UserSummary> {
     return firstValueFrom(this.http.post<UserSummary>('/api/users', request));
   }

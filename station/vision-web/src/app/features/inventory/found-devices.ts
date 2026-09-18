@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { DiscoveryInboxStore } from '../../core/discovery/discovery-inbox-store';
 import {
@@ -63,7 +63,7 @@ const CLOCK_TICK_MS = 1_000;
 export class FoundDevices {
   protected readonly store = inject(DiscoveryInboxStore);
   private readonly api = inject(VisionApi);
-  private readonly auth = inject(AuthStore);
+  private readonly auth = inject(AuthFacade);
   private readonly router = inject(Router);
 
   /**

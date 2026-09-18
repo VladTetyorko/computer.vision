@@ -356,7 +356,7 @@ export function applyPreset(
 }
 
 // --- Resolved CV config (docs/plans/active/CV-SETTINGS-PLAN.md §3, wave W7) ---------------------
-// The one honest replacement for the old `SettingsStore#effective()` draft (H2: "stop the
+// The one honest replacement for the old `SettingsFacade#effective()` draft (H2: "stop the
 // dual-write"). Every fly-time CV control (this panel, the setup modal, the detections strip) now
 // renders **either** the running stream's own live config (`GET /api/streams/{id}/config`, wave
 // W7's H6 fix — a real readback instead of assuming from what was last sent) **or**, before a
@@ -551,7 +551,7 @@ export function buildProfileRequestFromConfig(
  * active/CV-CLEAN-FEED-PLAN.md D-2) so a per-chip hide/unhide click reaches the wire the same way
  * every other hot knob already does. Takes the full {@link ResolvedCvConfig} rather than a bespoke
  * shape (wave W7) — the caller merges its own patch on top of the currently-resolved config first
- * ("current + this one edit"), same as before this wave's `SettingsStore#effective()` was the base.
+ * ("current + this one edit"), same as before this wave's `SettingsFacade#effective()` was the base.
  */
 export function buildHotKnobPatch(config: ResolvedCvConfig): UpdateStreamConfigRequest {
   return {

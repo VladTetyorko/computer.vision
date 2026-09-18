@@ -2,10 +2,10 @@ import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { canManageOrg as computeCanManageOrg } from '../../core/org/org-logic';
 import { FleetStore } from '../../core/fleet/fleet-store';
-import { SettingsStore } from '../../core/settings/settings-store';
+import { SettingsFacade } from '../../core/settings/settings-facade';
 import { ToastService } from '../../core/toast.service';
 import { UndoToastService } from '../../shared/ui/undo-toast.service';
 import { pluralize } from '../../shared/ui/text-logic';
@@ -115,8 +115,8 @@ export class InventoryFacade {
   private readonly undoToast = inject(UndoToastService);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
-  private readonly auth = inject(AuthStore);
-  private readonly settings = inject(SettingsStore);
+  private readonly auth = inject(AuthFacade);
+  private readonly settings = inject(SettingsFacade);
   private readonly viewStore = inject(InventoryViewStore);
 
   readonly fleet = inject(FleetStore);

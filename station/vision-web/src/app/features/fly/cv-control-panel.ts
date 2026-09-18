@@ -96,10 +96,10 @@ export class CvControlPanel {
   readonly setupRequested = output<void>();
 
   /** The detection-boxes declutter level (`FlyPage`'s own `facade.boxesMode`, itself an alias of
-   * `SettingsStore.declutterLevel` — wave W7, H12) — one shared, persisted **View** preference
+   * `SettingsFacade.declutterLevel` — wave W7, H12) — one shared, persisted **View** preference
    * (docs/plans/active/CV-SETTINGS-PLAN.md §3.5 rule 1: a control with no backend effect lives in a
    * View group and says so), never part of {@link ResolvedCvConfig}/the wire contract, so it still
-   * round-trips via a plain input/output pair rather than reading `SettingsStore` directly here. */
+   * round-trips via a plain input/output pair rather than reading `SettingsFacade` directly here. */
   readonly boxesMode = input<BoxesMode>(DEFAULT_DECLUTTER_LEVEL);
   readonly boxesModeChange = output<BoxesMode>();
   /** The four declutter levels, in cycle order — the segmented control's own `@for` source. */

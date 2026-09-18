@@ -42,7 +42,7 @@ import type { AssetSummary } from '../api/models';
  * The seven root stores &sect;2's table names. The eighth row, `/command`'s own 5s
  * `GET /api/fleet/summary` (wave L8a), is **not** here: `CommandFacade` has no TestBed harness in
  * this repo (only `command-logic.spec.ts`, a pure-logic file) and standing one up would mean faking
- * `Router`/`ActivatedRoute`/`AuthStore`/`WeatherStore`/`RouteStore` for one number. Its retirement
+ * `Router`/`ActivatedRoute`/`AuthFacade`/`WeatherStore`/`RouteStore` for one number. Its retirement
  * is pinned instead by `features/fleet/summary-refresh-logic.spec.ts` and stated as arithmetic in
  * &sect;9 of the plan, labelled as such.
  */

@@ -29,7 +29,7 @@ export function describeHttpError(error: unknown): string {
       // reauth overlay or a redirect to `/login` for every endpoint that can genuinely session-401;
       // this generic copy only ever surfaces for a caller that renders its own toast/error text on
       // top of that (the interceptor re-throws, it doesn't swallow), or for the two excluded
-      // endpoints with their own inline 401 handling (`AuthStore.login`/`changePassword`).
+      // endpoints with their own inline 401 handling (`AuthFacade.login`/`changePassword`).
       return fromServer ?? 'Your session is no longer valid — sign in again.';
     case 403:
       return fromServer ?? 'You do not have access to that.';

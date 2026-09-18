@@ -14,7 +14,7 @@ import {
   viewChild,
 } from '@angular/core';
 import type * as Leaflet from 'leaflet';
-import { SettingsStore, type MapLayerId } from '../../../core/settings/settings-store';
+import { SettingsFacade, type MapLayerId } from '../../../core/settings/settings-facade';
 import { ThemeFacade } from '../../../core/shell/theme-facade';
 import { capitalizeLabel, formatConfidence, relativeTimeLabel } from '../../../core/events/events-logic';
 import { humanAge } from '../../../core/telemetry/telemetry-logic';
@@ -194,7 +194,7 @@ interface RouteHandle {
  * **Dumb by construction.** Unlike both components it replaces (which injected `FleetMapStore` /
  * `TelemetryStore` / `EventsStore` directly and therefore only worked on a page that provided
  * them), every overlay arrives as an input. The only injected state is the two root stores that
- * decide how the *basemap* renders (`SettingsStore.mapLayer` + `ThemeFacade.theme`), so this
+ * decide how the *basemap* renders (`SettingsFacade.mapLayer` + `ThemeFacade.theme`), so this
  * component drops into any page — see `tactical-map-logic.ts#followMarkers` for the one helper a
  * follow-mode host needs to turn its `TelemetryStore` into the single `[assets]` entry.
  *
@@ -223,7 +223,7 @@ interface RouteHandle {
   },
 })
 export class TacticalMap {
-  private readonly settings = inject(SettingsStore);
+  private readonly settings = inject(SettingsFacade);
   private readonly theme = inject(ThemeFacade);
 
   // --- Inputs (docs/plans/done/MAP-REWORK-PLAN.md §5.1's frozen superset) ----------------------------------

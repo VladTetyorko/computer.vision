@@ -1,7 +1,7 @@
 import { Injectable, effect, inject, signal } from '@angular/core';
 import { VisionApi } from '../api/vision-api';
 import { PollScheduler } from '../poll-scheduler';
-import { SettingsStore } from '../settings/settings-store';
+import { SettingsFacade } from '../settings/settings-facade';
 import { LiveStore } from '../live/live-store';
 import { isLiveAvailable } from '../live/live-fallback-logic';
 import type { DetectionEvent } from '../api/models';
@@ -79,7 +79,7 @@ const EVENTS_LIMIT = 50;
 export class EventsStore {
   private readonly api = inject(VisionApi);
   private readonly scheduler = inject(PollScheduler);
-  private readonly settings = inject(SettingsStore);
+  private readonly settings = inject(SettingsFacade);
   private readonly live = inject(LiveStore);
 
   private readonly eventsSignal = signal<readonly DetectionEvent[]>([]);

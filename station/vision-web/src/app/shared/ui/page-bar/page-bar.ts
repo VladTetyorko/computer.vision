@@ -42,11 +42,11 @@ export interface PageBarCrumb {
  *
  * **The `?` hint popover closes on `Escape` and on an outside click** (docs/plans/done/UI-STATE-PLAN.md §2.4) —
  * before this, it only closed by clicking its own trigger a second time, so an operator who hit
- * `Escape` expecting *whatever is floating* to go away (the same instinct §2.2's `GlobalOverlayStore`
+ * `Escape` expecting *whatever is floating* to go away (the same instinct §2.2's shell overlay store (now the `overlay` slice)
  * serves for the shell's identity menu/notification bell) had no way to know this one specific popover
  * needed a different gesture. This popover is page-scoped — it dies with the page like every other
  * page overlay (§2.1's "page overlays" tier) — so per §2.4 it keeps its own local `hintOpen` signal
- * rather than moving into the shell's `GlobalOverlayStore`; only the *behavior* (Escape + outside-click)
+ * rather than moving into the shell's `overlay` slice; only the *behavior* (Escape + outside-click)
  * is mirrored, via the same "one document-level listener pair, `root.contains(target)` decides
  * inside-vs-outside" idiom `core/ui/state/overlay.effects.ts` uses for the shell's own
  * overlays — see this class's own `onDocumentKeydown`/`onDocumentClick` below.
@@ -82,7 +82,7 @@ export class PageBar {
 
   /** The hint's own trigger-plus-body wrapper (`page-bar.html`'s `#hintRoot`) — the outside-click
    *  listener below treats any click landing inside this element (the `?` button *or* the popover
-   *  body itself) as "not outside", the same containment trick `GlobalOverlayStore.register`'s own
+   *  body itself) as "not outside", the same containment trick `core/ui/overlay-host-registry.ts#register`'s own
    *  doc comment explains. `undefined` whenever no `hint` input is bound at all (the `@if` in the
    *  template never renders `#hintRoot` in that case) — every use below already treats that as "there
    *  is nothing to close". */
@@ -132,7 +132,7 @@ export class PageBar {
 
   /**
    * A click anywhere outside {@link hintRoot} (trigger *and* popover body alike) closes it. Bound on
-   * `document:click`, the same phase `GlobalOverlayStore`'s own outside-click listener uses — the
+   * `document:click`, the same phase the `overlay` slice's own outside-click effect uses — the
    * trigger's own `(click)="toggleHint()"` is a *target-phase* listener on the button itself, so by
    * normal DOM dispatch order it always runs before this bubble-phase `document` listener sees the
    * same click (see that store's own doc comment for the full ordering argument); a click that just

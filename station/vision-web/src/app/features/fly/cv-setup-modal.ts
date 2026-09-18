@@ -526,7 +526,7 @@ export class CvSetupModal {
    * A model change is always its own separate PATCH (`buildModelChangePatch`, `model` alone — see
    * `core/api/models.ts#UpdateStreamConfigRequest`'s own frozen "two families of change never mix
    * in one call" rule). The seeded label filter this used to only reach the wire lazily, via
-   * whatever *unrelated* hot-knob edit happened to come next (`SettingsStore#adjust` mutating a
+   * whatever *unrelated* hot-knob edit happened to come next (`SettingsFacade#adjust` mutating a
    * local draft the old `buildHotKnobPatch` read on its own later schedule) — wave W7 sends it
    * promptly instead, as its own **second**, still-separate hot-knob PATCH right after the model
    * PATCH succeeds, rather than folding it into the model PATCH itself (which would blur the exact

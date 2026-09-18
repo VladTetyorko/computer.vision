@@ -126,7 +126,7 @@ export function sortAssetsForPicker(assets: readonly AssetSummary[]): readonly A
 /**
  * The one auto-redirect `/fly` performs on its own (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5 F12,
  * docs/extracts/design/01-fly.md — "skip the picker when it has nothing to ask"): the operator's remembered
- * drone (`SettingsStore.flyAssetId`) only counts as "nothing to ask" while it is still actually
+ * drone (`SettingsFacade.flyAssetId`) only counts as "nothing to ask" while it is still actually
  * **streaming** — merely still existing (the pre-split `resolveActiveAssetId`'s own bar, back when
  * one component quietly switched between picker/cockpit with no URL change at all) is not enough. A
  * remembered drone that has simply landed is exactly the case the picker should still ask about,
@@ -510,7 +510,7 @@ function membershipGroupNames(memberships: readonly Membership[]): string | unde
  * in this string.
  *
  * **An unresolved `scopeKind`** (`undefined`/`null` — every real caller reaches this page behind
- * `authGuard`, which already awaited `AuthStore.ready`, so this is a defensive fallback, not a path
+ * `authGuard`, which already awaited `AuthFacade.ready`, so this is a defensive fallback, not a path
  * any real visit takes) gets the fleet-empty title/message — never the PILOT copy, which would
  * claim a specific relationship ("assigned to you") the app cannot back up for an unresolved scope —
  * but **not** the CTA: `showAddSource` mirrors `canManageOrg` exactly (`hasCapability(capabilities,
@@ -542,8 +542,8 @@ export function pickerEmptyStateCopy(
 // --- Crew seat awareness (docs/plans/active/CREW-CONTROL-PLAN.md §3.4/§3.5/§3.6, wave W4) — the
 // pilot's own cockpit reads the camera seat purely as a signal fed into the *existing* dock/Vision-
 // drawer templates: `FlyStage` above is untouched (§3.5's own frozen table — "no third stage/posture
-// in fly-logic.ts"), and there is no new tool-rail panel or CTA anywhere in this file. `SeatStore`
-// (`core/seat/seat-store.ts`, W3) is the one source of truth this reads from — a lone-operator/
+// in fly-logic.ts"), and there is no new tool-rail panel or CTA anywhere in this file. `SeatFacade`
+// (`core/seat/seat-facade.ts`, W3) is the one source of truth this reads from — a lone-operator/
 // feature-off session (§3.8) reports `singleOperatorSeats`, whose camera holder is always the same
 // explicit-null "free" shape {@link cameraHeldByOther} already treats as "not held by anyone else",
 // so this cockpit renders identically to before this wave with the flag off, by construction.

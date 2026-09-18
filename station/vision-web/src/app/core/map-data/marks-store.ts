@@ -491,7 +491,7 @@ export class MarksStore {
     }
   }
 
-  /** One explained toast per failure — the same seam `LayersStore`/`OrgStore`/`FleetStore` all use. */
+  /** One explained toast per failure — the same seam `LayersStore`/`OrgFacade`/`FleetStore` all use. */
   private async run<T>(action: () => Promise<T>): Promise<T | null> {
     try {
       return await action();

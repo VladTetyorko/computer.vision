@@ -2,7 +2,7 @@ import { DestroyRef, Injectable, computed, effect, inject, signal, untracked } f
 import { VisionApi } from '../../core/api/vision-api';
 import type { FleetSummary } from '../../core/api/models';
 import { FleetStore } from '../../core/fleet/fleet-store';
-import { SettingsStore } from '../../core/settings/settings-store';
+import { SettingsFacade } from '../../core/settings/settings-facade';
 import { EventsStore } from '../../core/events/events-store';
 import { LiveStore } from '../../core/live/live-store';
 import { PollScheduler } from '../../core/poll-scheduler';
@@ -84,7 +84,7 @@ export class WallFacade {
   private readonly events = inject(EventsStore);
   private readonly live = inject(LiveStore);
   private readonly scheduler = inject(PollScheduler);
-  private readonly settings = inject(SettingsStore);
+  private readonly settings = inject(SettingsFacade);
 
   private readonly summarySignal = signal<FleetSummary | undefined>(undefined);
   /** Flips once, after `refreshSummary`'s first attempt settles (success or failure) — see the class
@@ -118,7 +118,7 @@ export class WallFacade {
 
   // --- Density (§3.1, D11 — replaces the old `Tiles per row` <select>) ------------------------
 
-  /** Aliases `SettingsStore.wallDensity` directly — unchanged key/type, so an operator's existing
+  /** Aliases `SettingsFacade.wallDensity` directly — unchanged key/type, so an operator's existing
    *  preference (2..6 from the old select) survives this wave; {@link tileMinPx} clamps it to the
    *  nearest of the three frozen stops. */
   readonly density = this.settings.wallDensity;
@@ -129,11 +129,11 @@ export class WallFacade {
 
   // --- Declutter (D6 — one wall-level control, no longer per-tile) ----------------------------
 
-  /** Aliases `SettingsStore.declutterLevel` directly — the same shared, persisted preference the
+  /** Aliases `SettingsFacade.declutterLevel` directly — the same shared, persisted preference the
    *  Fly cockpit and `/live` already read/write (H12, `CockpitFacade#boxesMode`'s identical
    *  simplification). */
   readonly boxesMode = this.settings.declutterLevel;
-  /** F2 crop-follow — the same per-viewer `SettingsStore` signal Fly/Live write; tiles get it as
+  /** F2 crop-follow — the same per-viewer `SettingsFacade` signal Fly/Live write; tiles get it as
    *  an input and echo changes back, per the wall's facade-owns-settings idiom (`boxesMode`). */
   readonly cropFollowEnabled = this.settings.cropFollowEnabled;
   cycleBoxesMode(): void {

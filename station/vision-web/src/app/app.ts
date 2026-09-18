@@ -11,7 +11,7 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterOutlet } from '@angular/router';
 import { filter, map } from 'rxjs';
-import { AuthStore } from './core/auth/auth-store';
+import { AuthFacade } from './core/auth/auth-facade';
 import { FleetStore } from './core/fleet/fleet-store';
 import { LeafletWarmup } from './core/leaflet-warmup';
 import { LiveStore } from './core/live/live-store';
@@ -37,7 +37,7 @@ import { UndoToast } from './shared/ui/undo-toast';
  * sidebar with nowhere real to send its clicks, and there's no separate "am I on `/login`" route
  * check to keep in sync with the guard's own routing.
  *
- * **Dev parity (`vision.auth.enabled=false`)**: `AuthStore` resolves the fixed dev principal to
+ * **Dev parity (`vision.auth.enabled=false`)**: `AuthFacade` resolves the fixed dev principal to
  * `topRole: 'ADMIN'` exactly as before this task (unchanged mechanism, `core/org/org-guard.ts`'s own
  * doc comment) — `auth.user()` is non-null the instant `loadMe()` settles, so the sidebar renders
  * with the full ADMIN-scoped set, same as a real ADMIN session. Nothing here reads `authEnabled`
@@ -70,7 +70,7 @@ import { UndoToast } from './shared/ui/undo-toast';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class App {
-  protected readonly auth = inject(AuthStore);
+  protected readonly auth = inject(AuthFacade);
   private readonly fleet = inject(FleetStore);
   private readonly liveStore = inject(LiveStore);
   private readonly sidebar = inject(SidebarFacade);
@@ -83,10 +83,10 @@ export class App {
    * docs/conclusions/OPS-UX-REVIEW.md §O3 — "an operator has no way to know this station has no
    * login at all"). Requires **both** `auth.user()` resolved and `authEnabled() === false`, not
    * `authEnabled()` alone: `authEnabled` reads `false` for one tick before the boot `GET
-   * /api/auth/me` has ever answered (`AuthStore`'s own initial signal value), and showing a
+   * /api/auth/me` has ever answered (`AuthFacade`'s own initial signal value), and showing a
    * security-relevant claim before the session that claim is *about* has actually loaded would be a
    * boot-time flash of a banner that might immediately vanish once auth turns out to be enabled — the
-   * same "no boot-time render flash" contract `AuthStore`'s own class doc already promises the
+   * same "no boot-time render flash" contract `AuthFacade`'s own class doc already promises the
    * sidebar. Sits in `app.ts` (not `AppSidebar`) because it renders in `app.html`, outside the
    * sidebar entirely, in the shared `.shell-banners` stack (`app.css`'s own comment explains why
    * that stack is `position: fixed`, and why it must be a *stack* rather than one strip per banner).

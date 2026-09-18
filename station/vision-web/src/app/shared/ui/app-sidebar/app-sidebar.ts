@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, input, viewChild } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
-import { AuthStore } from '../../../core/auth/auth-store';
+import { AuthFacade } from '../../../core/auth/auth-facade';
 import { FleetStore } from '../../../core/fleet/fleet-store';
 import { LiveStore } from '../../../core/live/live-store';
 import { SidebarFacade } from '../../../core/shell/sidebar-facade';
@@ -142,7 +142,7 @@ export class AppSidebar {
    *  `Settings › Appearance` control (`features/settings/account-settings.ts`) IS a routed page and
    *  goes through `AccountSettingsFacade` instead for exactly that reason. */
   protected readonly theme = inject(ThemeFacade);
-  private readonly auth = inject(AuthStore);
+  private readonly auth = inject(AuthFacade);
   private readonly liveStore = inject(LiveStore);
   /** Backs the shell rollup dot below (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.2) — the same "shared
    *  shell component, not a routed page" carve-out `theme`'s own doc comment above explains; the
@@ -158,7 +158,7 @@ export class AppSidebar {
    * the one filter left here now that every `badge: 'soon'` scaffold entry has left `NAV_MODES`
    * outright (docs/plans/active/WAREHOUSE-UX-PLAN.md wave W1; `nav-entries.ts`'s own class doc has the
    * full writeup of what replaced the old `badge`-drop half of this filter). Reads
-   * `AuthStore.can()` directly per entry (docs/plans/active/AUTH-ROLES-PLAN.md §3.2, wave W2) rather
+   * `AuthFacade.can()` directly per entry (docs/plans/active/AUTH-ROLES-PLAN.md §3.2, wave W2) rather
    * than a single `canManage` computed pinned to `MANAGE_ORG` — every entry today happens to name
    * that one capability (F10), but a future entry naming a different one (e.g. `MANAGE_FLEET` alone)
    * is filtered correctly without this component growing a second gate.
