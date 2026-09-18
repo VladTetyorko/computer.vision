@@ -183,3 +183,42 @@ part of the wave, not a follow-up; (b) the guard is now a real gate, and an effe
 `Store` while a component may not. And one to re-check, not assume: the bundle only grows from here
 until a wave **deletes** its legacy store, so re-measure against the previous wave's tip rather than
 reading the number above.
+
+---
+
+## 10. Reference implementation — read these before writing a slice
+
+N0 shipped a complete, working slice twice. **Copy its shape; do not invent a second idiom.**
+
+| Read | For |
+|---|---|
+| `core/shell/state/sidebar.model.ts` | `interface XState` + `initialState`, nothing else in the file |
+| `core/shell/state/sidebar.actions.ts` | `createActionGroup` — one group per event source, events named as facts |
+| `core/shell/state/sidebar.reducer.ts` | `createFeature` + `extraSelectors` (the old `computed()`s live here, as pure functions of state) |
+| `core/shell/state/sidebar.effects.ts` | functional effects, `concatLatestFrom` for state reads, `{dispatch:false}` for pure side effects, exported as one `xEffects` object |
+| `core/shell/state/sidebar.hydration.ts` | a `StateHydrator` — returns `undefined` for anything it cannot trust, never a partial guess |
+| `core/shell/sidebar-facade.ts` | `selectSignal` reads + dispatch methods, **named exactly as the store class being replaced** |
+| `core/state/app-state.ts` | where a new app-wide slice and its effects get registered |
+| `core/shell/state/sidebar.reducer.spec.ts`, `core/shell/sidebar-facade.spec.ts` | the two spec shapes: pure reducer cases, and a facade case driven through the real `provideAppState()` |
+
+### Non-negotiables for every wave
+
+1. **`npm run test:ci`** from `station/vision-web` — never a bare `npx vitest run` (it fakes ~536
+   failures). The whole suite must be green when you finish, not just your own files.
+2. **`npx tsc --noEmit -p tsconfig.app.json` and `-p tsconfig.spec.json`** — 0 errors on both.
+3. **Delete the legacy store class and its spec in your own wave.** If a consumer outside your file
+   scope still injects it, that consumer is inside your scope for the one-line `inject()` swap — and
+   nothing more. Never leave the old class behind "for now".
+4. **A spec that needs real state calls `provideAppState()`.** Never hand-roll a `provideStore` in a
+   spec; that is exactly the drift `provideAppState()` exists to prevent.
+5. **An effect may `inject(Store)`; a component may not.** `core/ui/architecture.spec.ts` enforces it,
+   along with reducer purity and the reducer↔actions↔spec sibling rule. Run it; don't weaken it.
+6. **No `async` effect bodies.** `VisionApi` is Promise-shaped until N9 — wrap with
+   `from(...)`/`defer(...)` inside a flattening operator (§7).
+7. **A silent degrade stays silent**, but becomes a `*Failed` action the reducer handles — never a
+   `console.warn` nothing can select on (§3 rule 7).
+8. **Do not commit.** The orchestrator commits each wave. Report what you changed and the exact
+   test/build numbers you saw.
+9. **Update `MODULE.md` in place** for what your wave changed (the `core/**` stores table row, the
+   `core/state/` section's "converted so far" line). Wave narrative goes to `MODULE-HISTORY.md`,
+   never to `MODULE.md`.
