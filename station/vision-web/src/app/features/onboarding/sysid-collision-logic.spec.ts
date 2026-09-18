@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { Device, DiscoveryCandidate, ParameterReading, VehicleProfile } from '../../core/api/models';
-import { candidateSysidCollision, detectSysidCollision, sysidParameterName } from './sysid-collision-logic';
+import {
+  SYSID_RANGE_MAX,
+  SYSID_RANGE_MIN,
+  describeSysidStep,
+  detectSysidCollision,
+  heardSysidFor,
+  sysidParameterName,
+} from './sysid-collision-logic';
 
 function profile(partial: Partial<VehicleProfile> = {}): VehicleProfile {
   return {
@@ -38,20 +45,6 @@ function reading(name: string, value = 1): ParameterReading {
   return { name, value, type: 'INT32' };
 }
 
-function candidate(partial: Partial<DiscoveryCandidate> = {}): DiscoveryCandidate {
-  return {
-    id: 'c-1',
-    method: 'mavlink',
-    name: 'Vehicle 7',
-    address: 'udp:14550',
-    details: {},
-    firstSeen: '2026-08-31T00:00:00Z',
-    lastSeen: '2026-08-31T00:00:00Z',
-    status: 'NEW',
-    ...partial,
-  };
-}
-
 describe('detectSysidCollision', () => {
   it('returns null when there is no profile', () => {
     expect(detectSysidCollision(null, [device({ options: { sysid: '1' } })])).toBeNull();
@@ -85,34 +78,88 @@ describe('detectSysidCollision', () => {
   });
 });
 
-describe('candidateSysidCollision', () => {
-  it('prefers the server-reported sysidPushRequired/assignedSysid pair when present', () => {
-    const found = candidate({ sysidPushRequired: true, assignedSysid: 4, details: { sysid: '1' } });
-    expect(candidateSysidCollision(found, [])).toBe(4);
+function candidate(partial: Partial<DiscoveryCandidate> = {}): DiscoveryCandidate {
+  return {
+    id: 'c-1',
+    method: 'mavlink',
+    name: 'Vehicle 7',
+    address: 'udp:14550',
+    details: {},
+    firstSeen: '2026-08-31T00:00:00Z',
+    lastSeen: '2026-08-31T00:00:00Z',
+    status: 'NEW',
+    ...partial,
+  };
+}
+
+describe('heardSysidFor', () => {
+  it('returns null for no candidate', () => {
+    expect(heardSysidFor(null)).toBeNull();
   });
 
-  it('ignores assignedSysid when sysidPushRequired is not true', () => {
-    const found = candidate({ sysidPushRequired: false, assignedSysid: 4, details: { sysid: '1' } });
-    expect(candidateSysidCollision(found, [device({ options: { sysid: '1' } })])).toBe(1);
+  it('prefers suggestedStreamOptions.sysid over details.sysid', () => {
+    const found = candidate({ suggestedStreamOptions: { sysid: '1' }, details: { sysid: '9' } });
+    expect(heardSysidFor(found)).toBe(1);
   });
 
-  it('returns null when there is no details sysid and no server hint', () => {
-    expect(candidateSysidCollision(candidate(), [device({ options: { sysid: '1' } })])).toBeNull();
+  it('falls back to details.sysid when suggestedStreamOptions is absent', () => {
+    const found = candidate({ details: { sysid: '7' } });
+    expect(heardSysidFor(found)).toBe(7);
   });
 
-  it('returns null when the candidate sysid is not numeric', () => {
+  it('returns null when neither field carries a sysid', () => {
+    expect(heardSysidFor(candidate())).toBeNull();
+  });
+
+  it('returns null for a non-numeric sysid', () => {
     const found = candidate({ details: { sysid: 'not-a-number' } });
-    expect(candidateSysidCollision(found, [device({ options: { sysid: '1' } })])).toBeNull();
+    expect(heardSysidFor(found)).toBeNull();
+  });
+});
+
+describe('describeSysidStep', () => {
+  const range = { sysidRangeMin: SYSID_RANGE_MIN, sysidRangeMax: SYSID_RANGE_MAX };
+
+  it('classifies the factory-default sysid (1) even though the station already assigned a real one', () => {
+    const result = describeSysidStep({ heardSysid: 1, assignedSysid: 12, ...range });
+    expect(result.kind).toBe('factory-default');
+    expect(result.title).toBe('Give this vehicle its fleet number');
+    expect(result.message).not.toMatch(/collision/i);
+    expect(result.message).toContain('1');
+    expect(result.message).toContain('12');
   });
 
-  it('returns null when the details sysid collides with nothing in the fleet', () => {
-    const found = candidate({ details: { sysid: '1' } });
-    expect(candidateSysidCollision(found, [device({ options: { sysid: '3' } })])).toBeNull();
+  it('classifies a heard sysid inside the assignable range as a genuine collision, naming the assigned fix', () => {
+    const result = describeSysidStep({ heardSysid: 15, assignedSysid: 20, ...range });
+    expect(result.kind).toBe('collision');
+    expect(result.title).toBe('Fix the sysid collision');
+    expect(result.message).toContain('15');
+    expect(result.message).toContain('20');
   });
 
-  it('falls back to the details sysid heuristic and finds a collision', () => {
-    const found = candidate({ details: { sysid: '3' } });
-    expect(candidateSysidCollision(found, [device({ options: { sysid: '3' } })])).toBe(3);
+  it('classifies a heard sysid above the range (GCS/broadcast band) as out-of-range, not a collision', () => {
+    const result = describeSysidStep({ heardSysid: 253, assignedSysid: 11, ...range });
+    expect(result.kind).toBe('out-of-range');
+    expect(result.message).not.toMatch(/collision/i);
+    expect(result.message).toContain('253');
+    expect(result.message).toContain('11');
+  });
+
+  it('classifies a heard sysid below the range as out-of-range', () => {
+    const result = describeSysidStep({ heardSysid: 0, assignedSysid: 13, ...range });
+    expect(result.kind).toBe('out-of-range');
+  });
+
+  it('degrades to the collision wording without a heard number when nothing was observed client-side', () => {
+    const result = describeSysidStep({ heardSysid: null, assignedSysid: 14, ...range });
+    expect(result.kind).toBe('collision');
+    expect(result.message).toContain('14');
+  });
+
+  it('never fabricates an assigned number when none is known (legacy connection-form path)', () => {
+    const result = describeSysidStep({ heardSysid: 15, assignedSysid: null, ...range });
+    expect(result.message).not.toMatch(/\bnull\b/);
+    expect(result.message).toContain('a new fleet number');
   });
 });
 

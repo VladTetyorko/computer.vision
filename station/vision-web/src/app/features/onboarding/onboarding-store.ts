@@ -1346,6 +1346,15 @@ export class OnboardingStore {
   private async enterSysidStep(assetId: string, displayName: string): Promise<void> {
     this.createdAssetId.set(assetId);
     this.createdAssetDisplayName.set(displayName);
+    // §7 ruling #3: a found-nearby candidate already had a number picked for it by the station
+    // (`foundCandidateSysidCollision` holds the register/attach response's own `assignedSysid`) —
+    // prefill it so the operator isn't asked to invent a number from scratch; the field stays
+    // editable. The Prove-path collision (a genuine already-claimed sysid, no server assignment)
+    // leaves this at whatever the operator already typed, same as before.
+    const assigned = this.foundCandidateSysidCollision();
+    if (assigned !== null) {
+      this.sysidValue.set(assigned);
+    }
     this.step.set('sysid');
   }
 

@@ -21,6 +21,13 @@ import {
   type FitOutRole,
 } from '../../core/onboarding/fit-out-logic';
 import {
+  SYSID_RANGE_MAX,
+  SYSID_RANGE_MIN,
+  describeSysidStep,
+  heardSysidFor,
+  type SysidStepDescription,
+} from './sysid-collision-logic';
+import {
   MAVLINK_METHOD,
   MEDIAMTX_METHOD,
   freshestNewCandidate,
@@ -392,15 +399,28 @@ export class OnboardingFacade {
 
   readonly outcomeLabel = outcomeLabel;
 
-  /** The collided sysid itself, for the step's own wording — {@link combinedSysidCollision} over both
-   *  rows' Prove results (only a `mavlink` Sense row realistically ever sets one, but this stays
-   *  total over both), falling back to `store.foundCandidateSysidCollision` for a found-nearby
-   *  candidate that never ran Prove at all (docs/plans/active/LINK-PAIRING-PLAN.md §7 ruling #3). */
-  readonly sysidCollision = computed(
-    () =>
-      combinedSysidCollision({ sense: this.store.proveByRole().sense.sysidCollision, sight: this.store.proveByRole().sight.sysidCollision }) ??
-      this.store.foundCandidateSysidCollision(),
-  );
+  /**
+   * The sysid step's title/message (docs/plans/active/LINK-PAIRING-PLAN.md §8 defect #3) —
+   * `sysid-collision-logic.ts#describeSysidStep`'s three-way classification, fed by two independent
+   * client-side facts: the sysid actually *heard* ({@link combinedSysidCollision} over both Prove
+   * rows — only a `mavlink` Sense row realistically ever sets one — falling back to
+   * `heardSysidFor(store.selectedCandidate())` for a found-nearby candidate that never ran Prove at
+   * all) and the sysid the station *assigned* (`store.foundCandidateSysidCollision`, the register/
+   * attach response's own `assignedSysid`, `null` for the legacy Prove path which never gets one).
+   * These used to be conflated into one "collision" number — the bug this fixes.
+   */
+  readonly sysidStep = computed<SysidStepDescription>(() => {
+    const heardFromProve = combinedSysidCollision({
+      sense: this.store.proveByRole().sense.sysidCollision,
+      sight: this.store.proveByRole().sight.sysidCollision,
+    });
+    return describeSysidStep({
+      heardSysid: heardFromProve ?? heardSysidFor(this.store.selectedCandidate()),
+      assignedSysid: this.store.foundCandidateSysidCollision(),
+      sysidRangeMin: SYSID_RANGE_MIN,
+      sysidRangeMax: SYSID_RANGE_MAX,
+    });
+  });
 
   /** {@link outcomeTone} maps to a `vision-notice` variant — `'muted'` (UNSUPPORTED) has no notice-variant equivalent, so it renders as `'neutral'`, mirroring `readiness.ts#remediationVariant`'s own precedent. */
   sysidOutcomeVariant(outcome: ParameterWriteResponse['outcome']): 'neutral' | 'warn' | 'danger' | 'ok' {

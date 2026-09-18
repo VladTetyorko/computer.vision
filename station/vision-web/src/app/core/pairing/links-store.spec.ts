@@ -180,7 +180,7 @@ describe('LinksStore', () => {
   // --- LiveStore projection (§3.4 "whole group snapshot, never a diff") ---------------------------
 
   it('subscribes live when LiveStore is open, reading straight from linksFor(assetId) — latest-wins', () => {
-    const api = stubApi();
+    const api = stubApi({ getAssetLinks: vi.fn().mockResolvedValue(group('a-9')) });
     const live = stubLiveStore('open');
     const scheduler = stubScheduler();
 
@@ -188,6 +188,7 @@ describe('LinksStore', () => {
     store.track('a-9');
 
     expect(live.trackLinks).toHaveBeenCalledExactlyOnceWith('a-9');
+    expect(api.getAssetLinks).toHaveBeenCalledExactlyOnceWith('a-9'); // the seed read — see Defect A
     expect(scheduler.lastFor(5_000)).toBeUndefined();
 
     const first = group('a-9', { activeLinkId: 'link-1' });
@@ -199,6 +200,47 @@ describe('LinksStore', () => {
     live.pushResult('a-9', second);
     TestBed.tick();
     expect(store.group()).toEqual(second); // replaced, not accumulated
+    store.reset();
+  });
+
+  // --- Seed read on a fresh live session (Defect A — the panel never fetched on the live transport) -
+
+  it('seeds group() from one REST read when live is already open at track() time', async () => {
+    const seed = group('a-9', { activeLinkId: 'link-1', pinned: true });
+    const api = stubApi({ getAssetLinks: vi.fn().mockResolvedValue(seed) });
+    const live = stubLiveStore('open');
+    const scheduler = stubScheduler();
+
+    const store = inject(api, { live, scheduler });
+    expect(store.group()).toBeUndefined();
+    store.track('a-9');
+    await flush();
+
+    expect(api.getAssetLinks).toHaveBeenCalledExactlyOnceWith('a-9');
+    expect(store.group()).toEqual(seed);
+    expect(scheduler.lastFor(5_000)).toBeUndefined(); // still no recurring poll while live
+    store.reset();
+  });
+
+  it('a live snapshot that arrives before the seed read resolves is not clobbered by it', async () => {
+    let resolveSeed!: (value: LinkGroupResponse) => void;
+    const seedPromise = new Promise<LinkGroupResponse>((resolve) => {
+      resolveSeed = resolve;
+    });
+    const api = stubApi({ getAssetLinks: vi.fn().mockReturnValue(seedPromise) });
+    const live = stubLiveStore('open');
+
+    const store = inject(api, { live });
+    store.track('a-10');
+
+    const pushed = group('a-10', { activeLinkId: 'live-first' });
+    live.pushResult('a-10', pushed);
+    TestBed.tick();
+    expect(store.group()).toEqual(pushed);
+
+    resolveSeed(group('a-10', { activeLinkId: 'seed-arrived-late' }));
+    await flush();
+    expect(store.group()).toEqual(pushed); // the live push already won; the late seed is discarded
     store.reset();
   });
 
@@ -331,15 +373,17 @@ describe('LinksStore', () => {
     store.reset();
   });
 
-  it('refreshNow() is a no-op while live is the active transport', async () => {
-    const api = stubApi();
+  it('refreshNow() is a no-op while live is the active transport — beyond track()\'s own one-time seed read', async () => {
+    const api = stubApi({ getAssetLinks: vi.fn().mockResolvedValue(group('a-23')) });
     const live = stubLiveStore('open');
 
     const store = inject(api, { live });
     store.track('a-23');
+    await flush(); // let the seed read (Defect A) settle
+    expect(api.getAssetLinks).toHaveBeenCalledExactlyOnceWith('a-23');
 
     await store.refreshNow();
-    expect(api.getAssetLinks).not.toHaveBeenCalled();
+    expect(api.getAssetLinks).toHaveBeenCalledOnce(); // still just the seed — refreshNow() itself added nothing
     store.reset();
   });
 });

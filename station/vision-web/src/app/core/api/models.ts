@@ -1416,14 +1416,14 @@ export interface DiscoveryCandidate {
   readonly status: DiscoveryCandidateStatus;
   readonly registeredAssetId?: string;
   /**
-   * **Assumed for L2/L3, not yet a real field** (docs/plans/active/LINK-PAIRING-PLAN.md §7 architect
-   * ruling #3 — "on sysid collision the response carries `sysidPushRequired=true`"). This wave reads
-   * it defensively (absent on every server that predates it) and, until it exists, falls back to a
-   * client-side sysid-collision heuristic over `details['sysid']` —
-   * `features/onboarding/sysid-collision-logic.ts#candidateSysidCollision`'s own doc comment.
+   * A real field (docs/plans/active/LINK-PAIRING-PLAN.md §7 architect ruling #3 — "adopt is one
+   * motion … only on collision assign the lowest free number in the range and return
+   * `sysidPushRequired=true`"): `true` when this candidate's heard sysid was a factory default, out
+   * of the assignable range, or already claimed by another paired device, so the station picked
+   * {@link assignedSysid} for it instead of keeping the one it was heard broadcasting.
    */
   readonly sysidPushRequired?: boolean;
-  /** The sysid this candidate collides with, when {@link sysidPushRequired} is `true` — same assumption/fallback as that field. */
+  /** The sysid the station actually assigned, when {@link sysidPushRequired} is `true` — **not** the sysid this candidate collided with; that one is only ever known client-side, from the candidate's own `suggestedStreamOptions`/`details` (`features/onboarding/sysid-collision-logic.ts#heardSysidFor`). */
   readonly assignedSysid?: number;
 }
 
@@ -1451,16 +1451,16 @@ export interface RegisterDiscoveryCandidateResponse {
   readonly displayName: string;
   readonly category: string;
   /**
-   * **Assumed for L2/L3, not yet a real field** — same assumption as {@link DiscoveryCandidate}'s
-   * own `sysidPushRequired` (docs/plans/active/LINK-PAIRING-PLAN.md §7 architect ruling #3: "adopt
-   * is one motion" — `register`/`attach` of a `mavlink` device pairs it in the same transaction and
-   * "only on collision assign the lowest free number in the range and return `sysidPushRequired=true`
-   * so the confirm screen shows the push step"). The onboarding wizard's found-nearby path reads
-   * this directly off the register response (there is no Prove-step `VehicleProfile` to derive it
-   * from for a candidate that skipped Prove) — see `onboarding-store.ts#applyFoundCandidateCollision`.
+   * A real field, same as {@link DiscoveryCandidate}'s own `sysidPushRequired`
+   * (docs/plans/active/LINK-PAIRING-PLAN.md §7 architect ruling #3: "adopt is one motion" —
+   * `register`/`attach` of a `mavlink` device pairs it in the same transaction and "only on
+   * collision assign the lowest free number in the range and return `sysidPushRequired=true` so the
+   * confirm screen shows the push step"). The onboarding wizard's found-nearby path reads this
+   * directly off the register response (there is no Prove-step `VehicleProfile` to derive it from
+   * for a candidate that skipped Prove) — see `onboarding-store.ts#applyFoundCandidateCollision`.
    */
   readonly sysidPushRequired?: boolean;
-  /** The sysid actually assigned on collision, when {@link sysidPushRequired} is `true` — same assumption as above. */
+  /** The sysid the station actually assigned, when {@link sysidPushRequired} is `true` — not the sysid this candidate was heard on; see {@link DiscoveryCandidate.assignedSysid}'s identical note. */
   readonly assignedSysid?: number;
 }
 

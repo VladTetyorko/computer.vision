@@ -34,49 +34,116 @@ export function detectSysidCollision(
   return collides ? sysid : null;
 }
 
+// --- Sysid step copy (docs/plans/active/LINK-PAIRING-PLAN.md §7 ruling #2/#3, LF2 web defect #3) --
+// `vision.pairing.sysid-range` (server-owned, `station/vision-app`'s config) is the assignable band —
+// mirrored here as constants rather than re-fetched, exactly the same "frozen wire constant" posture
+// this file already takes with `sysidParameterName`'s firmware-generation assumption. Keep these two
+// numbers as the one place the web app names the range; every caller of `describeSysidStep` passes
+// them through rather than re-declaring `10`/`250` locally.
+
+/** Mirrors `vision.pairing.sysid-range`'s lower bound (§7 ruling #2). */
+export const SYSID_RANGE_MIN = 10;
+
+/** Mirrors `vision.pairing.sysid-range`'s upper bound (§7 ruling #2 — 251-255 are reserved for a GCS/broadcast by MAVLink convention). */
+export const SYSID_RANGE_MAX = 250;
+
+/** ArduPilot's (and this platform's rover firmware's) factory-default system id — §7 ruling #2: an assigned sysid must never equal this, or a fresh, unpaired newcomer collides with a paired vehicle on the lobby. */
+const FACTORY_DEFAULT_SYSID = 1;
+
 /**
- * The Confirm-screen counterpart of `detectSysidCollision` above, for a found-nearby candidate that
- * has never gone through the Prove step (docs/plans/active/LINK-PAIRING-PLAN.md §7, wave L4) — there
- * is no `VehicleProfile` yet at Confirm time, only the `DiscoveryCandidate` the feed surfaced.
- * Prefers the server-reported `sysidPushRequired`/`assignedSysid` pair (§7 architect ruling #3,
- * **assumed for L2/L3, not yet real** — see `DiscoveryCandidate`'s own doc comment) and falls back
- * to the same client-side heuristic `detectSysidCollision` uses when those fields are absent: reading
- * the raw sysid a MAVLink discovery probe already stashed in `details['sysid']`
- * (`drone-scan-logic.ts#vehicleSysid`'s identical convention) and comparing it against every existing
- * device's own `options['sysid']`. Returns the colliding sysid, or `null` when there is nothing to
- * collide with (a camera/ONVIF candidate never has a sysid at all).
+ * The sysid a found-nearby candidate was actually heard broadcasting — read straight off the
+ * discovery-probe fields the feed already carries, `suggestedStreamOptions['sysid']` (the richer
+ * per-candidate options map) falling back to `details['sysid']` (`drone-scan-logic.ts#vehicleSysid`'s
+ * identical convention) for a candidate the server hasn't upgraded to carry the former. `null` for no
+ * candidate, or one with no sysid at all (a camera/ONVIF candidate never has one).
  */
-/**
- * **Written and unit-tested, deliberately not yet wired into `ConfirmStep`** — the register/attach
- * response (`OnboardingStore#applyFoundCandidateCollision`, populated post-attach) is already the
- * authoritative source `finishCreate`/`writeSysid` act on, so this function's only remaining value is
- * an *early*, non-blocking warning on the Confirm screen itself, before the operator commits. Wiring
- * it in needs an `existingDevices` read (`VisionApi#listDevices`) `OnboardingStore` doesn't already
- * cache at Confirm time — adding a new fetch on that path was judged out of scope for this wave
- * (LINK-PAIRING wave L4) given no live/browser verification was available to check it; a follow-up
- * wave can call this from `OnboardingStore#chooseFoundCandidate` once `listDevices()` is already warm
- * or cheap to call there.
- */
-export function candidateSysidCollision(
-  candidate: DiscoveryCandidate,
-  existingDevices: readonly Device[],
-): number | null {
-  if (candidate.sysidPushRequired === true && candidate.assignedSysid !== undefined) {
-    return candidate.assignedSysid;
+export function heardSysidFor(candidate: DiscoveryCandidate | null): number | null {
+  if (!candidate) {
+    return null;
   }
-  const raw = candidate.details['sysid'];
+  const raw = candidate.suggestedStreamOptions?.['sysid'] ?? candidate.details['sysid'];
   if (raw === undefined) {
     return null;
   }
   const sysid = Number(raw);
-  if (!Number.isFinite(sysid)) {
-    return null;
+  return Number.isFinite(sysid) ? sysid : null;
+}
+
+export type SysidStepKind = 'factory-default' | 'collision' | 'out-of-range';
+
+export interface SysidStepDescription {
+  readonly kind: SysidStepKind;
+  readonly title: string;
+  readonly message: string;
+}
+
+export interface SysidStepInput {
+  /** The sysid this vehicle was actually heard broadcasting, if known client-side (a found-nearby candidate's `suggestedStreamOptions?.['sysid']`/`details['sysid']`, or a Prove-step profile's own `sysid`) — `null` when this wizard never observed it directly. */
+  readonly heardSysid: number | null;
+  /** The number the station assigned (register/attach response's `assignedSysid`, §7 ruling #3), when known — `null` for the legacy connection-form path, which never calls `PairingService.pair` and so never gets one (docs/plans/active/LINK-PAIRING-PLAN.md §7 ruling #3's own "adopt is one motion" scope is the found-nearby path only). */
+  readonly assignedSysid: number | null;
+  readonly sysidRangeMin: number;
+  readonly sysidRangeMax: number;
+}
+
+/**
+ * The sysid step's title/message (docs/plans/active/LINK-PAIRING-PLAN.md §8 defect #3) — replaces the
+ * hardcoded "Fix the sysid collision" copy, which fired on every factory-default (sysid=1) first
+ * pairing even though §7 ruling #2 makes that the *common* case, not a fleet collision: ArduPilot and
+ * this platform's own rover firmware both ship at sysid 1, so the very first time any fresh vehicle
+ * is heard it "collides" with nothing — it is simply still wearing its factory tag. Three distinct
+ * situations, distinguished by where `heardSysid` sits relative to the assignable range:
+ * - `'factory-default'` — `heardSysid === 1`. Not a collision at all; the vehicle just needs its
+ *   fleet number written.
+ * - `'out-of-range'` — heard outside `[sysidRangeMin, sysidRangeMax]` but not the factory default
+ *   (e.g. 0, or 251-255's MAVLink-reserved GCS/broadcast band). Same "write the assigned number"
+ *   framing, naming the reservation instead of a fleet collision.
+ * - `'collision'` — heard sysid is a plausible fleet id already claimed by another device; the one
+ *   genuine collision case, and the only one where the old wording was accurate. Kept close to the
+ *   original copy, but now also names the assigned number as the actual fix rather than leaving the
+ *   operator to guess one.
+ *
+ * `heardSysid === null` (nothing observed client-side, e.g. an old backend that never reported
+ * `sysidPushRequired`) degrades to the `'collision'` wording without a heard number — honest rather
+ * than fabricated, never blocks the step (this step is always advisory, `continueFromSysidStep`
+ * proceeds regardless).
+ */
+export function describeSysidStep(input: SysidStepInput): SysidStepDescription {
+  const { heardSysid, assignedSysid, sysidRangeMin, sysidRangeMax } = input;
+  const assignedText = assignedSysid !== null ? `${assignedSysid}` : 'a new fleet number';
+
+  if (heardSysid === FACTORY_DEFAULT_SYSID) {
+    return {
+      kind: 'factory-default',
+      title: 'Give this vehicle its fleet number',
+      message:
+        `This vehicle still answers to system id ${FACTORY_DEFAULT_SYSID} — the factory default every ` +
+        `fresh ArduPilot vehicle ships with. The station assigned it ${assignedText} as its fleet number. ` +
+        `Write it now; the vehicle applies its new id after its next reboot.`,
+    };
   }
-  const collides = existingDevices.some((device) => {
-    const existingRaw = device.options['sysid'];
-    return existingRaw !== undefined && Number(existingRaw) === sysid;
-  });
-  return collides ? sysid : null;
+
+  if (heardSysid !== null && (heardSysid < sysidRangeMin || heardSysid > sysidRangeMax)) {
+    return {
+      kind: 'out-of-range',
+      title: 'This vehicle is using a reserved id',
+      message:
+        `System id ${heardSysid} is outside this fleet's ${sysidRangeMin}-${sysidRangeMax} range — reserved ` +
+        `for a ground station or broadcast, not a flyable vehicle. The station assigned it ${assignedText}. ` +
+        `Write it now; the vehicle applies its new id after its next reboot.`,
+    };
+  }
+
+  const heardText = heardSysid !== null ? `${heardSysid}` : 'a system id';
+  return {
+    kind: 'collision',
+    title: 'Fix the sysid collision',
+    message:
+      `This vehicle answers to system id ${heardText}, which another vehicle in the fleet already claims ` +
+      `— until it gets a distinct id, one of the two will be invisible or unreliable on this link. The ` +
+      `station assigned it ${assignedText} to fix that; write it now, or continue and fix it later from the ` +
+      `asset's readiness page.`,
+  };
 }
 
 /**

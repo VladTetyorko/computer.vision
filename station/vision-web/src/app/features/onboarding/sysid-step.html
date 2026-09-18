@@ -1,10 +1,5 @@
-<h2>Fix the sysid collision</h2>
-<p class="muted hint">
-  This vehicle answers to system id <span class="mono">{{ facade.sysidCollision() }}</span>, which
-  another vehicle in the fleet already claims — until it gets a distinct id, one of the two will be
-  invisible or unreliable on this link. You can fix it now, or continue and fix it later from the
-  asset's readiness page.
-</p>
+<h2>{{ facade.sysidStep().title }}</h2>
+<p class="muted hint">{{ facade.sysidStep().message }}</p>
 
 <div class="field">
   <label class="label" for="sysid-value">New system id</label>

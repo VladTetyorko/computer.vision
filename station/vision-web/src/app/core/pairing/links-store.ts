@@ -27,18 +27,28 @@ const POLL_INTERVAL_MS = 5_000;
  * `providers` (alongside `TelemetryStore`/`DetectionsStore`), so a fresh instance — and its
  * poll/subscription — starts/stops with the route.
  *
- * **Degrades honestly when the backend is absent.** L2/L3 (the Java side of this same plan) had not
- * landed in this worktree as of this wave: `GET /api/assets/{id}/links` 404s today on every asset,
- * unconditionally — `training-store.ts#TrainingStore`'s own precedent for turning a
- * feature-not-here 404 into a first-class {@link disabled} state applies verbatim here (a 404 on
- * *this specific* route can only mean "the controller isn't mounted", never "unknown asset id" — an
- * unknown asset never reaches this store at all, `AssetDetailFacade#load` already 404s on the asset
- * fetch itself first). The panel reads {@link disabled} to render `vision-empty` with an honest
- * reason, never a blocked page or a fabricated link list. Every *other* failure (network down, a
- * genuine 5xx) silent-degrades the same way `GeoStore#pollOnce` does — a missed poll just leaves
- * {@link group} at its last-known value, no toast (a link-health panel re-polling every 5s does not
- * need to interrupt the operator over one missed beat); `pin`/`releasePin` below, being an operator-
- * initiated action rather than a background poll, do toast on failure.
+ * **Always seeds from one REST read, even on `'live'`.** `GET /api/assets/{id}/links` is a real,
+ * mounted route (`AssetLinksController`, §3.4/L3) — but the server's `links:<assetId>` SSE buffer is
+ * only *seeded* by that same REST read (an election-change publish keeps it warm afterward, not a
+ * fresh subscription's first moment), so a session that opens with the connection already `'open'`
+ * would otherwise wait indefinitely for a push that never comes. `applyTransport`'s `'live'` branch
+ * therefore fires one one-shot {@link pollOnce} whenever it finds *neither* signal populated yet —
+ * never a second time once either has data, and never on top of a live snapshot that already arrived
+ * first (that snapshot wins; see the comment on the seed itself). The recurring 5s poll loop stays
+ * off while `'live'`; `'poll'` transport is unaffected — its own start-up already does this same
+ * one-shot read before the recurring schedule begins.
+ *
+ * **Degrades honestly when the backend is absent.** `training-store.ts#TrainingStore`'s own
+ * precedent for turning a feature-not-here 404 into a first-class {@link disabled} state applies
+ * verbatim here (a 404 on *this specific* route can only mean "the controller isn't mounted", never
+ * "unknown asset id" — an unknown asset never reaches this store at all, `AssetDetailFacade#load`
+ * already 404s on the asset fetch itself first). The panel reads {@link disabled} to render
+ * `vision-empty` with an honest reason, never a blocked page or a fabricated link list. Every *other*
+ * failure (network down, a genuine 5xx) silent-degrades the same way `GeoStore#pollOnce` does — a
+ * missed poll just leaves {@link group} at its last-known value, no toast (a link-health panel
+ * re-polling every 5s does not need to interrupt the operator over one missed beat); `pin`/
+ * `releasePin` below, being an operator-initiated action rather than a background poll, do toast on
+ * failure.
  */
 @Injectable()
 export class LinksStore {
@@ -192,25 +202,45 @@ export class LinksStore {
    * beat on the flip. Mirrors `GeoStore.applyTransport`.
    */
   private applyTransport(next: AssetScopedTransport): void {
+    const assetId = this.currentAssetIdSignal();
     if (next === 'live') {
       if (this.liveResultSignal() === undefined && this.pollResultSignal() !== undefined) {
         this.liveResultSignal.set(this.pollResultSignal());
       }
       this.transportSignal.set(next);
       this.stopPolling();
+      if (assetId !== undefined && this.pollResultSignal() === undefined && this.liveResultSignal() === undefined) {
+        // Neither source has ever produced a value for this session — the SSE buffer needs an
+        // initial REST read to seed it too (see class doc). Never re-fired once either signal has
+        // data, so a live snapshot that lands first (or a poll fetch already in flight) is untouched.
+        void this.seedOnce(assetId, this.generation);
+      }
       return;
     }
     if (this.pollResultSignal() === undefined && this.liveResultSignal() !== undefined) {
       this.pollResultSignal.set(this.liveResultSignal());
     }
     this.transportSignal.set(next);
-    const assetId = this.currentAssetIdSignal();
     if (assetId === undefined || this.stopPollingFn !== null) {
       return; // nothing to poll, or already polling
     }
     const generation = this.generation;
     void this.pollOnce(assetId, generation);
     this.stopPollingFn = this.scheduler.schedule(POLL_INTERVAL_MS, () => this.pollOnce(assetId, generation));
+  }
+
+  /**
+   * The one-shot seed read `applyTransport`'s `'live'` branch fires when a fresh `track()` session
+   * resolves straight to `'live'` with no data yet. Always populates {@link pollResultSignal} (so a
+   * later fallback to `'poll'` has something to carry over, same as any other poll result); also
+   * seeds {@link liveResultSignal} — but only if still on `'live'` *and* no live snapshot has arrived
+   * in the meantime, so a push that wins the race is never clobbered by this slower REST read.
+   */
+  private async seedOnce(assetId: string, generation: number): Promise<void> {
+    await this.pollOnce(assetId, generation);
+    if (generation === this.generation && this.transportSignal() === 'live' && this.liveResultSignal() === undefined) {
+      this.liveResultSignal.set(this.pollResultSignal());
+    }
   }
 
   private async pollOnce(assetId: string, generation: number): Promise<void> {
