@@ -1,13 +1,21 @@
 # vision — agent context
 
-Multi-protocol computer-vision & streaming platform. Hexagonal, multi-module Maven, Java 21 + Spring Boot 4 core, Python CV service (gRPC). Full design: [ARCHITECTURE.md](ARCHITECTURE.md). Phase specs: [docs/](docs/).
+Multi-protocol computer-vision & streaming platform. Hexagonal, multi-module Maven, Java 21 + Spring
+Boot 4 core, Python CV service (gRPC). Full design: [ARCHITECTURE.md](ARCHITECTURE.md). Specs:
+[docs/plans/](docs/plans/README.md) — that README, not a plan's own header, is the status authority.
 
 ## Module docs — mandatory workflow
 
-Each module has a `MODULE.md` (format: `.claude/skills/module-docs/SKILL.md`).
+Every module carries **two** docs. Format and the keep/move boundary: `.claude/skills/module-docs/SKILL.md`.
 
-- **Before modifying a module: read its `MODULE.md`** and those of its direct dependencies — do NOT re-read sources for API surface the doc already gives you.
-- **After modifying a module: update its `MODULE.md`** in the same task (surface, conventions, gotchas, status).
+| File | Read when |
+|---|---|
+| `<module>/MODULE.md` | **always**, before touching the module — plus the `MODULE.md` of modules whose ports/models you use |
+| `<module>/MODULE-HISTORY.md` | **only** when you need to know *why* something is the way it is |
+
+- Read the **sections you need**. A doc long enough to carry a section index is not read front-to-back.
+- After modifying a module, **update its `MODULE.md` in place**. Never append a wave/status section —
+  git and the plan doc already hold the history; `MODULE-HISTORY.md` takes it if it's worth narrating.
 - Doc missing/stale → fix it as part of the task.
 
 ## Module index
@@ -25,6 +33,7 @@ Each module has a `MODULE.md` (format: `.claude/skills/module-docs/SKILL.md`).
 | vision-learning | `contexts/vision-learning/` | CV training datasets, labeling, model promotion |
 | vision-simulation | `contexts/vision-simulation/` | Synthetic flight-plan/telemetry simulation orchestration |
 | vision-proto | `cv/vision-proto/` | gRPC codegen from `proto/vision/v1/cv.proto` |
+| mavlink-core | `drone-link/mavlink-core/` | Framework-free MAVLink 2 codec/session/service library (no Spring) |
 | adapter-simulation | `simulation-sources/sim/` | Synthetic video + telemetry sources (`sim`) |
 | adapter-rtsp | `video-input/rtsp/` | RTSP/FFmpeg ingest |
 | adapter-mjpeg | `video-input/mjpeg/` | MJPEG HTTP ingest + TX simulator |
@@ -44,59 +53,79 @@ Each module has a `MODULE.md` (format: `.claude/skills/module-docs/SKILL.md`).
 
 ## Cross-cutting facts
 
-- **Dependency rule (ArchUnit-enforced):** kernel ← platform ← contexts (warehouse is the pure leaf; identity/flight/perception/map/events/learning/simulation form the measured DAG over it, see `docs/plans/active/DOMAIN-SEPARATION-W1.md` §16) ← adapters ← app; adapters never depend on each other; Spring only in vision-app, vision-api and the adapters (never a context module).
-- **Ids:** entity ids wrap `java.util.UUID` (`X.random()`, `X.of(String)` → IllegalArgumentException on bad input). `CategoryId` is a kebab-case slug. `DeviceType` enum no longer exists — categories are data.
-- **Asset model:** users interact with `Asset` (owned, categorized, 1..n devices, attributes map); `Device` is low-level plumbing; `AssetUsage` records sessions + telemetry.
-- **Validation idiom:** domain records validate in compact constructors with manual `if (…) throw new IllegalArgumentException(…)`; application layer uses `Objects.requireNonNull`.
-- **Jackson 3** (`tools.jackson.*`) under Spring Boot 4 — not `com.fasterxml.jackson.databind`; `java.time` serializes natively; annotations still `com.fasterxml.jackson.annotation`.
-- **Build:** `./mvnw -B verify` (full; FFmpeg natives + docker-based tests, allow ~10 min cold). Single module: `./mvnw -B -pl <path> test`. Adapter integration tests use the real `docker` CLI (mediamtx) and skip without docker.
-- **Never run reactor-wide builds while another agent's task holds modules red** — scope builds with `-pl`.
+- **Dependency rule (ArchUnit-enforced):** kernel ← platform ← contexts (warehouse is the pure leaf;
+  identity/flight/perception/map/events/learning/simulation form the measured DAG over it, see
+  `docs/plans/active/DOMAIN-SEPARATION-W1.md` §16) ← adapters ← app; adapters never depend on each
+  other; Spring only in vision-app, vision-api and the adapters (never a context module).
+- **Ids:** entity ids wrap `java.util.UUID` (`X.random()`, `X.of(String)` → IllegalArgumentException
+  on bad input). `CategoryId` is a kebab-case slug. `DeviceType` enum no longer exists — categories are data.
+- **Asset model:** users interact with `Asset` (owned, categorized, 1..n devices, attributes map);
+  `Device` is low-level plumbing; `AssetUsage` records sessions + telemetry.
+- **Validation idiom:** domain records validate in compact constructors with manual
+  `if (…) throw new IllegalArgumentException(…)`; application layer uses `Objects.requireNonNull`.
+- **Jackson 3** (`tools.jackson.*`) under Spring Boot 4 — not `com.fasterxml.jackson.databind`;
+  `java.time` serializes natively; annotations still `com.fasterxml.jackson.annotation`.
 
-## Delegation model (how this repo is built)
+## Build
 
-Plans in `docs/*-PLAN.md` are authoritative specs; implementation is delegated to subagents with disjoint file scopes; every task ends with its scoped build green and MODULE.md updated.
+| | Command |
+|---|---|
+| Full | `./mvnw -B verify` — FFmpeg natives + docker-based tests, allow ~10 min cold |
+| One module | `./mvnw -B -pl <path> test` |
+| Several modules in one session | `./mvnw -B -pl <a>,<b> -am -Dmaven.test.skip=true install` **first**, then test each — without it, `-pl` resolves a stale `~/.m2` jar and invents "cannot find symbol" |
+| Web | `cd station/vision-web && npm run test:ci` — **never** bare `npx vitest run`, it fakes ~536 failures |
 
-## Agentic rules
+- **Never run reactor-wide builds while another agent's task holds modules red** — scope with `-pl`.
+- **Never background a build** (`&`, `run_in_background`): it is killed when the turn ends, and the
+  wave is left unverified. Run it synchronously in the foreground.
+- **Keep the log on disk, not in context.** `./mvnw … > /tmp/b.log 2>&1; tail -5 /tmp/b.log;
+  grep -E '^\[ERROR\]|Tests run:.*Fail|BUILD' /tmp/b.log | head -40` — then open the log for detail.
+  An `[INFO]`-anchored grep hides failures; never verify with one.
 
-Work in agents, keep responsibility and slave separation:
-Fable - for architecture only, no code, no tests 
-Opus - for thinking on module lvl, can create a code and configuration. Responsible for flow
-Sonnet - is a slave, for coding, tests etc. Not included in planing
+## Delegation model
 
-One task is one branch. If there are many sub-tasks related to one big - create a subbranch, then merge 
-Context - for taking the context use mainly documentation, not the code
-Before starting - create a file with a context, then start working on it
-After finishing - summarize the context and update the dockumentation. 
+Plans in `docs/plans/` are authoritative specs; implementation is delegated to subagents with
+**disjoint file scopes**; every task ends with its scoped build green and `MODULE.md` updated in place.
 
-## Overall rules for architecture and building
+- **Fable** — architecture only. No code, no tests.
+- **Every implementing agent and sub-agent is Sonnet.** Opus orchestrates: it decides the waves, the
+  scopes and the flow, and may write code and configuration itself when a wave is too small to delegate.
+- **One task is one branch.** Many sub-tasks under one big task → sub-branches, then merge.
+- **Commit each wave as it lands.** An agent never commits, but the orchestrator must: uncommitted
+  work in a shared tree is destroyed by the next branch switch, and a killed agent leaves a
+  half-edited file behind.
+- **Context comes from the documentation, not from re-reading the code.** Write the context file
+  before starting; summarise it and update the docs after finishing.
 
-1) No magic numbers and hardcoding of 
-values should be in the configuration files, like application.properties in root lvl, or, if it's a Mathematic constant - in the code
-If the configuration can varry and be changed during the runtime - chose between having it in database as a constant or in request parameters
-If the configuration can be changed during the runtime - use the database and cache layer to store it
-2) Layered architecture and object orientations are the best practices: Use inversion of control, follow java standard practices and use packages as separators of layers. For example: Controller -> high-lvl service -> "orcestration", feature-based service -> maybe cache->banch of lower services -> banch of repositories -> database.
-3) Standalone principle on modules lvl: Module is independent and doesn't know nothing about who uses it and who listends to it. Communication contract similar to interfaces lvl. Every module should have API description
-4) For docks - prefer to use diagrams, markdowns, but not code snippets. Dock should be useful for both, agent and person who works with the code.
-5) For code comments - prefer to use java docks, but not markdowns. javadocks should be short, and explain WHY, not What. DO not use pure comments untill it's not Understandable from first sight
-6) Follow the SOLID principles, while architecturing and implementing
-7) Records are ok to use in the code
-8) Configuration files should be in the root of the project, and appliable to all modules. If the module is "independent" - changes on main should be reflected on it too
-9) Failsaife and up-to-date are one of priorities in our project. Newest data/telemetry/detections etc should be used, even if previous is still available.
-10) A new collaborator means updating the call sites, or bundling into a settings record — never one more constructor overload, and never a parameter whose contract is "null means the feature is off". The old "N-1-arg convenience constructor" convention is **withdrawn**: it produced ten constructors on `UsageTracker` and nine on `StreamPipeline`. Rule and rationale in `.claude/skills/java-clean-code/SKILL.md` §3.
+## Architecture rules
 
-## Deployment maintenance
-- I will run this application on different servers, so the run of application should be reflected in docker-compose.yml
-- If the module is not "core" related - it should be scalable.
-- if the module is "core" related - it should be scalable too, if it contains the calculations logic
+1. **No magic numbers, no hardcoding.** Values live in configuration at the project root
+   (`application.properties`, `.env`) — or in code only if they are mathematical constants.
+   Varies per deployment → config. Varies at runtime → database + cache layer. Varies per call →
+   request parameter. Root configuration applies to **all** modules, a standalone module included —
+   a change on main must reach it too.
+2. **Layers are packages, and abstraction rises with each one.** Repository (one table) → DTO service
+   (its own repository only) → feature service (composes lower services) → orchestration service →
+   controller (authn/authz, nothing else). Example: `/position-of-drone` → `DroneInFlightPositioningService`
+   → `DroneTelemetryService` + `DroneGPSService` → their repositories.
+3. **A module is standalone.** It knows nothing about who calls it or who listens. The contract is the
+   interface; every module carries its API description in `MODULE.md`.
+4. **SOLID and IoC**, in design and in implementation. Records are fine. Details and the checklist:
+   `.claude/skills/java-clean-code/SKILL.md` — read it before adding any interface, service or
+   constructor parameter.
+5. **A new collaborator means updating the call sites**, or bundling into a settings record — never one
+   more constructor overload, and never a parameter whose contract is "null means the feature is off".
+   The "N-1-arg convenience constructor" convention is **withdrawn** (it produced ten constructors on
+   `UsageTracker`, nine on `StreamPipeline`). Rationale: `java-clean-code` §3.
+6. **Docs are diagrams and markdown, not code snippets**, and must serve both an agent and a person.
+   Code comments are javadoc, short, explaining **why** — not what. No plain comment for something
+   obvious at first sight.
+7. **Failsafe and up-to-date are priorities.** The newest telemetry/detection/data wins, even when an
+   older sample is still available. Degrade honestly: never show a stale value *as if* it were current.
+8. **Build a feature on the previous feature.** Code and flows are understandable by their
+   responsibility — that is what makes the next feature cheap.
 
-## Separate and Standalone
--  As a developer, i prefer the code where i can add new feature based on previous code.
-- That's why - code and flows should be understandable by it's responsability. 
-- Follow the SOLID principles,
-- Follow IoC principle,
-- Have a layers of application: from dumb - the repositories should work with each table in the database, DTO's service - should work only with it's repository. Next lvl of service - should work with lower services and handle them. The higher services are - the hogher is abstraction of feature. I'ts the main rule for architecturing
-Example: 
-- Controller /position-of-drone - checks the authorisation and authentication, if ok - calls
-- Service /DroneInFLightPositioningService calls 
-- DroneTelemetryService(for telemetry of drone in scape) and DroneGPSService(for drone's position on map) calls
-- Repository /DroneTelemetryRepository, /DroneGPSRepository etc.
+## Deployment
+
+- The app runs on many servers: every run path must be reflected in `docker-compose.yml`.
+- Non-core modules must be scalable. Core modules must be scalable too when they hold calculation logic.

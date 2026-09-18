@@ -16,24 +16,31 @@ All version pins come from `spring-boot-dependencies` (this module's grandparent
 
 **Used by:** vision-app (`PersistenceWiringConfiguration`, unconditional).
 
-**Build/test:** `./mvnw -B -pl storage/persistence test` — 291 tests (up from 283 immediately before
-LINK-PAIRING L2, +5 for the new standalone `JpaPairingRepositoryTest` — see Gotchas for why it is
-its own file rather than a section inside `PostgresDockerIntegrationTest`; the L2 wave also fixed a
-pre-existing `uq_pairings_sysid`/`uq_discovery_candidates_identity_key` collision risk in that
-monolith's own fixtures, see its own Gotchas entry, with no net change to its test count; up from
-277 immediately before ALWAYS-ON-FLOW wave B3, +6 for `EventHistoryRepositoryTests`; the branch this
-wave landed on had already moved past the 276 recorded at AUTH-ROLES B5 via other concurrent work, so
-277 — not 276 — is that wave's own true baseline; up from 274 after COMMAND-MAP-FLOW B1, 269 after
-ASSET-FLOWS BK4, 267 after ZERO-CONFIG-ONBOARDING Z2c, 260 before that — count from Maven's own summary
-line, see Gotchas), one shared `postgres:16`
-Testcontainers container per test class. Requires a running Docker daemon — there is no non-Docker
-path; tests skip cleanly (not fail) when Docker is unavailable. Use a **two-step** build when a
-sibling context module is mid-flight elsewhere in the reactor: `./mvnw -B -pl
+**Build/test:** `./mvnw -B -pl storage/persistence test` — 291 tests (count from Maven's own summary
+line, not by summing surefire XML — see Gotchas), one shared `postgres:16` Testcontainers container
+per test class. Requires a running Docker daemon — there is no non-Docker path; tests skip cleanly
+(not fail) when Docker is unavailable. Use a **two-step** build when a sibling context module is
+mid-flight elsewhere in the reactor: `./mvnw -B -pl
 core/vision-kernel,core/vision-platform,contexts/vision-warehouse,contexts/vision-identity,contexts/vision-flight,contexts/vision-perception,contexts/vision-map,contexts/vision-events,contexts/vision-learning,contexts/vision-simulation
 install -Dmaven.test.skip=true` (installs jars **without compiling their test sources**, so a
 concurrent agent's broken test file elsewhere doesn't block this module — `-DskipTests` alone still
 runs `testCompile` and is not enough) then `./mvnw -B -pl storage/persistence test` (no `-am`, so it
 resolves the just-installed jars instead of recompiling upstream).
+
+## Section index
+
+| Topic | Heading |
+|---|---|
+| Repository-port table (34 classes, one row each) | API surface → `repository` |
+| Entity mapping conventions (jsonb, flattening, id strategy) | API surface → `entity` |
+| Flyway migration ledger, V1 through V37 | API surface → Schema |
+| `db_audit_log` trigger-based row-change audit | API surface → Database change audit |
+| Hibernate bootstrap, shared Hikari pool, Spring Session seam | API surface → Bootstrap and connection pool |
+| Upsert/persist/delete idioms, tracks-in-jsonb | Conventions |
+| Prune-on-write retention + telemetry write batching | Conventions → Retention and batching |
+| Library quirks, test pitfalls, known defects | Gotchas |
+| What's implemented vs. deliberately open | Status |
+| Wave-by-wave narrative, dates, test counts | [`MODULE-HISTORY.md`](MODULE-HISTORY.md) |
 
 ## API surface
 
@@ -56,14 +63,14 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 | `JpaCategoryRepository` | `CategoryRepositoryPort` | merge upsert, hard delete |
 | `JpaDeviceRepository` | `DeviceRepositoryPort` | merge upsert, hard delete |
 | `JpaAssetRepository` | `AssetRepositoryPort` | merge upsert, hard delete, `findByDeviceId`; `AssetMapper` flattens `Identity`/`Custody` onto the asset row directly (see WAREHOUSE-UX-PLAN.md D7, `V28`) |
-| `JpaAssetUsageRepository` | `AssetUsageRepositoryPort` | merge upsert; `findByStream` is a deliberately unindexed scan (one-row-per-flight table, read once per stream lookup); `findRecent(int)` is the fleet-wide sibling of `findRecentByAsset`; `totalFlightSecondsByAsset()` (WAREHOUSE-UX W8) is this module's **first native SELECT-with-row-projection query** (every earlier native query was a batch `DELETE`/`executeUpdate`) — `em.createNativeQuery(...)` returning `List<Object[]>`, needed because plain JPQL cannot express `coalesce(ended_at, now())`; `AssetUsageEntity#pilotId`/`AssetUsageMapper` (ASSET-FLOWS-PLAN §2 D1p, wave BK4) finally map the `pilot_id` column `V28` added schema-only — no new migration, see the `V28` row below |
+| `JpaAssetUsageRepository` | `AssetUsageRepositoryPort` | merge upsert; `findByStream` is a deliberately unindexed scan (one-row-per-flight table, read once per stream lookup); `findRecent(int)` is the fleet-wide sibling of `findRecentByAsset`; `totalFlightSecondsByAsset()` is this module's **first native SELECT-with-row-projection query** (every earlier native query was a batch `DELETE`/`executeUpdate`) — `em.createNativeQuery(...)` returning `List<Object[]>`, needed because plain JPQL cannot express `coalesce(ended_at, now())`; `AssetUsageEntity#pilotId`/`AssetUsageMapper` (ASSET-FLOWS-PLAN §2 D1p) finally map the `pilot_id` column `V28` added schema-only — no new migration, see the `V28` row below |
 | `JpaTelemetryRepository` | `TelemetryRepositoryPort` | always `persist` (append-only); prune-on-write retention (100k rows/usage default); optional batched-write mode via `TelemetryBatchSettings` (see Batching) — production wiring still uses the immediate-mode constructor; `findByUsage`'s `limit` returns the **earliest** samples, not the newest, unchanged (see Gotchas); `findLatestByUsage` (COMMAND-MAP-FLOW-PLAN.md B1) returns the **latest** `limit` samples via `order by at desc` + `setMaxResults`, reversed in Java before returning so the result stays ascending |
 | `JpaDetectionRepository` | `DetectionRepositoryPort` | always `persist`; prune-on-write (100k rows/stream); `DetectionQuery#to` treated as inclusive despite the port's javadoc calling it exclusive (see Gotchas) |
 | `JpaAssetImageRepository` | `AssetImageRepositoryPort` | keyed by `assetId` itself (no synthetic id — at most one image per asset); `data` plain `byte[]`/`bytea` |
 | `JpaGeofenceRepository` | `GeofenceRepositoryPort` | merge upsert, hard delete; no soft-delete concept (`enabled=false` is just a column) |
-| `JpaUserRepository` | `UserRepositoryPort` | merge upsert; `findByUsername` lower-cases the key then exact-matches the already-lower-cased stored value; `memberships` is jsonb; `UserEntity.mustChangePassword` (AUTH-ROLES-PLAN.md D13, wave B3, `V33`) round-trips through `UserMapper`'s 7-arg `toEntity`/`toDomain` alongside every other column |
+| `JpaUserRepository` | `UserRepositoryPort` | merge upsert; `findByUsername` lower-cases the key then exact-matches the already-lower-cased stored value; `memberships` is jsonb; `UserEntity.mustChangePassword` (AUTH-ROLES-PLAN.md D13, `V33`) round-trips through `UserMapper`'s 7-arg `toEntity`/`toDomain` alongside every other column |
 | `JpaGroupRepository` | `GroupRepositoryPort` | merge upsert; `parentGroupId` a nullable UUID (null = root) |
-| `JpaAssignmentRepository` | `AssignmentRepositoryPort` | composite-key (`pilot_user_id`,`asset_id`) `merge` upsert, idempotent unassign; **the one exception to "no mapper needed"** (AUTH-ROLES-PLAN.md §3.4, wave B3): `AssignmentEntity.role` (`V33`, stored as `role.name()`) round-trips through `AssignmentRole.valueOf(...)`, and `roleFor(UserId, AssetId)`/`assignmentsForAsset(AssetId)` build real `Assignment` domain records from the entity — inline `UUID`↔id-wrapper conversion is no longer the whole story once a domain aggregate exists to map to |
+| `JpaAssignmentRepository` | `AssignmentRepositoryPort` | composite-key (`pilot_user_id`,`asset_id`) `merge` upsert, idempotent unassign; **the one exception to "no mapper needed"** (AUTH-ROLES-PLAN.md §3.4): `AssignmentEntity.role` (`V33`, stored as `role.name()`) round-trips through `AssignmentRole.valueOf(...)`, and `roleFor(UserId, AssetId)`/`assignmentsForAsset(AssetId)` build real `Assignment` domain records from the entity — inline `UUID`↔id-wrapper conversion is no longer the whole story once a domain aggregate exists to map to |
 | `JpaMarkRepository` | `MarkRepositoryPort` | merge upsert, hard delete |
 | `JpaMapLayerRepository` | `MapLayerRepositoryPort` | merge upsert; `save` **wholesale-replaces** the grant list (`map_layer_grants`); `deleteById` deliberately does **not** cascade to marks/drawings — that's `DefaultMapLayerService#delete`'s job (it must emit one `MapEvent` per removed row) |
 | `JpaDrawingRepository` | `DrawingRepositoryPort` | merge upsert (a drawing mutates in place as its geometry is dragged), hard delete |
@@ -79,13 +86,13 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 | `JpaTrackTrailRepository` | `TrackTrailRepositoryPort` | always `persist` (append-only breadcrumb trail); `trimToMostRecent`/`deleteOlderThan` are single bulk `DELETE`s, safe to call every tick; excluded from the audit log |
 | `JpaTrackCorrectionRepository` | `TrackCorrectionRepositoryPort` | always `persist`; `deleteOlderThan`/`trimUsageToMostRecent` are bulk `DELETE`s, same shape as `JpaTrackTrailRepository`; excluded from the audit log |
 | `JpaControlProfileRepository` | `ControlProfileRepositoryPort` | `merge` upsert; `activate` clears the owner's other active profiles for that vehicle kind then sets the flag, **in that order**, in one transaction — a partial unique index rejects the opposite order; `NoSuchElementException` for an unknown id **or** one belonging to another operator (deliberately indistinguishable, see Gotchas); audited |
-| `JpaMaintenanceRepository` | `MaintenanceRepositoryPort` | `merge` upsert by `MaintenanceId` (the record mutates via `close()`, same shape as `JpaControlProfileRepository`); `MaintenanceRecordEntity#kind` reuses the domain `MaintenanceKind` enum directly; audited (WAREHOUSE-UX-PLAN.md D7/W3, `V28`); `findOpen()`/`findRecentlyClosed(limit)` (WAREHOUSE-UX W8) are `findOpenByAsset`/`findByAsset`'s fleet-wide counterparts — same `closed_at`/`opened_at` columns, no `asset_id` predicate, `GET /api/maintenance`'s backing queries |
-| `JpaAssetNoteRepository` | `AssetNoteRepositoryPort` | always `persist` (append-only, same shape as `JpaAuditTrail`); no application service consumes this yet — wired ahead of a later wave's crew-notes UI; audited (WAREHOUSE-UX-PLAN.md D7/W3, `V28`) |
+| `JpaMaintenanceRepository` | `MaintenanceRepositoryPort` | `merge` upsert by `MaintenanceId` (the record mutates via `close()`, same shape as `JpaControlProfileRepository`); `MaintenanceRecordEntity#kind` reuses the domain `MaintenanceKind` enum directly; audited (WAREHOUSE-UX-PLAN.md D7/W3, `V28`); `findOpen()`/`findRecentlyClosed(limit)` are `findOpenByAsset`/`findByAsset`'s fleet-wide counterparts — same `closed_at`/`opened_at` columns, no `asset_id` predicate, `GET /api/maintenance`'s backing queries |
+| `JpaAssetNoteRepository` | `AssetNoteRepositoryPort` | always `persist` (append-only, same shape as `JpaAuditTrail`); no application service consumes this yet — wired ahead of a later crew-notes UI feature; audited (WAREHOUSE-UX-PLAN.md D7, `V28`) |
 | `JpaCvProfileRepository` | `CvProfileRepositoryPort` | `merge` upsert for both `CvProfile` (by id) and `CvProfileBinding` (by composite `(scope_kind, scope_id)`); `findAllByGroup` needs no extra filtering to exclude built-ins — a built-in's `group_id` is always `NULL` and no `UUID` param ever matches `NULL` in JPQL; `delete`/`deleteBinding` real hard deletes, idempotent; audited (CV-SETTINGS-PLAN.md §5.3, `V29`) |
-| `JpaCvModelRepository` | `CvModelRepositoryPort` | `merge` upsert on composite `(model_id, version)`; `findLive` does not itself enforce "exactly one LIVE row" — that invariant is `ModelRegistryService`'s job (W4-app); audited (CV-SETTINGS-PLAN.md §5.3, `V30`) |
+| `JpaCvModelRepository` | `CvModelRepositoryPort` | `merge` upsert on composite `(model_id, version)`; `findLive` does not itself enforce "exactly one LIVE row" — that invariant is `ModelRegistryService`'s job (application layer); audited (CV-SETTINGS-PLAN.md §5.3, `V30`) |
 | `JpaTrainingRunRepository` | `TrainingRunRepositoryPort` | `merge` upsert by `runId` (written once at start, again as `TrainingProgress` arrives); `findAll(limit)` orders newest-first by `started_at`, the column `idx_cv_training_runs_started_at` indexes; audited (CV-SETTINGS-PLAN.md §5.3, `V30`, fixes H7: "training metrics evaporate") |
 | `JpaDiscoveryCandidateRepository` | `DiscoveryCandidateRepositoryPort` | `merge` upsert by `DiscoveryCandidateId` (a re-reported identity mutates `lastSeen`/`status` in place rather than inserting a new row); `findByIdentityKey` is the upsert-target lookup the inbox sweep uses every cycle — backed by the unique index on `identity_key`, not a table scan; `findAll` orders `lastSeen desc` (newest-reported first, the inbox's natural read order); audited (ZERO-CONFIG-ONBOARDING-CONTEXT.md §11 Z2c, `V31`) |
-| `JpaEventHistory` | `EventHistoryPort` (`vision-platform`) | always `persist` (append-only); **table-wide** prune-on-write (default 20,000 rows total, not per-stream — see Retention and batching), unlike every other pruned repository in this table; **single constructor** `(EntityManagerFactory, int retentionLimit)` — deliberately no 1-arg/baked-default overload, since `vision-app`'s `VisionEventHistoryProperties.Retention` is the one source of truth for the default (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave B3); excluded from the audit log (`V35`) |
+| `JpaEventHistory` | `EventHistoryPort` (`vision-platform`) | always `persist` (append-only); **table-wide** prune-on-write (default 20,000 rows total, not per-stream — see Retention and batching), unlike every other pruned repository in this table; **single constructor** `(EntityManagerFactory, int retentionLimit)` — deliberately no 1-arg/baked-default overload, since `vision-app`'s `VisionEventHistoryProperties.Retention` is the one source of truth for the default (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md); excluded from the audit log (`V35`) |
 | `JpaPairingRepository` | `PairingRepositoryPort` | `merge` upsert by `PairingId`; `deleteById` is a real **hard** delete (⚠ accepted deviation, LINK-PAIRING-PLAN.md §3.3 — a forgotten pairing's sysid/key must stop being valid immediately), idempotent (a missing id is a no-op, no exception); `PairingMapper` round-trips `VehicleKey`'s 32 raw bytes through `vehicle_key BYTEA` unchanged; audited (`V37`) |
 
 ### `entity` — mapping conventions (not repeated per class)
@@ -121,11 +128,11 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
   and `map_layer_grants.layer_id` (an owned `@ElementCollection`, Hibernate controls both sides). This
   traces back to parity with the now-deleted in-memory reference repositories, which performed zero
   referential checks; that parity target is gone, but the schema is frozen on this permissive shape
-  regardless of why it was first chosen (no `V27+` without a dedicated task).
+  regardless of why it was first chosen (no `V37+` without a dedicated task).
 - **`AssetUsageEntity#phase`** (nullable, `V19`) falls back to `UsagePhase.PREFLIGHT` on `toDomain`
   only for a genuinely `null` column (a pre-`V19` row); **`AssetUsageEntity#origin`** (`V26`) is
   `NOT NULL` with a database default, so `AssetUsageMapper` has no legacy-null case for it at all.
-  **`AssetUsageEntity#pilotId`** (nullable, `V28`, mapped `AssetUsageMapper` wave BK4) is plain
+  **`AssetUsageEntity#pilotId`** (nullable, `V28`, mapped by `AssetUsageMapper`) is plain
   `UUID`↔`UserId` — no legacy-null special case either, since "unknown pilot" and "column never
   populated" are the same honest `null` at every row's actual, unbackfilled history.
 - **`AssetEntity` flattens `Identity`/`Custody` onto its own columns** (`V28`) rather than nesting a
@@ -139,14 +146,21 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
   single `model` column — `ModelRef`'s compact constructor requires both `id` and `version` non-blank,
   which cannot round-trip from one string alone without inventing an `"id@version"` encoding this
   schema uses nowhere else; flagged as a deliberate deviation in the migration's own header comment
-  and in CV-SETTINGS-CONTEXT.md's W3 handoff. `CvProfileEntity#tracking`/`#eventRule` are each the
+  and in CV-SETTINGS-CONTEXT.md's handoff notes. `CvProfileEntity#tracking`/`#eventRule` were each the
   whole `TrackingConfig`/`EventRuleConfig` record as jsonb (same "read back whole" convention as
-  `ControlProfile`'s channel/action maps) — `event_rule` is itself a deviation, a column `V29` adds
-  that CV-SETTINGS-PLAN.md §5.3's own column list omitted (the domain `CvProfile` carries an
-  `EventRuleConfig`; without the column a profile could not round-trip through the port at all).
-  `CvProfileBindingEntity` uses `CvProfileBindingId` (`@IdClass`, `scopeKind`/`scopeId` — `scopeKind`
-  stored as `.name()`/`valueOf()` rather than `@Enumerated`, since it is part of the composite key, not
-  a plain column).
+  `ControlProfile`'s channel/action maps) — `event_rule` is itself a deviation, a column CV-SETTINGS-PLAN.md
+  §5.3's own column list omitted (the domain `CvProfile` carries an `EventRuleConfig`; without the
+  column a profile could not round-trip through the port at all). `CvProfileBindingEntity` uses
+  `CvProfileBindingId` (`@IdClass`, `scopeKind`/`scopeId` — `scopeKind` stored as `.name()`/`valueOf()`
+  rather than `@Enumerated`, since it is part of the composite key, not a plain column).
+- **`CvProfileEntity` became a patch as of `V36__cv_profile_patch.sql`**: every knob column but
+  `id`/`name`/`description`/`built_in`/`group_id`/the timestamps is now nullable (unset = inherit),
+  `tracking` is retyped to the narrower `TrackingKnobPatch` (5 fields, not the original 10-field
+  `TrackingConfig` above), and a nullable `intent` column was added (enum name via `Intent#valueOf`,
+  same convention as `cv_profile_bindings.scope_kind`); `ck_cv_profiles_model_pair CHECK ((model_id IS
+  NULL) = (model_version IS NULL))` is the one paired-nullability constraint (docs/plans/active/CV-ORCHESTRATION-PLAN.md
+  §4.7, decision E22). A pre-`V36` `tracking` jsonb row's extra keys fail Jackson 3's default strict
+  deserialization against the narrower type — see the Jackson mix-in entry in Gotchas.
 - **`CvModelEntity` decomposes `ModelProvenance` into five flat, independently-nullable columns**
   (`dataset_id`/`training_run_id`/`base_model`/`epochs`/`trained_at`, `V30`) rather than nesting it as
   one jsonb object — every field really is independently nullable at the domain level (a
@@ -174,14 +188,14 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
   `status` is `@Enumerated(EnumType.STRING)` reusing `CandidateStatus` directly. `identity_key` is a
   plain unique-indexed `String` column, not a synthesized id — the port's `findByIdentityKey` is the
   sweep's upsert-target lookup, called once per discovered device every cycle.
-- **`ControlProfileEntity` gained `stickMode`/`forwardIsUp`** (`V32`, CONTROLLER-SETUP-CONTEXT.md wave
-  C15 — the owner's `TransmitterView`) as two plain scalar columns rather than folding them into the
+- **`ControlProfileEntity` gained `stickMode`/`forwardIsUp`** (`V32`, CONTROLLER-SETUP-CONTEXT.md —
+  the owner's `TransmitterView`) as two plain scalar columns rather than folding them into the
   existing `channelMap`/`actionMap` jsonb, since they are two fixed, range-checked fields (`stickMode`
   1-4) rather than an open document; `NOT NULL` with defaults matching `TransmitterView.DEFAULT`
   (mode 2, forward-up), the same "every existing row already has an arrangement" reasoning
   `AssetUsageEntity#origin` (`V26`) uses.
 
-## Schema (`src/main/resources/db/migration`) — migration ledger, V1 through V37
+### Schema (`src/main/resources/db/migration`) — migration ledger, V1 through V37
 
 | Migration | What it does |
 |---|---|
@@ -212,16 +226,16 @@ class for entity↔domain conversion. Constructor is `(EntityManagerFactory)` un
 | `V25__device_origin.sql` | `devices.origin` (`LIVE`/`SIMULATED`, `NOT NULL DEFAULT 'LIVE'`), backfilling `SIMULATED` for devices already on a `simulated`-category asset |
 | `V26__asset_usage_origin.sql` | `asset_usages.origin` (`STREAM`/`TELEMETRY`/`OPERATOR`, `NOT NULL DEFAULT 'STREAM'`) — single statement, no follow-up `UPDATE` needed since every pre-existing row's correct value is the same one |
 | `V27__rc_relay_readiness.sql` | `feature_requirements.required_parameter_value`/`forbidden_parameter_bits` (nullable); retires the single always-trivially-satisfied `id='ardupilot:rc-relay'` placeholder row V18 seeded and replaces it with two independent, value-aware rows under the same `rc-relay` feature key — a GCS-sysid value check (`SYSID_MYGCS` must equal `255`) and an `RC_OPTIONS` forbidden-bits check (bit 1 must be clear) — net row count for `firmware='ardupilot'` goes from 11 to 12 (FLEET-RADIO-PLAN.md R6) |
-| `V28__asset_inventory.sql` | `assets` += `serial_number`/`make`/`model`/`registration` (from `Identity`), `custodian_id`/`location`/`custody_since` (from `Custody`), `inventory_state` (stored values only — `IN_STOCK`/`MAINTENANCE`/`RETIRED`, default `IN_STOCK`), `created_at`/`updated_at`; backfills `registration` from the pre-existing `attributes->>'registration'` key then removes that key (WAREHOUSE-UX-PLAN.md D8); `categories` += `connected BOOLEAN NOT NULL DEFAULT TRUE`, seeding three passive categories (`battery`/`spare`/`radio`) with `connected=false`; new `maintenance_records` (audited) and `asset_notes` (audited) tables; `asset_usages.pilot_id` (nullable UUID — schema-only when this migration landed; mapped by `AssetUsageEntity#pilotId`/`AssetUsageMapper` in ASSET-FLOWS wave BK4, no new migration needed) |
+| `V28__asset_inventory.sql` | `assets` += `serial_number`/`make`/`model`/`registration` (from `Identity`), `custodian_id`/`location`/`custody_since` (from `Custody`), `inventory_state` (stored values only — `IN_STOCK`/`MAINTENANCE`/`RETIRED`, default `IN_STOCK`), `created_at`/`updated_at`; backfills `registration` from the pre-existing `attributes->>'registration'` key then removes that key (WAREHOUSE-UX-PLAN.md D8); `categories` += `connected BOOLEAN NOT NULL DEFAULT TRUE`, seeding three passive categories (`battery`/`spare`/`radio`) with `connected=false`; new `maintenance_records` (audited) and `asset_notes` (audited) tables; `asset_usages.pilot_id` (nullable UUID — schema-only when this migration landed; mapped by `AssetUsageEntity#pilotId`/`AssetUsageMapper` per ASSET-FLOWS-PLAN.md, no new migration needed) |
 | `V29__cv_profiles.sql` | `cv_profiles` (audited) + `cv_profile_bindings` (audited, composite PK `(scope_kind, scope_id)`); seeds the four built-in profiles (`people-vehicles`/`wide-search`/`military-vehicles`/`video-only`, fixed ids) with `built_in=true`/`group_id=NULL` and `tracking`/`event_rule` byte-identical to `TrackingConfig.defaults()`/`EventRuleConfig.defaults()`; **zero bindings seeded** (CV-SETTINGS-PLAN.md §3.1 rule 3 — no feature flag, every existing stream keeps resolving to `PipelineConfig.defaults()`); two deviations from §5.3's literal column list, both flagged in the migration's own header: `model_id`/`model_version` split (not one `model` column) and an added `event_rule` column (missing from §5.3 entirely) |
 | `V30__cv_model_registry.sql` | `cv_models` (audited, composite PK `(model_id, version)`, every provenance column + `metrics` nullable) + `cv_training_runs` (audited, `idx_cv_training_runs_started_at` for `findAll(limit)`'s newest-first order); no seed rows — the config-seeded model roster merges with the worker's live `ListModels` response at the application layer, not baked into this schema (fixes H4/H7) |
 | `V31__discovery_inbox.sql` | `discovery_candidates` (audited): domain-owned `id` PK, `identity_key` (the mDNS/ONVIF/MAVLink-derived stable key `DiscoveryCandidate` upserts on), `method`/`name`/`address`, flattened `suggested_category`/`suggested_stream_protocol`/`suggested_stream_uri`/`suggested_stream_options` (nullable as a group — a candidate with no offered stream), `details` jsonb `NOT NULL DEFAULT '{}'`, `first_seen`/`last_seen` `TIMESTAMPTZ`, `status`, nullable `registered_asset_id` (no FK — the same "no cross-aggregate FK" posture every other table in this schema takes, see Conventions); unique index on `identity_key` (the upsert target) + index on `last_seen` (the inbox list's sort column) |
-| `V32__control_profile_transmitter_view.sql` | `control_profiles` += `stick_mode SMALLINT NOT NULL DEFAULT 2`, `forward_is_up BOOLEAN NOT NULL DEFAULT TRUE`, `ck_control_profiles_stick_mode CHECK (stick_mode BETWEEN 1 AND 4)` — how the owner's transmitter is arranged (CONTROLLER-SETUP-CONTEXT.md wave C15); defaults rather than nullable since every existing row already has an arrangement (the platform's); **renumbered from the branch's own `V25` during the `feat/controller-setup-c15` merge** — see the Gotchas entry below for the collision this replaced |
-| `V33__assignment_roles.sql` | `pilot_assignments.role` (`VARCHAR(16) NOT NULL DEFAULT 'PILOT'`), `users.must_change_password` (`BOOLEAN NOT NULL DEFAULT FALSE`) — the per-asset seat (`AssignmentRole`, PILOT/CREW) and the forced-password-change latch (AUTH-ROLES-PLAN.md §3.4/D13, wave B3); purely additive, no backfill logic needed beyond the column defaults; no trigger changes — `V21`'s `audit_row_change()` resolves every column via `to_jsonb(NEW/OLD)`, not a fixed list |
-| `V34__spring_session.sql` | `spring_session`/`spring_session_attributes` — a **byte-for-byte copy** of Spring Session JDBC 4.1.0's own official `org/springframework/session/jdbc/schema-postgresql.sql` (extracted from the jar, not hand-transcribed), so sessions survive an app restart (AUTH-ROLES-PLAN.md §3.6, wave B5); no entity/mapper/repository — this table is read/written entirely by Spring Session's own `JdbcIndexedSessionRepository`, wired in `vision-app`'s `PersistenceWiringConfiguration`/`AuthWiringConfiguration`, not by anything in this module; both tables added to `PostgresDockerIntegrationTest`'s `EXCLUDED_TABLES` (infrastructure, same classification as `flyway_schema_history`) |
-| `V35__event_history.sql` | `event_history` table (`EventHistoryPort`, `vision-platform`): domain-owned `id VARCHAR(64)` PK (`Event.id()` is a plain `String`, not a UUID-wrapper), nullable `stream_id UUID` (device-level events have none), `occurred_at TIMESTAMPTZ NOT NULL`, `type VARCHAR(32) NOT NULL`, `message TEXT NOT NULL`, `attributes JSONB NOT NULL DEFAULT '{}'::jsonb` (free-form `Map<String,String>`, same jsonb convention as every other map-typed column in this module); one index, `idx_event_history_occurred_at ON event_history (occurred_at DESC)`, for `findRecent`/`findSince`'s newest-first scan and the table-wide retention prune's `ORDER BY occurred_at DESC LIMIT`; no foreign key (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave B3) |
-| `V36__cv_profile_patch.sql` | drops `NOT NULL` on `cv_profiles.model_id`/`model_version`/`confidence_threshold`/`inference_fps`/`label_filter`/`label_deny_filter`/`detection_enabled`/`tracking`/`event_rule` (every knob but `id`/`name`/`description`/`built_in`/`group_id`/the timestamps) so a row can leave any of them unset = inherit; adds `ck_cv_profiles_model_pair CHECK ((model_id IS NULL) = (model_version IS NULL))`; adds nullable `intent TEXT` (enum name, parsed via `Intent#valueOf`, same convention as `cv_profile_bindings.scope_kind`). Existing rows untouched — every V29-seeded built-in and any prior operator-created profile already had every column set (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7, decision E22, wave W7.2) |
-| `V37__pairing.sql` | `pairings` table (audited, `V37__pairing.sql`): `id` UUID PK, `device_id` (no FK, this schema's standing no-cross-entity-FK convention), `sysid INTEGER NOT NULL`, `vehicle_key BYTEA NOT NULL` (the raw 32 bytes `VehicleKey` wraps), `hardware_uid NUMERIC(20,0)` nullable (a uint64 `AUTOPILOT_VERSION.uid`, decoded to `BigInteger`), `radio_bind_attributes JSONB NOT NULL DEFAULT '{}'`, `created_at TIMESTAMPTZ NOT NULL`, `replaced_at TIMESTAMPTZ` nullable; unique indexes on `device_id` (≤1 pairing per device) and `sysid` (≤1 pairing per sysid, the safety net behind `DefaultPairingService`'s own collision check); `trg_audit_pairings` trigger — a vehicle's identity (sysid/key/hardware uid) is operator-authored, accountability-relevant, bounded-write-volume control-plane state, the same character as `control_profiles`/`vehicle_profiles` (docs/plans/active/LINK-PAIRING-PLAN.md §3.3, wave L2) |
+| `V32__control_profile_transmitter_view.sql` | `control_profiles` += `stick_mode SMALLINT NOT NULL DEFAULT 2`, `forward_is_up BOOLEAN NOT NULL DEFAULT TRUE`, `ck_control_profiles_stick_mode CHECK (stick_mode BETWEEN 1 AND 4)` — how the owner's transmitter is arranged (CONTROLLER-SETUP-CONTEXT.md); defaults rather than nullable since every existing row already has an arrangement (the platform's); **renumbered from the branch's own `V25` during the `feat/controller-setup-c15` merge** — see the Gotchas entry below for the collision this replaced |
+| `V33__assignment_roles.sql` | `pilot_assignments.role` (`VARCHAR(16) NOT NULL DEFAULT 'PILOT'`), `users.must_change_password` (`BOOLEAN NOT NULL DEFAULT FALSE`) — the per-asset seat (`AssignmentRole`, PILOT/CREW) and the forced-password-change latch (AUTH-ROLES-PLAN.md §3.4/D13); purely additive, no backfill logic needed beyond the column defaults; no trigger changes — `V21`'s `audit_row_change()` resolves every column via `to_jsonb(NEW/OLD)`, not a fixed list |
+| `V34__spring_session.sql` | `spring_session`/`spring_session_attributes` — a **byte-for-byte copy** of Spring Session JDBC 4.1.0's own official `org/springframework/session/jdbc/schema-postgresql.sql` (extracted from the jar, not hand-transcribed), so sessions survive an app restart (AUTH-ROLES-PLAN.md §3.6); no entity/mapper/repository — this table is read/written entirely by Spring Session's own `JdbcIndexedSessionRepository`, wired in `vision-app`'s `PersistenceWiringConfiguration`/`AuthWiringConfiguration`, not by anything in this module; both tables added to `PostgresDockerIntegrationTest`'s `EXCLUDED_TABLES` (infrastructure, same classification as `flyway_schema_history`) |
+| `V35__event_history.sql` | `event_history` table (`EventHistoryPort`, `vision-platform`): domain-owned `id VARCHAR(64)` PK (`Event.id()` is a plain `String`, not a UUID-wrapper), nullable `stream_id UUID` (device-level events have none), `occurred_at TIMESTAMPTZ NOT NULL`, `type VARCHAR(32) NOT NULL`, `message TEXT NOT NULL`, `attributes JSONB NOT NULL DEFAULT '{}'::jsonb` (free-form `Map<String,String>`, same jsonb convention as every other map-typed column in this module); one index, `idx_event_history_occurred_at ON event_history (occurred_at DESC)`, for `findRecent`/`findSince`'s newest-first scan and the table-wide retention prune's `ORDER BY occurred_at DESC LIMIT`; no foreign key (docs/plans/active/ALWAYS-ON-FLOW-PLAN.md) |
+| `V36__cv_profile_patch.sql` | drops `NOT NULL` on `cv_profiles.model_id`/`model_version`/`confidence_threshold`/`inference_fps`/`label_filter`/`label_deny_filter`/`detection_enabled`/`tracking`/`event_rule` (every knob but `id`/`name`/`description`/`built_in`/`group_id`/the timestamps) so a row can leave any of them unset = inherit; adds `ck_cv_profiles_model_pair CHECK ((model_id IS NULL) = (model_version IS NULL))`; adds nullable `intent TEXT` (enum name, parsed via `Intent#valueOf`, same convention as `cv_profile_bindings.scope_kind`). Existing rows untouched — every V29-seeded built-in and any prior operator-created profile already had every column set (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7, decision E22) |
+| `V37__pairing.sql` | `pairings` table (audited, `V37__pairing.sql`): `id` UUID PK, `device_id` (no FK, this schema's standing no-cross-entity-FK convention), `sysid INTEGER NOT NULL`, `vehicle_key BYTEA NOT NULL` (the raw 32 bytes `VehicleKey` wraps), `hardware_uid NUMERIC(20,0)` nullable (a uint64 `AUTOPILOT_VERSION.uid`, decoded to `BigInteger`), `radio_bind_attributes JSONB NOT NULL DEFAULT '{}'`, `created_at TIMESTAMPTZ NOT NULL`, `replaced_at TIMESTAMPTZ` nullable; unique indexes on `device_id` (≤1 pairing per device) and `sysid` (≤1 pairing per sysid, the safety net behind `DefaultPairingService`'s own collision check); `trg_audit_pairings` trigger — a vehicle's identity (sysid/key/hardware uid) is operator-authored, accountability-relevant, bounded-write-volume control-plane state, the same character as `control_profiles`/`vehicle_profiles` (docs/plans/active/LINK-PAIRING-PLAN.md §3.3) |
 
 A second, conditional Flyway location, `src/main/resources/db/seed/dev`, holds
 `V90001__dev_accounts.sql` (the `admin`/`manager`/`pilot` DEV-ONLY accounts) — it only joins Flyway's
@@ -229,7 +243,7 @@ A second, conditional Flyway location, `src/main/resources/db/seed/dev`, holds
 deliberately reserved high band (always the highest resolved version, so it always applies next
 regardless of how far `db/migration` has moved) — not "next free slot after V13".
 
-## Database change audit
+### Database change audit
 
 A Postgres-trigger-based record of every row change (`db_audit_log`, `V21`) — distinct from
 `AuditTrailPort`/`audit_entries` (`V14`, domain-intent, written only where application code
@@ -268,12 +282,12 @@ automatically.**
   `detection_results`, `detection_events`, `training_samples`, `sample_images`, `asset_images` (a
   `bytea` column would duplicate image bytes into every audit row), `audit_entries` (auditing an
   audit trail buys nothing), `db_audit_log` itself (would recurse), `flyway_schema_history`,
-  `projected_track_points`, `track_corrections`, `spring_session`/`spring_session_attributes` (`V34`,
-  wave B5 — this table's own infrastructure, same classification as `flyway_schema_history`; not
-  domain data, and neither has a Java entity in this module for a trigger to be redundant against),
-  `event_history` (`V35`, ALWAYS-ON-FLOW-PLAN wave B3 — same character as `detection_events`/
-  `telemetry_samples`: machine-generated, append-only, self-pruning platform-event history, not
-  operator-authored control-plane state).
+  `projected_track_points`, `track_corrections`, `spring_session`/`spring_session_attributes` (`V34` —
+  this table's own infrastructure, same classification as `flyway_schema_history`; not domain data,
+  and neither has a Java entity in this module for a trigger to be redundant against), `event_history`
+  (`V35`, ALWAYS-ON-FLOW-PLAN — same character as `detection_events`/`telemetry_samples`:
+  machine-generated, append-only, self-pruning platform-event history, not operator-authored
+  control-plane state).
 
 Coverage is tested against the **live schema** (`information_schema.tables`/`pg_trigger`), not
 trusted from a migration comment — `DbAuditLogCoverageTests` fails if a new table is added without
@@ -282,7 +296,7 @@ this (trigger installation is schema, not application config) and there is **no 
 job** — `db_audit_log` grows unbounded, an explicitly open item, the same accepted tradeoff
 `audit_entries` already makes.
 
-## Bootstrap and connection pool
+### Bootstrap and connection pool
 
 `PersistenceUnit.start` uses Hibernate's **native** bootstrap API
 (`org.hibernate.cfg.Configuration#buildSessionFactory()`, which directly implements
@@ -304,21 +318,21 @@ internally, which cannot be handed to Flyway before the `EntityManagerFactory` e
 is not even a declared dependency of this module. `hibernate.hbm2ddl.auto=validate` — Flyway owns all
 schema creation/evolution, Hibernate only validates its mapping matches.
 
-**Two entry points into `start`, one pool-building step now a public seam (AUTH-ROLES-PLAN.md §3.6,
-wave B5).** `buildDataSource(String jdbcUrl, String username, String password,
-PersistencePoolSettings poolSettings)` — the Hikari-pool-construction step above — is now `public`
-(was `private`), and a new `start(DataSource dataSource, boolean seedDevUsers)` overload accepts an
-already-built pool instead of building one internally (the original 5-arg `start(String, String,
-String, boolean, PersistencePoolSettings)` now just calls `buildDataSource` then delegates to this
-overload — behavior unchanged, same single call for every existing caller). This exists so a THIRD
-consumer can share the exact same pool without this module knowing anything about it: `vision-app`'s
-`PersistenceWiringConfiguration` now builds the pool once as its own `visionDataSource` bean and hands
+**Two entry points into `start`, one pool-building step a public seam** (AUTH-ROLES-PLAN.md §3.6).
+`buildDataSource(String jdbcUrl, String username, String password,
+PersistencePoolSettings poolSettings)` — the Hikari-pool-construction step above — is `public`
+(not `private`), and `start(DataSource dataSource, boolean seedDevUsers)` accepts an already-built
+pool instead of building one internally (the original 5-arg `start(String, String,
+String, boolean, PersistencePoolSettings)` just calls `buildDataSource` then delegates to this
+overload — same single call for every existing caller). This exists so a third consumer can share
+the exact same pool without this module knowing anything about it: `vision-app`'s
+`PersistenceWiringConfiguration` builds the pool once as its own `visionDataSource` bean and hands
 it to Spring Session JDBC (via Boot's own autoconfiguration, binding to any `DataSource` bean it finds)
 as well as to this module's own `start(DataSource, boolean)` — see that module's own MODULE.md for the
 destroy-method-ordering reasoning (`visionDataSource`'s `@Bean(destroyMethod = "")`, since
 `persistenceEntityManagerFactory`'s own `destroyMethod="close"` already closes the same pool
 transitively). This module has no Spring dependency itself and does not know Spring Session JDBC
-exists — the new overload is a plain constructor-injection seam, nothing more.
+exists — the overload is a plain constructor-injection seam, nothing more.
 
 `PersistencePoolSettings`/telemetry batching (below) are constructor-argument opt-ins the module
 defines and validates but does not read from Spring config itself — binding `vision.persistence.pool.*`
@@ -342,9 +356,12 @@ overload.
   whole, so it round-trips for free, but is **not SQL-queryable**: you cannot ask "where was track
   #7" without scanning and deserializing. Pre-tracking rows read back with `track == null`.
   `DetectionResult#tracking()` (per-frame duty-cycle telemetry, as opposed to per-detection
-  `TrackRef`) has no column and deliberately does not persist.
+  `TrackRef`) has no column and deliberately does not persist. `DetectionResultMapper#toDomain` always
+  supplies `Optional.empty()` for `DetectionResult`'s `ledger` component — the warm trace tier
+  (`FrameLedger`) is never persisted, by design (see `contexts/vision-perception/MODULE.md`'s
+  `FrameLedger` note), so this is the permanently-correct value, not a placeholder.
 
-## Retention and batching
+### Retention and batching
 
 `JpaTelemetryRepository`, `JpaDetectionRepository`, and `JpaDetectionEventRepository` each prune
 their oldest rows **on every write**, inside the same transaction as the insert: `persist`/`merge` →
@@ -355,7 +372,7 @@ against the pre-insert view of the table and could prune the row just appended. 
 `JpaAssetUsageRepository` have no pruning at all (immutable facts / low write volume respectively).
 Retention caps are constructor arguments, not yet bound to a `vision.persistence.*` Spring property.
 
-`JpaEventHistory` (ALWAYS-ON-FLOW-PLAN wave B3) prunes the same way — `persist` → `flush()` → native
+`JpaEventHistory` (ALWAYS-ON-FLOW-PLAN) prunes the same way — `persist` → `flush()` → native
 bulk `DELETE` — but with **no grouping key at all**: the cap (default 20,000 rows, bound via
 `vision-app`'s `VisionEventHistoryProperties.Retention`, not a raw constructor default — see the API
 surface table above) is table-wide, `DELETE FROM event_history WHERE id NOT IN (SELECT id FROM
@@ -451,6 +468,14 @@ buffered samples per open usage; `DEFAULT_BATCH_WINDOW_MILLIS` is non-zero on pu
   container — three previously-green tests started failing with `ConstraintViolation` the moment
   L2's `identityKeyFor` change reached this module. Fixed by giving every call a distinct sysid
   (matching its address's last octet, for readability) instead of adding cleanup between methods.
+- **`PostgresDockerIntegrationTest`'s `EntityManagerFactory` — and therefore every table in the
+  schema — is shared static state across every `@Nested` class and test method in the file.** A test
+  that asserts on a table's full contents (`findRecent`'s full result, its first element, an exact
+  `List.of(...)` equality) will flake against rows other tests left behind; filter query results down
+  to the test's own inserted ids before asserting. For a genuinely table-wide retention-prune
+  assertion (no per-key grouping to isolate by), use timestamps far enough in the future that the
+  test's own rows are unambiguously the newest in the entire shared table regardless of execution
+  order — `AuditTrailRepositoryTests`/`EventHistoryRepositoryTests` both follow this pattern.
 - **`JpaControlProfileRepository#activate`/`#findById` throw the same `NoSuchElementException` for an
   unknown id and for an id belonging to another operator** — deliberately indistinguishable from
   outside (enumeration resistance).
@@ -471,8 +496,8 @@ buffered samples per open usage; `DEFAULT_BATCH_WINDOW_MILLIS` is non-zero on pu
 - **An unconfigured Jackson 3 `JsonMapper`/Hibernate's auto-detected `Jackson3JsonFormatMapper` FAILS
   on an unrecognized JSON property by default** (`UnrecognizedPropertyException`) — it does not
   silently ignore one, despite Jackson 2's community reputation for exactly that. Hit for real, not
-  hypothetically: pre-W7.2 `cv_profiles.tracking` rows store a full 10-field `TrackingConfig` object,
-  and `V36__cv_profile_patch.sql`/wave W7.2 retypes the column's Java side to the narrower 5-field
+  hypothetically: pre-`V36` `cv_profiles.tracking` rows store a full 10-field `TrackingConfig` object,
+  and `V36__cv_profile_patch.sql` retypes the column's Java side to the narrower 5-field
   `TrackingKnobPatch` — every pre-existing row's extra keys (`lock` etc.) then failed to deserialize.
   Fixed with a Jackson mix-in (`config.TrackingKnobPatchJsonMixin`, `@JsonIgnoreProperties(ignoreUnknown
   = true)`, package-private — `domain.model.TrackingKnobPatch` itself stays framework-free) registered
@@ -483,10 +508,10 @@ buffered samples per open usage; `DEFAULT_BATCH_WINDOW_MILLIS` is non-zero on pu
 
 ## Status
 
-Fully implements every repository port the platform currently defines (32 `Jpa*Repository`/`Jpa*Store`
-classes; see API surface) against a schema migrated through `V34` (`V34__spring_session.sql`, wave B5 —
-Spring Session JDBC's own schema, the one migration in this ledger with no domain entity behind it).
-Wired into vision-app unconditionally via `PersistenceWiringConfiguration` — Postgres is the only store.
+Fully implements every repository port the platform currently defines (33 `Jpa*Repository`/
+`Jpa*Store` classes; see API surface) against a schema migrated through `V36`
+(`V36__cv_profile_patch.sql`). Wired into vision-app unconditionally via
+`PersistenceWiringConfiguration` — Postgres is the only store.
 
 Open items, all deliberate rather than oversights:
 - Connection pooling and telemetry write batching both exist but are constructor-argument opt-ins
@@ -498,137 +523,9 @@ Open items, all deliberate rather than oversights:
 - `DatasetExportPort`'s old filesystem-export implementation is gone; dataset delivery to the
   training host now rides a gRPC upload (`cv/grpc`'s `GrpcDatasetUploadPort`), not this module.
 
-**WAREHOUSE-UX wave W8** added two new query methods against the existing `V28` schema — no new
-migration, since `maintenance_records`/`asset_usages` already carried every column needed
-(`closed_at`/`opened_at`, `asset_id`/`started_at`/`ended_at`). `PostgresDockerIntegrationTest` gained
-a `MaintenanceRepositoryTests` nested class (previously untested against real Postgres) plus three
-new `AssetUsageRepositoryTests` cases for `totalFlightSecondsByAsset` (closed-usage exact duration,
-open-usage running-until-now, absent-asset no-entry).
-
-**CV-SETTINGS wave W3** added `V29`/`V30` and their three adapters (`JpaCvProfileRepository`,
-`JpaCvModelRepository`, `JpaTrainingRunRepository`) implementing the perception/learning domain ports
-committed by W1/W2. Two deliberate deviations from CV-SETTINGS-PLAN.md §5.3's literal column list, both
-flagged in-line in the migration files themselves: `cv_profiles.model_id`/`model_version` (split from
-one `model` column — `ModelRef` requires both non-blank) and `cv_profiles.event_rule` (a column §5.3
-omitted entirely; without it a `CvProfile` could not round-trip). `PostgresDockerIntegrationTest`
-gained three nested classes (`CvProfileRepositoryTests` 11 cases, `CvModelRepositoryTests` 6,
-`TrainingRunRepositoryTests` 4) plus two top-level migration-verification tests —
-`v29MigrationSeedsFourBuiltInCvProfilesWithZeroBindings` reads the four seeded rows back through the
-real adapter (not raw SQL) and asserts their `tracking`/`eventRule` jsonb decodes byte-identical to
-`TrackingConfig.defaults()`/`EventRuleConfig.defaults()`, and that each ships with zero bindings;
-`v30MigrationCreatesTheCvModelRegistryTablesOnTopOfV1ThroughV29` proves the composite PK and every
-nullable provenance/metrics column via `information_schema`. 237 → 260 tests (Maven's own summary
-line); `BUILD SUCCESS`, Docker ran (not skipped). See CV-SETTINGS-CONTEXT.md's W3→W5 handoff for the
-adapter bean names and the four fixed built-in profile UUIDs vision-app's wiring needs.
-
-**ZERO-CONFIG-ONBOARDING wave Z2c done.** New `V31__discovery_inbox.sql` + `DiscoveryCandidateEntity`/
-`mapper.DiscoveryCandidateMapper`/`repository.JpaDiscoveryCandidateRepository` implementing
-`warehouse`'s `DiscoveryCandidateRepositoryPort` (built by an earlier, disjoint domain/application
-wave in this same Z2c task — this module's write scope was persistence only). `PostgresDockerIntegrationTest`
-gained one `DiscoveryCandidateRepositoryTests` nested class (7 cases: empty-lookup by id and by
-identity key, a full stream round-trip, a no-stream round-trip proving the trio of stream columns is
-genuinely absent rather than empty-string, the identity-key upsert path preserving the row's id across
-a re-report, `DISMISSED`/`REGISTERED` status round-tripping, and newest-first ordering). 260 → 267
-tests (Maven's own summary line); `BUILD SUCCESS`, Docker ran (not skipped — Testcontainers started a
-real `postgres:16`, Flyway migrated through `V31`, every nested class in the table above executed).
-
-**ASSET-FLOWS wave BK4 (D1p) done.** `AssetUsageEntity#pilotId`/`AssetUsageMapper` now map the
-`pilot_id` column `V28__asset_inventory.sql` added schema-only, closing `PLATFORM-AUDIT-2026-08-21.md`
-R1 gap #4/T4 ("every flight record is anonymous") on the persistence side. **No new migration** —
-confirmed against the ground-truth Flyway slot ledger mid-wave (master's next free slot is `V33`,
-not `V31`/`V32` as this wave's original brief assumed); moot for this wave regardless, since `V28`
-already carries the column and nothing here needed a schema change. `PostgresDockerIntegrationTest`
-gained two new `AssetUsageRepositoryTests` cases (`savedUsageWithAKnownPilotRoundTripsExactly`,
-`savedUsageWithNoPilotRoundTripsAsNull`). 267 → 269 tests (Maven's own summary line); `BUILD SUCCESS`,
-Docker ran (not skipped — Testcontainers started a real `postgres:16`).
-
-**COMMAND-MAP-FLOW-PLAN.md B1 (D1 fix)** added `JpaTelemetryRepository#findLatestByUsage` — the
-`/command` fleet map polls `GET /api/usages/{usageId}/telemetry` and treated the last element of
-`findByUsage`'s earliest-first window as "latest position", so the map froze once a flight passed
-`limit` samples. Additive only: `findByUsage`/`DefaultReplayService` untouched, `TelemetryRepositoryPort`
-gained one method, `AssetController#telemetry` now calls it instead — same path, same param, same
-DTO, same ascending order, same `200 []` on an unknown usage. `PostgresDockerIntegrationTest`'s
-`TelemetryRepositoryTests` gained three cases (latest-window selection, ascending order preserved,
-empty case). 271 → 274 tests (Maven's own summary line); `BUILD SUCCESS`, Docker ran (not skipped).
-
-**AUTH-ROLES wave B3 done.** `V33__assignment_roles.sql` adds `pilot_assignments.role` and
-`users.must_change_password` (both additive, defaulted at the column level, no trigger changes).
-`UserEntity`/`UserMapper` widened to round-trip `mustChangePassword`; `AssignmentEntity` gained
-`role`, and `JpaAssignmentRepository` gained `roleFor(UserId, AssetId)` (most-recently-assigned seat)
-and `assignmentsForAsset(AssetId)` (full roster with seats) — `AssignmentRepositoryPort`'s two new
-read methods behind `GET /api/assets/{id}/pilots` and `GET /api/me/assignments`'s seat enrichment
-(vision-api, same wave). `PostgresDockerIntegrationTest` gained two new `AssignmentRepositoryTests`
-cases (`roleForReflectsTheMostRecentlyAssignedSeat`, `assignmentsForAssetListsEveryLinkWithItsSeat`)
-plus mechanical fixes to every pre-existing `new User(...)`/`repository.assign(...)` call site for
-the two widened constructors. 274 → 276 tests (Maven's own summary line); `BUILD SUCCESS`, Docker ran
-(not skipped — Testcontainers started a real `postgres:16`, Flyway migrated through `V33`).
-
-**AUTH-ROLES wave B5 done.** New `V34__spring_session.sql` (byte-for-byte official Spring Session JDBC
-4.1.0 Postgres schema) so sessions survive an app restart — see the ledger row and the Bootstrap
-section above for the shared-pool seam this wave added (`buildDataSource` now public, new
-`start(DataSource, boolean)` overload). `PostgresDockerIntegrationTest`'s `EXCLUDED_TABLES` gained
-`spring_session`/`spring_session_attributes` (this table's own infrastructure, same classification as
-`flyway_schema_history`) — added proactively, before the live-schema `DbAuditLogCoverageTests` test
-would otherwise have failed against the two new unclassified tables. No entity, no mapper, no
-repository added — Spring Session's own `JdbcIndexedSessionRepository` (vision-app) reads/writes these
-tables directly; this module only supplies the schema and the shared connection pool.
-
-`./mvnw -B -pl storage/persistence test` — **276** tests, unchanged from the AUTH-ROLES B3 baseline (no
-new test method this wave — the migration and the `EXCLUDED_TABLES` fix are exercised by the
-pre-existing `DbAuditLogCoverageTests` methods, both reconfirmed green against the live schema,
-including `everyPublicBaseTableIsEitherAuditedOrExplicitlyExcluded` and
-`everyAuditedTableCarriesExactlyTheAuditTriggerAndNoExcludedTableDoes`). `BUILD SUCCESS`, Docker ran
-(not skipped — Testcontainers started a real `postgres:16`, Flyway migrated through `V34`, all 230
-nested-class test methods inside `PostgresDockerIntegrationTest` executed and passed).
-
-**ALWAYS-ON-FLOW wave B3 done.** New `V35__event_history.sql` + `EventHistoryEntity`/
-`mapper.EventHistoryMapper`/`repository.JpaEventHistory` implementing `vision-platform`'s new
-`EventHistoryPort` — the durable home for platform `Event`s the notification bell/`/manage/system`
-never had (own API-surface/ledger/retention entries above). `PostgresDockerIntegrationTest` gained
-one `EventHistoryRepositoryTests` nested class (6 cases: round-trip including a null `streamId`,
-round-trip with a real `StreamId`, `findRecent` newest-first across every type, `findSince`'s cursor
-inclusivity, `findSince` with a null cursor applying no lower bound, and the table-wide retention
-prune) plus `event_history` added to `EXCLUDED_TABLES`. One test-design defect found and fixed during
-this wave, not a production defect: the first draft of three of those six cases assumed the table held
-only that test's own rows (asserting on `findRecent`'s full result / its first element / an exact
-`List.of(...)` equality) — wrong, since `entityManagerFactory` and therefore `event_history` are
-shared static state across every `@Nested` class and test method in this one file, exactly the
-constraint `AuditTrailRepositoryTests` already documents and defends against. Fixed by filtering
-`findRecent`/`findSince` results down to each test's own inserted ids before asserting (the established
-precedent) and, for the retention-prune case specifically, using timestamps far enough in the future
-that this test's own rows are unambiguously the newest in the *entire* shared table regardless of
-execution order — a per-key cap could tolerate sharing the table loosely, but a genuinely table-wide
-cap cannot.
-
-`./mvnw -B -pl storage/persistence,station/vision-api,station/vision-app test -DskipWeb` — this
-module: **283** tests (277 immediately before this wave, +6), `BUILD SUCCESS`, Docker ran (not skipped
-— real Testcontainers `postgres:16`, Flyway migrated through `V35`). Full three-module command green;
-see `station/vision-app/MODULE.md`'s own wave B3 section for the cross-module report (wiring,
-retention/scoping reasoning, per-module before/after counts).
-
-See `docs/plans/README.md` for the plan-status authority behind the phase references throughout this
-file (MVP2, POSTGRES-ONLY-CONTEXT, SCALE-100, FIXED-CAMERA-GEO, VISUAL-GEO-V2, DRONE-ONBOARDING,
+See `docs/plans/README.md` for the plan-status authority behind every plan-doc citation in this file
+(MVP2, POSTGRES-ONLY-CONTEXT, SCALE-100, FIXED-CAMERA-GEO, VISUAL-GEO-V2, DRONE-ONBOARDING,
 CONTROLLER-SETUP-CONTEXT, ARCHITECTURE-AUDIT-2026-08-26, CV-SETTINGS, ZERO-CONFIG-ONBOARDING-CONTEXT,
-ASSET-FLOWS, AUTH-ROLES, ALWAYS-ON-FLOW).
+ASSET-FLOWS, AUTH-ROLES, ALWAYS-ON-FLOW, CV-ORCHESTRATION).
 
-`docs/plans/active/CV-ORCHESTRATION-PLAN.md` wave W2.1 (mechanical, folded into this module's file
-scope by `DetectionResult`'s domain constructor growing a 9th component, `Optional<FrameLedger>
-ledger`) touched exactly one call site here: `DetectionResultMapper#toDomain` now passes
-`Optional.empty()` as the trailing argument — this mapper never round-trips a ledger (the warm trace
-tier is never persisted, by design, `contexts/vision-perception/MODULE.md`'s own `FrameLedger`
-bullet), so `Optional.empty()` is the permanently-correct value here, not a placeholder awaiting a
-later wave. `PostgresDockerIntegrationTest` needed the same mechanical update at its own
-`DetectionResult` construction sites. No schema change, no new migration, no behavior change — noted
-here only because CLAUDE.md's module-docs rule calls for every touched module's doc to reflect its
-own change, however small.
-
-**CV-ORCHESTRATION wave W7.2 done** (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.7, decision E22 —
-"a profile is a patch"). `V36__cv_profile_patch.sql` (see the migration ledger above) + `CvProfileEntity`
-widened to mirror `contexts/vision-perception`'s W7.0 domain rewrite: every knob but identity/timestamps
-now nullable, a new nullable `intent` column, `tracking` retyped `TrackingKnobPatch` (5 fields, not the
-10-field `TrackingConfig` it held before). One real defect found and fixed, not just a mechanical
-follow-through: pre-existing `tracking` jsonb rows failed to deserialize against the narrower type
-(`UnrecognizedPropertyException` — see the new Gotchas entry above for the fix, a scoped Jackson
-mix-in registered in `PersistenceUnit#start`). `./mvnw -B -pl storage/persistence -am test -DskipWeb` —
-**286** tests, `BUILD SUCCESS`, Docker ran (not skipped — real `postgres:16`, Flyway migrated through
-`V36`).
+Wave-by-wave history: [`MODULE-HISTORY.md`](MODULE-HISTORY.md).

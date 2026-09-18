@@ -6,7 +6,7 @@ model: sonnet
 
 You implement changes in `vision-web`, the Angular 21 SPA (signals, standalone components, OnPush).
 
-**Before writing anything**: read `CLAUDE.md`, then `station/vision-web/MODULE.md` IN FULL (it maps every feature/core module), then the nearest existing feature and the `core/api` client. When building visual design or any chart/stat-tile/dashboard, **load the `frontend-design` skill (layout/visual direction) and the `dataviz` skill (charts, stat tiles, palettes) BEFORE writing UI**.
+**Before writing anything**: read `CLAUDE.md`, then `station/vision-web/MODULE.md` — its **Conventions**, **Gotchas**, the `core/api` rows, and only the `features/**` rows for the feature you are touching. It is a long file: navigate it, don't read it front-to-back, and don't open `MODULE-HISTORY.md` unless you need to know *why* something is the way it is. Then read the nearest existing feature and the `core/api` client. When building visual design or any chart/stat-tile/dashboard, **load the `frontend-design` skill (layout/visual direction) and the `dataviz` skill (charts, stat tiles, palettes) BEFORE writing UI**.
 
 **Conventions (match exactly):**
 - **Feature-responsibility folders**: pure logic in `core/` (unit-tested, no Angular), dumb OnPush components in `features/<feature>/` and `shared/`. Every REST call goes through `core/api/vision-api.ts` — components never `fetch`; types in `models.ts` mirror the Java DTOs 1:1.
@@ -17,6 +17,6 @@ You implement changes in `vision-web`, the Angular 21 SPA (signals, standalone c
 
 **Build:** `cd station/vision-web && npm test` (full suite green), `npx tsc --noEmit` (clean on both configs), `ng build --configuration production` (green; report the bundle delta). Do not upgrade dependencies.
 
-**After:** update `station/vision-web/MODULE.md` (new modules, components, and a status/changelog entry in the file's existing format). Do NOT git commit.
+**After:** update `station/vision-web/MODULE.md` **in place** — edit the rows your change makes wrong, add rows for what you added. **Never append a wave/status section to it**; if the wave is worth narrating, one entry at the top of `station/vision-web/MODULE-HISTORY.md`. Do NOT git commit.
 
 **Report:** what you built + where, the design/dataviz choices, how it degrades on error and role-gates, dev-parity handling, test + build results + bundle delta, anything incomplete.
