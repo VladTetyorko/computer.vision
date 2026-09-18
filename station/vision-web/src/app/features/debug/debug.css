@@ -1,13 +1,73 @@
-/* Method's column is `auto`, not a shared `fr`, now that the select itself is sized to its content
-   via `.field-sm` (`styles.css`, docs/plans/done/NAV-IA-REDESIGN-PLAN.md Wave 2 task 3) rather than stretching
-   to fill whatever share of the row a `fr` track handed it — this is what actually shrinks it from
-   the ~165px a 6-value enum used to cost (docs/extracts/design/18-debug.md's own finding). */
-.console-form {
+/* ---- Console: rail + request/response stack (docs/plans/active/fly-debug-redesign/PLAN.md §1.1) --- */
+
+.console {
     display: grid;
-    grid-template-columns: 1.4fr auto 2fr;
+    grid-template-columns: 280px 1fr;
+    gap: var(--space-16);
+    align-items: start;
+}
+
+.stack {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-16);
+    min-width: 0;
+}
+
+/* ---- Request bar (§1.2) — one combined method+path control, Send at the right -------------- */
+
+.request-bar {
+    display: flex;
+    flex-wrap: wrap;
     gap: var(--space-8);
-    align-items: end;
-    margin-bottom: var(--space-16);
+    align-items: stretch;
+}
+
+/* The "one visual control, one focus ring" bar: method + path share a single bordered group,
+   each inner control loses its own border/background so the whole group reads as one field. */
+.method-path {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    background: var(--panel-raised);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.method-path:focus-within {
+    border-color: var(--color-info);
+    box-shadow: 0 0 0 2px var(--color-info-soft);
+}
+
+.method-select {
+    flex: none;
+    width: auto;
+    border: 0;
+    border-right: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+    background: transparent;
+}
+
+.method-select:hover,
+.method-select:focus {
+    border-right-color: var(--border-strong);
+    box-shadow: none;
+    outline: none;
+}
+
+.path-input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+    background: transparent;
+}
+
+.path-input:hover,
+.path-input:focus {
+    box-shadow: none;
+    outline: none;
 }
 
 .body-editor {
@@ -15,19 +75,27 @@
     min-height: 6rem;
 }
 
+/* ---- Response pane (§1.3) ------------------------------------------------------------------ */
+
 .response {
-    margin-top: var(--space-16);
+    margin-top: var(--space-8);
     padding-top: var(--space-16);
     border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
 }
 
 .response-status {
-    margin-bottom: var(--space-8);
+    flex-wrap: wrap;
+}
+
+.copy-curl {
+    margin-left: auto;
 }
 
 .headers {
     flex-wrap: wrap;
-    margin-bottom: var(--space-8);
 }
 
 .response-body {
@@ -39,34 +107,17 @@
     overflow: auto;
     white-space: pre-wrap;
     word-break: break-word;
+    margin: 0;
 }
 
-.history {
-    margin-top: var(--space-16);
-    padding-top: var(--space-16);
-    border-top: 1px solid var(--border);
-}
-
-.history h3 {
-    color: var(--text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    font-size: 0.72rem;
-    margin-bottom: var(--space-8);
-}
-
-.history-row {
-    cursor: pointer;
-}
-
-.history-row:hover td {
-    background: var(--panel-hover);
-}
-
-/* docs/plans/done/VISUAL-REFRESH-PLAN.md F5 rule 2 — the ms column is a bare number, right-aligned. */
-th.col-num,
-td.col-num {
-    text-align: right;
+/* Empty body — a faint dash, never a blank well (§1.3). */
+.response-empty {
+    margin: 0;
+    padding: var(--space-16);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    text-align: center;
 }
 
 .health-list {
@@ -93,8 +144,8 @@ details {
 }
 
 /* The secondary Actuator probe (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.3) — separated from the
-   primary `GET /api/system/status` card content above it the same way `.response`/`.history` mark
-   their own section boundary. */
+   primary `GET /api/system/status` card content above it the same way `.response` marks its own
+   section boundary. */
 .actuator-probe {
     margin-top: var(--space-16);
     padding-top: var(--space-16);
@@ -119,8 +170,9 @@ summary {
 }
 
 @media (max-width: 900px) {
-    /* --bp-md */
-    .console-form {
+    /* --bp-md — the rail collapses above the stack (§1.1); it stays the same rich listbox, just
+       reflowed to a single column rather than swapped for a `<select>`. */
+    .console {
         grid-template-columns: 1fr;
     }
 }

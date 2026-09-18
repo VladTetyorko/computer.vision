@@ -1,0 +1,90 @@
+:host {
+    display: block;
+}
+
+.rail {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-16);
+    max-height: 30rem;
+    overflow-y: auto;
+    background: var(--panel-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-8);
+}
+
+/* Structural-label register (frontend-style §8) — matches this page's own former `.history h3`
+   recipe exactly, now shared by both group headings. */
+.rail-group-label {
+    margin: 0 0 var(--space-4);
+    padding: 0 var(--space-8);
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 0.72rem;
+    font-weight: 600;
+}
+
+.rail-option {
+    display: flex;
+    align-items: center;
+    gap: var(--space-8);
+    min-height: 2.25rem;
+    padding: var(--space-4) var(--space-8);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+}
+
+.rail-option:hover {
+    background: var(--panel-hover);
+}
+
+/* Keyboard/mouse highlight — a plain hover-tint, deliberately distinct from `.selected` below
+   (frontend-style §4's one selection language stays reserved for "loaded into the request bar
+   right now", not mere cursor position). */
+.rail-option.active {
+    background: var(--panel-hover);
+}
+
+/* The catalog's own persistent selection — this app's one selection language, never used on a
+   history row (§1.1: history has no persistent "selected" state, only a hover/active highlight). */
+.rail-option.selected {
+    background: var(--color-info-soft);
+    box-shadow: inset 2px 0 0 0 var(--color-info);
+}
+
+.rail-empty {
+    padding: 0 var(--space-8);
+    font-size: 0.8rem;
+}
+
+.history-code {
+    flex: 1;
+    min-width: 0;
+}
+
+.history-status {
+    color: var(--text-muted);
+    flex: none;
+}
+
+/* Hover/focus-revealed per §1.1 — the row itself never holds DOM focus (activedescendant owns
+   that on the rail container), so "focus-revealed" means `:focus-within` from the button's own
+   native focus (reachable by Tab) alongside the row's `:hover`/`.active` highlight. */
+.send-again {
+    opacity: 0;
+    flex: none;
+}
+
+.rail-option:hover .send-again,
+.rail-option.active .send-again,
+.rail-option:focus-within .send-again {
+    opacity: 1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    .send-again {
+        transition: opacity 0.15s ease;
+    }
+}
