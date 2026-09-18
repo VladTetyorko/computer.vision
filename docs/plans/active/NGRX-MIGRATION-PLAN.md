@@ -4,7 +4,7 @@
 final result I need a well structured ngrx application … with all the reducers, actions, effects and
 so on."*
 
-**State:** N0 foundation landing. Waves N1–N9 open.
+**State:** N0 **BUILT** 2026-09-18 on `feat/ngrx-migration` (`93c64ad6`), unmerged. Waves N1–N9 open.
 
 ---
 
@@ -174,5 +174,12 @@ Promise-returning method is added to `VisionApi` after N0 — new endpoints land
 
 | Wave | State |
 |---|---|
-| N0 | in progress |
+| N0 | **BUILT** 2026-09-18, `93c64ad6` on `feat/ngrx-migration` — engine (`core/state/`), pilot slices `theme`+`sidebar`, facades, guard, budgets. 220/220 files · 4 285/4 285 tests green; production build exit 0. Cost measured: **+45.01 kB raw / +13.31 kB transfer**, budget 390/445 → 500/550 kB |
 | N1–N9 | open |
+
+**Carry into N1.** Two facts N0 established that every later wave depends on: (a) a spec that needs
+real state calls `provideAppState()` — never a hand-rolled `provideStore` — so adding a slice there is
+part of the wave, not a follow-up; (b) the guard is now a real gate, and an effect *may* inject
+`Store` while a component may not. And one to re-check, not assume: the bundle only grows from here
+until a wave **deletes** its legacy store, so re-measure against the previous wave's tip rather than
+reading the number above.
