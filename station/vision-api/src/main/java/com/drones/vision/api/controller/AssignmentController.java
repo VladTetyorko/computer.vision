@@ -9,6 +9,7 @@ import com.drones.vision.identity.domain.model.Assignment;
 import com.drones.vision.identity.domain.model.AssignmentRole;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.identity.application.AssignmentService;
+import com.drones.vision.identity.application.AuthService;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.identity.domain.port.AssignmentRepositoryPort;
@@ -35,9 +36,11 @@ import com.drones.vision.api.security.CurrentUser;
  * roster read), {@link AssignmentRepositoryPort} (used read-only for {@code assignmentsForAsset}/
  * {@code roleFor} — the same precedent {@link AssetController} sets for reading a driven port
  * directly when no service method exposes exactly the read a controller needs), {@link AssetService}
- * (to 404 a pilots-list request for an asset outside the caller's scope), and {@link CurrentUser}
- * (the granter's authority, id, and the pilot's own id — {@code assign}/{@code unassign} pass {@code
- * currentUser.authority()}, docs/plans/active/AUTH-ROLES-PLAN.md wave B6). Four collaborators, under
+ * (to 404 a pilots-list request for an asset outside the caller's scope), {@link AuthService} (the
+ * by-id name lookup behind {@link #pilots}'s {@code username}/{@code displayName} — see that
+ * method's javadoc for why the name is resolved server-side), and {@link CurrentUser} (the granter's
+ * authority, id, and the pilot's own id — {@code assign}/{@code unassign} pass {@code
+ * currentUser.authority()}, docs/plans/active/AUTH-ROLES-PLAN.md wave B6). Five collaborators, at
  * the ceiling.
  *
  * <p><strong>Seat role</strong> (docs/plans/active/AUTH-ROLES-PLAN.md D6, wave B3): {@code PUT
@@ -62,15 +65,17 @@ public class AssignmentController {
     private final AssignmentService assignmentService;
     private final AssignmentRepositoryPort assignmentRepository;
     private final AssetService assetService;
+    private final AuthService authService;
     private final CurrentUser currentUser;
 
     public AssignmentController(AssignmentService assignmentService,
                                 AssignmentRepositoryPort assignmentRepository,
-                                AssetService assetService, CurrentUser currentUser) {
+                                AssetService assetService, AuthService authService, CurrentUser currentUser) {
         this.assignmentService = Objects.requireNonNull(assignmentService, "assignmentService must not be null");
         this.assignmentRepository =
                 Objects.requireNonNull(assignmentRepository, "assignmentRepository must not be null");
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
+        this.authService = Objects.requireNonNull(authService, "authService must not be null");
         this.currentUser = Objects.requireNonNull(currentUser, "currentUser must not be null");
     }
 
@@ -105,8 +110,16 @@ public class AssignmentController {
     }
 
     /**
-     * Lists the pilots assigned to an asset, with each one's seat role. 404s if the asset is outside
-     * the caller's scope, so existence is not revealed — the same rule the scoped asset read follows.
+     * Lists the pilots assigned to an asset, with each one's seat role and name. 404s if the asset is
+     * outside the caller's scope, so existence is not revealed — the same rule the scoped asset read
+     * follows.
+     *
+     * <p>The names are resolved here, per row, by {@link AuthService#find(UserId)}
+     * (docs/plans/active/INVENTORY-REWORK-PLAN.md D3). They used to be the client's job, joined
+     * against {@code GET /api/users} — which answers an empty list for a pilot's {@code
+     * ASSIGNED_ASSETS} scope, so the caller who most needs to know who else is on the aircraft was
+     * the one guaranteed to see raw UUIDs. A by-id lookup on a person this row already names widens
+     * nothing: it cannot be used to enumerate anyone the caller could not already see here.
      *
      * @param assetId the asset, as a canonical UUID string
      * @return the assigned pilots
@@ -116,7 +129,7 @@ public class AssignmentController {
         AssetId id = AssetId.of(assetId);
         assetService.details(currentUser.scope(), id); // 404s an unknown or out-of-scope asset
         return assignmentRepository.assignmentsForAsset(id).stream()
-                .map(a -> PilotResponse.from(a.pilot(), a.role()))
+                .map(a -> PilotResponse.from(a.pilot(), a.role(), authService.find(a.pilot()).orElse(null)))
                 .toList();
     }
 

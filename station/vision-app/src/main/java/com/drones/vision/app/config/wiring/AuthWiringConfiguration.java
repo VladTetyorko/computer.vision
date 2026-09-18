@@ -6,6 +6,9 @@ import com.drones.vision.identity.domain.port.GroupRepositoryPort;
 import com.drones.vision.identity.domain.port.PasswordHasherPort;
 import com.drones.vision.identity.domain.port.UserRepositoryPort;
 import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.warehouse.application.custody.AssetCustodyService;
+import com.drones.vision.identity.application.handover.DefaultHandoverService;
+import com.drones.vision.identity.application.handover.HandoverService;
 import com.drones.vision.api.security.PrincipalResolver;
 import com.drones.vision.api.security.SessionAuthenticator;
 import com.drones.vision.app.security.BcryptPasswordHasher;
@@ -102,6 +105,23 @@ public class AuthWiringConfiguration {
     public AssignmentService assignmentService(AssignmentRepositoryPort assignmentRepositoryPort,
                                                AssetService assetService, AuditTrailPort auditTrailPort) {
         return new DefaultAssignmentService(assignmentRepositoryPort, assetService, auditTrailPort);
+    }
+
+    /**
+     * Hand-over: giving somebody an aircraft is one decision, so it writes both halves
+     * (docs/plans/active/INVENTORY-REWORK-PLAN.md D1) — custody, then the {@code PILOT} seat, with a
+     * compensating {@code returnToStock} if the seat write fails.
+     *
+     * <p>Wired here, in the identity configuration, because the composition is identity's: {@code
+     * vision-identity} already depends on {@code vision-warehouse} (never the reverse), which is what
+     * lets one service own both writes without either context learning about the other's flag. It is
+     * unconditional — the two services it composes are, and it adds no gate of its own; authorisation
+     * stays where it already was, inside {@link AssetCustodyService} and {@link AssignmentService}.
+     */
+    @Bean
+    public HandoverService handoverService(AssetCustodyService assetCustodyService,
+                                           AssignmentService assignmentService) {
+        return new DefaultHandoverService(assetCustodyService, assignmentService);
     }
 
     /** A user's own activity feed (docs/plans/done/U-SCOPE-PLAN.md, feature 7) — behind {@code GET /api/me/activity}. */

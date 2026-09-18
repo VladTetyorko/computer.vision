@@ -10,7 +10,9 @@ import com.drones.vision.warehouse.application.asset.AssetStatus;
 import com.drones.vision.warehouse.application.asset.AssetSummary;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.platform.Authority;
+import com.drones.vision.identity.application.AuthService;
 import com.drones.vision.identity.domain.model.Role;
+import com.drones.vision.identity.domain.model.User;
 import com.drones.vision.warehouse.application.device.DeviceRegistration;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.Custody;
@@ -83,6 +85,7 @@ class AssetControllerTest {
     private AssetImageRepositoryPort assetImageRepositoryPort;
     private VehicleProfileRepositoryPort vehicleProfileRepositoryPort;
     private AssetUsageRepositoryPort assetUsageRepositoryPort;
+    private AuthService authService;
     private AssetRowFacts assetRowFacts;
     private MockMvc mockMvc;
 
@@ -99,7 +102,9 @@ class AssetControllerTest {
         when(vehicleProfileRepositoryPort.findLatest(any())).thenReturn(Optional.empty());
         assetUsageRepositoryPort = mock(AssetUsageRepositoryPort.class);
         when(assetUsageRepositoryPort.totalFlightSecondsByAsset()).thenReturn(Map.of());
-        assetRowFacts = new AssetRowFacts(vehicleProfileRepositoryPort, assetUsageRepositoryPort);
+        authService = mock(AuthService.class);
+        when(authService.find(any())).thenReturn(Optional.empty());
+        assetRowFacts = new AssetRowFacts(vehicleProfileRepositoryPort, assetUsageRepositoryPort, authService);
 
         mockMvc = MockMvcBuilders
                 .standaloneSetup(new AssetController(assetService, currentUser,
@@ -501,6 +506,74 @@ class AssetControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].totalFlightSeconds").value(3600))
                 .andExpect(jsonPath("$[1].totalFlightSeconds").value(0));
+    }
+
+    /**
+     * docs/plans/active/INVENTORY-REWORK-PLAN.md §6 — the Links column reads {@code deviceCount} off
+     * the list row, so a 20-asset page stays one request instead of the 25 the per-row {@code GET
+     * /api/assets/{id}} count used to cost (CONTEXT §3, defect D).
+     */
+    @Test
+    void listCarriesDeviceCountSoNoClientNeedsAPerRowDetailFetch() throws Exception {
+        Asset twoDevices = asset(videoDevice(), videoDevice());
+        Asset oneDevice = asset(videoDevice());
+        when(assetService.assets(any(VisibilityScope.class), eq(false))).thenReturn(List.of(
+                new AssetSummary(twoDevices, "Drone", AssetStatus.OFFLINE, null, null, twoDevices.inventoryState(),
+                        twoDevices.identity(), twoDevices.custody()),
+                new AssetSummary(oneDevice, "Drone", AssetStatus.OFFLINE, null, null, oneDevice.inventoryState(),
+                        oneDevice.identity(), oneDevice.custody())));
+
+        mockMvc.perform(get("/api/assets"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].deviceCount").value(2))
+                .andExpect(jsonPath("$[1].deviceCount").value(1));
+    }
+
+    /**
+     * D3: the custodian's name is resolved server-side by id. The client-side join it replaces read
+     * {@code GET /api/users}, which is empty for a pilot's scope — the caller who most needs the name.
+     */
+    @Test
+    void listResolvesTheCustodianNameByIdAndOmitsItForAnInStockAsset() throws Exception {
+        UserId custodian = UserId.random();
+        Asset held = issuedTo(custodian);
+        Asset inStock = asset(videoDevice());
+        when(authService.find(custodian)).thenReturn(Optional.of(
+                new User(custodian, "anna", "Anna Kovalenko", "anna@vision.local", "hash", true)));
+        when(assetService.assets(any(VisibilityScope.class), eq(false))).thenReturn(List.of(
+                new AssetSummary(held, "Drone", AssetStatus.OFFLINE, null, null, held.inventoryState(),
+                        held.identity(), held.custody()),
+                new AssetSummary(inStock, "Drone", AssetStatus.OFFLINE, null, null, inStock.inventoryState(),
+                        inStock.identity(), inStock.custody())));
+
+        mockMvc.perform(get("/api/assets"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].custody.custodianId").value(custodian.value().toString()))
+                .andExpect(jsonPath("$[0].custody.custodianName").value("Anna Kovalenko"))
+                .andExpect(jsonPath("$[1].custody.custodianId").doesNotExist())
+                .andExpect(jsonPath("$[1].custody.custodianName").doesNotExist());
+    }
+
+    @Test
+    void listOmitsTheCustodianNameWhenTheUserRecordNoLongerResolves() throws Exception {
+        UserId gone = UserId.random();
+        Asset held = issuedTo(gone);
+        when(authService.find(gone)).thenReturn(Optional.empty());
+        when(assetService.assets(any(VisibilityScope.class), eq(false))).thenReturn(List.of(
+                new AssetSummary(held, "Drone", AssetStatus.OFFLINE, null, null, held.inventoryState(),
+                        held.identity(), held.custody())));
+
+        mockMvc.perform(get("/api/assets"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].custody.custodianId").value(gone.value().toString()))
+                .andExpect(jsonPath("$[0].custody.custodianName").doesNotExist());
+    }
+
+    /** One video device, currently held by {@code custodian}. */
+    private Asset issuedTo(UserId custodian) {
+        Asset registered = asset(videoDevice());
+        return registered.withInventory(new Custody(custodian, "Van 3", Instant.now()),
+                registered.inventoryState(), Instant.now());
     }
 
     // ---- PATCH /api/assets/{id} ----

@@ -2,6 +2,7 @@ package com.drones.vision.api.controller;
 
 import com.drones.vision.api.exception.ApiExceptionHandler;
 import com.drones.vision.api.security.CurrentUser;
+import com.drones.vision.identity.application.handover.HandoverService;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.CategoryId;
 import com.drones.vision.kernel.DeviceId;
@@ -38,6 +39,7 @@ import java.util.Set;
 import static org.hamcrest.Matchers.hasSize;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -48,6 +50,7 @@ class AssetInventoryControllerTest {
 
     private static final CategoryId DRONE = new CategoryId("drone");
 
+    private HandoverService handoverService;
     private AssetCustodyService assetCustodyService;
     private MaintenanceService maintenanceService;
     private AssetService assetService;
@@ -58,12 +61,13 @@ class AssetInventoryControllerTest {
 
     @BeforeEach
     void setUp() {
+        handoverService = mock(HandoverService.class);
         assetCustodyService = mock(AssetCustodyService.class);
         maintenanceService = mock(MaintenanceService.class);
         assetService = mock(AssetService.class);
         assetImageRepositoryPort = mock(AssetImageRepositoryPort.class);
         currentUser = new CurrentUser(new Ownership(UserId.random(), GroupId.random()));
-        mockMvc = MockMvcBuilders.standaloneSetup(new AssetInventoryController(assetCustodyService,
+        mockMvc = MockMvcBuilders.standaloneSetup(new AssetInventoryController(handoverService, assetCustodyService,
                         maintenanceService, assetService, assetImageRepositoryPort, currentUser))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
@@ -81,9 +85,9 @@ class AssetInventoryControllerTest {
     }
 
     @Test
-    void custodyIssueCallsTheServiceAndReturnsAssetDetails() throws Exception {
+    void custodyIssueGoesThroughHandoverSoTheCustodianAlsoGetsTheSeat() throws Exception {
         UserId custodian = UserId.random();
-        when(assetCustodyService.issue(asset.id(), custodian, "Van 3", currentUser.userId(), currentUser.authority()))
+        when(handoverService.issue(asset.id(), custodian, "Van 3", currentUser.userId(), currentUser.authority()))
                 .thenReturn(asset);
 
         mockMvc.perform(post("/api/assets/{id}/custody", asset.id().value())
@@ -92,17 +96,55 @@ class AssetInventoryControllerTest {
                                 + "\",\"location\":\"Van 3\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.assetId").value(asset.id().value().toString()));
+
+        verify(handoverService).issue(asset.id(), custodian, "Van 3", currentUser.userId(), currentUser.authority());
+        verifyNoInteractions(assetCustodyService);
+    }
+
+    /**
+     * A failed hand-over surfaces as the failure, not as a half-done issue: {@link HandoverService}
+     * has already undone the custody write by the time the exception reaches here, and {@link
+     * ApiExceptionHandler} maps it (409 for {@link IllegalStateException}) exactly as a failed plain
+     * custody write always did.
+     */
+    @Test
+    void custodyIssueSurfacesAHandoverFailureRatherThanAHalfState() throws Exception {
+        UserId custodian = UserId.random();
+        when(handoverService.issue(asset.id(), custodian, null, currentUser.userId(), currentUser.authority()))
+                .thenThrow(new IllegalStateException("assignment write failed"));
+
+        mockMvc.perform(post("/api/assets/{id}/custody", asset.id().value())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"action\":\"issue\",\"custodianId\":\"" + custodian.value() + "\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value("CONFLICT"));
     }
 
     @Test
-    void custodyReturnCallsTheService() throws Exception {
-        when(assetCustodyService.returnToStock(asset.id(), currentUser.userId(), currentUser.authority()))
+    void custodyReturnGoesThroughHandoverAndKeepsTheAssignment() throws Exception {
+        when(handoverService.returnToStock(asset.id(), currentUser.userId(), currentUser.authority()))
                 .thenReturn(asset);
 
         mockMvc.perform(post("/api/assets/{id}/custody", asset.id().value())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"action\":\"return\"}"))
                 .andExpect(status().isOk());
+
+        verify(handoverService).returnToStock(asset.id(), currentUser.userId(), currentUser.authority());
+        verifyNoInteractions(assetCustodyService);
+    }
+
+    @Test
+    void groundingStillGoesStraightToCustodyNotHandover() throws Exception {
+        when(assetCustodyService.ground(asset.id(), MaintenanceKind.GROUNDING, "Bent arm",
+                currentUser.userId(), currentUser.authority())).thenReturn(asset);
+
+        mockMvc.perform(post("/api/assets/{id}/inventory", asset.id().value())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"action\":\"ground\",\"kind\":\"grounding\",\"summary\":\"Bent arm\"}"))
+                .andExpect(status().isOk());
+
+        verifyNoInteractions(handoverService);
     }
 
     @Test
@@ -187,7 +229,7 @@ class AssetInventoryControllerTest {
 
     @Test
     void custodyPropagatesAccessDeniedAsForbidden() throws Exception {
-        when(assetCustodyService.returnToStock(asset.id(), currentUser.userId(), currentUser.authority()))
+        when(handoverService.returnToStock(asset.id(), currentUser.userId(), currentUser.authority()))
                 .thenThrow(new AccessDeniedException("DENIED:out of scope"));
 
         mockMvc.perform(post("/api/assets/{id}/custody", asset.id().value())

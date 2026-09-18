@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import type { AssetDetails, UserSummary } from '../../core/api/models';
+import type { AssetDetails, AssetSummary, MaintenanceRecord, ReadinessRow, UserSummary } from '../../core/api/models';
 import {
   buildVehicleRows,
   custodianFilterOptions,
+  custodianLabel,
   filterVehicleRowsByArchived,
   filterVehicleRowsByCategory,
   filterVehicleRowsByConnected,
@@ -12,14 +13,17 @@ import {
   filterVehicleRowsByRetired,
   findVehicleRowById,
   firmwareLabel,
-  searchVehicleRowsByName,
+  custodySinceLabel,
+  linksLabel,
+  openMaintenanceSummary,
+  searchVehicleRows,
   sortVehicleRowsByTriage,
   vehicleLastFlownLabel,
-  vehicleRowActions,
+  type BuildVehicleRowsInput,
   type VehicleRow,
 } from './vehicles-logic';
 
-function asset(partial: Partial<AssetDetails> = {}): AssetDetails {
+function asset(partial: Partial<AssetSummary> = {}): AssetSummary {
   return {
     assetId: 'a-0',
     displayName: 'Asset',
@@ -28,10 +32,28 @@ function asset(partial: Partial<AssetDetails> = {}): AssetDetails {
     owner: 'org',
     status: 'OFFLINE',
     attributes: {},
-    devices: [],
-    recentUsages: [],
     ...partial,
   };
+}
+
+function details(partial: Partial<AssetDetails> = {}): AssetDetails {
+  return { ...asset(), devices: [], recentUsages: [], ...partial };
+}
+
+function readinessRow(partial: Partial<ReadinessRow> = {}): ReadinessRow {
+  return { assetId: 'a-1', displayName: 'Asset', verdict: 'GO', features: {}, ...partial };
+}
+
+/** `buildVehicleRows` takes one input record — this fills in the joins a given test doesn't care about. */
+function rowsFor(assets: readonly AssetSummary[], partial: Partial<BuildVehicleRowsInput> = {}): readonly VehicleRow[] {
+  return buildVehicleRows({
+    assets,
+    users: [],
+    readinessByAssetId: new Map(),
+    detailsByAssetId: new Map(),
+    nowMs: Date.now(),
+    ...partial,
+  });
 }
 
 function user(partial: Partial<UserSummary> = {}): UserSummary {
@@ -51,8 +73,12 @@ function row(partial: Partial<VehicleRow> = {}): VehicleRow {
     asset: asset(),
     lifecycle: 'ACTIVE',
     archived: false,
-    deviceCount: 0,
+    streaming: false,
+    links: '—',
     stateChip: { kind: 'unknown', label: '—', tone: 'muted', live: false },
+    sinceLabel: '—',
+    simulated: false,
+    readinessBlockers: [],
     firmware: '—',
     hours: '—',
     lastFlownLabel: 'Never flown',
@@ -69,6 +95,22 @@ describe('vehicleLastFlownLabel', () => {
     const now = Date.parse('2026-08-29T12:00:00Z');
     const lastUsedAt = new Date(now - 3_600_000).toISOString();
     expect(vehicleLastFlownLabel(lastUsedAt, now)).toMatch(/ago$/);
+  });
+});
+
+describe('custodySinceLabel', () => {
+  const now = Date.parse('2026-09-06T12:00:00Z');
+
+  it('is an em dash for an asset nobody holds', () => {
+    expect(custodySinceLabel(undefined, now)).toBe('—');
+  });
+
+  it('is an em dash for a timestamp this build cannot parse — never a fabricated "just now"', () => {
+    expect(custodySinceLabel('not-a-date', now)).toBe('—');
+  });
+
+  it('renders how long the custody has stood', () => {
+    expect(custodySinceLabel('2026-09-06T09:00:00Z', now)).toBe('3h ago');
   });
 });
 
@@ -97,88 +139,156 @@ describe('firmwareLabel', () => {
   });
 });
 
+describe('linksLabel', () => {
+  it('prefers the wire count', () => {
+    expect(linksLabel(3, undefined)).toBe('3');
+    expect(linksLabel(0, undefined)).toBe('0');
+  });
+
+  it('falls back to an already-fetched detail record (a pre-W1 backend, row open)', () => {
+    expect(linksLabel(undefined, details({ devices: [{ id: 'd-1' } as never] }))).toBe('1');
+  });
+
+  it('is "—" when neither source can answer — never a fabricated 0', () => {
+    expect(linksLabel(undefined, undefined)).toBe('—');
+  });
+});
+
+describe('custodianLabel', () => {
+  it('prefers the name resolved on the wire (D3) over any client-side join', () => {
+    const nameById = new Map([['u-1', 'Stale Join']]);
+    expect(custodianLabel({ custodianId: 'u-1', custodianName: 'Jane Pilot' }, nameById)).toEqual({ name: 'Jane Pilot' });
+  });
+
+  it('falls back to the org user-list join for a pre-W1 backend', () => {
+    expect(custodianLabel({ custodianId: 'u-1' }, new Map([['u-1', 'Jane Pilot']]))).toEqual({ name: 'Jane Pilot' });
+  });
+
+  it('falls back to a truncated id (never a bare 36-char UUID) with the whole id as a title', () => {
+    const uuid = '3f2a91c4-1d2e-4b7a-9c8d-0e1f2a3b4c5d';
+    expect(custodianLabel({ custodianId: uuid }, new Map())).toEqual({ name: '3f2a91c4…', title: uuid });
+  });
+
+  it('names nobody for an asset in stock', () => {
+    expect(custodianLabel(undefined, new Map())).toEqual({});
+    expect(custodianLabel({}, new Map())).toEqual({});
+  });
+});
+
 describe('buildVehicleRows', () => {
-  it('resolves the custodian id to a display name when found', () => {
-    const rows = buildVehicleRows(
-      [asset({ assetId: 'a-1', custody: { custodianId: 'u-1', since: '2026-08-01T00:00:00Z' } })],
-      [user({ userId: 'u-1', displayName: 'Jane Pilot' })],
-      new Map(),
-      Date.now(),
+  it('carries the drawer\'s own three derived facts: since, simulated origin and the full blocker list', () => {
+    const nowMs = Date.parse('2026-09-06T12:00:00Z');
+    const rows = rowsFor(
+      [
+        asset({ assetId: 'a-1', custody: { custodianId: 'u-1', since: '2026-09-06T10:00:00Z' } }),
+        asset({ assetId: 'a-2', category: 'simulated' }),
+      ],
+      {
+        readinessByAssetId: new Map([
+          ['a-1', readinessRow({ assetId: 'a-1', verdict: 'NO_GO', features: { battery: 'MISSING', 'map-position': 'DEGRADED' } })],
+        ]),
+        nowMs,
+      },
     );
+    expect(rows.find((r) => r.asset.assetId === 'a-1')?.sinceLabel).toBe('2h ago');
+    expect(rows.find((r) => r.asset.assetId === 'a-1')?.readinessBlockers).toEqual(['Map position', 'Battery']);
+    expect(rows.find((r) => r.asset.assetId === 'a-1')?.simulated).toBe(false);
+    expect(rows.find((r) => r.asset.assetId === 'a-2')?.simulated).toBe(true);
+    expect(rows.find((r) => r.asset.assetId === 'a-2')?.sinceLabel).toBe('—');
+    expect(rows.find((r) => r.asset.assetId === 'a-2')?.readinessBlockers).toEqual([]);
+  });
+
+  it('resolves the custodian id to a display name when found', () => {
+    const rows = rowsFor([asset({ assetId: 'a-1', custody: { custodianId: 'u-1', since: '2026-08-01T00:00:00Z' } })], {
+      users: [user({ userId: 'u-1', displayName: 'Jane Pilot' })],
+    });
+    expect(rows[0].custodianName).toBe('Jane Pilot');
+    expect(rows[0].custodianTitle).toBeUndefined();
+    expect(rows[0].custodianId).toBe('u-1');
+  });
+
+  it('prefers the custodian name the wire already resolved, with no user list at all (a pilot session)', () => {
+    const rows = rowsFor([asset({ assetId: 'a-1', custody: { custodianId: 'u-1', custodianName: 'Jane Pilot' } })]);
     expect(rows[0].custodianName).toBe('Jane Pilot');
   });
 
-  it('falls back to the raw custodian id when no matching user is found', () => {
-    const rows = buildVehicleRows(
-      [asset({ assetId: 'a-1', custody: { custodianId: 'u-missing' } })],
-      [],
-      new Map(),
-      Date.now(),
-    );
-    expect(rows[0].custodianName).toBe('u-missing');
+  it('falls back to a truncated custodian id when nothing can name it', () => {
+    const uuid = '3f2a91c4-1d2e-4b7a-9c8d-0e1f2a3b4c5d';
+    const rows = rowsFor([asset({ assetId: 'a-1', custody: { custodianId: uuid } })]);
+    expect(rows[0].custodianName).toBe('3f2a91c4…');
+    expect(rows[0].custodianTitle).toBe(uuid);
   });
 
   it('leaves custodianName undefined for an in-stock asset', () => {
-    const rows = buildVehicleRows([asset({ assetId: 'a-1' })], [], new Map(), Date.now());
-    expect(rows[0].custodianName).toBeUndefined();
+    expect(rowsFor([asset({ assetId: 'a-1' })])[0].custodianName).toBeUndefined();
   });
 
-  it('joins the readiness verdict by assetId', () => {
-    const rows = buildVehicleRows(
-      [asset({ assetId: 'a-1' })],
-      [],
-      new Map([['a-1', 'GO']]),
-      Date.now(),
-    );
-    expect(rows[0].readinessVerdict).toBe('GO');
+  it('carries the custody location as its own column value', () => {
+    const rows = rowsFor([asset({ custody: { custodianId: 'u-1', location: 'Shelf B' } })]);
+    expect(rows[0].location).toBe('Shelf B');
+    expect(rowsFor([asset()])[0].location).toBeUndefined();
+  });
+
+  it('joins the readiness verdict by assetId, and names the first blocker as the cause', () => {
+    const rows = rowsFor([asset({ assetId: 'a-1' })], {
+      readinessByAssetId: new Map([
+        ['a-1', readinessRow({ verdict: 'NO_GO', features: { battery: 'MISSING', 'link-quality': 'DEGRADED' } })],
+      ]),
+    });
+    expect(rows[0].readinessVerdict).toBe('NO_GO');
+    expect(rows[0].readinessCause).toBe('Link quality +1 more');
+  });
+
+  it('leaves the cause undefined for a fully-ready row — a verdict with no blocker has none to name', () => {
+    const rows = rowsFor([asset({ assetId: 'a-1' })], {
+      readinessByAssetId: new Map([['a-1', readinessRow({ verdict: 'GO', features: { battery: 'READY' } })]]),
+    });
+    expect(rows[0].readinessCause).toBeUndefined();
   });
 
   it('leaves readinessVerdict undefined for an asset never evaluated', () => {
-    const rows = buildVehicleRows([asset({ assetId: 'a-1' })], [], new Map(), Date.now());
-    expect(rows[0].readinessVerdict).toBeUndefined();
+    expect(rowsFor([asset({ assetId: 'a-1' })])[0].readinessVerdict).toBeUndefined();
+  });
+
+  it('reads streaming off the summary status — the Watch live gate', () => {
+    expect(rowsFor([asset({ status: 'STREAMING' })])[0].streaming).toBe(true);
+    expect(rowsFor([asset({ status: 'OFFLINE' })])[0].streaming).toBe(false);
+  });
+
+  it('renders Links from the wire count, from a cached detail record, or as "—"', () => {
+    expect(rowsFor([asset({ assetId: 'a-1', deviceCount: 2 })])[0].links).toBe('2');
+    expect(
+      rowsFor([asset({ assetId: 'a-1' })], {
+        detailsByAssetId: new Map([['a-1', details({ devices: [{ id: 'd-1' } as never] })]]),
+      })[0].links,
+    ).toBe('1');
+    expect(rowsFor([asset({ assetId: 'a-1' })])[0].links).toBe('—');
   });
 
   it('renders firmware/hours as "—" when the asset carries neither field (never probed/flown)', () => {
-    const rows = buildVehicleRows([asset()], [], new Map(), Date.now());
+    const rows = rowsFor([asset()]);
     expect(rows[0].firmware).toBe('—');
     expect(rows[0].hours).toBe('—');
   });
 
   it('renders firmware as "<name> <version>" and hours via formatFlightTime once the asset carries both', () => {
-    const rows = buildVehicleRows(
-      [asset({ firmware: { name: 'ardupilot', version: '4.7.0' }, totalFlightSeconds: 3_720 })],
-      [],
-      new Map(),
-      Date.now(),
-    );
+    const rows = rowsFor([asset({ firmware: { name: 'ardupilot', version: '4.7.0' }, totalFlightSeconds: 3_720 })]);
     expect(rows[0].firmware).toBe('ArduPilot 4.7.0');
     expect(rows[0].hours).toBe('1h 02m');
   });
 
   it('renders a genuine zero totalFlightSeconds honestly, not as "—"', () => {
-    const rows = buildVehicleRows([asset({ totalFlightSeconds: 0 })], [], new Map(), Date.now());
-    expect(rows[0].hours).toBe('0m');
+    expect(rowsFor([asset({ totalFlightSeconds: 0 })])[0].hours).toBe('0m');
   });
 
   it('builds an honest stateChip merging lifecycle/archived/inventoryState', () => {
-    const rows = buildVehicleRows([asset({ lifecycle: 'DELETED', inventoryState: 'IN_FIELD' })], [], new Map(), Date.now());
-    expect(rows[0].stateChip.kind).toBe('archived');
+    expect(rowsFor([asset({ lifecycle: 'DELETED', inventoryState: 'IN_FIELD' })])[0].stateChip.kind).toBe('archived');
   });
 
   it('reads registration from identity, falling back to the legacy attributes key (core/fleet/asset-attributes.ts#effectiveRegistration)', () => {
-    const viaIdentity = buildVehicleRows([asset({ identity: { registration: 'N12345' } })], [], new Map(), Date.now());
-    expect(viaIdentity[0].registration).toBe('N12345');
-
-    const viaLegacyAttribute = buildVehicleRows(
-      [asset({ attributes: { registrationNumber: 'N-OLD' } })],
-      [],
-      new Map(),
-      Date.now(),
-    );
-    expect(viaLegacyAttribute[0].registration).toBe('N-OLD');
-
-    const neither = buildVehicleRows([asset()], [], new Map(), Date.now());
-    expect(neither[0].registration).toBeUndefined();
+    expect(rowsFor([asset({ identity: { registration: 'N12345' } })])[0].registration).toBe('N12345');
+    expect(rowsFor([asset({ attributes: { registrationNumber: 'N-OLD' } })])[0].registration).toBe('N-OLD');
+    expect(rowsFor([asset()])[0].registration).toBeUndefined();
   });
 });
 
@@ -254,8 +364,8 @@ describe('filterVehicleRowsByInventoryState', () => {
 describe('filterVehicleRowsByCustodian', () => {
   it('narrows to one custodian id', () => {
     const rows = [
-      row({ asset: asset({ assetId: 'a-1', custody: { custodianId: 'u-1' } }) }),
-      row({ asset: asset({ assetId: 'a-2', custody: { custodianId: 'u-2' } }) }),
+      row({ asset: asset({ assetId: 'a-1' }), custodianId: 'u-1' }),
+      row({ asset: asset({ assetId: 'a-2' }), custodianId: 'u-2' }),
     ];
     expect(filterVehicleRowsByCustodian(rows, 'u-1').map((r) => r.asset.assetId)).toEqual(['a-1']);
   });
@@ -273,10 +383,73 @@ describe('filterVehicleRowsByReadiness', () => {
   });
 });
 
-describe('searchVehicleRowsByName', () => {
-  it('matches case-insensitively', () => {
-    const rows = [row({ asset: asset({ displayName: 'Falcon One' }) }), row({ asset: asset({ displayName: 'Rover' }) })];
-    expect(searchVehicleRowsByName(rows, 'falcon')).toHaveLength(1);
+describe('searchVehicleRows', () => {
+  const falcon = row({ asset: asset({ displayName: 'Falcon One', identity: { serialNumber: 'SN-4417' } }), registration: 'UR-1234' });
+  const rover = row({ asset: asset({ displayName: 'Rover' }) });
+  const rows = [falcon, rover];
+
+  it('matches the display name, case-insensitively', () => {
+    expect(searchVehicleRows(rows, 'falcon')).toEqual([falcon]);
+  });
+
+  it('matches the serial and the registration — the two identifiers painted on the airframe', () => {
+    expect(searchVehicleRows(rows, 'sn-44')).toEqual([falcon]);
+    expect(searchVehicleRows(rows, 'ur-1234')).toEqual([falcon]);
+  });
+
+  it('leaves every row for a blank query and drops every row for a miss', () => {
+    expect(searchVehicleRows(rows, '   ')).toBe(rows);
+    expect(searchVehicleRows(rows, 'nothing')).toEqual([]);
+  });
+
+  it('never matches a row whose serial/registration are simply absent', () => {
+    expect(searchVehicleRows([rover], 'sn')).toEqual([]);
+  });
+});
+
+describe('openMaintenanceSummary', () => {
+  const nowMs = Date.parse('2026-09-06T12:00:00Z');
+
+  function record(partial: Partial<MaintenanceRecord> = {}): MaintenanceRecord {
+    return {
+      id: 'r-1',
+      assetId: 'a-1',
+      kind: 'GROUNDING',
+      openedAt: '2026-09-06T09:00:00Z',
+      openedBy: 'u-1',
+      summary: 'Cracked arm',
+      ...partial,
+    };
+  }
+
+  it('has nothing to show when every record is closed', () => {
+    expect(openMaintenanceSummary([record({ closedAt: '2026-09-06T10:00:00Z' })], new Map(), nowMs)).toBeUndefined();
+    expect(openMaintenanceSummary([], new Map(), nowMs)).toBeUndefined();
+  });
+
+  it('names the oldest open record, its kind label, its opener and its age', () => {
+    const summary = openMaintenanceSummary(
+      [
+        record({ id: 'r-new', openedAt: '2026-09-06T11:00:00Z', summary: 'Newer' }),
+        record({ id: 'r-old', openedAt: '2026-09-06T09:00:00Z', summary: 'Cracked arm' }),
+      ],
+      new Map([['u-1', 'Mo Manager']]),
+      nowMs,
+    );
+    expect(summary).toEqual({
+      recordId: 'r-old',
+      kindLabel: 'Grounded',
+      summary: 'Cracked arm',
+      openedByLabel: 'Mo Manager',
+      ageLabel: '3h ago',
+    });
+  });
+
+  it('reads the system principal as Station and an unresolvable id as a truncation', () => {
+    const station = openMaintenanceSummary([record({ openedBy: '00000000-0000-0000-0000-000000000000' })], new Map(), nowMs);
+    expect(station?.openedByLabel).toBe('Station');
+    const unknown = openMaintenanceSummary([record({ openedBy: '3f2a91c4-1111-2222-3333-444444444444' })], new Map(), nowMs);
+    expect(unknown?.openedByLabel).toBe('3f2a91c4');
   });
 });
 
@@ -292,9 +465,9 @@ describe('findVehicleRowById', () => {
 describe('custodianFilterOptions', () => {
   it('dedupes and sorts by name', () => {
     const rows = [
-      row({ asset: asset({ assetId: 'a-1', custody: { custodianId: 'u-2' } }), custodianName: 'Zed' }),
-      row({ asset: asset({ assetId: 'a-2', custody: { custodianId: 'u-1' } }), custodianName: 'Amy' }),
-      row({ asset: asset({ assetId: 'a-3', custody: { custodianId: 'u-1' } }), custodianName: 'Amy' }),
+      row({ asset: asset({ assetId: 'a-1' }), custodianId: 'u-2', custodianName: 'Zed' }),
+      row({ asset: asset({ assetId: 'a-2' }), custodianId: 'u-1', custodianName: 'Amy' }),
+      row({ asset: asset({ assetId: 'a-3' }), custodianId: 'u-1', custodianName: 'Amy' }),
     ];
     expect(custodianFilterOptions(rows)).toEqual([
       { id: 'u-1', name: 'Amy' },
@@ -307,80 +480,6 @@ describe('custodianFilterOptions', () => {
   });
 });
 
-describe('vehicleRowActions', () => {
-  it('an in-stock asset may be issued, grounded, retired, or flown — not returned or released', () => {
-    expect(vehicleRowActions({ archived: false, lifecycle: 'ACTIVE', inventoryState: 'IN_STOCK' })).toEqual({
-      issue: true,
-      return: false,
-      ground: true,
-      release: false,
-      retire: true,
-      fly: true,
-    });
-  });
-
-  it('an issued/in-field asset may be returned, grounded, retired, or flown — not issued again', () => {
-    for (const state of ['ISSUED', 'IN_FIELD'] as const) {
-      expect(vehicleRowActions({ archived: false, lifecycle: 'ACTIVE', inventoryState: state })).toEqual({
-        issue: false,
-        return: true,
-        ground: true,
-        release: false,
-        retire: true,
-        fly: true,
-      });
-    }
-  });
-
-  it('a MAINTENANCE asset may only be released, retired, or (still) flown', () => {
-    expect(vehicleRowActions({ archived: false, lifecycle: 'ACTIVE', inventoryState: 'MAINTENANCE' })).toEqual({
-      issue: false,
-      return: false,
-      ground: false,
-      release: true,
-      retire: true,
-      fly: true,
-    });
-  });
-
-  it('a RETIRED asset offers nothing inventory-mutating, but Open/Fly stay available', () => {
-    expect(vehicleRowActions({ archived: false, lifecycle: 'ACTIVE', inventoryState: 'RETIRED' })).toEqual({
-      issue: false,
-      return: false,
-      ground: false,
-      release: false,
-      retire: false,
-      fly: true,
-    });
-  });
-
-  it('an archived/deactivated asset offers none of the six verbs', () => {
-    expect(vehicleRowActions({ archived: true, lifecycle: 'DELETED', inventoryState: 'IN_STOCK' })).toEqual({
-      issue: false,
-      return: false,
-      ground: false,
-      release: false,
-      retire: false,
-      fly: false,
-    });
-    expect(vehicleRowActions({ archived: false, lifecycle: 'DEACTIVATED', inventoryState: 'IN_STOCK' })).toEqual({
-      issue: false,
-      return: false,
-      ground: false,
-      release: false,
-      retire: false,
-      fly: false,
-    });
-  });
-
-  it('an unknown (never-fetched) inventoryState hides every inventory-mutating verb, honestly', () => {
-    expect(vehicleRowActions({ archived: false, lifecycle: 'ACTIVE', inventoryState: undefined })).toEqual({
-      issue: false,
-      return: false,
-      ground: false,
-      release: false,
-      retire: false,
-      fly: true,
-    });
-  });
-});
+// `vehicleRowActions` moved to `core/fleet/inventory-logic.ts` in wave W3 of
+// docs/plans/active/INVENTORY-REWORK-PLAN.md (it now takes an `InventoryActor` and is shared with
+// the pilot cards) — its per-cell matrix tests live in that module's own spec.

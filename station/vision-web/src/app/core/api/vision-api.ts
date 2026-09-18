@@ -579,9 +579,13 @@ export class VisionApi {
    * W3/W4). Returns the asset's full `AssetDetails`, the same response shape {@link
    * setAssetInventory} returns. `canManage`-gated, `403` audited.
    *
-   * The onboarding wizard's Hand-over step's "Issue to" action calls this, then separately calls
-   * {@link assignPilot} — `issue` alone does not create a pilot assignment (verified by reading
-   * `DefaultAssetCustodyService#issue`, which only touches `Custody`/`InventoryState`).
+   * **One call is the whole hand-over** (docs/plans/active/INVENTORY-REWORK-PLAN.md §6 row 4, wave
+   * W3): every client path — the Inventory kebab's Issue and the onboarding wizard's Hand-over step
+   * alike — calls this and nothing else. The wizard used to follow it with a client-side {@link
+   * assignPilot} because `DefaultAssetCustodyService#issue` only touched `Custody`/`InventoryState`;
+   * the kebab never did, so the same vehicle ended up with or without a PILOT assignment purely by
+   * which screen issued it. Composing custody with the assignment is the server's job now (wave W1's
+   * `AssetHandoverService`) — do not re-add a second call here.
    */
   setAssetCustody(assetId: string, request: CustodyActionRequest): Promise<AssetDetails> {
     return firstValueFrom(

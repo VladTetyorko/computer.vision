@@ -7,6 +7,7 @@ import com.drones.vision.api.dto.FleetMaintenanceRecordResponse;
 import com.drones.vision.api.dto.InventoryActionRequest;
 import com.drones.vision.api.dto.MaintenanceRecordResponse;
 import com.drones.vision.api.security.CurrentUser;
+import com.drones.vision.identity.application.handover.HandoverService;
 import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.warehouse.application.custody.AssetCustodyService;
 import com.drones.vision.warehouse.application.maintenance.MaintenanceListState;
@@ -34,6 +35,15 @@ import java.util.Objects;
  * class's own javadoc gives for {@link AssetStreamController} — adding {@link AssetCustodyService}
  * and {@link MaintenanceService} here would have pushed {@code AssetController}'s constructor two
  * past .claude/skills/java-clean-code/SKILL.md &sect;3's five-parameter ceiling.
+ *
+ * <p><b>Six collaborators, one past that ceiling</b> — the same documented exception {@link
+ * AssetStreamController} (6) and {@link StreamController} (7) already carry. {@link HandoverService}
+ * joined {@link AssetCustodyService} rather than replacing it: hand-over owns issue/return only
+ * (docs/plans/active/INVENTORY-REWORK-PLAN.md D1/D2), while ground/release/retire stay warehouse's
+ * own verbs and must not be re-homed in identity to save a parameter. The honest fix is to split the
+ * four {@code /maintenance} endpoints onto their own controller, which would leave five here and two
+ * there; that is a larger move than this wave's additive scope allows, and is recorded as debt rather
+ * than done quietly.
  *
  * <p><b>Authorisation lives in the services, not here</b> — the same pattern {@link
  * OnboardingController}'s own javadoc documents: {@link AssetCustodyService}'s custody/inventory
@@ -66,15 +76,17 @@ public class AssetInventoryController {
      */
     private static final int DEFAULT_FLEET_MAINTENANCE_LIMIT = 200;
 
+    private final HandoverService handoverService;
     private final AssetCustodyService assetCustodyService;
     private final MaintenanceService maintenanceService;
     private final AssetService assetService;
     private final AssetImageRepositoryPort assetImageRepositoryPort;
     private final CurrentUser currentUser;
 
-    public AssetInventoryController(AssetCustodyService assetCustodyService, MaintenanceService maintenanceService,
-                                     AssetService assetService, AssetImageRepositoryPort assetImageRepositoryPort,
-                                     CurrentUser currentUser) {
+    public AssetInventoryController(HandoverService handoverService, AssetCustodyService assetCustodyService,
+                                     MaintenanceService maintenanceService, AssetService assetService,
+                                     AssetImageRepositoryPort assetImageRepositoryPort, CurrentUser currentUser) {
+        this.handoverService = Objects.requireNonNull(handoverService, "handoverService must not be null");
         this.assetCustodyService =
                 Objects.requireNonNull(assetCustodyService, "assetCustodyService must not be null");
         this.maintenanceService = Objects.requireNonNull(maintenanceService, "maintenanceService must not be null");
@@ -87,6 +99,19 @@ public class AssetInventoryController {
     /**
      * Issues an in-stock asset to a custodian, or returns an issued one to stock.
      *
+     * <p><b>Issuing also grants the custodian the {@code PILOT} seat</b>
+     * (docs/plans/active/INVENTORY-REWORK-PLAN.md D1) — one call, one decision. It used to write
+     * custody alone, leaving the person holding the aircraft unable to fly it until somebody
+     * separately assigned them; the fit-out wizard papered over that with a second client call, and
+     * every other issue path simply produced the broken half-state
+     * (docs/plans/active/INVENTORY-REWORK-CONTEXT.md §3, defect B). The composition itself lives in
+     * {@link HandoverService}, not here: a controller sequencing two writes with a compensating undo
+     * between them would be business logic in an adapter.
+     *
+     * <p><b>Returning does not revoke the seat</b> (D2) — authorisation to fly outlives possession of
+     * the box, so a returned asset keeps its assignment and re-issuing to the same person is a no-op
+     * on the roster.
+     *
      * @param id      the asset
      * @param request the custody action to perform
      * @return the full detail view of the updated asset
@@ -95,9 +120,9 @@ public class AssetInventoryController {
     public AssetDetailsResponse custody(@PathVariable String id, @RequestBody CustodyActionRequest request) {
         AssetId assetId = AssetId.of(id);
         switch (request.toAction()) {
-            case ISSUE -> assetCustodyService.issue(assetId, request.requireCustodianId(), request.location(),
+            case ISSUE -> handoverService.issue(assetId, request.requireCustodianId(), request.location(),
                     currentUser.userId(), currentUser.authority());
-            case RETURN -> assetCustodyService.returnToStock(assetId, currentUser.userId(), currentUser.authority());
+            case RETURN -> handoverService.returnToStock(assetId, currentUser.userId(), currentUser.authority());
         }
         return detailsResponse(assetId);
     }
@@ -198,16 +223,17 @@ public class AssetInventoryController {
     }
 
     /**
-     * {@code firmware}/{@code totalFlightSeconds} are always absent on this controller's responses —
-     * deliberately, not an oversight: this class's own javadoc already explains why {@link
-     * AssetCustodyService}/{@link MaintenanceService} live here rather than on {@link
-     * AssetController} (the five-parameter ceiling), and the same ceiling has no room left for
-     * {@code com.drones.vision.api.support.AssetRowFacts} either. A caller wanting an accurate {@code
-     * firmware}/{@code totalFlightSeconds} after a custody/inventory mutation should follow up with
-     * {@code GET /api/assets/{id}}, which does join them (see {@link AssetController#details}).
+     * {@code firmware}, {@code totalFlightSeconds} and {@code custody.custodianName} are always
+     * absent on this controller's responses — deliberately, not an oversight: this class's own
+     * javadoc already explains why {@link AssetCustodyService}/{@link MaintenanceService} live here
+     * rather than on {@link AssetController} (the five-parameter ceiling), and this constructor has
+     * no room left for {@code com.drones.vision.api.support.AssetRowFacts}, which owns all three
+     * joins. A caller wanting them after a custody/inventory mutation should follow up with {@code
+     * GET /api/assets/{id}}, which does join them (see {@link AssetController#details}) — the
+     * custodian's id is on the response either way, so nothing here is unknowable, only unjoined.
      */
     private AssetDetailsResponse detailsResponse(AssetId id) {
         return AssetDetailsResponse.from(assetService.details(currentUser.scope(), id),
-                assetImageRepositoryPort.existsByAssetId(id), null, null);
+                assetImageRepositoryPort.existsByAssetId(id), null, null, null);
     }
 }

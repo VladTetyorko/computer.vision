@@ -1,4 +1,4 @@
-@if (store.candidates().length > 0 || unreachableWarnings().length > 0) {
+@if (canSeeInbox() && (store.candidates().length > 0 || unreachableWarnings().length > 0)) {
   <section class="found-devices">
     <!-- A3 (docs/plans/active/ASSET-FLOWS-PLAN.md §2) — honest scanner health, shown even with zero
          candidates (that's exactly when it matters most: an empty inbox reads very differently once

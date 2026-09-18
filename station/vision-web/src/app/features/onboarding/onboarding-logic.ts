@@ -3,13 +3,10 @@ import type {
   AssetIdentity,
   CreateAssetRequest,
   DiscoveryCandidate,
-  Membership,
   NetworkAddress,
   ProbeCandidateRequest,
   ProbeDeviceRequest,
   ProbeDeviceResult,
-  Role,
-  UserSummary,
   VehicleProfile,
 } from '../../core/api/models';
 import {
@@ -320,64 +317,11 @@ export function buildPostSimulationAssetEdit(
 }
 
 // --- Hand over: "Who takes this?" (docs/plans/done/OPS-UX-PLAN.md §2 A3; docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4 D3) --
-
-/** Least→most privileged, mirroring the domain's own `Role` ordinal — used only to find the *highest* of a set of memberships below. `VIEWER` (docs/plans/active/AUTH-ROLES-PLAN.md, wave B0a/B6) ranks below `PILOT`, same as the real enum's own ordinal order. */
-const ROLE_RANK: Readonly<Record<Role, number>> = { VIEWER: 0, PILOT: 1, MANAGER: 2, ADMIN: 3 };
-
-/**
- * The group a newly-created asset silently belongs to (docs/conclusions/OPS-UX-REVIEW.md §A4 — `POST
- * /api/assets` "sets `Ownership` from the creator"). Mirrors the backend's own rule byte-for-byte
- * (`VisionUserDetails#ownershipOf`, station/vision-app): the group tied to the creator's **highest**
- * `Role` membership, ties broken by encounter order (the backend's own tie-break is undocumented as
- * stable either — see that method's own comment) — never a group the caller has to pick, since the
- * wizard's Source/Identify/Prove/Attach steps never ask for one. Returns `undefined` only for a
- * membership-less account (the "couldn't determine your group" honest-degrade case downstream).
- *
- * **Known dev-parity gap** (`vision.auth.enabled=false`): the fixed dev-admin principal's own
- * `MeResponse.memberships` carries a synthetic group id that does not match the real seeded
- * admin/manager/pilot users' own "Root" group id (two different, unrelated ids that merely share a
- * display name) — so this function resolves *a* group correctly, but `pilotsInGroup` below will
- * never find a match against it in that mode. This is a frontend-only gap with no backend change
- * available to fix the mismatch; the picker's own honest empty state ("nobody in *that* group is a
- * pilot yet") is still a true statement about the data this app can see, never a fabrication.
- */
-export function creatorOwnershipGroup(memberships: readonly Membership[]): Membership | undefined {
-  return memberships.reduce<Membership | undefined>((best, candidate) => {
-    if (!best || ROLE_RANK[candidate.role] > ROLE_RANK[best.role]) {
-      return candidate;
-    }
-    return best;
-  }, undefined);
-}
-
-/**
- * Every enabled user holding a `PILOT` membership in `groupId` — the Hand-over step's own custodian
- * candidate list, same `enabled`-only filter `features/asset-detail/pilots-card.ts#assignable`
- * already applies (a disabled account can't sign in to fly anything). `undefined`/unresolved
- * `groupId` yields no candidates at all, never every pilot app-wide — offering the wrong team's
- * roster would be worse than offering none.
- */
-export function pilotsInGroup(users: readonly UserSummary[], groupId: string | undefined): readonly UserSummary[] {
-  if (!groupId) {
-    return [];
-  }
-  return users.filter(
-    (user) => user.enabled && user.memberships.some((m) => m.groupId === groupId && m.role === 'PILOT'),
-  );
-}
-
-/**
- * The picker's default selection (docs/plans/done/OPS-UX-PLAN.md §2 A3 — "Default selection: the creator
- * when they are a pilot in that group, else none"). Deliberately checks the creator's *own* role
- * within the resolved ownership group, not their global `topRole`: a MANAGER/ADMIN's ownership
- * group is by construction the group of their own highest-role membership (see
- * {@link creatorOwnershipGroup}'s own doc comment), so their role *there* is never `PILOT` — this
- * only ever preselects the creator for the solo-pilot self-registration case (a plain PILOT's own
- * single membership).
- */
-export function defaultPilotSelection(creatorUserId: string, ownershipGroup: Membership | undefined): readonly string[] {
-  return ownershipGroup?.role === 'PILOT' ? [creatorUserId] : [];
-}
+// `creatorOwnershipGroup`, `pilotsInGroup` and `defaultPilotSelection` used to live here. They moved
+// to `core/org/pilot-logic.ts` verbatim (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.5, wave W4)
+// the moment the Inventory page's own "Issue to…" dialog became a second consumer of the same
+// question — this file's standing "a second consumer moves shared logic to `core/`" precedent. The
+// wizard imports them from there now; `onboarding-store.ts` re-exports nothing of its own.
 
 // --- Terminal Ready screen: the two-half Sight/Sense proof (D9, docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.1) --
 // "Sight ✓ first frame 1280×720 H.264 / Sense ✓ heartbeat, sysid 7 — ArduPilot rover", sourced from

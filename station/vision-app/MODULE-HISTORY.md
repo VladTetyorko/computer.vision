@@ -153,6 +153,35 @@ Nothing deferred from this module's own file scope. Not committed — the wave o
 
 ---
 
+## docs/plans/active/INVENTORY-REWORK-PLAN.md — wave W1 (2026-09-06, branch `feat/inventory-rework`)
+
+**Wave W1 done** (docs/plans/active/INVENTORY-REWORK-PLAN.md §2 D1–D3, §7 row W1). Two wiring
+changes, both unconditional, no new flag and no change to any existing bean's condition:
+
+- **New `handoverService` bean** in `AuthWiringConfiguration` (MODULE.md's wiring map) —
+  `DefaultHandoverService(AssetCustodyService, AssignmentService)`, behind
+  `AssetInventoryController#custody`'s ISSUE/RETURN. It composes two application services rather
+  than ports, which is unusual here and deliberate: the composition needs both warehouse and
+  identity, and `vision-identity` is the module allowed to depend on `vision-warehouse` (never the
+  reverse), so the service itself lives there and this is only its construction. Unconditional
+  because both collaborators are, and because it introduces no gate of its own — `mayManageFleet` is
+  still checked inside each lower service.
+- **`assetRowFacts` widened** with `AuthService` (MODULE.md's wiring map) for the by-id
+  custodian-name lookup.
+
+No `application.yaml` key added or changed, no `@ConditionalOnProperty` touched. `station/vision-app`
+**353 → 353, all green**, 0 failures/errors — the default-config guardrail is satisfied trivially
+here since W1 ships no flag: every pre-existing test is unmodified and still green, and the
+full-context load tests (`AssetWiringTest`, `EndpointAuthorizationTest`, the `*WiringTest` family)
+prove the new bean resolves and `AssetInventoryController`'s sixth collaborator is satisfied without
+a cycle — a missing or ambiguous `HandoverService` bean would fail every one of them at startup, so
+no separate assertion was added for it. Docker ran for real, not skipped (Testcontainers
+`postgres:16`, Flyway migrated through `V35`). `EndpointAuthorizationTest`'s reflection BFS still
+finds an authority check on every handler including `custody`, which reaches `CurrentUser#authority()`
+exactly as before — only the service it hands it to changed.
+
+---
+
 ## 2026-09-06, LIVE-POLL-RETIREMENT-PLAN.md — waves L3+L4
 
 This module's file scope was the wiring/devsupport half of both waves — the domain/port/service

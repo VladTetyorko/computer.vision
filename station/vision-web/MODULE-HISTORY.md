@@ -707,6 +707,457 @@ new imports.
   `isLiveAvailable(this.live.connectionState())` read is the only new coupling to it, and that read
   already existed in `EventsStore`'s pre-existing implementation this pair of waves mirrors.
 
+## Status — INVENTORY-REWORK web wave W3: authority-aware verbs, details on selection, names and cause on rows (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.2/§6, wave W3) — 2026-09-06
+
+The Inventory page stops guessing. Before this wave it rendered the same kebab to everyone and found
+out what the session could actually do by watching the server say 403; it opened `GET /api/assets/{id}`
+once per row to fill two columns; it printed raw 36-character UUIDs where a custodian's name belongs;
+and it told an operator a vehicle was "Not ready" without saying why. Five defects from
+`INVENTORY-REWORK-CONTEXT.md` §3 (A, C, D, E, F) and the §6 row-4 wizard double-call (B).
+
+### A — one authority-aware verb matrix
+
+`vehicleRowActions(row)` moved out of `features/inventory/vehicles-logic.ts` (where it was a
+capability-blind boolean set) into `core/fleet/inventory-logic.ts` as
+`vehicleRowActions(row: InventoryActionRow, actor: InventoryActor)`. The actor is read once, in
+`InventoryFacade#actor`, from `AuthStore`:
+
+```
+InventoryActor { canManageFleet, canManageOrg, canCommandFlight, userId? }
+```
+
+`userId` is unused by the two columns shipped here — it is present so wave W2's web half can add §5.2
+columns 2/3 (a pilot's *Report issue*, a custodian's *Return*) by extending this record and the switch,
+without touching a single call site; the interface carries a one-line TSDoc pointer saying exactly that.
+
+The rule, uniform across the row kebab and the detail pane: **a verb this session's capabilities would
+have the server refuse is not rendered at all**; **a verb that exists but is momentarily impossible is
+rendered disabled with its reason** (`.kebab-item` + `.kebab-reason`, `.disabled-reason` in the pane).
+The matrix as implemented — every cell has its own `it` in `core/fleet/inventory-logic.spec.ts`:
+
+| Effective state | `canManageFleet` (col. 1) | `canCommandFlight` (col. 2's Fly) | anyone in scope (col. 4) |
+|---|---|---|---|
+| In stock | Issue to… · Ground… · Retire… · Archive | Fly | Open · Watch live¹ |
+| Issued | Return to stock · Ground… · **Retire disabled** — "Return it to stock first" | Fly | Open · Watch live¹ |
+| In field | Ground… only (a usage is open: neither Return nor Retire) | Fly | Open · Watch live¹ |
+| Maintenance | Release · Retire… · Archive | **Fly disabled** — "Grounded for maintenance — release it first" | Open |
+| Retired | Archive | — | Open |
+| Archived / Deactivated | Restore | — | Open |
+| `inventoryState` never fetched | — | — | Open |
+
+¹ only while `AssetSummary.status === 'STREAMING'`.
+
+Two deliberate divergences from the printed §5.2 table, both spec-asserted: **DEACTIVATED has no row of
+its own** in the plan and is treated exactly like ARCHIVED (Restore only, since the lifecycle write is
+the same one); **an unfetched `inventoryState`** (the honest `unknown` chip) offers no mutating verb at
+all rather than defaulting to the In-stock row. Effective state is derived by calling
+`effectiveInventoryStateChip` — the chip and the verbs read the same function, so they cannot disagree.
+
+Gates outside the matrix, each named against the endpoint it mirrors: the pane's maintenance **Open
+record**/**Close** and its new-record form need `MANAGE_FLEET`; the page-bar **+ Add vehicle** needs
+`MANAGE_ORG` (`AssetController#register`, and `/add-source` carries `orgGuard` — a pilot who clicked it
+used to be bounced by that guard one navigation later); **Found devices** activates
+`DiscoveryInboxStore` only for `MANAGE_ORG` and only after `/api/auth/me` has resolved (an `effect` with
+a once-only `activated` flag, released symmetrically) — `GET /api/discovery/inbox` 403s everyone else,
+so a pilot or viewer used to take that error path every 30 s for the life of the page.
+
+### B — the N+1 is gone
+
+`InventoryFacade#loadAll` is **five requests flat, whatever the fleet size** (it was `5 + N`):
+
+```
+Promise.all([ listAssets() | listAssetsIncludingArchived(),  listCategories(),
+              listUsers()*,  fleetReadiness(),  fleetSummary() ])          (* see C)
+```
+
+Rows are built from `AssetSummary` alone (`buildVehicleRows` now takes summaries + readiness +
+`detailsByAssetId` + users). `AssetDetails` is fetched **on row selection** by
+`InventoryFacade#ensureDetails(assetId)` — cached per id in `detailsByAssetId`, returning `undefined`
+on failure without blocking the pane, and cleared on every `loadAll` (the selected row is re-fetched
+immediately). **This is the path W4's drawer should call**: `facade.selectedDetails()` for the data,
+`facade.loadingDetails()` for the spinner; never `api.getAsset` from a component.
+
+The Links column is `summary.deviceCount ?? details?.devices.length ?? '—'` (`linksLabel`) — a
+pre-W1 backend that does not send `deviceCount` renders `—` for an unselected row, never a fabricated
+`0`, which would read as the assertion "this vehicle has no devices linked". `patchAsset` now **merges**
+`{...asset, ...updated}` into both the list and the details cache: custody/inventory responses omit
+`firmware`/`totalFlightSeconds`/`deviceCount`, and a wholesale replace blanked those columns after an
+Issue. `Watch live` no longer needs a device id on the row — `InventoryFacade#watchLive` resolves
+details through the same cache on click, then `findVideoDevice`, and toasts honestly when there is none.
+
+### C, D, E — the row says something
+
+- **Names come off the wire.** `AssetCustody` gained optional `custodianName`, `AssignedPilot` optional
+  `username`/`displayName` (additive, plan §6). `custodianLabel` resolves
+  `custody.custodianName ?? nameById.get(id) ?? shortIdLabel(id)` — the last rung is a truncated
+  `3f2a91c4…` carrying the full id in `title`, never a bare UUID in the cell. `listUsers()` stays as the
+  middle rung only, and is **not called at all** when `auth.scopeKind() === 'ASSIGNED_ASSETS'` (the
+  server answers `[]` for that scope anyway — one less request and one less 403-shaped empty).
+- **Readiness says why.** The cell is dot + verdict + first blocker as muted truncated text, reusing
+  `core/readiness/readiness-logic.ts#fleetRowAttention(row, 1)` rather than duplicating a second
+  phrasing of the same sentence. Still one chip per row (the state chip) per frontend-style §5.
+- **Location** (`custody.location`) is a new column after Custodian, `—` when unset.
+
+### Left undone, named honestly
+
+- **The "~5 requests, not 25" check was made statically, not against a running app.** The backend on
+  :8080 has auth enabled and answers `/api/auth/me` with 401; no credentials were available to this
+  agent. What was verified: `loadAll` awaits exactly five API calls, and the only `api.getAsset` in the
+  facade is inside `ensureDetails`. **Both-theme screenshots are pending W6** for the same reason.
+- **`streaming` reads `AssetSummary.status === 'STREAMING'`**, not a join against `FleetSummary.assets`
+  as the wave brief phrased it. The summary already carries the field; joining a second source for the
+  same fact would be the thing this wave is deleting elsewhere.
+- **§5.2 columns 2/3's own verbs are not shipped** (a pilot's *Report issue*, a custodian's *Return* —
+  defects D4/D5): they need W2's backend half. There is an explicit regression spec asserting a pilot
+  holding a vehicle gets neither, so the gap is a tested fact rather than an oversight.
+- **The wizard's dropped `assignPilot` (defect B) depends on W1 being deployed.** Until
+  `AssetHandoverService` composes custody + PILOT assignment server-side, a wizard hand-over on an old
+  backend sets custody without the assignment — which is exactly what the Inventory kebab's Issue has
+  always done, so the two paths are consistent either way.
+
+### Tests / build
+
+`npm run test:ci` — **192/192 files, 3860/3860 tests green** (up from 3825: the verb matrix cell by cell
+in `core/fleet/inventory-logic.spec.ts`, plus `linksLabel`/`custodianLabel`/`buildVehicleRows` cases in
+`features/inventory/vehicles-logic.spec.ts`). `npx tsc --noEmit` clean on both `tsconfig.app.json` and
+`tsconfig.spec.json`. `ng build --configuration production` green with only the two pre-existing budget
+warnings; initial bundle unchanged at 435.22 kB raw (transfer 122.03 → 122.01 kB), the lazy `inventory`
+chunk 102.99 → 109.11 kB raw (+6.12), 20.37 → 21.65 kB transfer (+1.28).
+
+## Status — INVENTORY-REWORK web wave W4: the stats become the view, the drawer becomes a triage sheet, Issue becomes pilot-first (docs/plans/active/INVENTORY-REWORK-PLAN.md §2 D7/§5.1/§5.3/§5.5, wave W4) — 2026-09-07
+
+W3 made the Inventory page tell the truth about what a session may do. W4 makes it worth standing in
+front of. Before this wave the widest band on the page was five numbers nobody could act on; the page
+bar carried five side-by-side selects that wrapped onto three lines and pushed the table below the
+fold; the detail pane printed a raw ISO timestamp for "since", a full maintenance history, and a
+second form for opening a record that duplicated Ground; and issuing a vehicle meant scrolling a flat
+36-row directory of every enabled user to find the one pilot who can fly it.
+
+### D7 — the KPI strip is now the view switcher
+
+`inventory-page-logic.ts` was rewritten: `inventoryKpis`/`InventoryKpis` are gone, and with them the
+fifth request (`GET /api/fleet/summary`) `loadAll` used to make — the page is now **four flat requests**.
+In their place, five toggleable views:
+
+| View | Predicate (`rowMatchesInventoryView`) | Tone (non-zero) |
+|---|---|---|
+| Needs attention | `stateChip.kind === 'maintenance'` **or** `readinessVerdict === 'NO_GO'` **or** `readinessCause !== undefined` | `danger` |
+| In field | `stateChip.kind === 'in-field'` | `ok` + live dot |
+| Issued | `stateChip.kind === 'issued'` | — |
+| In stock | `stateChip.kind === 'in-stock'` | — |
+| Maintenance | `stateChip.kind === 'maintenance'` | `warn` |
+
+Four of the five read the row's own effective-state chip, so a row's chip and the view it lands under
+can never disagree. **Needs attention** is §3.1's union — *grounded · open maintenance · stale/never
+probed* — expressed as the two facts a row actually carries; a row whose readiness was never fetched
+carries neither and is deliberately not counted, because absence of evidence is not a blocker.
+An archived or retired row matches no view at all (spec-asserted for all five).
+
+**Counts are of the rows a click would show, not of the fleet.** `InventoryFacade#viewTiles` counts
+the tab's rows *after* search/Category/More-filters/retired/archived and *before* the view filter, so
+a tile reading `3` always yields exactly three rows and can never disagree with the table under it.
+Selection is the codebase's own convention — a 2px inset `--color-info` rule plus a `--color-info-soft`
+tint, reaching the shared `vision-stat` through `::ng-deep` (the tactic `tactical-map.css` and
+`flight-plan-dialog.css` already use) rather than forking the primitive into a selectable variant.
+Clicking the selected tile deselects to All (`toggleInventoryView`).
+
+**Where the view lives.** `features/inventory/inventory-view-store.ts` — `InventoryViewStore`, one key
+(`vision.inventory.view`), `read()`/`write()` both wrapped in `try`/`catch`. It does **not** go through
+`core/panel-state.ts#readPersistedString`: that helper touches `localStorage` bare, which is safe for a
+value re-derived every boot but not for one read during this page's own construction — a Safari private
+window or a browser configured to block site data would take the page down with it. A blocked browser
+simply gets no memory. The stored value is three-valued (`InventoryViewSelection`): a view, `'all'` for
+an explicit All (so deselecting survives a reload instead of being undone by the default), and absent
+for never-chosen. The default — Needs attention while anything is in it, else All — is latched **once**,
+in `#latchDefaultView` on the first fleet read, deliberately not as a live `computed`: a vehicle going
+NO_GO must never move the table under whoever is reading it.
+
+**Export** cannot be filtered honestly. `InventoryExportController` takes exactly one parameter,
+`format`, and exports the caller's whole scope; there is no filter to pass. So the file stays whole and
+the button says so: **`Export all (CSV)`**.
+
+### The page bar folds
+
+Search (now matching **display name, serial and registration** — `searchVehicleRows`, renamed from
+`searchVehicleRowsByName` because a function that also matches serials must not keep a name saying
+otherwise) and **Category** stay on the bar. State, Custodian and Readiness moved behind a **More
+filters** `<details>`/`<summary>` popover with a count badge (`#moreFilterCount`, counting only the
+hidden three — a badge exists to say "something you can't see is hiding rows") and `Clear filters`
+inside. `<details>` rather than a signal-backed dropdown because `core/ui/architecture.spec.ts` forbids
+a routed page holding an `*Open` signal, and because it closes on Escape with no keyboard handler —
+the same idiom `shared/ui/kebab-menu.ts` already uses. **Show retired / Show archived** moved to the
+right end of the view row; `+ Add vehicle` and `Refresh` gating is untouched.
+
+### §5.3 — the drawer is a triage sheet
+
+| Section | Reads |
+|---|---|
+| Title row: name; `category · Simulated` muted | `VehicleRow#asset.displayName`/`categoryName`/`simulated` (new, `core/fleet/triage-logic.ts#isSimulated`) |
+| Chips row: **one** state chip + readiness dot/verdict | `#stateChip`, `#readinessVerdict` (`verdictLabel`/`verdictTone`) |
+| One fact grid, fixed-width muted labels | `#custodianName`/`#custodianTitle`, `#location`, **`#sinceLabel`** (new — `custodySinceLabel`, `3h ago`, `—` for in-stock/unparsable, replacing a raw ISO timestamp), `asset.identity?.*`, `#registration`, `#firmware`, `#hours`, `#lastFlownLabel`, `#links` (last group Vehicles-only) |
+| `h3 Why not ready` | **`#readinessBlockers`** (new — `core/readiness/readiness-logic.ts#fleetRowBlockers`, the uncapped list behind `fleetRowAttention`'s `+N more`), first bold; `GO — no blockers`; or `Not evaluated yet` |
+| `h3 Maintenance` | `InventoryFacade#openMaintenance` → `vehicles-logic.ts#openMaintenanceSummary` — the **oldest still-open** record as kind · summary · *opened by name* · age, else `No open records` |
+| `h3 Pilots` | `#selectedPilots`/`#loadingPilots`/`#selectedPilotsUnavailable`, named by `core/org/pilot-logic.ts#assignedPilotName` + `assignmentRoleLabel` |
+| Actions row | `core/fleet/inventory-logic.ts#primaryVehicleVerb(actions)` — **exactly one** `.btn`, everything else `.btn.secondary`, `Open full ›` last |
+
+`fleetRowBlockers` was exported (and `fleetRowAttention` made to delegate to it) precisely so the cell's
+one-line summary and the drawer's full list can never word or order the same blockers differently.
+The manager-only **Open record** form is deleted, not moved: grounding a vehicle already *is* opening a
+record, with a kind and a reason, and it moves the state with it — a second near-identical form offered
+a `NOTE` record nothing on this page could read. **Close record** stays (it is the only way to clear a
+non-blocking `NOTE`/`REPAIR` record on a vehicle that is not grounded, where Release is not offered).
+`+ Assign…` **links to `/assets/:id`** rather than lifting `pilots-card.ts`: that card injects
+`VisionApi`/`AuthStore` and owns its own pilots + users fetch, so mounting it here would put a second
+API consumer under a routed page and duplicate two reads this facade already caches. It is gated on
+`canManageOrg`, not `canManageFleet` — that is what the destination card itself requires, and a link to
+a drawer that would refuse to render is the same broken promise as a button that 403s.
+
+### §5.5 — Issue is pilot-first
+
+The grouping rule's final home is **`core/org/pilot-logic.ts`**. `creatorOwnershipGroup`,
+`pilotsInGroup` and `defaultPilotSelection` moved there **verbatim** from
+`features/onboarding/onboarding-logic.ts` (which now carries a pointer comment, and whose store imports
+them from the new home) — the standing "a second consumer moves shared logic to `core/`" precedent, not
+a copy. Added beside them: `pilotsAnywhere`, `assignedPilotName`, `custodianPickerGroups`,
+`custodianCandidateName`.
+
+`custodianPickerGroups` returns three disjoint, name-sorted lists rendered as `<optgroup>`s:
+**Assigned pilots** (this asset's own `PILOT`-seat holders; a `CREW` seat-holder is deliberately
+excluded — W1's `HandoverService` skips the `PILOT` grant whenever any seat exists, so issuing to them
+would leave them holding something they still may not fly, and they stay reachable under Show everyone
+where nothing about them is claimed) → **Other pilots** → **Show everyone** (a checkbox revealing the
+third `<optgroup>`, kept a native `<select>` because the OS picker is the right control on a phone).
+
+*Other pilots* is **two-rung, and the second rung is the honest half**: the asset's own group's pilots,
+and — only when that finds nobody — every enabled pilot in the already-scoped user list. The reason is
+a wire limitation: `AssetSummaryResponse.owner` is the owning **user** id and no endpoint returns
+`Ownership#groupId`, so `InventoryFacade#ownershipGroupId` passes the session's own ownership group as a
+stand-in. That misses a child-group asset, and matches nothing at all in dev-parity mode, where the
+fixed dev-admin principal's synthetic group id differs from the seeded users' own "Root" group id (two
+unrelated ids sharing a display name). Rung 1 alone would hand a live manager an empty *Other pilots*
+and leave defect E exactly where it was. Neither rung hides anybody — Show everyone always holds the
+remainder — so this is a sorting aid that degrades to *less sorted*, never a visibility decision.
+
+The primary button reads **`Issue to <name>`** once somebody is picked, disabled until then. Toasts:
+`Issued to <name>` with **Undo** = `returnAsset`, appending `· assigned as pilot` **only when a `PILOT`
+seat genuinely appeared** — the facade compares the asset's pilot list either side of the write, because
+the server skips the grant when any seat already exists and the plan's literal wording would otherwise
+lie. `Returned to stock` with **Undo** = re-issue to the same custodian at the same location, both
+captured before the write; an asset with no recorded custodian gets a plain toast with nothing to undo
+rather than an Undo that would re-issue to nobody. Ground/Release/Retire keep their plain toasts.
+
+### The W1 wire, honoured
+
+`POST /api/assets/{id}/custody` and `/inventory` answer with a `CustodyResponse` built without the name
+join, so the custody object that replaces the old one carries a `custodianId` and **no `custodianName`**
+— `patchAsset` alone would blank the Custodian column the instant somebody pressed Issue on a station
+that had just rendered the real name. Every custody/inventory mutation is therefore followed by exactly
+one `GET /api/assets/{id}` for that asset (`InventoryFacade#refreshAsset`), silently degrading to the
+mutation response's own picture if the re-read fails. After a successful Issue the asset's pilot list is
+invalidated and re-fetched, so the new pilot appears in `h3 Pilots` without a reload.
+
+### W5's slot
+
+`inventory.html` wraps everything from the view row down in `@if (facade.showsManagerView())`
+(`actor.canManageFleet || auth.scopeKind() !== 'ASSIGNED_ASSETS'` — a wider-scoped viewer reads the same
+table, read-only). The `@else` branch is W5's, and carries the literal marker
+`<!-- W5: My vehicles cards render here -->` plus a temporary `<vision-empty>` pointing at Fly.
+
+### Honest degradation, in one list
+
+- A failed `getAsset` re-read after a mutation → the row keeps the shorter custodian label. Degraded, never wrong.
+- A failed pilots read is stored as `null`, distinct from `[]`: the drawer prints `—`, never the *claim* "Nobody is assigned to fly this".
+- Blocked `localStorage` → no remembered view; the page behaves exactly like a first-time visitor.
+- An empty view (rather than an empty fleet) gets its own "Nothing in this view" state with a **Show all** button, not the "No vehicles yet" state that would imply the fleet is gone.
+- Every absent fact in the drawer grid is an em dash.
+
+### Dev parity (`vision.auth.enabled=false`)
+
+The dev admin holds every capability, so `showsManagerView()` is true, every verb the matrix can grant
+is granted, and the page behaves exactly as before. The one place dev parity is *visibly* different is
+the Issue picker's *Other pilots* group — the dev principal's synthetic group id matches no seeded
+user's membership — and that is precisely the case rung 2 exists to cover: the group falls back to
+"every pilot you can already see" rather than to nothing.
+
+### Left undone, named honestly
+
+- **Verified statically and by spec only.** The app on :8080 has auth enabled and this agent had no credentials; both-theme screenshots remain W6's job, as W3's own entry already recorded.
+- **`+ Assign…` is a link, not an inline flow.** Assigning still happens on `/assets/:id`. Lifting `pilots-card.ts` would need it refactored to take its data as inputs first — real work, outside this wave's scope, and the link is honest in the meantime.
+- **Export is still whole-scope.** A filtered export needs `InventoryExportController` to accept a filter; that is a backend change this wave did not invent client-side.
+- **The view row renders on Equipment too.** Deliberate: the persisted view would otherwise filter that tab invisibly. In-field/Needs attention will often read 0 there, which is honest rather than hidden.
+
+### Tests / build
+
+`npm run test:ci` — **194/194 files, 3906/3906 tests green** (192/3860 before this wave: new
+`features/inventory/inventory-page-logic.spec.ts` rewritten around the five views, new
+`features/inventory/inventory-view-store.spec.ts` (5 cases incl. `localStorage` throwing on both read
+and write), new `core/org/pilot-logic.spec.ts`, plus `fleetRowBlockers`, `primaryVehicleVerb`,
+`custodySinceLabel`, `searchVehicleRows`, `openMaintenanceSummary` and a `buildVehicleRows` case for the
+three new derived row facts). `npx tsc --noEmit` clean on both `tsconfig.app.json` and
+`tsconfig.spec.json`. `ng build --configuration production` **green, exit 0**, only the two pre-existing
+budget warnings; initial bundle **unchanged at 435.22 kB raw** (transfer 122.01 → 121.99 kB), the lazy
+`inventory` chunk **109.11 → 121.00 kB raw (+11.89)**, 21.65 → 23.96 kB transfer (+2.31) — the drawer's
+new sections, the grouped Issue dialog, the view row and `core/org/pilot-logic.ts`, all behind the
+`/assets` lazy route.
+
+## Status — INVENTORY-REWORK web wave W5: My vehicles — the pilot/crew card view fills W4's own slot (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.4, wave W5) — 2026-09-07
+
+W4 left `inventory.html`'s `@else` branch carrying a literal marker comment and a temporary
+`<vision-empty>` pointing at Fly. A genuinely `ASSIGNED_ASSETS`-scoped session — a pilot or crew
+member, never `MANAGE_FLEET` — landed on `/assets` and got told the real view "is not built yet."
+This wave builds it: three new files (`my-vehicles.ts`/`.html`/`.css`) plus a pure
+`my-vehicles-logic.ts`/`.spec.ts`, consuming exactly what W3/W4 already built without changing
+manager-view behavior at all.
+
+### The component
+
+`<vision-my-vehicles>` is a non-routed presentational child — the same `core/ui/architecture.spec.ts`
+carve-out `vehicles-table.ts`/`found-devices.ts`/`pilots-card.ts` already use — injecting
+`InventoryFacade` directly (DI-shared from `InventoryPage`'s own `providers: [InventoryFacade]`), never
+`VisionApi`/an `*Store`. It makes no network call of its own. `inventory.html`'s `@else` branch is now
+just `<vision-my-vehicles />`; `inventory.ts` dropped the now-dead `RouterLink`/`EmptyState` imports the
+old placeholder alone had used.
+
+Two stacked card grids — Vehicles, then a muted uppercase `h3 Equipment` heading, then Equipment's own
+grid — rather than a second tab switch: a pilot's whole fleet is small enough that a second click to see
+the handful of batteries they also hold is friction the manager's dense table doesn't have to justify.
+
+### Row sourcing — a correctness fix, not just a read
+
+Cards read two new facade computeds, `myVehicleRows`/`myEquipmentRows`, added to `InventoryFacade`
+alongside the pre-existing `vehicleRows`/`equipmentRows`. They wrap the facade's own *private*
+pre-view computeds (`preViewVehicleRows`/`preViewEquipmentRows`) rather than the public post-view ones
+— deliberately. The view row (Needs attention/In field/Issued/In stock/Maintenance, D7, wave W4) is a
+manager-only control, rendered only inside `showsManagerView()`, with a default-view latch that runs
+unconditionally in `loadAll()` and a pick persisted **per browser** (`InventoryViewStore`'s
+`localStorage` key), not per session. A naive implementation reading `vehicleRows()`/`equipmentRows()`
+directly would have silently hidden a pilot's own perfectly fine vehicles the moment any one of them
+needed attention — the tile that would explain why is a control that persona never sees — or shown
+whatever a manager last picked on a shared station. `myVehicleRows`/`myEquipmentRows` still run the
+same search/category filter pipeline (so the page bar's search box narrows them exactly as it narrows
+the manager's table), just stopping one step before the view split. This is additive: the private
+pre-view computeds already existed unchanged, so manager-view rendering is untouched.
+
+### Card anatomy (§5.4)
+
+Per card: title = asset name linking to `/assets/:id` (`routerLink`, never a button — `open` is this
+link, not a verb in the actions row); category + `Simulated` muted top-right, one line, never a second
+chip; a readiness line (dot + verdict + first blocker, reusing `verdictLabel`/`verdictTone` and the
+row's own `readinessBlockers`/`readinessCause` — the identical facts the table/drawer already read, so
+this card can't phrase the same verdict differently); the state chip (the card's only chip); a prose
+custody line (`myVehicleCustodyLine` — `With you · since 3h ago` when `custodianId === facade.actor()
+.userId`, `With <name> · since …` otherwise, `In stock` / `In stock at <location>`, `In the field`,
+falling back to the chip's own label for any other state — maintenance/retired/archived/unknown); a
+meta line (`myVehicleMetaLine`, `Last flown 7h ago · 15h 04m total`, riding the row's own `'—'`
+unchanged for a never-flown vehicle); an actions row. Equipment cards drop the readiness and meta lines
+(neither concept applies to a battery or a gimbal) but share title/origin/chip/custody/actions.
+
+### Verbs — generic rendering, one authority matrix
+
+Every verb comes from `facade.actionsFor(row)` (`core/fleet/inventory-logic.ts#vehicleRowActions`, the
+one matrix every surface reads), through `my-vehicles-logic.ts#myVehicleActions`, which layers exactly
+one more rule: a `CREW`-assigned row never offers Fly (§5.4's own rule — a CREW seat is about working
+the camera, not flying, and the shared matrix has no way to know a session's per-asset
+`AssignmentRole`, only its capabilities, which a CREW-assigned *pilot-role account* may still hold).
+`MY_VEHICLE_VERB_ORDER = ['fly', 'watchLive', 'return']` + `MY_VEHICLE_VERB_LABELS` +
+`myVehicleVerbList` render every shown verb as a button generically — the template never names a verb
+— a disabled one still renders, as a ghost with its `title`/`.disabled-reason`. `myVehiclePrimaryVerb`
+picks **exactly one** primary: Fly when shown and enabled, else Watch live when shown, else no primary
+at all — a deliberate divergence from the table/drawer's own `primaryVehicleVerb` (which ranks Return
+above Fly: right for a manager weighing a take-back, wrong for a pilot's own launch-pad card, where
+flying it is always the headline action when it's possible at all). **This is also the whole hook W2**
+(D4/D5, a pilot's own *Report issue*, a custodian's self-*Return*) **needs**: extend
+`vehicleRowActions` with the new verb, append it to `MY_VEHICLE_VERB_ORDER` and one label to
+`MY_VEHICLE_VERB_LABELS`, and wire its case in `MyVehicles#runVerb` — the template's `@for` over
+`verbList(row)` never changes.
+
+### The crew seat, and the flag that doesn't exist
+
+`InventoryFacade#myRoleFor(assetId)` answers this session's own `AssignmentRole` for one asset, backed
+by a new signal (`myAssignmentRoleByAssetId`) populated by a new private `loadMyAssignments()` — a
+fifth request, `GET /api/me/assignments` via `VisionApi#myAssignments` (pre-existing), fired
+fire-and-forget from `loadAll()` right after `latchDefaultView()`, deliberately **outside** the
+existing four-request `Promise.all` (`INVENTORY-REWORK-CONTEXT.md`'s own "5 requests flat" precedent)
+so a slow/failed assignments read can never hold up or fail the manager table's own load. Gated on
+`auth.scopeKind() === 'ASSIGNED_ASSETS'` — the only persona "My vehicles" ever renders for — and
+degrades to an empty map on any failure, so every card then simply falls through to the plain verb set.
+
+The task brief asked for "Open crew seat → `/crew/:assetId`, only if the crew feature is exposed to the
+web; else fall back to Watch live." **No client-readable `vision.crew.enabled` (or equivalent) signal
+exists anywhere in vision-web** — checked `MeResponse`, `core/seat/seat-logic.ts`, `core/seat/
+seat-store.ts`, and `features/hubs/nav-entries.ts` (whose "Crew seat" nav entry is deliberately
+ungated, and whose bare `/crew` route redirects to `/wall` for lack of a real landing page). The
+fallback is therefore not a special case at all: `myVehicleActions` simply removes `fly` for a
+CREW-assigned row, and `myVehiclePrimaryVerb`'s existing Fly→Watch-live rule falls through to Watch
+live exactly the way it would for any other Fly-less row — no separate "Open crew seat" verb, label, or
+route needed. If a client-readable crew flag is added later, wiring the real crew-seat link is a small,
+localized change to `myVehicleActions`/`runVerb` alone.
+
+### Empty state, loading, page bar
+
+`vision-empty`, `No vehicles assigned to you yet` / `Your fleet manager assigns vehicles from Roster.`,
+no CTA — reusing `facade.hasActiveFilters()` to distinguish a genuinely empty assignment (`§5.4`'s
+literal copy) from a search/filter that matched nothing (`No matches` / `Clear filters`, the same
+distinction W4's own "empty view vs. empty fleet" precedent established for the manager table). Loading
+reads the page's existing `Loading…` treatment gated on the same `facade.loading()` signal the manager
+branch uses — the empty state can never flash ahead of it, since both are `@if`/`@else if` siblings off
+one signal.
+
+**The page bar narrows by persona, not duplicates.** `inventory.html`'s filter block changed from
+`@if (facade.showsManagerView() && (tab is vehicles/equipment))` to `@if (!facade.showsManagerView() ||
+tab is vehicles/equipment)` — algebraically identical to the old condition whenever
+`showsManagerView()` is true (`!true = false`), so manager rendering is unchanged; it additionally opens
+the block for a non-manager session. Search is unconditional inside (`myVehicleRows`/`myEquipmentRows`
+run the same filter pipeline as the table); Category and the "More filters" `<details>` are now nested
+under their own inner `@if (facade.showsManagerView())` — a pilot's handful of assigned assets is not a
+directory that needs slicing. `Export all (CSV)` is now wrapped in `@if (facade.showsManagerView())`
+too (it rendered unconditionally before this wave) — the endpoint's own scope already limits it to the
+caller's own assets regardless, but "export the fleet" has no meaning over two assigned vehicles.
+`[count]` on `<vision-page-bar>` now reads `facade.showsManagerView() ? facade.activeRows().length :
+facade.myRowsCount()` (`myRowsCount` = vehicles + equipment together, since both render as one stacked
+list here). `+ Add vehicle` and `Refresh` gating is untouched.
+
+### Grid (frontend-style §5.4/§9)
+
+`.card-grid` — `grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr))`, 1–3 columns by content
+width rather than a breakpoint list, `--space-16` gaps. Cards reuse the global `.card` primitive
+(`--panel`/`--border`/`--radius`, no shadow); `.card-actions` gets its own hairline `--border` top rule
+separating it from the prose lines above. Fully theme-blind — no raw hex, no off-grid px, checked
+against both themes' token definitions in `styles.css` (a live screenshot check remains W6's job, same
+as every prior wave — the app on :8080 has auth on with no credentials available to this agent).
+
+### Dev parity (`vision.auth.enabled=false`)
+
+The dev admin resolves `MANAGE_FLEET` unbounded, so `showsManagerView()` is `true` and `<vision-my-
+vehicles>` never mounts — the app behaves exactly as before. `loadMyAssignments()` also never fires for
+that session (`auth.scopeKind() !== 'ASSIGNED_ASSETS'`), so this wave adds zero requests to the dev-
+parity path.
+
+### Left undone, named honestly
+
+- **Verified statically and by spec only** — the app on :8080 has auth enabled and this agent had no
+  credentials; both-theme screenshots remain W6's job, as W3's and W4's own entries already recorded.
+- **No "Open crew seat" verb/route** — see above; there is nothing in vision-web to gate it on, so the
+  plan's own named fallback (Watch live) is what ships.
+- **§5.4 under-specified the empty-vs-no-matches split** for this view specifically; this wave resolved
+  it the same way W4's own "empty view vs. empty fleet" precedent did, reusing `hasActiveFilters()`
+  rather than inventing a second empty-state rule.
+- **§5.4's card diagram doesn't show Equipment cards at all** — this wave trims readiness/meta off them
+  (chosen, not specified) since neither concept exists for non-connected categories; everything else
+  (title/origin/chip/custody/actions) is shared with vehicle cards.
+
+### Tests / build
+
+`npm run test:ci` — **195/195 files, 3925/3925 tests green** (194/3906 before this wave: new
+`features/inventory/my-vehicles-logic.spec.ts` covering `myVehicleCustodyLine`/`myVehicleMetaLine`/
+`myVehicleActions`/`myVehicleVerbList`/`myVehiclePrimaryVerb`). `npx tsc --noEmit` clean on both
+`tsconfig.app.json` and `tsconfig.spec.json`. `ng build --configuration production` **green, exit 0**,
+only the same three pre-existing warnings (the `cockpit.html` NG8107 and the two budget warnings);
+initial bundle **unchanged at 435.22 kB raw** (transfer ~122.00 kB, matching W4's own number within
+rounding), the lazy `inventory` chunk **121.00 → 129.68 kB raw (+8.68)**, 23.96 → 25.43 kB transfer
+(+1.47) — the new component, its logic module, and the `GET /api/me/assignments` wiring, all behind the
+`/assets` lazy route.
+
 ## Status — CV-ORCHESTRATION wave W-pre (web): DetectionState's 4th value stops falling through every switch (docs/plans/active/CV-ORCHESTRATION-PLAN.md §7 D1, §4.6, §6 W-pre row) — 2026-09-12
 
 Standalone defect fix, disjoint from the rest of CV-ORCHESTRATION's waves (W-pre runs parallel to

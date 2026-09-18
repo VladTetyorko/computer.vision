@@ -57,6 +57,14 @@ Users, groups, roles, authentication, and the pilot→asset assignment roster.
 - `ActivityService` (interface) → `DefaultActivityService(AuditTrailPort)`
   - `List<AuditEntry> myActivity(UserId actor, int limit)` — thin pass-through over `AuditTrailPort.findByActor`; scoping is just "your own actor id" (a manager-sees-team view is deferred)
 
+### `application.handover` (INVENTORY-REWORK-PLAN wave W1, NEW)
+- `HandoverService` (interface) → `DefaultHandoverService(AssetCustodyService, AssignmentService)` — **the only service in this module that composes two other application services rather than ports.** Giving somebody an aircraft is one decision; it used to take two writes, and every caller but the fit-out wizard forgot the second (docs/plans/active/INVENTORY-REWORK-CONTEXT.md §3, defect B). It lives here, not in warehouse, because the composition needs both contexts and identity is the one that may depend on warehouse (never the reverse).
+  - `Asset issue(AssetId, UserId custodianId, String location, UserId actor, Authority authority)` — `AssetCustodyService#issue(...)` first, then `AssignmentService#assign(custodian, asset, AssignmentRole.PILOT, actor, authority)`. Returns whatever custody returned.
+    - **Idempotent on the roster**: the assign is skipped entirely when `assignmentService.roleFor(custodian, asset)` is already present. That is not merely a saved write — `AssignmentRepositoryPort#assign` is an upsert whose `AssignmentRole` *changes* on re-assign, so calling it unconditionally would silently promote a manager's deliberate `CREW` seat to `PILOT` every time that person was handed the box. Handing somebody an aircraft is not a decision to change their seat.
+    - **Compensating**: if the assign throws, `returnToStock` undoes the custody write and the original exception is rethrown — the caller sees the failure, never a half-state. A failing undo is attached with `addSuppressed`, so the original cause still surfaces.
+  - `Asset returnToStock(AssetId, UserId actor, Authority authority)` — custody only; the assignment deliberately **survives** (plan D2: authorisation to fly outlives possession of the box, and revoking it would make every return→re-issue cycle a fresh grant).
+  - **Authorisation and audit stay entirely with the two lower services** — `AssetCustodyService` and `AssignmentService` each already gate on `Authority#mayManageFleet(ownership)` and each already write their own audit entry. This service adds no gate and no third audit row: a manager who may issue an asset is by construction a manager who may assign a pilot to that same asset's ownership.
+
 ## Conventions
 - Domain records validate in their compact constructor (`if (…) throw new IllegalArgumentException(…)`); the application layer uses `Objects.requireNonNull`.
 - The acting user is a method parameter (`UserId actor`/`VisibilityScope acting`), never a constructor dependency. **Wave B2**: `actor` (who to attribute an audit entry to) and `acting`/`granterScope` (what the caller may see/manage) are passed as **two separate plain parameters**, never bundled into one type — see Gotchas.
@@ -141,3 +149,22 @@ principal Spring Session JDBC java-serializes on every authenticated request onc
 free). No behavior change — `./mvnw -B -pl core/vision-kernel,contexts/vision-identity test` —
 **153/153** green, unchanged (this module's own suite constructs `User`/`Membership` values but never
 serializes them, so the count is unaffected).
+
+**INVENTORY-REWORK-PLAN wave W1 done** (docs/plans/active/INVENTORY-REWORK-PLAN.md §2 D1/D2, §7 row
+W1) — one new package, `application.handover`, holding `HandoverService`/`DefaultHandoverService`
+(own API-surface section above). Nothing existing changed: no signature widened, no gate moved, no
+audit row added or removed. The composition is deliberately thin — two calls and a compensating
+undo — and every behavioural claim it makes is pinned by `DefaultHandoverServiceTest`'s hand fakes
+(9 cases: writes custody then assigns; returns custody's own result; leaves an existing `PILOT`
+alone; never promotes an existing `CREW` seat; a failed custody write never reaches the assignment;
+a failed assignment compensates and rethrows; a failed compensation is suppressed so the original
+still surfaces; `returnToStock` keeps the assignment; `returnToStock` propagates custody's refusal).
+
+`./mvnw -B -pl contexts/vision-identity test` — **162/162** green (153 before this wave + the 9
+above), 0 failures, 0 errors. No pre-existing test was edited.
+
+**Consumers**: `station/vision-app` wires the bean (`AuthWiringConfiguration#handoverService`,
+unconditional — it composes two unconditional services and adds no flag of its own);
+`station/vision-api`'s `AssetInventoryController#custody` routes ISSUE/RETURN through it instead of
+calling `AssetCustodyService` directly. Ground/release/retire still go straight to
+`AssetCustodyService` — hand-over owns possession, not serviceability.

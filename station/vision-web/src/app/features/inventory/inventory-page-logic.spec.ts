@@ -1,60 +1,139 @@
 import { describe, expect, it } from 'vitest';
-import type { AssetAttention, CategoryCounts, FleetSummary } from '../../core/api/models';
-import { inventoryKpis } from './inventory-page-logic';
+import type { InventoryStateChipKind } from '../../core/fleet/inventory-logic';
+import {
+  INVENTORY_VIEWS,
+  INVENTORY_VIEW_ALL,
+  defaultInventoryView,
+  filterRowsByInventoryView,
+  inventoryViewTiles,
+  parseInventoryView,
+  rowMatchesInventoryView,
+  serializeInventoryView,
+  toggleInventoryView,
+  type InventoryViewRow,
+} from './inventory-page-logic';
 
-function asset(partial: Partial<AssetAttention> = {}): AssetAttention {
-  return {
-    assetId: 'a-0',
-    displayName: 'Asset',
-    categoryId: 'drone',
-    categoryName: 'Drone',
-    lifecycle: 'ACTIVE',
-    streaming: false,
-    openEventCount: 0,
-    ...partial,
-  };
+function row(kind: InventoryStateChipKind, partial: Partial<InventoryViewRow> = {}): InventoryViewRow {
+  return { stateChip: { kind }, ...partial };
 }
 
-function counts(partial: Partial<CategoryCounts> = {}): CategoryCounts {
-  return {
-    categoryId: 'drone',
-    categoryName: 'Drone',
-    total: 0,
-    active: 0,
-    deactivated: 0,
-    deleted: 0,
-    streaming: 0,
-    inStock: 0,
-    issued: 0,
-    inField: 0,
-    maintenance: 0,
-    retired: 0,
-    ...partial,
-  };
-}
-
-function summary(partial: Partial<FleetSummary> = {}): FleetSummary {
-  return { categories: [], assets: [], totalAssets: 0, ...partial };
-}
-
-describe('inventoryKpis', () => {
-  it('degrades to all-zero with no summary loaded yet', () => {
-    expect(inventoryKpis(undefined)).toEqual({ totalAssets: 0, streaming: 0, active: 0, deactivated: 0, needsAttention: 0 });
+describe('rowMatchesInventoryView', () => {
+  it('matches the four state views against the row\'s own effective-state chip', () => {
+    expect(rowMatchesInventoryView(row('in-field'), 'in-field')).toBe(true);
+    expect(rowMatchesInventoryView(row('issued'), 'issued')).toBe(true);
+    expect(rowMatchesInventoryView(row('in-stock'), 'in-stock')).toBe(true);
+    expect(rowMatchesInventoryView(row('maintenance'), 'maintenance')).toBe(true);
+    expect(rowMatchesInventoryView(row('in-stock'), 'in-field')).toBe(false);
   });
 
-  it('counts streaming assets and sums active/deactivated across categories', () => {
-    const kpis = inventoryKpis(
-      summary({
-        totalAssets: 3,
-        assets: [asset({ streaming: true }), asset({ streaming: false })],
-        categories: [counts({ active: 2, deactivated: 1 }), counts({ categoryId: 'cam', active: 1, deactivated: 0 })],
-      }),
-    );
-    expect(kpis).toEqual({ totalAssets: 3, streaming: 1, active: 3, deactivated: 1, needsAttention: 0 });
+  it('counts a grounded vehicle as needing attention', () => {
+    expect(rowMatchesInventoryView(row('maintenance'), 'needs-attention')).toBe(true);
   });
 
-  it('counts an asset with any triggered attention reason toward needsAttention', () => {
-    const kpis = inventoryKpis(summary({ assets: [asset({ batteryPercent: 5 }), asset({ batteryPercent: 90 })] }));
-    expect(kpis.needsAttention).toBe(1);
+  it('counts a NO_GO verdict as needing attention even while it sits in stock', () => {
+    expect(rowMatchesInventoryView(row('in-stock', { readinessVerdict: 'NO_GO' }), 'needs-attention')).toBe(true);
+  });
+
+  it('counts any readiness blocker as needing attention — "never probed" included', () => {
+    expect(rowMatchesInventoryView(row('in-stock', { readinessVerdict: 'UNKNOWN', readinessCause: 'Map position' }), 'needs-attention')).toBe(true);
+  });
+
+  it('does not count a row whose readiness was never fetched — absence of evidence is not a blocker', () => {
+    expect(rowMatchesInventoryView(row('in-stock'), 'needs-attention')).toBe(false);
+    expect(rowMatchesInventoryView(row('in-field', { readinessVerdict: 'GO' }), 'needs-attention')).toBe(false);
+  });
+
+  it('never counts an archived or retired row toward a state view', () => {
+    for (const view of INVENTORY_VIEWS) {
+      expect(rowMatchesInventoryView(row('archived'), view)).toBe(false);
+      expect(rowMatchesInventoryView(row('retired'), view)).toBe(false);
+    }
+  });
+});
+
+describe('filterRowsByInventoryView', () => {
+  const rows = [row('in-stock'), row('in-field'), row('maintenance'), row('in-stock', { readinessVerdict: 'NO_GO' })];
+
+  it('hands back the same array for All, without copying', () => {
+    expect(filterRowsByInventoryView(rows, null)).toBe(rows);
+  });
+
+  it('narrows to one view', () => {
+    expect(filterRowsByInventoryView(rows, 'in-stock')).toHaveLength(2);
+    expect(filterRowsByInventoryView(rows, 'needs-attention')).toHaveLength(2);
+  });
+});
+
+describe('inventoryViewTiles', () => {
+  const rows = [
+    row('in-stock'),
+    row('in-stock', { readinessVerdict: 'NO_GO', readinessCause: 'Battery' }),
+    row('in-field'),
+    row('maintenance'),
+    row('issued'),
+  ];
+
+  it('produces the five views in the printed order', () => {
+    expect(inventoryViewTiles(rows).map((tile) => tile.view)).toEqual([...INVENTORY_VIEWS]);
+  });
+
+  it('counts exactly what selecting the view would show', () => {
+    for (const tile of inventoryViewTiles(rows)) {
+      expect(tile.count).toBe(filterRowsByInventoryView(rows, tile.view).length);
+    }
+  });
+
+  it('colours only the two views that mean something is wrong, and only while they hold rows', () => {
+    const tiles = inventoryViewTiles(rows);
+    expect(tiles.find((t) => t.view === 'needs-attention')?.tone).toBe('danger');
+    expect(tiles.find((t) => t.view === 'maintenance')?.tone).toBe('warn');
+    expect(tiles.find((t) => t.view === 'in-field')?.tone).toBe('ok');
+    expect(tiles.find((t) => t.view === 'in-stock')?.tone).toBe('default');
+    expect(inventoryViewTiles([]).every((tile) => tile.tone === 'default')).toBe(true);
+  });
+
+  it('pulses the live dot only while something is actually airborne', () => {
+    expect(inventoryViewTiles(rows).find((t) => t.view === 'in-field')?.live).toBe(true);
+    expect(inventoryViewTiles([row('in-stock')]).find((t) => t.view === 'in-field')?.live).toBe(false);
+  });
+
+  it('reads all-zero for an empty fleet rather than throwing', () => {
+    expect(inventoryViewTiles([]).map((tile) => tile.count)).toEqual([0, 0, 0, 0, 0]);
+  });
+});
+
+describe('defaultInventoryView', () => {
+  it('opens on Needs attention while anything is in it, else All', () => {
+    expect(defaultInventoryView(2)).toBe('needs-attention');
+    expect(defaultInventoryView(0)).toBeNull();
+  });
+});
+
+describe('parseInventoryView / serializeInventoryView', () => {
+  it('round-trips every view and explicit All', () => {
+    for (const view of INVENTORY_VIEWS) {
+      expect(parseInventoryView(serializeInventoryView(view))).toBe(view);
+    }
+    expect(serializeInventoryView(null)).toBe(INVENTORY_VIEW_ALL);
+    expect(parseInventoryView(INVENTORY_VIEW_ALL)).toBeNull();
+  });
+
+  it('keeps "explicitly All" distinct from "never chosen"', () => {
+    expect(parseInventoryView(INVENTORY_VIEW_ALL)).toBeNull();
+    expect(parseInventoryView(null)).toBeUndefined();
+    expect(parseInventoryView(undefined)).toBeUndefined();
+  });
+
+  it('reads a stale or hand-edited value as never chosen', () => {
+    expect(parseInventoryView('needs_attention')).toBeUndefined();
+    expect(parseInventoryView('')).toBeUndefined();
+  });
+});
+
+describe('toggleInventoryView', () => {
+  it('selects a different view and deselects the current one', () => {
+    expect(toggleInventoryView(null, 'issued')).toBe('issued');
+    expect(toggleInventoryView('issued', 'in-stock')).toBe('in-stock');
+    expect(toggleInventoryView('issued', 'issued')).toBeNull();
   });
 });

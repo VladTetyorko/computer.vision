@@ -440,6 +440,46 @@ needed/not run — this module's tests are pure-unit/MockMvc, no Testcontainers 
 touched files. `vision-web`'s `drone-picker-facade.ts` was read for context, per instruction, but not
 modified, and self-corrects once the server stops over-sending.
 
+## docs/plans/active/INVENTORY-REWORK-PLAN.md wave W1 (2026-09-06, branch `feat/inventory-rework`)
+
+The hand-over composition and the three wire fields a client can no longer join for itself (§2
+D1–D3, §6 frozen wire contract, §7 row W1). No new endpoint, no flag, no removed or renamed field.
+
+- **`AssetInventoryController#custody`** routes ISSUE/RETURN through `HandoverService`
+  (vision-identity) instead of calling `AssetCustodyService` directly (endpoint table + Conventions
+  entries in MODULE.md). ISSUE writes custody **and** grants the `PILOT` seat, idempotently — an
+  existing `PILOT` *or* `CREW` seat on that (user, asset) pair is left untouched, so handing somebody
+  the box can never silently promote a manager's deliberate `CREW` seat. RETURN clears custody and
+  keeps the assignment (D2). Ground/release/retire are unchanged and still go straight to
+  `AssetCustodyService`.
+- **Failure shapes are unchanged**, because the compensation happens below this layer: a refused
+  issue (`AccessDeniedException`) is still `403 FORBIDDEN`, an unknown asset still `404 NOT_FOUND`, a
+  conflicting state (`IllegalStateException` — including a failed seat grant, after the custody write
+  has been rolled back) still `409 CONFLICT`, a malformed/absent `custodianId` still `400 BAD_REQUEST`.
+  A caller either sees the whole hand-over or sees the error; there is no partial 2xx.
+- **DTOs**: `CustodyResponse.custodianName`, `PilotResponse.username`/`displayName`,
+  `AssetSummaryResponse`/`AssetDetailsResponse` `deviceCount` (see MODULE.md's DTO conventions for the
+  exact shapes and omission rules). `AssignmentController` gained `AuthService` as a fifth
+  collaborator (at the ceiling); `AssetRowFacts` gained it as a third, keeping `AssetController` at
+  five.
+
+`./mvnw -B -pl contexts/vision-identity,station/vision-api,station/vision-app test -DskipWeb` (run
+per-module, scoped) — `contexts/vision-identity` **162** (153 → 162, +9 `DefaultHandoverServiceTest`),
+`station/vision-api` **1059** (1052 → 1059, +7: 3 `AssetControllerTest` cases for `deviceCount` and
+the custodian-name resolve/omit pair, 2 `AssignmentControllerTest` cases for the by-id name lookup
+and the unresolvable-user omission, 2 `AssetInventoryControllerTest` cases for the hand-over routing
+and the 409 on a failed hand-over; 3 pre-existing cases in that file were re-pointed at
+`HandoverService` since the collaborator they assert on changed, and one was renamed),
+`station/vision-app` **353** (unchanged — no wiring test in scope changed behaviour). All green, 0
+failures/errors. Docker ran for real (Testcontainers `postgres:16`, Flyway migrated through `V35`).
+`EndpointAuthorizationTest`'s BFS still finds an authority check on every handler — `custody` reaches
+`CurrentUser#authority()` exactly as before, only through a different service.
+
+**Note for the web wave (W3)**: the fit-out wizard's *second* call at
+`station/vision-web/src/app/.../onboarding-store.ts:1307-1308` — the `assignPilot(...)` issued right
+after the custody call — is now redundant. It is harmless (the grant is idempotent and never changes
+an existing seat), but it is a second round trip papering over defect B, and the web wave removes it.
+
 ## docs/plans/active/CREW-CONTROL-PLAN.md wave W2 (2026-09-05, uncommitted at time of writing, branch `feat/crew-control`)
 
 New `security.SeatAccess` (the one collaborator every guard calls — 5 params, at the constructor

@@ -1904,6 +1904,19 @@ export interface AssetSummary {
    * comment), never when the true value is a genuine zero (a never-flown asset reports `0`).
    */
   readonly totalFlightSeconds?: number;
+  /**
+   * `asset.devices().size()` — how many devices are linked to this asset
+   * (docs/plans/active/INVENTORY-REWORK-PLAN.md §6 row 3, added by that plan's wave W1). It exists
+   * so the Inventory table can render its **Links** column straight off `GET /api/assets` instead
+   * of issuing one `GET /api/assets/{id}` per row (that plan's context §3 defect D — 20 assets used
+   * to cost 25 requests).
+   *
+   * Optional, and absent on any station whose backend predates W1: a reader falls back to a
+   * *already-loaded* `AssetDetails#devices.length` when it happens to have one, and otherwise
+   * renders `'—'` — never a fabricated `0`, which would read as the assertion "this vehicle has no
+   * devices linked" (`features/inventory/vehicles-logic.ts#linksLabel`).
+   */
+  readonly deviceCount?: number;
 }
 
 /** Mirrors `warehouse.domain.model.InventoryState` (WAREHOUSE-UX-PLAN.md §3.2 D1/D2). */
@@ -1920,6 +1933,16 @@ export interface AssetIdentity {
 /** Mirrors `dto.CustodyResponse` — `custodianId`/`since` absent for an asset still in stock. */
 export interface AssetCustody {
   readonly custodianId?: string;
+  /**
+   * The custodian's display name, resolved server-side by an **unscoped id lookup** — a label
+   * lookup, not a listing (docs/plans/active/INVENTORY-REWORK-PLAN.md §6 row 1, decision D3; added
+   * by that plan's wave W1). Optional on the wire and here: a station running a pre-W1 backend
+   * omits it entirely, and so does a `custodianId` this deployment can no longer resolve to a user.
+   * Both cases fall back to the client-side `GET /api/users` join and then to a truncated id
+   * (`features/inventory/vehicles-logic.ts#custodianLabel`) — never a fabricated name, and never a
+   * bare 36-character UUID in a table cell.
+   */
+  readonly custodianName?: string;
   readonly location?: string;
   readonly since?: string;
 }
@@ -3940,6 +3963,15 @@ export interface CreateGroupRequest {
 export interface AssignedPilot {
   readonly userId: string;
   readonly role: AssignmentRole;
+  /**
+   * The assignee's account name / display name (docs/plans/active/INVENTORY-REWORK-PLAN.md §6 row 2,
+   * decision D3 — added by that plan's wave W1, resolved server-side by the same unscoped id lookup
+   * `AssetCustody#custodianName` uses). Both optional for the same two reasons that field is:
+   * a pre-W1 backend omits them, and an unresolvable id has no name to send. A reader falls back to
+   * the id (truncated for display) rather than rendering a blank or an invented name.
+   */
+  readonly username?: string;
+  readonly displayName?: string;
 }
 
 /**

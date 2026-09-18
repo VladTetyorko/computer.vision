@@ -206,12 +206,25 @@ function orderedFeatureEntries(features: Readonly<Record<string, FeatureStatus>>
  * an answer either way.
  */
 export function fleetRowAttention(row: ReadinessRow, limit = 2): string | null {
-  const notReady = orderedFeatureEntries(row.features).filter((entry) => entry.status !== 'READY');
-  if (notReady.length === 0) {
+  const labels = fleetRowBlockers(row);
+  if (labels.length === 0) {
     return null;
   }
-  const labels = notReady.map((entry) => featureLabel(entry.feature));
   return labels.length <= limit ? labels.join(', ') : `${labels.slice(0, limit).join(', ')} +${labels.length - limit} more`;
+}
+
+/**
+ * The same non-`READY` features {@link fleetRowAttention} rolls up, as the ordered list of labels
+ * rather than one joined sentence (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.3's *Why not ready*
+ * section, wave W4 — a detail pane has room to name every blocker where a table cell does not, and
+ * the two must never order or word them differently). Empty means "nothing non-`READY` among the
+ * features that were actually evaluated" — indistinguishable from a row with no evaluated features
+ * at all, so a caller pairs it with the verdict rather than announcing "all clear" off this alone.
+ */
+export function fleetRowBlockers(row: ReadinessRow): readonly string[] {
+  return orderedFeatureEntries(row.features)
+    .filter((entry) => entry.status !== 'READY')
+    .map((entry) => featureLabel(entry.feature));
 }
 
 const VERDICT_PRIORITY: Readonly<Record<ReadinessVerdict, number>> = { NO_GO: 0, UNKNOWN: 1, GO: 2 };

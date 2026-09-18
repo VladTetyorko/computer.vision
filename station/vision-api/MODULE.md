@@ -48,8 +48,9 @@ helpers: `SnapshotJpegEncoder`, `CapabilityParsing`, `DeviceOriginParsing`, `Rem
 `SystemStatusController` so `SystemStatusSampler` can reuse the exact same rollup logic —
 `DiscoveryStatusFacts` — the plain (non-DTO) crossing-seam payload behind `GET /api/discovery/status`,
 `InventoryExportService` — the hand-rolled CSV behind `GET /api/inventory/export`, `AssetRowFacts` —
-bundles the `firmware`/`totalFlightSeconds` cross-context joins `AssetController` needs, see
-Conventions, `SeatSupport` — bundles `SeatAccess`'s device/stream→asset resolution, asset ownership,
+WAREHOUSE-UX W8 + INVENTORY-REWORK W1, bundles the `firmware`/`totalFlightSeconds`/
+`custody.custodianName` cross-context joins `AssetController` needs, see Conventions, `SeatSupport` —
+bundles `SeatAccess`'s device/stream→asset resolution, asset ownership,
 display-name lookup, and `FORCE`/`DENIED:SEAT_HELD` audit writes, see Conventions) · `demo/`
 (property-gated demo-data seeding, deletable as one unit) · `exception/` (`ApiExceptionHandler` +
 api-local exceptions) · `config/` (MVC/WebSocket/SPA `@Configuration`).
@@ -85,7 +86,7 @@ the full mechanism.
 | AssetController | POST | `/api/assets/{id}/devices` | Attach a device | manage |
 | AssetController | DELETE | `/api/assets/{id}/devices/{deviceId}` | Detach a device | manage |
 | AssetController | GET | `/api/usages/{usageId}/telemetry?limit=` | Raw (unwindowed) telemetry trail — the **latest** `limit` samples, ascending (reads `TelemetryRepositoryPort#findLatestByUsage`, not `#findByUsage` — the `/command` fleet map polls this treating the last element as "current position") | **unscoped** (ledger: `AssetController#telemetry`) |
-| AssetInventoryController | POST | `/api/assets/{id}/custody` | Issue to a custodian / return to stock (`{action:ISSUE\|RETURN,custodianId?,location?}`) | manage (via `AssetCustodyService`) |
+| AssetInventoryController | POST | `/api/assets/{id}/custody` | Issue to a custodian / return to stock (`{action:ISSUE\|RETURN,custodianId?,location?}`). **INVENTORY-REWORK W1: ISSUE now also grants the custodian the `PILOT` seat** (idempotent — an existing `PILOT` or `CREW` seat is left exactly as it is); RETURN clears custody and **leaves the assignment in place**. Routed through `HandoverService`, see Conventions | manage (via `HandoverService` → `AssetCustodyService` + `AssignmentService`) |
 | AssetInventoryController | POST | `/api/assets/{id}/inventory` | Ground / release / retire (`{action:GROUND\|RELEASE\|RETIRE,kind?,summary?}`) | manage (via `AssetCustodyService`) |
 | AssetInventoryController | GET | `/api/assets/{id}/maintenance` | List an asset's maintenance history, open and closed | scope (via `MaintenanceService`) |
 | AssetInventoryController | POST | `/api/assets/{id}/maintenance` | Open a maintenance record directly, without also grounding | manage (via `MaintenanceService`) |
@@ -230,7 +231,7 @@ the full mechanism.
 | AuthPasswordController | POST | `/api/auth/password` | Self-service password change, `{currentPassword,newPassword}` → `204`, clears `mustChangePassword`; `401` wrong current, `400 WEAK_PASSWORD`, `409 AUTH_DISABLED` when `vision.auth.enabled=false` | self |
 | AssignmentController | PUT | `/api/assets/{assetId}/pilots/{userId}` | Assign a pilot (idempotent); body `{"role"?: "PILOT"\|"CREW"}` — absent body/field defaults to `PILOT` | manage |
 | AssignmentController | DELETE | `/api/assets/{assetId}/pilots/{userId}` | Unassign (idempotent) | manage |
-| AssignmentController | GET | `/api/assets/{assetId}/pilots` | List an asset's pilots; `PilotResponse` carries `role` | scope |
+| AssignmentController | GET | `/api/assets/{assetId}/pilots` | List an asset's pilots; `PilotResponse` carries `role` and, **INVENTORY-REWORK W1**, `username`/`displayName` resolved server-side by id (`AuthService#find`) — both omitted if the user record no longer resolves | scope |
 | AssignmentController | GET | `/api/me/assignments` | Caller's own assigned assets; `AssignmentResponse` carries `role` (defaults to `PILOT` if `roleFor` finds no link — see Gotchas) | self |
 | ActivityController | GET | `/api/me/activity?limit=` | Caller's own audit entries | self |
 | AuditController | GET | `/api/audit?targetType=&targetId=&limit=` | Fleet-wide audit trail | manageOrg |
@@ -581,6 +582,33 @@ freshly-created `Asset` in hand, and building the full details response would ne
 collaborators (`AssetRowFacts`, image lookup) this endpoint has no call to pull in; a caller wanting
 the full asset shape follows up with `GET /api/assets/{id}`.
 
+**INVENTORY-REWORK W1 additions** (docs/plans/active/INVENTORY-REWORK-PLAN.md §6 frozen wire
+contract, D3) — three fields, all additive, no field renamed or removed:
+- `CustodyResponse(custodianId, custodianName, location, since)` — `custodianName` is the custodian's
+  `User#displayName()`, resolved **server-side by id**. Omitted (not `null`-valued, `NON_NULL`) for an
+  in-stock asset, for a custodian whose user record no longer resolves, and on the endpoints with no
+  name lookup to offer (below).
+- `PilotResponse(userId, role, username, displayName)` — the `GET /api/assets/{assetId}/pilots` row.
+  Both names omitted together when the user record no longer resolves; the `userId` is always there,
+  so a client always has something to show.
+- `AssetSummaryResponse`/`AssetDetailsResponse` gained a trailing **`deviceCount`** (`int`, `Asset#devices().size()`,
+  never absent — it is read straight off the same `AssetSummary` the row is built from, so it is
+  accurate on **every** producer including the SSE `fleet` snapshot). It exists so a Links column
+  renders from the list alone; the web used to `GET /api/assets/{id}` once per row just to count
+  devices, turning a 20-asset page into 25 requests (CONTEXT §3, defect D). On
+  `AssetDetailsResponse` it is redundant with `devices.size()` and carried anyway, so one row shape
+  reads the same from either endpoint.
+
+**Why the names are resolved server-side, and why this is not a scope widening**: the client-side
+join this replaces read `GET /api/users`, which answers an **empty list** for a `PILOT`'s
+`ASSIGNED_ASSETS` scope — so exactly the caller who most needs to know who holds the aircraft was
+the one guaranteed to render a raw UUID (CONTEXT §3, defect C). The server-side resolution is a
+**label lookup by id** (`AuthService#find(UserId)`, the same unscoped by-id read `SeatSupport#displayNameOrId`
+already makes), on a person the row already names — it cannot be used to enumerate anybody, and
+`UserService#list(scope)`'s own filtering is untouched. `AssetSummaryResponse.from`/
+`AssetDetailsResponse.from` each widened by one trailing `custodianName` parameter (no overload —
+CLAUDE.md rule 10); `PilotResponse.from` widened to take the resolved `User` (nullable = unresolved).
+
 **`DiscoveryCandidateResponse`/`RegisterDiscoveryCandidateResponse` sysid fields (LINK-PAIRING-PLAN.md
 §3.3/§7).** Both gained a trailing `Integer assignedSysid` (`@JsonInclude(NON_NULL)`, widened
 `from(...)` overload to `from(candidate, sysidPushRequired, assignedSysid)`; a 1-arg/3-field
@@ -767,23 +795,42 @@ See Gotchas for the measured `sources: {}` (present-but-empty) JSON shape when n
   `scope`-only authority level above, no separate endpoint/DTO/wire contract.
 - Logging: `System.Logger`, not SLF4J — matches every other adapter/domain class in this codebase;
   SLF4J appears only in `vision-app`'s Spring-only devsupport beans.
-- **`AssetRowFacts` (`support/`) bundles two cross-context reads behind one collaborator** —
-  `firmwareOf(Asset)` (iterates the asset's devices, returns the first
-  `VehicleProfileRepositoryPort#findLatest` hit) and `totalFlightSecondsByAsset()` (delegates to
-  `AssetUsageRepositoryPort`'s aggregate). `AssetController` already sat at four constructor params
-  (`AssetService`, `CurrentUser`, `TelemetryRepositoryPort`, `AssetImageRepositoryPort`); adding both
-  `VehicleProfileRepositoryPort` and `AssetUsageRepositoryPort` directly would have meant six, past
-  the five-parameter ceiling (`.claude/skills/java-clean-code/SKILL.md` §3) — so both ports are
-  bundled into one new fifth parameter instead, the same "bundle into a collaborator" resolution this
-  file's own `AssetInventoryController`/`AssetStreamController` split documents for the same ceiling.
-  Two other call sites of `AssetSummaryResponse.from`/`AssetDetailsResponse.from` —
-  `AssetInventoryController#detailsResponse` and `LiveUpdateRegistry#freshFleetEnvelope` — are already
-  at their own five-parameter ceiling with no room for `AssetRowFacts` either, and pass `null, null`
-  explicitly (each documented in place) rather than silently omitting the parameters; a caller wanting
-  an accurate join after those endpoints should follow up with `GET /api/assets/{id}`.
+- **`AssetRowFacts` (`support/`, WAREHOUSE-UX W8; a third join added by INVENTORY-REWORK W1) bundles
+  the cross-context reads behind one collaborator** — `firmwareOf(Asset)` (iterates the asset's
+  devices, returns the first `VehicleProfileRepositoryPort#findLatest` hit), `totalFlightSecondsByAsset()`
+  (delegates to `AssetUsageRepositoryPort`'s aggregate), and `custodianNameOf(Custody)` (W1 —
+  `AuthService#find(UserId)`'s `displayName`, `null` for an in-stock asset or an unresolvable user;
+  identity is joined here for the same reason flight is, warehouse's `Custody` holds a bare `UserId`
+  and must not learn to read identity). `AssetController` already sat at four constructor params
+  (`AssetService`, `CurrentUser`, `TelemetryRepositoryPort`, `AssetImageRepositoryPort`); adding
+  `VehicleProfileRepositoryPort`, `AssetUsageRepositoryPort` and `AuthService` directly would have
+  meant seven, past the five-parameter ceiling (`.claude/skills/java-clean-code/SKILL.md` §3) — so
+  all three are bundled into one fifth parameter instead, the same "bundle into a collaborator"
+  resolution this file's own `AssetInventoryController`/`AssetStreamController` split documents for
+  the same ceiling. `AssetSummary`/domain records were **not** widened for this — see
+  `contexts/vision-warehouse/MODULE.md`'s W8 note for why. Two other call sites of
+  `AssetSummaryResponse.from`/`AssetDetailsResponse.from` — `AssetInventoryController#detailsResponse`
+  and `LiveUpdateRegistry#freshFleetEnvelope` — have no room for `AssetRowFacts` either, and pass
+  `null, null, null` explicitly (each documented in place) rather than silently omitting the
+  parameters; a caller wanting an accurate `firmware`/`totalFlightSeconds`/`custody.custodianName`
+  after those endpoints should follow up with `GET /api/assets/{id}`. `deviceCount` is **not** in
+  that company — it comes off the `AssetSummary` itself, so every producer reports it accurately.
   `AssetRowFacts` carries no stereotype annotation and depends on ports from two different contexts —
   `ContextArchitectureTest`'s `contextOf(...)` does not flag this since it only recognizes
   `com.drones.vision.<context>` packages, not `vision-api`/`vision-app`/adapter code.
+- **`HandoverService` (vision-identity) owns the two-write hand-over, not `AssetInventoryController`**
+  (INVENTORY-REWORK W1, plan D1/D2). `POST /api/assets/{id}/custody` ISSUE must write custody *and*
+  grant the custodian the `PILOT` seat, with a compensating `returnToStock` if the grant fails — a
+  controller sequencing two writes with an undo between them would be business logic in an adapter.
+  The controller stays a thin translator: it calls one service method and renders the result.
+  Ground/release/retire still go straight to `AssetCustodyService`; hand-over owns possession, not
+  serviceability. **Constructor cost, disclosed**: this puts `AssetInventoryController` at **six**
+  collaborators, one past the ceiling — the same documented exception `AssetStreamController` (6)
+  and `StreamController` (7) already carry. `HandoverService` joined `AssetCustodyService` rather
+  than replacing it, because re-homing ground/release/retire in identity to save a parameter would
+  be a far worse trade. The honest fix is to split the four `/maintenance` endpoints onto their own
+  controller (five here, two there); that is larger than W1's additive scope and is recorded here as
+  debt rather than done quietly.
 - **`DiscoveryInboxController`'s three original handlers split authorization the same way
   `AuditController`/`GroupAdminController` already do, for the same reason each does it that way**:
   `list`/`dismiss` gate explicitly in-controller (`currentUser.authority().mayManageOrg()`, throwing

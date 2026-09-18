@@ -1,0 +1,129 @@
+@if (facade.loading()) {
+  <p class="muted">Loading…</p>
+} @else if (facade.error(); as error) {
+  <vision-empty title="Couldn't load your vehicles" [message]="error">
+    <button type="button" class="btn secondary" (click)="facade.loadAll()">Try again</button>
+  </vision-empty>
+} @else if (!hasAny()) {
+  @if (facade.hasActiveFilters()) {
+    <vision-empty title="No matches" message="Nothing currently matches this search.">
+      <button type="button" class="btn secondary" (click)="facade.clearFilters()">Clear filters</button>
+    </vision-empty>
+  } @else {
+    <vision-empty
+      title="No vehicles assigned to you yet"
+      message="Your fleet manager assigns vehicles from Roster."
+    />
+  }
+} @else {
+  @if (vehicleRows().length > 0) {
+    <div class="card-grid">
+      @for (row of vehicleRows(); track row.asset.assetId) {
+        @let verbs = actionsFor(row);
+        @let primary = primaryVerb(row);
+        <article class="card vehicle-card" [class.archived]="row.archived">
+          <header class="card-head">
+            <a class="card-title truncate" [routerLink]="['/assets', row.asset.assetId]" [title]="row.asset.displayName">
+              {{ row.asset.displayName }}
+            </a>
+            <span class="card-origin muted truncate">
+              {{ row.asset.categoryName }}
+              @if (row.simulated) {
+                · Simulated
+              }
+            </span>
+          </header>
+
+          <div class="card-readiness">
+            @if (row.readinessVerdict; as verdict) {
+              <span class="dot" [class.ok]="verdictTone(verdict) === 'ok'" [class.danger]="verdictTone(verdict) === 'danger'"></span>
+              <span>{{ verdictLabel(verdict) }}</span>
+              @if (row.readinessCause; as cause) {
+                <span class="muted truncate" [title]="cause">{{ cause }}</span>
+              }
+            } @else {
+              <span class="muted">Readiness not evaluated</span>
+            }
+          </div>
+
+          <span
+            class="chip"
+            [class.faded]="row.stateChip.tone === 'muted'"
+            [class.ok]="row.stateChip.tone === 'ok'"
+            [class.warn]="row.stateChip.tone === 'warn'"
+          >
+            @if (row.stateChip.live) {
+              <span class="dot live"></span>
+            }
+            {{ row.stateChip.label }}
+          </span>
+
+          <p class="card-line muted">{{ custodyLine(row) }}</p>
+          <p class="card-line muted">{{ metaLine(row) }}</p>
+
+          <div class="card-actions">
+            @for (verb of verbList(row); track verb) {
+              <button
+                type="button"
+                [class]="verb === primary ? 'btn' : 'btn secondary'"
+                [disabled]="verbs[verb].disabled"
+                [title]="verbs[verb].reason ?? ''"
+                (click)="runVerb(row, verb)"
+              >
+                {{ verbLabels[verb] }}
+              </button>
+              @if (verbs[verb].disabled && verbs[verb].reason) {
+                <span class="disabled-reason">{{ verbs[verb].reason }}</span>
+              }
+            }
+          </div>
+        </article>
+      }
+    </div>
+  }
+
+  @if (equipmentRows().length > 0) {
+    <h3 class="equipment-heading muted">Equipment</h3>
+    <div class="card-grid">
+      @for (row of equipmentRows(); track row.asset.assetId) {
+        @let verbs = actionsFor(row);
+        @let primary = primaryVerb(row);
+        <article class="card vehicle-card equipment-card" [class.archived]="row.archived">
+          <header class="card-head">
+            <a class="card-title truncate" [routerLink]="['/assets', row.asset.assetId]" [title]="row.asset.displayName">
+              {{ row.asset.displayName }}
+            </a>
+            <span class="card-origin muted truncate">{{ row.asset.categoryName }}</span>
+          </header>
+
+          <span
+            class="chip"
+            [class.faded]="row.stateChip.tone === 'muted'"
+            [class.ok]="row.stateChip.tone === 'ok'"
+            [class.warn]="row.stateChip.tone === 'warn'"
+          >
+            {{ row.stateChip.label }}
+          </span>
+
+          <p class="card-line muted">{{ custodyLine(row) }}</p>
+
+          @if (verbList(row).length > 0) {
+            <div class="card-actions">
+              @for (verb of verbList(row); track verb) {
+                <button
+                  type="button"
+                  [class]="verb === primary ? 'btn' : 'btn secondary'"
+                  [disabled]="verbs[verb].disabled"
+                  [title]="verbs[verb].reason ?? ''"
+                  (click)="runVerb(row, verb)"
+                >
+                  {{ verbLabels[verb] }}
+                </button>
+              }
+            </div>
+          }
+        </article>
+      }
+    </div>
+  }
+}
