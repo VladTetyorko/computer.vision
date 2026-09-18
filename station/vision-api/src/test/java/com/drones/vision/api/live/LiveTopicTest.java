@@ -63,6 +63,16 @@ class LiveTopicTest {
         assertEquals(LiveTopic.cvTrace(assetId), topic);
     }
 
+    /** LINK-PAIRING-PLAN.md §3.4/§4 row L3 -- links:<assetId>, an opt-in per-asset topic like cv-trace. */
+    @Test
+    void parsesALinksTopicWithItsAssetId() {
+        AssetId assetId = AssetId.random();
+
+        LiveTopic topic = LiveTopic.parse("links:" + assetId.value());
+
+        assertEquals(LiveTopic.links(assetId), topic);
+    }
+
     @Test
     void wireRoundTripsForEveryKind() {
         AssetId assetId = AssetId.random();
@@ -73,6 +83,7 @@ class LiveTopicTest {
         assertEquals("detections:" + assetId.value(), LiveTopic.detections(assetId).wire());
         assertEquals("tracks:" + assetId.value(), LiveTopic.tracks(assetId).wire());
         assertEquals("cv-trace:" + assetId.value(), LiveTopic.cvTrace(assetId).wire());
+        assertEquals("links:" + assetId.value(), LiveTopic.links(assetId).wire());
     }
 
     @Test
@@ -94,6 +105,7 @@ class LiveTopicTest {
         assertThrows(IllegalArgumentException.class, () -> LiveTopic.parse("detections"));
         assertThrows(IllegalArgumentException.class, () -> LiveTopic.parse("tracks"));
         assertThrows(IllegalArgumentException.class, () -> LiveTopic.parse("cv-trace"));
+        assertThrows(IllegalArgumentException.class, () -> LiveTopic.parse("links"));
     }
 
     @Test

@@ -2,11 +2,17 @@ package com.drones.vision.api.live;
 
 import com.drones.vision.api.dto.AssetSummaryResponse;
 import com.drones.vision.api.dto.GeofenceZoneEventPayload;
+import com.drones.vision.api.dto.LinkGroupResponse;
 import com.drones.vision.api.dto.LiveEnvelopeResponse;
 import com.drones.vision.api.dto.MapEventPayload;
 import com.drones.vision.api.support.VisionApiProperties;
+import com.drones.vision.flight.domain.model.CarrierKind;
 import com.drones.vision.flight.domain.model.GeofenceZone;
 import com.drones.vision.flight.domain.model.GeofenceZoneEvent;
+import com.drones.vision.flight.domain.model.LinkGroupView;
+import com.drones.vision.flight.domain.model.LinkId;
+import com.drones.vision.flight.domain.model.LinkView;
+import com.drones.vision.flight.domain.model.SerialRole;
 import com.drones.vision.flight.domain.model.ZoneId;
 import com.drones.vision.flight.domain.model.ZoneKind;
 import com.drones.vision.perception.application.stream.ActiveStream;
@@ -222,6 +228,13 @@ class LiveUpdateRegistryTest {
         List<GeoPosition> square = List.of(new GeoPosition(10, 10, null), new GeoPosition(10, 20, null),
                 new GeoPosition(20, 20, null), new GeoPosition(20, 10, null));
         return new GeofenceZone(ZoneId.random(), name, ZoneKind.KEEP_OUT, square, null, true);
+    }
+
+    private static LinkGroupView linkGroup(AssetId assetId) {
+        LinkId linkId = new LinkId("udp:127.0.0.1:14550");
+        LinkView link = new LinkView(linkId, CarrierKind.UDP, SerialRole.NONE, "Primary UDP", true, true,
+                Duration.ofSeconds(1), null, DeviceId.random());
+        return new LinkGroupView(assetId, List.of(link), linkId, false, null);
     }
 
     private static MapLayer layer(LayerId layerId) {
@@ -606,6 +619,48 @@ class LiveUpdateRegistryTest {
         assertTrue(json.contains("\"zones\""), "the envelope's type must be zones");
         assertTrue(json.contains("UPDATED"));
         assertTrue(json.contains(updated.id().value().toString()));
+    }
+
+    /**
+     * LINK-PAIRING-PLAN.md §3.4/§4 row L3 — {@code publishLinks} appends one {@code links} envelope
+     * per call, dispatched directly like {@link #publishZoneEventAppendsAZonesEnvelopeForEachAction}
+     * rather than coalesced, since {@code DefaultLinkStateService} calls it at most once per
+     * {@code linksFor}/{@code pin}/{@code release}. Scoped per asset — the counterpart to {@link
+     * #aResultWithATracedLedgerBroadcastsOntoTheCvTraceTopic}'s per-asset {@code cv-trace} buffer.
+     */
+    @Test
+    void publishLinksAppendsALinksEnvelopeToThatAssetsBuffer() {
+        AssetId assetId = AssetId.random();
+        LiveUpdateRegistry registry = registry();
+        LinkGroupView group = linkGroup(assetId);
+
+        registry.publishLinks(assetId, group);
+
+        List<LiveEnvelopeResponse> buffered = registry.bufferFor(LiveTopic.links(assetId)).snapshot();
+        assertEquals(1, buffered.size());
+        assertEquals("links", buffered.get(0).type());
+        assertEquals(assetId.value().toString(), buffered.get(0).assetId());
+        LinkGroupResponse payload = (LinkGroupResponse) buffered.get(0).payload();
+        assertEquals(assetId.value().toString(), payload.assetId());
+        assertEquals(1, payload.links().size());
+        assertEquals(group.activeLinkId().value(), payload.activeLinkId());
+    }
+
+    /** The SSE-delivery counterpart to {@link #publishLinksAppendsALinksEnvelopeToThatAssetsBuffer}. */
+    @Test
+    void publishLinksReachesASubscribedConnection() {
+        AssetId assetId = AssetId.random();
+        LiveUpdateRegistry registry = registry();
+        RecordingSseEmitter emitter = new RecordingSseEmitter();
+        registry.register(emitter, Set.of(LiveTopic.links(assetId)), UserId.random(), layerId -> true, id -> true);
+
+        registry.publishLinks(assetId, linkGroup(assetId));
+
+        assertTrue(awaitTrue(Duration.ofSeconds(2), () -> emitter.received().size() == 1),
+                "the subscribed connection must receive the links envelope");
+        String json = emitter.received().get(0);
+        assertTrue(json.contains("\"links\""), "the envelope's type must be links");
+        assertTrue(json.contains(assetId.value().toString()));
     }
 
     @Test

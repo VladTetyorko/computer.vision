@@ -109,7 +109,8 @@ class MavlinkSettingsTest {
                 "0.0.0.0", Duration.ofSeconds(30), 32, Duration.ofSeconds(5), Duration.ofMillis(700), -1,
                 MavlinkSettings.Scan.defaults(), MavlinkSettings.Transmit.defaults(), MavlinkSettings.Rc.defaults(),
                 MavlinkSettings.Inventory.defaults(), MavlinkSettings.Onboarding.defaults(),
-                MavlinkSettings.LinkStatus.defaults(), MavlinkSettings.StreamNegotiation.defaults()));
+                MavlinkSettings.LinkStatus.defaults(), MavlinkSettings.StreamNegotiation.defaults(),
+                com.drones.vision.adapter.mavlink.election.LinkElectionSettings.defaults()));
         assertTrue(ex.getMessage().contains("commandRetries"), ex.getMessage());
     }
 

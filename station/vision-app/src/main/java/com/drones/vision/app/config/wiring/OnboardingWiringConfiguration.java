@@ -4,6 +4,7 @@ import com.drones.vision.adapter.mavlink.MavlinkTelemetrySource;
 import com.drones.vision.adapter.mavlink.MavlinkVehicleConfigurator;
 import com.drones.vision.api.support.OnboardingProperties;
 import com.drones.vision.api.support.RemediationOrchestrator;
+import com.drones.vision.app.config.properties.VisionLinksProperties;
 import com.drones.vision.app.config.properties.VisionMavlinkProperties;
 import com.drones.vision.app.config.properties.VisionOnboardingProperties;
 import com.drones.vision.app.config.properties.VisionRcProperties;
@@ -85,9 +86,10 @@ public class OnboardingWiringConfiguration {
     public VehicleConfigPort mavlinkVehicleConfigurator(MavlinkTelemetrySource mavlinkTelemetrySource,
                                                           VisionMavlinkProperties mavlinkProperties,
                                                           VisionRcProperties rcProperties,
-                                                          VisionOnboardingProperties onboardingProperties) {
-        return new MavlinkVehicleConfigurator(mavlinkTelemetrySource,
-                TelemetryWiring.toMavlinkSettings(mavlinkProperties, rcProperties, onboardingProperties));
+                                                          VisionOnboardingProperties onboardingProperties,
+                                                          VisionLinksProperties linksProperties) {
+        return new MavlinkVehicleConfigurator(mavlinkTelemetrySource, TelemetryWiring.toMavlinkSettings(
+                mavlinkProperties, rcProperties, onboardingProperties, linksProperties));
     }
 
     /**

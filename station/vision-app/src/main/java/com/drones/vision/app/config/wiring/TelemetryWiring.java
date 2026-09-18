@@ -4,12 +4,16 @@ import com.drones.vision.adapter.mavlink.MavlinkFlightCommander;
 import com.drones.vision.adapter.mavlink.MavlinkManualControlSender;
 import com.drones.vision.adapter.mavlink.MavlinkSettings;
 import com.drones.vision.adapter.mavlink.MavlinkTelemetrySource;
+import com.drones.vision.adapter.mavlink.MavlinkVehicleLinkPort;
+import com.drones.vision.adapter.mavlink.election.LinkElectionSettings;
 import com.drones.vision.adapter.simulation.SimulatedTelemetrySource;
 import com.drones.vision.adapter.simulation.TelemetrySettings;
+import com.drones.vision.app.config.properties.VisionLinksProperties;
 import com.drones.vision.app.config.properties.VisionMavlinkProperties;
 import com.drones.vision.app.config.properties.VisionOnboardingProperties;
 import com.drones.vision.app.config.properties.VisionRcProperties;
 import com.drones.vision.app.config.properties.VisionSimulationProperties;
+import com.drones.vision.warehouse.application.asset.AssetService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -28,7 +32,7 @@ import java.util.List;
  */
 @Configuration
 @EnableConfigurationProperties({VisionSimulationProperties.class, VisionMavlinkProperties.class,
-        VisionRcProperties.class, VisionOnboardingProperties.class})
+        VisionRcProperties.class, VisionOnboardingProperties.class, VisionLinksProperties.class})
 public class TelemetryWiring {
 
     /**
@@ -61,22 +65,30 @@ public class TelemetryWiring {
     @Bean
     public MavlinkTelemetrySource mavlinkTelemetrySource(VisionMavlinkProperties mavlinkProperties,
                                                            VisionRcProperties rcProperties,
-                                                           VisionOnboardingProperties onboardingProperties) {
-        return new MavlinkTelemetrySource(toMavlinkSettings(mavlinkProperties, rcProperties, onboardingProperties));
+                                                           VisionOnboardingProperties onboardingProperties,
+                                                           VisionLinksProperties linksProperties) {
+        return new MavlinkTelemetrySource(
+                toMavlinkSettings(mavlinkProperties, rcProperties, onboardingProperties, linksProperties));
     }
 
     /**
      * Maps {@link VisionMavlinkProperties} (plus {@link VisionRcProperties} for the mandatory
-     * {@link MavlinkSettings#rc()} slice and {@link VisionOnboardingProperties} for the
-     * {@link MavlinkSettings#onboarding()} one) onto a full {@code MavlinkSettings} — shared with
-     * {@code FeedTransmitterWiring#mavlinkFeedTransmitter}, which needs the identical mapping.
+     * {@link MavlinkSettings#rc()} slice, {@link VisionOnboardingProperties} for the {@link
+     * MavlinkSettings#onboarding()} one, and {@link VisionLinksProperties} for {@link
+     * MavlinkSettings#linkElection()}, LINK-PAIRING-PLAN.md §3.4/§4 row L3) onto a full {@code
+     * MavlinkSettings} — shared with {@code FeedTransmitterWiring#mavlinkFeedTransmitter}, which
+     * needs the identical mapping.
      *
      * <p>The onboarding slice is deliberately assembled from {@code vision.onboarding.*} rather than
      * {@code vision.mavlink.*}: an operator reasons about onboarding as one feature with one set of
-     * guardrails, not as a MAVLink tuning knob that happens to live next to socket timeouts.
+     * guardrails, not as a MAVLink tuning knob that happens to live next to socket timeouts. {@code
+     * vision.links.*} is its own top-level prefix for the same reason — election policy is a
+     * separate concept from socket/transmit tuning, even though both end up on {@code
+     * MavlinkSettings}.
      */
     static MavlinkSettings toMavlinkSettings(VisionMavlinkProperties properties, VisionRcProperties rcProperties,
-                                              VisionOnboardingProperties onboardingProperties) {
+                                              VisionOnboardingProperties onboardingProperties,
+                                              VisionLinksProperties linksProperties) {
         VisionMavlinkProperties.Scan scan = properties.scan();
         VisionMavlinkProperties.Transmit transmit = properties.transmit();
         return new MavlinkSettings(properties.bindHost(), properties.silenceWindow(),
@@ -91,7 +103,9 @@ public class TelemetryWiring {
                 .withCommandRetries(properties.commandRetries())
                 .withOnboarding(toOnboarding(onboardingProperties))
                 .withLinkStatus(new MavlinkSettings.LinkStatus(properties.dropRateWarnPercent(),
-                        properties.dropRateAlarmPercent(), properties.linkFailureGrace()));
+                        properties.dropRateAlarmPercent(), properties.linkFailureGrace()))
+                .withLinkElection(new LinkElectionSettings(linksProperties.softTimeout(),
+                        linksProperties.hardTimeout(), linksProperties.dwellWindow()));
     }
 
     /**
@@ -147,9 +161,10 @@ public class TelemetryWiring {
     public MavlinkFlightCommander mavlinkFlightCommander(MavlinkTelemetrySource mavlinkTelemetrySource,
                                                           VisionMavlinkProperties mavlinkProperties,
                                                           VisionRcProperties rcProperties,
-                                                          VisionOnboardingProperties onboardingProperties) {
+                                                          VisionOnboardingProperties onboardingProperties,
+                                                          VisionLinksProperties linksProperties) {
         return new MavlinkFlightCommander(mavlinkTelemetrySource,
-                toMavlinkSettings(mavlinkProperties, rcProperties, onboardingProperties));
+                toMavlinkSettings(mavlinkProperties, rcProperties, onboardingProperties, linksProperties));
     }
 
     /**
@@ -166,5 +181,22 @@ public class TelemetryWiring {
         return new MavlinkManualControlSender(mavlinkTelemetrySource,
                 new MavlinkSettings.Rc(rcProperties.overrideHz(), rcProperties.minOverrideHz(),
                         rcProperties.maxOverrideHz(), rcProperties.releaseFrames()));
+    }
+
+    /**
+     * The one {@code VehicleLinkPort}/{@code CarrierDirectoryPort} bean (LINK-PAIRING-PLAN.md §3.4/§4
+     * row L3) — declared by its concrete adapter type, the same "bean method returns the concrete
+     * class, a sibling config's constructor parameter asks for the port interface" idiom {@link
+     * #mavlinkFlightCommander}/{@link #mavlinkManualControlSender} already use for {@code
+     * FlightCommandPort}/{@code ManualControlPort}. One class implementing both ports (rather than
+     * two beans) mirrors {@code LiveUpdateRegistry}/{@code NoopLiveUpdatePublisher}, which already
+     * implement eight related {@code *LiveUpdatePort} interfaces on one class for the same reason:
+     * both ports share the same collaborator ({@link #mavlinkTelemetrySource}) and the same
+     * adapter-side/domain-model translation helpers.
+     */
+    @Bean
+    public MavlinkVehicleLinkPort mavlinkVehicleLinkPort(MavlinkTelemetrySource mavlinkTelemetrySource,
+                                                           AssetService assetService) {
+        return new MavlinkVehicleLinkPort(mavlinkTelemetrySource, assetService);
     }
 }

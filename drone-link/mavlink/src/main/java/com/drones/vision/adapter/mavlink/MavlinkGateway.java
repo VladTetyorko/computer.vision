@@ -8,8 +8,10 @@ import com.drones.mavlink.codec.MavFrame;
 import com.drones.mavlink.config.MavlinkCoreSettings;
 import com.drones.mavlink.service.HeartbeatService;
 import com.drones.mavlink.session.Correlator;
+import com.drones.mavlink.session.DefaultLinkQuality;
 import com.drones.mavlink.session.DefaultTxScheduler;
 import com.drones.mavlink.session.LinkHealth;
+import com.drones.mavlink.session.LinkQuality;
 import com.drones.mavlink.session.MavlinkNode;
 import com.drones.mavlink.session.MavlinkSession;
 import com.drones.mavlink.session.MessageFilter;
@@ -23,6 +25,8 @@ import com.drones.mavlink.transport.LinkRegistry;
 import com.drones.mavlink.transport.MavlinkLink;
 import com.drones.mavlink.transport.UdpListenLink;
 
+import com.drones.vision.adapter.mavlink.election.LinkGroup;
+import com.drones.vision.adapter.mavlink.election.LinkGroupSnapshot;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.Telemetry;
 
@@ -164,6 +168,9 @@ final class MavlinkGateway implements LinkRegistry {
     private final Subscription subscription;
     private final MavlinkMessageInventory messageInventory;
     private final MavlinkConnectRemediator connectRemediator;
+    private final LinkQuality linkQuality;
+    private final LinkGroupTracker linkGroupTracker;
+    private final FrameSink electionAwareSink;
     private final AtomicBoolean closed = new AtomicBoolean(false);
     private final AtomicBoolean lobbyHeld = new AtomicBoolean(false);
     private final AtomicReference<LobbyHeartbeat> lobbyHeartbeat = new AtomicReference<>();
@@ -211,6 +218,14 @@ final class MavlinkGateway implements LinkRegistry {
         this.connectRemediator = settings.onboarding().requestMessagesOnConnect()
                 ? new MavlinkConnectRemediator(session.dispatcher(), session.sink(), session.correlator(), settings)
                 : null;
+        // LINK-PAIRING-PLAN.md §3.4/§4 row L3: a third, independent dispatcher subscription --
+        // per-link RADIO_STATUS quality, then the sighting tracker that feeds every LinkGroup.
+        // Neither touches onFrame's claim-routing subscription above, same isolation rationale as
+        // messageInventory's own "a bug in one must never affect the other".
+        this.linkQuality = new DefaultLinkQuality(session.dispatcher());
+        this.linkGroupTracker = new LinkGroupTracker(
+                session.dispatcher(), linkQuality, settings.linkElection(), linkDescriptors::get);
+        this.electionAwareSink = new ElectionAwareFrameSink(session.sink(), session.peers(), linkGroupTracker);
     }
 
     /**
@@ -247,6 +262,7 @@ final class MavlinkGateway implements LinkRegistry {
         session.removeLink(id);
         registeredLinks.remove(id);
         LinkDescriptor descriptor = linkDescriptors.remove(id);
+        linkGroupTracker.forgetLink(id);
         if (descriptor != null) {
             LOG.log(Level.INFO, () -> "Unregistered link " + id + " (" + descriptor.label() + ")");
         }
@@ -422,9 +438,15 @@ final class MavlinkGateway implements LinkRegistry {
         return claimPolicy.commandTarget(deviceId);
     }
 
-    /** This gateway's session {@link FrameSink}, for a TX port class to build a {@code mavlink-core} service on. */
+    /**
+     * This gateway's {@link FrameSink}, for a TX port class to build a {@code mavlink-core} service
+     * on — election-aware (LINK-PAIRING-PLAN.md §4 row L3): steers a targeted {@code send} to the
+     * destination sysid's {@link LinkGroup} ACTIVE link when election has an opinion, falling back
+     * to the session's own last-heard routing otherwise. See {@link ElectionAwareFrameSink}'s own
+     * javadoc for the one documented routing gap this does not close.
+     */
     FrameSink sink() {
-        return session.sink();
+        return electionAwareSink;
     }
 
     /** This gateway's session {@link Correlator}, for a TX port class to build a {@code mavlink-core} service on. */
@@ -435,6 +457,54 @@ final class MavlinkGateway implements LinkRegistry {
     /** This gateway's session {@link PeerDirectory}, for a TX port class to build a {@code mavlink-core} service on. */
     PeerDirectory peers() {
         return session.peers();
+    }
+
+    /**
+     * A point-in-time {@link LinkGroupSnapshot} of every link that has ever delivered a frame for
+     * {@code sysid} on this gateway, or {@code null} if nothing has ever been heard from it
+     * (LINK-PAIRING-PLAN.md §3.4/§4 row L3) — the adapter-internal shape {@code
+     * MavlinkVehicleLinkPort} translates into {@code vision-flight}'s own {@code LinkGroupView}.
+     */
+    LinkGroupSnapshot linkGroupSnapshot(int sysid) {
+        return linkGroupTracker.snapshot(sysid);
+    }
+
+    /**
+     * Every carrier currently registered on this gateway, paired with its own {@link LinkId}
+     * (LINK-PAIRING-PLAN.md §3.4/§7 ruling 5, station-wide {@code GET /api/carriers}) — a snapshot
+     * copy of {@link #linkDescriptors}, independent of any one sysid's election state.
+     */
+    List<RegisteredCarrier> registeredCarriers() {
+        return linkDescriptors.entrySet().stream()
+                .map(entry -> new RegisteredCarrier(entry.getKey(), entry.getValue()))
+                .toList();
+    }
+
+    /**
+     * Operator override: pins {@code sysid}'s ACTIVE link to {@code link} (LINK-PAIRING-PLAN.md
+     * §3.4) — see {@link LinkGroup#pin} for the exact semantics (wins regardless of health or
+     * {@code SerialRole.BENCH}).
+     *
+     * @throws IllegalArgumentException if nothing has ever been heard from {@code sysid} on this
+     *                                   gateway, or {@code link} is not one of its known members
+     */
+    void pinLink(int sysid, LinkId link) {
+        LinkGroup group = linkGroupTracker.groupFor(sysid);
+        if (group == null) {
+            throw new IllegalArgumentException("sysid " + sysid + " has never been heard on this gateway");
+        }
+        group.pin(link);
+    }
+
+    /**
+     * Releases an operator pin on {@code sysid}'s link group, if any, and re-runs automatic election
+     * immediately (LINK-PAIRING-PLAN.md §3.4) — a no-op if {@code sysid} is unknown or unpinned.
+     */
+    void releasePin(int sysid) {
+        LinkGroup group = linkGroupTracker.groupFor(sysid);
+        if (group != null) {
+            group.release(Instant.now());
+        }
     }
 
     /**
@@ -507,6 +577,7 @@ final class MavlinkGateway implements LinkRegistry {
         }
         stopLobbyHeartbeat();
         subscription.close();
+        linkGroupTracker.close();
         messageInventory.close();
         if (connectRemediator != null) {
             connectRemediator.close();
@@ -521,6 +592,14 @@ final class MavlinkGateway implements LinkRegistry {
 
     private static MavlinkCoreSettings coreSettings(MavlinkSettings settings) {
         return MavlinkCoreSettings.defaults().withCloseJoinTimeout(settings.closeJoinTimeout());
+    }
+
+    /**
+     * One carrier registered on this gateway, paired with its own id (LINK-PAIRING-PLAN.md §3.4/§7
+     * ruling 5) — {@code MavlinkVehicleLinkPort} translates this into {@code vision-flight}'s own
+     * {@code CarrierView} for the station-wide {@code GET /api/carriers} read.
+     */
+    record RegisteredCarrier(LinkId id, LinkDescriptor descriptor) {
     }
 
     /** A sysid heard on this gateway's socket that no registration currently claims (docs/plans/active/DRONE-INFRA-PLAN.md I-b). */

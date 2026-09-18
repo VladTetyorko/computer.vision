@@ -122,7 +122,16 @@ enum LiveTopicKind {
      * "frame" ledger — an inspector subscribing to this topic is itself part of what keeps {@code
      * trace} demanded (see {@code TraceDemandPort}'s own javadoc). Ring-buffer capacity 1.
      */
-    CV_TRACE("cv-trace");
+    CV_TRACE("cv-trace"),
+    /**
+     * Per-asset link-election snapshot, opt-in (LINK-PAIRING-PLAN.md §3.4/§4 row L3) — the whole
+     * {@code com.drones.vision.api.dto.LinkGroupResponse}, published every time {@code
+     * com.drones.vision.flight.domain.port.LinkStateLiveUpdatePort#publishLinks} fires (a read, a
+     * pin, or a release), exactly the "one topic, one full-state payload" rule {@link #TRACKS}/{@link
+     * #GEO} already follow. Ring-buffer capacity 1, same "freshest wins" treatment as those two
+     * (CLAUDE.md rule 9).
+     */
+    LINKS("links");
 
     private final String wire;
 

@@ -14,6 +14,10 @@ import com.drones.vision.warehouse.domain.port.AssetUsageRepositoryPort;
 import com.drones.vision.flight.domain.port.FlightCommandPort;
 import com.drones.vision.flight.domain.port.GeofenceLiveUpdatePort;
 import com.drones.vision.flight.domain.port.GeofenceRepositoryPort;
+import com.drones.vision.flight.domain.port.LinkStateLiveUpdatePort;
+import com.drones.vision.flight.domain.port.VehicleLinkPort;
+import com.drones.vision.flight.application.link.DefaultLinkStateService;
+import com.drones.vision.flight.application.link.LinkStateService;
 import com.drones.vision.flight.domain.port.ManualControlPort;
 import com.drones.vision.flight.domain.port.TelemetryLiveUpdatePort;
 import com.drones.vision.flight.domain.port.TelemetryRepositoryPort;
@@ -123,14 +127,16 @@ import java.util.function.BiConsumer;
  * server-push data plane (docs/plans/done/REALTIME-PLAN.md
  * §4): {@link #fleetLiveUpdatePort}/{@link #telemetryLiveUpdatePort}/{@link
  * #detectionLiveUpdatePort}/{@link #mapLiveUpdatePort}/{@link #eventLiveUpdatePort}/{@link
- * #trackCorrectionLiveUpdatePort}/{@link #geofenceLiveUpdatePort} each select between the real
- * {@code LiveUpdateRegistry} (vision-api, which implements all seven — five ports the former
- * god-port {@code LiveUpdatePublisherPort} split into, docs/plans/active/DOMAIN-SEPARATION-W1.md
- * §15, W1.6b, plus a sixth added for visual geolocation's {@code geo:<assetId>} topic,
- * docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4/D11/H5, plus a seventh, {@code GeofenceLiveUpdatePort},
- * for the {@code zones} topic (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md &sect;3 D2/&sect;4.1,
- * wave L3)) and {@code NoopLiveUpdatePublisher} (same seven-interface shape) per {@link
- * VisionLiveProperties#enabled()} (default {@code true}); when enabled, every one of the seven bean
+ * #trackCorrectionLiveUpdatePort}/{@link #geofenceLiveUpdatePort}/{@link #linkStateLiveUpdatePort}
+ * each select between the real {@code LiveUpdateRegistry} (vision-api, which implements all eight —
+ * five ports the former god-port {@code LiveUpdatePublisherPort} split into,
+ * docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6b, plus a sixth added for visual geolocation's
+ * {@code geo:<assetId>} topic, docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4/D11/H5, plus a seventh,
+ * {@code GeofenceLiveUpdatePort}, for the {@code zones} topic (docs/plans/active/
+ * LIVE-POLL-RETIREMENT-PLAN.md &sect;3 D2/&sect;4.1, wave L3), plus an eighth, {@code
+ * LinkStateLiveUpdatePort}, for the {@code links:<assetId>} topic (LINK-PAIRING-PLAN.md §3.4/§4 row
+ * L3)) and {@code NoopLiveUpdatePublisher} (same eight-interface shape) per {@link
+ * VisionLiveProperties#enabled()} (default {@code true}); when enabled, every one of the eight bean
  * methods resolves to the same {@code LiveUpdateRegistry} singleton, so a call through any one port
  * still lands on the one shared dispatcher. {@code SystemStatusSampler} (vision-api, wave L4) needs
  * no selector of its own here: it is a plain {@code @Component}, self-gated by the same {@code
@@ -292,6 +298,20 @@ public class ApplicationServiceWiring {
      */
     @Bean
     public GeofenceLiveUpdatePort geofenceLiveUpdatePort(VisionLiveProperties properties,
+                                                    @Qualifier("liveUpdateRegistry") ObjectProvider<LiveUpdateRegistry> registry) {
+        if (properties.enabled()) {
+            return registry.getObject();
+        }
+        return new NoopLiveUpdatePublisher();
+    }
+
+    /**
+     * Selects the {@link LinkStateLiveUpdatePort} implementation — see {@link #fleetLiveUpdatePort};
+     * the eighth selector, added for the {@code links:<assetId>} topic (LINK-PAIRING-PLAN.md §3.4/§4
+     * row L3), gated on the same {@link VisionLiveProperties#enabled()} flag as the other seven.
+     */
+    @Bean
+    public LinkStateLiveUpdatePort linkStateLiveUpdatePort(VisionLiveProperties properties,
                                                     @Qualifier("liveUpdateRegistry") ObjectProvider<LiveUpdateRegistry> registry) {
         if (properties.enabled()) {
             return registry.getObject();
@@ -476,6 +496,21 @@ public class ApplicationServiceWiring {
                                             GeofenceMonitor geofenceMonitor,
                                             GeofenceLiveUpdatePort geofenceLiveUpdatePort) {
         return new DefaultGeofenceService(geofenceRepositoryPort, geofenceMonitor, geofenceLiveUpdatePort);
+    }
+
+    /**
+     * Link-state read/pin/release behind {@code AssetLinksController} (vision-api, component-scanned)
+     * — LINK-PAIRING-PLAN.md §3.4/§4 row L3, a one-line assembly mirroring {@link #geofenceService}'s
+     * shape. {@code vehicleLinkPort} resolves to {@code TelemetryWiring#mavlinkVehicleLinkPort}, the
+     * one {@link VehicleLinkPort} bean in this context today; {@code linkStateLiveUpdatePort} threads
+     * through so every {@code linksFor}/{@code pin}/{@code release} call republishes the fresh
+     * snapshot on the {@code links:<assetId>} live topic.
+     */
+    @Bean
+    public LinkStateService linkStateService(VehicleLinkPort vehicleLinkPort,
+                                              LinkStateLiveUpdatePort linkStateLiveUpdatePort,
+                                              EventPublisherPort eventPublisherPort) {
+        return new DefaultLinkStateService(vehicleLinkPort, linkStateLiveUpdatePort, eventPublisherPort);
     }
 
     /**

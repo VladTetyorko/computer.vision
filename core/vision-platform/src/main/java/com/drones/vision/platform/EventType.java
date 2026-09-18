@@ -42,5 +42,17 @@ public enum EventType {
      * is always {@code null} (asset-scoped, the {@code GEOFENCE_BREACH} precedent); attributes carry
      * {@code {assetId, batteryPercent}}.
      */
-    BATTERY_LOW
+    BATTERY_LOW,
+    /**
+     * Raised by {@code contexts/vision-flight}'s {@code DefaultLinkStateService}
+     * (docs/plans/active/LINK-PAIRING-PLAN.md §3.4, wave L3) exactly once per active-link change for
+     * an asset with more than one paired MAVLink link — an automatic election promotion/demotion, or
+     * an operator pin/release that actually moved the active link. Distinct from {@link #LINK_LOST}:
+     * that fires when a device's whole telemetry source dies (no link at all left); this fires while
+     * at least one link is still live, control simply moved to a different one. {@code streamId} is
+     * always {@code null} (asset-scoped, the {@link #GEOFENCE_BREACH} precedent); attributes carry
+     * {@code {assetId, fromLinkId, toLinkId, reason}} ({@code fromLinkId} may be absent when there
+     * was no previous active link; {@code reason} is one of {@code "auto"} or {@code "operator"}).
+     */
+    LINK_FAILOVER
 }

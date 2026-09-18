@@ -3,9 +3,11 @@ package com.drones.vision.adapter.mavlink;
 import com.drones.mavlink.session.LinkHealth;
 import com.drones.mavlink.transport.CarrierKind;
 import com.drones.mavlink.transport.LinkDescriptor;
+import com.drones.mavlink.transport.LinkId;
 import com.drones.mavlink.transport.LinkRegistry;
 import com.drones.mavlink.transport.SerialRole;
 import com.drones.mavlink.transport.UdpListenLink;
+import com.drones.vision.adapter.mavlink.election.LinkGroupSnapshot;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
@@ -17,10 +19,12 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.net.URI;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Flow;
 import java.util.concurrent.SubmissionPublisher;
@@ -227,6 +231,80 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
         Map<DeviceId, LinkHealth.Health> merged = new HashMap<>();
         for (MavlinkGateway gateway : gateways.values()) {
             merged.putAll(gateway.claimedVehicleHealth());
+        }
+        return merged;
+    }
+
+    /**
+     * A point-in-time {@link LinkGroupSnapshot} for {@code deviceId}'s currently-claimed sysid
+     * (LINK-PAIRING-PLAN.md §3.4/§4 row L3), or empty if this device has no open runtime or holds no
+     * claim right now. Public for the same reason {@link #claimedVehicleHealth()} is: {@code
+     * com.drones.vision.adapter.mavlink.MavlinkVehicleLinkPort} (this class's own package, so
+     * package-private would in fact suffice here — kept public to match this class's other
+     * cross-cutting accessors and to stay usable from a future package split without another wave).
+     */
+    public Optional<LinkGroupSnapshot> linkGroupSnapshot(DeviceId deviceId) {
+        Objects.requireNonNull(deviceId, "deviceId must not be null");
+        DeviceRuntime runtime = runtimes.get(deviceId);
+        if (runtime == null) {
+            return Optional.empty();
+        }
+        MavlinkGateway.CommandTarget target = runtime.gateway().commandTarget(deviceId);
+        if (target == null) {
+            return Optional.empty();
+        }
+        return Optional.ofNullable(runtime.gateway().linkGroupSnapshot(target.sysid()));
+    }
+
+    /**
+     * Operator override: pins {@code deviceId}'s currently-claimed sysid ACTIVE link to {@code
+     * link} (LINK-PAIRING-PLAN.md §3.4).
+     *
+     * @throws IllegalStateException if {@code deviceId} has no open runtime or holds no claim right now
+     */
+    public void pinLink(DeviceId deviceId, LinkId link) {
+        Objects.requireNonNull(deviceId, "deviceId must not be null");
+        Objects.requireNonNull(link, "link must not be null");
+        DeviceRuntime runtime = runtimes.get(deviceId);
+        if (runtime == null) {
+            throw new IllegalStateException("device " + deviceId + " has no open MAVLink telemetry runtime");
+        }
+        MavlinkGateway.CommandTarget target = runtime.gateway().commandTarget(deviceId);
+        if (target == null) {
+            throw new IllegalStateException("device " + deviceId + " holds no MAVLink claim right now");
+        }
+        runtime.gateway().pinLink(target.sysid(), link);
+    }
+
+    /**
+     * Releases an operator pin on {@code deviceId}'s currently-claimed sysid link group, if any — a
+     * no-op if {@code deviceId} has no open runtime or holds no claim right now.
+     */
+    public void releasePin(DeviceId deviceId) {
+        Objects.requireNonNull(deviceId, "deviceId must not be null");
+        DeviceRuntime runtime = runtimes.get(deviceId);
+        if (runtime == null) {
+            return;
+        }
+        MavlinkGateway.CommandTarget target = runtime.gateway().commandTarget(deviceId);
+        if (target != null) {
+            runtime.gateway().releasePin(target.sysid());
+        }
+    }
+
+    /**
+     * Every carrier currently registered across every open gateway (LINK-PAIRING-PLAN.md §3.4/§7
+     * ruling 5, station-wide {@code GET /api/carriers}) — station-wide by definition (a carrier
+     * belongs to no single asset), so this merges every gateway's own registered link descriptors
+     * rather than scoping to one device/runtime like every other accessor in this class. Empty when
+     * no gateway is open. Public for the same reason {@link #claimedVehicleHealth()} is: {@code
+     * MavlinkVehicleLinkPort} lives in this same package today, but this accessor matches this
+     * class's other cross-cutting, publicly-visible plumbing.
+     */
+    public List<MavlinkGateway.RegisteredCarrier> registeredCarriers() {
+        List<MavlinkGateway.RegisteredCarrier> merged = new ArrayList<>();
+        for (MavlinkGateway gateway : gateways.values()) {
+            merged.addAll(gateway.registeredCarriers());
         }
         return merged;
     }

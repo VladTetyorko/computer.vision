@@ -195,6 +195,10 @@ the full mechanism.
 | GeofenceController | POST | `/api/geofences` | Create a zone | administer |
 | GeofenceController | PUT | `/api/geofences/{id}` | Replace a zone wholesale | administer |
 | GeofenceController | DELETE | `/api/geofences/{id}` | Delete a zone | administer |
+| AssetLinksController | GET | `/api/assets/{id}/links` | One asset's paired-link election snapshot (LINK-PAIRING-PLAN.md §3.4) | in-scope (404 out-of-scope/unknown, via `requireInScope`) |
+| AssetLinksController | PUT | `/api/assets/{id}/links/{linkId}/pin` | Operator override: pin the ACTIVE link, empty `{}` body | in-scope |
+| AssetLinksController | DELETE | `/api/assets/{id}/links/pin` | Release an operator pin, hand back to automatic election; idempotent; returns `LinkGroupResponse` (200, not 204 — the caller reads the resulting snapshot) | in-scope |
+| CarriersController | GET | `/api/carriers` | Every carrier registered on the station, station-wide reference data (§3.4/§7 ruling 5) | `@OpenByDesign` — no `AssetId` to filter by |
 | DiscoveryController | POST | `/api/discovery/scan` | ONVIF/mDNS/V4L2 device scan | **unscoped** (ledger) |
 | DiscoveryInboxController | GET | `/api/discovery/inbox` | `{candidates, sources}` envelope — every reported discovery candidate (newest-reported first) plus one health row per discovery mechanism (BK6/A3) | manageOrg |
 | DiscoveryInboxController | POST | `/api/discovery/inbox/{id}/register` | Register a candidate as a new asset | manageOrg (checked inside `DiscoveryInboxService#register`, ownership from `CurrentUser`, never the body — see Conventions) |
@@ -359,15 +363,16 @@ because none was needed.
 
 ### Live updates (`com.drones.vision.api.live`)
 
-One `LiveUpdateRegistry` implements all seven per-context live-update ports (`FleetLiveUpdatePort`,
+One `LiveUpdateRegistry` implements all eight per-context live-update ports (`FleetLiveUpdatePort`,
 `TelemetryLiveUpdatePort`, `DetectionLiveUpdatePort`, `MapLiveUpdatePort`, `EventLiveUpdatePort`,
-`TrackCorrectionLiveUpdatePort`, and — LIVE-POLL-RETIREMENT-PLAN wave L3 — `GeofenceLiveUpdatePort`,
-`contexts/vision-flight`'s new port) and owns every SSE connection, process-local/single-instance
-only. Topics: `fleet`, `event`, `devices`, `detection-events`, `discovery`, `zones` (all always-on, no
-auth needed beyond the connection itself — see below for `discovery`'s own delta-only semantics), plus
-a tenth always-on topic `system` that carries no per-context port at all (see below), `map` and
-per-asset `telemetry:<id>`/`detections:<id>`/`geo:<id>`/`tracks:<id>`/`cv-trace:<id>` (individually
-authorized — see below; the last two, CV-ORCHESTRATION wave W2.5, are documented in their own
+`TrackCorrectionLiveUpdatePort`, `GeofenceLiveUpdatePort` (LIVE-POLL-RETIREMENT-PLAN wave L3), and —
+LINK-PAIRING-PLAN.md §3.4/§4 row L3 — `LinkStateLiveUpdatePort`, both `contexts/vision-flight` ports)
+and owns every SSE connection, process-local/single-instance only. Topics: `fleet`, `event`, `devices`,
+`detection-events`, `discovery`, `zones` (all always-on, no auth needed beyond the connection itself —
+see below for `discovery`'s own delta-only semantics), plus a tenth always-on topic `system` that
+carries no per-context port at all (see below), `map` and per-asset `telemetry:<id>`/`detections:<id>`/
+`geo:<id>`/`tracks:<id>`/`cv-trace:<id>`/`links:<id>` (individually authorized — see below; `tracks`/
+`cv-trace`, CV-ORCHESTRATION wave W2.5, and `links`, wave L3 below, are each documented in their own
 paragraph further down).
 Delivery is coalesced (leading+trailing, ~150ms default) per topic, not per connection, so exactly one
 resumable `seq` exists per topic; `Last-Event-ID` resumes from a per-topic ring buffer (FIFO or
@@ -389,6 +394,21 @@ before removing it, rather than discarding it, specifically so a subscriber can 
 deleted" without a separate lookup. Buffer capacity mirrors `discoveryBuffer` (shares
 `eventBufferCapacity`, FIFO, not latest-only — a `DELETED` a resuming viewer missed must still be
 delivered, not collapsed away by a later `UPDATED` to a different zone).
+
+**`links:<assetId>` (LINK-PAIRING-PLAN.md §3.4/§4 row L3) — one asset's paired-link election
+snapshot, opt-in per asset like `cv-trace`, not always-on like `zones`.** `contexts/vision-flight`'s
+`DefaultLinkStateService` calls `LinkStateLiveUpdatePort#publishLinks(AssetId, LinkGroupView)` at most
+once per `linksFor`/`pin`/`release` call — dispatched directly via the executor (`publishZoneEvent`'s
+pattern), not coalesced, since there is no hot per-sample cadence to batch here the way `telemetry`/
+`detections` have. The envelope's payload is `LinkGroupResponse` (`dto/`) — the exact same shape
+`GET /api/assets/{id}/links` returns, "one topic, one full-state snapshot, never a delta". Ring buffer
+is per-asset, capacity-1 latest-wins (`LiveRingBuffer(1, true)`), same shape as `cv-trace`'s own
+per-asset buffers — `bufferFor`'s `LINKS` case computes into `linksBuffers` (a
+`ConcurrentHashMap<AssetId, LiveRingBuffer>`), swept by `evictUnusedAssetBuffers` exactly like every
+other per-asset topic. **`LINKS` is removable** from `updateTopics` (a client may unsubscribe), the
+same posture as `TELEMETRY`/`DETECTIONS`/`CV_TRACE` — confirmed against `station/vision-web`'s
+`live-store.ts`, whose `trackLinks`/`untrackLinks` already call the identical generic `track`/`untrack`
+helpers `trackCvTrace`/`untrackCvTrace` use, not the sticky `GEO`/`TRACKS` pair's own helpers.
 
 **`tracks:<assetId>`/`cv-trace:<assetId>` (CV-ORCHESTRATION-PLAN.md §4.4/§4.5/§4.6/§4.9/§5, waves
 W2.5/W2.8/W9) — the live halves of `GET /api/streams/{id}/tracks` and
@@ -781,6 +801,25 @@ call sites) — unlike `stats`/`latency`/`rate`/`follow`, `objects` is **not** c
 `NON_NULL` annotation in practice: it is a `List`, so an empty list still serializes as `[]`, matching
 `tracks`' own "always present, empty is honest" idiom rather than the "absent-object" idiom the four
 `Optional`-sourced fields use.
+
+**LINK-PAIRING-PLAN.md §3.4/§4 row L3 additions** — four new records back `GET /api/assets/{id}/links`,
+`POST .../links/pin`, `DELETE .../links/pin` and `GET /api/carriers` (all `dto/`, each with a static
+`from(...)` mapping its domain view 1:1, none reusing an existing DTO): `LinkGroupResponse(assetId,
+links, activeLinkId, pinned, lastFailoverAt)` (`@JsonInclude(NON_NULL)`) is the top-level snapshot —
+also the `links:<assetId>` SSE envelope payload, see "Live updates" above — `activeLinkId` genuinely
+`null` (not omitted-as-absent semantics; the field always serializes) when no link is ACTIVE yet,
+matching `LinkGroupView#activeLinkId()`. `LinkViewResponse(id, carrier, serialRole, label, active,
+receiving, heartbeatAgeSeconds, quality, deviceId)` — `heartbeatAgeSeconds` is a plain whole-second
+`long`, not an ISO-8601 duration string (the frozen web contract's own field shape); `deviceId` is
+**additive beyond the frozen contract** (LINK-PAIRING-PLAN.md §4 row L3 task brief, not §3.4) so a
+multi-device asset's links can be told apart on the wire — flagged here because it is the one field
+in this wave a reader must not assume `station/vision-web`'s frozen TS interface already declares.
+`LinkQualityResponse(lastRadioStatusAt, rssi, remoteRssi, noise, rxErrors, fixed)` — every field
+`Integer`/`Boolean` (not primitive) so `NON_NULL` can omit any one individually, and `from(null)`
+returns `null` (the whole object, not just its fields, is absent until the first `RADIO_STATUS` frame).
+`CarrierSummaryResponse(id, carrier, serialRole, label, priority)` — no `@JsonInclude`, every field
+always populated for a registered carrier, backs the station-wide (not per-asset) `GET /api/carriers`
+list.
 
 ## Gotchas
 

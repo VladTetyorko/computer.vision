@@ -1367,6 +1367,25 @@ vision:
     #       - message-id: 147   # BATTERY_STATUS
     #         interval: 250ms
 
+    # --- Link election (docs/plans/active/LINK-PAIRING-PLAN.md §3.4/§4, Wave L3) ---
+    # Every key below is commented out: each documents VisionLinksProperties' own default rather than
+    # overriding it -- a freshly-built app behaves exactly as LinkElectionSettings.defaults() already
+    # did. vision.links is its own top-level prefix (not nested under vision.mavlink above) since
+    # election policy is a distinct concept from socket/transmit tuning, even though
+    # TelemetryWiring#toMavlinkSettings folds both onto the same MavlinkSettings object. Maps onto
+    # adapter-mavlink's LinkElectionSettings, which LinkGroup reads to decide automatic failover among
+    # a vehicle's registered carriers.
+    # links:
+    #   How long the active link's heartbeat may go silent before a healthier carrier is preferred
+    #   over it, but the active link is not yet force-failed.
+    #   soft-timeout: 3s
+    #   How long with no heartbeat at all before the active link is force-failed regardless of
+    #   whether a healthier carrier exists. Must be >= soft-timeout.
+    #   hard-timeout: 10s
+    #   Minimum time a newly-elected link must remain active before another election may replace it
+    #   again -- damps flapping between two carriers of near-equal quality.
+    #   dwell-window: 5s
+
     # --- vision.ops: battery urgency thresholds (docs/plans/active/ASSET-FLOWS-PLAN.md §2 "Battery
     # thresholds") ---
     # Every key below is commented out: each documents VisionOpsProperties.Battery's own default

@@ -3,6 +3,8 @@ package com.drones.vision.app.devsupport;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.flight.domain.model.GeofenceZoneEvent;
 import com.drones.vision.flight.domain.port.GeofenceLiveUpdatePort;
+import com.drones.vision.flight.domain.model.LinkGroupView;
+import com.drones.vision.flight.domain.port.LinkStateLiveUpdatePort;
 import com.drones.vision.perception.domain.model.DetectionEvent;
 import com.drones.vision.perception.domain.model.DetectionResult;
 import com.drones.vision.perception.domain.model.TracksSnapshot;
@@ -22,9 +24,10 @@ import com.drones.vision.warehouse.domain.port.FleetLiveUpdatePort;
  * No-op implementation of all six live-update ports the former god-port {@code
  * LiveUpdatePublisherPort} split into (docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6b), plus
  * {@link TrackCorrectionLiveUpdatePort} added for visual geolocation's {@code geo:<assetId>} topic
- * (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4/D11/H5) and {@link GeofenceLiveUpdatePort} added for
+ * (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4/D11/H5), {@link GeofenceLiveUpdatePort} added for
  * the {@code zones} topic (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md &sect;3 D2/&sect;4.1,
- * wave L3) — seven ports total, every method a no-op. Wired when
+ * wave L3), and {@link LinkStateLiveUpdatePort} added for the {@code links:<assetId>} topic
+ * (LINK-PAIRING-PLAN.md §3.4/§4 row L3) — eight ports total, every method a no-op. Wired when
  * {@code vision.live.enabled=false} (docs/plans/done/REALTIME-PLAN.md
  * §4, item 4) — {@code vision-api}'s {@code /api/live} endpoint itself 404s in that case (its
  * controller/registry beans are conditionally absent), but the application layer ({@code
@@ -40,7 +43,7 @@ import com.drones.vision.warehouse.domain.port.FleetLiveUpdatePort;
  */
 public final class NoopLiveUpdatePublisher implements FleetLiveUpdatePort, TelemetryLiveUpdatePort,
         DetectionLiveUpdatePort, MapLiveUpdatePort, EventLiveUpdatePort, TrackCorrectionLiveUpdatePort,
-        GeofenceLiveUpdatePort {
+        GeofenceLiveUpdatePort, LinkStateLiveUpdatePort {
 
     @Override
     public void publishFleetChanged() {
@@ -79,6 +82,11 @@ public final class NoopLiveUpdatePublisher implements FleetLiveUpdatePort, Telem
 
     @Override
     public void publishZoneEvent(GeofenceZoneEvent event) {
+        // no-op
+    }
+
+    @Override
+    public void publishLinks(AssetId assetId, LinkGroupView group) {
         // no-op
     }
 }

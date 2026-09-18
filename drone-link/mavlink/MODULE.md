@@ -67,6 +67,10 @@ there is nothing to structurally prevent here the way Mechanism A's opt-in remed
   same `gateways.compute` reference-counting path `open`/`holdLobby` use, so whichever caller (a
   carrier adapter's boot wiring, or this class's own `open`/`holdLobby` self-heal) reaches a bind
   address first "wins" the shared instance; throws `IllegalArgumentException` outside `[1,65535]`.
+  **(LINK-PAIRING-PLAN.md §3.4/§4 row L3, new)** `public List<MavlinkGateway.RegisteredCarrier>
+  registeredCarriers()` — merges every open `MavlinkGateway`'s own `registeredCarriers()` into one
+  station-wide list, the same merge-across-`gateways.values()` shape `claimedVehicleHealth()` already
+  uses; the one collaborator `MavlinkVehicleLinkPort#carriers()` (below) calls.
   Package-private: `static bindKey(host, port)`, `bindKeyFor(Device)`,
   `hasActiveHub(bindKey)`, `unclaimedVehicles(bindKey)`, `claimedVehicles(bindKey)`,
   `commandTarget(bindKey, DeviceId)`, `gateway(bindKey)`. `StreamDescriptor.options["sysid"]`
@@ -103,7 +107,12 @@ there is nothing to structurally prevent here the way Mechanism A's opt-in remed
   to build a mavlink-core service on), `messageInventory()`, `Map<DeviceId, LinkHealth.Health>
   claimedVehicleHealth()` (**FLEET-RADIO R4/D4** — was `List<LinkHealth.Health>`; keyed by the
   claiming device, resolving each `ClaimedVehicle`'s `PeerId` and querying `session.health().of(...)`
-  per vehicle rather than returning one undifferentiated list). **(SOURCE-ONBOARDING-2 A2)**
+  per vehicle rather than returning one undifferentiated list). **(LINK-PAIRING-PLAN.md §3.4/§4 row
+  L3, new)** `public List<RegisteredCarrier> registeredCarriers()` — every entry of this gateway's own
+  `linkDescriptors` map, as `record RegisteredCarrier(LinkId id, LinkDescriptor descriptor)`; election
+  state (active/receiving/quality) is deliberately absent — this is carrier *reference data*
+  (`GET /api/carriers`, station-wide), not per-asset link state, which stays `LinkGroupSnapshot`'s job.
+  **(SOURCE-ONBOARDING-2 A2)**
   `MavlinkIntakeStatus intakeStatus(String bindAddress)` (package-private) — **(LINK-PAIRING L1,
   updated)** now filters `registeredLinks.values()` for any `UdpListenLink` instance (there may be
   zero, one — the legacy per-device bind or carrier-udp's registered lobby link — or, in principle,
@@ -182,6 +191,32 @@ there is nothing to structurally prevent here the way Mechanism A's opt-in remed
   a send-level fault (e.g. no link registered) → WARNING. Deliberately does **not** wire its probe's
   `CapabilityReport` into `MavlinkFlightCommander.capabilities(Device)` this wave — a known, documented
   scope boundary, not an oversight.
+- `public final class MavlinkVehicleLinkPort implements VehicleLinkPort, CarrierDirectoryPort`
+  (LINK-PAIRING-PLAN.md §3.4 frozen contract) — the one adapter for both `vision-flight` ports (**one
+  class, several related ports**, mirroring `vision-api`'s `LiveUpdateRegistry`), since both share the
+  same collaborator (`MavlinkTelemetrySource`) and the same `toFlightCarrier`/`toFlightSerialRole`/
+  `toFlightLinkId`/`toFlightQuality` translation helpers between this module's `com.drones.mavlink..`
+  wire types and `vision-flight`'s local mirror model. Constructor `(MavlinkTelemetrySource,
+  AssetService)`. `linksFor(AssetId)` resolves the asset's MAVLink-protocol device(s) via the unscoped
+  `AssetService#details(AssetId)` overload (safe here — the only caller, `LinkStateService`, is only
+  ever reached through a controller that already checked the acting user's scope), iterates each
+  device's `LinkGroupSnapshot` (from `MavlinkTelemetrySource#linkGroupSnapshot`), and tags every
+  resulting `LinkView` with its own `deviceId` — additive beyond the frozen contract, for the
+  multi-device-asset case the web contract did not originally assume; the group-level
+  `activeLinkId`/`pinned`/`lastFailoverAt` come from the first device ever heard from (a documented
+  simplification — no cross-device priority rule exists). `pin(AssetId, LinkId)` resolves the asset's
+  *first* MAVLink device and calls `MavlinkTelemetrySource#pinLink`; `release(AssetId)` releases the
+  pin on every one of the asset's MAVLink devices. `carriers()` (`CarrierDirectoryPort` — **station-
+  wide, not per-asset**, §7 ruling 5) maps `MavlinkTelemetrySource#registeredCarriers()` straight to
+  `CarrierView`, independent of any sysid's election state. Local mirror types
+  (`vision-flight`'s own `LinkId`/`CarrierKind`/`SerialRole`/`LinkQuality`/`LinkView`/`LinkGroupView`/
+  `CarrierView`, not a direct import of this module's `com.drones.mavlink.transport`/`com.drones.
+  mavlink.session` types) are **mandatory, not a deviation from the frozen contract's literal code
+  snippets**: ArchUnit's `domainDependsOnlyOnDomainAndJava`/`applicationDependsOnlyOnApplicationDomainAndJava`
+  rules (`station/vision-app`'s `ArchitectureTest`) forbid any `..domain..`/`..application..` class in
+  `contexts/vision-flight` from depending on `com.drones.mavlink..` at all — this class is where the
+  one-way translation between the two type systems happens, exactly as `LinkId`'s own javadoc (in
+  `vision-flight`) documents.
 - `public final class MavlinkFlightCommander implements FlightCommandPort` — `setMode`/
   `returnToHome`/`arm`/`disarm`/`emergencyStop`/`auxFunction`/`capabilities`. Every command is one
   `COMMAND_LONG` from a fresh, per-call `CommandService` built on the resolved device's gateway.

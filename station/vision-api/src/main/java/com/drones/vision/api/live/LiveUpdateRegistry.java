@@ -13,6 +13,7 @@ import com.drones.vision.api.dto.EventResponse;
 import com.drones.vision.api.dto.FrameLedgerResponse;
 import com.drones.vision.api.dto.GeofenceZoneEventPayload;
 import com.drones.vision.api.dto.GeofenceZoneResponse;
+import com.drones.vision.api.dto.LinkGroupResponse;
 import com.drones.vision.api.dto.LiveConnectedResponse;
 import com.drones.vision.api.dto.LiveEnvelopeResponse;
 import com.drones.vision.api.dto.LiveSubscriptionResponse;
@@ -39,6 +40,8 @@ import com.drones.vision.perception.domain.port.DetectionEventRepositoryPort;
 import com.drones.vision.perception.domain.port.DetectionLiveUpdatePort;
 import com.drones.vision.platform.EventLiveUpdatePort;
 import com.drones.vision.flight.domain.port.GeofenceLiveUpdatePort;
+import com.drones.vision.flight.domain.model.LinkGroupView;
+import com.drones.vision.flight.domain.port.LinkStateLiveUpdatePort;
 import com.drones.vision.map.domain.port.MapLiveUpdatePort;
 import com.drones.vision.flight.domain.port.TelemetryLiveUpdatePort;
 import com.drones.vision.flight.domain.port.TrackCorrectionLiveUpdatePort;
@@ -85,9 +88,10 @@ import com.drones.vision.api.controller.StreamController;
  * EventLiveUpdatePort} — five ports the former god-port {@code LiveUpdatePublisherPort} split into,
  * docs/plans/active/DOMAIN-SEPARATION-W1.md §15, W1.6b — plus a sixth, {@link
  * TrackCorrectionLiveUpdatePort}, added for visual geolocation's {@code geo:<assetId>} topic,
- * docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4/D11, and a seventh, {@link GeofenceLiveUpdatePort},
+ * docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4/D11, a seventh, {@link GeofenceLiveUpdatePort},
  * added for the {@code zones} topic (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md &sect;3 D2/
- * &sect;4.1, wave L3)), a per-process ({@code single-instance
+ * &sect;4.1, wave L3), and an eighth, {@link LinkStateLiveUpdatePort}, added for the {@code
+ * links:<assetId>} topic (LINK-PAIRING-PLAN.md §3.4/§4 row L3)), a per-process ({@code single-instance
  * deployment}, per the plan) hub fanning application-layer announcements out to every subscribed
  * {@code SseEmitter}. An adapter is exactly the place that may depend on every context at once —
  * each context's application code still only ever holds the one port it actually calls. {@code
@@ -237,7 +241,7 @@ import com.drones.vision.api.controller.StreamController;
 @ConditionalOnProperty(prefix = "vision.live", name = "enabled", matchIfMissing = true)
 public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryLiveUpdatePort,
         DetectionLiveUpdatePort, MapLiveUpdatePort, EventLiveUpdatePort, TrackCorrectionLiveUpdatePort,
-        GeofenceLiveUpdatePort {
+        GeofenceLiveUpdatePort, LinkStateLiveUpdatePort {
 
     private static final System.Logger LOG = System.getLogger(LiveUpdateRegistry.class.getName());
 
@@ -358,6 +362,11 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
      */
     private final ConcurrentHashMap<AssetId, LiveRingBuffer> tracksBuffers = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<AssetId, LiveRingBuffer> cvTraceBuffers = new ConcurrentHashMap<>();
+    /**
+     * Per-asset {@code links:<assetId>} buffer (LINK-PAIRING-PLAN.md §3.4/§4 row L3) -- same
+     * eviction/capacity-1 treatment as {@link #detectionBuffers}/{@link #geoBuffers}.
+     */
+    private final ConcurrentHashMap<AssetId, LiveRingBuffer> linksBuffers = new ConcurrentHashMap<>();
 
     private final ConcurrentHashMap<AssetId, ConcurrentLinkedQueue<Telemetry>> pendingTelemetry =
             new ConcurrentHashMap<>();
@@ -654,11 +663,14 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
         for (String raw : request.remove()) {
             LiveTopic topic = LiveTopic.parse(raw);
             if (topic.kind() == LiveTopicKind.TELEMETRY || topic.kind() == LiveTopicKind.DETECTIONS
-                    || topic.kind() == LiveTopicKind.CV_TRACE) {
+                    || topic.kind() == LiveTopicKind.CV_TRACE || topic.kind() == LiveTopicKind.LINKS) {
                 // FLEET/EVENT/DEVICES/DETECTION_EVENTS/MAP stay on regardless -- see class javadoc. CV_TRACE
                 // is deliberately removable (unlike GEO/TRACKS, left at this method's pre-existing scope) --
                 // see TraceDemandPort's own javadoc for why closing a debug console must actually stop
-                // paying the trace tier's cost, not just stop rendering it.
+                // paying the trace tier's cost, not just stop rendering it. LINKS is removable too --
+                // vision-web's LinksStore ref-counts trackLinks/untrackLinks around the same generic
+                // track()/untrack() helper cvTrace uses (live-store.ts), so a closed Links panel must
+                // actually drop the subscription, not just stop rendering it.
                 connection.topics().remove(topic);
             }
         }
@@ -764,7 +776,8 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
         return telemetryBuffers.values().stream().anyMatch(LiveRingBuffer::everDropped)
                 || detectionBuffers.values().stream().anyMatch(LiveRingBuffer::everDropped)
                 || tracksBuffers.values().stream().anyMatch(LiveRingBuffer::everDropped)
-                || cvTraceBuffers.values().stream().anyMatch(LiveRingBuffer::everDropped);
+                || cvTraceBuffers.values().stream().anyMatch(LiveRingBuffer::everDropped)
+                || linksBuffers.values().stream().anyMatch(LiveRingBuffer::everDropped);
     }
 
     /**
@@ -939,6 +952,29 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
                     new GeofenceZoneEventPayload(event.action().name(), GeofenceZoneResponse.from(event.zone())));
             zonesBuffer.append(envelope);
             broadcast(LiveTopic.ZONES, envelope);
+        });
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Appends one envelope to {@code assetId}'s own {@link #linksBuffers} entry and broadcasts it
+     * (LINK-PAIRING-PLAN.md §3.4/§4 row L3) — dispatched directly, not coalesced like {@link
+     * #publishTelemetryAppended}/{@link #publishDetections}: {@code DefaultLinkStateService} (vision-
+     * flight) already calls this at most once per {@code linksFor}/{@code pin}/{@code release}, a
+     * request-driven rate no busier than {@link #publishZoneEvent}'s own operator-driven writes, so
+     * a second coalescing layer here would only add latency with nothing to save.
+     */
+    @Override
+    public void publishLinks(AssetId assetId, LinkGroupView group) {
+        Objects.requireNonNull(assetId, "assetId must not be null");
+        Objects.requireNonNull(group, "group must not be null");
+        scheduler.execute(() -> {
+            LiveTopic topic = LiveTopic.links(assetId);
+            LiveEnvelopeResponse envelope = new LiveEnvelopeResponse(sequencer.incrementAndGet(),
+                    assetId.value().toString(), LiveTopicKind.LINKS.wire(), LinkGroupResponse.from(group));
+            bufferFor(topic).append(envelope);
+            broadcast(topic, envelope);
         });
     }
 
@@ -1149,6 +1185,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
         geoBuffers.keySet().retainAll(subscribedAssetIds(LiveTopicKind.GEO));
         tracksBuffers.keySet().retainAll(subscribedAssetIds(LiveTopicKind.TRACKS));
         cvTraceBuffers.keySet().retainAll(subscribedAssetIds(LiveTopicKind.CV_TRACE));
+        linksBuffers.keySet().retainAll(subscribedAssetIds(LiveTopicKind.LINKS));
     }
 
     private Set<AssetId> subscribedAssetIds(LiveTopicKind kind) {
@@ -1203,6 +1240,7 @@ public final class LiveUpdateRegistry implements FleetLiveUpdatePort, TelemetryL
             case GEO -> geoBuffers.computeIfAbsent(topic.assetId(), id -> new LiveRingBuffer(1, true));
             case TRACKS -> tracksBuffers.computeIfAbsent(topic.assetId(), id -> new LiveRingBuffer(1, true));
             case CV_TRACE -> cvTraceBuffers.computeIfAbsent(topic.assetId(), id -> new LiveRingBuffer(1, true));
+            case LINKS -> linksBuffers.computeIfAbsent(topic.assetId(), id -> new LiveRingBuffer(1, true));
         };
     }
 

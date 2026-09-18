@@ -3,6 +3,7 @@ package com.drones.vision.app.config.wiring;
 import com.drones.vision.adapter.mavlink.MavlinkFeedTransmitter;
 import com.drones.vision.adapter.mavlink.MavlinkSettings;
 import com.drones.vision.adapter.mavlink.MavlinkTelemetrySource;
+import com.drones.vision.app.config.properties.VisionLinksProperties;
 import com.drones.vision.app.config.properties.VisionMavlinkProperties;
 import com.drones.vision.app.config.properties.VisionOnboardingProperties;
 import com.drones.vision.app.config.properties.VisionRcProperties;
@@ -100,7 +101,10 @@ class MavlinkLinkStatusWiringTest {
                 new VisionOnboardingProperties.Remediate(new VisionOnboardingProperties.Remediate.MessageInterval(false)),
                 new VisionOnboardingProperties.Passport(false));
 
-        MavlinkSettings settings = TelemetryWiring.toMavlinkSettings(mavlinkProperties, rcProperties, onboardingProperties);
+        VisionLinksProperties linksProperties =
+                new VisionLinksProperties(Duration.ofSeconds(3), Duration.ofSeconds(10), Duration.ofSeconds(5));
+        MavlinkSettings settings = TelemetryWiring.toMavlinkSettings(
+                mavlinkProperties, rcProperties, onboardingProperties, linksProperties);
         MavlinkTelemetrySource source = new MavlinkTelemetrySource(settings);
         SubsystemStatusPort statusPort = new SystemStatusWiring().mavlinkLinkStatus(source, mavlinkProperties);
 

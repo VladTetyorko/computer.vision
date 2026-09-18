@@ -1,6 +1,7 @@
 package com.drones.vision.app.config.wiring;
 
 import com.drones.vision.adapter.mavlink.MavlinkSettings;
+import com.drones.vision.app.config.properties.VisionLinksProperties;
 import com.drones.vision.app.config.properties.VisionMavlinkProperties;
 import com.drones.vision.app.config.properties.VisionOnboardingProperties;
 import com.drones.vision.app.config.properties.VisionRcProperties;
@@ -107,6 +108,7 @@ class TelemetryWiringOnboardingTest {
                                 probeParameters),
                         new VisionOnboardingProperties.Remediate(
                                 new VisionOnboardingProperties.Remediate.MessageInterval(requestMessagesOnConnect)),
-                        new VisionOnboardingProperties.Passport(false)));
+                        new VisionOnboardingProperties.Passport(false)),
+                new VisionLinksProperties(Duration.ofSeconds(3), Duration.ofSeconds(10), Duration.ofSeconds(5)));
     }
 }

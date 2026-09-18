@@ -1,5 +1,7 @@
 package com.drones.vision.adapter.mavlink;
 
+import com.drones.vision.adapter.mavlink.election.LinkElectionSettings;
+
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
@@ -39,7 +41,8 @@ public record MavlinkSettings(
         Inventory inventory,
         Onboarding onboarding,
         LinkStatus linkStatus,
-        StreamNegotiation streamNegotiation) {
+        StreamNegotiation streamNegotiation,
+        LinkElectionSettings linkElection) {
 
     /**
      * docs/plans/active/MAVLINK-COMMANDS-PLAN.md D2a — {@link #ackTimeout()}'s per-<b>attempt</b> wait
@@ -79,6 +82,7 @@ public record MavlinkSettings(
         Objects.requireNonNull(onboarding, "onboarding must not be null");
         Objects.requireNonNull(linkStatus, "linkStatus must not be null");
         Objects.requireNonNull(streamNegotiation, "streamNegotiation must not be null");
+        Objects.requireNonNull(linkElection, "linkElection must not be null");
     }
 
     /**
@@ -100,7 +104,7 @@ public record MavlinkSettings(
                             Duration closeJoinTimeout, Duration ackTimeout, Scan scan, Transmit transmit, Rc rc) {
         this(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout, DEFAULT_COMMAND_RETRIES,
                 scan, transmit, rc, Inventory.defaults(), Onboarding.defaults(), LinkStatus.defaults(),
-                StreamNegotiation.defaults());
+                StreamNegotiation.defaults(), LinkElectionSettings.defaults());
     }
 
     /**
@@ -112,7 +116,7 @@ public record MavlinkSettings(
                             Inventory inventory) {
         this(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout, DEFAULT_COMMAND_RETRIES,
                 scan, transmit, rc, inventory, Onboarding.defaults(), LinkStatus.defaults(),
-                StreamNegotiation.defaults());
+                StreamNegotiation.defaults(), LinkElectionSettings.defaults());
     }
 
     /** Reproduces every literal this module's classes hardcode today. */
@@ -130,7 +134,8 @@ public record MavlinkSettings(
                 Inventory.defaults(),
                 Onboarding.defaults(),
                 LinkStatus.defaults(),
-                StreamNegotiation.defaults());
+                StreamNegotiation.defaults(),
+                LinkElectionSettings.defaults());
     }
 
     /**
@@ -140,7 +145,7 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withSilenceWindow(Duration newSilenceWindow) {
         return new MavlinkSettings(bindHost, newSilenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                commandRetries, scan, transmit, rc, inventory, onboarding, linkStatus, streamNegotiation);
+                commandRetries, scan, transmit, rc, inventory, onboarding, linkStatus, streamNegotiation, linkElection);
     }
 
     /**
@@ -152,7 +157,7 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withAckTimeout(Duration newAckTimeout) {
         return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, newAckTimeout,
-                commandRetries, scan, transmit, rc, inventory, onboarding, linkStatus, streamNegotiation);
+                commandRetries, scan, transmit, rc, inventory, onboarding, linkStatus, streamNegotiation, linkElection);
     }
 
     /**
@@ -162,7 +167,7 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withCommandRetries(int newCommandRetries) {
         return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                newCommandRetries, scan, transmit, rc, inventory, onboarding, linkStatus, streamNegotiation);
+                newCommandRetries, scan, transmit, rc, inventory, onboarding, linkStatus, streamNegotiation, linkElection);
     }
 
     /**
@@ -172,7 +177,7 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withInventory(Inventory newInventory) {
         return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                commandRetries, scan, transmit, rc, newInventory, onboarding, linkStatus, streamNegotiation);
+                commandRetries, scan, transmit, rc, newInventory, onboarding, linkStatus, streamNegotiation, linkElection);
     }
 
     /**
@@ -181,7 +186,7 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withOnboarding(Onboarding newOnboarding) {
         return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                commandRetries, scan, transmit, rc, inventory, newOnboarding, linkStatus, streamNegotiation);
+                commandRetries, scan, transmit, rc, inventory, newOnboarding, linkStatus, streamNegotiation, linkElection);
     }
 
     /**
@@ -192,7 +197,7 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withLinkStatus(LinkStatus newLinkStatus) {
         return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                commandRetries, scan, transmit, rc, inventory, onboarding, newLinkStatus, streamNegotiation);
+                commandRetries, scan, transmit, rc, inventory, onboarding, newLinkStatus, streamNegotiation, linkElection);
     }
 
     /**
@@ -202,7 +207,20 @@ public record MavlinkSettings(
      */
     public MavlinkSettings withStreamNegotiation(StreamNegotiation newStreamNegotiation) {
         return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
-                commandRetries, scan, transmit, rc, inventory, onboarding, linkStatus, newStreamNegotiation);
+                commandRetries, scan, transmit, rc, inventory, onboarding, linkStatus, newStreamNegotiation,
+                linkElection);
+    }
+
+    /**
+     * Copy of this settings object with just {@link #linkElection()} replaced — same test/tuning
+     * convenience as {@link #withInventory}; lets a test shrink {@link LinkElectionSettings}'s soft/
+     * hard/dwell bounds far below the production defaults so an election regression test can assert
+     * promptly instead of waiting out multi-second timeouts.
+     */
+    public MavlinkSettings withLinkElection(LinkElectionSettings newLinkElection) {
+        return new MavlinkSettings(bindHost, silenceWindow, maxUnclaimedVehicles, closeJoinTimeout, ackTimeout,
+                commandRetries, scan, transmit, rc, inventory, onboarding, linkStatus, streamNegotiation,
+                newLinkElection);
     }
 
     /** {@code MavlinkHeartbeatScanner}'s hub-poll/self-bind-timeout budgets. */

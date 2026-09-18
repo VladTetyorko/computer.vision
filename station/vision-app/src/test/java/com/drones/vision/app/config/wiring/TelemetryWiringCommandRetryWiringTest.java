@@ -3,6 +3,7 @@ package com.drones.vision.app.config.wiring;
 import com.drones.vision.adapter.mavlink.MavlinkFlightCommander;
 import com.drones.vision.adapter.mavlink.MavlinkSettings;
 import com.drones.vision.adapter.mavlink.MavlinkTelemetrySource;
+import com.drones.vision.app.config.properties.VisionLinksProperties;
 import com.drones.vision.app.config.properties.VisionMavlinkProperties;
 import com.drones.vision.app.config.properties.VisionOnboardingProperties;
 import com.drones.vision.app.config.properties.VisionRcProperties;
@@ -51,10 +52,14 @@ class TelemetryWiringCommandRetryWiringTest {
             new Binder(new MapConfigurationPropertySource(Map.of()))
                     .bindOrCreate("vision.onboarding", VisionOnboardingProperties.class);
 
+    private final VisionLinksProperties linksProperties =
+            new Binder(new MapConfigurationPropertySource(Map.of()))
+                    .bindOrCreate("vision.links", VisionLinksProperties.class);
+
     @Test
     void defaultPropertiesYieldTheD2aBudget() {
-        MavlinkSettings settings =
-                TelemetryWiring.toMavlinkSettings(mavlinkProperties, rcProperties, onboardingProperties);
+        MavlinkSettings settings = TelemetryWiring.toMavlinkSettings(
+                mavlinkProperties, rcProperties, onboardingProperties, linksProperties);
 
         assertEquals(Duration.ofMillis(700), settings.ackTimeout(),
                 "per-attempt wait must be 700ms, not the old 2s -- see MAVLINK-COMMANDS-PLAN.md D2a");
@@ -65,8 +70,8 @@ class TelemetryWiringCommandRetryWiringTest {
     void mavlinkFlightCommanderBeanBuildsOnTheSameSettingsAsMavlinkTelemetrySource() {
         MavlinkTelemetrySource telemetrySource = new MavlinkTelemetrySource();
 
-        MavlinkFlightCommander commander =
-                wiring.mavlinkFlightCommander(telemetrySource, mavlinkProperties, rcProperties, onboardingProperties);
+        MavlinkFlightCommander commander = wiring.mavlinkFlightCommander(
+                telemetrySource, mavlinkProperties, rcProperties, onboardingProperties, linksProperties);
 
         assertNotNull(commander, "the canonical (MavlinkTelemetrySource, MavlinkSettings) constructor "
                 + "must accept exactly the MavlinkSettings toMavlinkSettings(...) builds from properties defaults");
@@ -78,7 +83,8 @@ class TelemetryWiringCommandRetryWiringTest {
         VisionMavlinkProperties zeroRetries = new VisionMavlinkProperties("0.0.0.0", Duration.ofSeconds(30), 32,
                 Duration.ofSeconds(5), Duration.ofMillis(700), 0, 5.0, 20.0, Duration.ofSeconds(2), null, null);
 
-        MavlinkSettings settings = TelemetryWiring.toMavlinkSettings(zeroRetries, rcProperties, onboardingProperties);
+        MavlinkSettings settings =
+                TelemetryWiring.toMavlinkSettings(zeroRetries, rcProperties, onboardingProperties, linksProperties);
 
         assertEquals(0, settings.commandRetries(),
                 "vision.mavlink.command-retries: 0 must restore today's single-shot behaviour");
