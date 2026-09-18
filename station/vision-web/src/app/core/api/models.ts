@@ -1415,6 +1415,16 @@ export interface DiscoveryCandidate {
   readonly lastSeen: string;
   readonly status: DiscoveryCandidateStatus;
   readonly registeredAssetId?: string;
+  /**
+   * **Assumed for L2/L3, not yet a real field** (docs/plans/active/LINK-PAIRING-PLAN.md §7 architect
+   * ruling #3 — "on sysid collision the response carries `sysidPushRequired=true`"). This wave reads
+   * it defensively (absent on every server that predates it) and, until it exists, falls back to a
+   * client-side sysid-collision heuristic over `details['sysid']` —
+   * `features/onboarding/sysid-collision-logic.ts#candidateSysidCollision`'s own doc comment.
+   */
+  readonly sysidPushRequired?: boolean;
+  /** The sysid this candidate collides with, when {@link sysidPushRequired} is `true` — same assumption/fallback as that field. */
+  readonly assignedSysid?: number;
 }
 
 /**
@@ -1440,6 +1450,18 @@ export interface RegisterDiscoveryCandidateResponse {
   readonly assetId: string;
   readonly displayName: string;
   readonly category: string;
+  /**
+   * **Assumed for L2/L3, not yet a real field** — same assumption as {@link DiscoveryCandidate}'s
+   * own `sysidPushRequired` (docs/plans/active/LINK-PAIRING-PLAN.md §7 architect ruling #3: "adopt
+   * is one motion" — `register`/`attach` of a `mavlink` device pairs it in the same transaction and
+   * "only on collision assign the lowest free number in the range and return `sysidPushRequired=true`
+   * so the confirm screen shows the push step"). The onboarding wizard's found-nearby path reads
+   * this directly off the register response (there is no Prove-step `VehicleProfile` to derive it
+   * from for a candidate that skipped Prove) — see `onboarding-store.ts#applyFoundCandidateCollision`.
+   */
+  readonly sysidPushRequired?: boolean;
+  /** The sysid actually assigned on collision, when {@link sysidPushRequired} is `true` — same assumption as above. */
+  readonly assignedSysid?: number;
 }
 
 /**
@@ -2531,7 +2553,91 @@ export type LiveEnvelope =
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'zones'; readonly payload: GeofenceZoneEventPayload }
   | { readonly seq: number; readonly assetId?: undefined; readonly type: 'system'; readonly payload: SystemStatus }
   | { readonly seq: number; readonly assetId: string; readonly type: 'tracks'; readonly payload: StreamTracksResponse }
-  | { readonly seq: number; readonly assetId: string; readonly type: 'cv-trace'; readonly payload: FrameLedger };
+  | { readonly seq: number; readonly assetId: string; readonly type: 'cv-trace'; readonly payload: FrameLedger }
+  | { readonly seq: number; readonly assetId: string; readonly type: 'links'; readonly payload: LinkGroupResponse };
+
+// --- Links / pairing (docs/plans/active/LINK-PAIRING-PLAN.md §3.3/§3.4, wave L4) -----------------------
+// `mavlink-core`'s `LinkRegistry`/`LinkDescriptor`/`CarrierKind`/`SerialRole`/`LinkQuality` and
+// vision-warehouse's `Pairing`/`VehicleLinkPort`/`LinkGroupView`/`LinkView` (§3.3/§3.4) are frozen at
+// the *domain* level, but no wire DTO for them exists yet anywhere in this codebase — L2/L3 own the
+// server side; this wave (L4, web) builds the client ahead of it, against the plan's own domain
+// shapes. The wire shapes below are this wave's own best-effort mirror of those domain records —
+// **assumed, not verified against a real DTO** — see `station/vision-web/MODULE.md`'s asset-detail
+// row and this wave's own exit report for the exact field names L2/L3 must match (or this file must
+// be updated to match instead, once the real controller lands).
+
+/** Mirrors `mavlink-core`'s `CarrierKind` (§3.1, frozen). */
+export type LinkCarrierKind = 'UDP' | 'SERIAL';
+
+/** Mirrors `mavlink-core`'s `SerialRole` (§3.1, frozen) — `NONE` for a UDP link (the field simply doesn't apply), `GROUND_RADIO`/`BENCH` for a serial one. */
+export type LinkSerialRole = 'NONE' | 'GROUND_RADIO' | 'BENCH';
+
+/**
+ * Mirrors `mavlink-core`'s `LinkQuality` (§3.1, frozen at the domain level — this wire shape is
+ * this wave's own assumption). Every field optional/absent when the link has never carried a
+ * `RADIO_STATUS` message (a UDP/Wi-Fi link, or a serial link whose radio doesn't report one) —
+ * degrades to "no quality data" honestly, never a fabricated zero.
+ */
+export interface LinkQualityView {
+  readonly lastRadioStatusAt?: string;
+  readonly rssi?: number;
+  readonly remoteRssi?: number;
+  readonly noise?: number;
+  readonly rxErrors?: number;
+  readonly fixed?: boolean;
+}
+
+/**
+ * Mirrors vision-warehouse's `LinkView` (§3.4, frozen at the domain level) — one carrier currently
+ * registered for a vehicle's link group. `heartbeatAgeSeconds` is this wave's own choice of wire
+ * shape for the domain's `Duration heartbeatAge` (a plain number of seconds, not an ISO-8601
+ * duration string) — feed straight into `core/telemetry/telemetry-logic.ts#humanAge`, the same
+ * render every other age in this app uses.
+ */
+export interface LinkView {
+  readonly id: string;
+  readonly carrier: LinkCarrierKind;
+  readonly serialRole: LinkSerialRole;
+  readonly label: string;
+  /** This is the link `VehicleLinkPort` is currently sending/electing telemetry from — never more than one at a time per group. */
+  readonly active: boolean;
+  /** This link is hearing heartbeats right now, whether or not it is the elected `active` one — an operator's own view of "is this carrier even alive". */
+  readonly receiving: boolean;
+  readonly heartbeatAgeSeconds: number;
+  readonly quality?: LinkQualityView;
+}
+
+/**
+ * Mirrors vision-warehouse's `LinkGroupView` (§3.4, frozen at the domain level) — the body of `GET
+ * /api/assets/{id}/links`, and the payload of the per-asset `links:<assetId>` SSE topic (§3.4 —
+ * "payload is the whole list snapshot", never a diff, so `LinksStore` simply replaces its held
+ * value on every arrival, live or polled, exactly like `GeoStore`/`DetectionsStore`'s own
+ * ring-capacity-1 topics). `pinned`/`activeLinkId` reflect §6's election rule: AUTO (server elects
+ * the best carrier) unless an operator pinned one via `PUT .../links/{linkId}/pin`.
+ */
+export interface LinkGroupResponse {
+  readonly assetId: string;
+  readonly links: readonly LinkView[];
+  readonly activeLinkId: string | null;
+  readonly pinned: boolean;
+  /** The most recent automatic failover away from a link that stopped receiving, if any this session has recorded server-side — absent when none has happened yet. */
+  readonly lastFailoverAt?: string;
+}
+
+/**
+ * Mirrors vision-warehouse's per-station carrier list (§3.4 — "station-wide `GET /api/carriers`",
+ * architect ruling §7) — every carrier configured on this station, not scoped to one asset; a
+ * future carrier-management surface's own source list. Not consumed by any store this wave (the
+ * asset-scoped Links panel needs only `LinkGroupResponse`), added for wire-contract completeness
+ * per the plan's own §3.4 frozen endpoint list.
+ */
+export interface CarrierSummaryResponse {
+  readonly id: string;
+  readonly carrier: LinkCarrierKind;
+  readonly serialRole: LinkSerialRole;
+  readonly label: string;
+  readonly priority: number;
+}
 
 /**
  * Mirrors `dto.UpdateLiveTopicsRequest` — the body of `PATCH /api/live/{connectionId}/topics`
@@ -3305,6 +3411,18 @@ export interface SystemNetworkResponse {
   readonly mavlinkPort: number;
   readonly videoPushPort?: number;
   readonly videoPushPathPrefix?: string;
+  /**
+   * **Assumed for L2, not yet a real field** (docs/plans/active/LINK-PAIRING-PLAN.md §4 row L4 —
+   * "Playground shown in the rail only when the server reports `vision.simulation.enabled`"). No
+   * dedicated capability endpoint exists anywhere in this app (`core/training/training-store.ts`'s
+   * own doc comment is the only precedent, and its 404-means-disabled idiom doesn't fit a flag that
+   * gates a *feature inside* an always-present endpoint, not a whole controller); this reuses the one
+   * deploy-time config response the wizard already reads for the same reason. Absent on every server
+   * that predates this field — `features/playground/playground-facade.ts` defaults to `true`
+   * (enabled) when absent, so an un-upgraded backend keeps today's behavior (simulate creation has
+   * always been unconditionally available) rather than silently losing the feature.
+   */
+  readonly simulationEnabled?: boolean;
 }
 
 // --- Drone onboarding: vehicle profile & fleet readiness (docs/plans/active/DRONE-ONBOARDING-PLAN.md

@@ -106,6 +106,53 @@ export function visibleCandidates(
     });
 }
 
+/**
+ * Simulated sources are created and managed exclusively from `/playground` (docs/plans/active/
+ * LINK-PAIRING-PLAN.md §4 row L4) — they must never surface in the passive "Found nearby" onboarding
+ * feed or the discovery inbox's own count badges, so a Playground-created asset is never mistaken
+ * for a real, physically-present device. **Assumed, not verified against a real backend**: nothing
+ * in the discovery contract (§3.3/§3.4) says a simulated source is ever reported to the inbox at
+ * all (today it plainly is not — `POST /api/simulations` never touches discovery), so this filter is
+ * defensive/forward-compatible only, in case a future scanner starts reporting one. Matches by
+ * `method` — case-insensitively `'simulation'` or `'sim'` — the two spellings this codebase already
+ * uses for the concept (`SimulateMode`/`core/fleet/simulation-logic.ts` vs. this module's own
+ * `sim`-prefixed device ids elsewhere).
+ */
+export function excludeSimulated(candidates: readonly DiscoveryCandidate[]): readonly DiscoveryCandidate[] {
+  return candidates.filter((candidate) => {
+    const method = candidate.method.toLowerCase();
+    return method !== 'simulation' && method !== 'sim';
+  });
+}
+
+/** Keys `candidate.details` uses, across the scanners this app already has, when a probe attempt
+ *  came back needing authentication (an ONVIF camera behind a login, mainly) — matched
+ *  case-insensitively against both the key and, for boolean-shaped keys, its value. */
+const CREDENTIAL_HINT_KEYS = ['authrequired', 'needsauth', 'requiresauth', 'credentialrequired'];
+const CREDENTIAL_HINT_STATUS_VALUES = ['unauthorized', '401', 'auth_required', 'credentials_required'];
+
+/**
+ * Whether the Confirm screen's one typed credential field should show at all (docs/plans/active/
+ * LINK-PAIRING-PLAN.md §3.7, wave L4 — "the ONE typed field only if the probe was refused for
+ * credentials"). **Assumed, not verified against a real backend**: no field on `DiscoveryCandidate`
+ * today distinguishes "this probe failed because it needs a password" from any other failure or from
+ * "never probed at all" — `sysidPushRequired`'s own doc comment notes the same gap for pairing. This
+ * reads `candidate.details` defensively for a small set of plausible key/value spellings a scanner
+ * might use to report that; until L2/L3 lands a real signal (or tells the web which key to read) this
+ * will almost always resolve `false` and the field stays hidden — which is the honest failure mode
+ * (never invents a "credentials needed" prompt the backend never asked for).
+ */
+export function candidateNeedsCredential(candidate: DiscoveryCandidate): boolean {
+  return Object.entries(candidate.details).some(([key, value]) => {
+    const loweredKey = key.toLowerCase();
+    const loweredValue = value.toLowerCase();
+    if (CREDENTIAL_HINT_KEYS.includes(loweredKey)) {
+      return loweredValue === 'true' || loweredValue === 'yes' || CREDENTIAL_HINT_STATUS_VALUES.includes(loweredValue);
+    }
+    return loweredKey === 'probestatus' && CREDENTIAL_HINT_STATUS_VALUES.includes(loweredValue);
+  });
+}
+
 /** Feeds the section's unobtrusive count badge (mirrors the app's other "how many need me"
  *  counts — Command's attention queue, the bell's unread count): only NEW candidates count,
  *  never REGISTERED/DISMISSED — those no longer need a decision. */

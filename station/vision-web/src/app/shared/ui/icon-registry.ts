@@ -81,7 +81,10 @@ export type IconName =
   // audit trail (docs/plans/done/OPS-UX-PLAN.md §3 B1)
   | 'shield'
   // setup checklist (docs/plans/done/OPS-UX-PLAN.md §3 B2) — a done row's own tick mark.
-  | 'check';
+  | 'check'
+  // links panel (docs/plans/active/LINK-PAIRING-PLAN.md §3.4, wave L4) — a chain-link glyph, distinct
+  // from `signal`'s bars so the drill-in row for "Links" doesn't read as a duplicate of "Full telemetry".
+  | 'link';
 
 export const ICONS: Record<IconName, string> = {
   home: '<path d="M4 11.5 12 4l8 7.5"/><path d="M6 10.5V19a1 1 0 0 0 1 1h4v-6h2v6h4a1 1 0 0 0 1-1v-8.5"/>',
@@ -196,4 +199,10 @@ export const ICONS: Record<IconName, string> = {
   // Setup checklist (docs/plans/done/OPS-UX-PLAN.md §3 B2) — a bare tick, no ring/circle around it
   // (unlike `shield`'s check-in-a-shield): the row's own layout supplies the "done" framing.
   check: '<polyline points="4 12 9.5 17.5 20 6"/>',
+  // Links panel (docs/plans/active/LINK-PAIRING-PLAN.md §3.4, wave L4) — two overlapping rounded
+  // links, the familiar "chain link" mark (Feather/Lucide's own `link` glyph, hand-drawn to this
+  // file's stroke language).
+  link:
+    '<path d="M9.5 14.5 14.5 9.5"/><path d="M8 16 5.5 18.5a3 3 0 0 1-4.24-4.24L4 11.5a3 3 0 0 1 4.24 0"/>' +
+    '<path d="M16 8l2.5-2.5a3 3 0 0 1 4.24 4.24L20 12.24a3 3 0 0 1-4.24 0"/>',
 };

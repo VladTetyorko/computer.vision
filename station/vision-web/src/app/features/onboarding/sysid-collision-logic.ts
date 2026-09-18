@@ -1,4 +1,4 @@
-import type { Device, ParameterReading, VehicleProfile } from '../../core/api/models';
+import type { Device, DiscoveryCandidate, ParameterReading, VehicleProfile } from '../../core/api/models';
 
 /**
  * Pure logic behind the onboarding wizard's sysid-collision step (docs/plans/active/FLEET-RADIO-PLAN.md
@@ -30,6 +30,51 @@ export function detectSysidCollision(
   const collides = existingDevices.some((device) => {
     const raw = device.options['sysid'];
     return raw !== undefined && Number(raw) === sysid;
+  });
+  return collides ? sysid : null;
+}
+
+/**
+ * The Confirm-screen counterpart of `detectSysidCollision` above, for a found-nearby candidate that
+ * has never gone through the Prove step (docs/plans/active/LINK-PAIRING-PLAN.md §7, wave L4) — there
+ * is no `VehicleProfile` yet at Confirm time, only the `DiscoveryCandidate` the feed surfaced.
+ * Prefers the server-reported `sysidPushRequired`/`assignedSysid` pair (§7 architect ruling #3,
+ * **assumed for L2/L3, not yet real** — see `DiscoveryCandidate`'s own doc comment) and falls back
+ * to the same client-side heuristic `detectSysidCollision` uses when those fields are absent: reading
+ * the raw sysid a MAVLink discovery probe already stashed in `details['sysid']`
+ * (`drone-scan-logic.ts#vehicleSysid`'s identical convention) and comparing it against every existing
+ * device's own `options['sysid']`. Returns the colliding sysid, or `null` when there is nothing to
+ * collide with (a camera/ONVIF candidate never has a sysid at all).
+ */
+/**
+ * **Written and unit-tested, deliberately not yet wired into `ConfirmStep`** — the register/attach
+ * response (`OnboardingStore#applyFoundCandidateCollision`, populated post-attach) is already the
+ * authoritative source `finishCreate`/`writeSysid` act on, so this function's only remaining value is
+ * an *early*, non-blocking warning on the Confirm screen itself, before the operator commits. Wiring
+ * it in needs an `existingDevices` read (`VisionApi#listDevices`) `OnboardingStore` doesn't already
+ * cache at Confirm time — adding a new fetch on that path was judged out of scope for this wave
+ * (LINK-PAIRING wave L4) given no live/browser verification was available to check it; a follow-up
+ * wave can call this from `OnboardingStore#chooseFoundCandidate` once `listDevices()` is already warm
+ * or cheap to call there.
+ */
+export function candidateSysidCollision(
+  candidate: DiscoveryCandidate,
+  existingDevices: readonly Device[],
+): number | null {
+  if (candidate.sysidPushRequired === true && candidate.assignedSysid !== undefined) {
+    return candidate.assignedSysid;
+  }
+  const raw = candidate.details['sysid'];
+  if (raw === undefined) {
+    return null;
+  }
+  const sysid = Number(raw);
+  if (!Number.isFinite(sysid)) {
+    return null;
+  }
+  const collides = existingDevices.some((device) => {
+    const existingRaw = device.options['sysid'];
+    return existingRaw !== undefined && Number(existingRaw) === sysid;
   });
   return collides ? sysid : null;
 }

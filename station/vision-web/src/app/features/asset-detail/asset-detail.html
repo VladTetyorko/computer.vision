@@ -300,6 +300,9 @@
             <button type="button" class="btn secondary" (click)="openDrillIn('hardware')">
               <vision-icon name="chip" [size]="16" />Hardware &amp; devices<vision-icon name="chevron-right" [size]="14" />
             </button>
+            <button type="button" class="btn secondary" (click)="panels.open('links')">
+              <vision-icon name="link" [size]="16" />Links<vision-icon name="chevron-right" [size]="14" />
+            </button>
             <button type="button" class="btn secondary" (click)="panels.open('attributes')">
               <vision-icon name="list" [size]="16" />Characteristics<vision-icon name="chevron-right" [size]="14" />
             </button>
@@ -736,6 +739,145 @@
       <vision-side-panel title="Pilots" icon="pilot" (close)="panels.close()">
         <vision-pilots-card [assetId]="assetId()" />
       </vision-side-panel>
+    }
+
+    <!-- ==== Links (docs/plans/active/LINK-PAIRING-PLAN.md §3.4/§3.7, wave L4) — every redundant carrier
+         for this asset's paired device: kind/health/quality, ACTIVE vs receiving, AUTO vs pinned,
+         a hard bench-cable warning, failover history, and the three recovery actions. Degrades
+         honestly per `LinksStore`'s own class doc — `facade.links.disabled()` means the backend
+         route isn't mounted at all, distinct from the ordinary "no group yet" loading case. ------ -->
+    @if (panels.isOpen('links')) {
+      <vision-side-panel
+        title="Links"
+        subtitle="Redundant carriers for this asset's paired device"
+        icon="link"
+        (close)="panels.close()"
+      >
+        @if (facade.links.disabled()) {
+          <vision-empty
+            icon="alert"
+            title="Link pairing isn't enabled here"
+            message="This deployment hasn't turned on multi-link pairing yet. Ask an administrator if you expect radio/Wi-Fi failover for this asset."
+          />
+        } @else if (!facade.links.group()) {
+          <p class="muted hint">No link data yet for this asset.</p>
+        } @else {
+          @if (facade.linksBenchWarning()) {
+            <vision-notice variant="danger" icon="alert">
+              A bench cable is the active link right now — this asset is not safe to fly. Reconnect
+              over Wi-Fi or ground radio before takeoff.
+            </vision-notice>
+          }
+
+          <div class="row spread links-status-row">
+            <span class="chip" [class.ok]="!facade.linksPinned()">
+              {{ facade.linksPinned() ? 'Pinned' : 'AUTO' }}
+            </span>
+            @if (facade.linksPinned()) {
+              <button type="button" class="btn secondary small" (click)="facade.releaseLinkPin()">
+                Return to AUTO
+              </button>
+            }
+          </div>
+
+          @if (facade.linksSorted().length === 0) {
+            <p class="muted hint">No links registered for this asset yet.</p>
+          } @else {
+            <ul class="link-list">
+              @for (link of facade.linksSorted(); track link.id) {
+                <li class="link-row" [class.active]="link.id === facade.linksActiveId()">
+                  <span class="chip" [class.ok]="link.id === facade.linksActiveId()" [class.faded]="!link.receiving">
+                    @if (link.id === facade.linksActiveId()) {
+                      <span class="dot live"></span>
+                    }
+                    {{ link.id === facade.linksActiveId() ? 'ACTIVE' : (link.receiving ? 'Receiving' : 'Silent') }}
+                  </span>
+                  <span class="link-main">
+                    <span class="link-label truncate">{{ facade.linkKind(link) }} · {{ link.label }}</span>
+                    <span class="link-meta muted">
+                      {{ facade.linkHealth(link) }}
+                      @if (facade.linkQuality(link); as quality) {
+                        · {{ quality }}
+                      }
+                    </span>
+                  </span>
+                  <button type="button" class="btn secondary small" (click)="facade.pinLink(link.id)">
+                    Pin
+                  </button>
+                </li>
+              }
+            </ul>
+          }
+
+          <h3>Failover history</h3>
+          @if (facade.linkFailovers().length === 0) {
+            <p class="muted hint">No automatic failovers recorded this session.</p>
+          } @else {
+            <ul class="failover-list">
+              @for (row of facade.linkFailovers(); track row.at) {
+                <li class="failover-row">
+                  <span class="failover-main">
+                    {{ failoverLinkLabel(row.fromLinkId) }} → {{ failoverLinkLabel(row.toLinkId) }}
+                    @if (row.reason) {
+                      <span class="muted">({{ row.reason }})</span>
+                    }
+                  </span>
+                  <span class="failover-time faint">{{ failoverTime(row.at) }}</span>
+                </li>
+              }
+            </ul>
+          }
+
+          <h3>Recovery</h3>
+          <div class="row recovery-actions">
+            <button
+              type="button"
+              class="btn secondary small"
+              (click)="facade.replaceLinkHardware()"
+              [disabled]="!facade.pairingDevice() || facade.busyDeviceId() === facade.pairingDevice()?.id"
+            >
+              Replace hardware
+            </button>
+            <button type="button" class="btn secondary small" (click)="openFixLinkAddress()" [disabled]="!facade.pairingDevice()">
+              Fix address
+            </button>
+            <button
+              type="button"
+              class="btn secondary small danger-action"
+              (click)="requestForgetLinkPairing()"
+              [disabled]="!facade.pairingDevice() || facade.busyDeviceId() === facade.pairingDevice()?.id"
+            >
+              Forget pairing
+            </button>
+          </div>
+
+          @if (isEditorOpen('linkAddress')) {
+            <div class="inline-form">
+              <input
+                [value]="linkAddressDraft()"
+                (input)="linkAddressDraft.set($any($event.target).value)"
+                placeholder="udp://0.0.0.0:14550"
+                aria-label="Device address"
+              />
+              <button type="button" class="btn small" (click)="confirmFixLinkAddress()" [disabled]="facade.busyDeviceId() === facade.pairingDevice()?.id">
+                Save
+              </button>
+              <button type="button" class="btn secondary small" (click)="cancelFixLinkAddress()">Cancel</button>
+            </div>
+          }
+        }
+      </vision-side-panel>
+    }
+
+    @if (isDialogOpen('forget-pairing')) {
+      <vision-confirm-dialog
+        message="Forget this pairing? The device will need to be re-paired from scratch — this cannot be undone."
+        confirmLabel="Forget pairing"
+        cancelLabel="Cancel"
+        [busy]="facade.busyDeviceId() === facade.pairingDevice()?.id"
+        (confirmed)="confirmForgetLinkPairing()"
+        (cancelled)="cancelForgetLinkPairing()"
+      />
     }
   }
 </div>

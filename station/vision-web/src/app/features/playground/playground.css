@@ -1,0 +1,47 @@
+/* This component's own copy of every class it uses — Angular's emulated view encapsulation means a
+   child component's template classes never match another component's scoped rules; every consumer
+   of the same visual pattern keeps its own copy (`features/onboarding/source-step.css`'s own doc
+   comment is the precedent this mirrors — the create form here is deliberately styled the same as
+   the wizard's former "Test source setup" card). */
+
+.hint {
+    font-size: 0.8rem;
+    margin: 0 0 var(--space-16);
+}
+
+.field {
+    margin-bottom: var(--space-16);
+}
+
+.field.wide {
+    min-width: 0;
+}
+
+.checkbox-field {
+    display: flex;
+    align-items: center;
+    gap: var(--space-8);
+    flex-direction: row;
+}
+
+.checkbox-field input {
+    width: auto;
+}
+
+.flight-plan-summary {
+    flex-wrap: wrap;
+}
+
+.home-point-fallback {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    margin-bottom: var(--space-16);
+}
+
+.home-point-fallback summary {
+    cursor: pointer;
+}
+
+.home-point-fallback .row {
+    margin-top: var(--space-8);
+}

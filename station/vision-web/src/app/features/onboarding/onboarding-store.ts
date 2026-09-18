@@ -87,6 +87,7 @@ import {
   pilotsInGroup,
   prefillFromDiscoveryCandidate,
   prevStep,
+  roleForDiscoveryMethod,
   type IdentifyDraft,
   type SourceMode,
   type StepContext,
@@ -338,8 +339,112 @@ export class OnboardingStore {
 
   /** The one discovery-inbox candidate id this visit's `attach` step may still attach atomically
    *  (C1) — set only by the `?candidateId=` query-param entrance (never by the waiting room's own
-   *  ad-hoc "Use" click, which carries no such "this candidate *is* that asset" promise). */
+   *  ad-hoc "Use" click, which carries no such "this candidate *is* that asset" promise). Also set by
+   *  {@link chooseFoundCandidate} (docs/plans/active/LINK-PAIRING-PLAN.md §3.7, wave L4) — the "Found
+   *  nearby" feed's own click-through carries exactly the same "this candidate *is* that asset"
+   *  promise as the query-param entrance, and reuses this same field for it. */
   readonly originCandidateId = signal<string | null>(null);
+
+  // --- "Found nearby" feed + Confirm interstitial (docs/plans/active/LINK-PAIRING-PLAN.md §3.7/§7,
+  //     wave L4) — replaces the fork tiles' "It comes to us"/"We go to it" pair with one flat,
+  //     always-visible feed of every discovery candidate; clicking a card jumps straight to the
+  //     `confirm` interstitial rather than the fork's old per-role waiting room. -----------------
+
+  /** The candidate a "Found nearby" card was clicked for — drives the `confirm` step's own facts
+   *  panel. Cleared by {@link backFromConfirm}; left set through `identify`/`attach`/`sysid`/
+   *  `handover` so `finishCreate` can still recover the client-side sysid heuristic. */
+  readonly selectedCandidate = signal<DiscoveryCandidate | null>(null);
+
+  /**
+   * The Confirm screen's one optional typed field (task brief: "the ONE typed field only if the
+   * probe was refused for credentials"). **Simplified, documented assumption**: there is no backend
+   * signal that a probe was refused specifically for credentials (no such field exists on
+   * `DiscoveryCandidate` and none is frozen by §3.3/§3.4), so this renders as an always-visible
+   * optional disclosure rather than one conditionally triggered by a refusal this app cannot
+   * observe — filled in only when the operator knows the device needs one. Sent as an additional
+   * `password` device option (harmless/ignored by any adapter that doesn't read it) via
+   * {@link chooseFoundCandidate}'s own row prefill, merged in by {@link continueFromConfirm}.
+   */
+  readonly confirmCredential = signal('');
+
+  /**
+   * The sysid this found-nearby asset's pairing collided with, once known — populated from the
+   * register/attach response's own `sysidPushRequired`/`assignedSysid` (§7 ruling #3: "adopt is one
+   * motion … only on collision assign the lowest free number … and return `sysidPushRequired=true`"),
+   * never from a pre-attach guess (there is nothing to guess against before the atomic call actually
+   * runs — see {@link applyFoundCandidateCollision}). Read by {@link finishCreate}/{@link writeSysid}
+   * alongside the Prove-step-derived `proveByRole` collision, for a candidate that never ran Prove.
+   */
+  readonly foundCandidateSysidCollision = signal<number | null>(null);
+
+  /**
+   * Card click (docs/plans/active/LINK-PAIRING-PLAN.md §3.7): prefills the matching row exactly like
+   * {@link useHeardCandidate} always has, then — only if that prefill actually found a stream to fill
+   * the row with — additionally marks this visit as candidate-originated ({@link originCandidateId},
+   * the same atomic-attach promise the query-param entrance makes) and enters {@link WizardStep}
+   * `'confirm'`. A candidate `prefillRowFromCandidate` couldn't use (no suggested stream yet) already
+   * toasted its own honest reason and left `sourceMode`/`step` untouched — this method takes no
+   * further action on top of that, matching this app's degrade-honestly rule.
+   */
+  chooseFoundCandidate(candidate: DiscoveryCandidate): void {
+    if (!prefillFromDiscoveryCandidate(candidate)) {
+      this.toasts.info(`${candidate.method} could not supply a stream address for "${candidate.name}" yet.`);
+      return;
+    }
+    this.useHeardCandidate(candidate);
+    this.confirmCredential.set('');
+    this.selectedCandidate.set(candidate);
+    this.originCandidateId.set(candidate.id);
+    this.step.set('confirm');
+  }
+
+  /** Confirm's own Continue — re-enters the ordinary `nextStep('source', ctx)` decision (the role is
+   *  already pre-proven by {@link chooseFoundCandidate}'s own prefill, so this already resolves
+   *  straight to `identify`, skipping `prove`) after folding the optional credential field into the
+   *  prefilled row's own options, if one was typed. */
+  continueFromConfirm(): void {
+    const candidate = this.selectedCandidate();
+    const credential = this.confirmCredential().trim();
+    if (candidate && credential.length > 0) {
+      const role = roleForDiscoveryMethod(candidate.method);
+      this.rows.update((r) => ({
+        ...r,
+        [role]: { ...r[role], options: [...r[role].options, { key: 'password', value: credential }] },
+      }));
+    }
+    this.step.set(nextStep('source', this.stepContext()));
+  }
+
+  /** Confirm's own Back — clears the prefilled row (including its candidate-origin tracking) and
+   *  returns to `source`'s own found-nearby feed, exactly like the resolved-row summary card's
+   *  "Change" affordance ({@link clearRow}) already does for every other entrance. */
+  backFromConfirm(): void {
+    const candidate = this.selectedCandidate();
+    if (candidate) {
+      this.clearRow(roleForDiscoveryMethod(candidate.method));
+    }
+    this.selectedCandidate.set(null);
+    this.confirmCredential.set('');
+    this.foundCandidateSysidCollision.set(null);
+    this.sourceMode.set(null);
+    this.step.set('source');
+  }
+
+  /** Confirm's own "This is my old rover/camera" link — today's existing-asset attach path
+   *  (`attach` step's own segmented control), unchanged, just entered directly rather than via
+   *  Identify. */
+  attachExistingFromConfirm(): void {
+    this.chooseAttachTarget('existing');
+    this.step.set('attach');
+  }
+
+  /** Populates {@link foundCandidateSysidCollision} from a register/attach response — see that
+   *  signal's own doc comment for exactly which fields this reads and why. */
+  private applyFoundCandidateCollision(response: { sysidPushRequired?: boolean; assignedSysid?: number }): void {
+    this.foundCandidateSysidCollision.set(
+      response.sysidPushRequired === true && response.assignedSysid !== undefined ? response.assignedSysid : null,
+    );
+  }
 
   /**
    * Picks one of the fork's four tiles. A row this step itself half-initialized under a
@@ -379,11 +484,16 @@ export class OnboardingStore {
     }
     // 'scan' initializes nothing: both rows stay `none` and render their own tile grid, narrowed by
     // `OnboardingFacade#rowFindMethods` to exclude `register` (manual's own tile) — Sight is left
-    // with one real method (`discover`) plus the universal "Use a test source" tile, Sense keeps its
-    // full two (`listen`/`drone`) plus the same. Auto-selecting `discover` for Sight here (an earlier
-    // version of this method did) would have silently made the legacy Simulate video-file demo
-    // unreachable through this fork — every tile grid, on every mode, always keeps `setRowValue(role,
-    // 'simulate')` reachable.
+    // with one real method (`discover`), Sense keeps its full two (`listen`/`drone`).
+    //
+    // The "Use a test source" tile that used to sit alongside these on every grid is gone (docs/plans/
+    // active/LINK-PAIRING-PLAN.md §3.7, wave L4 — `features/playground` is now the only place a
+    // simulated asset is created). `setRowValue(role, 'simulate')` and the legacy whole-vehicle
+    // Simulate sub-form it drove (`OnboardingFacade#showLegacySimulateConfig`) are left in place but
+    // dormant/unreachable from this wizard — nothing in `source-step.html` calls it any more — rather
+    // than ripped out, since Playground's own builder (`core/fleet/simulation-logic.ts`) still reuses
+    // some of the same plumbing and a clean follow-up removal deserves its own pass, not a rushed one
+    // bundled into this wave.
   }
 
   private initEmptyRow(role: FitOutRole, method: FitOutFindMethod): void {
@@ -994,13 +1104,47 @@ export class OnboardingStore {
     }
     this.creating.set(true);
     try {
-      if (usesLegacySimulationPath(this.rows())) {
+      const candidateId = this.originCandidateId();
+      if (this.selectedCandidate() && candidateId) {
+        await this.createViaCandidateRegister(candidateId);
+      } else if (usesLegacySimulationPath(this.rows())) {
         await this.createViaSimulation();
       } else {
         await this.createViaConnection();
       }
     } finally {
       this.creating.set(false);
+    }
+  }
+
+  /**
+   * The "Found nearby" feed's own "new asset" path (docs/plans/active/LINK-PAIRING-PLAN.md §7 ruling
+   * #3: "adopt is one motion" — only `DiscoveryInboxController.register`/`attach` actually calls
+   * `PairingService.pair` in the same transaction; the generic multi-device `POST /api/assets` every
+   * other Source entrance uses below does not). Gated on {@link selectedCandidate} (not just
+   * {@link originCandidateId} alone, which the older `?candidateId=` query-param entrance also sets)
+   * so this new routing only ever applies to a visit that actually went through
+   * {@link chooseFoundCandidate} — the query-param entrance's own existing "new asset" behavior stays
+   * byte-identical. Applies `identifyDraft`'s richer facts (serial/make/model/registration) as a
+   * follow-up edit, the same "create minimal, then PATCH" idiom {@link createViaSimulation} already
+   * uses for its own Simulate-service round-trip.
+   */
+  private async createViaCandidateRegister(candidateId: string): Promise<void> {
+    try {
+      const draft = { displayName: this.displayName().trim() || 'New asset', category: this.category().trim() };
+      const result = await this.discoveryInbox.register(candidateId, draft);
+      if (!result) {
+        return; // failure already toasted by DiscoveryInboxStore#run
+      }
+      this.applyFoundCandidateCollision(result);
+      const edit = buildPostSimulationAssetEdit(this.identifyDraft());
+      const displayName =
+        Object.keys(edit).length > 0
+          ? (await this.api.updateAsset(result.assetId, edit)).displayName
+          : result.displayName;
+      await this.finishCreate(result.assetId, displayName);
+    } catch (error) {
+      this.toasts.error(describeHttpError(error));
     }
   }
 
@@ -1038,6 +1182,16 @@ export class OnboardingStore {
         : await this.registerAndAssignRows(assetId);
       if (!ok) {
         return;
+      }
+      if (candidateId) {
+        // §7 ruling #3: `attach` pairs in the same transaction as `register` — read the freshly
+        // patched candidate back (DiscoveryInboxStore#attachCandidate already replaced it in its own
+        // list with the server's real response) for the same `sysidPushRequired`/`assignedSysid` pair
+        // `createViaCandidateRegister` reads off `register`'s response directly.
+        const updated = this.discoveryInbox.candidates().find((c) => c.id === candidateId);
+        if (updated) {
+          this.applyFoundCandidateCollision(updated);
+        }
       }
       this.existingAssetPath.set(true);
       await this.fleet.refresh({ quiet: true });
@@ -1160,10 +1314,15 @@ export class OnboardingStore {
     // sysid detours through the sysid step first — every other path (no collision detected, the
     // equipment short-circuit, or the legacy Simulate path, neither of which ever runs Prove) goes
     // straight to Hand-over, byte-identical to this wizard's behavior before this step existed.
-    const collision = combinedSysidCollision({
-      sense: this.proveByRole().sense.sysidCollision,
-      sight: this.proveByRole().sight.sysidCollision,
-    });
+    // LINK-PAIRING-PLAN.md §7 ruling #3 (wave L4) adds a second source: a found-nearby candidate
+    // never runs Prove at all, so its own collision (if any) is only known from the register/attach
+    // response — `foundCandidateSysidCollision` — checked here as a fallback, never overriding a
+    // real Prove-derived collision when one somehow also exists.
+    const collision =
+      combinedSysidCollision({
+        sense: this.proveByRole().sense.sysidCollision,
+        sight: this.proveByRole().sight.sysidCollision,
+      }) ?? this.foundCandidateSysidCollision();
     if (collision !== null) {
       await this.enterSysidStep(assetId, displayName);
     } else {
@@ -1199,7 +1358,15 @@ export class OnboardingStore {
    */
   async writeSysid(): Promise<void> {
     const assetId = this.createdAssetId();
-    const parameterName = this.proveByRole().sense.sysidParameterToWrite ?? this.proveByRole().sight.sysidParameterToWrite;
+    // LINK-PAIRING-PLAN.md §7 ruling #3 (wave L4): a found-nearby candidate never ran Prove, so
+    // neither role's own `sysidParameterToWrite` is ever set for it — fall back to the modern
+    // spelling (`sysid-collision-logic.ts#sysidParameterName`'s own doc comment: the fallback this
+    // platform's own firmware target answers to) whenever `foundCandidateSysidCollision` is the
+    // reason this step was entered at all.
+    const parameterName =
+      this.proveByRole().sense.sysidParameterToWrite ??
+      this.proveByRole().sight.sysidParameterToWrite ??
+      (this.foundCandidateSysidCollision() !== null ? 'MAV_SYSID' : null);
     const value = this.sysidValue();
     if (!assetId || parameterName === null || value === null || this.writingSysid()) {
       return;
@@ -1337,6 +1504,8 @@ export class OnboardingStore {
         return this.canAdvanceIdentify();
       case 'attach':
         return false; // its own Create/Attach action, not a "Next"
+      case 'confirm':
+        return false; // its own Continue/Back actions, not the shared footer — see WizardStep's own confirm doc comment
       case 'sysid':
         return false; // its own "Write sysid"/"Continue" actions, not a "Next"
       case 'handover':

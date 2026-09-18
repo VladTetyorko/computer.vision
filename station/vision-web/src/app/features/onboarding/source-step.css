@@ -33,55 +33,112 @@
     width: auto;
 }
 
-/* ---- The fork itself (D3, wave W3) ------------------------------------------------------------ */
+/* ---- "Found nearby" feed (docs/plans/active/LINK-PAIRING-PLAN.md §3.7, wave L4) — replaces the old
+   four-tile fork grid: one live feed of discovery candidates as the primary path, with the old fork
+   tiles demoted into a closed-by-default `<details>` one level down. ------------------------------ */
 
-.fork-grid {
+.found-heading {
+    margin: 0 0 var(--space-12);
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+.found-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
     gap: var(--space-16);
     margin-bottom: var(--space-16);
 }
 
-.fork-tile {
+.found-card {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
-    gap: var(--space-8);
+    gap: var(--space-4);
     text-align: left;
     background: var(--panel-raised);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: var(--space-16) var(--space-16);
     cursor: pointer;
+    transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.found-card:hover {
+    border-color: var(--color-info);
+    background: var(--panel-hover);
+}
+
+.found-name {
+    font-weight: 600;
+    color: var(--text);
+    font-size: 0.9rem;
+}
+
+.found-card-age {
+    margin-top: var(--space-4);
+    font-size: 0.72rem;
+}
+
+/* ---- Secondary links — the old fork tiles, one level down (§3.7) ------------------------------- */
+
+.secondary-links {
+    margin-bottom: var(--space-16);
+}
+
+.secondary-links summary {
+    cursor: pointer;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+.link-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+    margin-top: var(--space-12);
+}
+
+.link-tile {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-4);
+    text-align: left;
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-12) var(--space-16);
+    cursor: pointer;
     text-decoration: none;
     color: inherit;
     transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-.fork-tile:hover {
+.link-tile:hover {
     border-color: var(--color-info);
     background: var(--panel-hover);
 }
 
-.fork-tile.inert {
+.link-tile.inert {
     cursor: default;
     opacity: 0.65;
 }
 
-.fork-tile.inert:hover {
+.link-tile.inert:hover {
     border-color: var(--border);
-    background: var(--panel-raised);
+    background: var(--panel);
 }
 
-.fork-title {
+.link-title {
     font-weight: 600;
     color: var(--text);
-    font-size: 0.95rem;
+    font-size: 0.85rem;
 }
 
-.fork-sub {
+.link-sub {
     color: var(--text-muted);
-    font-size: 0.8rem;
+    font-size: 0.76rem;
 }
 
 .resolved-chip-row {
@@ -237,15 +294,6 @@
     inset: 4px;
     border-radius: 50%;
     border: 1px solid var(--color-info);
-}
-
-.glyph-simulate::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: 50%;
-    border: 2px solid var(--color-info);
-    transform: scale(0.55) rotate(45deg);
 }
 
 .glyph-listen::after {

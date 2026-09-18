@@ -9,6 +9,17 @@ import { pluralize } from '../../shared/ui/text-logic';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { EventsStore } from '../../core/events/events-store';
+import { LiveStore } from '../../core/live/live-store';
+import { LinksStore } from '../../core/pairing/links-store';
+import {
+  failoverRowsForAsset,
+  hasActiveBenchWarning,
+  linkHealthLabel,
+  linkKindLabel,
+  linkQualitySummary,
+  sortedLinks,
+  type LinkFailoverRow,
+} from '../../core/pairing/pairing-logic';
 import { GeofenceStore } from '../../core/geofence/geofence-store';
 import { MarksStore } from '../../core/map-data/marks-store';
 import { LayersStore } from '../../core/map-data/layers-store';
@@ -53,6 +64,7 @@ import type {
   Device,
   DetectionEvent,
   FleetSummary,
+  LinkView,
   MaintenanceRecord,
   SettableLifecycleState,
   TelemetrySample,
@@ -100,6 +112,9 @@ export class AssetDetailFacade {
   private readonly auth = inject(AuthStore);
   private readonly telemetry = inject(TelemetryStore);
   private readonly events = inject(EventsStore);
+  /** Named `liveStore`, not `live` — this class already has a `live` computed (whether *this asset*
+   *  is currently streaming, see below); this is the generic SSE connection singleton. */
+  private readonly liveStore = inject(LiveStore);
 
   readonly fleet = inject(FleetStore);
   readonly settings = inject(SettingsStore);
@@ -352,6 +367,7 @@ export class AssetDetailFacade {
   /** Called once by the page's own constructor `effect()` on every `assetId` route-input change. */
   load(assetId: string): void {
     this.currentAssetIdSignal.set(assetId);
+    this.links.track(assetId); // no-op for an unchanged id — see `LinksStore#track`'s own doc comment
     void this.fetchAsset(assetId);
     void this.loadStats(assetId);
     void this.loadMaintenanceRecords(assetId);
@@ -662,6 +678,129 @@ export class AssetDetailFacade {
     } finally {
       this.busy.set(false);
     }
+  }
+
+  // --- Links panel (docs/plans/active/LINK-PAIRING-PLAN.md §3.4/§3.7, wave L4) --------------------
+  // One asset can carry several redundant carriers for the same telemetry device (Wi-Fi, ground
+  // radio, a bench cable) — `LinksStore` tracks the whole group; every derivation below is a thin
+  // read-model over it, mirroring `geofence`/`marks` etc. immediately above. Degrades honestly per
+  // `LinksStore`'s own class doc: `links.disabled()` means the backend route isn't mounted at all
+  // (not "no links yet"), `links.group()` staying `undefined` past that is the ordinary
+  // still-loading/no-data case — the panel renders `vision-empty` either way, with a different
+  // reason.
+
+  readonly links = inject(LinksStore);
+
+  readonly linksSorted = computed(() => sortedLinks(this.links.group()?.links ?? []));
+  readonly linksPinned = computed(() => this.links.group()?.pinned ?? false);
+  readonly linksActiveId = computed(() => this.links.group()?.activeLinkId ?? null);
+  readonly linksBenchWarning = computed(() => hasActiveBenchWarning(this.links.group()?.links ?? []));
+
+  /** Failover history off the existing generic events feed (`LiveStore.liveEvents()` — only ever
+   *  populated while the SSE connection has been open; there is no REST history read for this, same
+   *  as every other `LiveEvent` consumer in this app), filtered to this asset. */
+  readonly linkFailovers = computed<readonly LinkFailoverRow[]>(() =>
+    failoverRowsForAsset(this.liveStore.liveEvents(), this.currentAssetIdSignal() ?? ''),
+  );
+
+  linkKind(link: LinkView): string {
+    return linkKindLabel(link.carrier, link.serialRole);
+  }
+
+  linkHealth(link: LinkView): string {
+    return linkHealthLabel(link);
+  }
+
+  linkQuality(link: LinkView): string | undefined {
+    return linkQualitySummary(link.quality);
+  }
+
+  /**
+   * The device the Links panel's recovery actions (Replace hardware / Forget pairing / Fix address)
+   * act on. **Assumed, not verified against a real backend**: `LinkView` (§3.4's own frozen shape)
+   * carries no `deviceId` of its own — `PairingService` is keyed on `DeviceId`, `VehicleLinkPort`/
+   * `LinkStateService` on `AssetId`, two different id spaces (docs/plans/active/LINK-PAIRING-PLAN.md
+   * §3.3 vs §3.4) — so there is no per-link id to resolve a recovery target against. This assumes the
+   * 1:1 case every fixture in the plan shows: one asset, one paired telemetry device, whose carriers
+   * are what the link group lists. An asset with more than one independently-paired telemetry device
+   * would need a real per-link `deviceId` in the DTO to disambiguate — flagged for L2/L3.
+   */
+  readonly pairingDevice = computed<Device | undefined>(() => this.assetTelemetryDevices()[0]);
+
+  async pinLink(linkId: string): Promise<void> {
+    const assetId = this.currentAssetId;
+    if (!assetId) {
+      return;
+    }
+    await this.links.pin(assetId, linkId);
+  }
+
+  async releaseLinkPin(): Promise<void> {
+    const assetId = this.currentAssetId;
+    if (!assetId) {
+      return;
+    }
+    await this.links.releasePin(assetId);
+  }
+
+  /** `POST /api/devices/{id}/pairing/replace-hardware` — this device keeps its identity/name, the
+   *  physical radio/board behind it is swapped. Toasts on failure; re-reads the link group
+   *  immediately on success so the panel doesn't wait out the poll interval. */
+  async replaceLinkHardware(): Promise<void> {
+    const device = this.pairingDevice();
+    if (!device) {
+      return;
+    }
+    this.busyDeviceId.set(device.id);
+    try {
+      await this.api.replaceDevicePairingHardware(device.id);
+      this.toasts.ok(`Ready to pair new hardware for "${device.name}".`);
+      await this.links.refreshNow();
+    } catch (error) {
+      this.toasts.error(describeHttpError(error));
+    } finally {
+      this.busyDeviceId.set(null);
+    }
+  }
+
+  /** `DELETE /api/devices/{id}/pairing` — irreversible (§3.3's own frozen "hard-delete `forget`"
+   *  decision); the shared undo/confirm idiom around this call is the caller's job (the panel opens a
+   *  `vision-confirm-dialog` before invoking this), not this method's. */
+  async forgetLinkPairing(): Promise<void> {
+    const device = this.pairingDevice();
+    if (!device) {
+      return;
+    }
+    this.busyDeviceId.set(device.id);
+    try {
+      await this.api.forgetDevicePairing(device.id);
+      this.toasts.ok(`Forgot the pairing for "${device.name}".`);
+      await this.links.refreshNow();
+    } catch (error) {
+      this.toasts.error(describeHttpError(error));
+    } finally {
+      this.busyDeviceId.set(null);
+    }
+  }
+
+  /** `PATCH /api/devices/{id}` with a new `uri` — `protocol` is always sent alongside it (unchanged,
+   *  read off the device's own current value) since the backend requires the pair together whenever
+   *  either is present (`DeviceEdit`'s own doc comment). `true` = ok for the caller to close its own
+   *  dialog, mirroring the editor-save methods above. */
+  async fixLinkAddress(uri: string): Promise<boolean> {
+    const device = this.pairingDevice();
+    const trimmed = uri.trim();
+    if (!device || trimmed.length === 0) {
+      return false;
+    }
+    let success = false;
+    await this.runDeviceAction(device.id, async () => {
+      success = !!(await this.fleet.updateDevice(device.id, { protocol: device.protocol, uri: trimmed }));
+    });
+    if (success) {
+      await this.links.refreshNow();
+    }
+    return success;
   }
 
   // --- Per-device telemetry (called from the page's own `@for`-bound template helpers) -----------

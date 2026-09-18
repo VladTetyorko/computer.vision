@@ -155,8 +155,14 @@ describe('NAV_MODES', () => {
   describe('FLEET — three W1 renames, plus W4 folds three entries into Inventory and adds Maintenance', () => {
     const fleet = NAV_MODES.find((mode) => mode.id === 'fleet')!;
 
-    it('has exactly Inventory, Add vehicle, Crew, Maintenance, in that order', () => {
-      expect(fleet.entries.map((entry) => entry.name)).toEqual(['Inventory', 'Add vehicle', 'Crew', 'Maintenance']);
+    it('has exactly Inventory, Add vehicle, Playground, Crew, Maintenance, in that order', () => {
+      expect(fleet.entries.map((entry) => entry.name)).toEqual([
+        'Inventory',
+        'Add vehicle',
+        'Playground',
+        'Crew',
+        'Maintenance',
+      ]);
     });
 
     it('Assets is renamed to "Inventory", stays ungrouped and ungated', () => {
@@ -173,6 +179,18 @@ describe('NAV_MODES', () => {
       expect(addVehicle?.name).toBe('Add vehicle');
       expect(addVehicle?.requires).toBe('MANAGE_ORG');
       expect(fleet.entries.some((entry) => entry.name === 'Add source')).toBe(false);
+    });
+
+    /** New this wave (docs/plans/active/LINK-PAIRING-PLAN.md §3.7/§4, wave L4) — the one place a
+     *  simulated asset can be created now (`features/playground/playground-facade.ts`'s own class
+     *  doc); `requires: 'MANAGE_ORG'` mirrors "Add vehicle" directly above it — same fleet-management
+     *  action. Always listed, not conditionally hidden behind `vision.simulation.enabled` — see
+     *  `features/playground/playground.ts`'s own class doc for why. */
+    it('Playground is new this wave, targets /playground, MANAGE_ORG-gated', () => {
+      const playground = fleet.entries.find((entry) => entry.to === '/playground');
+      expect(playground).toBeDefined();
+      expect(playground?.name).toBe('Playground');
+      expect(playground?.requires).toBe('MANAGE_ORG');
     });
 
     it('"Pilots / roster" is renamed to "Crew", stays MANAGE_ORG-gated', () => {
@@ -291,9 +309,12 @@ describe('NAV_MODES', () => {
    * lists alike: pilot 10 + 1 = 11, manager 19 + 1 = 20. **Wave W5.3
    * (docs/plans/active/CV-ORCHESTRATION-PLAN.md §9 decision 3) moves the manager count to 21** —
    * one new `MANAGE_ORG`-gated entry (CV inspector) joins Vision (+1): 20 + 1 = 21; the pilot count
-   * is unaffected (CV inspector is gated) and stays at 11.
+   * is unaffected (CV inspector is gated) and stays at 11. **Wave L4
+   * (docs/plans/active/LINK-PAIRING-PLAN.md §3.7/§4) moves the manager count to 22** — one new
+   * `MANAGE_ORG`-gated entry (Playground) joins Fleet (+1): 21 + 1 = 22; the pilot count is
+   * unaffected (Playground is gated) and stays at 11.
    */
-  it('a PILOT sees exactly the plan\'s own 11 entries; a MANAGER/ADMIN sees 21 (20 + 1 new CV inspector — see this test\'s own doc comment)', () => {
+  it('a PILOT sees exactly the plan\'s own 11 entries; a MANAGER/ADMIN sees 22 (21 + 1 new Playground — see this test\'s own doc comment)', () => {
     const pilotVisible = visibleEntries(false);
     const managerVisible = visibleEntries(true);
 
@@ -311,7 +332,7 @@ describe('NAV_MODES', () => {
       'Settings',
     ]);
     expect(pilotVisible.length).toBe(11);
-    expect(managerVisible.length).toBe(21);
+    expect(managerVisible.length).toBe(22);
   });
 });
 

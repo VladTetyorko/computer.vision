@@ -24,6 +24,8 @@ const FROZEN_NAMES: readonly IconName[] = [
   'check',
   // docs/plans/active/ALWAYS-ON-FLOW-PLAN.md §4 Wave C1/C2 — the wall tile's video-on-request toggle.
   'eye-off',
+  // docs/plans/active/LINK-PAIRING-PLAN.md §3.4, wave L4 — the asset-detail Links panel's own glyph.
+  'link',
 ];
 
 describe('ICONS registry', () => {

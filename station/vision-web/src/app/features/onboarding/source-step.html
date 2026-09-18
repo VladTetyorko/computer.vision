@@ -11,27 +11,56 @@
     }
   }
 
-  <div class="fork-grid">
-    @for (option of facade.sourceModeOptions; track option.mode) {
-      <button type="button" class="fork-tile" (click)="facade.store.chooseSourceMode(option.mode)">
-        <span class="fork-title">{{ option.label }}</span>
-        <span class="fork-sub">{{ option.hint }}</span>
-      </button>
-    }
-    <a
-      class="fork-tile"
-      [class.inert]="!facade.store.provisionWifiSupported()"
-      [routerLink]="facade.store.provisionWifiSupported() ? '/provision-wifi' : null"
-      [attr.aria-disabled]="!facade.store.provisionWifiSupported()"
-    >
-      <span class="fork-title">Provision Wi-Fi over USB</span>
-      @if (facade.store.provisionWifiSupported()) {
-        <span class="fork-sub">Send Wi-Fi credentials directly to a device over a USB serial connection.</span>
-      } @else {
-        <span class="fork-sub disabled-reason">Needs Chrome or Edge on this computer — Web Serial isn't available here.</span>
+  <h3 class="found-heading">Found nearby</h3>
+
+  @if (facade.foundNearbyCandidates().length === 0) {
+    <vision-empty
+      icon="scan"
+      title="Nothing detected yet"
+      message="New devices show up here on their own as soon as something is heard or scanned — no need to refresh."
+    />
+  } @else {
+    <div class="found-grid">
+      @for (candidate of facade.foundNearbyCandidates(); track candidate.id) {
+        <button type="button" class="found-card" (click)="facade.store.chooseFoundCandidate(candidate)">
+          <div class="row spread">
+            <span class="found-name truncate" [title]="candidate.name">{{ candidate.name }}</span>
+            <span class="chip">{{ facade.discoveryMethodLabel(candidate.method) }}</span>
+          </div>
+          <p class="mono muted truncate" [title]="candidate.address">{{ candidate.address }}</p>
+          @if (candidate.suggestedCategory) {
+            <p class="muted hint">Looks like: {{ candidate.suggestedCategory }}</p>
+          }
+          <p class="muted found-card-age">Seen {{ facade.candidateAgeLabel(candidate) }}</p>
+        </button>
       }
-    </a>
-  </div>
+    </div>
+  }
+
+  <details class="secondary-links">
+    <summary>Other ways to add a device</summary>
+    <div class="link-list">
+      @for (option of facade.demotedSourceModeOptions(); track option.mode) {
+        <button type="button" class="link-tile" (click)="facade.store.chooseSourceMode(option.mode)">
+          <span class="link-title">{{ option.label }}</span>
+          <span class="link-sub">{{ option.hint }}</span>
+        </button>
+      }
+      <a
+        class="link-tile"
+        [class.inert]="!facade.store.provisionWifiSupported()"
+        [routerLink]="facade.store.provisionWifiSupported() ? '/provision-wifi' : null"
+        [attr.aria-disabled]="!facade.store.provisionWifiSupported()"
+      >
+        <span class="link-title">Provision Wi-Fi over USB</span>
+        @if (facade.store.provisionWifiSupported()) {
+          <span class="link-sub">Send Wi-Fi credentials directly to a device over a USB serial connection.</span>
+        } @else {
+          <span class="link-sub disabled-reason">Needs Chrome or Edge on this computer — Web Serial isn't available here.</span>
+        }
+      </a>
+    </div>
+  </details>
 } @else {
   <div class="row source-mode-head">
     <button type="button" class="btn secondary small" (click)="facade.store.backToSourceFork()">‹ Back to source options</button>
@@ -175,11 +204,6 @@
                   <span class="method-sub">{{ facade.findMethodHints[method] }}</span>
                 </button>
               }
-              <button type="button" class="method-tile" (click)="facade.store.setRowValue(role, 'simulate')">
-                <span class="method-glyph glyph-simulate" aria-hidden="true"></span>
-                <span class="method-title">Use a test source</span>
-                <span class="method-sub">No hardware needed — a video file or a moving test drone.</span>
-              </button>
             </div>
           } @else if (facade.store.rows()[role].value === 'simulate') {
             <div class="row method-chosen-row">

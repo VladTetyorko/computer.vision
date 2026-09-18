@@ -77,11 +77,24 @@ import { humanAge } from '../../core/telemetry/telemetry-logic';
  * `attach` post-creation. `nextStep`/`prevStep` still define total cases for both purely so they
  * stay total over the whole `WizardStep` union; `onboarding.html`'s own footer is what actually
  * withholds the generic Back/Next buttons on these two steps.
+ *
+ * - **`confirm`** (docs/plans/active/LINK-PAIRING-PLAN.md §3.7/§7, wave L4) — the "Found nearby" feed's
+ *   own interstitial, reached only by clicking a card (`OnboardingStore#chooseFoundCandidate`), never
+ *   via `next()`/`visibleSteps()` — exactly the same "hidden terminal-ish step" carve-out as `sysid`/
+ *   `handover` above, kept out of the rail so it never competes with the real
+ *   `source`/`prove`/`identify`/`attach` sequence for a rail slot. Shows the candidate's own detected
+ *   facts, the one optional credentials field, and — on this screen's own "This is my old X" link —
+ *   a shortcut into `attach`'s existing-asset picker (`OnboardingStore#attachExistingFromConfirm`).
+ *   Its own Continue (`OnboardingStore#continueFromConfirm`) re-enters the ordinary
+ *   `nextStep('source', ctx)` decision (the candidate's role is already pre-proven by the prefill, so
+ *   that call already resolves straight to `identify`, skipping `prove` — no new transition rule
+ *   needed); Back (`OnboardingStore#backFromConfirm`) clears the prefilled row and returns to
+ *   `source`'s own found-nearby feed.
  */
-export type WizardStep = 'source' | 'prove' | 'identify' | 'attach' | 'sysid' | 'handover';
+export type WizardStep = 'source' | 'prove' | 'identify' | 'attach' | 'confirm' | 'sysid' | 'handover';
 
 /** Every step, used internally where the full universe matters (e.g. this file's own totality checks). Not what the rail renders — see {@link visibleSteps}. */
-export const WIZARD_STEPS: readonly WizardStep[] = ['source', 'prove', 'identify', 'attach', 'sysid', 'handover'];
+export const WIZARD_STEPS: readonly WizardStep[] = ['source', 'prove', 'identify', 'attach', 'confirm', 'sysid', 'handover'];
 
 /**
  * Both fit-out rows answered `—` — the equipment path (D3): a battery, a prop, a case, nothing that
@@ -137,6 +150,8 @@ export function nextStep(current: WizardStep, ctx: StepContext): WizardStep {
       return ctx.equipment ? 'handover' : 'attach'; // the equipment short-circuit never actually calls next() here — see WizardStep's own identify doc comment.
     case 'attach':
       return 'attach'; // terminal via next() — see this function's own doc comment.
+    case 'confirm':
+      return 'confirm'; // never reached via next() — OnboardingStore#continueFromConfirm re-enters via 'source', see WizardStep's own confirm doc comment.
     case 'sysid':
       return 'sysid'; // terminal, same reason.
     case 'handover':
@@ -156,6 +171,8 @@ export function prevStep(current: WizardStep, ctx: StepContext): WizardStep {
       return 'attach';
     case 'attach':
       return 'identify';
+    case 'confirm':
+      return 'confirm'; // never reached via prev() — OnboardingStore#backFromConfirm sets 'source' directly, see WizardStep's own confirm doc comment.
     case 'identify':
       if (ctx.equipment) {
         return 'source';

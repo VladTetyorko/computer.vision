@@ -23,6 +23,7 @@ import type {
   CalibrationResult,
   CameraPoseRequest,
   CameraPoseResponse,
+  CarrierSummaryResponse,
   Category,
   CorrectionsResponse,
   CreateAssetRequest,
@@ -71,6 +72,7 @@ import type {
   GroupSummary,
   InventoryActionRequest,
   LabelAnnotationsRequest,
+  LinkGroupResponse,
   LiveSubscription,
   MaintenanceListState,
   MaintenanceRecord,
@@ -689,6 +691,51 @@ export class VisionApi {
         `/api/assets/${encodeURIComponent(assetId)}/devices/${encodeURIComponent(deviceId)}`,
       ),
     );
+  }
+
+  // --- Links / pairing (docs/plans/active/LINK-PAIRING-PLAN.md §3.3/§3.4, wave L4) ----------------
+  // Every endpoint below is frozen at the *domain* level (§3.3/§3.4) but not yet implemented
+  // anywhere in this worktree (L2/L3 own the server side) — `core/pairing/links-store.ts` degrades
+  // honestly (empty list, no toast) on the 404 this necessarily 404s with today, exactly like every
+  // other ahead-of-backend wave in this app (`training-store.ts`'s own precedent).
+
+  /** `GET /api/assets/{id}/links` (§3.4) — one asset's whole link group, the Links panel's poll fallback and initial paint. */
+  getAssetLinks(assetId: string): Promise<LinkGroupResponse> {
+    return firstValueFrom(this.http.get<LinkGroupResponse>(`/api/assets/${encodeURIComponent(assetId)}/links`));
+  }
+
+  /** `PUT /api/assets/{id}/links/{linkId}/pin` (§3.4) — pins the election to this carrier; returns the updated group. */
+  pinAssetLink(assetId: string, linkId: string): Promise<LinkGroupResponse> {
+    return firstValueFrom(
+      this.http.put<LinkGroupResponse>(
+        `/api/assets/${encodeURIComponent(assetId)}/links/${encodeURIComponent(linkId)}/pin`,
+        {},
+      ),
+    );
+  }
+
+  /** `DELETE /api/assets/{id}/links/pin` (§3.4) — releases a pin, returning the group to AUTO election. */
+  releaseAssetLinkPin(assetId: string): Promise<LinkGroupResponse> {
+    return firstValueFrom(
+      this.http.delete<LinkGroupResponse>(`/api/assets/${encodeURIComponent(assetId)}/links/pin`),
+    );
+  }
+
+  /** `GET /api/carriers` (§3.4, station-wide per architect ruling §7) — every carrier configured on this station. */
+  listCarriers(): Promise<CarrierSummaryResponse[]> {
+    return firstValueFrom(this.http.get<CarrierSummaryResponse[]>('/api/carriers'));
+  }
+
+  /** `POST /api/devices/{id}/pairing/replace-hardware` (§3.3 recovery action) — this device keeps its identity/name, the physical radio/board behind it is swapped. No body, no response payload consumed. */
+  replaceDevicePairingHardware(deviceId: string): Promise<void> {
+    return firstValueFrom(
+      this.http.post<void>(`/api/devices/${encodeURIComponent(deviceId)}/pairing/replace-hardware`, {}),
+    );
+  }
+
+  /** `DELETE /api/devices/{id}/pairing` (§3.3 — "hard-delete `forget`", frozen decision) — irreversible; the shared undo/confirm idiom is this call's own caller's job, not this method's. */
+  forgetDevicePairing(deviceId: string): Promise<void> {
+    return firstValueFrom(this.http.delete<void>(`/api/devices/${encodeURIComponent(deviceId)}/pairing`));
   }
 
   // --- Asset image (docs/plans/done/UX-REWORK-PLAN.md §U-d) ----------------------------------------------

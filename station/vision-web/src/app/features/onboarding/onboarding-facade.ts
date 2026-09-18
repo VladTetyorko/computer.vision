@@ -27,7 +27,14 @@ import {
   intakeState,
   type IntakeState,
 } from '../../core/onboarding/intake-logic';
-import { candidateAgeLabel, discoveryMethodLabel } from '../../core/discovery/discovery-inbox-logic';
+import {
+  DEFAULT_DISCOVERY_INBOX_VISIBILITY,
+  candidateAgeLabel,
+  candidateNeedsCredential,
+  discoveryMethodLabel,
+  excludeSimulated,
+  visibleCandidates,
+} from '../../core/discovery/discovery-inbox-logic';
 import {
   detailsSummary,
   isClaimedVehicle,
@@ -59,6 +66,7 @@ const STEP_LABELS: Record<WizardStep, string> = {
   prove: 'Prove',
   identify: 'Identify',
   attach: 'Attach',
+  confirm: 'Confirm',
   sysid: 'Sysid',
   handover: 'Hand over',
 };
@@ -145,6 +153,52 @@ export class OnboardingFacade {
 
   readonly sourceModeOptions = SOURCE_MODE_OPTIONS;
 
+  /** The three demoted one-level-down links below the "Found nearby" feed (docs/plans/active/
+   *  LINK-PAIRING-PLAN.md §3.7, wave L4) — every fork tile except `'passive'`, which the feed itself
+   *  now replaces outright rather than gating behind a click. */
+  readonly demotedSourceModeOptions = computed(() => SOURCE_MODE_OPTIONS.filter((option) => option.mode !== 'passive'));
+
+  /**
+   * The "Found nearby" feed's own card list (docs/plans/active/LINK-PAIRING-PLAN.md §3.7, wave L4) —
+   * every discovery candidate worth a decision (`visibleCandidates`'s own NEW-first filter, the same
+   * one the discovery inbox's "Found devices" section already uses), minus anything simulated
+   * (`excludeSimulated` — simulated sources are created exclusively from `/playground` and must never
+   * pass as a physically-present found device).
+   */
+  readonly foundNearbyCandidates = computed(() =>
+    excludeSimulated(visibleCandidates(this.store.discoveryCandidates(), DEFAULT_DISCOVERY_INBOX_VISIBILITY)),
+  );
+
+  /** "vehicle" for a MAVLink candidate, "camera" for everything else — the Confirm screen's own
+   *  "This is my old {noun}" link text and empty-state copy. */
+  foundCandidateNounFor(candidate: DiscoveryCandidate): string {
+    return candidate.method.toLowerCase() === MAVLINK_METHOD ? 'vehicle' : 'camera';
+  }
+
+  /**
+   * The Confirm screen's own facts `<dl>` (docs/plans/active/LINK-PAIRING-PLAN.md §3.7 — "detected
+   * facts"): name, discovery method, and every detail the candidate itself carries, verbatim — never
+   * a fabricated field. `details` is a plain `Record<string,string>`, so entries render in whatever
+   * order the backend sent them; that's acceptable here (an inspection list, not a form).
+   */
+  candidateDetailEntries(candidate: DiscoveryCandidate): readonly { readonly label: string; readonly value: string }[] {
+    const entries: { label: string; value: string }[] = [
+      { label: 'Name', value: candidate.name },
+      { label: 'Found via', value: discoveryMethodLabel(candidate.method) },
+      { label: 'Address', value: candidate.address },
+    ];
+    for (const [key, value] of Object.entries(candidate.details)) {
+      entries.push({ label: key, value });
+    }
+    return entries;
+  }
+
+  /** Whether the Confirm screen's one credential field should render at all — see
+   *  `candidateNeedsCredential`'s own doc comment for the honest gap this papers over. */
+  candidateNeedsCredential(candidate: DiscoveryCandidate): boolean {
+    return candidateNeedsCredential(candidate);
+  }
+
   readonly findMethodLabels = FIND_METHOD_LABELS;
   readonly findMethodHints = FIND_METHOD_HINTS;
 
@@ -156,10 +210,18 @@ export class OnboardingFacade {
    * fixed per-role list, narrowed on the `scan` fork tile to exclude `register` (that method is
    * `manual`'s own tile — offering it again here would overlap the fork's two modes). `manual` never
    * renders a tile grid at all (`OnboardingStore#chooseSourceMode` auto-resolves both rows straight
-   * to `register`), so this narrowing only ever matters for `scan`. The "Use a test source" tile is
-   * not part of this list at all — every row's tile grid renders it unconditionally alongside
-   * whatever this returns, on every mode, so the legacy Simulate path stays reachable regardless of
-   * which fork tile got the operator here.
+   * to `register`), so this narrowing only ever matters for `scan`.
+   *
+   * **No "Use a test source" tile any more** (docs/plans/active/LINK-PAIRING-PLAN.md §3.7, wave L4 —
+   * "`/playground` is the ONLY place a simulated asset is created"): the row's own tile grid
+   * (`source-step.html`'s `method-grid`) renders only this list now, never a Simulate option. A row's
+   * `value` can still, in principle, already *be* `'simulate'` (a pre-existing draft, e.g. restored
+   * from a stale in-progress session) — `source-step.html`'s `@else if (…value === 'simulate')`
+   * branch and the legacy whole-vehicle Simulate sub-form below it ({@link showLegacySimulateConfig})
+   * stay in place purely to render that state honestly rather than crash on it; neither is reachable
+   * from a fresh choice any more (`FitOutRowValue`'s `'simulate'` member and `OnboardingStore#setRowValue`
+   * are both left in place for the same reason — dormant, not deleted — see `source-step.ts`'s own
+   * class doc comment).
    */
   rowFindMethods(role: FitOutRole): readonly FitOutFindMethod[] {
     const all = FIT_OUT_FIND_METHODS[role];
@@ -330,9 +392,14 @@ export class OnboardingFacade {
 
   readonly outcomeLabel = outcomeLabel;
 
-  /** The collided sysid itself, for the step's own wording — {@link combinedSysidCollision} over both rows' Prove results (only a `mavlink` Sense row realistically ever sets one, but this stays total over both). */
-  readonly sysidCollision = computed(() =>
-    combinedSysidCollision({ sense: this.store.proveByRole().sense.sysidCollision, sight: this.store.proveByRole().sight.sysidCollision }),
+  /** The collided sysid itself, for the step's own wording — {@link combinedSysidCollision} over both
+   *  rows' Prove results (only a `mavlink` Sense row realistically ever sets one, but this stays
+   *  total over both), falling back to `store.foundCandidateSysidCollision` for a found-nearby
+   *  candidate that never ran Prove at all (docs/plans/active/LINK-PAIRING-PLAN.md §7 ruling #3). */
+  readonly sysidCollision = computed(
+    () =>
+      combinedSysidCollision({ sense: this.store.proveByRole().sense.sysidCollision, sight: this.store.proveByRole().sight.sysidCollision }) ??
+      this.store.foundCandidateSysidCollision(),
   );
 
   /** {@link outcomeTone} maps to a `vision-notice` variant — `'muted'` (UNSUPPORTED) has no notice-variant equivalent, so it renders as `'neutral'`, mirroring `readiness.ts#remediationVariant`'s own precedent. */

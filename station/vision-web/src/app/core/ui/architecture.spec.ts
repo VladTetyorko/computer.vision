@@ -80,6 +80,12 @@ const ROUTED_PAGES = [
   // The engineer inspector (docs/plans/active/CV-ORCHESTRATION-PLAN.md §9 decision 3, wave W5.3) —
   // guarded from day one like every other routed page above.
   'cv-inspector/cv-inspector',
+  // Playground (docs/plans/active/LINK-PAIRING-PLAN.md §3.7/§4, wave L4) — the one place a simulated
+  // asset can be created; guarded from day one like every other routed page above. Its own
+  // `flightPlanDialogOpen` overlay flag lives on `PlaygroundFacade` (a signal there is fine — this
+  // guard only scans the *page* component's own source, per this file's own doc comment), not on
+  // `PlaygroundPage` itself, so it never needs a `UiStore` group.
+  'playground/playground',
 ];
 
 // All feature .ts sources, inlined as raw strings at build time. Keys look like

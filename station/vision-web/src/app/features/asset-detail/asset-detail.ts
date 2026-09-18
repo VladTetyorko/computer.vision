@@ -1,6 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
+import { LinksStore } from '../../core/pairing/links-store';
 import { UiStore } from '../../core/ui/ui-store';
 import { relativeTimeLabel } from '../../core/events/events-logic';
 import { ageSeconds, isStale } from '../../core/telemetry/telemetry-logic';
@@ -21,6 +22,7 @@ import { Icon } from '../../shared/ui/icon';
 import { KebabMenu } from '../../shared/ui/kebab-menu';
 import { ConfirmDialog } from '../../shared/ui/confirm-dialog';
 import { EmptyState } from '../../shared/ui/empty-state';
+import { Notice } from '../../shared/ui/notice';
 import { Stat } from '../../shared/ui/stat';
 import { PageBar, type PageBarCrumb } from '../../shared/ui/page-bar/page-bar';
 import { pluralize } from '../../shared/ui/text-logic';
@@ -45,8 +47,13 @@ import type { AssetUsage, Device, DetectionEvent } from '../../core/api/models';
  *  whichever other was open, so this page can never show two editors at once. Transient (no
  *  `storageKey`) — an editor must never survive a reload. `'registration'` renamed to `'identity'`
  *  this wave (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.4) — the single-field editor became a
- *  four-field `AssetIdentity` group. */
-type AssetEditor = 'asset' | 'identity' | 'attributes' | 'assign';
+ *  four-field `AssetIdentity` group. `'linkAddress'` added by docs/plans/active/LINK-PAIRING-PLAN.md
+ *  §3.4/§3.7, wave L4 — the Links panel's "Fix address" inline form; it edits a device's `uri`, not
+ *  an asset field, but the architecture guard (`core/ui/architecture.spec.ts`) requires every overlay
+ *  flag on a routed page to live in a `UiStore` group rather than a bare signal, and this page's other
+ *  `panels`/`dialogs` groups are typed for drawer-ids/confirm-ids respectively — `editors` is the
+ *  closest-fitting existing group for "one inline form open at a time". */
+type AssetEditor = 'asset' | 'identity' | 'attributes' | 'assign' | 'linkAddress';
 
 /** The Identity editor's own draft shape — one combined form for all four `AssetIdentity` fields, replacing the old single `registrationNumberDraft` string. */
 type IdentityDraft = { serialNumber: string; make: string; model: string; registration: string };
@@ -101,6 +108,7 @@ type IdentityDraft = { serialNumber: string; make: string; model: string; regist
     KebabMenu,
     ConfirmDialog,
     EmptyState,
+    Notice,
     Stat,
     PageBar,
     MapTools,
@@ -108,7 +116,7 @@ type IdentityDraft = { serialNumber: string; make: string; model: string; regist
   templateUrl: './asset-detail.html',
   styleUrl: './asset-detail.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [AssetDetailFacade, TelemetryStore],
+  providers: [AssetDetailFacade, TelemetryStore, LinksStore],
 })
 export class AssetDetailPage {
   /** Bound from the route by `withComponentInputBinding()`. */
@@ -172,9 +180,13 @@ export class AssetDetailPage {
    * own acceptance criterion — "Archive asset requires a confirm and is not adjacent to Rename").
    * A separate group from `editors`/`panels` so a confirm can never coexist with either — mirrors
    * `features/fly/fly.ts`'s identical single-member `dialog` group for its Stop-stream confirm.
+   *
+   * Widened to `'forget-pairing'` this wave (docs/plans/active/LINK-PAIRING-PLAN.md §3.4/§3.7, wave L4)
+   * — the Links panel's own hard-delete confirm (`DELETE /api/devices/{id}/pairing`), same "confirm,
+   * not undo" idiom as Archive since forgetting a pairing is irreversible.
    */
   private readonly dialogs = new UiStore();
-  protected isDialogOpen(id: 'archive'): boolean {
+  protected isDialogOpen(id: 'archive' | 'forget-pairing'): boolean {
     return this.dialogs.isOpen(id);
   }
 
@@ -202,6 +214,7 @@ export class AssetDetailPage {
       this.rowAction.set(null);
       this.renameDraft.set('');
       this.assignDraft.set('');
+      this.linkAddressDraft.set('');
       this.facade.load(id);
     });
   }
@@ -469,5 +482,70 @@ export class AssetDetailPage {
     if (ok) {
       this.cancelAssign();
     }
+  }
+
+  // --- Links panel (docs/plans/active/LINK-PAIRING-PLAN.md §3.4/§3.7, wave L4) --------------------
+  // Every derived read-model and HTTP-backed command lives on `AssetDetailFacade` (`links`/
+  // `linksSorted`/`pinLink`/`replaceLinkHardware`/etc. — see that class's own "Links panel" section);
+  // this component owns only the panel-local overlay state (the Fix-address inline form's open flag
+  // rides the `editors` group as `'linkAddress'` — see that type's own doc comment for why — with a
+  // plain draft signal alongside it, same "group flag + plain draft" split every other editor above
+  // uses) and the one pure template helper (`failoverLinkLabel`) that isn't testable-in-isolation
+  // logic worth its own `*-logic.ts` file — it just resolves an id against the same
+  // `facade.linksSorted()` the template already reads.
+
+  protected readonly linkAddressDraft = signal('');
+
+  protected openFixLinkAddress(): void {
+    this.linkAddressDraft.set(this.facade.pairingDevice()?.uri ?? '');
+    this.editors.open('linkAddress');
+  }
+
+  protected cancelFixLinkAddress(): void {
+    this.editors.close('linkAddress');
+    this.linkAddressDraft.set('');
+  }
+
+  protected async confirmFixLinkAddress(): Promise<void> {
+    const ok = await this.facade.fixLinkAddress(this.linkAddressDraft());
+    if (ok) {
+      this.cancelFixLinkAddress();
+    }
+  }
+
+  /**
+   * Opens the Forget-pairing confirm (`dialogs` group — see that field's own doc comment for why
+   * this is a genuine confirm dialog, not the app's usual undo-toast idiom).
+   */
+  protected requestForgetLinkPairing(): void {
+    this.dialogs.open('forget-pairing');
+  }
+
+  protected cancelForgetLinkPairing(): void {
+    this.dialogs.close('forget-pairing');
+  }
+
+  protected async confirmForgetLinkPairing(): Promise<void> {
+    await this.facade.forgetLinkPairing();
+    this.dialogs.close('forget-pairing');
+  }
+
+  /** "12s ago" for one failover row's `at` timestamp — shares `relativeTimeLabel` with `relativeTime`
+   *  above; that helper takes a `DetectionEvent`, this one a raw ISO string, so it can't be reused
+   *  as-is, but both ultimately call the same `humanAge`-backed formatter. */
+  protected failoverTime(atIso: string): string {
+    return relativeTimeLabel(atIso, this.facade.now());
+  }
+
+  /** Resolves a `LinkFailoverRow`'s bare `fromLinkId`/`toLinkId` to that link's current display
+   *  label, off `facade.linksSorted()` — falls back to the raw id (still better than nothing) for a
+   *  link that has since rotated out of the group (e.g. after a hardware replace), and to "—" when
+   *  the event carried no id at all (an older/malformed event — `parseLinkFailover`'s own degrade). */
+  protected failoverLinkLabel(linkId: string | undefined): string {
+    if (!linkId) {
+      return '—';
+    }
+    const link = this.facade.linksSorted().find((candidate) => candidate.id === linkId);
+    return link ? `${this.facade.linkKind(link)} · ${link.label}` : linkId;
   }
 }

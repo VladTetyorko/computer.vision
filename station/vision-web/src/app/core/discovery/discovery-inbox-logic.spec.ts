@@ -10,10 +10,12 @@ import {
   buildRegisterCommand,
   candidateActions,
   candidateAgeLabel,
+  candidateNeedsCredential,
   canSubmitRegisterDraft,
   defaultRegisterDraft,
   discoveryMethodLabel,
   dismissedCandidateCount,
+  excludeSimulated,
   newCandidateCount,
   registeredCandidateCount,
   sourceUnreachableWarnings,
@@ -101,6 +103,51 @@ describe('candidateAgeLabel', () => {
 
   it('degrades to 0s for an unparsable timestamp rather than throwing/NaN', () => {
     expect(candidateAgeLabel('not-a-date', nowMs)).toBe('last heard 0s ago');
+  });
+});
+
+describe('excludeSimulated', () => {
+  it('drops candidates reported under the simulation method, case-insensitively', () => {
+    const rows = [candidate({ id: 'c-1', method: 'mavlink' }), candidate({ id: 'c-2', method: 'Simulation' })];
+    expect(excludeSimulated(rows).map((c) => c.id)).toEqual(['c-1']);
+  });
+
+  it('drops the short "sim" spelling too', () => {
+    const rows = [candidate({ id: 'c-1', method: 'onvif' }), candidate({ id: 'c-2', method: 'sim' })];
+    expect(excludeSimulated(rows).map((c) => c.id)).toEqual(['c-1']);
+  });
+
+  it('keeps every candidate when none are simulated', () => {
+    const rows = [candidate({ id: 'c-1' }), candidate({ id: 'c-2', method: 'onvif' })];
+    expect(excludeSimulated(rows)).toHaveLength(2);
+  });
+});
+
+describe('candidateNeedsCredential', () => {
+  it('is false when details carries no auth hint at all', () => {
+    expect(candidateNeedsCredential(candidate({ details: { model: 'Hikvision DS-2CD' } }))).toBe(false);
+  });
+
+  it('is false with an empty details map', () => {
+    expect(candidateNeedsCredential(candidate({ details: {} }))).toBe(false);
+  });
+
+  it('reads a boolean-shaped authRequired hint case-insensitively', () => {
+    expect(candidateNeedsCredential(candidate({ details: { AuthRequired: 'true' } }))).toBe(true);
+    expect(candidateNeedsCredential(candidate({ details: { authrequired: 'yes' } }))).toBe(true);
+  });
+
+  it('is false when the same key is present but false', () => {
+    expect(candidateNeedsCredential(candidate({ details: { authRequired: 'false' } }))).toBe(false);
+  });
+
+  it('reads a probeStatus status-code hint', () => {
+    expect(candidateNeedsCredential(candidate({ details: { probeStatus: 'UNAUTHORIZED' } }))).toBe(true);
+    expect(candidateNeedsCredential(candidate({ details: { probeStatus: '401' } }))).toBe(true);
+  });
+
+  it('ignores an unrelated probeStatus value', () => {
+    expect(candidateNeedsCredential(candidate({ details: { probeStatus: 'OK' } }))).toBe(false);
   });
 });
 

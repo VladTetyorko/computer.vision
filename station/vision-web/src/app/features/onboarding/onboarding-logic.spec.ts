@@ -143,6 +143,10 @@ describe('nextStep', () => {
   it('is a no-op past sysid — the wizard reaches it only via OnboardingStore#finishCreate, never via next()', () => {
     expect(nextStep('sysid', ctx())).toBe('sysid');
   });
+
+  it('is a no-op past confirm — the wizard reaches it only via OnboardingStore#chooseFoundCandidate, and leaves it via #continueFromConfirm, never via next()', () => {
+    expect(nextStep('confirm', ctx())).toBe('confirm');
+  });
 });
 
 describe('prevStep', () => {
@@ -180,6 +184,10 @@ describe('prevStep', () => {
 
   it('goes sysid -> attach — its own immediate predecessor, never further (onboarding never renders a Back button here regardless)', () => {
     expect(prevStep('sysid', ctx())).toBe('attach');
+  });
+
+  it('is a no-op past confirm — OnboardingStore#backFromConfirm sets \'source\' directly, never via prev()', () => {
+    expect(prevStep('confirm', ctx())).toBe('confirm');
   });
 
   it('round-trips with nextStep for a connected vehicle needing prove', () => {

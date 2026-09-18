@@ -3,6 +3,7 @@ import { RouterLink } from '@angular/router';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { StepRail } from '../../shared/ui/step-rail';
 import { AttachStep } from './attach-step';
+import { ConfirmStep } from './confirm-step';
 import { HandoverStep } from './handover-step';
 import { IdentifyStep } from './identify-step';
 import { OnboardingFacade } from './onboarding-facade';
@@ -13,10 +14,12 @@ import { SysidStep } from './sysid-step';
 
 /**
  * The onboarding wizard's own route (`/add-source`, docs/plans/done/UX-REWORK-PLAN.md §U-d) — replaces
- * the inline "+ Add source" card the pre-wizard Devices/Warehouse page used to open on itself. Six
- * steps (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.1, wave W2+W3 — five visible, `sysid`
- * hidden; see `onboarding-logic.ts#WizardStep`'s own doc comment for the full per-step contract):
- * **Source** (the honest fork, `SourceStep`) → **Prove** (Test + Verify per unresolved row,
+ * the inline "+ Add source" card the pre-wizard Devices/Warehouse page used to open on itself. Seven
+ * steps (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.1, wave W2+W3, plus `confirm` from
+ * docs/plans/active/LINK-PAIRING-PLAN.md §3.7, wave L4 — five visible, `confirm`/`sysid` hidden; see
+ * `onboarding-logic.ts#WizardStep`'s own doc comment for the full per-step contract):
+ * **Source** (the "Found nearby" feed + demoted fallback tiles, `SourceStep`) → **Confirm** (hidden,
+ * reached only from a found-nearby card, `ConfirmStep`) → **Prove** (Test + Verify per unresolved row,
  * `ProveStep`) → **Identify** (name/category/photo, `IdentifyStep`) → **Attach** (new asset, or
  * attach onto an existing one, `AttachStep`) → **Sysid** (hidden collision-fix interstitial,
  * `SysidStep`) → **Hand-over** (`HandoverStep`).
@@ -42,7 +45,7 @@ import { SysidStep } from './sysid-step';
  */
 @Component({
   selector: 'vision-onboarding',
-  imports: [RouterLink, PageBar, StepRail, SourceStep, ProveStep, IdentifyStep, AttachStep, SysidStep, HandoverStep],
+  imports: [RouterLink, PageBar, StepRail, SourceStep, ProveStep, IdentifyStep, AttachStep, ConfirmStep, SysidStep, HandoverStep],
   templateUrl: './onboarding.html',
   styleUrl: './onboarding.css',
   changeDetection: ChangeDetectionStrategy.OnPush,

@@ -9,6 +9,7 @@ import type {
   DiscoveryEventPayload,
   FrameLedger,
   GeofenceZoneEventPayload,
+  LinkGroupResponse,
   LiveConnected,
   LiveEnvelope,
   LiveEvent,
@@ -27,6 +28,7 @@ import {
   detectionsTopic,
   geoTopic,
   incrementTopicRef,
+  linksTopic,
   mergeTelemetrySamples,
   telemetryTopic,
   tracksTopic,
@@ -325,6 +327,8 @@ export class LiveStore {
   /** Latest-wins, like `detectionsSignals` — the capped ring an inspector reads from is
    *  `core/cv-trace/cv-trace-store.ts`'s own job (wave W5.2), not this store's. */
   private readonly cvTraceSignals = new Map<string, ReturnType<typeof signal<FrameLedger | undefined>>>();
+  /** Latest-wins, like `geoSignals` — §3.4's own "payload is the whole list snapshot" rule (docs/plans/active/LINK-PAIRING-PLAN.md, wave L4). */
+  private readonly linksSignals = new Map<string, ReturnType<typeof signal<LinkGroupResponse | undefined>>>();
   /** Per-topic subscriber counts (docs/plans/done/REALTIME-PLAN.md §4, item 2) — see class doc's "Ref-counting". */
   private readonly topicRefs = new Map<string, number>();
 
@@ -410,6 +414,11 @@ export class LiveStore {
     return this.cvTraceSignalFor(assetId);
   }
 
+  /** The latest live link-group snapshot for `assetId` (docs/plans/active/LINK-PAIRING-PLAN.md §3.4, wave L4) — `undefined` until one arrives. */
+  linksFor(assetId: string): Signal<LinkGroupResponse | undefined> {
+    return this.linksSignalFor(assetId);
+  }
+
   /** Ref-counted opt-in to `telemetry:<assetId>` — call once per consumer; pair with `untrackTelemetry`. */
   trackTelemetry(assetId: string): void {
     this.track(telemetryTopic(assetId));
@@ -468,6 +477,16 @@ export class LiveStore {
     this.untrack(cvTraceTopic(assetId), assetId, this.cvTraceSignals);
   }
 
+  /** Ref-counted opt-in to `links:<assetId>` — call once per consumer; pair with `untrackLinks`. */
+  trackLinks(assetId: string): void {
+    this.track(linksTopic(assetId));
+  }
+
+  /** The matching teardown for `trackLinks` — call from the consumer's own `reset()`/destroy. */
+  untrackLinks(assetId: string): void {
+    this.untrack(linksTopic(assetId), assetId, this.linksSignals);
+  }
+
   private telemetrySignalFor(assetId: string): ReturnType<typeof signal<readonly TelemetrySample[]>> {
     let existing = this.telemetrySignals.get(assetId);
     if (existing === undefined) {
@@ -509,6 +528,15 @@ export class LiveStore {
     if (existing === undefined) {
       existing = signal<FrameLedger | undefined>(undefined);
       this.cvTraceSignals.set(assetId, existing);
+    }
+    return existing;
+  }
+
+  private linksSignalFor(assetId: string): ReturnType<typeof signal<LinkGroupResponse | undefined>> {
+    let existing = this.linksSignals.get(assetId);
+    if (existing === undefined) {
+      existing = signal<LinkGroupResponse | undefined>(undefined);
+      this.linksSignals.set(assetId, existing);
     }
     return existing;
   }
@@ -663,6 +691,11 @@ export class LiveStore {
         // Latest-wins, like `detections`/`geo` above — `core/cv-trace/cv-trace-store.ts` (wave
         // W5.2) is what accumulates the capped ring an inspector actually reads from.
         this.cvTraceSignalFor(envelope.assetId).set(envelope.payload);
+        return;
+      case 'links':
+        // Latest-wins snapshot — §3.4's own "payload is the whole list snapshot" rule, same posture
+        // as `geo`/`cv-trace` above.
+        this.linksSignalFor(envelope.assetId).set(envelope.payload);
         return;
     }
   }

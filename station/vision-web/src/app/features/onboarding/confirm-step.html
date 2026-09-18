@@ -1,0 +1,40 @@
+<h2>Confirm</h2>
+
+@if (facade.store.selectedCandidate(); as candidate) {
+  <p class="muted hint">Here's what was detected — check it over before adding it.</p>
+
+  <dl class="facts">
+    @for (entry of facade.candidateDetailEntries(candidate); track entry.label) {
+      <div class="fact"><dt>{{ entry.label }}</dt><dd class="mono">{{ entry.value }}</dd></div>
+    }
+  </dl>
+
+  @if (facade.candidateNeedsCredential(candidate)) {
+    <div class="field wide">
+      <label class="label" for="confirm-credential">Password</label>
+      <input
+        id="confirm-credential"
+        name="confirmCredential"
+        type="password"
+        class="field-lg"
+        [ngModel]="facade.store.confirmCredential()"
+        (ngModelChange)="facade.store.confirmCredential.set($event)"
+        placeholder="Needed to connect to this device"
+      />
+    </div>
+  }
+
+  <button type="button" class="link-button" (click)="facade.store.attachExistingFromConfirm()">
+    This is my old {{ facade.foundCandidateNounFor(candidate) }} — attach to an existing asset instead
+  </button>
+
+  <div class="row">
+    <button type="button" class="btn secondary" (click)="facade.store.backFromConfirm()">Back</button>
+    <button type="button" class="btn" (click)="facade.store.continueFromConfirm()">Continue</button>
+  </div>
+} @else {
+  <div class="empty"><p>Nothing selected — go back and pick a device from the found-nearby feed.</p></div>
+  <div class="row">
+    <button type="button" class="btn secondary" (click)="facade.store.backFromConfirm()">Back</button>
+  </div>
+}

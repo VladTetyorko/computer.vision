@@ -222,8 +222,28 @@ export const NAV_MODES: readonly NavMode[] = [
         name: 'Add vehicle',
         // Renamed from "Add source". `requires: 'MANAGE_ORG'` mirrors `POST /api/assets`'s own
         // `canManageOrg()` gate (docs/plans/done/OPS-UX-PLAN.md §2 A4) — unchanged by this wave.
-        description: 'Enter an address, scan the network, listen for a drone, or simulate one — four steps.',
+        //
+        // Description rewritten this wave (docs/plans/active/LINK-PAIRING-PLAN.md §3.7, wave L4) — the
+        // old "…or simulate one — four steps" wording described the wizard's now-removed "Use a test
+        // source" tile; simulate creation moved to the new **Playground** entry below (`/playground`
+        // — "the ONLY place a simulated asset is created").
+        description: 'Pick up something found nearby automatically, or enter an address, scan the network, or listen for a drone yourself.',
         to: '/add-source',
+        requires: 'MANAGE_ORG',
+      },
+      {
+        icon: 'scan',
+        name: 'Playground',
+        // New this wave (docs/plans/active/LINK-PAIRING-PLAN.md §3.7/§4 row L4) — every zero-hardware
+        // simulate entry point (`POST /api/simulations`) lives here now, nowhere else
+        // (`features/playground/playground-facade.ts`'s own class doc). `requires: 'MANAGE_ORG'`
+        // mirrors "Add vehicle" above — creating a simulated asset is the same fleet-management
+        // action. Always listed, not conditionally hidden behind `vision.simulation.enabled` — see
+        // `features/playground/playground.ts`'s own class doc for why (`NAV_MODES` has no runtime-
+        // signal-based visibility mechanism; the page itself degrades honestly instead, same as CV
+        // training's identical deploy-time toggle).
+        description: 'Spin up a simulated asset — a moving test drone with live telemetry, or a video file played through the pipeline.',
+        to: '/playground',
         requires: 'MANAGE_ORG',
       },
       {

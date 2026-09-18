@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import type { Device, ParameterReading, VehicleProfile } from '../../core/api/models';
-import { detectSysidCollision, sysidParameterName } from './sysid-collision-logic';
+import type { Device, DiscoveryCandidate, ParameterReading, VehicleProfile } from '../../core/api/models';
+import { candidateSysidCollision, detectSysidCollision, sysidParameterName } from './sysid-collision-logic';
 
 function profile(partial: Partial<VehicleProfile> = {}): VehicleProfile {
   return {
@@ -38,6 +38,20 @@ function reading(name: string, value = 1): ParameterReading {
   return { name, value, type: 'INT32' };
 }
 
+function candidate(partial: Partial<DiscoveryCandidate> = {}): DiscoveryCandidate {
+  return {
+    id: 'c-1',
+    method: 'mavlink',
+    name: 'Vehicle 7',
+    address: 'udp:14550',
+    details: {},
+    firstSeen: '2026-08-31T00:00:00Z',
+    lastSeen: '2026-08-31T00:00:00Z',
+    status: 'NEW',
+    ...partial,
+  };
+}
+
 describe('detectSysidCollision', () => {
   it('returns null when there is no profile', () => {
     expect(detectSysidCollision(null, [device({ options: { sysid: '1' } })])).toBeNull();
@@ -68,6 +82,37 @@ describe('detectSysidCollision', () => {
   it('ignores devices with no sysid option at all', () => {
     const devices = [device({ options: {} }), device({ id: 'device-3', options: { sysid: '1' } })];
     expect(detectSysidCollision(profile({ sysid: 1 }), devices)).toBe(1);
+  });
+});
+
+describe('candidateSysidCollision', () => {
+  it('prefers the server-reported sysidPushRequired/assignedSysid pair when present', () => {
+    const found = candidate({ sysidPushRequired: true, assignedSysid: 4, details: { sysid: '1' } });
+    expect(candidateSysidCollision(found, [])).toBe(4);
+  });
+
+  it('ignores assignedSysid when sysidPushRequired is not true', () => {
+    const found = candidate({ sysidPushRequired: false, assignedSysid: 4, details: { sysid: '1' } });
+    expect(candidateSysidCollision(found, [device({ options: { sysid: '1' } })])).toBe(1);
+  });
+
+  it('returns null when there is no details sysid and no server hint', () => {
+    expect(candidateSysidCollision(candidate(), [device({ options: { sysid: '1' } })])).toBeNull();
+  });
+
+  it('returns null when the candidate sysid is not numeric', () => {
+    const found = candidate({ details: { sysid: 'not-a-number' } });
+    expect(candidateSysidCollision(found, [device({ options: { sysid: '1' } })])).toBeNull();
+  });
+
+  it('returns null when the details sysid collides with nothing in the fleet', () => {
+    const found = candidate({ details: { sysid: '1' } });
+    expect(candidateSysidCollision(found, [device({ options: { sysid: '3' } })])).toBeNull();
+  });
+
+  it('falls back to the details sysid heuristic and finds a collision', () => {
+    const found = candidate({ details: { sysid: '3' } });
+    expect(candidateSysidCollision(found, [device({ options: { sysid: '3' } })])).toBe(3);
   });
 });
 

@@ -426,6 +426,78 @@ td.actions {
     white-space: nowrap;
 }
 
+/* ---- Links panel (docs/plans/active/LINK-PAIRING-PLAN.md §3.4/§3.7, wave L4) — link rows mirror
+   `.event-row` above; the active link gets the app's one selection language (frontend-style skill
+   §4 — 2px left inset bar in --color-info), same treatment `.event-row.open` gives a live event. -- */
+
+.links-status-row {
+    margin-bottom: var(--space-8);
+}
+
+.link-list,
+.failover-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-8);
+}
+
+.link-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-8);
+    background: var(--panel-raised);
+    border: 1px solid var(--border);
+    border-left: 2px solid transparent;
+    border-radius: var(--radius-sm);
+    padding: var(--space-8);
+}
+
+.link-row.active {
+    border-left-color: var(--color-info);
+}
+
+.link-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.link-label {
+    font-weight: 600;
+    font-size: 0.85rem;
+}
+
+.link-meta {
+    font-size: 0.72rem;
+}
+
+.failover-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-8);
+    background: var(--panel-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: var(--space-8);
+    font-size: 0.8rem;
+}
+
+.failover-time {
+    white-space: nowrap;
+    font-size: 0.72rem;
+}
+
+.recovery-actions {
+    flex-wrap: wrap;
+    margin-top: var(--space-8);
+}
+
 /* ---- Map inset chrome (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.2, D9) --------------------------
    `<vision-tactical-map>` fills `.map-inset`; the Map tools HUD button floats over its own bottom-
    right corner (its other three corners are already the map's own camera/basemap/legend chrome —

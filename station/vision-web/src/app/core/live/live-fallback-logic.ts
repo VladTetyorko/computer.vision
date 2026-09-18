@@ -110,6 +110,16 @@ export function cvTraceTopic(assetId: string): string {
   return `cv-trace:${assetId}`;
 }
 
+/**
+ * `links:<assetId>` (docs/plans/active/LINK-PAIRING-PLAN.md §3.4, wave L4) — opt-in, ref-counted
+ * exactly like `telemetryTopic`/`detectionsTopic`/`geoTopic`/`cvTraceTopic` above. Carries the
+ * whole {@link LinkGroupResponse} snapshot on every arrival (§3.4: "payload is the whole list
+ * snapshot") — `LinksStore` is latest-wins for this topic, the same posture as `geoTopic`.
+ */
+export function linksTopic(assetId: string): string {
+  return `links:${assetId}`;
+}
+
 export interface RefCountResult {
   /** The topic's new subscriber count. */
   readonly count: number;

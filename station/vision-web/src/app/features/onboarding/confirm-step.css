@@ -1,0 +1,55 @@
+/* This component's own copy of every class it uses — CSS encapsulation means a child component's
+   template classes never match a parent's scoped rules (see `features/asset-detail/asset-detail.css`'s
+   own doc comment for the precedent this follows). */
+
+.hint {
+    font-size: 0.8rem;
+    margin: 0 0 var(--space-16);
+}
+
+.field {
+    margin-bottom: var(--space-16);
+}
+
+.field.wide {
+    min-width: 0;
+}
+
+/* Facts grid — mirrors `attach-step.css`/`source-step.css`'s identical rules; every consumer keeps
+   its own copy per this file's own header comment. */
+.facts {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-8) var(--space-16);
+    margin: 0 0 var(--space-16);
+}
+
+.fact dt {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+}
+
+.fact dd {
+    margin: var(--space-2) 0 0;
+    font-size: 0.85rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.link-button {
+    display: block;
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0 0 var(--space-16);
+    color: var(--color-info);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    text-align: left;
+}
+
+.link-button:hover {
+    text-decoration: underline;
+}

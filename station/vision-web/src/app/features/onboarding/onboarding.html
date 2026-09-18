@@ -23,6 +23,9 @@
       @case ('attach') {
         <vision-attach-step />
       }
+      @case ('confirm') {
+        <vision-confirm-step />
+      }
       @case ('sysid') {
         <vision-sysid-step />
       }
@@ -32,8 +35,8 @@
     }
 
     <!-- The shared footer — only for the three steps plain enough to share one Back/Next pair.
-         `attach`/`sysid`/`handover` each own a fully custom footer inline in their own template
-         instead (see this component's own class-doc paragraph). -->
+         `attach`/`confirm`/`sysid`/`handover` each own a fully custom footer inline in their own
+         template instead (see this component's own class-doc paragraph). -->
     @if (facade.store.step() === 'source' || facade.store.step() === 'prove' || facade.store.step() === 'identify') {
       <div class="row wizard-nav">
         @if (facade.store.step() !== 'source') {

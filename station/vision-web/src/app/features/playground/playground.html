@@ -1,0 +1,148 @@
+<div class="page">
+  <vision-section-header
+    title="Playground"
+    subtitle="Spin up a simulated asset to test flows end to end — a moving test drone with live telemetry needs no file or hardware at all."
+  />
+
+  @if (!facade.checkingCapability() && !facade.simulationEnabled()) {
+    <div class="card">
+      <vision-empty
+        icon="alert"
+        title="Playground isn't enabled here"
+        message="This deployment hasn't turned on simulated assets. Ask an administrator to enable vision.simulation.enabled if you need a test asset."
+      />
+    </div>
+  } @else {
+    @if (facade.lastCreated(); as created) {
+      <vision-notice variant="ok" icon="check">
+        Created a simulated asset.
+        <a [routerLink]="['/assets', created.assetId]">Open it</a>
+        <button type="button" class="btn secondary small" (click)="facade.dismissCreated()">Dismiss</button>
+      </vision-notice>
+    }
+
+    <div class="card">
+      <div class="field wide">
+        <span class="label">Mode</span>
+        <div class="segmented" role="group" aria-label="Simulation mode">
+          @for (mode of facade.modes; track mode) {
+            <button
+              type="button"
+              class="btn secondary small"
+              [class.active]="facade.mode() === mode"
+              (click)="setMode(mode)"
+            >
+              {{ facade.modeLabels[mode] }}
+            </button>
+          }
+        </div>
+        <p class="muted hint">{{ facade.modeHints[facade.mode()] }}</p>
+      </div>
+
+      <div class="field wide">
+        <label class="label" for="playground-name">Name</label>
+        <input
+          id="playground-name"
+          name="name"
+          class="field-lg"
+          [ngModel]="facade.name()"
+          (ngModelChange)="facade.name.set($event)"
+          placeholder="Optional — a name is generated if left blank"
+        />
+      </div>
+
+      @if (facade.needsVideoPath()) {
+        <div class="field wide">
+          <label class="label" for="playground-video-path">Server-side video path</label>
+          <input
+            id="playground-video-path"
+            name="videoPath"
+            class="field-lg"
+            [ngModel]="facade.videoPath()"
+            (ngModelChange)="facade.videoPath.set($event)"
+            placeholder="/srv/videos/flight.mp4"
+            required
+          />
+          <p class="muted hint">The path must exist on the machine running the platform, not your browser.</p>
+        </div>
+      }
+
+      <div class="field wide flight-plan-field">
+        <span class="label">Flight plan</span>
+        @if (facade.flightPlanSummary(); as summary) {
+          <div class="row flight-plan-summary">
+            <span class="chip accent">{{ summary }}</span>
+            <button type="button" class="btn secondary small" (click)="facade.openFlightPlanDialog()">Edit</button>
+            <button type="button" class="btn secondary small" (click)="facade.clearFlightPlan()">Clear</button>
+          </div>
+        } @else {
+          <div class="row flight-plan-summary">
+            <button type="button" class="btn secondary small" (click)="facade.openFlightPlanDialog()">
+              Draw flight plan on map
+            </button>
+            <span class="muted hint">No plan drawn — flies a circle around the home point below.</span>
+          </div>
+        }
+      </div>
+
+      <details class="field wide home-point-fallback">
+        <summary>Home point (used only without a flight plan)</summary>
+        <div class="row">
+          <div class="field">
+            <label class="label" for="playground-lat">Home latitude</label>
+            <input
+              id="playground-lat"
+              name="latitude"
+              type="number"
+              step="any"
+              [ngModel]="facade.latitude()"
+              (ngModelChange)="facade.latitude.set($event)"
+              placeholder="optional"
+            />
+          </div>
+          <div class="field">
+            <label class="label" for="playground-lon">Home longitude</label>
+            <input
+              id="playground-lon"
+              name="longitude"
+              type="number"
+              step="any"
+              [ngModel]="facade.longitude()"
+              (ngModelChange)="facade.longitude.set($event)"
+              placeholder="optional"
+            />
+          </div>
+        </div>
+      </details>
+
+      <label class="field checkbox-field">
+        <input
+          type="checkbox"
+          name="autoStart"
+          [ngModel]="facade.autoStart()"
+          (ngModelChange)="facade.autoStart.set($event)"
+        />
+        <span>Start streaming immediately</span>
+      </label>
+
+      <div class="row">
+        <button type="button" class="btn" [disabled]="!facade.canSubmit()" (click)="submit()">
+          {{ facade.busy() ? 'Creating…' : 'Create simulated asset' }}
+        </button>
+      </div>
+      @if (!facade.canSubmit() && !facade.busy()) {
+        <p class="disabled-reason">Enter a server-side video path to continue.</p>
+      }
+    </div>
+  }
+
+  @if (facade.flightPlanDialogOpen()) {
+    <vision-flight-plan-dialog
+      [homeLatitude]="facade.latitude()"
+      [homeLongitude]="facade.longitude()"
+      [initialPlan]="facade.flightPlan() ?? null"
+      (saved)="facade.onFlightPlanSaved($event)"
+      (cancelled)="facade.onFlightPlanCancelled()"
+    />
+  }
+</div>
