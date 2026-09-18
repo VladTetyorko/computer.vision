@@ -4,7 +4,7 @@
 final result I need a well structured ngrx application … with all the reducers, actions, effects and
 so on."*
 
-**State:** N0 **BUILT** 2026-09-18 on `feat/ngrx-migration` (`93c64ad6`), unmerged. Waves N1–N9 open.
+**State:** N0–N2 **BUILT** 2026-09-18 on `feat/ngrx-migration` (merged at `f70afb09`), not yet on `master`. 7 slices done, **26 hand-rolled stores remain**. Waves N3–N9 open.
 
 ---
 
@@ -198,7 +198,10 @@ Promise-returning method is added to `VisionApi` after N0 — new endpoints land
 | Wave | State |
 |---|---|
 | N0 | **BUILT** 2026-09-18, `93c64ad6` on `feat/ngrx-migration` — engine (`core/state/`), pilot slices `theme`+`sidebar`, facades, guard, budgets. 220/220 files · 4 285/4 285 tests green; production build exit 0. Cost measured: **+45.01 kB raw / +13.31 kB transfer**, budget 390/445 → 500/550 kB |
-| N1–N9 | open |
+| N1 | **BUILT**, `4cc6b3f4` — `overlay` slice; `GlobalOverlayStore` deleted. Its DOM half (the `HTMLElement` registry) stayed out of state in `core/ui/overlay-host-registry.ts`; the route fence listens for `ROUTER_NAVIGATED`, not `Router` |
+| N2 | **BUILT**, `1a3da7f0` — `settings`, `org`, `seat`, `auth`; all four legacy classes deleted. `seat` keys state by `assetId` instead of relying on injector scoping; `core/state/dispatch-bridge.ts#dispatchAndAwait` keeps `Promise`-returning facade commands |
+| N1+N2 merged | `f70afb09` — **231/231 files · 4 387/4 387 tests green**, production build exit 0 at **500.83 kB raw / 142.55 kB transfer** (835 B over the 500 kB *warning* budget, under the 550 kB error budget; left as a warning on purpose) |
+| N3–N9 | open |
 
 **Carry into N1.** Two facts N0 established that every later wave depends on: (a) a spec that needs
 real state calls `provideAppState()` — never a hand-rolled `provideStore` — so adding a slice there is
