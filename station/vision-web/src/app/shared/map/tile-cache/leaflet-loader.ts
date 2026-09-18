@@ -1,7 +1,7 @@
 import { signal } from '@angular/core';
 import type * as Leaflet from 'leaflet';
 import type { MapLayerId } from '../../../core/settings/settings-store';
-import type { Theme } from '../../../core/shell/theme-store';
+import type { Theme } from '../../../core/shell/state/theme.model';
 import { readPersistedFlag, writePersistedFlag } from '../../../core/panel-state';
 import { getCachedTile, putCachedTile } from './tile-cache-db';
 import { tileCacheKey, tileHost } from './tile-cache-logic';
@@ -173,7 +173,7 @@ export function markMapLayerExplicit(): void {
  * The layer id a map should actually render: `chosen` (`SettingsStore.mapLayer()`) once the
  * operator has made an explicit pick, otherwise the theme's own default — "an explicit user pick
  * always wins" (docs/plans/done/VISUAL-REFRESH-PLAN.md F7). Pure and unit-tested (`leaflet-loader.spec.ts`);
- * `TacticalMap` wraps it in a `computed()` reading `ThemeStore.theme()` +
+ * `TacticalMap` wraps it in a `computed()` reading `ThemeFacade.theme()` +
  * `SettingsStore.mapLayer()`, so both re-render the instant either changes.
  */
 export function effectiveMapLayerId(theme: Theme, chosen: MapLayerId, explicit: boolean): MapLayerId {

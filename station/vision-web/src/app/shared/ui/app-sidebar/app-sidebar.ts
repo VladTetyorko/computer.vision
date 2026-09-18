@@ -3,8 +3,8 @@ import { RouterLink, RouterLinkActive } from '@angular/router';
 import { AuthStore } from '../../../core/auth/auth-store';
 import { FleetStore } from '../../../core/fleet/fleet-store';
 import { LiveStore } from '../../../core/live/live-store';
-import { SidebarStore } from '../../../core/shell/sidebar-store';
-import { ThemeStore } from '../../../core/shell/theme-store';
+import { SidebarFacade } from '../../../core/shell/sidebar-facade';
+import { ThemeFacade } from '../../../core/shell/theme-facade';
 import { shellStatusLabel, shellStatusSeverity } from '../../../core/system-status/system-status-logic';
 import { SystemStatusStore } from '../../../core/system-status/system-status-store';
 import { GlobalOverlayStore } from '../../../core/ui/overlay-store';
@@ -50,7 +50,7 @@ import { NotificationBell } from '../notification-bell';
  * (`system`, `NavMode.footer === true`, rendered in `.sidebar-foot` next to the identity chip) —
  * exactly the split WAREHOUSE-UX-PLAN.md §3.1's own mermaid diagram draws.
  *
- * **`effectiveCollapsed`** simply re-exposes `SidebarStore.collapsed`, which owns the whole
+ * **`effectiveCollapsed`** simply re-exposes `SidebarFacade.collapsed`, which owns the whole
  * override/route/preference precedence (see that store's own class doc). This component deliberately
  * knows nothing about routing — it neither reads the router nor takes a `fullBleed` input any more;
  * `app.ts` owns the single router subscription and pushes the result into the store, keeping this a
@@ -91,7 +91,7 @@ import { NotificationBell } from '../notification-bell';
  * `<svg>` idiom — `shared/ui/icon-registry.ts` is out of this task's file scope, so this follows the
  * pre-existing "a bespoke inline svg is fine for a one-off glyph" precedent that file itself names,
  * rather than adding a name to the frozen registry from a file this task cannot touch). Calls
- * `ThemeStore.toggle()` directly, no facade indirection (see the `theme` field's own doc comment for
+ * `ThemeFacade.toggle()` directly, no facade indirection (see the `theme` field's own doc comment for
  * why that's fine here but not on a routed page). Shows the *current* theme's glyph — sun while
  * light is active, moon while dark is active — with `title`/`aria-label` describing the action
  * ("Switch to dark theme" while showing the sun, and vice versa). Identical markup at every width;
@@ -99,7 +99,7 @@ import { NotificationBell } from '../notification-bell';
  * sits *inside* the brand `<a routerLink="/fly">` (so it shares that corner's layout); its own click
  * handler calls `$event.stopPropagation()` after `theme.toggle()` for exactly that reason — without
  * it, the click bubbles to the anchor and the router navigates to `/fly`, which (being full-bleed)
- * then auto-collapses the sidebar via `SidebarStore.enterRoute()`. A theme click must never double as
+ * then auto-collapses the sidebar via `SidebarFacade.enterRoute()`. A theme click must never double as
  * a navigation.
  *
  * **Responsive** (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.1, docs/extracts/design/00-shell.md): ≥1024px docked
@@ -133,14 +133,14 @@ import { NotificationBell } from '../notification-bell';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class AppSidebar {
-  protected readonly sidebar = inject(SidebarStore);
+  protected readonly sidebar = inject(SidebarFacade);
   protected readonly fleet = inject(FleetStore);
   /** Backs the foot's theme-toggle button (docs/plans/done/VISUAL-REFRESH-PLAN.md Wave 1) — a shared shell
    *  component, not a routed feature page, so `core/ui/architecture.spec.ts`'s "routed page injects
    *  only its facade" guard doesn't scan this file at all (it globs `features/**` only); the
    *  `Settings › Appearance` control (`features/settings/account-settings.ts`) IS a routed page and
    *  goes through `AccountSettingsFacade` instead for exactly that reason. */
-  protected readonly theme = inject(ThemeStore);
+  protected readonly theme = inject(ThemeFacade);
   private readonly auth = inject(AuthStore);
   private readonly liveStore = inject(LiveStore);
   /** Backs the shell rollup dot below (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.2) — the same "shared

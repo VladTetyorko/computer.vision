@@ -8,8 +8,9 @@ import { FleetStore } from '../../../core/fleet/fleet-store';
 import { EventsStore } from '../../../core/events/events-store';
 import { LiveStore } from '../../../core/live/live-store';
 import { VisionApi } from '../../../core/api/vision-api';
-import { SidebarStore } from '../../../core/shell/sidebar-store';
-import { ThemeStore } from '../../../core/shell/theme-store';
+import { SidebarFacade } from '../../../core/shell/sidebar-facade';
+import { provideAppState } from '../../../core/state/app-state';
+import { ThemeFacade } from '../../../core/shell/theme-facade';
 import { SystemStatusStore } from '../../../core/system-status/system-status-store';
 import { NAV_MODES } from '../../../features/hubs/nav-entries';
 import { hasCapability } from '../../../core/auth/auth-logic';
@@ -73,6 +74,7 @@ function render(options: {
 } = {}) {
   TestBed.configureTestingModule({
     providers: [
+      provideAppState(),
       provideRouter([
         { path: 'fly', component: StubPage },
         { path: 'command', component: StubPage },
@@ -91,10 +93,10 @@ function render(options: {
       { provide: VisionApi, useValue: {} },
     ],
   });
-  // `fullBleed` is no longer an input — the route flag reaches the sidebar through `SidebarStore`
+  // `fullBleed` is no longer an input — the route flag reaches the sidebar through `SidebarFacade`
   // (`app.ts` calls `enterRoute` on every NavigationEnd), which layers it under any manual toggle.
   if (options.fullBleed !== undefined) {
-    TestBed.inject(SidebarStore).enterRoute(options.fullBleed);
+    TestBed.inject(SidebarFacade).enterRoute(options.fullBleed);
   }
   const fixture = TestBed.createComponent(AppSidebar);
   fixture.detectChanges();
@@ -240,9 +242,9 @@ describe('AppSidebar — collapse', () => {
     expect(aside.classList.contains('collapsed')).toBe(false);
   });
 
-  it('collapses when SidebarStore.collapsed is toggled', () => {
+  it('collapses when SidebarFacade.collapsed is toggled', () => {
     const fixture = render();
-    TestBed.inject(SidebarStore).toggle();
+    TestBed.inject(SidebarFacade).toggle();
     fixture.detectChanges();
 
     const aside = (fixture.nativeElement as HTMLElement).querySelector('.sidebar')!;
@@ -458,8 +460,8 @@ describe('AppSidebar — shell rollup dot (docs/plans/done/SYSTEM-STATUS-PLAN.md
 });
 
 /**
- * `ThemeStore` is injected directly here (never faked) — the same "exercise the real, simple,
- * `providedIn: 'root'` store" precedent `SidebarStore` already gets throughout this file, since it
+ * `ThemeFacade` is injected directly here (never faked) — the same "exercise the real, simple,
+ * `providedIn: 'root'` boundary" precedent `SidebarFacade` already gets throughout this file, since it
  * is a plain persisted-signal store, not something with an HTTP/SSE dependency graph worth stubbing
  * (contrast `FleetStore`/`EventsStore`/`LiveStore` above, faked purely so the tree can mount).
  */
@@ -471,7 +473,7 @@ describe('AppSidebar — theme toggle (docs/plans/done/VISUAL-REFRESH-PLAN.md F3
     const root = fixture.nativeElement as HTMLElement;
     const toggle = root.querySelector('.theme-toggle') as HTMLButtonElement;
 
-    expect(TestBed.inject(ThemeStore).theme()).toBe('light');
+    expect(TestBed.inject(ThemeFacade).theme()).toBe('light');
     expect(toggle.getAttribute('aria-label')).toBe('Switch to dark theme');
     // Sun glyph is the <circle>-based svg; moon is a bare <path> with no circle — see this
     // component's own doc comment: the icon shows the *current* theme, not the destination.
@@ -479,7 +481,7 @@ describe('AppSidebar — theme toggle (docs/plans/done/VISUAL-REFRESH-PLAN.md F3
     expect(toggle.querySelector('svg path')).toBeNull();
   });
 
-  it('clicking the toggle flips ThemeStore.theme, the button label/glyph, and <html data-theme>', () => {
+  it('clicking the toggle flips ThemeFacade.theme, the button label/glyph, and <html data-theme>', () => {
     const fixture = render();
     const root = fixture.nativeElement as HTMLElement;
     const toggle = root.querySelector('.theme-toggle') as HTMLButtonElement;
@@ -487,7 +489,7 @@ describe('AppSidebar — theme toggle (docs/plans/done/VISUAL-REFRESH-PLAN.md F3
     toggle.click();
     fixture.detectChanges();
 
-    expect(TestBed.inject(ThemeStore).theme()).toBe('dark');
+    expect(TestBed.inject(ThemeFacade).theme()).toBe('dark');
     expect(toggle.getAttribute('aria-label')).toBe('Switch to light theme');
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
     expect(toggle.querySelector('svg path')).not.toBeNull();
@@ -496,7 +498,7 @@ describe('AppSidebar — theme toggle (docs/plans/done/VISUAL-REFRESH-PLAN.md F3
     toggle.click();
     fixture.detectChanges();
 
-    expect(TestBed.inject(ThemeStore).theme()).toBe('light');
+    expect(TestBed.inject(ThemeFacade).theme()).toBe('light');
     expect(toggle.getAttribute('aria-label')).toBe('Switch to dark theme');
     expect(document.documentElement.getAttribute('data-theme')).toBe('light');
     expect(toggle.querySelector('svg circle')).not.toBeNull();
@@ -512,13 +514,13 @@ describe('AppSidebar — theme toggle (docs/plans/done/VISUAL-REFRESH-PLAN.md F3
     expect(toggle).not.toBeNull();
     toggle.click();
     fixture.detectChanges();
-    expect(TestBed.inject(ThemeStore).theme()).toBe('dark');
+    expect(TestBed.inject(ThemeFacade).theme()).toBe('dark');
   });
 
   // Regression guard: the toggle sits inside the brand `<a routerLink="/fly">` (see this file's own
   // class doc). Without `$event.stopPropagation()` in its click handler, the click bubbles to that
   // anchor and the router navigates to /fly — which then auto-collapses the sidebar via
-  // `SidebarStore.enterRoute()` (`app.ts`'s `NavigationEnd` handler), since /fly is full-bleed. A
+  // `SidebarFacade.enterRoute()` (`app.ts`'s `NavigationEnd` handler), since /fly is full-bleed. A
   // theme click must never double as a navigation.
   it('does not navigate — it sits inside the brand <a routerLink="/fly"> and must stop click propagation', async () => {
     const fixture = render();
@@ -533,6 +535,6 @@ describe('AppSidebar — theme toggle (docs/plans/done/VISUAL-REFRESH-PLAN.md F3
     fixture.detectChanges();
 
     expect(router.url).toBe('/assets');
-    expect(TestBed.inject(ThemeStore).theme()).toBe('dark');
+    expect(TestBed.inject(ThemeFacade).theme()).toBe('dark');
   });
 });

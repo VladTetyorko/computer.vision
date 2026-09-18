@@ -2438,3 +2438,77 @@ both `tsconfig.app.json` and `tsconfig.spec.json`. No `features/vision-profiles/
 concurrently on `CvProfile*`/profile-as-patch, a disjoint file scope from this wave).
 
 - **Commit**: `feat(cv-orchestration W9.2): tracks: SSE flip reaches the web store`.
+
+## Status — NGRX-MIGRATION wave N0: the state engine, and two slices to prove it (docs/plans/active/NGRX-MIGRATION-PLAN.md §2/§3, §4 row N0) — 2026-09-18
+
+**What the owner asked for and what was actually missing.** The ask was *"move from injections to the
+signals … as a final result a well structured ngrx application, with all the reducers, actions,
+effects and so on."* The first half was already true and is worth recording so nobody re-does it:
+this SPA has **1 137 `signal`/`computed`/`effect` call sites, zero `BehaviorSubject`/`Subject`, and no
+`zone.js` dependency at all**. Signals are not the gap. The gap is a state **engine** — shared state
+lived in **32 hand-rolled store classes (9 026 lines)** each re-inventing the same five mechanisms
+(private `signal()` + `.asReadonly()` pairs, `async` methods wrapping `VisionApi` in `try/catch`, a
+per-store `run()` that fires one error toast, `PollScheduler` timers that pause while SSE is open, and
+ad-hoc `localStorage` reads), with **38 facades (11 291 lines)** re-exporting those stores wholesale
+(`readonly fleet = inject(FleetStore)`) so templates read `facade.fleet.devices()` and store internals
+leak into HTML. NgRx replaces the five mechanisms; the facade rule in `MODULE.md` closes the leak.
+
+**Why NgRx 21.1.1 and not 22.** 21.x is the last line declaring `@angular/core ^21.0.0`; NgRx 22
+requires Angular 22, which this repo is not on.
+
+**The three foundation pieces** (all in `core/state/`, see `MODULE.md` for the contract):
+`provideAppState()` is deliberately a function rather than an inline block in `app.config.ts`, because
+a spec that needs real state must register *the identical* store — same hydrators, same runtime
+checks — instead of a hand-rolled subset free to drift from what ships. `hydration.ts` makes
+persistence a **meta-reducer**, the plan's §8 risk: an effect that re-reads storage on every action
+double-fires, a meta-reducer keyed on `INIT`/`UPDATE` cannot. `UPDATE` matters as much as `INIT` —
+without it, a slice provided later by a lazy route never hydrates. Router state uses
+`MinimalRouterStateSerializer`: the full `RouterStateSnapshot` carries component classes and
+injectors, and would trip `strictStateSerializability` on the first navigation. All four runtime
+checks are on, deliberately — this app's state is plain data end to end, so a mutation or a
+non-serializable value is a defect, not a trade-off.
+
+**Pilot slices: `theme` and `sidebar`.** Both were `localStorage`-backed root stores, which makes them
+the right pilots — they exercise hydration, effects-own-the-side-effect (the `data-theme` attribute on
+`<html>` is written by an effect, never a reducer), and consumer rewiring, without touching HTTP.
+`sidebar` carried the harder invariant: its collapsed state is a three-layer precedence
+(`override ?? (preference || fullBleed)`) that had to survive as a *pure* function of state
+(`sidebarCollapsed`, exposed through `extraSelectors`), and its persist effect is filtered on
+`!fullBleed` so an operator who never touched the toggle still has no key written — a behaviour the
+old store got by accident and the effect now gets on purpose.
+
+**Facades are named 1:1 with the store they replaced** (`ThemeFacade#theme()`/`setTheme()`,
+`SidebarFacade#collapsed()`/`toggle()`), which is the whole reason a 12-consumer rewiring was
+one line each: `inject(ThemeStore)` → `inject(ThemeFacade)` and nothing else. The legacy classes were
+deleted in the same wave — the plan's §5 step 9, never two engines for one piece of state.
+
+**The guard grew a third concern.** `core/ui/architecture.spec.ts` now also asserts that only a
+`*-facade.ts` **or** a `*.effects.ts` may `inject(Store)`. Its first run failed on the two effects
+files, correctly: an effect reading state through `concatLatestFrom` legitimately holds `Store`, and
+the predicate had to say so. The other two invariants — reducers contain no
+`inject(`/`Date.now(`/`Math.random(`/`localStorage`/`document.`, and every `*.reducer.ts` has a
+sibling `*.actions.ts` and `*.reducer.spec.ts` — passed first try.
+
+**`VisionApi` deliberately stays Promise-shaped until N9** (plan §7). It is 1 802 lines, 162 methods,
+**289 call sites across 70 source files plus 265 in specs**; flipping it now would spend a ~135-file
+blast radius on files this migration is about to delete, and leave the tree half-converted along two
+axes at once. The cost of waiting is cancellation — `switchMap` over `from(promise)` discards a
+superseded result but does not abort the request — and this app polls and does CRUD, it has no
+typeahead, so the difference is nil until N9 makes it exact.
+
+### Tests / build
+
+`npm run test:ci` — **220/220 files, 4 285/4 285 tests green** (+3 files / +24 tests over the 217/4 261
+baseline: `theme.reducer.spec.ts`, `sidebar.reducer.spec.ts` and the two facade specs replacing the
+two deleted store specs). `npx ng build --configuration production` — exit 0.
+
+**Bundle cost, measured honestly.** The first production build *failed* (487.46 kB against a 445 kB
+error budget), so the baseline was measured properly rather than guessed: a detached
+`git worktree add HEAD` with a symlinked `node_modules` builds at **442.45 kB raw / 123.81 kB
+transfer** — i.e. the app was already only 2.5 kB under its own error budget before NgRx existed.
+NgRx itself costs **+45.01 kB raw / +13.31 kB transfer**. `angular.json`'s initial budget moved
+`390/445 kB` → **`500/550 kB`** (a clean 2-line diff). That is a real, deliberate cost of the engine,
+recorded here rather than buried in a budget bump: every wave N1–N9 that deletes a hand-rolled store
+gives some of it back, and the next wave to touch budgets should re-measure rather than assume.
+
+- **Commit**: `feat(ngrx N0): NgRx foundation + theme/sidebar pilot slices`.

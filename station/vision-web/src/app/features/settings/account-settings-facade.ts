@@ -3,7 +3,7 @@ import { AuthStore } from '../../core/auth/auth-store';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { canManageOrg } from '../../core/org/org-logic';
 import { SettingsStore } from '../../core/settings/settings-store';
-import { ThemeStore } from '../../core/shell/theme-store';
+import { ThemeFacade } from '../../core/shell/theme-facade';
 import { ToastService } from '../../core/toast.service';
 
 /**
@@ -33,13 +33,13 @@ export class AccountSettingsFacade {
   readonly settings = inject(SettingsStore);
   readonly fleet = inject(FleetStore);
   /** Backs the page's own "Appearance" section (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/Wave 1) — the same
-   *  `ThemeStore` the sidebar-footer switch calls directly, injected here instead because
+   *  `ThemeFacade` the sidebar-footer switch calls directly, injected here instead because
    *  `AccountSettingsPage` **is** a routed page (`core/ui/architecture.spec.ts`'s "injects only its
    *  facade, never a bare `*Store`" guard scans every `ROUTED_PAGES` entry, and this route is one of
    *  them) — `account-settings.html` reads/writes it as `facade.theme.theme()`/
    *  `facade.theme.setTheme(...)`, the same direct-field idiom `facade.settings`/`facade.fleet`
    *  already use above rather than this class growing passthrough wrapper methods. */
-  readonly theme = inject(ThemeStore);
+  readonly theme = inject(ThemeFacade);
   private readonly auth = inject(AuthStore);
   private readonly toasts = inject(ToastService);
 

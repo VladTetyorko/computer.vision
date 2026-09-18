@@ -42,7 +42,7 @@ interface OverlayHost {
  *     what `UiStore` already solves.
  *  2. **Closes on every `NavigationEnd`** (§1 D2 — "navigate /assets → /devices: BOTH STILL OPEN").
  *     One `Router.events` subscription, owned **here**, not by `app.ts` — unlike
- *     `core/shell/sidebar-store.ts#SidebarStore.enterRoute` (which needs the route's own
+ *     `core/shell/sidebar-facade.ts#SidebarFacade.enterRoute` (which needs the route's own
  *     `data.fullBleed`, a per-navigation *value* only `app.ts`'s own router read has), this rule
  *     needs nothing but the event itself, so the store can be fully self-contained.
  *  3. **Closes on `Escape` and on a click outside the open overlay** (§2.2 rule 3) — one
@@ -66,8 +66,8 @@ interface OverlayHost {
  * see `overlay-store.spec.ts`'s "outside click" suite for this traced through an actual dispatched
  * event, not just asserted.
  *
- * **`providedIn: 'root'`**, like `SidebarStore` (one instance for the one session) — but unlike
- * `SidebarStore`, this class owns its own `Router`/`document` wiring rather than leaning on `app.ts`,
+ * **`providedIn: 'root'`**, like `SidebarFacade` (one instance for the one session) — but unlike
+ * the sidebar slice, this class owns its own `Router`/`document` wiring rather than leaning on `app.ts`,
  * since none of it depends on anything only `app.ts` already has to compute; the store is entirely
  * self-sufficient the moment anything injects it (which happens naturally the first time
  * `identity-chip`/`notification-bell`/the sidebar's mobile sheet mount — all three only ever mount

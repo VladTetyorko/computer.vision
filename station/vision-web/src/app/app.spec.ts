@@ -11,7 +11,8 @@ import type { AuthCapability } from './core/api/models';
 import { EventsStore } from './core/events/events-store';
 import { LiveStore } from './core/live/live-store';
 import { VisionApi } from './core/api/vision-api';
-import { SidebarStore } from './core/shell/sidebar-store';
+import { SidebarFacade } from './core/shell/sidebar-facade';
+import { provideAppState } from './core/state/app-state';
 
 /**
  * `App` pulls in `AppSidebar`, which in turn mounts `IdentityChip`/`NotificationBell`, each with
@@ -93,6 +94,7 @@ function render(
 ) {
   TestBed.configureTestingModule({
     providers: [
+      provideAppState(),
       provideRouter([
         { path: 'fly', component: StubPage, data: { fullBleed: true } },
         { path: 'assets', component: StubPage },
@@ -312,10 +314,10 @@ describe('App shell', () => {
   });
 
   describe('the "[" shortcut', () => {
-    it('toggles SidebarStore.collapsed', () => {
+    it('toggles SidebarFacade.collapsed', () => {
       localStorage.clear();
       render({ topRole: 'PILOT' });
-      const sidebar = TestBed.inject(SidebarStore);
+      const sidebar = TestBed.inject(SidebarFacade);
       expect(sidebar.collapsed()).toBe(false);
 
       document.dispatchEvent(new KeyboardEvent('keydown', { key: '[' }));
@@ -328,7 +330,7 @@ describe('App shell', () => {
     it('is ignored while focus is inside a text input', () => {
       localStorage.clear();
       render({ topRole: 'PILOT' });
-      const sidebar = TestBed.inject(SidebarStore);
+      const sidebar = TestBed.inject(SidebarFacade);
 
       const input = document.createElement('input');
       document.body.appendChild(input);
@@ -341,7 +343,7 @@ describe('App shell', () => {
     it('is ignored while focus is inside a contenteditable region', () => {
       localStorage.clear();
       render({ topRole: 'PILOT' });
-      const sidebar = TestBed.inject(SidebarStore);
+      const sidebar = TestBed.inject(SidebarFacade);
 
       const div = document.createElement('div');
       // `setAttribute`, not the `.contentEditable` IDL property — see `app.ts#isEditableRegion`'s
@@ -357,7 +359,7 @@ describe('App shell', () => {
     it('is ignored when a modifier key is held', () => {
       localStorage.clear();
       render({ topRole: 'PILOT' });
-      const sidebar = TestBed.inject(SidebarStore);
+      const sidebar = TestBed.inject(SidebarFacade);
 
       document.dispatchEvent(new KeyboardEvent('keydown', { key: '[', metaKey: true }));
       expect(sidebar.collapsed()).toBe(false);
@@ -367,7 +369,7 @@ describe('App shell', () => {
       localStorage.clear();
       const fixture = render({ topRole: 'PILOT' });
       const router = TestBed.inject(Router);
-      const sidebar = TestBed.inject(SidebarStore);
+      const sidebar = TestBed.inject(SidebarFacade);
 
       await router.navigateByUrl('/fly');
       fixture.detectChanges();

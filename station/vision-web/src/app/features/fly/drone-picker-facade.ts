@@ -103,7 +103,7 @@ export class DronePickerFacade {
   /** Whether the "Simulated" group's cards are collapsed (docs/plans/active/OPERATOR-UX-3-PLAN.md §2
    * T1's "Hide simulated" toggle) — persisted per operator, mirrors `cockpit-facade.ts#mapVisible`'s
    * own `readPersistedFlag`/`writePersistedFlag` idiom exactly (`core/panel-state.ts`, already used
-   * identically by `live-facade.ts`/`cockpit-facade.ts`/`SidebarStore`/`ThemeStore` — this app's one
+   * identically by `live-facade.ts`/`cockpit-facade.ts`/`SidebarFacade`/`ThemeFacade` — this app's one
    * `localStorage` persistence mechanism for a single boolean/string preference). The group header
    * itself (with its own count) always stays visible; only the card grid beneath it collapses. */
   readonly hideSimulated = signal(readPersistedFlag(HIDE_SIMULATED_KEY, false));

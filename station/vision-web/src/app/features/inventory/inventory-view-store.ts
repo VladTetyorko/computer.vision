@@ -12,10 +12,10 @@ const INVENTORY_VIEW_KEY = 'vision.inventory.view';
 /**
  * The Inventory view row's per-browser memory (docs/plans/active/INVENTORY-REWORK-PLAN.md §5.1,
  * wave W4) — "last view persists per browser", the same single-string-preference shape
- * `core/shell/theme-store.ts#ThemeStore` uses, kept beside the page it belongs to rather than in
+ * `core/shell/state/theme.effects.ts` uses, kept beside the page it belongs to rather than in
  * `core/` because nothing outside `features/inventory/**` has any use for it.
  *
- * **Reads and writes are wrapped, not assumed.** `ThemeStore` goes through
+ * **Reads and writes are wrapped, not assumed.** The theme slice goes through
  * `core/panel-state.ts#readPersistedString`, which touches `localStorage` bare; that is safe enough
  * for a value the app re-derives on every boot, but `localStorage` genuinely throws — a Safari
  * private window, a browser configured to block site data, a page opened from a `file://` origin —
