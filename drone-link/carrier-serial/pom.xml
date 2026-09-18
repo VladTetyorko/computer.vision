@@ -9,21 +9,23 @@
         <relativePath>../../pom.xml</relativePath>
     </parent>
 
-    <artifactId>mavlink-core</artifactId>
-    <name>mavlink-core</name>
-    <description>
-        Reusable, framework-free MAVLink component: transport, codec, session and protocol services.
-        Zero project dependencies by design — see drone-link/mavlink-core/API.md.
-    </description>
+    <artifactId>adapter-carrier-serial</artifactId>
+    <name>adapter-carrier-serial</name>
+    <description>Spring adapter that polls jSerialComm's port list, opens a SerialLink per matched port and registers it on a LinkRegistry — LINK-PAIRING-PLAN.md §3.2 (ground radios and bench cables, hotplug-aware).</description>
 
     <dependencies>
         <dependency>
-            <groupId>io.dronefleet.mavlink</groupId>
-            <artifactId>mavlink</artifactId>
+            <groupId>com.drones</groupId>
+            <artifactId>mavlink-core</artifactId>
         </dependency>
-        <!-- LINK-PAIRING-PLAN.md §3.1: SerialLink's production backend. A plain library
-             (not a framework), allowed here without breaking this module's Spring-free rule:
-             see ArchitectureTest#mavlinkCoreIsSpringFree. -->
+        <dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-context</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.fazecast</groupId>
             <artifactId>jSerialComm</artifactId>

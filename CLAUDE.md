@@ -29,6 +29,8 @@ Each module has a `MODULE.md` (format: `.claude/skills/module-docs/SKILL.md`).
 | adapter-rtsp | `video-input/rtsp/` | RTSP/FFmpeg ingest |
 | adapter-mjpeg | `video-input/mjpeg/` | MJPEG HTTP ingest + TX simulator |
 | adapter-mavlink | `drone-link/mavlink/` | MAVLink 2 UDP telemetry ingest + TX flight-plan simulator |
+| adapter-carrier-udp | `drone-link/carrier-udp/` | Binds the MAVLink lobby UDP socket at boot, registers it on a `LinkRegistry` |
+| adapter-carrier-serial | `drone-link/carrier-serial/` | Hotplug-polls serial ports (jSerialComm), opens/registers a `SerialLink` per matched ground-radio/bench port |
 | adapter-v4l2 | `video-input/v4l2/` | USB/V4L2 local camera ingest (RX only) |
 | adapter-publish-hls | `video-output/publish-hls/` | H.264 RTSP push → mediamtx (HLS viewing) |
 | adapter-discovery | `device-discovery/onvif-mdns-v4l2/` | ONVIF / mDNS / V4L2 scanners |

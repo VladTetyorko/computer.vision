@@ -40,6 +40,7 @@
         <ffmpeg.version>6.1.1-1.5.10</ffmpeg.version>
         <jmdns.version>3.5.9</jmdns.version>
         <dronefleet-mavlink.version>1.1.11</dronefleet-mavlink.version>
+        <jserialcomm.version>2.11.4</jserialcomm.version>
     </properties>
 
     <!-- Responsibility groups, not layer names: each folder answers *what is this for*
@@ -150,6 +151,16 @@
             </dependency>
             <dependency>
                 <groupId>com.drones</groupId>
+                <artifactId>adapter-carrier-udp</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.drones</groupId>
+                <artifactId>adapter-carrier-serial</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>com.drones</groupId>
                 <artifactId>adapter-publish-hls</artifactId>
                 <version>${project.version}</version>
             </dependency>
@@ -249,6 +260,14 @@
                 <groupId>io.dronefleet.mavlink</groupId>
                 <artifactId>mavlink</artifactId>
                 <version>${dronefleet-mavlink.version}</version>
+            </dependency>
+            <!-- LINK-PAIRING-PLAN.md §3.2: SerialLink's (drone-link/mavlink-core) production
+                 backend and drone-link/carrier-serial's port enumeration. Plain library, not a
+                 framework: mavlink-core stays Spring-free with this dependency present. -->
+            <dependency>
+                <groupId>com.fazecast</groupId>
+                <artifactId>jSerialComm</artifactId>
+                <version>${jserialcomm.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>

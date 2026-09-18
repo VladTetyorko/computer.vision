@@ -1,6 +1,11 @@
 package com.drones.vision.adapter.mavlink;
 
 import com.drones.mavlink.session.LinkHealth;
+import com.drones.mavlink.transport.CarrierKind;
+import com.drones.mavlink.transport.LinkDescriptor;
+import com.drones.mavlink.transport.LinkRegistry;
+import com.drones.mavlink.transport.SerialRole;
+import com.drones.mavlink.transport.UdpListenLink;
 import com.drones.vision.kernel.Capability;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.kernel.DeviceId;
@@ -339,12 +344,51 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
         }
     }
 
+    /**
+     * Binds a fresh {@link UdpListenLink} and registers it on a brand-new {@link MavlinkGateway} —
+     * the legacy self-bind path for a {@code udp://host:port} device stream (LINK-PAIRING-PLAN.md
+     * §7: "legacy per-descriptor udp://host:port sources keep working by registering their {@code
+     * UdpListenLink} through {@link LinkRegistry}, never by bypassing it"). {@code
+     * MavlinkGateway}'s own constructor opens no socket; this method is the one place in this class
+     * that still does, and only as a fallback — for the well-known lobby address specifically,
+     * {@code drone-link/carrier-udp}'s boot wiring normally reaches {@link #linkRegistry(int)}
+     * (via this class) before {@link #holdLobby(int)}'s first scheduled sweep does, so this method
+     * is typically never invoked for that address in the deployed app; it stays live for every
+     * other {@code udp://host:port} device stream, and as the fallback when carrier-udp is absent
+     * (e.g. a plain {@code adapter-mavlink} consumer or a unit test).
+     */
     private MavlinkGateway newGateway(String host, int port) {
         try {
-            return new MavlinkGateway(host, port, settings);
+            UdpListenLink link = new UdpListenLink(host, port);
+            MavlinkGateway gateway = new MavlinkGateway(settings);
+            gateway.register(link, new LinkDescriptor(CarrierKind.UDP, SerialRole.NONE, "udp:" + host + ":" + port, 0));
+            return gateway;
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to bind MAVLink gateway on udp://" + host + ":" + port, e);
         }
+    }
+
+    /**
+     * The {@link LinkRegistry} for {@value #DEFAULT_BIND_HOST}{@code :port} — the seam
+     * LINK-PAIRING-PLAN.md §3.2's {@code drone-link/carrier-udp}/{@code carrier-serial} boot wiring
+     * uses to register a link onto this source's shared gateway map without this module exposing
+     * {@link MavlinkGateway} itself (package-private). Computes an <b>empty</b> gateway (zero
+     * links, zero device registrations) into the map if none is bound yet, via the exact same
+     * atomic {@link Map#compute} path {@link #open}/{@link #holdLobby} use — so whichever caller (a
+     * carrier adapter's own boot wiring, or this class's own {@link #holdLobby}/{@link #open}
+     * self-heal fallback) reaches a given bind address first "wins" the one gateway instance every
+     * later caller then shares. Always resolves against {@value #DEFAULT_BIND_HOST}, matching
+     * {@link #intakeStatus(int)}/{@link #holdLobby(int)}'s existing convention.
+     *
+     * @throws IllegalArgumentException if {@code port} is outside {@code [1,65535]}
+     */
+    public LinkRegistry linkRegistry(int port) {
+        if (port <= 0 || port > 65_535) {
+            throw new IllegalArgumentException("port must be in [1,65535], got " + port);
+        }
+        String bindKey = bindKey(DEFAULT_BIND_HOST, port);
+        return gateways.compute(bindKey, (key, existing) ->
+                existing == null || existing.isClosed() ? new MavlinkGateway(settings) : existing);
     }
 
     /**

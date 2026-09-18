@@ -20,7 +20,10 @@
 #                 (cv-service-inference / cv-service-training, "cv-split" profile) is also
 #                 defined below for docs/plans/active/ARCHITECTURE-AUDIT-2026-08-26.md R6 --
 #                 see the split services' own comments.
-#   vision-app  - the Java application (this repo's root ./Dockerfile)
+#   vision-app  - the Java application (this repo's root ./Dockerfile). An opt-in variant
+#                 (vision-app-serial, "serial" profile, LINK-PAIRING-PLAN.md §3.2) adds a
+#                 /dev/serial/by-id device passthrough for drone-link/carrier-serial -- see that
+#                 service's own comment.
 #
 # Resilience demo (docs/plans/done/MVP1-PLAN.md §C9 exit criterion 4): the stack also
 # works with cv-service missing entirely --
@@ -476,7 +479,7 @@ services:
     ports:
       - "50062:50051"
 
-  vision-app:
+  vision-app: &vision-app-base
     build:
       context: .
       dockerfile: Dockerfile
@@ -736,6 +739,36 @@ services:
       # line, always on, since an absent host directory just mounts empty and
       # costs nothing.
       - ${DEMO_CLIPS_DIR:-./clips}:/clips:ro
+
+  # --- Serial carrier hardware passthrough variant (LINK-PAIRING-PLAN.md §3.2/§7, opt-in) ---
+  #
+  # Same build/environment/ports/healthcheck/volumes as vision-app above, via the
+  # &vision-app-base YAML anchor (identical technique to x-cv-service-build/x-cv-service-healthcheck
+  # at the top of this file) -- differing only by the /dev/serial/by-id device passthrough
+  # drone-link/carrier-serial's SerialCarrierConfiguration needs to see ArduPilot/PX4 ground-radio
+  # and bench-cable serial ports from inside the container. vision.carrier.serial.enabled still
+  # defaults to false (application.yaml) even with the device present -- this only makes the
+  # hardware reachable, it does not turn the poller on.
+  #
+  # Compose profiles gate a whole service, never a single field of an always-on one -- there is no
+  # way to attach this device to vision-app itself "only under a profile", so this is a second,
+  # explicitly opt-in service instead, gated behind the "serial" profile exactly like cv-split/scale
+  # above. vision-app (no profile) still always starts on a plain `docker compose up`, so bringing
+  # this up ALONGSIDE it would start two containers racing for the same 8080/14550 host ports --
+  # same reason cv-service-inference/cv-service-training's own comment documents `--scale
+  # cv-service=0`. Run serial mode with:
+  #
+  #   docker compose up -d --scale vision-app=0 --profile serial vision-app-serial
+  #
+  # Most hosts running this compose have no /dev/serial/by-id at all, which is exactly why this
+  # stays a second named service rather than a live edit to vision-app's own device list: an
+  # unconditional `devices:` entry naming a path that does not exist on the host would fail
+  # `docker compose up` outright for everyone else.
+  vision-app-serial:
+    <<: *vision-app-base
+    profiles: ["serial"]
+    devices:
+      - /dev/serial/by-id:/dev/serial/by-id
 
 volumes:
   postgres-data:

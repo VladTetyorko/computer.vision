@@ -15,7 +15,11 @@ import com.drones.mavlink.session.MavlinkSession;
 import com.drones.mavlink.session.MessageFilter;
 import com.drones.mavlink.session.PeerDirectory;
 import com.drones.mavlink.session.Subscription;
+import com.drones.mavlink.transport.LinkDescriptor;
+import com.drones.mavlink.transport.LinkId;
 import com.drones.mavlink.transport.LinkIntake;
+import com.drones.mavlink.transport.LinkPeer;
+import com.drones.mavlink.transport.LinkRegistry;
 import com.drones.mavlink.transport.MavlinkLink;
 import com.drones.mavlink.transport.UdpListenLink;
 
@@ -24,11 +28,12 @@ import com.drones.vision.kernel.Telemetry;
 
 import java.io.IOException;
 import java.lang.System.Logger.Level;
-import java.net.InetSocketAddress;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.SubmissionPublisher;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -43,9 +48,21 @@ import java.util.concurrent.atomic.AtomicReference;
  * core that lets N aircraft coexist on the one well-known GCS port (14550) every telemetry radio
  * pushes to by default.
  *
+ * <h2>{@code implements LinkRegistry} (LINK-PAIRING-PLAN.md §3.1/§7) — no socket of its own</h2>
+ * This class opens <b>no socket, ever</b>. Every {@link MavlinkLink} it carries — the legacy
+ * per-device {@link UdpListenLink} {@link MavlinkTelemetrySource#open}/{@link
+ * MavlinkTelemetrySource#holdLobby} bind, or a link a carrier adapter (drone-link/carrier-udp,
+ * drone-link/carrier-serial) already opened itself — arrives via {@link #register(MavlinkLink,
+ * com.drones.mavlink.transport.LinkDescriptor)} <i>after</i> construction, which delegates to
+ * {@link MavlinkSession#addLink}; {@link #unregister(LinkId)} delegates to {@link
+ * MavlinkSession#removeLink} and, matching that method's own "does not own the link" contract,
+ * never closes the link itself. {@link #close()} is the one exception: closing the <i>whole
+ * gateway</i> closes every link still registered on it, exactly as the pre-LINK-PAIRING single-link
+ * design always closed its one socket.
+ *
  * <h2>What this class owns</h2>
  * <ul>
- *   <li>a {@link UdpListenLink} — binds {@code host:port} immediately, in this constructor;</li>
+ *   <li>zero or more {@link MavlinkLink}s, added via {@link #register} — see above;</li>
  *   <li>a {@link MavlinkSession}, constructed with {@link MavlinkNode#groundStation()} (sysid 255 /
  *       compid 190 -- the same GCS identity this adapter has always used) — the composition root
  *       that owns the link's reader thread, {@link PeerDirectory}, {@link Correlator}, {@link
@@ -133,13 +150,14 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>Not a domain/port type — package-private, owned entirely by {@link MavlinkTelemetrySource},
  * the only class that constructs, registers with, or queries one.
  */
-final class MavlinkGateway {
+final class MavlinkGateway implements LinkRegistry {
 
     private static final System.Logger LOG = System.getLogger(MavlinkGateway.class.getName());
-    /** Reported for the {@code MavlinkLink}-only test seam constructor, which is never a {@link UdpListenLink}. */
+    /** Reported when nothing registered on this gateway is a {@link UdpListenLink}. */
     private static final LinkIntake NO_INTAKE = new LinkIntake(0, 0, null);
 
-    private final MavlinkLink link;
+    private final Map<LinkId, MavlinkLink> registeredLinks = new ConcurrentHashMap<>();
+    private final Map<LinkId, LinkDescriptor> linkDescriptors = new ConcurrentHashMap<>();
     private final MavlinkCoreSettings coreSettings;
     private final MavlinkSession session;
     private final VehicleClaimPolicy claimPolicy;
@@ -155,39 +173,26 @@ final class MavlinkGateway {
     private final AtomicLong framesDecoded = new AtomicLong();
 
     /**
-     * Binds {@code bindHost:port} immediately (throws {@link IOException} on a bind conflict --
-     * unlike the pre-W4 hub, which bound lazily on its own background thread and only ever
-     * surfaced a bind failure asynchronously via {@code onError}; {@code mavlink-core}'s {@link
-     * UdpListenLink} binds synchronously in its own constructor, so this gateway does too and lets
-     * a bind failure propagate synchronously from {@link MavlinkTelemetrySource#open} instead --
-     * see that class's own javadoc).
+     * Builds this gateway with <b>zero</b> links — the session, claim policy, and every dispatcher
+     * subscription exist immediately, but nothing arrives until a caller {@link #register}s at
+     * least one {@link MavlinkLink}. This is the one public constructor (java-clean-code skill §3:
+     * "one public constructor per class" — the pre-LINK-PAIRING socket-opening constructor and the
+     * link-carrying test seam it delegated to are gone; every caller, production or test, now
+     * builds a gateway then calls {@link #register} exactly like a carrier adapter would).
      *
      * @param settings supplies {@link MavlinkSettings#silenceWindow()} (unpinned re-election
      *                 window), {@link MavlinkSettings#maxUnclaimedVehicles()} (bounded unclaimed
      *                 registry cap), and {@link MavlinkSettings#closeJoinTimeout()} (how long
      *                 {@link #close()} awaits the session's reader thread)
      */
-    MavlinkGateway(String bindHost, int port, MavlinkSettings settings) throws IOException {
-        this(new UdpListenLink(bindHost, port), settings);
-    }
-
-    /**
-     * Test-only seam (java-clean-code skill §3's "inject a clock or a backoff bound" allowance):
-     * builds this gateway around an already-constructed {@link MavlinkLink} instead of binding a
-     * fresh {@link UdpListenLink}, so a test can simulate a genuine link failure (FLEET-RADIO-PLAN.md
-     * F7/R4) with a hand-built {@code MavlinkLink} double rather than sabotaging a real socket via
-     * reflection. The production constructor above delegates here rather than duplicating this
-     * body, so the two can never drift apart.
-     */
-    MavlinkGateway(MavlinkLink link, MavlinkSettings settings) {
-        this.link = link;
+    MavlinkGateway(MavlinkSettings settings) {
         this.coreSettings = coreSettings(settings);
         this.session = new MavlinkSession(MavlinkNode.groundStation(), coreSettings);
-        session.addLink(link);
         // FLEET-RADIO-PLAN.md R4/F7: mavlink-core used to swallow a genuine read failure into a
-        // silent reader-thread exit. Wired before any registration exists, so a failure occurring
-        // the instant after bind still reaches every registration this gateway ever accumulates.
-        session.onLinkFailure((linkId, cause) -> handleLinkFailure(cause));
+        // silent reader-thread exit. Wired before any link is registered, so a failure occurring
+        // the instant after the first register() call still reaches every registration this
+        // gateway ever accumulates.
+        session.onLinkFailure(this::handleLinkFailure);
         // MAVLINK-COMMANDS-PLAN.md P2: built before claimPolicy so its onClaimed hook can be wired
         // in below. Unconditional (no settings.onboarding()-style flag) -- see its own javadoc.
         MavlinkStreamNegotiator streamNegotiator = new MavlinkStreamNegotiator(session.sink(), session.correlator(), settings);
@@ -206,6 +211,45 @@ final class MavlinkGateway {
         this.connectRemediator = settings.onboarding().requestMessagesOnConnect()
                 ? new MavlinkConnectRemediator(session.dispatcher(), session.sink(), session.correlator(), settings)
                 : null;
+    }
+
+    /**
+     * {@link LinkRegistry} implementation (LINK-PAIRING-PLAN.md §3.1): adds {@code link} to this
+     * gateway's session and records {@code descriptor} for it. Does not mint a new id — the
+     * returned {@link LinkId} is always {@code link.id()}. Thread-safe: called from whatever thread
+     * a carrier adapter's own wiring/hotplug-poll runs on, independent of the session's reader
+     * threads.
+     *
+     * @throws IllegalArgumentException if a link with this id is already registered (delegated
+     *                                   from {@link MavlinkSession#addLink})
+     */
+    @Override
+    public LinkId register(MavlinkLink link, LinkDescriptor descriptor) {
+        Objects.requireNonNull(link, "link must not be null");
+        Objects.requireNonNull(descriptor, "descriptor must not be null");
+        session.addLink(link);
+        registeredLinks.put(link.id(), link);
+        linkDescriptors.put(link.id(), descriptor);
+        LOG.log(Level.INFO, () -> "Registered " + descriptor.carrier() + " link " + link.id()
+                + " (" + descriptor.label() + ", priority " + descriptor.priority() + ")");
+        return link.id();
+    }
+
+    /**
+     * {@link LinkRegistry} implementation: removes {@code id} from this gateway's session.
+     * Idempotent; never closes the link itself (matches {@link MavlinkSession#removeLink}'s own
+     * "does not own the link" contract) — the caller that registered it is responsible for closing
+     * it once it is done with it.
+     */
+    @Override
+    public void unregister(LinkId id) {
+        Objects.requireNonNull(id, "id must not be null");
+        session.removeLink(id);
+        registeredLinks.remove(id);
+        LinkDescriptor descriptor = linkDescriptors.remove(id);
+        if (descriptor != null) {
+            LOG.log(Level.INFO, () -> "Unregistered link " + id + " (" + descriptor.label() + ")");
+        }
     }
 
     /** Once closed (last registration released), never reused. */
@@ -282,7 +326,7 @@ final class MavlinkGateway {
             // thread.
             stopLobbyHeartbeat();
         }
-        LOG.log(Level.INFO, () -> "MAVLink lobby hold acquired on " + link.id() + "; GCS heartbeat TX started");
+        LOG.log(Level.INFO, () -> "MAVLink lobby hold acquired on " + registeredLinks.keySet() + "; GCS heartbeat TX started");
     }
 
     /**
@@ -296,7 +340,7 @@ final class MavlinkGateway {
             return;
         }
         stopLobbyHeartbeat();
-        LOG.log(Level.INFO, () -> "MAVLink lobby hold released on " + link.id());
+        LOG.log(Level.INFO, () -> "MAVLink lobby hold released on " + registeredLinks.keySet());
         if (claimPolicy.isEmpty()) {
             close();
         }
@@ -362,8 +406,8 @@ final class MavlinkGateway {
      * non-blocking, in-memory operations (no network I/O, no join of the very thread calling this),
      * so running them inline here honors that contract without needing a hand-off to another thread.
      */
-    private void handleLinkFailure(IOException cause) {
-        LOG.log(Level.WARNING, "MAVLink link failed for gateway on link " + link.id() + "; closing its publishers", cause);
+    private void handleLinkFailure(LinkId linkId, IOException cause) {
+        LOG.log(Level.WARNING, "MAVLink link failed for gateway on link " + linkId + "; closing its publishers", cause);
         claimPolicy.closeAllPublishersExceptionally(cause);
         close();
     }
@@ -405,15 +449,21 @@ final class MavlinkGateway {
 
     /**
      * A snapshot of this gateway's telemetry intake (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md
-     * A2/C2) — pre-parse socket counters ({@link LinkIntake}, only meaningful for the production
-     * {@link UdpListenLink} link; a hand-built test-seam {@link MavlinkLink} reports all-zero), how
-     * many of those bytes actually decoded ({@link #framesDecoded}), the lobby hold flag, and who is
+     * A2/C2) — pre-parse socket counters ({@link LinkIntake}, from whichever registered link is a
+     * {@link UdpListenLink}, since that is the only link type this counter exists for today; a
+     * hand-built test-seam {@link MavlinkLink} or a {@code SerialLink} reports all-zero), how many
+     * of those bytes actually decoded ({@link #framesDecoded}), the lobby hold flag, and who is
      * heard/claimed right now. {@code bindAddress} is supplied by the caller rather than derived
      * from {@link MavlinkLink#id()}, which embeds this module's own {@code "udp-listen:"} plumbing
      * this status's field should not leak.
      */
     MavlinkIntakeStatus intakeStatus(String bindAddress) {
-        LinkIntake intake = link instanceof UdpListenLink listen ? listen.intake() : NO_INTAKE;
+        LinkIntake intake = registeredLinks.values().stream()
+                .filter(UdpListenLink.class::isInstance)
+                .map(UdpListenLink.class::cast)
+                .findFirst()
+                .map(UdpListenLink::intake)
+                .orElse(NO_INTAKE);
         List<Integer> unclaimed = unclaimedVehicles().stream().map(UnclaimedVehicle::sysid).toList();
         List<Integer> claimed = claimedVehicles().stream().map(ClaimedVehicle::sysid).toList();
         return new MavlinkIntakeStatus(true, bindAddress, lobbyHeld.get(),
@@ -439,12 +489,17 @@ final class MavlinkGateway {
      * joins that thread, bounded by the settings' close-join timeout) — matching the pre-W4 hub's
      * own shutdown ordering.
      *
-     * <p>Package-private rather than private for exactly one caller besides {@link #unregister}:
+     * <p>Package-private rather than private for exactly one caller besides {@link #unregister(VehicleRegistration)}:
      * {@code MavlinkVehicleConfigurator} opens its own registration-less gateway when it must probe
      * an address no device is streaming from yet, and closes that one itself. The invariant this
      * relaxes is only "gateways die when their last registration goes"; the invariant that matters —
      * <b>never close a gateway you did not open</b> — is enforced by that class's lease, because a
      * borrowed gateway backs a live device's telemetry.
+     *
+     * <p>Closes every link still registered on this gateway (see the class javadoc's "no socket of
+     * its own" section for why that differs from {@link #unregister(LinkId)}, which never closes a
+     * link) — the one place this class still owns link lifetime end-to-end, matching the pre-
+     * LINK-PAIRING single-link design's own "close the socket" behavior generalized to N links.
      */
     void close() {
         if (!closed.compareAndSet(false, true)) {
@@ -456,7 +511,11 @@ final class MavlinkGateway {
         if (connectRemediator != null) {
             connectRemediator.close();
         }
-        link.close();
+        for (MavlinkLink registeredLink : registeredLinks.values()) {
+            registeredLink.close();
+        }
+        registeredLinks.clear();
+        linkDescriptors.clear();
         session.close();
     }
 
@@ -475,9 +534,12 @@ final class MavlinkGateway {
     /**
      * A currently-claimed vehicle's command-TX coordinates (docs/plans/active/DRONE-INFRA-PLAN.md I-e Stage 1):
      * which sysid, its firmware/mavType (for RTL mode-number resolution — {@code null} until a
-     * {@code HEARTBEAT} has actually arrived), and where to send a reply.
+     * {@code HEARTBEAT} has actually arrived), and where to send a reply. {@code sourceAddress} is
+     * a carrier-agnostic {@link LinkPeer} (LINK-PAIRING-PLAN.md §3.1) rather than an {@code
+     * InetSocketAddress} — a serial-carried vehicle has no IP address at all, only {@link
+     * LinkPeer#NONE}.
      */
-    record CommandTarget(int sysid, String firmware, Integer mavType, InetSocketAddress sourceAddress) {
+    record CommandTarget(int sysid, String firmware, Integer mavType, LinkPeer sourceAddress) {
     }
 
     /**

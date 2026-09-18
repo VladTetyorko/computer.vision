@@ -9,7 +9,10 @@ driven adapter for `TelemetrySourcePort` / `FlightCommandPort` / `ManualControlP
 (for `SubsystemStatusPort`/`SubsystemStatus`/`Health`), `drone-link/mavlink-core`,
 `io.dronefleet.mavlink:mavlink` (used only where mavlink-core's contract requires a raw library
 type: message-type dispatch, `MavCmd`/`MavResult`, dialect field annotations, `Heartbeat`) ·
-**Used by:** vision-app
+**Used by:** vision-app (also, indirectly, `drone-link/carrier-udp`/`drone-link/carrier-serial` —
+LINK-PAIRING-PLAN.md §3.2 — via `MavlinkTelemetrySource#linkRegistry(int)`'s `LinkRegistry` return
+type only; neither carrier module has a Maven dependency on this one, `vision-app`'s `CarrierWiring`
+is the sole place that connects them)
 
 **Build/test:** `./mvnw -B -pl drone-link/mavlink -am test`. SITL-gated integration tests skip
 cleanly without a `vision-sitl` docker image; timing-sensitive real-loopback tests poll to their
@@ -57,7 +60,14 @@ there is nothing to structurally prevent here the way Mechanism A's opt-in remed
   intakeStatus(int port)` — the P1/P2 diagnostic read (own Gotchas entry below); always resolves
   against `DEFAULT_BIND_HOST`, so it takes a bare port, mirroring `holdLobby`/`releaseLobby`; throws
   `IllegalArgumentException` outside `[1,65535]`; never throws for a port nothing has ever bound —
-  returns `MavlinkIntakeStatus.unbound(bindAddress)` instead. Package-private: `static bindKey(host, port)`, `bindKeyFor(Device)`,
+  returns `MavlinkIntakeStatus.unbound(bindAddress)` instead. **(LINK-PAIRING-PLAN.md §3.2, new)**
+  `public LinkRegistry linkRegistry(int port)` — the seam `vision-app`'s `CarrierWiring` uses to
+  reach the shared lobby `MavlinkGateway` (as a `LinkRegistry`) without this module exposing its
+  package-private `MavlinkGateway` type itself; resolves/creates against `DEFAULT_BIND_HOST` via the
+  same `gateways.compute` reference-counting path `open`/`holdLobby` use, so whichever caller (a
+  carrier adapter's boot wiring, or this class's own `open`/`holdLobby` self-heal) reaches a bind
+  address first "wins" the shared instance; throws `IllegalArgumentException` outside `[1,65535]`.
+  Package-private: `static bindKey(host, port)`, `bindKeyFor(Device)`,
   `hasActiveHub(bindKey)`, `unclaimedVehicles(bindKey)`, `claimedVehicles(bindKey)`,
   `commandTarget(bindKey, DeviceId)`, `gateway(bindKey)`. `StreamDescriptor.options["sysid"]`
   (lenient int 1–255) pins a device to one sysid; missing/invalid → unpinned. Constructors: `()`,
@@ -65,49 +75,62 @@ there is nothing to structurally prevent here the way Mechanism A's opt-in remed
   per distinct bind address, reference-counted across every device sharing it — `holdLobby`/`releaseLobby`
   share that same reference-counting via the identical `gateways.compute` path `open`/`close` use, always
   at `DEFAULT_BIND_HOST` ("0.0.0.0").
-- `final class MavlinkGateway` (package-private) — one per bind address (`host:port`). Owns a
-  `MavlinkLink` (production: a `UdpListenLink`, binds in its own constructor, throws `IOException`
-  on conflict), a `MavlinkSession` built with `MavlinkNode.groundStation()` (sysid 255/compid 190), a
-  `VehicleClaimPolicy`, a `MavlinkMessageInventory`, and optionally a `MavlinkConnectRemediator`
-  (only when `settings.onboarding().requestMessagesOnConnect()` is `true`) and, **(MAVLINK-COMMANDS-PLAN
+- `final class MavlinkGateway implements LinkRegistry` (package-private) — one per bind address
+  (`host:port`). **(LINK-PAIRING-PLAN.md §3.1/§7) Opens no socket of its own, ever.** Every
+  `MavlinkLink` it carries — the legacy per-device `UdpListenLink` `MavlinkTelemetrySource#open`/
+  `holdLobby` binds, or a link a carrier adapter (`drone-link/carrier-udp`, `drone-link/carrier-serial`)
+  already opened itself — arrives via `LinkId register(MavlinkLink, LinkDescriptor)` (delegates to
+  `MavlinkSession#addLink`, logs INFO; returns `link.id()`, never mints a new one) *after*
+  construction; `void unregister(LinkId)` delegates to `MavlinkSession#removeLink` and, matching that
+  method's own "does not own the link" contract, never closes the link itself. `close()` is the one
+  exception: closing the whole gateway closes every still-registered link, exactly as the
+  pre-LINK-PAIRING single-link design always closed its one socket. Holds `Map<LinkId, MavlinkLink>
+  registeredLinks` + `Map<LinkId, LinkDescriptor> linkDescriptors`, a `MavlinkSession` built with
+  `MavlinkNode.groundStation()` (sysid 255/compid 190), a `VehicleClaimPolicy`, a
+  `MavlinkMessageInventory`, and optionally a `MavlinkConnectRemediator` (only when
+  `settings.onboarding().requestMessagesOnConnect()` is `true`) and, **(MAVLINK-COMMANDS-PLAN
   P2, always)**, a `MavlinkStreamNegotiator`, built before `VehicleClaimPolicy` so its `negotiate(int)`
   method reference can be handed in as the claim policy's `onClaimed` hook. Demultiplexes every
   dispatched frame by sysid only (never source address — a companion computer relaying several
   vehicles is one physical source for all of them). `register(DeviceId, Integer pinnedSysid,
-  SubmissionPublisher<Telemetry>): VehicleRegistration`, `unregister(...): boolean` (true once it has
-  actually closed the gateway — **since Z2b**, an empty claim policy alone is no longer sufficient; a
-  live lobby hold (`lobbyHeld.get()`) suppresses the close exactly like a live device registration
-  always has), `isClosed()`, `unclaimedVehicles()`, `claimedVehicles()`,
+  SubmissionPublisher<Telemetry>): VehicleRegistration` (a *separate*, device-claim-registration
+  overload — unrelated to the `LinkRegistry` `register` above, distinguished by argument shape),
+  `unregister(VehicleRegistration): boolean` (true once it has actually closed the gateway —
+  **since Z2b**, an empty claim policy alone is no longer sufficient; a live lobby hold
+  (`lobbyHeld.get()`) suppresses the close exactly like a live device registration always has),
+  `isClosed()`, `unclaimedVehicles()`, `claimedVehicles()`,
   `commandTarget(DeviceId)`, `sink()`/`correlator()`/`peers()` (session collaborators for a TX class
   to build a mavlink-core service on), `messageInventory()`, `Map<DeviceId, LinkHealth.Health>
   claimedVehicleHealth()` (**FLEET-RADIO R4/D4** — was `List<LinkHealth.Health>`; keyed by the
   claiming device, resolving each `ClaimedVehicle`'s `PeerId` and querying `session.health().of(...)`
-  per vehicle rather than returning one undifferentiated list). **(SOURCE-ONBOARDING-2 A2, new)**
-  `MavlinkIntakeStatus intakeStatus(String bindAddress)` (package-private) — composes `link instanceof
-  UdpListenLink listen ? listen.intake() : NO_INTAKE` (mavlink-core's pre-parse `LinkIntake` — all-zero
-  for the `MavlinkLink`-only test-seam constructor, since a hand-built double has no socket to count)
-  with this gateway's own `framesDecoded` counter and the current unclaimed/claimed sysid lists. A
-  private `AtomicLong framesDecoded` is incremented as the very first statement of `onFrame(MavFrame)`
-  — every frame `mavlink-core` has already resynced/decoded and dispatched, regardless of whether
-  `VehicleClaimPolicy` finds a claiming registration; this is what makes `intakeStatus` able to answer
-  P2 ("bytes arrive, nothing decodes") independent of claim status. `close()` (package-private —
-  besides `unregister`, only `MavlinkVehicleConfigurator` calls it, for a self-bound probe gateway
-  it opened itself). **(ZERO-CONFIG-ONBOARDING Z2b, new)** `void holdLobby()` / `void releaseLobby()`
-  / `boolean isLobbyHeld()` — the claim-free hold and its GCS heartbeat TX (own Gotchas entry below).
-  Constructors: `(String bindHost, int port, MavlinkSettings)` (production,
-  delegates to the one below via `new UdpListenLink(bindHost, port)`) and package-private
-  `(MavlinkLink, MavlinkSettings)` — a **FLEET-RADIO R4 test seam** (java-clean-code §3's sanctioned
-  single-seam exception): widening the field type from `UdpListenLink` to `MavlinkLink` cost nothing
-  (the field was already used only through methods `MavlinkLink` itself declares) and let
-  `MavlinkGatewayLinkFailureTest` exercise the real `MavlinkGateway`→`VehicleClaimPolicy`→
-  `SubmissionPublisher` chain end-to-end against a hand-built failing link, instead of sabotaging a
-  real `DatagramSocket` via reflection. **(FLEET-RADIO R4/F7)** wires
-  `session.onLinkFailure((linkId, cause) -> handleLinkFailure(cause))` in this constructor;
-  `handleLinkFailure` logs a WARNING, calls `claimPolicy.closeAllPublishersExceptionally(cause)`
-  (**D5**), then `close()`s the gateway itself. Nested records `UnclaimedVehicle(int sysid, String
+  per vehicle rather than returning one undifferentiated list). **(SOURCE-ONBOARDING-2 A2)**
+  `MavlinkIntakeStatus intakeStatus(String bindAddress)` (package-private) — **(LINK-PAIRING L1,
+  updated)** now filters `registeredLinks.values()` for any `UdpListenLink` instance (there may be
+  zero, one — the legacy per-device bind or carrier-udp's registered lobby link — or, in principle,
+  more) rather than checking one single field, summing `intake()` across every match (`NO_INTAKE`,
+  all-zero, when none is a `UdpListenLink`) together with this gateway's own `framesDecoded` counter
+  and the current unclaimed/claimed sysid lists. A private `AtomicLong framesDecoded` is incremented
+  as the very first statement of `onFrame(MavFrame)` — every frame `mavlink-core` has already
+  resynced/decoded and dispatched, regardless of whether `VehicleClaimPolicy` finds a claiming
+  registration; this is what makes `intakeStatus` able to answer P2 ("bytes arrive, nothing decodes")
+  independent of claim status. `close()` (package-private — besides `unregister`, only
+  `MavlinkVehicleConfigurator` calls it, for a self-bound probe gateway it opened itself).
+  **(ZERO-CONFIG-ONBOARDING Z2b)** `void holdLobby()` / `void releaseLobby()` / `boolean
+  isLobbyHeld()` — the claim-free hold and its GCS heartbeat TX (own Gotchas entry below).
+  **One public constructor (java-clean-code §3): `MavlinkGateway(MavlinkSettings settings)`, zero
+  links** — the pre-LINK-PAIRING production ctor (`(String bindHost, int port, MavlinkSettings)`,
+  which bound a `UdpListenLink` itself) and the FLEET-RADIO R4 `(MavlinkLink, MavlinkSettings)` test
+  seam are both **gone**; every caller (production and test alike) now constructs a gateway bare and
+  calls `register` — see the Gotchas entry below for what this changed at every call site.
+  **(FLEET-RADIO R4/F7, unchanged)** still wires `session.onLinkFailure((linkId, cause) ->
+  handleLinkFailure(cause))` in the constructor; `handleLinkFailure` logs a WARNING, calls
+  `claimPolicy.closeAllPublishersExceptionally(cause)` (**D5**), then `close()`s the gateway itself
+  regardless of which link failed. Nested records `UnclaimedVehicle(int sysid, String
   firmware, Integer mavType, Instant lastHeard)`, `ClaimedVehicle(int sysid, DeviceId deviceId,
   String firmware, Integer mavType, Instant lastHeard)`, `CommandTarget(int sysid, String firmware,
-  Integer mavType, InetSocketAddress sourceAddress)`.
+  Integer mavType, LinkPeer sourceAddress)` (**LINK-PAIRING L1** — was `InetSocketAddress`;
+  `VehicleClaimPolicy`'s private `factsFor(int sysid)` resolves it as `peer.address()`, already a
+  `LinkPeer` off `PeerDirectory`, so this was a net deletion of a conversion, not an addition of one).
 - `final class VehicleClaimPolicy` (package-private) — project policy: which `Device` owns which
   sysid (pinned/unpinned claim + re-election — see Gotchas). Constructor takes an
   `IntConsumer onClaimed` (**MAVLINK-COMMANDS-PLAN P2**, one call site: `MavlinkGateway` passes
@@ -429,6 +452,27 @@ one `FlightState`-contributing row above has fired at least once.
 - **`udp://host:port` means listen, not connect (RX).** A telemetry radio or SITL instance *pushes*
   datagrams to this app; `MavlinkTelemetrySource` never dials out. `host` is the local bind address
   (wildcard when blank), `port` the local bind port.
+- **(LINK-PAIRING-PLAN.md §3.2/§7) `MavlinkGateway.register(DeviceId, ...)`'s production `newGateway`
+  helper still opens a `UdpListenLink` itself, for one narrow, deliberate reason: a per-device pinned
+  `udp://host:port` stream (a `Device` whose `StreamDescriptor` names a bind address other than the
+  shared lobby's) has no carrier adapter watching for it — `carrier-udp`'s `UdpCarrierConfiguration`
+  binds exactly one well-known lobby address at boot, nothing more.** §7's ruling ("carrier-udp is
+  the only creator of the *lobby* `UdpListenLink`") is scoped to the lobby specifically; this legacy
+  path is typically dead code for that one address once carrier-udp wins the boot-time race
+  (`gateways.compute`'s first caller for a given bind key keeps the instance — see the Z2b Gotchas
+  below), but stays live, on purpose, both for a per-device stream and as a same-process fallback if
+  carrier-udp is absent from the classpath entirely (a deployment that only wants
+  `adapter-mavlink`, without either carrier module — see each carrier's own MODULE.md's "Depends on
+  mavlink-core (+Spring) only" note for why that composition is possible at all).
+- **`MavlinkGateway`'s sole public constructor now takes only `MavlinkSettings` — no link, ever
+  (LINK-PAIRING L1).** Every call site that used to pass a bind host/port or a hand-built
+  `MavlinkLink` into the constructor now constructs bare and calls `register(link, descriptor)`
+  afterward — this is `java-clean-code` §3's "update the call sites, don't add an overload" rule
+  applied literally: `MavlinkGatewayLinkFailureTest`/`MavlinkLobbyHoldTest`'s hand-built `FailingLink`
+  test doubles register with a throwaway `LinkDescriptor(CarrierKind.SERIAL, SerialRole.NONE,
+  "<label>", 0)` (the carrier/role/priority are inert for these tests — only the failure path is
+  exercised), and `newGateway` (above) registers its own `UdpListenLink` the same way production code
+  now must.
 - **(OPERATOR-UX-4 N1 — fixed) No GPS fix means no position, never `{0,0}`.** A real ESP32 rover
   with no GPS fix sends `GLOBAL_POSITION_INT` with `lat=lon=0` regardless — before this fix, this
   decoder recorded that unconditionally, so warehouse's `lastKnownPosition` became `{0,0,0}` and the
@@ -641,14 +685,18 @@ one `FlightState`-contributing row above has fired at least once.
 
 ### FLEET-RADIO R4 Gotchas
 
-- **`MavlinkGateway`'s field was widened from `UdpListenLink` to the `MavlinkLink` interface purely
-  to get a clean test seam — this cost nothing in production.** Every use of the field
-  (`close()`, `id()`, passing it to `session.addLink(link)`) was already declared on `MavlinkLink`
-  itself; nothing about production behavior changed. The alternative considered and rejected was
-  reflection-based sabotage of a real `DatagramSocket` (closing it out from under `UdpSocketIo`/
-  `UdpListenLink` via two or more private-field hops) to force a genuine `IOException` for
-  `MavlinkGatewayLinkFailureTest` — rejected as fragile and invasive compared to a one-parameter
-  package-private constructor overload injecting a hand-built `MavlinkLink` double.
+- **(superseded by LINK-PAIRING L1 — kept for the reasoning, not the mechanism) `MavlinkGateway`
+  originally had a single `UdpListenLink` field, widened to the `MavlinkLink` interface purely to get
+  a clean test seam — this cost nothing in production, since every use of the field (`close()`,
+  `id()`, passing it to `session.addLink(link)`) was already declared on `MavlinkLink` itself.** The
+  field is gone now — LINK-PAIRING L1 replaced it with `Map<LinkId, MavlinkLink> registeredLinks`,
+  populated only via `register(MavlinkLink, LinkDescriptor)` after construction (see the API surface
+  and the LINK-PAIRING Gotchas entry above) — but the *reasoning* this bullet records still holds and
+  is worth keeping: the alternative considered and rejected, both then and for L1's own
+  `MavlinkGatewayLinkFailureTest`/`MavlinkLobbyHoldTest` doubles, was reflection-based sabotage of a
+  real `DatagramSocket` (closing it out from under `UdpSocketIo`/`UdpListenLink` via two or more
+  private-field hops) to force a genuine `IOException` — rejected as fragile and invasive compared to
+  a hand-built `MavlinkLink` double registered like any other link.
 - **`VehicleClaimPolicy.closeAllPublishersExceptionally` closes *every* currently-registered
   publisher on the gateway, not just one device's.** This is correct for what F7 actually models: a
   `MavlinkSession`'s reader thread failing means the one shared UDP socket for that bind address is
@@ -1200,3 +1248,13 @@ additive read surfaces, consistent with this wave's accepted decision that new e
 default. `./mvnw -B -pl drone-link/mavlink test` (after `-pl drone-link/mavlink-core install
 -DskipTests` to pick up A1's `LinkIntake` from a stale `~/.m2` jar) — **273 tests**, all green,
 foreground/blocking run (2026-09-04).
+
+**`docs/plans/active/LINK-PAIRING-PLAN.md` wave L1 done.** `MavlinkGateway` now `implements
+LinkRegistry` and opens no socket of its own — see the API surface and Gotchas entries above for the
+full contract change (`register`/`unregister` replacing the deleted `(String, int, MavlinkSettings)`
+production constructor and the FLEET-RADIO R4 `(MavlinkLink, MavlinkSettings)` test seam;
+`CommandTarget.sourceAddress` now `LinkPeer`, not `InetSocketAddress`; the new `linkRegistry(int)`
+accessor `vision-app`'s `CarrierWiring` uses). New `LinkRegistryTest` (6, exercises the contract
+directly since `mavlink-core` ships no concrete `LinkRegistry` implementation of its own).
+`MavlinkGatewayLinkFailureTest`/`MavlinkLobbyHoldTest` updated for the new construct-then-register
+shape. `./mvnw -B -pl drone-link/mavlink test` — **279 tests**, all green (2026-09-18).

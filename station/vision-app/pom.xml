@@ -94,6 +94,23 @@
             <groupId>com.drones</groupId>
             <artifactId>mavlink-core</artifactId>
         </dependency>
+        <!--
+          drone-link/carrier-udp, drone-link/carrier-serial (LINK-PAIRING-PLAN.md §3.2): unlike
+          every other adapter here, each of these two ships its own Spring @Configuration class
+          (UdpCarrierConfiguration/SerialCarrierConfiguration), auto-detected by @SpringBootApplication's
+          component scan the moment they are on the classpath — CarrierWiring supplies only the
+          LinkRegistry bean they inject, it never @Imports either class directly. Compile scope for
+          the same reason mavlink-core is compile-scoped just above: runtime classloading of
+          @Configuration/@Scheduled classes, not merely test compilation.
+        -->
+        <dependency>
+            <groupId>com.drones</groupId>
+            <artifactId>adapter-carrier-udp</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.drones</groupId>
+            <artifactId>adapter-carrier-serial</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.drones</groupId>
             <artifactId>adapter-v4l2</artifactId>

@@ -6,9 +6,9 @@ import com.drones.mavlink.SysId;
 import com.drones.mavlink.session.HeartbeatInfo;
 import com.drones.mavlink.session.Peer;
 import com.drones.mavlink.session.PeerDirectory;
+import com.drones.mavlink.transport.LinkPeer;
 import com.drones.vision.kernel.DeviceId;
 
-import java.net.InetSocketAddress;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -273,11 +273,11 @@ final class VehicleClaimPolicy {
         HeartbeatInfo heartbeat = peer.heartbeat();
         String firmware = heartbeat == null ? null : MavlinkTelemetryDecoder.firmwareLabel(heartbeat.autopilot());
         Integer mavType = heartbeat == null ? null : heartbeat.mavType();
-        InetSocketAddress sourceAddress = new InetSocketAddress(peer.address().host(), peer.address().port());
+        LinkPeer sourceAddress = peer.address(); // net deletion, not addition -- Peer.address() is already a LinkPeer
         return new VehicleFacts(firmware, mavType, peer.lastHeard(), sourceAddress);
     }
 
     /** {@code sourceAddress} is {@code null} only when {@code sysid} has never actually been heard (see {@link #peerFor}). */
-    private record VehicleFacts(String firmware, Integer mavType, Instant lastHeard, InetSocketAddress sourceAddress) {
+    private record VehicleFacts(String firmware, Integer mavType, Instant lastHeard, LinkPeer sourceAddress) {
     }
 }

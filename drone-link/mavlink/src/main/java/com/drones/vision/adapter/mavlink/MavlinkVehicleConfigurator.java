@@ -12,6 +12,10 @@ import com.drones.mavlink.service.ParameterService;
 import com.drones.mavlink.service.CommandService;
 import com.drones.mavlink.session.HeartbeatInfo;
 import com.drones.mavlink.session.Peer;
+import com.drones.mavlink.transport.CarrierKind;
+import com.drones.mavlink.transport.LinkDescriptor;
+import com.drones.mavlink.transport.SerialRole;
+import com.drones.mavlink.transport.UdpListenLink;
 import com.drones.vision.flight.domain.model.MessageIntervalOutcome;
 import com.drones.vision.flight.domain.model.MessageObservation;
 import com.drones.vision.flight.domain.model.ParameterAliases;
@@ -497,6 +501,10 @@ public final class MavlinkVehicleConfigurator implements VehicleConfigPort {
      * Borrows the gateway already bound to {@code target}, or opens a temporary one. {@link #close}
      * closes only what this lease itself opened — closing a borrowed gateway would tear down a
      * registered device's live telemetry.
+     *
+     * <p>LINK-PAIRING-PLAN.md §7: {@link MavlinkGateway} itself opens no socket — this method binds
+     * the probe's {@link UdpListenLink} directly and {@link MavlinkGateway#register registers} it,
+     * exactly like a carrier adapter would, rather than relying on a socket-opening constructor.
      */
     private LinkLease lease(LinkTarget target) {
         MavlinkGateway existing = telemetrySource.gateway(target.bindKey());
@@ -504,7 +512,11 @@ public final class MavlinkVehicleConfigurator implements VehicleConfigPort {
             return LinkLease.borrowed(existing);
         }
         try {
-            return LinkLease.selfBound(new MavlinkGateway(target.host(), target.port(), settings));
+            UdpListenLink link = new UdpListenLink(target.host(), target.port());
+            MavlinkGateway gateway = new MavlinkGateway(settings);
+            gateway.register(link, new LinkDescriptor(CarrierKind.UDP, SerialRole.NONE,
+                    "onboarding-probe:" + target.address(), 0));
+            return LinkLease.selfBound(gateway);
         } catch (IOException e) {
             LOG.log(System.Logger.Level.WARNING,
                     () -> "MAVLink onboarding could not bind " + target.address() + ": " + e);

@@ -17,6 +17,8 @@
     <modules>
         <module>mavlink-core</module>
         <module>mavlink</module>
+        <module>carrier-udp</module>
+        <module>carrier-serial</module>
     </modules>
 
 </project>

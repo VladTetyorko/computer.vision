@@ -111,6 +111,11 @@ class ArchitectureTest {
     // slice (rtsp, mjpeg, mavlink, v4l2, publishhls, cvgrpc, discovery,
     // persistence, simulation) pairwise. Adding a second rule with the same meaning would
     // be redundant, not additive, and that rule is one of the five left unmodified per §6.4.
+    //
+    // LINK-PAIRING-PLAN.md §3.2 (wave L1) added two more slices this same generic rule covers
+    // for free: `com.drones.vision.adapter.carrierudp`/`carrierserial` (drone-link/carrier-udp,
+    // drone-link/carrier-serial) — each depends only on mavlink-core + Spring, never on
+    // `com.drones.vision.adapter.mavlink` or on each other, exactly like every other pair above.
 
     @Test
     void restControllersLiveOnlyInApiControllerOrProxyPackage() {
@@ -126,7 +131,18 @@ class ArchitectureTest {
 
     @Test
     void configurationPropertiesClassesLiveOnlyInAppConfigPropertiesPackage() {
+        // The two exempted packages (LINK-PAIRING-PLAN.md §3.2, wave L1) are self-contained Spring
+        // adapter modules -- drone-link/carrier-udp, drone-link/carrier-serial -- that must never
+        // depend on vision-app (see each one's own "Depends on mavlink-core (+Spring) only" javadoc),
+        // so each declares its OWN `@ConfigurationProperties` record under its own
+        // `com.drones.vision.adapter.*` package instead of binding against a type declared here
+        // (CarrierSerialProperties, CarrierSerialBenchProperties). Every other `@ConfigurationProperties`
+        // class anywhere under `com.drones.vision` -- a context module, another adapter, vision-app
+        // itself -- is still required to live in the one designated package; only these two carrier
+        // packages are carved out, narrowly, by name.
         ArchRule rule = classes().that().areAnnotatedWith(ConfigurationProperties.class)
+                .and().resideOutsideOfPackages(
+                        "com.drones.vision.adapter.carrierudp..", "com.drones.vision.adapter.carrierserial..")
                 .should().resideInAPackage("com.drones.vision.app.config.properties");
         rule.check(classes);
     }

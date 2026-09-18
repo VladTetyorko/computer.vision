@@ -1,9 +1,12 @@
 package com.drones.vision.adapter.mavlink;
 
 import com.drones.mavlink.transport.ByteChunk;
+import com.drones.mavlink.transport.CarrierKind;
+import com.drones.mavlink.transport.LinkDescriptor;
 import com.drones.mavlink.transport.LinkId;
 import com.drones.mavlink.transport.LinkPeer;
 import com.drones.mavlink.transport.MavlinkLink;
+import com.drones.mavlink.transport.SerialRole;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.Telemetry;
 
@@ -23,11 +26,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * FLEET-RADIO-PLAN.md F7/D5, exercised through {@link MavlinkGateway}'s real production wiring
- * (the {@link MavlinkGateway#MavlinkGateway(MavlinkLink, MavlinkSettings)} test seam swaps in a
- * hand-built {@link MavlinkLink} in place of a real {@code UdpListenLink}, but everything
- * downstream of that -- {@link com.drones.mavlink.session.MavlinkSession}, {@link
- * VehicleClaimPolicy}, this class's own {@code handleLinkFailure} -- is the exact same code path
- * production traffic runs through).
+ * (a hand-built {@link MavlinkLink} is {@link MavlinkGateway#register} registered in place of a
+ * real {@code UdpListenLink}, but everything downstream of that -- {@link
+ * com.drones.mavlink.session.MavlinkSession}, {@link VehicleClaimPolicy}, this class's own {@code
+ * handleLinkFailure} -- is the exact same code path production traffic runs through).
  *
  * <p>Before R4, a genuine socket failure was swallowed by {@code MavlinkSession}'s reader thread
  * (a WARNING log, then silent return) and every registered device's {@link SubmissionPublisher}
@@ -41,7 +43,8 @@ class MavlinkGatewayLinkFailureTest {
     @Test
     void aGenuineLinkFailureClosesEveryRegisteredPublisherExceptionallyAndPromptly() throws Exception {
         FailingLink link = new FailingLink();
-        MavlinkGateway gateway = new MavlinkGateway(link, MavlinkSettings.defaults());
+        MavlinkGateway gateway = new MavlinkGateway(MavlinkSettings.defaults());
+        gateway.register(link, new LinkDescriptor(CarrierKind.SERIAL, SerialRole.NONE, "failing-test-link", 0));
         try {
             SubmissionPublisher<Telemetry> publisher = new SubmissionPublisher<>();
             CountDownLatch errored = new CountDownLatch(1);
@@ -86,7 +89,8 @@ class MavlinkGatewayLinkFailureTest {
     @Test
     void anOrdinaryUnregisterNeverClosesThePublisherExceptionally() {
         FailingLink link = new FailingLink(); // never told to fail
-        MavlinkGateway gateway = new MavlinkGateway(link, MavlinkSettings.defaults());
+        MavlinkGateway gateway = new MavlinkGateway(MavlinkSettings.defaults());
+        gateway.register(link, new LinkDescriptor(CarrierKind.SERIAL, SerialRole.NONE, "failing-test-link", 0));
         SubmissionPublisher<Telemetry> publisher = new SubmissionPublisher<>();
         AtomicReference<Throwable> receivedError = new AtomicReference<>();
         publisher.subscribe(new Flow.Subscriber<>() {

@@ -749,6 +749,42 @@ vision:
       # vision discovering its own video output as if it were a newly found camera.
       path-prefix: ingest/
 
+  # --- drone-link/carrier-udp, drone-link/carrier-serial: MAVLink links by transport
+  # (LINK-PAIRING-PLAN.md §3.2) ---
+  carrier:
+    # carrier-udp's UdpCarrierConfiguration has no config surface of its own -- it binds the
+    # existing lobby address (vision.mavlink.bind-host / vision.discovery.mavlink-port above) and
+    # registers it on the shared LinkRegistry; there is deliberately no vision.carrier.udp.* here.
+    serial:
+      # Master switch. False by default: serial hardware access needs a device passthrough this
+      # compose file only adds under the "serial" profile (see docker-compose.yml) -- most hosts
+      # running this compose have no /dev/serial/by-id at all. Commented out to document the
+      # default rather than override it.
+      # enabled: false
+      # How often SerialCarrierConfiguration re-samples SerialPort.getCommPorts() for hotplug
+      # appear/disappear.
+      # poll-interval: 2s
+      # Baud rate for a matched port with no entry in baud-overrides below -- ArduPilot/PX4's own
+      # common SiK-radio telemetry default.
+      # default-baud-rate: 57600
+      # Glob patterns (only "*" is special, case-insensitive) tested against a candidate port's
+      # device path (e.g. /dev/ttyUSB0 on Linux), human-readable description, and bare system name.
+      # An empty allow list means "everything not denied"; deny is checked first and always wins,
+      # even over an overlapping allow entry.
+      # allow: []
+      # deny: []
+      # Per-port baud override, keyed by the same identifier allow/deny match against -- prefer the
+      # stable /dev/serial/by-id/<id> symlink over a bare /dev/ttyUSBn, which can renumber on replug.
+      # baud-overrides: {}
+      # Which matched ports are a bench cable (SerialRole.BENCH) rather than a ground radio
+      # (SerialRole.GROUND_RADIO) -- declared by glob pattern against the same three identifiers
+      # as allow/deny above, never guessed from USB vendor/product id (a cheap USB-serial bridge
+      # chip is shared by ground radios and bench dongles alike). A bench link always registers
+      # at priority 0 and, per L3 election policy, is never auto-elected regardless of that
+      # number -- only an explicit operator pin activates one.
+      # bench:
+      #   patterns: []
+
   # --- vision-api: server-push data plane (see docs/plans/done/REALTIME-PLAN.md §4) ---
   live:
     # Whether WiringConfiguration wires LiveUpdatePublisherPort to the real

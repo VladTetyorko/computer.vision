@@ -5,9 +5,12 @@ import com.drones.mavlink.SysId;
 import com.drones.mavlink.codec.FrameReader;
 import com.drones.mavlink.codec.FrameWriter;
 import com.drones.mavlink.transport.ByteChunk;
+import com.drones.mavlink.transport.CarrierKind;
+import com.drones.mavlink.transport.LinkDescriptor;
 import com.drones.mavlink.transport.LinkId;
 import com.drones.mavlink.transport.LinkPeer;
 import com.drones.mavlink.transport.MavlinkLink;
+import com.drones.mavlink.transport.SerialRole;
 import com.drones.mavlink.transport.UdpTargetLink;
 
 import com.drones.vision.kernel.Capability;
@@ -228,7 +231,8 @@ class MavlinkLobbyHoldTest {
     @Timeout(value = 15, unit = TimeUnit.SECONDS)
     void aGenuineLinkFailureClosesTheGatewayRegardlessOfTheLobbyHoldAndStopsItsHeartbeatScheduler() throws Exception {
         FailingLink link = new FailingLink();
-        MavlinkGateway gateway = new MavlinkGateway(link, MavlinkSettings.defaults());
+        MavlinkGateway gateway = new MavlinkGateway(MavlinkSettings.defaults());
+        gateway.register(link, new LinkDescriptor(CarrierKind.SERIAL, SerialRole.NONE, "lobby-hold-failing-test-link", 0));
         try {
             gateway.holdLobby();
             assertTrue(gateway.isLobbyHeld());
