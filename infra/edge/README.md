@@ -46,3 +46,9 @@ recently" — the asset's last-known telemetry goes stale, shown wherever `Asset
 summary renders staleness). The companion-computer recipe additionally carries video, whose
 loss is a separate, visible signal (stream ends, viewer shows the usual "no signal" state) —
 see `companion-rpi.md`'s own failure-modes section for that recipe's specifics.
+
+## Ground radio dongles (LINK-PAIRING)
+
+A fourth path: any USB radio that behaves like a SiK modem (transparent MAVLink + `RADIO_STATUS`) is
+picked up by the station's serial carrier by hotplug — see `ground-radio.md` for the contract the
+Arduino + nRF24 dongle must meet, and `drone-link/carrier-serial/MODULE.md` for the station side.
