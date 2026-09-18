@@ -2,7 +2,7 @@ import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angul
 import { VisionApi } from '../api/vision-api';
 import type { DetectionResult, StreamTracksResponse, WorldObject } from '../api/models';
 import { PollScheduler } from '../poll-scheduler';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import { cvStatus, deriveChips, freshResults } from './detections-logic';
 import { type AssetScopedTransport, resolveAssetScopedTransport, trackSessionKey } from '../live/live-fallback-logic';
 import { detectionsPausedNotice } from '../../shared/player/detection-overlay-logic';
@@ -36,7 +36,7 @@ const DETECTIONS_LIMIT = 50;
 /**
  * Tracks one stream's recent detections for the Live page's chip strip + CV status dot
  * (docs/plans/done/MVP1-PLAN.md §C8 bullet 4): polls `GET /api/streams/{streamId}/detections` every 2s while
- * visible, or — when `assetId` is given and {@link LiveStore} is open (docs/plans/done/REALTIME-PLAN.md §4,
+ * visible, or — when `assetId` is given and {@link LiveFacade} is open (docs/plans/done/REALTIME-PLAN.md §4,
  * Phase R-c) — subscribes to that asset's live `detections:<assetId>` topic instead.
  *
  * **`track(streamId, assetId?)`** (`assetId` new in R-c, mirroring `TelemetryStore.track`'s own
@@ -44,10 +44,10 @@ const DETECTIONS_LIMIT = 50;
  * (docs/plans/done/REALTIME-PLAN.md §4, item 2 — there is no way to subscribe to "this stream's detections"
  * over SSE, only "this asset's"), so a caller with no asset id in scope (`LivePage`/`WallTile` — a
  * bare `deviceId`/`streamId`, no asset context) always polls by `streamId`, regardless of whether
- * `LiveStore` is otherwise connected — exactly as before this cycle. `FlyPage`/`AssetDetailPage`
+ * `LiveFacade` is otherwise connected — exactly as before this cycle. `FlyPage`/`AssetDetailPage`
  * (both already have an asset id) pass it, and get live detections when available.
  *
- * **Latest-frame-only, accumulated client-side**: `LiveStore.detectionsFor` only ever holds the
+ * **Latest-frame-only, accumulated client-side**: `LiveFacade.detectionsFor` only ever holds the
  * single most recent result (the coalescing registry's own "detections keep only the latest per
  * asset", docs/plans/done/REALTIME-PLAN.md §4, item 3 — there is no backlog to replay). This store still
  * presents the same shape the poll fallback always has — a short recent-history list, newest first
@@ -59,10 +59,10 @@ const DETECTIONS_LIMIT = 50;
  * see `freshResults` on the `results` computed below.
  *
  * **Subscription lifecycle vs. transport, kept separate** (mirrors `TelemetryStore`'s own split —
- * see that class's doc comment for the full reasoning): `track()` subscribes to `LiveStore` once
+ * see that class's doc comment for the full reasoning): `track()` subscribes to `LiveFacade` once
  * (ref-counted there) for the whole session, torn down only by a matching `reset()`/a later
  * `track()` call; whether `results` is actually *fed* from that subscription or from the local poll
- * toggles purely with `LiveStore.connectionState()`, so a transient SSE drop never spuriously
+ * toggles purely with `LiveFacade.connectionState()`, so a transient SSE drop never spuriously
  * unsubscribes/resubscribes. Switching either direction seeds the *other* signal from whatever was
  * last visible, so the chip strip never blanks for a beat on a transport flip.
  *
@@ -83,9 +83,9 @@ const DETECTIONS_LIMIT = 50;
  * inside `CvControlPanel`, then (wave W9, decision E25) widened to a transport-aware feed **exactly
  * like {@link results}**: the `tracks:<assetId>` SSE topic now carries the whole response
  * (`StreamTracksResponse`, not just the world-object fold), so with an asset id in scope and
- * `LiveStore` open, {@link tracks} reads `LiveStore.tracksFor` and the poll below never starts;
+ * `LiveFacade` open, {@link tracks} reads `LiveFacade.tracksFor` and the poll below never starts;
  * without an asset id (`LivePage`/`WallTile`/`CrewFacade` — a bare `streamId`, no asset context) or
- * while `LiveStore` isn't open, the original 2s poll is the fallback it should always have been.
+ * while `LiveFacade` isn't open, the original 2s poll is the fallback it should always have been.
  * Reuses this class's own {@link currentAssetIdSignal} (set by {@link track}'s own `assetId?`
  * parameter) rather than adding one to {@link followTracks} — the tracks session and the detections
  * feed stay separate lifecycles (next paragraph), they merely share which asset id is in scope.
@@ -101,8 +101,8 @@ const DETECTIONS_LIMIT = 50;
  *
  * **A third, independent thing this store exposes: {@link worldObjects}** (docs/plans/active/
  * CV-ORCHESTRATION-PLAN.md §4.6, wave W3.1) — the world model's live `WorldObject[]` snapshot,
- * derived from `LiveStore.worldObjectsFor`, itself now a narrower view of the same `tracks:<assetId>`
- * snapshot {@link tracks} above can read live (wave W9) — see `LiveStore`'s own doc comment. Tied 1:1
+ * derived from `LiveFacade.worldObjectsFor`, itself now a narrower view of the same `tracks:<assetId>`
+ * snapshot {@link tracks} above can read live (wave W9) — see `LiveFacade`'s own doc comment. Tied 1:1
  * to the **detections-feed** subscription lifecycle above (`track()`/`teardownTracking()`), **not**
  * the tracks lifecycle two paragraphs up — it starts/stops exactly when `trackDetections`/
  * `untrackDetections` do, for the same asset id, regardless of `wantsTracksPoll`. Frame-cadence,
@@ -113,7 +113,7 @@ const DETECTIONS_LIMIT = 50;
 export class DetectionsStore {
   private readonly api = inject(VisionApi);
   private readonly scheduler = inject(PollScheduler);
-  private readonly live = inject(LiveStore);
+  private readonly live = inject(LiveFacade);
 
   /** Kept fresh by the 2s poll while {@link tracksTransportSignal} reads `'poll'` — stale/unused
    *  while `'live'`. `null` before the first poll settles, before {@link trackTracks} has been
@@ -132,7 +132,7 @@ export class DetectionsStore {
    * Whichever source is currently active for the tracks session, or `null` before anything has
    * settled / while not tracked at all — every downstream reader (lock chip, flow strip, detection
    * status) degrades to "hidden" from this one `null`, never a fabricated value. Transport-aware
-   * exactly like {@link results} (wave W9, decision E25): reads `LiveStore.tracksFor` while
+   * exactly like {@link results} (wave W9, decision E25): reads `LiveFacade.tracksFor` while
    * {@link tracksTransportSignal} is `'live'`, the poll's own signal otherwise.
    */
   readonly tracks = computed<StreamTracksResponse | null>(() => {
@@ -384,7 +384,7 @@ export class DetectionsStore {
   // paragraph). Independent of `track()`/`reset()`/`teardownTracking()` above (the detections feed)
   // — a separate stream id, a separate "wanted" gate, a separate `null`-degrades-honestly signal —
   // even though the live half of the transport flip below reads the very subscription that lifecycle
-  // owns (`LiveStore.tracksFor`, ref-counted by `track()`'s own `trackWorldObjects` call).
+  // owns (`LiveFacade.tracksFor`, ref-counted by `track()`'s own `trackWorldObjects` call).
 
   /**
    * Marks a tracks session "wanted" for `streamId` every {@link TRACKS_POLL_INTERVAL_MS} while the
@@ -438,7 +438,7 @@ export class DetectionsStore {
    * Switches which source {@link tracks} reads from and, correspondingly, whether the poll fallback
    * is running — mirrors {@link applyTransport}, scoped to the tracks lifecycle. **Never** touches
    * the live subscription itself: that is ref-counted by {@link track}/{@link teardownTracking} via
-   * `LiveStore.trackWorldObjects`/`untrackWorldObjects`, piggybacked on the detections-feed session
+   * `LiveFacade.trackWorldObjects`/`untrackWorldObjects`, piggybacked on the detections-feed session
    * entirely independently of whether a tracks session currently wants live data at all (wave W9,
    * decision E25 — see class doc).
    */

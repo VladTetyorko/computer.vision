@@ -14,7 +14,7 @@ import { filter, map } from 'rxjs';
 import { AuthFacade } from './core/auth/auth-facade';
 import { FleetStore } from './core/fleet/fleet-store';
 import { LeafletWarmup } from './core/leaflet-warmup';
-import { LiveStore } from './core/live/live-store';
+import { LiveFacade } from './core/live/live-facade';
 import { SidebarFacade } from './core/shell/sidebar-facade';
 import { AppSidebar } from './shared/ui/app-sidebar/app-sidebar';
 import { ForcePasswordChange } from './shared/ui/force-password-change';
@@ -72,7 +72,7 @@ import { UndoToast } from './shared/ui/undo-toast';
 export class App {
   protected readonly auth = inject(AuthFacade);
   private readonly fleet = inject(FleetStore);
-  private readonly liveStore = inject(LiveStore);
+  private readonly liveStore = inject(LiveFacade);
   private readonly sidebar = inject(SidebarFacade);
   private readonly router = inject(Router);
 
@@ -97,7 +97,7 @@ export class App {
 
   /**
    * The one silent-degradation case docs/plans/done/SYSTEM-STATUS-PLAN.md §1/§3.1 names: the SSE `/api/live`
-   * connection is `closed` (its own 60s retry loop, `core/live/live-store.ts#SSE_RETRY_INTERVAL_MS`,
+   * connection is `closed` (its own 60s retry loop, `core/live/live-facade.ts#SSE_RETRY_INTERVAL_MS`,
    * exhausted at least once) while the backend's REST API is still perfectly `reachable()` — every
    * "live" surface in the app has already silently fallen back to its own 5s poll
    * (`core/fleet/fleet-store.ts#POLL_INTERVAL_MS`, `features/command/command-facade.ts`'s identical

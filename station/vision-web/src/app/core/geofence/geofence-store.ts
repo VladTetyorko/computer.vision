@@ -5,7 +5,7 @@ import { describeHttpError } from '../api-error';
 import { ToastService } from '../toast.service';
 import { UndoToastService } from '../../shared/ui/undo-toast.service';
 import { PollScheduler } from '../poll-scheduler';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import { isLiveAvailable } from '../live/live-fallback-logic';
 
 /**
@@ -15,7 +15,7 @@ import { isLiveAvailable } from '../live/live-fallback-logic';
  * too, without needing FleetStore's 5s cadence.
  *
  * **Gated on live, not unconditional** (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1, wave
- * L5) — this poll now runs **only** while `activeConsumers > 0` **and** `LiveStore` is not `'open'`.
+ * L5) — this poll now runs **only** while `activeConsumers > 0` **and** `LiveFacade` is not `'open'`.
  * While live is open, the `zones` topic (added in wave L3) already delivers every
  * created/updated/deleted delta for free, so scheduling this poll on top of it would just be a
  * redundant `GET` every 30s; see {@link applyTransport} for the exact state table. This supersedes
@@ -70,10 +70,10 @@ const ZONES_POLL_INTERVAL_MS = 30_000;
  * <h2>Initial GET + live deltas, not poll-only (wave L3/L5)</h2>
  * The `zones` topic is deliberately not snapshot-on-connect (§4.1) — a fresh connection sees nothing
  * until the next edit — so this store always does its own initial `GET` (`refresh()`, on
- * `activate()` and on the safety-net poll) and folds `LiveStore.zoneEvents()` arrivals on top via
+ * `activate()` and on the safety-net poll) and folds `LiveFacade.zoneEvents()` arrivals on top via
  * this file's own `applyZoneEvents`: `CREATED`/`UPDATED` upsert by id, `DELETED` removes by id. Both
  * halves are idempotent by construction — the same event replayed across a reconnect (a real
- * possibility given `LiveStore`'s own at-least-once framing) just re-applies the same upsert or
+ * possibility given `LiveFacade`'s own at-least-once framing) just re-applies the same upsert or
  * removal — so a double delivery can never duplicate a zone or resurrect one already deleted.
  */
 @Injectable({ providedIn: 'root' })
@@ -82,7 +82,7 @@ export class GeofenceStore {
   private readonly toasts = inject(ToastService);
   private readonly undoToast = inject(UndoToastService);
   private readonly scheduler = inject(PollScheduler);
-  private readonly live = inject(LiveStore);
+  private readonly live = inject(LiveFacade);
 
   private readonly zonesSignal = signal<readonly GeofenceZone[]>([]);
   readonly zones = this.zonesSignal.asReadonly();
@@ -123,7 +123,7 @@ export class GeofenceStore {
       this.zonesSignal.update((zones) => applyZoneEvents(zones, newEvents));
     });
 
-    // Re-evaluates poll-vs-live whenever `LiveStore` (re)connects or drops
+    // Re-evaluates poll-vs-live whenever `LiveFacade` (re)connects or drops
     // (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1) — mirrors `MarksStore`/
     // `DiscoveryInboxStore`'s identical reconnect-driven effect.
     effect(() => {
@@ -301,7 +301,7 @@ export class GeofenceStore {
  * `discovery-inbox-logic.ts#applyDiscoveryEvents` establish for `map`/`discovery`. `CREATED` and
  * `UPDATED` are handled identically, an upsert by id (replace if already present, insert if not) —
  * treating them the same is what makes a double-delivered event (a real possibility across a
- * reconnect, per `LiveStore`'s own at-least-once framing) idempotent: replaying the same `CREATED` a
+ * reconnect, per `LiveFacade`'s own at-least-once framing) idempotent: replaying the same `CREATED` a
  * second time just replaces the entry with an identical copy of itself. `DELETED` removes by id; a
  * second `DELETED` for an already-absent id is a no-op filter, equally safe to repeat.
  */

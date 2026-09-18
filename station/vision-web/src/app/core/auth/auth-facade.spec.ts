@@ -4,7 +4,7 @@ import { Router } from '@angular/router';
 import { describe, expect, it, vi } from 'vitest';
 import type { AuthCapability, MeResponse, Role, ScopeKind } from '../api/models';
 import { VisionApi } from '../api/vision-api';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import { provideAppState } from '../state/app-state';
 import { AuthFacade } from './auth-facade';
 
@@ -61,21 +61,21 @@ function stubRouter() {
 }
 
 /** `reconnect`/`stop` spied so `login`/`logout`'s own hooks into it are directly assertable. */
-function stubLiveStore() {
+function stubLiveFacade() {
   return { reconnect: vi.fn(), stop: vi.fn() };
 }
 
 function create(
   api: ReturnType<typeof stubApi>,
   router: ReturnType<typeof stubRouter> = stubRouter(),
-  liveStore: ReturnType<typeof stubLiveStore> = stubLiveStore(),
+  liveStore: ReturnType<typeof stubLiveFacade> = stubLiveFacade(),
 ): AuthFacade {
   TestBed.configureTestingModule({
     providers: [
       provideAppState(),
       { provide: VisionApi, useValue: api },
       { provide: Router, useValue: router },
-      { provide: LiveStore, useValue: liveStore },
+      { provide: LiveFacade, useValue: liveStore },
     ],
   });
   return TestBed.inject(AuthFacade);
@@ -247,7 +247,7 @@ describe('AuthFacade', () => {
 
   it('login: reconnects the live store on success (a fresh session supersedes whatever it was open under)', async () => {
     const api = stubApi({ authMe: vi.fn().mockResolvedValue(null), authLogin: vi.fn().mockResolvedValue(meResponse()) });
-    const liveStore = stubLiveStore();
+    const liveStore = stubLiveFacade();
     const facade = create(api, stubRouter(), liveStore);
     await facade.ready;
 
@@ -262,7 +262,7 @@ describe('AuthFacade', () => {
       authMe: vi.fn().mockResolvedValue(null),
       authLogin: vi.fn().mockRejectedValue(new HttpErrorResponse({ status: 401 })),
     });
-    const liveStore = stubLiveStore();
+    const liveStore = stubLiveFacade();
     const facade = create(api, stubRouter(), liveStore);
     await facade.ready;
 
@@ -273,7 +273,7 @@ describe('AuthFacade', () => {
 
   it('logout: stops the live store when auth was enabled', async () => {
     const api = stubApi({ authMe: vi.fn().mockResolvedValue(meResponse({ authEnabled: true })) });
-    const liveStore = stubLiveStore();
+    const liveStore = stubLiveFacade();
     const facade = create(api, stubRouter(), liveStore);
     await facade.ready;
 
@@ -284,7 +284,7 @@ describe('AuthFacade', () => {
 
   it('logout: leaves the live store alone in dev parity (authEnabled=false) — there was no real session change', async () => {
     const api = stubApi({ authMe: vi.fn().mockResolvedValue(meResponse({ authEnabled: false })) });
-    const liveStore = stubLiveStore();
+    const liveStore = stubLiveFacade();
     const facade = create(api, stubRouter(), liveStore);
     await facade.ready;
 
@@ -446,7 +446,7 @@ describe('AuthFacade', () => {
     it('success applies the new admin session and reconnects the live store, returning null', async () => {
       const created = meResponse({ topRole: 'ADMIN', username: 'root-admin' });
       const api = stubApi({ bootstrap: vi.fn().mockResolvedValue(created) });
-      const liveStore = stubLiveStore();
+      const liveStore = stubLiveFacade();
       const facade = create(api, stubRouter(), liveStore);
       await facade.ready;
 

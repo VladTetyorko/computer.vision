@@ -4,6 +4,8 @@ import { provideState, provideStore } from '@ngrx/store';
 
 import { authEffects } from '../auth/state/auth.effects';
 import { authFeature } from '../auth/state/auth.reducer';
+import { liveEffects } from '../live/state/live.effects';
+import { liveFeature } from '../live/state/live.reducer';
 import { sidebarEffects } from '../shell/state/sidebar.effects';
 import { sidebarHydrator } from '../shell/state/sidebar.hydration';
 import { sidebarFeature } from '../shell/state/sidebar.reducer';
@@ -70,6 +72,7 @@ export function provideAppState() {
     provideState(orgFeature),
     provideState(seatFeature),
     provideState(authFeature),
+    provideState(liveFeature),
     provideEffects(
       themeEffects,
       sidebarEffects,
@@ -78,6 +81,7 @@ export function provideAppState() {
       orgEffects,
       seatEffects,
       authEffects,
+      liveEffects,
     ),
   ]);
 }

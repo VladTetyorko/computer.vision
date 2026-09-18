@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { SystemStatusStore } from './system-status-store';
 import { VisionApi } from '../api/vision-api';
 import { PollScheduler } from '../poll-scheduler';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import type { LiveConnectionState } from '../live/live-fallback-logic';
 import type { SystemStatus } from '../api/models';
 
@@ -21,9 +21,9 @@ function stubScheduler() {
 }
 
 /** `connectionState` seeded `'closed'` — reproduces today's (pre-D1) behaviour exactly, see
- *  `marks-store.spec.ts`'s identical `stubLiveStore` doc comment. `systemStatus` starts `undefined`;
+ *  `marks-store.spec.ts`'s identical `stubLiveFacade` doc comment. `systemStatus` starts `undefined`;
  *  `push` drives the always-on `system` topic this store now projects directly. */
-function stubLiveStore() {
+function stubLiveFacade() {
   const systemStatus = signal<SystemStatus | undefined>(undefined);
   const connectionState = signal<LiveConnectionState>('closed');
   return {
@@ -45,14 +45,14 @@ function status(partial: Partial<SystemStatus> = {}): SystemStatus {
 function create(
   api: { systemStatus: ReturnType<typeof vi.fn> },
   scheduler: ReturnType<typeof stubScheduler> = stubScheduler(),
-  live: ReturnType<typeof stubLiveStore> = stubLiveStore(),
-): { store: SystemStatusStore; scheduler: ReturnType<typeof stubScheduler>; live: ReturnType<typeof stubLiveStore> } {
+  live: ReturnType<typeof stubLiveFacade> = stubLiveFacade(),
+): { store: SystemStatusStore; scheduler: ReturnType<typeof stubScheduler>; live: ReturnType<typeof stubLiveFacade> } {
   TestBed.configureTestingModule({
     providers: [
       SystemStatusStore,
       { provide: VisionApi, useValue: api },
       { provide: PollScheduler, useValue: scheduler },
-      { provide: LiveStore, useValue: live },
+      { provide: LiveFacade, useValue: live },
     ],
   });
   const store = TestBed.inject(SystemStatusStore);
@@ -182,7 +182,7 @@ describe('SystemStatusStore', () => {
 
     it('constructing while already live does one initial GET (the reconcile), not zero, and never schedules the poll', async () => {
       const api = { systemStatus: vi.fn().mockResolvedValue(status()) };
-      const live = stubLiveStore();
+      const live = stubLiveFacade();
       live.connectionState.set('open');
       const { scheduler } = create(api, stubScheduler(), live);
       await flush();

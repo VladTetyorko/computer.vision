@@ -1,7 +1,7 @@
 import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
 import { VisionApi } from '../api/vision-api';
 import { PollScheduler } from '../poll-scheduler';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import { isLiveAvailable } from '../live/live-fallback-logic';
 import type { OverallHealth, SystemStatus } from '../api/models';
 
@@ -12,7 +12,7 @@ import type { OverallHealth, SystemStatus } from '../api/models';
  * every registered cadence must be.
  *
  * **Gated on live, live axis only** (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1/§4.2, wave
- * L5) — this poll now runs **only** while `LiveStore` is not `'open'`. While live is open, the
+ * L5) — this poll now runs **only** while `LiveFacade` is not `'open'`. While live is open, the
  * always-on `system` topic (wave L4) already delivers every health-change sample for free, so
  * scheduling this poll on top would just be a redundant `GET` every 15s. There is no demand axis to
  * compose this with, unlike every other store this plan gates: see the class doc for why.
@@ -56,7 +56,7 @@ const LOG_PREFIX = '[system-status]';
  * that just arrived over an open connection is by definition current-and-good, exactly like a
  * successful `refresh()` already clears it. This is what "error" now actually means once live is
  * up: not "no live data has ever arrived" (the `system` topic effectively arrives on connect — see
- * `LiveStore.systemStatus`'s own doc comment — so that case is vanishingly narrow) but "the last
+ * `LiveFacade.systemStatus`'s own doc comment — so that case is vanishingly narrow) but "the last
  * REST attempt this store made — the initial fetch, or the one-time reconcile on a poll→live
  * transition — failed", which a subsequent live arrival supersedes exactly as a subsequent
  * successful poll would have.
@@ -65,7 +65,7 @@ const LOG_PREFIX = '[system-status]';
 export class SystemStatusStore {
   private readonly api = inject(VisionApi);
   private readonly scheduler = inject(PollScheduler);
-  private readonly live = inject(LiveStore);
+  private readonly live = inject(LiveFacade);
 
   private readonly statusSignal = signal<SystemStatus | undefined>(undefined);
   private readonly loadingSignal = signal(false);
@@ -105,7 +105,7 @@ export class SystemStatusStore {
       }
     });
 
-    // Re-evaluates poll-vs-live whenever `LiveStore` (re)connects or drops, and fires once at
+    // Re-evaluates poll-vs-live whenever `LiveFacade` (re)connects or drops, and fires once at
     // construction (an `effect()`'s first run) — mirrors `FleetStore`/`EventsStore`'s identical
     // reconnect-driven effect, live-axis-only per class doc.
     effect(() => {

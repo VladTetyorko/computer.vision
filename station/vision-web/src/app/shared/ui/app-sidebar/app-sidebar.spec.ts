@@ -6,7 +6,7 @@ import { AppSidebar } from './app-sidebar';
 import { AuthFacade } from '../../../core/auth/auth-facade';
 import { FleetStore } from '../../../core/fleet/fleet-store';
 import { EventsStore } from '../../../core/events/events-store';
-import { LiveStore } from '../../../core/live/live-store';
+import { LiveFacade } from '../../../core/live/live-facade';
 import { VisionApi } from '../../../core/api/vision-api';
 import { SidebarFacade } from '../../../core/shell/sidebar-facade';
 import { provideAppState } from '../../../core/state/app-state';
@@ -42,7 +42,7 @@ function fakeEventsStore() {
   return { activate: () => {}, release: () => {}, events: () => [] as unknown[] };
 }
 
-function fakeLiveStore(connectionState: 'connecting' | 'open' | 'closed' = 'open') {
+function fakeLiveFacade(connectionState: 'connecting' | 'open' | 'closed' = 'open') {
   return { liveEvents: () => [] as unknown[], connectionState: () => connectionState };
 }
 
@@ -84,7 +84,7 @@ function render(options: {
       { provide: FleetStore, useValue: fakeFleetStore(options) },
       { provide: AuthFacade, useValue: fakeAuthFacade(options.topRole) },
       { provide: EventsStore, useValue: fakeEventsStore() },
-      { provide: LiveStore, useValue: fakeLiveStore(options.connectionState) },
+      { provide: LiveFacade, useValue: fakeLiveFacade(options.connectionState) },
       // `overall` defaults to `'OK'` — not `undefined` — so every pre-existing test in this file
       // (written before the shell rollup dot read this third axis, docs/plans/done/SYSTEM-STATUS-PLAN.md
       // §5.2) keeps its original "everything is fine" baseline unless a test explicitly opts into
@@ -464,7 +464,7 @@ describe('AppSidebar — shell rollup dot (docs/plans/done/SYSTEM-STATUS-PLAN.md
  * `ThemeFacade` is injected directly here (never faked) — the same "exercise the real, simple,
  * `providedIn: 'root'` boundary" precedent `SidebarFacade` already gets throughout this file, since it
  * is a plain persisted-signal store, not something with an HTTP/SSE dependency graph worth stubbing
- * (contrast `FleetStore`/`EventsStore`/`LiveStore` above, faked purely so the tree can mount).
+ * (contrast `FleetStore`/`EventsStore`/`LiveFacade` above, faked purely so the tree can mount).
  */
 describe('AppSidebar — theme toggle (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/Wave 1)', () => {
   beforeEach(() => localStorage.clear());

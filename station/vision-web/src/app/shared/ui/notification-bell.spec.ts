@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NotificationBell } from './notification-bell';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { EventsStore } from '../../core/events/events-store';
-import { LiveStore } from '../../core/live/live-store';
+import { LiveFacade } from '../../core/live/live-facade';
 import { ToastService } from '../../core/toast.service';
 import { VisionApi } from '../../core/api/vision-api';
 import { OverlayFacade } from '../../core/ui/overlay-facade';
@@ -12,7 +12,7 @@ import { provideAppState } from '../../core/state/app-state';
 import type { DetectionEvent, LiveEvent } from '../../core/api/models';
 
 /**
- * `NotificationBell` pulls in `EventsStore`/`FleetStore`/`LiveStore`/`VisionApi` — every one faked
+ * `NotificationBell` pulls in `EventsStore`/`FleetStore`/`LiveFacade`/`VisionApi` — every one faked
  * here (no HTTP, no polling, no real `EventSource`), mirroring `shared/ui/app-sidebar/app-sidebar.spec.ts`'s
  * own "fake every transitive dependency purely so the tree can mount" approach. `OverlayFacade`
  * is left real (`provideAppState()`, an NgRx slice per docs/plans/active/NGRX-MIGRATION-PLAN.md §8,
@@ -57,7 +57,7 @@ function liveEvent(partial: Partial<LiveEvent> = {}): LiveEvent {
  *  `streamingAssetIds` is every asset id this fake reports `'STREAMING'`; everything else is
  *  simply absent from the list, mirroring how a real offline/unknown asset just isn't in `fleet`'s
  *  own snapshot at all. */
-function fakeLiveStore(events: LiveEvent[] = [], streamingAssetIds: readonly string[] = []) {
+function fakeLiveFacade(events: LiveEvent[] = [], streamingAssetIds: readonly string[] = []) {
   return {
     liveEvents: () => events,
     fleet: () => streamingAssetIds.map((assetId) => ({ assetId, status: 'STREAMING' as const })),
@@ -71,7 +71,7 @@ function render(events: DetectionEvent[] = [], liveEvents: LiveEvent[] = [], str
       provideRouter([]),
       { provide: FleetStore, useValue: fakeFleetStore() },
       { provide: EventsStore, useValue: fakeEventsStore(events) },
-      { provide: LiveStore, useValue: fakeLiveStore(liveEvents, streamingAssetIds) },
+      { provide: LiveFacade, useValue: fakeLiveFacade(liveEvents, streamingAssetIds) },
       { provide: VisionApi, useValue: {} },
     ],
   });

@@ -4,7 +4,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { describe, expect, it, vi } from 'vitest';
 import { GeoStore } from './geo-store';
 import { VisionApi } from '../api/vision-api';
-import { LiveStore, type LiveConnectionState } from '../live/live-store';
+import { LiveFacade, type LiveConnectionState } from '../live/live-facade';
 import { PollScheduler } from '../poll-scheduler';
 import type { CorrectionResponse, CorrectionsResponse } from '../api/models';
 
@@ -17,8 +17,8 @@ function stubApi(liveGeoCorrections: ReturnType<typeof vi.fn> = vi.fn().mockReso
   return { liveGeoCorrections };
 }
 
-/** Mirrors `detections-store.spec.ts#stubLiveStore` exactly, narrowed to the geo topic surface. */
-function stubLiveStore(initialState: LiveConnectionState = 'closed') {
+/** Mirrors `detections-store.spec.ts#stubLiveFacade` exactly, narrowed to the geo topic surface. */
+function stubLiveFacade(initialState: LiveConnectionState = 'closed') {
   const stateSignal = signal<LiveConnectionState>(initialState);
   const perAsset = new Map<string, ReturnType<typeof signal<CorrectionResponse | undefined>>>();
   const signalFor = (assetId: string) => {
@@ -53,12 +53,10 @@ function stubScheduler() {
 
 function inject(
   api: ReturnType<typeof stubApi>,
-  options: { live?: ReturnType<typeof stubLiveStore>; scheduler?: ReturnType<typeof stubScheduler> } = {},
+  options: { live?: ReturnType<typeof stubLiveFacade>; scheduler?: ReturnType<typeof stubScheduler> } = {},
 ): GeoStore {
   const providers: unknown[] = [GeoStore, { provide: VisionApi, useValue: api }];
-  if (options.live) {
-    providers.push({ provide: LiveStore, useValue: options.live });
-  }
+  providers.push({ provide: LiveFacade, useValue: options.live ?? stubLiveFacade() });
   if (options.scheduler) {
     providers.push({ provide: PollScheduler, useValue: options.scheduler });
   }
@@ -130,11 +128,11 @@ describe('GeoStore', () => {
     expect(store.latest()).toBeUndefined();
   });
 
-  // --- LiveStore projection (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4) -----------------------
+  // --- LiveFacade projection (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4) -----------------------
 
-  it('subscribes live when LiveStore is open, reading straight from geoFor(assetId) — latest-wins, no accumulation', () => {
+  it('subscribes live when LiveFacade is open, reading straight from geoFor(assetId) — latest-wins, no accumulation', () => {
     const api = stubApi();
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -155,9 +153,9 @@ describe('GeoStore', () => {
     store.reset();
   });
 
-  it('falls back to polling while LiveStore is not open, still subscribing for later', async () => {
+  it('falls back to polling while LiveFacade is not open, still subscribing for later', async () => {
     const api = stubApi();
-    const live = stubLiveStore('connecting');
+    const live = stubLiveFacade('connecting');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -169,9 +167,9 @@ describe('GeoStore', () => {
     store.reset();
   });
 
-  it('switches from poll to live, stopping the poll, when LiveStore opens mid-session', async () => {
+  it('switches from poll to live, stopping the poll, when LiveFacade opens mid-session', async () => {
     const api = stubApi();
-    const live = stubLiveStore('connecting');
+    const live = stubLiveFacade('connecting');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -187,9 +185,9 @@ describe('GeoStore', () => {
     store.reset();
   });
 
-  it('falls back to polling again when LiveStore drops mid-session, keeping the last-visible correction', async () => {
+  it('falls back to polling again when LiveFacade drops mid-session, keeping the last-visible correction', async () => {
     const api = stubApi(vi.fn().mockResolvedValue({ corrections: [] }));
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -209,7 +207,7 @@ describe('GeoStore', () => {
 
   it('reset() releases the live subscription', () => {
     const api = stubApi();
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
 
     const store = inject(api, { live });
     store.track('a-14');
@@ -221,7 +219,7 @@ describe('GeoStore', () => {
 
   it('re-tracking the same assetId is a no-op — subscribes live exactly once', () => {
     const api = stubApi();
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
 
     const store = inject(api, { live });
     for (let i = 0; i < 5; i++) {
@@ -235,7 +233,7 @@ describe('GeoStore', () => {
 
   it('re-tracking a different assetId releases the old live subscription and subscribes to the new one', () => {
     const api = stubApi();
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
 
     const store = inject(api, { live });
     store.track('a-15');

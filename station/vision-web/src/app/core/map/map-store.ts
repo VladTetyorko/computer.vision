@@ -3,7 +3,7 @@ import { VisionApi } from '../api/vision-api';
 import { findVideoDevice } from '../fleet/device-logic';
 import { PollScheduler } from '../poll-scheduler';
 import { selectOpenUsage } from '../telemetry/telemetry-logic';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import { isLiveAvailable, mergeTelemetrySamples } from '../live/live-fallback-logic';
 import type { AssetSummary, Device, TelemetrySample } from '../api/models';
 import {
@@ -16,7 +16,7 @@ import {
 /**
  * How often the fleet's asset list is re-read while the map is mounted **and live is unavailable**
  * — the not-open fallback (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1, wave L7a). While
- * `LiveStore` is `'open'` this poll does not run at all: `LiveStore.fleet()` (the `fleet` topic,
+ * `LiveFacade` is `'open'` this poll does not run at all: `LiveFacade.fleet()` (the `fleet` topic,
  * scoped per connection since wave L6 — see this class's own doc comment) already carries the
  * identical `AssetSummary[]` shape `GET /api/assets` returns, for free, on every connection.
  */
@@ -46,7 +46,7 @@ const CLOCK_TICK_MS = 1_000;
 
 /**
  * Per-streaming-asset tracker bookkeeping (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §5 L7b) —
- * one `trackTelemetry(assetId)` subscription (ref-counted on `LiveStore`, paired with exactly one
+ * one `trackTelemetry(assetId)` subscription (ref-counted on `LiveFacade`, paired with exactly one
  * `untrackTelemetry(assetId)` — see {@link stopTracker}/{@link teardown}) plus a one-time REST
  * backfill (L7c) merged against whatever live samples arrive on `telemetry:<assetId>`.
  */
@@ -58,7 +58,7 @@ interface AssetTracker {
    * *"a viewer connecting for the first time … sees nothing until the next sample arrives"*) and
    * this store's marker popup wants the same 200-sample trail `TelemetryStore` does. A plain
    * `WritableSignal` (not a settled value) so {@link markers} can merge it reactively against
-   * `LiveStore.telemetryFor(assetId)` regardless of arrival order — see this interface's own
+   * `LiveFacade.telemetryFor(assetId)` regardless of arrival order — see this interface's own
    * "ordering hazard" note below.
    */
   readonly backfill: ReturnType<typeof signal<readonly TelemetrySample[]>>;
@@ -82,7 +82,7 @@ interface AssetTracker {
  * This store used to run a 5s `GET /api/assets` poll plus, per currently-`streaming` asset, its own
  * 2s `GET /api/usages/{id}/telemetry` poll — the single largest request cost in the app (§2 of that
  * plan: ~12 req/min plus 30×N for N streaming assets). Both are now primarily served by
- * {@link LiveStore}, gated exactly like every other L1–L8 store on **D1**: *"poll runs iff there is
+ * {@link LiveFacade}, gated exactly like every other L1–L8 store on **D1**: *"poll runs iff there is
  * demand AND live is not open."*
  *
  * **This store's demand axis is satisfied by construction, not by a ref-count.** Unlike the
@@ -103,7 +103,7 @@ interface AssetTracker {
  * | `false` | `true`  (was live)    | refresh once, then start poll |
  * | `false` | `false` (was polling) | nothing (already polling) |
  *
- * **L7a — assets.** `LiveStore.fleet()` carries exactly `AssetSummary[]`, the shape `GET
+ * **L7a — assets.** `LiveFacade.fleet()` carries exactly `AssetSummary[]`, the shape `GET
  * /api/assets` already returns, scoped per connection since wave L6 (before L6 the `fleet` topic
  * was unscoped — see that wave's own doc comment; this store could not have safely joined it
  * before then). It is already read by `features/fly/drone-picker-facade.ts`,
@@ -115,7 +115,7 @@ interface AssetTracker {
  * envelope is a full snapshot, not a delta to merge.
  *
  * **L7b — telemetry.** Each currently-`streaming` asset gets a {@link AssetTracker}: one
- * `LiveStore.trackTelemetry(assetId)` (ref-counted opt-in) started the moment `reconcileTrackers`
+ * `LiveFacade.trackTelemetry(assetId)` (ref-counted opt-in) started the moment `reconcileTrackers`
  * notices it, paired with exactly one `untrackTelemetry(assetId)` when that asset stops streaming
  * ({@link stopTracker}) or this store tears down ({@link teardown}) — never zero, never two.
  * `reconcileTrackers` itself is unchanged in shape (still runs after every asset refresh, still
@@ -128,7 +128,7 @@ interface AssetTracker {
  * /api/usages/{id}/telemetry}` — `TelemetryStore.track`'s own precedent, reused rather than a second
  * invented shape. **Ordering hazard**: `trackTelemetry(assetId)` is called immediately in
  * {@link startTracker}, *before* the usage lookup / backfill fetch resolves — so live samples can
- * legitimately start arriving on `LiveStore.telemetryFor(assetId)` while the backfill is still in
+ * legitimately start arriving on `LiveFacade.telemetryFor(assetId)` while the backfill is still in
  * flight. Nothing is lost or duplicated: `markers` merges `tracker.backfill()` with
  * `live.telemetryFor(assetId)()` via `mergeTelemetrySamples` (dedup by `(deviceId, at)`, re-sorted)
  * on every read, regardless of which one landed first.
@@ -166,7 +166,7 @@ interface AssetTracker {
 export class FleetMapStore {
   private readonly api = inject(VisionApi);
   private readonly scheduler = inject(PollScheduler);
-  private readonly live = inject(LiveStore);
+  private readonly live = inject(LiveFacade);
 
   private readonly assetsSignal = signal<readonly AssetSummary[]>([]);
   private readonly nowSignal = signal(Date.now());
@@ -218,7 +218,7 @@ export class FleetMapStore {
     this.applyTransport(isLiveAvailable(this.live.connectionState()));
     this.stopClock = this.scheduler.schedule(CLOCK_TICK_MS, () => this.nowSignal.set(Date.now()));
 
-    // Re-evaluates poll-vs-live whenever `LiveStore` (re)connects or drops — mirrors
+    // Re-evaluates poll-vs-live whenever `LiveFacade` (re)connects or drops — mirrors
     // `MarksStore`/`FleetStore`/`EventsStore`'s identical reconnect-driven effect.
     effect(() => {
       this.applyTransport(isLiveAvailable(this.live.connectionState()));

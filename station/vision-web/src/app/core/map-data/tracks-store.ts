@@ -2,7 +2,7 @@ import { Injectable, effect, inject, signal } from '@angular/core';
 import { VisionApi } from '../api/vision-api';
 import type { ProjectedTrackResponse } from '../api/models';
 import { PollScheduler } from '../poll-scheduler';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import { isLiveAvailable } from '../live/live-fallback-logic';
 import { applyTrackEvent } from '../camera-geo/camera-geo-logic';
 
@@ -13,7 +13,7 @@ import { applyTrackEvent } from '../camera-geo/camera-geo-logic';
  * fixed-camera-geo flag flips on mid-session (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md D8).
  *
  * **Gated on live, not unconditional** (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1) — runs
- * **only** while `activeConsumers > 0` **and** `LiveStore` is not `'open'`; see
+ * **only** while `activeConsumers > 0` **and** `LiveFacade` is not `'open'`; see
  * `MarksStore.applyTransport`'s identical state table (`applyTransport` below implements the same
  * one).
  */
@@ -29,10 +29,10 @@ const TRACKS_POLL_INTERVAL_MS = 30_000;
  *
  * <h2>Initial GET + live deltas, exactly like every other `core/map-data/**` store</h2>
  * `GET /api/map/tracks` first (the only place `trail` — the durable, decimated history — ever
- * arrives; §5's own "trail via GET after reload"), then fold `LiveStore.mapEvents()` on top via
+ * arrives; §5's own "trail via GET after reload"), then fold `LiveFacade.mapEvents()` on top via
  * `core/camera-geo/camera-geo-logic.ts#applyTrackEvent`, the same `processedLiveEventCount` cursor
  * idiom `LayersStore`/`MarksStore`/`DrawingsStore` each keep independently over the one shared
- * arrival log (`core/live/live-store.ts#mapEvents`'s own doc comment explains why three-now-four
+ * arrival log (`core/live/live-facade.ts#mapEvents`'s own doc comment explains why three-now-four
  * consumers read one signal rather than sharing a fold).
  *
  * <h2>Flag-off degrades to "no tracks", not an error</h2>
@@ -56,7 +56,7 @@ const TRACKS_POLL_INTERVAL_MS = 30_000;
 @Injectable({ providedIn: 'root' })
 export class TracksStore {
   private readonly api = inject(VisionApi);
-  private readonly live = inject(LiveStore);
+  private readonly live = inject(LiveFacade);
   private readonly scheduler = inject(PollScheduler);
 
   private readonly tracksSignal = signal<readonly ProjectedTrackResponse[]>([]);
@@ -67,7 +67,7 @@ export class TracksStore {
   /** `true` once the first `refresh()` has settled (success or failure). */
   readonly loaded = this.loadedSignal.asReadonly();
 
-  /** How many live map deltas (`LiveStore.mapEvents()`) this store has folded in — see the class doc's cursor note. */
+  /** How many live map deltas (`LiveFacade.mapEvents()`) this store has folded in — see the class doc's cursor note. */
   private processedLiveEventCount = 0;
 
   /** Ref-count of live consumers — see {@link activate}/{@link release}. */
@@ -94,7 +94,7 @@ export class TracksStore {
       this.tracksSignal.update((tracks) => newEvents.reduce(applyTrackEvent, tracks));
     });
 
-    // Re-evaluates poll-vs-live whenever `LiveStore` (re)connects or drops
+    // Re-evaluates poll-vs-live whenever `LiveFacade` (re)connects or drops
     // (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1) — mirrors `FleetStore`/
     // `EventsStore`'s identical reconnect-driven effect.
     effect(() => {

@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, injec
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { AuthFacade } from '../../../core/auth/auth-facade';
 import { FleetStore } from '../../../core/fleet/fleet-store';
-import { LiveStore } from '../../../core/live/live-store';
+import { LiveFacade } from '../../../core/live/live-facade';
 import { SidebarFacade } from '../../../core/shell/sidebar-facade';
 import { ThemeFacade } from '../../../core/shell/theme-facade';
 import { shellStatusLabel, shellStatusSeverity } from '../../../core/system-status/system-status-logic';
@@ -143,7 +143,7 @@ export class AppSidebar {
    *  goes through `AccountSettingsFacade` instead for exactly that reason. */
   protected readonly theme = inject(ThemeFacade);
   private readonly auth = inject(AuthFacade);
-  private readonly liveStore = inject(LiveStore);
+  private readonly liveStore = inject(LiveFacade);
   /** Backs the shell rollup dot below (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.2) — the same "shared
    *  shell component, not a routed page" carve-out `theme`'s own doc comment above explains; the
    *  singleton store is already warm app-wide (see that store's own class doc), this just reads it. */

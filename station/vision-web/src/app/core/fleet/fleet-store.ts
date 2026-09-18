@@ -4,7 +4,7 @@ import { VisionApi } from '../api/vision-api';
 import { describeHttpError } from '../api-error';
 import { PollScheduler } from '../poll-scheduler';
 import { ToastService } from '../toast.service';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import { isLiveAvailable } from '../live/live-fallback-logic';
 import type {
   ActiveStream,
@@ -47,27 +47,27 @@ const LOG_PREFIX = '[fleet]';
  * cannot disagree — and there is exactly one poller in the app rather than one per page
  * (docs/plans/done/WEB-PLAN.md, W6).
  *
- * **Projection of `LiveStore`'s `devices` topic** (docs/plans/done/REALTIME-PLAN.md §4's backend follow-up
+ * **Projection of `LiveFacade`'s `devices` topic** (docs/plans/done/REALTIME-PLAN.md §4's backend follow-up
  * batch — the same poll-vs-live pattern `TelemetryStore`/`DetectionsStore` established in R-c,
- * simplified since this topic is app-wide and always-on, not per-asset/opt-in): while `LiveStore`
+ * simplified since this topic is app-wide and always-on, not per-asset/opt-in): while `LiveFacade`
  * is `'open'`, `devices`/`streams` are set atomically from each `DevicesSnapshotResponse` envelope
  * (both fields from the *same* snapshot — never independently stale relative to each other) and
  * the 5s poll below is paused entirely; while not `'open'`, the 5s `GET /api/devices`+`GET
  * /api/streams` poll is the (documented) fallback, exactly as it always was. No ref-counted
  * subscribe/unsubscribe is needed here (unlike `trackTelemetry`/`trackDetections`) — `devices` is
  * always-on, arriving on every connection regardless of the `topics` query parameter, so this store
- * only ever routes by `LiveStore.connectionState()`, never calls `track*`/`untrack*`.
+ * only ever routes by `LiveFacade.connectionState()`, never calls `track*`/`untrack*`.
  *
  * The constructor's own one-time `refresh()` call stays unconditional (mirrors `TelemetryStore`'s
  * "always one backfill fetch" precedent) — it paints something immediately without waiting on the
- * SSE handshake, and a live snapshot simply overwrites it moments later once `LiveStore` connects.
+ * SSE handshake, and a live snapshot simply overwrites it moments later once `LiveFacade` connects.
  */
 @Injectable({ providedIn: 'root' })
 export class FleetStore {
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
   private readonly scheduler = inject(PollScheduler);
-  private readonly live = inject(LiveStore);
+  private readonly live = inject(LiveFacade);
 
   private readonly devicesSignal = signal<readonly Device[]>([]);
   private readonly streamsSignal = signal<readonly ActiveStream[]>([]);
@@ -130,7 +130,7 @@ export class FleetStore {
     // double-registers it — see `applyTransport`'s own `stopPollingFn !== null` guard.
     this.stopPollingFn = this.schedulePoll();
 
-    // Re-evaluates poll-vs-live whenever `LiveStore` (re)connects or drops (docs/plans/done/REALTIME-PLAN.md
+    // Re-evaluates poll-vs-live whenever `LiveFacade` (re)connects or drops (docs/plans/done/REALTIME-PLAN.md
     // §4's backend follow-up batch) — mirrors `TelemetryStore`/`DetectionsStore`'s identical
     // reconnect-driven effect, simplified: no per-session `tracking` guard is needed since this
     // store has no track()/reset() session at all, just "poll, unless live is open".
@@ -152,8 +152,8 @@ export class FleetStore {
   }
 
   /**
-   * Switches whether the local 5s poll is running — **not** whether `LiveStore` itself has a
-   * connection (that's `LiveStore`'s own concern; there is nothing to subscribe/unsubscribe here,
+   * Switches whether the local 5s poll is running — **not** whether `LiveFacade` itself has a
+   * connection (that's `LiveFacade`'s own concern; there is nothing to subscribe/unsubscribe here,
    * `devices` being always-on). `liveAvailable` pauses the poll; its absence resumes it, refetching
    * immediately first (mirrors `TelemetryStore.applyTransport`'s reconnect-driven branch) since
    * `devices`/`streams` may be stale from however long the live connection was up. A no-op when the

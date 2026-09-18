@@ -10,7 +10,7 @@ import { TracksStore } from '../map-data/tracks-store';
 import { GeofenceStore } from '../geofence/geofence-store';
 import { SystemStatusStore } from '../system-status/system-status-store';
 import { FleetMapStore } from '../map/map-store';
-import { LiveStore } from './live-store';
+import { LiveFacade } from './live-facade';
 import { PollScheduler } from '../poll-scheduler';
 import { VisionApi } from '../api/vision-api';
 import { ToastService } from '../toast.service';
@@ -92,7 +92,7 @@ function countingApi(counts: Counts, assets: readonly AssetSummary[]) {
 }
 
 /** Real Angular signals so every store's own `effect()`/`computed` reacts as it would in the app. */
-function stubLiveStore(state: LiveConnectionState) {
+function stubLiveFacade(state: LiveConnectionState) {
   const telemetry = signal<readonly never[]>([]);
   return {
     connectionState: signal<LiveConnectionState>(state),
@@ -143,7 +143,7 @@ async function measure(transport: LiveConnectionState, assets: readonly AssetSum
       { provide: VisionApi, useValue: api },
       { provide: ToastService, useValue: toasts },
       { provide: UndoToastService, useValue: { show: vi.fn() } },
-      { provide: LiveStore, useValue: stubLiveStore(transport) },
+      { provide: LiveFacade, useValue: stubLiveFacade(transport) },
       provideRouter([]),
     ],
   });

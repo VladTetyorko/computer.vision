@@ -2,7 +2,7 @@ import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angul
 import { VisionApi } from '../api/vision-api';
 import type { CorrectionResponse } from '../api/models';
 import { PollScheduler } from '../poll-scheduler';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import { type AssetScopedTransport, resolveAssetScopedTransport } from '../live/live-fallback-logic';
 import { isVisualGeoDisabledError } from './geo-logic';
 
@@ -14,7 +14,7 @@ const POLL_INTERVAL_MS = 2_000;
  * wave H6) — the cockpit divergence chip + detail popover's (`features/fly/cockpit`) and `TacticalMap`'s
  * corrected-track layer's own source. Polls `GET /api/geo/corrections/live` every 2s while visible
  * — filtering the fleet-wide "latest per asset" response down to the one tracked asset, since §3.3 has
- * no single-asset "latest" route — or, when {@link LiveStore} is open, subscribes to that asset's live
+ * no single-asset "latest" route — or, when {@link LiveFacade} is open, subscribes to that asset's live
  * `geo:<assetId>` topic instead. Mirrors `core/detections/detections-store.ts#DetectionsStore`'s dual-transport
  * shape closely, simplified for geo's own narrower domain:
  *
@@ -44,11 +44,11 @@ const POLL_INTERVAL_MS = 2_000;
 export class GeoStore {
   private readonly api = inject(VisionApi);
   private readonly scheduler = inject(PollScheduler);
-  private readonly live = inject(LiveStore);
+  private readonly live = inject(LiveFacade);
 
   /** Kept fresh by the 2s poll while `transportSignal() === 'poll'`; stale/unused while `'live'`. */
   private readonly pollResultSignal = signal<CorrectionResponse | undefined>(undefined);
-  /** Mirrors `LiveStore.geoFor(assetId)` while `transportSignal() === 'live'`. */
+  /** Mirrors `LiveFacade.geoFor(assetId)` while `transportSignal() === 'live'`. */
   private readonly liveResultSignal = signal<CorrectionResponse | undefined>(undefined);
   /** The `assetId` passed to the current `track()` call, or `undefined` — drives the transport decision. */
   private readonly currentAssetIdSignal = signal<string | undefined>(undefined);

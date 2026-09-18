@@ -9,7 +9,7 @@ import { pluralize } from '../../shared/ui/text-logic';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { EventsStore } from '../../core/events/events-store';
-import { LiveStore } from '../../core/live/live-store';
+import { LiveFacade } from '../../core/live/live-facade';
 import { LinksStore } from '../../core/pairing/links-store';
 import {
   failoverRowsForAsset,
@@ -114,7 +114,7 @@ export class AssetDetailFacade {
   private readonly events = inject(EventsStore);
   /** Named `liveStore`, not `live` — this class already has a `live` computed (whether *this asset*
    *  is currently streaming, see below); this is the generic SSE connection singleton. */
-  private readonly liveStore = inject(LiveStore);
+  private readonly liveStore = inject(LiveFacade);
 
   readonly fleet = inject(FleetStore);
   readonly settings = inject(SettingsFacade);
@@ -696,7 +696,7 @@ export class AssetDetailFacade {
   readonly linksActiveId = computed(() => this.links.group()?.activeLinkId ?? null);
   readonly linksBenchWarning = computed(() => hasActiveBenchWarning(this.links.group()?.links ?? []));
 
-  /** Failover history off the existing generic events feed (`LiveStore.liveEvents()` — only ever
+  /** Failover history off the existing generic events feed (`LiveFacade.liveEvents()` — only ever
    *  populated while the SSE connection has been open; there is no REST history read for this, same
    *  as every other `LiveEvent` consumer in this app), filtered to this asset. */
   readonly linkFailovers = computed<readonly LinkFailoverRow[]>(() =>

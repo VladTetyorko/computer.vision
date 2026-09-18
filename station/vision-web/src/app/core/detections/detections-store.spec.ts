@@ -3,7 +3,7 @@ import { signal } from '@angular/core';
 import { describe, expect, it, vi } from 'vitest';
 import { DetectionsStore } from './detections-store';
 import { VisionApi } from '../api/vision-api';
-import { LiveStore, type LiveConnectionState } from '../live/live-store';
+import { LiveFacade, type LiveConnectionState } from '../live/live-facade';
 import { PollScheduler } from '../poll-scheduler';
 import type { DetectionResult, StreamTracksResponse, WorldObject } from '../api/models';
 import { CV_STATUS_FRESH_SECONDS } from './detections-logic';
@@ -21,12 +21,12 @@ function stubApi(
 }
 
 /**
- * A minimal `LiveStore` test double (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) — mirrors
+ * A minimal `LiveFacade` test double (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) — mirrors
  * `telemetry-store.spec.ts`'s own stub exactly (see that file's doc comment for the full
  * reasoning); defaults to `'closed'`, matching the real class under jsdom, so every pre-existing
  * test above keeps exercising the poll-only path unmodified.
  */
-function stubLiveStore(initialState: LiveConnectionState = 'closed') {
+function stubLiveFacade(initialState: LiveConnectionState = 'closed') {
   const stateSignal = signal<LiveConnectionState>(initialState);
   const perAsset = new Map<string, ReturnType<typeof signal<DetectionResult | undefined>>>();
   const signalFor = (assetId: string) => {
@@ -49,7 +49,7 @@ function stubLiveStore(initialState: LiveConnectionState = 'closed') {
   // Deliberately its own independent map, not derived from `worldObjectSignalFor` above — this is a
   // fake, and `DetectionsStore.worldObjects`/`.tracks` each only ever call their own one accessor
   // (`worldObjectsFor`/`tracksFor` respectively), so the two never need to agree here the way the
-  // real `LiveStore` now makes them (wave W9, decision E25 — `worldObjectsFor` derives from
+  // real `LiveFacade` now makes them (wave W9, decision E25 — `worldObjectsFor` derives from
   // `tracksFor`'s own `.objects` field there; see that class's own doc comment).
   const perAssetTracks = new Map<string, ReturnType<typeof signal<StreamTracksResponse | null>>>();
   const tracksSignalFor = (assetId: string) => {
@@ -90,12 +90,10 @@ function stubScheduler() {
 
 function inject(
   api: ReturnType<typeof stubApi>,
-  options: { live?: ReturnType<typeof stubLiveStore>; scheduler?: ReturnType<typeof stubScheduler> } = {},
+  options: { live?: ReturnType<typeof stubLiveFacade>; scheduler?: ReturnType<typeof stubScheduler> } = {},
 ): DetectionsStore {
   const providers: unknown[] = [DetectionsStore, { provide: VisionApi, useValue: api }];
-  if (options.live) {
-    providers.push({ provide: LiveStore, useValue: options.live });
-  }
+  providers.push({ provide: LiveFacade, useValue: options.live ?? stubLiveFacade() });
   if (options.scheduler) {
     providers.push({ provide: PollScheduler, useValue: options.scheduler });
   }
@@ -230,15 +228,15 @@ describe('DetectionsStore', () => {
     store.reset();
   });
 
-  // --- LiveStore projection (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) ----------------------------
+  // --- LiveFacade projection (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) ----------------------------
 
   function detectionResult(streamId: string, frameSequence: number): DetectionResult {
     return { streamId, frameSequence, capturedAt: new Date().toISOString(), inferenceMillis: 5, detections: [] };
   }
 
-  it('subscribes live when LiveStore is open and an assetId is given, accumulating latest-frame results', () => {
+  it('subscribes live when LiveFacade is open and an assetId is given, accumulating latest-frame results', () => {
     const api = stubApi();
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -265,7 +263,7 @@ describe('DetectionsStore', () => {
     // off, no viewers, or cv-service crashing all look the same here: no *new* envelope arrives, so
     // the last one just sits there aging. `results()` must stop surfacing it anyway.
     const api = stubApi();
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -284,9 +282,9 @@ describe('DetectionsStore', () => {
     store.reset();
   });
 
-  it('never subscribes live without an assetId, even when LiveStore is open — always polls', async () => {
+  it('never subscribes live without an assetId, even when LiveFacade is open — always polls', async () => {
     const api = stubApi();
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -298,9 +296,9 @@ describe('DetectionsStore', () => {
     store.reset();
   });
 
-  it('falls back to polling while LiveStore is not open, even with an assetId — still subscribes for later', async () => {
+  it('falls back to polling while LiveFacade is not open, even with an assetId — still subscribes for later', async () => {
     const api = stubApi();
-    const live = stubLiveStore('connecting');
+    const live = stubLiveFacade('connecting');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -312,9 +310,9 @@ describe('DetectionsStore', () => {
     store.reset();
   });
 
-  it('switches from poll to live, stopping the poll, when LiveStore opens mid-session', async () => {
+  it('switches from poll to live, stopping the poll, when LiveFacade opens mid-session', async () => {
     const api = stubApi();
-    const live = stubLiveStore('connecting');
+    const live = stubLiveFacade('connecting');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -330,10 +328,10 @@ describe('DetectionsStore', () => {
     store.reset();
   });
 
-  it('falls back to polling again immediately when LiveStore drops mid-session, keeping the last-visible result', async () => {
+  it('falls back to polling again immediately when LiveFacade drops mid-session, keeping the last-visible result', async () => {
     const streamDetections = vi.fn().mockResolvedValue([]);
     const api = stubApi(streamDetections);
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -354,7 +352,7 @@ describe('DetectionsStore', () => {
 
   it('reset() releases the live subscription', () => {
     const api = stubApi();
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
 
     const store = inject(api, { live });
     store.track('s-14', 'a-14');
@@ -369,7 +367,7 @@ describe('DetectionsStore', () => {
     // R-c follow-up) — this store's own `track()` has no `await` at all, so an unguarded caller
     // re-entering with the same id risked an even *tighter* same-tick re-notify loop.
     const api = stubApi();
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
 
     const store = inject(api, { live });
     for (let i = 0; i < 5; i++) {
@@ -385,7 +383,7 @@ describe('DetectionsStore', () => {
 
   it('re-tracking a different assetId releases the old live subscription and subscribes to the new one', () => {
     const api = stubApi();
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
 
     const store = inject(api, { live });
     store.track('s-15', 'a-15');
@@ -411,7 +409,7 @@ describe('DetectionsStore', () => {
 
   it('track(streamId, assetId) subscribes to world objects, and a pushed array reflects on worldObjects()', () => {
     const api = stubApi();
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
 
     const store = inject(api, { live });
     store.track('s-18', 'a-18');
@@ -427,7 +425,7 @@ describe('DetectionsStore', () => {
 
   it('track(streamId) with no assetId never subscribes to world objects — worldObjects() stays []', () => {
     const api = stubApi();
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
 
     const store = inject(api, { live });
     store.track('s-19'); // no assetId
@@ -439,7 +437,7 @@ describe('DetectionsStore', () => {
 
   it('reset() releases the world-objects subscription', () => {
     const api = stubApi();
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
 
     const store = inject(api, { live });
     store.track('s-20', 'a-20');
@@ -451,7 +449,7 @@ describe('DetectionsStore', () => {
 
   it('re-tracking a different assetId releases the old world-objects subscription and subscribes to the new one', () => {
     const api = stubApi();
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
 
     const store = inject(api, { live });
     store.track('s-21', 'a-21');
@@ -465,7 +463,7 @@ describe('DetectionsStore', () => {
   it('worldObjects() is fully independent of the tracks-poll lifecycle — trackTracks()/untrackTracks() never touch trackWorldObjects()/untrackWorldObjects()', async () => {
     const getStreamTracks = vi.fn().mockResolvedValue({ streamId: 's-23', lockedTrackId: 0, tracks: [], objects: [] });
     const api = stubApi(undefined, getStreamTracks);
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
 
     const store = inject(api, { live });
     store.trackTracks('s-23');
@@ -641,10 +639,10 @@ describe('DetectionsStore', () => {
   // same live/poll split as results(), reusing the store's already-known assetId (`track(streamId,
   // assetId?)`) rather than a parameter on followTracks() itself. --------------------------------
 
-  it('followTracks resolves to the live tracks:<assetId> envelope and never polls once an assetId is in scope and LiveStore is open', async () => {
+  it('followTracks resolves to the live tracks:<assetId> envelope and never polls once an assetId is in scope and LiveFacade is open', async () => {
     const getStreamTracks = vi.fn().mockResolvedValue(tracksResponse());
     const api = stubApi(undefined, getStreamTracks);
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -663,11 +661,11 @@ describe('DetectionsStore', () => {
     store.reset();
   });
 
-  it('followTracks still polls, unchanged, when no assetId is in scope even though LiveStore is open', async () => {
+  it('followTracks still polls, unchanged, when no assetId is in scope even though LiveFacade is open', async () => {
     const response = tracksResponse({ streamId: 's-25', lockedTrackId: 3 });
     const getStreamTracks = vi.fn().mockResolvedValue(response);
     const api = stubApi(undefined, getStreamTracks);
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -683,11 +681,11 @@ describe('DetectionsStore', () => {
     store.reset();
   });
 
-  it('switches the tracks session from poll to live, stopping the poll, when LiveStore opens mid-session', async () => {
+  it('switches the tracks session from poll to live, stopping the poll, when LiveFacade opens mid-session', async () => {
     const response = tracksResponse({ streamId: 's-26', lockedTrackId: 6 });
     const getStreamTracks = vi.fn().mockResolvedValue(response);
     const api = stubApi(undefined, getStreamTracks);
-    const live = stubLiveStore('connecting');
+    const live = stubLiveFacade('connecting');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });

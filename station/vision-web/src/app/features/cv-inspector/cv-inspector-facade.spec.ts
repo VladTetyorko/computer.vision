@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { CvInspectorFacade } from './cv-inspector-facade';
 import { CvTraceStore } from '../../core/cv-trace/cv-trace-store';
 import { FleetStore } from '../../core/fleet/fleet-store';
-import { LiveStore } from '../../core/live/live-store';
+import { LiveFacade } from '../../core/live/live-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { SystemStatusStore } from '../../core/system-status/system-status-store';
 import { VisionApi } from '../../core/api/vision-api';
@@ -14,9 +14,9 @@ import type { AssetAttention, CvTrace, FleetSummary, FrameLedger } from '../../c
  * Proves wave W5.7's "Live subscription" paragraph on `CvInspectorFacade`'s own class doc: picking
  * a stream resolves its owning asset (`VisionApi#fleetSummary()` + `assetIdForStream`) and starts
  * the LIVE `cv-trace:<assetId>` topic through the REAL `CvTraceStore`, not a mock of it — the only
- * way to prove the whole chain (facade → store → `LiveStore`) actually wires together, mirroring
+ * way to prove the whole chain (facade → store → `LiveFacade`) actually wires together, mirroring
  * `core/map/map-store.spec.ts`'s identical "real store, stub its own leaf deps" convention one
- * layer up. `FleetStore`/`SystemStatusStore`/`VisionApi`/`LiveStore`/`PollScheduler` are the only
+ * layer up. `FleetStore`/`SystemStatusStore`/`VisionApi`/`LiveFacade`/`PollScheduler` are the only
  * leaves stubbed; `CvTraceStore` and `CvInspectorFacade` are both the genuine classes.
  */
 
@@ -49,9 +49,9 @@ function stubApi(
   return { fleetSummary, getCvTrace };
 }
 
-/** Mirrors `cv-trace-store.spec.ts#stubLiveStore` — the real `CvTraceStore` calls straight through
+/** Mirrors `cv-trace-store.spec.ts#stubLiveFacade` — the real `CvTraceStore` calls straight through
  *  to these, so asserting on them proves the subscription itself, not just an intent to make one. */
-function stubLiveStore() {
+function stubLiveFacade() {
   const perAsset = new Map<string, ReturnType<typeof signal<FrameLedger | undefined>>>();
   const cvTraceFor = vi.fn((assetId: string) => {
     let existing = perAsset.get(assetId);
@@ -76,13 +76,13 @@ function stubStatusStore() {
   return { status: signal(undefined), refresh: vi.fn() };
 }
 
-function create(api: ReturnType<typeof stubApi>, live: ReturnType<typeof stubLiveStore> = stubLiveStore()) {
+function create(api: ReturnType<typeof stubApi>, live: ReturnType<typeof stubLiveFacade> = stubLiveFacade()) {
   TestBed.configureTestingModule({
     providers: [
       CvInspectorFacade,
       CvTraceStore,
       { provide: VisionApi, useValue: api },
-      { provide: LiveStore, useValue: live },
+      { provide: LiveFacade, useValue: live },
       { provide: PollScheduler, useValue: stubScheduler() },
       { provide: FleetStore, useValue: stubFleetStore() },
       { provide: SystemStatusStore, useValue: stubStatusStore() },

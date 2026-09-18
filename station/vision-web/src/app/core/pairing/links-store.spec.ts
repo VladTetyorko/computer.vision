@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { LinksStore } from './links-store';
 import { VisionApi } from '../api/vision-api';
 import { ToastService } from '../toast.service';
-import { LiveStore, type LiveConnectionState } from '../live/live-store';
+import { LiveFacade, type LiveConnectionState } from '../live/live-facade';
 import { PollScheduler } from '../poll-scheduler';
 import type { LinkGroupResponse, LinkView } from '../api/models';
 
@@ -26,8 +26,8 @@ function stubToasts() {
   return { error: vi.fn(), info: vi.fn(), ok: vi.fn(), warning: vi.fn(), notification: vi.fn() };
 }
 
-/** Mirrors `geo-store.spec.ts#stubLiveStore` exactly, narrowed to the links topic surface. */
-function stubLiveStore(initialState: LiveConnectionState = 'closed') {
+/** Mirrors `geo-store.spec.ts#stubLiveFacade` exactly, narrowed to the links topic surface. */
+function stubLiveFacade(initialState: LiveConnectionState = 'closed') {
   const stateSignal = signal<LiveConnectionState>(initialState);
   const perAsset = new Map<string, ReturnType<typeof signal<LinkGroupResponse | undefined>>>();
   const signalFor = (assetId: string) => {
@@ -62,16 +62,14 @@ function stubScheduler() {
 
 function inject(
   api: ReturnType<typeof stubApi>,
-  options: { live?: ReturnType<typeof stubLiveStore>; scheduler?: ReturnType<typeof stubScheduler>; toasts?: ReturnType<typeof stubToasts> } = {},
+  options: { live?: ReturnType<typeof stubLiveFacade>; scheduler?: ReturnType<typeof stubScheduler>; toasts?: ReturnType<typeof stubToasts> } = {},
 ): LinksStore {
   const providers: unknown[] = [
     LinksStore,
     { provide: VisionApi, useValue: api },
     { provide: ToastService, useValue: options.toasts ?? stubToasts() },
   ];
-  if (options.live) {
-    providers.push({ provide: LiveStore, useValue: options.live });
-  }
+  providers.push({ provide: LiveFacade, useValue: options.live ?? stubLiveFacade() });
   if (options.scheduler) {
     providers.push({ provide: PollScheduler, useValue: options.scheduler });
   }
@@ -177,11 +175,11 @@ describe('LinksStore', () => {
     expect(store.disabled()).toBe(false);
   });
 
-  // --- LiveStore projection (§3.4 "whole group snapshot, never a diff") ---------------------------
+  // --- LiveFacade projection (§3.4 "whole group snapshot, never a diff") ---------------------------
 
-  it('subscribes live when LiveStore is open, reading straight from linksFor(assetId) — latest-wins', () => {
+  it('subscribes live when LiveFacade is open, reading straight from linksFor(assetId) — latest-wins', () => {
     const api = stubApi({ getAssetLinks: vi.fn().mockResolvedValue(group('a-9')) });
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -208,7 +206,7 @@ describe('LinksStore', () => {
   it('seeds group() from one REST read when live is already open at track() time', async () => {
     const seed = group('a-9', { activeLinkId: 'link-1', pinned: true });
     const api = stubApi({ getAssetLinks: vi.fn().mockResolvedValue(seed) });
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -228,7 +226,7 @@ describe('LinksStore', () => {
       resolveSeed = resolve;
     });
     const api = stubApi({ getAssetLinks: vi.fn().mockReturnValue(seedPromise) });
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
 
     const store = inject(api, { live });
     store.track('a-10');
@@ -244,9 +242,9 @@ describe('LinksStore', () => {
     store.reset();
   });
 
-  it('falls back to polling while LiveStore is not open, still subscribing for later', async () => {
+  it('falls back to polling while LiveFacade is not open, still subscribing for later', async () => {
     const api = stubApi();
-    const live = stubLiveStore('connecting');
+    const live = stubLiveFacade('connecting');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -258,9 +256,9 @@ describe('LinksStore', () => {
     store.reset();
   });
 
-  it('switches from poll to live, stopping the poll, when LiveStore opens mid-session', async () => {
+  it('switches from poll to live, stopping the poll, when LiveFacade opens mid-session', async () => {
     const api = stubApi();
-    const live = stubLiveStore('connecting');
+    const live = stubLiveFacade('connecting');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -278,7 +276,7 @@ describe('LinksStore', () => {
 
   it('reset() releases the live subscription', () => {
     const api = stubApi();
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
 
     const store = inject(api, { live });
     store.track('a-14');
@@ -290,7 +288,7 @@ describe('LinksStore', () => {
 
   it('re-tracking the same assetId is a no-op — subscribes live exactly once', () => {
     const api = stubApi();
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
 
     const store = inject(api, { live });
     for (let i = 0; i < 5; i++) {
@@ -375,7 +373,7 @@ describe('LinksStore', () => {
 
   it('refreshNow() is a no-op while live is the active transport — beyond track()\'s own one-time seed read', async () => {
     const api = stubApi({ getAssetLinks: vi.fn().mockResolvedValue(group('a-23')) });
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
 
     const store = inject(api, { live });
     store.track('a-23');

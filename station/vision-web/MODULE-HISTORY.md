@@ -2661,3 +2661,126 @@ hand-rolled store the plan named was now a slice (26 remain), it described its b
 "after N0+N1" when that commit predated N1, and its suggested commit subject repeated the first
 error. Also repointed seven doc comments in `return-home-button.ts`/`page-bar.ts` that still named
 `GlobalOverlayStore` methods as if the class existed.
+
+## Status — NGRX-MIGRATION wave N3: the live slice — one SSE connection becomes a full NgRx slice + a `LiveGateway` seam (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N3) — 2026-09-18
+
+**Scope.** `core/live/live-store.ts` (735 lines, the app's one `GET /api/live` SSE connection, 25
+real consumer files — 26 counting `core/cv-trace/cv-trace-store.ts`, missed by an initial `grep`
+survey and caught by `tsc`, see the tooling note below) became `core/live/state/live.{model,actions,
+reducer,effects}.ts` + `core/live/live-facade.ts` + `core/live/live-gateway.ts`, registered in
+`provideAppState()`. `LiveStore` and its behaviour (ref-counted topic subscribe/unsubscribe,
+append-only per-topic logs, the manual retry loop on a fatal SSE close, the accepted "ref-count
+change during a native auto-retry" gap) carry over unchanged; every consumer's own `inject(LiveStore)`
+became `inject(LiveFacade)`, nothing else, because `LiveFacade` kept every one of the old class's
+signal and method names on purpose. Left untouched, correctly: nine files whose only `LiveStore`
+mention is historical doc-comment prose (`attention-logic.ts`, `geofence-logic.ts`,
+`map-event-logic.ts`, `pairing-logic.ts`, `system-events-logic.ts`, `notification-logic.ts`,
+`wall-tile.ts`, `auth.actions.ts`, `auth.reducer.ts`) plus `core/api/vision-api.ts` and
+`core/rc/manual-control-client.ts`; `core/api/models.ts`'s own stale `LiveEnvelope` doc comment
+(same missing-`links` defect category as the heading fixed below) is outside `core/live/`'s file
+scope and was left alone.
+
+**`LiveGateway` is this migration's first seam built specifically to keep a non-serializable browser
+object out of state**, following `OverlayHostRegistry`'s N1 precedent rather than inventing a new
+shape: a plain `providedIn: 'root'` class, `isAvailable()` reads `typeof EventSource !== 'undefined'`
+(false under jsdom — every spec's own confirmation of "no `EventSource` at all" rather than an
+assumption), `open(topics)` returns a cold `Observable<LiveGatewayEvent>` that owns exactly one real
+`EventSource` for its subscription's lifetime and closes it on teardown. `live.effects.ts#connection$`
+is the only subscriber, mapping each `LiveGatewayEvent` (`open`/`connected`/`message`/`retrying`/
+`fatal`) to a `LiveSocketActions` dispatch and owning the `SSE_RETRY_INTERVAL_MS` manual retry loop
+after a fatal close — a *transient* drop is the browser's own native reconnect, reported as
+`'retrying'` with no action from this code, which is exactly where the inherited gap lives: a topic
+tracked or untracked while a native auto-retry is in flight is missed until the next full reconnect,
+since the browser silently re-fetches the previous URL. **Preserved, not fixed** — the task's own
+instruction, and the honest thing to do given the alternative (canceling and reopening on every
+tracker change) would defeat the ref-counting's whole purpose of coalescing rapid mount/unmount
+churn into one PATCH.
+
+**Ref-counting split cleanly across the reducer/effects boundary using one NgRx guarantee**: a
+dispatched action's reducer always runs before any effect observes that same action. `topicRefs:
+Record<string, number>` lives in the reducer; `patchOnTrack$`/`patchOnUntrack$` read
+`topicRefs[topic]` immediately after via `concatLatestFrom`, so `=== 1` reliably means "I am the
+first subscriber, PATCH add" and an absent key after decrementing reliably means "I was the last,
+PATCH remove" — no separate counter or lock needed on the effects side.
+
+**Topic count doc defect, verified rather than assumed**: the old class's doc comment (and this
+file's own stores table, now fixed) said "Twelve topics now, twelve projected stores." Counting
+`LiveEnvelope`'s actual discriminated union in `core/api/models.ts` gives **fourteen** — `fleet`,
+`event`, `telemetry`, `detections`, `devices`, `detection-events`, `map`, `geo`, `discovery`,
+`zones`, `system`, `tracks`, `cv-trace`, `links` — and thirteen store classes project them (`tracks`
+and `geo` each get their own dedicated projection *and* feed a second facade reader —
+`worldObjectsFor`/`geoFor` — off the same topic, which is also why there are **seven** `xFor` reader
+methods but only **six** independent `trackX`/`untrackX` ref-count pairs: `worldObjectsFor` has no
+pair of its own, it piggybacks on `trackWorldObjects`/`untrackWorldObjects`'s `tracks:<assetId>`
+subscription, same as `tracksFor` does). `LiveFacade`'s class doc now reads "Fourteen topics now."
+
+**A production defect this wave found and fixed, not a test artifact — flagging for N4–N8 the same
+way N1 flagged the Router-DI finding for this one.** `auth.effects.ts`'s `reconnectLiveOnSession$`/
+`logoutSideEffects$` injected `LiveFacade` as an eager `createEffect` factory default parameter —
+the same idiom every other effect in the file uses for `Actions`/`VisionApi`/`Router`/`Store`, all of
+which are side-effect-free to construct. `LiveFacade` is not: its constructor dispatches
+`LivePageActions.reconnectRequested()` once, on construction, mirroring `AuthFacade`'s own
+constructor-dispatch precedent from N2. Read `@ngrx/effects`' own source
+(`node_modules/@ngrx/effects/fesm2022/ngrx-effects.mjs`, `EffectsRootModule`'s constructor): it calls
+`runner.start()` — subscribing the merged effect stream — **before** looping over every registered
+effects group and calling `sources.addEffects(group)` for each, in `provideEffects(...)`'s own array
+order. `app-state.ts` registers `authEffects` ahead of `liveEffects`. Resolving `authEffects`'s
+functional-effect factories therefore eagerly constructs `LiveFacade` — running its constructor's own
+`reconnect()` dispatch — **before** `liveEffects.connection$` has even been created to receive it,
+silently dropping that boot-time reconnect on every cold load. This was masked in practice, not
+absent: `AuthFacade`'s own later `bootstrapSucceeded`/`loginSucceeded` dispatch re-triggers
+`reconnectLiveOnSession$` well after every effect is live, so the connection still opens — just never
+from the constructor path the class's own doc comment claims, and never at all if that later dispatch
+were ever skipped. Caught by `live-facade.spec.ts`'s "degrades to closed shortly after construction"
+case, confirmed deterministic (not flaky, reproduced across repeated runs) and root-caused by
+bisection against a byte-for-byte copy of `live-facade.ts` under a different class name in a
+different file (which passed, isolating the cause to *which* class token `auth.effects.ts` itself
+eagerly resolves, not to `LiveFacade`'s own shape or field count). **Fixed** by replacing the eager
+`liveStore = inject(LiveFacade)` parameter with `injector = inject(Injector)` and resolving
+`injector.get(LiveFacade)` **inside** each effect's own `tap`/`switchMap` callback instead — deferring
+construction until the action genuinely fires, by which point every effect (including `connection$`)
+is already subscribed. **The general lesson for later waves**: any effects file that eagerly injects
+(as a factory default parameter, not inside the pipeline) a facade whose constructor has a dispatch or
+other side effect is order-dependent on `provideEffects(...)`'s array position in a way that is easy
+to get right by accident and easy to break silently — resolve such a facade lazily via `Injector.get`
+inside the operator chain instead, every time.
+
+**Tooling note: the interactive shell's `grep` is aliased to `ugrep` with flags that produce false
+negatives.** `grep -rn 'LiveStore' src/` missed the real `import { LiveStore } from '../live/
+live-store'` in `core/cv-trace/cv-trace-store.ts` (caught only once `tsc --noEmit` reported the now-
+dangling import) and separately misreported a "binary file" match on a file containing a legitimate
+raw NUL byte (`cv-trace-store.ts`'s own `` `${streamId}\x00${assetId ?? ''}\x00${last}` `` cache-key
+delimiter — confirmed pre-existing via `git show HEAD:...`, not introduced by this wave, left
+untouched). **Use `command grep` to bypass the shell alias for any search whose completeness matters.**
+
+### Tests / build
+
+`npm run test:ci` — **234/234 files, 4443/4443 tests green** (+3 files / +56 tests over the N1+N2
+merged baseline of 231/4387: `live.reducer.spec.ts` (33 tests), `live.effects.spec.ts` (13 tests),
+`live-facade.spec.ts` (10 tests) — no legacy spec file existed for `live-store.ts` to delete, unlike
+every prior wave). `npx tsc --noEmit` clean on both `tsconfig.app.json` and `tsconfig.spec.json`.
+`npx ng build --configuration production` — exit 0 (same two pre-existing, unrelated warnings as
+every prior wave: the `NG8107` optional-chain hint in `cockpit.html` and the CSS budget warning on
+`tactical-map.css`).
+
+**Bundle cost, measured honestly.** This wave's tree: **505.87 kB raw / 143.74 kB transfer** initial
+total. Rebuilt the exact commit this wave branched from (`e67ae16a`, N1+N2 merged) via `git stash
+push -u` in this same worktree rather than a separate throwaway one (no reinstall needed either way —
+`node_modules` is symlinked): **500.83 kB raw / 142.62 kB transfer**. This wave's own cost: **+5.04 kB
+raw (+1.0%) / +1.12 kB transfer (+0.8%)**. `angular.json`'s initial-bundle budget is 500 kB warn /
+550 kB error — the build stays green, now **5.87 kB over the warning line** (835 bytes of that already
+present before this wave, per N1+N2's own entry above). Left as a warning on purpose, same rule as
+every prior wave: raising it would silence the only signal tracking this migration's cost, and N4–N8
+each delete a hand-rolled store in turn.
+
+**Nothing in the plan itself was found wrong** beyond the stale "Twelve topics" doc-comment heading
+(now "Fourteen topics", verified by counting `LiveEnvelope`'s actual union rather than trusting the
+old prose) and the 6-pairs-vs-7-readers detail above, which the plan's own recipe didn't need to spell
+out but is worth knowing before touching this facade again. The `auth.effects.ts` eager-injection
+defect was not a plan defect — it was a pre-existing correctness bug in code the plan's brief never
+asked to change, found only because the migration made `LiveFacade`'s construction observable through
+NgRx's own effects machinery for the first time (`LiveStore` had no such ordering hazard, being a
+plain, self-contained, eagerly-constructed class with no dependency on effects registration order at
+all).
+
+- **Commit** (suggested; this agent does not commit per its task — the orchestrator commits each wave): `feat(ngrx N3): the live slice — SSE connection as an NgRx slice + LiveGateway seam, and an auth.effects.ts eager-injection fix`.

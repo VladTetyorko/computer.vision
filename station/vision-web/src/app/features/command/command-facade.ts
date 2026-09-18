@@ -20,7 +20,7 @@ import { DrawingsStore } from '../../core/map-data/drawings-store';
 import { resolveInteractionMode } from '../../core/map-data/drawings-logic';
 import { EventsStore } from '../../core/events/events-store';
 import { selectEventMarkers } from '../../core/events/events-logic';
-import { LiveStore } from '../../core/live/live-store';
+import { LiveFacade } from '../../core/live/live-facade';
 import { isLiveAvailable } from '../../core/live/live-fallback-logic';
 import {
   SUMMARY_FLOOR_INTERVAL_MS,
@@ -39,7 +39,7 @@ import type { AssetAttention, FleetSummary, GroupSummary, UserSummary } from '..
 /**
  * The fleet-summary read's **not-open fallback** cadence (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md
  * §5 L8a) — unchanged from the unconditional timer this wave retired, but now reached only while
- * `LiveStore` is not `'open'`. While it is, the summary refetches on *invalidation* instead: a
+ * `LiveFacade` is not `'open'`. While it is, the summary refetches on *invalidation* instead: a
  * `fleet`/`devices` arrival, or a `detection-events` arrival naming an asset this summary lists,
  * debounced to at most one request per `SUMMARY_INVALIDATION_DEBOUNCE_MS`, with
  * `SUMMARY_FLOOR_INTERVAL_MS` as the floor for the telemetry-derived fields that ride no topic.
@@ -80,7 +80,7 @@ const HIDE_SIMULATED_KEY = 'vision.fly.hideSimulated';
 
 /**
  * `CommandPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md wave W2) — owns every store/service the page
- * needs (`FleetStore`, `FleetMapStore`, `GeofenceStore`, `LiveStore`, `WeatherStore`, `VisionApi`,
+ * needs (`FleetStore`, `FleetMapStore`, `GeofenceStore`, `LiveFacade`, `WeatherStore`, `VisionApi`,
  * `Router`, `PollScheduler`), the fleet-summary poll, and every read-model/command the template binds
  * to. `CommandPage` itself injects only this facade (plus its own `UiStore` for the Zones overlay —
  * see that class's own doc comment for why the overlay stays component-local rather than moving here).
@@ -115,7 +115,7 @@ export class CommandFacade {
   private readonly mapStore = inject(FleetMapStore);
   private readonly geofence = inject(GeofenceStore);
   private readonly events = inject(EventsStore);
-  private readonly liveStore = inject(LiveStore);
+  private readonly liveStore = inject(LiveFacade);
   private readonly scheduler = inject(PollScheduler);
   private readonly weather = inject(WeatherStore);
   /** §3.4's on-demand route fetch — page-provided alongside `FleetMapStore`/`WeatherStore` in
@@ -190,7 +190,7 @@ export class CommandFacade {
   });
 
   /**
-   * `assetId → active breaches` (docs/plans/done/OPS-CORE-PLAN.md §G-c), derived from `LiveStore.liveEvents()`
+   * `assetId → active breaches` (docs/plans/done/OPS-CORE-PLAN.md §G-c), derived from `LiveFacade.liveEvents()`
    * — the generic `event` SSE topic GEOFENCE_BREACH rides. Feeds `buildEntityRows`' top-rank
    * `geofence-breach` reason, same "optional map, by assetId" shape as `gpsFixTypeByAssetId` above.
    */
@@ -215,7 +215,7 @@ export class CommandFacade {
 
   /**
    * `streamId → active PIPELINE_ERROR message` (docs/plans/done/SYSTEM-STATUS-PLAN.md §3.4), derived from
-   * `LiveStore.liveEvents()` exactly like `geofenceBreachesByAssetId` above, but keyed by `streamId`
+   * `LiveFacade.liveEvents()` exactly like `geofenceBreachesByAssetId` above, but keyed by `streamId`
    * (a pipeline error carries no `assetId` — see that function's own doc comment) rather than
    * `assetId`. Feeds `buildEntityRows`' `pipeline-error` reason.
    */
@@ -246,7 +246,7 @@ export class CommandFacade {
    * `assetId → attention row` (docs/plans/active/OPERATOR-UX-4-PLAN.md finding N2, §2 N2) — the *same*
    * `EntityRow` objects `entityRows` already sorts, just addressable by id. This is the fix for a
    * rail-vs-panel disagreement reproduced live on the running dev server: the rail's row read CRIT
-   * (a `geofence-breach`/`pipeline-error` reason, fed from `LiveStore` and threaded into
+   * (a `geofence-breach`/`pipeline-error` reason, fed from `LiveFacade` and threaded into
    * `buildEntityRows` but never into `AssetPanel`'s own, narrower `attentionReasons()` call) while the
    * panel it opened read "All quiet" for the identical asset — two independent derivations of the
    * same fact, free to drift. `AssetPanel` now takes `[reasons]` as a plain input fed from this map
@@ -607,7 +607,7 @@ export class CommandFacade {
     });
   }
 
-  /** Cursor into `LiveStore.detectionEvents()` — the same idiom `MarksStore` uses for `map`. */
+  /** Cursor into `LiveFacade.detectionEvents()` — the same idiom `MarksStore` uses for `map`. */
   private processedDetectionEventCount = 0;
   /** Swallows the invalidation effect's own first run; the constructor already fetched. */
   private summaryBootstrapped = false;

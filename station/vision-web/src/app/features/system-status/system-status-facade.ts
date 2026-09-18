@@ -1,6 +1,6 @@
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
 import { FleetStore } from '../../core/fleet/fleet-store';
-import { LiveStore } from '../../core/live/live-store';
+import { LiveFacade } from '../../core/live/live-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { relativeTimeLabel } from '../../core/events/events-logic';
 import { describeSystemEventSource, type SystemEventRow } from '../../core/system-events/system-events-logic';
@@ -26,10 +26,10 @@ const CLOCK_TICK_MS = 1_000;
  *
  * - {@link SystemStatusStore} — `GET /api/system/status`, already polling app-wide for the shell
  *   rollup dot (§5.2); this page is simply a second reader, exactly like `ReportsFacade` reading
- *   `LiveStore` without re-subscribing to anything.
+ *   `LiveFacade` without re-subscribing to anything.
  * - {@link SystemEventsStore} — S1's system-event log, reused wholesale (this wave's own explicit
- *   instruction) rather than a second `computed()` over `LiveStore.liveEvents()`.
- * - {@link FleetStore}/{@link LiveStore} — `devices`/`streams` for
+ *   instruction) rather than a second `computed()` over `LiveFacade.liveEvents()`.
+ * - {@link FleetStore}/{@link LiveFacade} — `devices`/`streams` for
  *   `describeSystemEventSource`, and `connectionState()` for the page's own Live transport card.
  *
  * Degrades honestly: `subsystems`/`overall*` read `undefined` (never a fabricated "OK") until the
@@ -42,7 +42,7 @@ export class SystemStatusFacade {
   private readonly statusStore = inject(SystemStatusStore);
   private readonly eventsStore = inject(SystemEventsStore);
   private readonly fleet = inject(FleetStore);
-  private readonly live = inject(LiveStore);
+  private readonly live = inject(LiveFacade);
   private readonly scheduler = inject(PollScheduler);
 
   private readonly nowSignal = signal(Date.now());

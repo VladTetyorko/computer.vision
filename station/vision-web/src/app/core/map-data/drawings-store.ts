@@ -7,7 +7,7 @@ import type { DrawKind, GeoPosition, MapDrawingResponse } from '../api/models';
 import { describeHttpError } from '../api-error';
 import { ToastService } from '../toast.service';
 import { PollScheduler } from '../poll-scheduler';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import { isLiveAvailable } from '../live/live-fallback-logic';
 import { LayersStore } from './layers-store';
 import type { DrawingDraft } from '../../shared/map/tactical-map/tactical-map-logic';
@@ -24,7 +24,7 @@ import {
  * primary path.
  *
  * **Gated on live, not unconditional** (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1) — runs
- * **only** while `activeConsumers > 0` **and** `LiveStore` is not `'open'`; see
+ * **only** while `activeConsumers > 0` **and** `LiveFacade` is not `'open'`; see
  * `MarksStore.applyTransport`'s identical state table (`applyTransport` below implements the same
  * one).
  */
@@ -80,7 +80,7 @@ const DRAWINGS_POLL_INTERVAL_MS = 30_000;
 export class DrawingsStore {
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
-  private readonly live = inject(LiveStore);
+  private readonly live = inject(LiveFacade);
   private readonly layers = inject(LayersStore);
   private readonly scheduler = inject(PollScheduler);
 
@@ -158,7 +158,7 @@ export class DrawingsStore {
       this.drawingsSignal.update((drawings) => applyDrawingEvents(drawings, newEvents));
     });
 
-    // Re-evaluates poll-vs-live whenever `LiveStore` (re)connects or drops
+    // Re-evaluates poll-vs-live whenever `LiveFacade` (re)connects or drops
     // (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1) — mirrors `FleetStore`/
     // `EventsStore`'s identical reconnect-driven effect.
     effect(() => {

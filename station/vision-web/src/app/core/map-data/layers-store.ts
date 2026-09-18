@@ -4,7 +4,7 @@ import type { AccessLevel, CreateLayerRequest, LayerGrant, MapLayer } from '../a
 import { describeHttpError } from '../api-error';
 import { ToastService } from '../toast.service';
 import { PollScheduler } from '../poll-scheduler';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import { isLiveAvailable } from '../live/live-fallback-logic';
 import {
   applyLayerEvents,
@@ -25,7 +25,7 @@ import {
  * connection that is genuinely down.
  *
  * **Gated on live, not unconditional** (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1) — runs
- * **only** while `activeConsumers > 0` **and** `LiveStore` is not `'open'`; see
+ * **only** while `activeConsumers > 0` **and** `LiveFacade` is not `'open'`; see
  * `MarksStore.applyTransport`'s identical state table (`applyTransport` below implements the same
  * one). **Grants are the one thing this poll alone used to repair** — they deliberately never
  * travel over SSE (docs/plans/done/MAP-REWORK-PLAN.md §4.3) — so retiring it outright would leave a
@@ -59,7 +59,7 @@ const GRANTS_RECONCILE_DEBOUNCE_MS = 1_000;
  *
  * <h2>Initial GET + live deltas + a grants-shaped caveat</h2>
  * Same posture as every other map-data store: `GET /api/map/layers` first, then fold
- * `LiveStore.mapEvents()` on top (`layers-logic.ts#applyLayerEvents`). The one wrinkle is that a
+ * `LiveFacade.mapEvents()` on top (`layers-logic.ts#applyLayerEvents`). The one wrinkle is that a
  * layer arriving over SSE never carries `grants` (§4.3) — `applyLayerEvents` therefore preserves the
  * previously-known list rather than blanking a manager's open grants editor. That fold is correct
  * for every change *except* a grant **revocation**, which it cannot represent (there is no "grants
@@ -88,7 +88,7 @@ const GRANTS_RECONCILE_DEBOUNCE_MS = 1_000;
 export class LayersStore {
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
-  private readonly live = inject(LiveStore);
+  private readonly live = inject(LiveFacade);
   private readonly scheduler = inject(PollScheduler);
 
   private readonly layersSignal = signal<readonly MapLayer[]>([]);
@@ -111,7 +111,7 @@ export class LayersStore {
   /** Which layer a new mark/drawing lands on by default; `undefined` means "omit `layerId` and let §3's server-side default apply". */
   readonly defaultLayerId = computed(() => defaultContributeLayerId(this.layersSignal()));
 
-  /** How many live map deltas (`LiveStore.mapEvents()`, a chronological append-only log) this store has folded in. */
+  /** How many live map deltas (`LiveFacade.mapEvents()`, a chronological append-only log) this store has folded in. */
   private processedLiveEventCount = 0;
 
   /** Ref-count of live consumers — see {@link activate}/{@link release}. */
@@ -132,7 +132,7 @@ export class LayersStore {
 
   constructor() {
     // Mirrors `MarksStore`/`DrawingsStore`'s identical cursor over the same shared arrival log — see
-    // `core/live/live-store.ts#mapEvents`' own doc comment for why three consumers read one signal.
+    // `core/live/live-facade.ts#mapEvents`' own doc comment for why three consumers read one signal.
     // Left unconditional (unlike the GET + poll below): folding an already-arrived SSE event is an
     // in-memory reduction with no network cost, so there is nothing to gate on demand.
     effect(() => {
@@ -148,7 +148,7 @@ export class LayersStore {
       }
     });
 
-    // Re-evaluates poll-vs-live whenever `LiveStore` (re)connects or drops
+    // Re-evaluates poll-vs-live whenever `LiveFacade` (re)connects or drops
     // (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1) — mirrors `FleetStore`/
     // `EventsStore`'s identical reconnect-driven effect.
     effect(() => {

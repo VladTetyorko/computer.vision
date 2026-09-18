@@ -4,7 +4,7 @@ import { VisionApi } from '../api/vision-api';
 import { ToastService } from '../toast.service';
 import { describeHttpError } from '../api-error';
 import { PollScheduler } from '../poll-scheduler';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import { type AssetScopedTransport, resolveAssetScopedTransport } from '../live/live-fallback-logic';
 import type { LinkGroupResponse } from '../api/models';
 
@@ -15,7 +15,7 @@ const POLL_INTERVAL_MS = 5_000;
 /**
  * Tracks one asset's whole link group (docs/plans/active/LINK-PAIRING-PLAN.md §3.4, wave L4) — the
  * asset-detail Links panel's own source. Polls `GET /api/assets/{id}/links` every 5s while visible,
- * or, when `LiveStore` is open, subscribes to that asset's live `links:<assetId>` topic instead — the
+ * or, when `LiveFacade` is open, subscribes to that asset's live `links:<assetId>` topic instead — the
  * payload there is always the *whole* group snapshot, never a diff (`LinkGroupResponse`'s own doc
  * comment), so this store simply replaces its held value on every arrival exactly like
  * `GeoStore`/`DetectionsStore`'s own ring-capacity-1 topics. Modeled directly on
@@ -55,11 +55,11 @@ export class LinksStore {
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
   private readonly scheduler = inject(PollScheduler);
-  private readonly live = inject(LiveStore);
+  private readonly live = inject(LiveFacade);
 
   /** Kept fresh by the 5s poll while `transportSignal() === 'poll'`; stale/unused while `'live'`. */
   private readonly pollResultSignal = signal<LinkGroupResponse | undefined>(undefined);
-  /** Mirrors `LiveStore.linksFor(assetId)` while `transportSignal() === 'live'`. */
+  /** Mirrors `LiveFacade.linksFor(assetId)` while `transportSignal() === 'live'`. */
   private readonly liveResultSignal = signal<LinkGroupResponse | undefined>(undefined);
   /** The `assetId` passed to the current `track()` call, or `undefined` — drives the transport decision. */
   private readonly currentAssetIdSignal = signal<string | undefined>(undefined);

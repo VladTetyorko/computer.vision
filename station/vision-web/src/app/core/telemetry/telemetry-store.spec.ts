@@ -3,7 +3,7 @@ import { signal } from '@angular/core';
 import { describe, expect, it, vi } from 'vitest';
 import { TelemetryStore } from './telemetry-store';
 import { VisionApi } from '../api/vision-api';
-import { LiveStore, type LiveConnectionState } from '../live/live-store';
+import { LiveFacade, type LiveConnectionState } from '../live/live-facade';
 import { PollScheduler } from '../poll-scheduler';
 import type { AssetDetails, AssetSummary, TelemetrySample } from '../api/models';
 
@@ -13,14 +13,14 @@ function flush(): Promise<void> {
 }
 
 /**
- * A minimal `LiveStore` test double (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) — real Angular `signal`s
+ * A minimal `LiveFacade` test double (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) — real Angular `signal`s
  * so `TelemetryStore`'s own `computed`/`effect` react to it exactly as they would to the real
- * class, without needing a real `EventSource` (jsdom has none — see `live-store.ts`'s own doc
- * comment). Defaults to `'closed'` — the same state the *real* `LiveStore` reports under jsdom —
+ * class, without needing a real `EventSource` (jsdom has none — see `live-facade.ts`'s own doc
+ * comment). Defaults to `'closed'` — the same state the *real* `LiveFacade` reports under jsdom —
  * so every pre-existing test above, which never provides this stub at all, keeps exercising the
  * poll-only path unmodified.
  */
-function stubLiveStore(initialState: LiveConnectionState = 'closed') {
+function stubLiveFacade(initialState: LiveConnectionState = 'closed') {
   const stateSignal = signal<LiveConnectionState>(initialState);
   const perAsset = new Map<string, ReturnType<typeof signal<readonly TelemetrySample[]>>>();
   const signalFor = (assetId: string) => {
@@ -83,12 +83,10 @@ function stubApi(overrides: Partial<Record<'listAssets' | 'getAsset' | 'usageTel
 
 function inject(
   api: ReturnType<typeof stubApi>,
-  options: { live?: ReturnType<typeof stubLiveStore>; scheduler?: ReturnType<typeof stubScheduler> } = {},
+  options: { live?: ReturnType<typeof stubLiveFacade>; scheduler?: ReturnType<typeof stubScheduler> } = {},
 ): TelemetryStore {
   const providers: unknown[] = [TelemetryStore, { provide: VisionApi, useValue: api }];
-  if (options.live) {
-    providers.push({ provide: LiveStore, useValue: options.live });
-  }
+  providers.push({ provide: LiveFacade, useValue: options.live ?? stubLiveFacade() });
   if (options.scheduler) {
     providers.push({ provide: PollScheduler, useValue: options.scheduler });
   }
@@ -247,7 +245,7 @@ describe('TelemetryStore', () => {
       getAsset: vi.fn().mockResolvedValue(asset),
       usageTelemetry: vi.fn().mockResolvedValue([]),
     });
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
 
     const store = inject(api, { live });
     for (let i = 0; i < 5; i++) {
@@ -300,7 +298,7 @@ describe('TelemetryStore', () => {
     expect(store.samples()).toEqual([]);
   });
 
-  // --- LiveStore projection (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) ----------------------------
+  // --- LiveFacade projection (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) ----------------------------
 
   function assetWithOpenUsage(assetId: string, deviceId: string, usageId: string): AssetDetails {
     return {
@@ -310,13 +308,13 @@ describe('TelemetryStore', () => {
     };
   }
 
-  it('subscribes live when LiveStore is open and an assetId is given — one backfill GET, no repeat poll', async () => {
+  it('subscribes live when LiveFacade is open and an assetId is given — one backfill GET, no repeat poll', async () => {
     const backfill: TelemetrySample = { deviceId: 'dev-9', at: '2026-07-24T00:00:00Z', latitude: 1, longitude: 1 };
     const api = stubApi({
       getAsset: vi.fn().mockResolvedValue(assetWithOpenUsage('a-9', 'dev-9', 'u-9')),
       usageTelemetry: vi.fn().mockResolvedValue([backfill]),
     });
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -335,12 +333,12 @@ describe('TelemetryStore', () => {
     store.reset();
   });
 
-  it('never subscribes live without an assetId, even when LiveStore is open — always polls', async () => {
+  it('never subscribes live without an assetId, even when LiveFacade is open — always polls', async () => {
     const api = stubApi({
       listAssets: vi.fn().mockResolvedValue([summaryFor('a-10')]),
       getAsset: vi.fn().mockResolvedValue(assetWithOpenUsage('a-10', 'dev-10', 'u-10')),
     });
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -353,12 +351,12 @@ describe('TelemetryStore', () => {
     store.reset();
   });
 
-  it('falls back to polling while LiveStore is not open, even with an assetId — still subscribes for later', async () => {
+  it('falls back to polling while LiveFacade is not open, even with an assetId — still subscribes for later', async () => {
     const api = stubApi({
       getAsset: vi.fn().mockResolvedValue(assetWithOpenUsage('a-11', 'dev-11', 'u-11')),
       usageTelemetry: vi.fn().mockResolvedValue([]),
     });
-    const live = stubLiveStore('connecting');
+    const live = stubLiveFacade('connecting');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -367,16 +365,16 @@ describe('TelemetryStore', () => {
     await flush();
 
     expect(live.trackTelemetry).toHaveBeenCalledExactlyOnceWith('a-11'); // subscribed regardless of transport
-    expect(scheduler.lastFor(2_000)).toBeDefined(); // but reads via polling until LiveStore opens
+    expect(scheduler.lastFor(2_000)).toBeDefined(); // but reads via polling until LiveFacade opens
     store.reset();
   });
 
-  it('switches from poll to live, stopping the poll, when LiveStore opens mid-session', async () => {
+  it('switches from poll to live, stopping the poll, when LiveFacade opens mid-session', async () => {
     const api = stubApi({
       getAsset: vi.fn().mockResolvedValue(assetWithOpenUsage('a-12', 'dev-12', 'u-12')),
       usageTelemetry: vi.fn().mockResolvedValue([]),
     });
-    const live = stubLiveStore('connecting');
+    const live = stubLiveFacade('connecting');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -393,13 +391,13 @@ describe('TelemetryStore', () => {
     store.reset();
   });
 
-  it('falls back to polling again, fetching fresh data immediately, when LiveStore drops mid-session', async () => {
+  it('falls back to polling again, fetching fresh data immediately, when LiveFacade drops mid-session', async () => {
     const usageTelemetry = vi.fn().mockResolvedValue([]);
     const api = stubApi({
       getAsset: vi.fn().mockResolvedValue(assetWithOpenUsage('a-13', 'dev-13', 'u-13')),
       usageTelemetry,
     });
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -423,7 +421,7 @@ describe('TelemetryStore', () => {
       getAsset: vi.fn().mockResolvedValue(assetWithOpenUsage('a-14', 'dev-14', 'u-14')),
       usageTelemetry: vi.fn().mockResolvedValue([]),
     });
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
 
     const store = inject(api, { live });
     store.track('dev-14', 'a-14');
@@ -443,7 +441,7 @@ describe('TelemetryStore', () => {
         .mockResolvedValueOnce(assetWithOpenUsage('a-16', 'dev-16', 'u-16')),
       usageTelemetry: vi.fn().mockResolvedValue([]),
     });
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
 
     const store = inject(api, { live });
     store.track('dev-15', 'a-15');

@@ -6,7 +6,7 @@ import { DronePickerPage } from './drone-picker';
 import { VisionApi } from '../../core/api/vision-api';
 import { AuthFacade } from '../../core/auth/auth-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
-import { LiveStore, type LiveConnectionState } from '../../core/live/live-store';
+import { LiveFacade, type LiveConnectionState } from '../../core/live/live-facade';
 import type { AssetSummary, AuthCapability, MeResponse, Role, ScopeKind } from '../../core/api/models';
 
 /**
@@ -69,10 +69,10 @@ function stubScheduler() {
   return { schedule: vi.fn(() => vi.fn()) };
 }
 
-/** Mirrors `fleet-store.spec.ts#stubLiveStore` — real signals, closed/undefined by default (the
- * same state the real `LiveStore` reports under jsdom, per that file's own doc comment), so the
+/** Mirrors `fleet-store.spec.ts#stubLiveFacade` — real signals, closed/undefined by default (the
+ * same state the real `LiveFacade` reports under jsdom, per that file's own doc comment), so the
  * facade's poll-vs-live effect stays on the poll path this stubbed `listAssets()` backs. */
-function stubLiveStore() {
+function stubLiveFacade() {
   return {
     connectionState: signal<LiveConnectionState>('closed').asReadonly(),
     fleet: signal<readonly AssetSummary[] | undefined>(undefined).asReadonly(),
@@ -92,7 +92,7 @@ async function render(assets: readonly AssetSummary[], user?: Pick<MeResponse, '
       { provide: VisionApi, useValue: stubApi(assets) as unknown as VisionApi },
       { provide: AuthFacade, useValue: fakeAuthFacade(user) as unknown as AuthFacade },
       { provide: PollScheduler, useValue: stubScheduler() as unknown as PollScheduler },
-      { provide: LiveStore, useValue: stubLiveStore() as unknown as LiveStore },
+      { provide: LiveFacade, useValue: stubLiveFacade() as unknown as LiveFacade },
     ],
   });
   const fixture = TestBed.createComponent(DronePickerPage);

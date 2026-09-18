@@ -8,7 +8,7 @@ import { contributableLayers, defaultContributeLayerId } from './layers-logic';
 import { VisionApi } from '../api/vision-api';
 import { ToastService } from '../toast.service';
 import { PollScheduler } from '../poll-scheduler';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import type { LiveConnectionState } from '../live/live-fallback-logic';
 import type { MapEventPayload, MapLayer, MapMark } from '../api/models';
 
@@ -69,17 +69,17 @@ function stubApi(overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
 
 /**
  * Real Angular signals so the store's own `effect()`s react exactly as they would to the real
- * `LiveStore`. `connectionState` seeded `'closed'` — reproduces today's (pre-D1) behaviour exactly,
+ * `LiveFacade`. `connectionState` seeded `'closed'` — reproduces today's (pre-D1) behaviour exactly,
  * so every existing assertion in this file stays green untouched
  * (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §5 L1b); tests that care about the live gate drive
  * it explicitly via `connectionState.set(...)`.
  */
-function stubLiveStore() {
+function stubLiveFacade() {
   const events = signal<readonly MapEventPayload[]>([]);
   const connectionState = signal<LiveConnectionState>('closed');
   return {
     mapEvents: events.asReadonly(),
-    /** Appends, oldest-first — mirrors `LiveStore.mapEvents`'s own accumulation contract. */
+    /** Appends, oldest-first — mirrors `LiveFacade.mapEvents`'s own accumulation contract. */
     push: (incoming: readonly MapEventPayload[]) => events.update((existing) => [...existing, ...incoming]),
     connectionState,
   };
@@ -103,14 +103,14 @@ function stubLayersStore(layers: readonly MapLayer[] = [layer()]) {
 
 function create(api: ReturnType<typeof stubApi>, options: { layers?: readonly MapLayer[] } = {}) {
   const toasts = { ok: vi.fn(), error: vi.fn(), info: vi.fn(), notify: vi.fn(), warn: vi.fn() };
-  const live = stubLiveStore();
+  const live = stubLiveFacade();
   TestBed.configureTestingModule({
     providers: [
       MarksStore,
       { provide: VisionApi, useValue: api },
       { provide: ToastService, useValue: toasts },
       { provide: PollScheduler, useValue: { schedule: vi.fn().mockReturnValue(() => undefined) } },
-      { provide: LiveStore, useValue: live },
+      { provide: LiveFacade, useValue: live },
       { provide: LayersStore, useValue: stubLayersStore(options.layers) },
       provideRouter([
         { path: 'command', component: StubPage },
@@ -448,7 +448,7 @@ describe('MarksStore', () => {
      *  the pre-activation state, which every other test in this file deliberately skips past. */
     function createInactive(api: ReturnType<typeof stubApi>) {
       const toasts = { ok: vi.fn(), error: vi.fn(), info: vi.fn(), notify: vi.fn(), warn: vi.fn() };
-      const live = stubLiveStore();
+      const live = stubLiveFacade();
       const scheduleFn = vi.fn().mockReturnValue(vi.fn());
       TestBed.configureTestingModule({
         providers: [
@@ -456,7 +456,7 @@ describe('MarksStore', () => {
           { provide: VisionApi, useValue: api },
           { provide: ToastService, useValue: toasts },
           { provide: PollScheduler, useValue: { schedule: scheduleFn } },
-          { provide: LiveStore, useValue: live },
+          { provide: LiveFacade, useValue: live },
           { provide: LayersStore, useValue: stubLayersStore() },
           provideRouter([{ path: 'command', component: StubPage }]),
         ],
@@ -499,7 +499,7 @@ describe('MarksStore', () => {
           { provide: VisionApi, useValue: api },
           { provide: ToastService, useValue: toasts },
           { provide: PollScheduler, useValue: { schedule: scheduleFn } },
-          { provide: LiveStore, useValue: stubLiveStore() },
+          { provide: LiveFacade, useValue: stubLiveFacade() },
           { provide: LayersStore, useValue: stubLayersStore() },
           provideRouter([{ path: 'command', component: StubPage }]),
         ],
@@ -587,7 +587,7 @@ describe('MarksStore', () => {
     it('a store that activates while already live does one initial GET, not zero', async () => {
       const api = stubApi({ listMapMarks: vi.fn().mockResolvedValue([mark()]) });
       const toasts = { ok: vi.fn(), error: vi.fn(), info: vi.fn(), notify: vi.fn(), warn: vi.fn() };
-      const live = stubLiveStore();
+      const live = stubLiveFacade();
       live.connectionState.set('open');
       const scheduleFn = vi.fn().mockReturnValue(vi.fn());
       TestBed.configureTestingModule({
@@ -596,7 +596,7 @@ describe('MarksStore', () => {
           { provide: VisionApi, useValue: api },
           { provide: ToastService, useValue: toasts },
           { provide: PollScheduler, useValue: { schedule: scheduleFn } },
-          { provide: LiveStore, useValue: live },
+          { provide: LiveFacade, useValue: live },
           { provide: LayersStore, useValue: stubLayersStore() },
           provideRouter([{ path: 'command', component: StubPage }]),
         ],

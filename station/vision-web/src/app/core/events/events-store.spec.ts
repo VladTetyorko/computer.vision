@@ -5,7 +5,7 @@ import { EventsStore } from './events-store';
 import { VisionApi } from '../api/vision-api';
 import { PollScheduler } from '../poll-scheduler';
 import { SettingsFacade } from '../settings/settings-facade';
-import { LiveStore, type LiveConnectionState } from '../live/live-store';
+import { LiveFacade, type LiveConnectionState } from '../live/live-facade';
 import type { DetectionEvent } from '../api/models';
 
 /** Lets the fire-and-forget promise chain inside `pollOnce()` settle before asserting. */
@@ -31,21 +31,21 @@ function stubSettings(eventNotifications = false) {
 }
 
 /**
- * A minimal `LiveStore` test double (docs/plans/done/REALTIME-PLAN.md §4's backend follow-up batch), mirroring
- * `telemetry-store.spec.ts#stubLiveStore` — real Angular `signal`s so `EventsStore`'s own
+ * A minimal `LiveFacade` test double (docs/plans/done/REALTIME-PLAN.md §4's backend follow-up batch), mirroring
+ * `telemetry-store.spec.ts#stubLiveFacade` — real Angular `signal`s so `EventsStore`'s own
  * `computed`/`effect` react to it exactly as they would to the real class, without a real
- * `EventSource` (jsdom has none). Defaults to `'closed'` — the same state the *real* `LiveStore`
+ * `EventSource` (jsdom has none). Defaults to `'closed'` — the same state the *real* `LiveFacade`
  * reports under jsdom — so every pre-existing test above, which never provides this stub at all,
  * keeps exercising the poll-only path unmodified.
  */
-function stubLiveStore(initialState: LiveConnectionState = 'closed') {
+function stubLiveFacade(initialState: LiveConnectionState = 'closed') {
   const stateSignal = signal<LiveConnectionState>(initialState);
   const detectionEventsSignal = signal<readonly DetectionEvent[]>([]);
   return {
     connectionState: stateSignal.asReadonly(),
     detectionEvents: detectionEventsSignal.asReadonly(),
     setState: (state: LiveConnectionState) => stateSignal.set(state),
-    /** Appends, oldest-first — mirrors the real `LiveStore.detectionEvents`'s own accumulation contract. */
+    /** Appends, oldest-first — mirrors the real `LiveFacade.detectionEvents`'s own accumulation contract. */
     pushDetectionEvents: (events: readonly DetectionEvent[]) =>
       detectionEventsSignal.update((existing) => [...existing, ...events]),
   };
@@ -55,7 +55,7 @@ function create(options: {
   events?: ReturnType<typeof vi.fn>;
   scheduler?: unknown;
   eventNotifications?: boolean;
-  live?: ReturnType<typeof stubLiveStore>;
+  live?: ReturnType<typeof stubLiveFacade>;
 } = {}): { store: EventsStore; api: { events: ReturnType<typeof vi.fn> } } {
   const api = { events: options.events ?? vi.fn().mockResolvedValue([]) };
   const providers: unknown[] = [
@@ -65,9 +65,7 @@ function create(options: {
   if (options.scheduler) {
     providers.push({ provide: PollScheduler, useValue: options.scheduler });
   }
-  if (options.live) {
-    providers.push({ provide: LiveStore, useValue: options.live });
-  }
+  providers.push({ provide: LiveFacade, useValue: options.live ?? stubLiveFacade() });
   TestBed.configureTestingModule({ providers });
   return { store: TestBed.inject(EventsStore), api };
 }
@@ -93,7 +91,7 @@ function installNotificationStub(permission: NotificationPermission): ReturnType
 function createWithCapturedPoll(options: {
   events?: ReturnType<typeof vi.fn>;
   eventNotifications?: boolean;
-  live?: ReturnType<typeof stubLiveStore>;
+  live?: ReturnType<typeof stubLiveFacade>;
 } = {}): { store: EventsStore; api: { events: ReturnType<typeof vi.fn> }; poll: () => void } {
   let captured: (() => void) | undefined;
   const schedule = vi.fn((_periodMs: number, callback: () => void) => {
@@ -300,11 +298,11 @@ describe('EventsStore', () => {
     Object.defineProperty(document, 'hidden', { value: false, configurable: true });
   });
 
-  // --- LiveStore projection (docs/plans/done/REALTIME-PLAN.md §4's backend follow-up batch) ---------------
+  // --- LiveFacade projection (docs/plans/done/REALTIME-PLAN.md §4's backend follow-up batch) ---------------
 
-  it('does not poll at all when activated while LiveStore is already open', () => {
+  it('does not poll at all when activated while LiveFacade is already open', () => {
     const events = vi.fn().mockResolvedValue([]);
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
     const { store } = create({ events, live });
 
     store.activate();
@@ -315,7 +313,7 @@ describe('EventsStore', () => {
 
   it('folds a detection-events arrival into events(), live, with no poll involved', () => {
     const events = vi.fn().mockResolvedValue([]);
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
     const { store } = create({ events, live });
 
     store.activate();
@@ -327,11 +325,11 @@ describe('EventsStore', () => {
     store.release();
   });
 
-  it('switches from poll to live, stopping the poll, when LiveStore opens mid-session', async () => {
+  it('switches from poll to live, stopping the poll, when LiveFacade opens mid-session', async () => {
     const events = vi.fn().mockResolvedValue([]);
     const stop = vi.fn();
     const schedule = vi.fn().mockReturnValue(stop);
-    const live = stubLiveStore('closed');
+    const live = stubLiveFacade('closed');
     const { store } = create({ events, live, scheduler: { schedule } });
 
     store.activate();
@@ -345,9 +343,9 @@ describe('EventsStore', () => {
     store.release();
   });
 
-  it('falls back to polling again, fetching fresh data immediately, when LiveStore drops mid-session', async () => {
+  it('falls back to polling again, fetching fresh data immediately, when LiveFacade drops mid-session', async () => {
     const events = vi.fn().mockResolvedValue([event({ id: 'e-fallback' })]);
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
     const { store } = create({ events, live });
 
     store.activate();
@@ -367,7 +365,7 @@ describe('EventsStore', () => {
     Object.defineProperty(document, 'hidden', { value: true, configurable: true });
 
     const events = vi.fn().mockResolvedValue([]);
-    const live = stubLiveStore('open');
+    const live = stubLiveFacade('open');
     const { store } = create({ events, live, eventNotifications: true });
 
     store.activate();

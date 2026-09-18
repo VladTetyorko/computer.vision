@@ -4,7 +4,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { provideRouter } from '@angular/router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AuthFacade } from './auth-facade';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import { provideAppState } from '../state/app-state';
 import { sessionInterceptor } from './session-interceptor';
 
@@ -39,7 +39,7 @@ describe('sessionInterceptor cold boot', () => {
         ]),
         provideHttpClient(withInterceptors([sessionInterceptor])),
         provideHttpClientTesting(),
-        { provide: LiveStore, useValue: { reconnect: vi.fn(), stop: vi.fn() } },
+        { provide: LiveFacade, useValue: { reconnect: vi.fn(), stop: vi.fn() } },
       ],
     });
   }

@@ -3,7 +3,7 @@ import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { EventsStore } from '../../core/events/events-store';
-import { LiveStore } from '../../core/live/live-store';
+import { LiveFacade } from '../../core/live/live-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { ToastService } from '../../core/toast.service';
 import { OverlayFacade } from '../../core/ui/overlay-facade';
@@ -64,7 +64,7 @@ import type { DetectionEvent } from '../../core/api/models';
  * `resolveEventTarget` behavior (asset detail / live cockpit) unchanged.
  *
  * **Geofence breaches (docs/plans/done/OPS-CORE-PLAN.md §G-c)** ride a *different* feed —
- * `LiveStore.liveEvents()`, the generic `event` SSE topic, not this bell's own `DetectionEvent`
+ * `LiveFacade.liveEvents()`, the generic `event` SSE topic, not this bell's own `DetectionEvent`
  * dropdown list (see `LiveEvent`'s own doc comment for why the two are genuinely different domain
  * concepts). This component is still where they toast from (the app's one "background thing just
  * happened" chrome), via a second, independent id-tracking set (`toastedBreachIds`, mirroring
@@ -119,7 +119,7 @@ import type { DetectionEvent } from '../../core/api/models';
  * (`EventsRail`'s own row component), not a widened version of it, since `EventRow.event` is typed
  * to `DetectionEvent` and every one of its existing call sites stays untouched by this wave; see
  * `system-event-row.ts`'s own class doc for the full "why a sibling" writeup. `SystemEventsStore`
- * (`providedIn: 'root'`, backed by `LiveStore.liveEvents()`) is this section's one data source —
+ * (`providedIn: 'root'`, backed by `LiveFacade.liveEvents()`) is this section's one data source —
  * `DETECTION` is excluded there already (that store's own doc comment), so this section can never
  * duplicate a detection the card above it already shows, avoiding exactly the alert-noise failure
  * mode `SYSTEM-STATUS-PLAN.md §1` names. `GEOFENCE_BREACH` still toasts *in addition* (the breach
@@ -140,7 +140,7 @@ export class NotificationBell {
   private readonly api = inject(VisionApi);
   private readonly fleet = inject(FleetStore);
   private readonly toasts = inject(ToastService);
-  private readonly liveStore = inject(LiveStore);
+  private readonly liveStore = inject(LiveFacade);
   private readonly poll = inject(PollScheduler);
   protected readonly events = inject(EventsStore);
   protected readonly systemEvents = inject(SystemEventsStore);
@@ -312,7 +312,7 @@ export class NotificationBell {
     return relativeTimeLabel(row.atIso, this.nowSignal());
   }
 
-  /** `shouldToast`'s own "is this asset currently streaming" input — `LiveStore.fleet()` (the
+  /** `shouldToast`'s own "is this asset currently streaming" input — `LiveFacade.fleet()` (the
    *  always-on `fleet` SSE topic's own `AssetSummary[]`, already flowing into this same store for
    *  `liveEvents()`; no new subscription) is `undefined` only before that topic's first snapshot
    *  ever arrives, which reads as "not streaming" — the honest default while nothing is confirmed

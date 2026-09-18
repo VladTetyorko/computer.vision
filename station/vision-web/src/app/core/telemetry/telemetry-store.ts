@@ -2,7 +2,7 @@ import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angul
 import { VisionApi } from '../api/vision-api';
 import type { AssetDetails, TelemetrySample } from '../api/models';
 import { PollScheduler } from '../poll-scheduler';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import { ageSeconds, deriveTrail, findOwningAsset, isStale, selectOpenUsage } from './telemetry-logic';
 import {
   type AssetScopedTransport,
@@ -23,23 +23,23 @@ const TELEMETRY_LIMIT = 200;
 /**
  * Tracks one device's live telemetry: resolves the owning asset's currently-open usage, then either
  * subscribes to that asset's live SSE telemetry (docs/plans/done/REALTIME-PLAN.md §4, Phase R-c) or polls that
- * usage's trail every 2s — whichever `LiveStore.connectionState()` currently supports.
+ * usage's trail every 2s — whichever `LiveFacade.connectionState()` currently supports.
  *
  * **`track(deviceId, assetId?)`** (docs/plans/done/REALTIME-PLAN.md Phase R-a item 3, `assetId` new) resolves
  * the device's owning asset and its open usage, same as before R-c. **New in R-c**: `track()` always
  * does exactly **one** `GET /api/usages/{usageId}/telemetry` — history backfill, not the start of a
  * repeating poll — then, only when `assetId` is given, subscribes to `telemetry:<assetId>` on the
- * shared {@link LiveStore} for as long as this `track()`/`reset()` session lasts (ref-counted there,
+ * shared {@link LiveFacade} for as long as this `track()`/`reset()` session lasts (ref-counted there,
  * so a second consumer watching the same asset costs nothing extra server-side). Whether this store
  * actually *reads* from that live subscription or falls back to its own 2s poll toggles purely with
- * `LiveStore.connectionState()` (`live-fallback-logic.ts#resolveAssetScopedTransport`) — the
+ * `LiveFacade.connectionState()` (`live-fallback-logic.ts#resolveAssetScopedTransport`) — the
  * subscription itself is not torn down and re-created on every connection blip, only on a genuine
  * `track()`/`reset()` — see this class's own `applyTransport`/`teardownTracking` for why that split
  * matters (a transient SSE drop must not spuriously PATCH-unsubscribe and PATCH-resubscribe).
  *
  * `assetId` omitted (`LivePage`/`WallTile`, which only ever have a bare `deviceId` — see R-a's own
  * paragraph on this) means there is no asset-scoped topic to subscribe to at all — this store then
- * always polls, exactly as it did before R-c, regardless of whether `LiveStore` is otherwise
+ * always polls, exactly as it did before R-c, regardless of whether `LiveFacade` is otherwise
  * connected (`resolveAssetScopedTransport` requires an `assetId` to ever return `'live'`).
  *
  * **Component-provided, not `providedIn: 'root'`.** `LivePage` and each `WallTile` list this in
@@ -57,7 +57,7 @@ const TELEMETRY_LIMIT = 200;
 export class TelemetryStore {
   private readonly api = inject(VisionApi);
   private readonly scheduler = inject(PollScheduler);
-  private readonly live = inject(LiveStore);
+  private readonly live = inject(LiveFacade);
 
   /** The one-time backfill fetch on `track()` — history, never touched again until the next `track()`. */
   private readonly backfillSignal = signal<readonly TelemetrySample[]>([]);
@@ -95,7 +95,7 @@ export class TelemetryStore {
   private lastTrackKey: string | undefined;
 
   /**
-   * Reads live (`LiveStore.telemetryFor`, merged with the one-time backfill) or the poll fallback,
+   * Reads live (`LiveFacade.telemetryFor`, merged with the one-time backfill) or the poll fallback,
    * per `transportSignal` — every other computed below derives from this, not either source
    * directly, so the rest of this class's public API never needs to know which is active.
    */
@@ -129,11 +129,11 @@ export class TelemetryStore {
   constructor() {
     this.stopClock = this.scheduler.schedule(CLOCK_TICK_MS, () => this.nowSignal.set(Date.now()));
 
-    // Re-evaluates poll-vs-live whenever `LiveStore` (re)connects or drops, for as long as a
+    // Re-evaluates poll-vs-live whenever `LiveFacade` (re)connects or drops, for as long as a
     // `track()` session is in effect — the *initial* choice is made directly, synchronously, in
     // `startTracking` below; this effect only ever handles a *later* transition mid-session
     // (docs/plans/done/REALTIME-PLAN.md §4, item 5). Deliberately does **not** touch the live subscription
-    // itself (`LiveStore.trackTelemetry`/`untrackTelemetry`) — only `applyTransport`'s local poll
+    // itself (`LiveFacade.trackTelemetry`/`untrackTelemetry`) — only `applyTransport`'s local poll
     // scheduler toggles here; see the class doc for why a transient drop must not spuriously
     // unsubscribe/resubscribe.
     effect(() => {
@@ -225,7 +225,7 @@ export class TelemetryStore {
    * Switches which source `samples` reads from and, correspondingly, whether the local poll is
    * running — **not** whether the live subscription itself exists (that's `track()`/`reset()`'s
    * job, once per session — see class doc). `'live'` just pauses the poll (no need to also fetch —
-   * `LiveStore` is delivering data already); `'poll'` starts/resumes it. `immediatePoll` (default
+   * `LiveFacade` is delivering data already); `'poll'` starts/resumes it. `immediatePoll` (default
    * `true`) skips the immediate fetch only when the caller already has fresh data in hand
    * (`startTracking`'s own initial backfill) — every other caller (the reconnect-driven `effect`
    * above, falling back from a dropped live connection) wants one right away, since `pollSamplesSignal`

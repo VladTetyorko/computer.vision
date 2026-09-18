@@ -13,7 +13,7 @@ import { GeofenceStore } from '../../core/geofence/geofence-store';
 import { GeoStore } from '../../core/geo/geo-store';
 import { hasFix } from '../../core/geo/geo-logic';
 import { GroundingStore } from './grounding-store';
-import { LiveStore } from '../../core/live/live-store';
+import { LiveFacade } from '../../core/live/live-facade';
 import { isLiveAvailable } from '../../core/live/live-fallback-logic';
 import { MarksStore } from '../../core/map-data/marks-store';
 import { LayersStore } from '../../core/map-data/layers-store';
@@ -135,8 +135,8 @@ export class CockpitFacade {
   private readonly route = inject(ActivatedRoute);
   private readonly scheduler = inject(PollScheduler);
   /** Named `liveStore`, not `live` — this class already has a public `live` computed (below,
-   * "stream() !== undefined"), unrelated to `LiveStore`'s own connection state. */
-  private readonly liveStore = inject(LiveStore);
+   * "stream() !== undefined"), unrelated to `LiveFacade`'s own connection state. */
+  private readonly liveStore = inject(LiveFacade);
   private readonly auth = inject(AuthFacade);
 
   readonly fleet = inject(FleetStore);
@@ -659,7 +659,7 @@ export class CockpitFacade {
    * there was; now (decision E25) `DetectionsStore.tracks` is transport-aware like `results`, so this
    * gates the tracks session's "wanted" state instead — `false` tears down both the poll and any live
    * read, `true` lets `tracks()` resolve to live `tracks:<assetId>` data whenever it can, falling back
-   * to the same poll only without an asset id or while `LiveStore` isn't open (that class's own doc
+   * to the same poll only without an asset id or while `LiveFacade` isn't open (that class's own doc
    * comment). The plan's own formula is "the Vision drawer is open OR the
    * per-frame lock is non-zero OR the last follow read was LOST"; the middle and last clauses are
    * exactly {@link lockedTrackId}/{@link follow} below. **The first clause is a deliberate
@@ -957,7 +957,7 @@ export class CockpitFacade {
     void this.refreshPoll();
     this.assetPollStopFn = this.scheduleAssetPoll();
 
-    // Pause/resume the asset poll against `LiveStore`'s own connection state
+    // Pause/resume the asset poll against `LiveFacade`'s own connection state
     // (docs/plans/done/SCALE-100-PLAN.md §5 S6, item 1) — mirrors
     // `core/fleet/fleet-store.ts#FleetStore`'s identical transport-switch effect: pause while live
     // is open, resume and refetch immediately the moment it drops (the switcher list/active asset

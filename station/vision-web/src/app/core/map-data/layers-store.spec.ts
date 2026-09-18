@@ -5,7 +5,7 @@ import { LayersStore } from './layers-store';
 import { VisionApi } from '../api/vision-api';
 import { ToastService } from '../toast.service';
 import { PollScheduler } from '../poll-scheduler';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import type { LiveConnectionState } from '../live/live-fallback-logic';
 import type { LayerGrant, MapEventPayload, MapLayer } from '../api/models';
 
@@ -41,8 +41,8 @@ function stubApi(overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
 }
 
 /** `connectionState` seeded `'closed'` — reproduces today's (pre-D1) behaviour exactly, see
- *  `marks-store.spec.ts`'s identical `stubLiveStore` doc comment. */
-function stubLiveStore() {
+ *  `marks-store.spec.ts`'s identical `stubLiveFacade` doc comment. */
+function stubLiveFacade() {
   const events = signal<readonly MapEventPayload[]>([]);
   const connectionState = signal<LiveConnectionState>('closed');
   return {
@@ -54,7 +54,7 @@ function stubLiveStore() {
 
 function createInactive(api: ReturnType<typeof stubApi>) {
   const toasts = { ok: vi.fn(), error: vi.fn(), info: vi.fn(), notify: vi.fn(), warn: vi.fn() };
-  const live = stubLiveStore();
+  const live = stubLiveFacade();
   const scheduleFn = vi.fn().mockReturnValue(vi.fn());
   TestBed.configureTestingModule({
     providers: [
@@ -62,7 +62,7 @@ function createInactive(api: ReturnType<typeof stubApi>) {
       { provide: VisionApi, useValue: api },
       { provide: ToastService, useValue: toasts },
       { provide: PollScheduler, useValue: { schedule: scheduleFn } },
-      { provide: LiveStore, useValue: live },
+      { provide: LiveFacade, useValue: live },
     ],
   });
   return { store: TestBed.inject(LayersStore), toasts, live, scheduleFn };
@@ -211,7 +211,7 @@ describe('LayersStore', () => {
 
     it('a store that activates while already live does one initial GET, not zero, and never schedules the poll', async () => {
       const api = stubApi({ listMapLayers: vi.fn().mockResolvedValue([layer()]) });
-      const live = stubLiveStore();
+      const live = stubLiveFacade();
       live.connectionState.set('open');
       const scheduleFn = vi.fn().mockReturnValue(vi.fn());
       TestBed.configureTestingModule({
@@ -220,7 +220,7 @@ describe('LayersStore', () => {
           { provide: VisionApi, useValue: api },
           { provide: ToastService, useValue: { ok: vi.fn(), error: vi.fn(), info: vi.fn(), notify: vi.fn(), warn: vi.fn() } },
           { provide: PollScheduler, useValue: { schedule: scheduleFn } },
-          { provide: LiveStore, useValue: live },
+          { provide: LiveFacade, useValue: live },
         ],
       });
       const store = TestBed.inject(LayersStore);

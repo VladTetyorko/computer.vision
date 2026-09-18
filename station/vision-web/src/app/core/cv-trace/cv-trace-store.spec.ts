@@ -3,7 +3,7 @@ import { signal } from '@angular/core';
 import { describe, expect, it, vi } from 'vitest';
 import { CvTraceStore } from './cv-trace-store';
 import { VisionApi } from '../api/vision-api';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import { PollScheduler } from '../poll-scheduler';
 import type { CvTrace, FrameLedger, GateDecision, WorldObject } from '../api/models';
 
@@ -58,8 +58,8 @@ function stubApi(getCvTrace: ReturnType<typeof vi.fn> = vi.fn().mockResolvedValu
   return { getCvTrace };
 }
 
-/** Mirrors `geo-store.spec.ts#stubLiveStore`, narrowed to the cv-trace topic surface. */
-function stubLiveStore() {
+/** Mirrors `geo-store.spec.ts#stubLiveFacade`, narrowed to the cv-trace topic surface. */
+function stubLiveFacade() {
   const perAsset = new Map<string, ReturnType<typeof signal<FrameLedger | undefined>>>();
   const signalFor = (assetId: string) => {
     let existing = perAsset.get(assetId);
@@ -91,12 +91,12 @@ function stubScheduler() {
 
 function inject(
   api: ReturnType<typeof stubApi>,
-  options: { live?: ReturnType<typeof stubLiveStore>; scheduler?: ReturnType<typeof stubScheduler> } = {},
+  options: { live?: ReturnType<typeof stubLiveFacade>; scheduler?: ReturnType<typeof stubScheduler> } = {},
 ): CvTraceStore {
   const providers: unknown[] = [
     CvTraceStore,
     { provide: VisionApi, useValue: api },
-    { provide: LiveStore, useValue: options.live ?? stubLiveStore() },
+    { provide: LiveFacade, useValue: options.live ?? stubLiveFacade() },
     { provide: PollScheduler, useValue: options.scheduler ?? stubScheduler() },
   ];
   TestBed.configureTestingModule({ providers });
@@ -131,7 +131,7 @@ describe('CvTraceStore', () => {
 
   it('subscribes live only when an assetId is given', async () => {
     const api = stubApi();
-    const live = stubLiveStore();
+    const live = stubLiveFacade();
 
     const withAsset = inject(api, { live });
     withAsset.track('stream-1', 'asset-1');
@@ -142,7 +142,7 @@ describe('CvTraceStore', () => {
 
   it('stays poll-only when no assetId is given — never calls trackCvTrace', async () => {
     const api = stubApi();
-    const live = stubLiveStore();
+    const live = stubLiveFacade();
 
     const store = inject(api, { live });
     store.track('stream-1');
@@ -155,7 +155,7 @@ describe('CvTraceStore', () => {
 
   it('merges a live arrival into the frame ring between polls', () => {
     const api = stubApi();
-    const live = stubLiveStore();
+    const live = stubLiveFacade();
 
     const store = inject(api, { live });
     store.track('stream-1', 'asset-1');
@@ -172,7 +172,7 @@ describe('CvTraceStore', () => {
 
   it("the next poll's frame list authoritatively replaces the ring, never merges with it", async () => {
     const api = stubApi();
-    const live = stubLiveStore();
+    const live = stubLiveFacade();
     const scheduler = stubScheduler();
 
     const store = inject(api, { live, scheduler });
@@ -224,7 +224,7 @@ describe('CvTraceStore', () => {
 
   it('re-tracking the same (streamId, assetId, last) is a no-op', async () => {
     const api = stubApi();
-    const live = stubLiveStore();
+    const live = stubLiveFacade();
 
     const store = inject(api, { live });
     for (let i = 0; i < 3; i++) {
@@ -239,7 +239,7 @@ describe('CvTraceStore', () => {
 
   it('re-tracking a different stream releases the old live subscription and starts a fresh session', async () => {
     const api = stubApi();
-    const live = stubLiveStore();
+    const live = stubLiveFacade();
 
     const store = inject(api, { live });
     store.track('stream-1', 'asset-1');

@@ -2,7 +2,7 @@ import { Injectable, effect, inject, signal } from '@angular/core';
 import { VisionApi } from '../api/vision-api';
 import { PollScheduler } from '../poll-scheduler';
 import { SettingsFacade } from '../settings/settings-facade';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import { isLiveAvailable } from '../live/live-fallback-logic';
 import type { DetectionEvent } from '../api/models';
 import { MAX_RETAINED_EVENTS, advanceCursor, eventNotificationText, mergeEvents, shouldNotify } from './events-logic';
@@ -52,10 +52,10 @@ const EVENTS_LIMIT = 50;
  * above is still mounted underneath — the SPA route doesn't unmount just because the OS-level
  * window/tab loses focus.
  *
- * **Projection of `LiveStore`'s `detection-events` topic** (docs/plans/done/REALTIME-PLAN.md §4's backend
+ * **Projection of `LiveFacade`'s `detection-events` topic** (docs/plans/done/REALTIME-PLAN.md §4's backend
  * follow-up batch — the same poll-vs-live pattern `TelemetryStore`/`DetectionsStore` established in
- * R-c, and `FleetStore` now shares too): while `LiveStore` is `'open'`, the 5s poll below is paused
- * entirely and this store instead reacts to `LiveStore.detectionEvents()` — every arrival is folded
+ * R-c, and `FleetStore` now shares too): while `LiveFacade` is `'open'`, the 5s poll below is paused
+ * entirely and this store instead reacts to `LiveFacade.detectionEvents()` — every arrival is folded
  * into `eventsSignal` through the exact same `mergeEvents`/`advanceCursor`/`maybeNotify` pipeline a
  * poll batch already used, so notification semantics (dedupe by id via `seenIds`, `OPEN`-only,
  * permission/hidden-gated) are identical regardless of which transport actually delivered the data.
@@ -73,14 +73,14 @@ const EVENTS_LIMIT = 50;
  * **No ref-counted subscribe/unsubscribe** (unlike `trackTelemetry`/`trackDetections`) —
  * `detection-events` is always-on, arriving on every connection regardless of the `topics` query
  * parameter and regardless of this store's own `activate()`/`release()` refcount (which only ever
- * gates the *poll*, never whether `LiveStore` itself is connected).
+ * gates the *poll*, never whether `LiveFacade` itself is connected).
  */
 @Injectable({ providedIn: 'root' })
 export class EventsStore {
   private readonly api = inject(VisionApi);
   private readonly scheduler = inject(PollScheduler);
   private readonly settings = inject(SettingsFacade);
-  private readonly live = inject(LiveStore);
+  private readonly live = inject(LiveFacade);
 
   private readonly eventsSignal = signal<readonly DetectionEvent[]>([]);
   readonly events = this.eventsSignal.asReadonly();
@@ -91,7 +91,7 @@ export class EventsStore {
   private activeConsumers = 0;
 
   constructor() {
-    // Re-evaluates poll-vs-live whenever `LiveStore` (re)connects or drops — mirrors
+    // Re-evaluates poll-vs-live whenever `LiveFacade` (re)connects or drops — mirrors
     // `TelemetryStore`/`DetectionsStore`'s identical reconnect-driven effect, simplified like
     // `FleetStore`'s own: no per-session `tracking` guard, since there is no track()/reset()
     // session here either, just "poll while ≥1 consumer is active, unless live is open".
@@ -100,7 +100,7 @@ export class EventsStore {
     });
 
     // Folds every `detection-events` arrival into `eventsSignal` — see class doc's "Projection of
-    // LiveStore's detection-events topic". Runs regardless of whether the poll is currently paused,
+    // LiveFacade's detection-events topic". Runs regardless of whether the poll is currently paused,
     // so a snapshot/arrival that lands before the connectionState effect above has paused polling
     // (or one delivered while genuinely live) is never dropped. `live.detectionEvents()` is already
     // oldest-first (see that signal's own doc comment) — `applyIncoming`'s expected order.
@@ -117,7 +117,7 @@ export class EventsStore {
    * now the permanently-mounted app-shell `NotificationBell` — see class doc's "Cost" note for why
    * that third, never-released consumer means the refcount effectively never returns to zero once
    * the app has booted). The first `activate()` since the last full `release()` triggers an
-   * immediate poll and starts the shared 5s cadence, **unless `LiveStore` is already `'open'`**, in
+   * immediate poll and starts the shared 5s cadence, **unless `LiveFacade` is already `'open'`**, in
    * which case there is nothing to poll for yet (live data is already flowing for free) — any
    * further concurrent consumer just bumps the refcount.
    */
@@ -140,7 +140,7 @@ export class EventsStore {
   }
 
   /**
-   * Switches whether the local 5s poll is running — **not** whether `LiveStore` itself has a
+   * Switches whether the local 5s poll is running — **not** whether `LiveFacade` itself has a
    * connection (there is nothing to subscribe/unsubscribe here, `detection-events` being
    * always-on). `liveAvailable` pauses the poll; its absence resumes it — but only while
    * `activeConsumers > 0` (mirrors `activate()`'s own original gate: no poll at all with nothing
@@ -189,7 +189,7 @@ export class EventsStore {
    *
    * **`incoming` must be oldest-first** — the one contract both call sites normalize to before
    * calling this, and the reason: unlike a poll batch (each id appears at most once —
-   * `EventController` is a plain repository read), a live batch (`LiveStore.detectionEvents()`) can
+   * `EventController` is a plain repository read), a live batch (`LiveFacade.detectionEvents()`) can
    * carry the *same* id more than once as its `OPEN`→`CLOSED` lifecycle advances, and both
    * `mergeEvents` (upsert-by-id — the *later* array entry wins) and `maybeNotify`/`seenIds` (must
    * observe a genuine `OPEN` before a later `CLOSED` marks the id "seen", or the `OPEN` notification

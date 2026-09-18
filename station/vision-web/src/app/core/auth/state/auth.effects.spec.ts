@@ -9,7 +9,7 @@ import { firstValueFrom, ReplaySubject } from 'rxjs';
 import { describe, expect, it, vi } from 'vitest';
 import type { MeResponse } from '../../api/models';
 import { VisionApi } from '../../api/vision-api';
-import { LiveStore } from '../../live/live-store';
+import { LiveFacade } from '../../live/live-facade';
 import { AuthApiActions, AuthPageActions } from './auth.actions';
 import {
   bootMe$,
@@ -39,7 +39,7 @@ function me(overrides: Partial<MeResponse> = {}): MeResponse {
   };
 }
 
-function setup(overrides: { api?: Partial<VisionApi>; router?: Partial<Router>; liveStore?: Partial<LiveStore> } = {}) {
+function setup(overrides: { api?: Partial<VisionApi>; router?: Partial<Router>; liveStore?: Partial<LiveFacade> } = {}) {
   const actions = new ReplaySubject<Action>(1);
   const api = {
     authMe: vi.fn().mockResolvedValue(null),
@@ -59,7 +59,7 @@ function setup(overrides: { api?: Partial<VisionApi>; router?: Partial<Router>; 
       provideState(authFeature),
       { provide: VisionApi, useValue: api },
       { provide: Router, useValue: router },
-      { provide: LiveStore, useValue: liveStore },
+      { provide: LiveFacade, useValue: liveStore },
     ],
   });
   const store = TestBed.inject(Store);

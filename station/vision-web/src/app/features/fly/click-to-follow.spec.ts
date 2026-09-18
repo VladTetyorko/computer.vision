@@ -15,7 +15,7 @@ import { buildFollowLockPatch, buildHotKnobPatch, buildPointLockPatch, type Reso
  * row / the task brief's own "your call on the right test boundary")**: a full `CockpitFacade` has on
  * the order of twenty injected collaborators (`VisionApi`, `FleetStore`, `Router`, `ActivatedRoute`,
  * `SettingsFacade`, `TelemetryStore`, `DetectionsStore`, `SeatFacade`, `EventsStore`, `GeofenceStore`,
- * `GeoStore`, `GroundingStore`, `LiveStore`, `MarksStore`, `LayersStore`, `DrawingsStore`,
+ * `GeoStore`, `GroundingStore`, `LiveFacade`, `MarksStore`, `LayersStore`, `DrawingsStore`,
  * `WeatherStore`, `AuthFacade`, …) and, as of this wave, no spec file anywhere in this codebase
  * instantiates it — building a harness for one just to count three calls would dwarf the thing being
  * measured, and would mean this spec's own setup code, not production logic, decides whether the

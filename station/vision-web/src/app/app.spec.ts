@@ -9,22 +9,22 @@ import { AuthFacade } from './core/auth/auth-facade';
 import { hasCapability } from './core/auth/auth-logic';
 import type { AuthCapability } from './core/api/models';
 import { EventsStore } from './core/events/events-store';
-import { LiveStore } from './core/live/live-store';
+import { LiveFacade } from './core/live/live-facade';
 import { VisionApi } from './core/api/vision-api';
 import { SidebarFacade } from './core/shell/sidebar-facade';
 import { provideAppState } from './core/state/app-state';
 
 /**
  * `App` pulls in `AppSidebar`, which in turn mounts `IdentityChip`/`NotificationBell`, each with
- * their own deep store graph (`AuthFacade`, `FleetStore`, `EventsStore`, `LiveStore`, `VisionApi`) —
+ * their own deep store graph (`AuthFacade`, `FleetStore`, `EventsStore`, `LiveFacade`, `VisionApi`) —
  * every one of those is overridden with a minimal, side-effect-free fake here (no HTTP, no polling,
  * no real `EventSource`) purely so the shell can mount at all; none of their own behavior is under
  * test in this file (see each store's own spec, and `shared/ui/app-sidebar/app-sidebar.spec.ts` for
  * the sidebar's own tiering/role-gate/collapse behavior). `ToastService`/`UndoToastService` are left
  * real — both are self-contained `signal()`-only state with no injected dependencies of their own.
  * `AppSidebar` also constructs a real `SystemStatusStore` for the shell health dot (§5.2),
- * which since docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md wave L5 reads `LiveStore.systemStatus()`
- * — `fakeLiveStore` below carries that member too, purely so `SystemStatusStore` can construct
+ * which since docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md wave L5 reads `LiveFacade.systemStatus()`
+ * — `fakeLiveFacade` below carries that member too, purely so `SystemStatusStore` can construct
  * without throwing; nothing in this file exercises its value.
  */
 function fakeFleetStore(reachable: boolean | undefined = true) {
@@ -35,7 +35,7 @@ function fakeEventsStore() {
   return { activate: () => {}, release: () => {}, events: () => [] as unknown[] };
 }
 
-function fakeLiveStore(connectionState: 'connecting' | 'open' | 'closed' = 'open') {
+function fakeLiveFacade(connectionState: 'connecting' | 'open' | 'closed' = 'open') {
   return {
     liveEvents: () => [] as unknown[],
     connectionState: () => connectionState,
@@ -103,7 +103,7 @@ function render(
       { provide: LeafletWarmup, useValue: { schedule: () => {} } },
       { provide: AuthFacade, useValue: fakeAuthFacade(options.topRole, options.authEnabled) },
       { provide: EventsStore, useValue: fakeEventsStore() },
-      { provide: LiveStore, useValue: fakeLiveStore(options.connectionState) },
+      { provide: LiveFacade, useValue: fakeLiveFacade(options.connectionState) },
       { provide: VisionApi, useValue: {} },
     ],
   });

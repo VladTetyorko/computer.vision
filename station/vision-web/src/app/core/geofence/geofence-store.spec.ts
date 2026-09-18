@@ -6,7 +6,7 @@ import { VisionApi } from '../api/vision-api';
 import { ToastService } from '../toast.service';
 import { UndoToastService } from '../../shared/ui/undo-toast.service';
 import { PollScheduler } from '../poll-scheduler';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import type { LiveConnectionState } from '../live/live-fallback-logic';
 import type { GeofenceZone, GeofenceZoneEventPayload } from '../api/models';
 
@@ -40,8 +40,8 @@ function stubScheduler() {
 }
 
 /** `connectionState` seeded `'closed'` — reproduces today's (pre-D1) behaviour exactly, see
- *  `marks-store.spec.ts`'s identical `stubLiveStore` doc comment. */
-function stubLiveStore() {
+ *  `marks-store.spec.ts`'s identical `stubLiveFacade` doc comment. */
+function stubLiveFacade() {
   const events = signal<readonly GeofenceZoneEventPayload[]>([]);
   const connectionState = signal<LiveConnectionState>('closed');
   return {
@@ -55,11 +55,11 @@ function create(api: ReturnType<typeof stubApi>): {
   store: GeofenceStore;
   toasts: { ok: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn> };
   undoToast: { showUndo: ReturnType<typeof vi.fn> };
-  live: ReturnType<typeof stubLiveStore>;
+  live: ReturnType<typeof stubLiveFacade>;
 } {
   const toasts = { ok: vi.fn(), error: vi.fn(), info: vi.fn(), notify: vi.fn() };
   const undoToast = { showUndo: vi.fn() };
-  const live = stubLiveStore();
+  const live = stubLiveFacade();
   TestBed.configureTestingModule({
     providers: [
       GeofenceStore,
@@ -67,7 +67,7 @@ function create(api: ReturnType<typeof stubApi>): {
       { provide: ToastService, useValue: toasts },
       { provide: UndoToastService, useValue: undoToast },
       { provide: PollScheduler, useValue: stubScheduler() },
-      { provide: LiveStore, useValue: live },
+      { provide: LiveFacade, useValue: live },
     ],
   });
   const store = TestBed.inject(GeofenceStore);
@@ -221,7 +221,7 @@ describe('GeofenceStore', () => {
   describe('activate/release (ALWAYS-ON-FLOW-PLAN.md §4 Wave C3)', () => {
     function createInactive(api: ReturnType<typeof stubApi>) {
       const scheduleFn = vi.fn().mockReturnValue(vi.fn());
-      const live = stubLiveStore();
+      const live = stubLiveFacade();
       TestBed.configureTestingModule({
         providers: [
           GeofenceStore,
@@ -229,7 +229,7 @@ describe('GeofenceStore', () => {
           { provide: ToastService, useValue: { ok: vi.fn(), error: vi.fn(), info: vi.fn(), notify: vi.fn() } },
           { provide: UndoToastService, useValue: { showUndo: vi.fn() } },
           { provide: PollScheduler, useValue: { schedule: scheduleFn } },
-          { provide: LiveStore, useValue: live },
+          { provide: LiveFacade, useValue: live },
         ],
       });
       return { store: TestBed.inject(GeofenceStore), scheduleFn, live };
@@ -340,7 +340,7 @@ describe('GeofenceStore', () => {
 
     it('runs the fold unconditionally, even with no active consumer', () => {
       const api = stubApi();
-      const live = stubLiveStore();
+      const live = stubLiveFacade();
       TestBed.configureTestingModule({
         providers: [
           GeofenceStore,
@@ -348,7 +348,7 @@ describe('GeofenceStore', () => {
           { provide: ToastService, useValue: { ok: vi.fn(), error: vi.fn(), info: vi.fn(), notify: vi.fn() } },
           { provide: UndoToastService, useValue: { showUndo: vi.fn() } },
           { provide: PollScheduler, useValue: { schedule: vi.fn().mockReturnValue(vi.fn()) } },
-          { provide: LiveStore, useValue: live },
+          { provide: LiveFacade, useValue: live },
         ],
       });
       const store = TestBed.inject(GeofenceStore);
@@ -363,7 +363,7 @@ describe('GeofenceStore', () => {
 
   describe('live gate (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1)', () => {
     function createInactive(api: ReturnType<typeof stubApi>) {
-      const live = stubLiveStore();
+      const live = stubLiveFacade();
       const scheduleFn = vi.fn().mockReturnValue(vi.fn());
       TestBed.configureTestingModule({
         providers: [
@@ -372,7 +372,7 @@ describe('GeofenceStore', () => {
           { provide: ToastService, useValue: { ok: vi.fn(), error: vi.fn(), info: vi.fn(), notify: vi.fn() } },
           { provide: UndoToastService, useValue: { showUndo: vi.fn() } },
           { provide: PollScheduler, useValue: { schedule: scheduleFn } },
-          { provide: LiveStore, useValue: live },
+          { provide: LiveFacade, useValue: live },
         ],
       });
       return { store: TestBed.inject(GeofenceStore), live, scheduleFn };

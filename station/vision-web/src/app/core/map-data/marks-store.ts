@@ -15,7 +15,7 @@ import type {
 import { describeHttpError } from '../api-error';
 import { ToastService } from '../toast.service';
 import { PollScheduler } from '../poll-scheduler';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import { isLiveAvailable } from '../live/live-fallback-logic';
 import { LayersStore } from './layers-store';
 import {
@@ -39,7 +39,7 @@ import {
  * the identical reason.
  *
  * **Gated on live, not unconditional** (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1) — this
- * poll now runs **only** while `activeConsumers > 0` **and** `LiveStore` is not `'open'`. While live
+ * poll now runs **only** while `activeConsumers > 0` **and** `LiveFacade` is not `'open'`. While live
  * is open the `map` topic already delivers every delta for free, so scheduling this poll on top
  * would just be a redundant `GET` every 30s; see {@link applyTransport} for the exact state table.
  */
@@ -63,7 +63,7 @@ const MARKS_POLL_INTERVAL_MS = 30_000;
  * <h2>Initial GET + live deltas, not poll-only</h2>
  * The `map` topic is deliberately not snapshot-on-connect, so this store always does its own initial
  * `GET` (`refresh()`, at construction and on the safety-net poll) and folds
- * `LiveStore.mapEvents()` arrivals on top via `mark-logic.ts#applyMarkEvents` — `created`/`updated`
+ * `LiveFacade.mapEvents()` arrivals on top via `mark-logic.ts#applyMarkEvents` — `created`/`updated`
  * upsert by id, `cleared`/`deleted` remove, and a deleted *layer* takes its marks with it. A delta
  * for a mark this store hasn't GET-ed yet (a narrow race right after boot) still upserts correctly.
  *
@@ -105,7 +105,7 @@ const MARKS_POLL_INTERVAL_MS = 30_000;
  * selection + palette live here" doc section above) calls `activate()` in its constructor and
  * `release()` from its own `DestroyRef.onDestroy` — mirroring `core/events/events-store.ts#activate`'s
  * identical ref-counted shape (the nearest existing precedent for a `providedIn:'root'` store whose
- * poll must track live demand rather than run forever) and `core/live/live-store.ts`'s per-topic
+ * poll must track live demand rather than run forever) and `core/live/live-facade.ts`'s per-topic
  * ref-counting for the counting idiom itself. The initial `GET` **moves under `activate()` too, not
  * just the poll** — a `void refresh()` in the constructor would still fire once per first-ever
  * construction regardless of whether anything is mounted to show the result, and would give a
@@ -130,7 +130,7 @@ const MARKS_POLL_INTERVAL_MS = 30_000;
 export class MarksStore {
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
-  private readonly live = inject(LiveStore);
+  private readonly live = inject(LiveFacade);
   private readonly layers = inject(LayersStore);
   private readonly scheduler = inject(PollScheduler);
 
@@ -196,7 +196,7 @@ export class MarksStore {
       this.marksSignal.update((marks) => applyMarkEvents(marks, newEvents));
     });
 
-    // Re-evaluates poll-vs-live whenever `LiveStore` (re)connects or drops
+    // Re-evaluates poll-vs-live whenever `LiveFacade` (re)connects or drops
     // (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1) — mirrors `FleetStore`/
     // `EventsStore`'s identical reconnect-driven effect.
     effect(() => {

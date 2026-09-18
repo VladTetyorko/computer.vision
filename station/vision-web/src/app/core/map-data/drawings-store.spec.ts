@@ -7,7 +7,7 @@ import { LayersStore } from './layers-store';
 import { VisionApi } from '../api/vision-api';
 import { ToastService } from '../toast.service';
 import { PollScheduler } from '../poll-scheduler';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import type { LiveConnectionState } from '../live/live-fallback-logic';
 import type { MapEventPayload, MapDrawingResponse } from '../api/models';
 
@@ -47,8 +47,8 @@ function stubApi(overrides: Record<string, ReturnType<typeof vi.fn>> = {}) {
 }
 
 /** `connectionState` seeded `'closed'` — reproduces today's (pre-D1) behaviour exactly, see
- *  `marks-store.spec.ts`'s identical `stubLiveStore` doc comment. */
-function stubLiveStore() {
+ *  `marks-store.spec.ts`'s identical `stubLiveFacade` doc comment. */
+function stubLiveFacade() {
   const events = signal<readonly MapEventPayload[]>([]);
   const connectionState = signal<LiveConnectionState>('closed');
   return {
@@ -73,7 +73,7 @@ function create(api: ReturnType<typeof stubApi>) {
       { provide: VisionApi, useValue: api },
       { provide: ToastService, useValue: { ok: vi.fn(), error: vi.fn(), info: vi.fn(), notify: vi.fn(), warn: vi.fn() } },
       { provide: PollScheduler, useValue: { schedule: vi.fn().mockReturnValue(() => undefined) } },
-      { provide: LiveStore, useValue: stubLiveStore() },
+      { provide: LiveFacade, useValue: stubLiveFacade() },
       { provide: LayersStore, useValue: stubLayersStore() },
       provideRouter([
         { path: 'command', component: StubPage },
@@ -137,7 +137,7 @@ describe('DrawingsStore', () => {
           { provide: VisionApi, useValue: api },
           { provide: ToastService, useValue: { ok: vi.fn(), error: vi.fn(), info: vi.fn(), notify: vi.fn(), warn: vi.fn() } },
           { provide: PollScheduler, useValue: { schedule: scheduleFn } },
-          { provide: LiveStore, useValue: stubLiveStore() },
+          { provide: LiveFacade, useValue: stubLiveFacade() },
           { provide: LayersStore, useValue: stubLayersStore() },
           provideRouter([{ path: 'command', component: StubPage }]),
         ],
@@ -185,7 +185,7 @@ describe('DrawingsStore', () => {
 
   describe('live gate (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1)', () => {
     function createInactive(api: ReturnType<typeof stubApi>) {
-      const live = stubLiveStore();
+      const live = stubLiveFacade();
       const scheduleFn = vi.fn().mockReturnValue(vi.fn());
       TestBed.configureTestingModule({
         providers: [
@@ -193,7 +193,7 @@ describe('DrawingsStore', () => {
           { provide: VisionApi, useValue: api },
           { provide: ToastService, useValue: { ok: vi.fn(), error: vi.fn(), info: vi.fn(), notify: vi.fn(), warn: vi.fn() } },
           { provide: PollScheduler, useValue: { schedule: scheduleFn } },
-          { provide: LiveStore, useValue: live },
+          { provide: LiveFacade, useValue: live },
           { provide: LayersStore, useValue: stubLayersStore() },
           provideRouter([{ path: 'command', component: StubPage }]),
         ],

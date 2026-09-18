@@ -3,7 +3,7 @@ import { VisionApi } from '../api/vision-api';
 import { describeHttpError } from '../api-error';
 import { PollScheduler } from '../poll-scheduler';
 import { ToastService } from '../toast.service';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import { isLiveAvailable } from '../live/live-fallback-logic';
 import { applyDiscoveryEvents } from './discovery-inbox-logic';
 import type {
@@ -18,7 +18,7 @@ import type {
  *  ZERO-CONFIG-ONBOARDING-CONTEXT.md §11 Z2c) — polling faster would never see anything newer.
  *
  *  **Gated on live, not unconditional** (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1) —
- *  runs **only** while `activeConsumers > 0` **and** `LiveStore` is not `'open'`; see
+ *  runs **only** while `activeConsumers > 0` **and** `LiveFacade` is not `'open'`; see
  *  `applyTransport`'s own doc comment for the state table (the same one `MarksStore`/`FleetStore`/
  *  `EventsStore` each implement). **`sources` is the one thing this poll alone still populates** —
  *  the `discovery` topic carries only candidates, never sources — so the reconcile this gate
@@ -65,7 +65,7 @@ const POLL_INTERVAL_MS = 30_000;
  * layers on top of that poll, exactly like `MarksStore` layers `map` on top of its own `GET
  * /api/map/marks` — the poll is now the fallback rather than an unconditional safety net (see
  * `POLL_INTERVAL_MS`'s own doc comment on the D1 gate and the `sources` gap it exists to cover),
- * while the always-on, delta-only feed (`LiveStore.discoveryEvents`) folds in near-instant
+ * while the always-on, delta-only feed (`LiveFacade.discoveryEvents`) folds in near-instant
  * `REPORTED`/`REGISTERED`/`DISMISSED`/`RESTORED` *candidate* changes via
  * `discovery-inbox-logic.ts#applyDiscoveryEvents`. This fold runs unconditionally from construction
  * (not gated by `activate`/`release`) — it costs nothing but an array upsert against a signal the
@@ -85,7 +85,7 @@ export class DiscoveryInboxStore {
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
   private readonly scheduler = inject(PollScheduler);
-  private readonly live = inject(LiveStore);
+  private readonly live = inject(LiveFacade);
 
   private readonly candidatesSignal = signal<readonly DiscoveryCandidate[]>([]);
   readonly candidates = this.candidatesSignal.asReadonly();
@@ -123,7 +123,7 @@ export class DiscoveryInboxStore {
       this.candidatesSignal.update((candidates) => applyDiscoveryEvents(candidates, newEvents));
     });
 
-    // Re-evaluates poll-vs-live whenever `LiveStore` (re)connects or drops
+    // Re-evaluates poll-vs-live whenever `LiveFacade` (re)connects or drops
     // (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3 D1) — mirrors `FleetStore`/
     // `EventsStore`'s identical reconnect-driven effect.
     effect(() => {

@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { FleetMapStore } from './map-store';
 import { VisionApi } from '../api/vision-api';
 import { PollScheduler } from '../poll-scheduler';
-import { LiveStore } from '../live/live-store';
+import { LiveFacade } from '../live/live-facade';
 import type { LiveConnectionState } from '../live/live-fallback-logic';
 import type { AssetDetails, AssetSummary, Device, TelemetrySample } from '../api/models';
 
@@ -56,14 +56,14 @@ function stubApi(
 }
 
 /**
- * A minimal `LiveStore` test double (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §5 L7) — real
+ * A minimal `LiveFacade` test double (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §5 L7) — real
  * Angular `signal`s so `FleetMapStore`'s own `computed`/`effect`s react to it exactly as they would
- * to the real class, without needing a real `EventSource` (jsdom has none — see `live-store.ts`'s
- * own doc comment). `connectionState` defaults `'closed'` — the same state the *real* `LiveStore`
+ * to the real class, without needing a real `EventSource` (jsdom has none — see `live-facade.ts`'s
+ * own doc comment). `connectionState` defaults `'closed'` — the same state the *real* `LiveFacade`
  * reports under jsdom — so every test that never provides an explicit initial state, or never
  * drives `connectionState`/`fleet` at all, keeps exercising the poll-only path unmodified.
  */
-function stubLiveStore(initialState: LiveConnectionState = 'closed') {
+function stubLiveFacade(initialState: LiveConnectionState = 'closed') {
   const connectionState = signal<LiveConnectionState>(initialState);
   const fleet = signal<readonly AssetSummary[] | undefined>(undefined);
   const perAsset = new Map<string, ReturnType<typeof signal<readonly TelemetrySample[]>>>();
@@ -106,15 +106,15 @@ function stubScheduler() {
 
 function create(
   api: ReturnType<typeof stubApi>,
-  options: { live?: ReturnType<typeof stubLiveStore>; scheduler?: ReturnType<typeof stubScheduler> } = {},
+  options: { live?: ReturnType<typeof stubLiveFacade>; scheduler?: ReturnType<typeof stubScheduler> } = {},
 ) {
-  const live = options.live ?? stubLiveStore();
+  const live = options.live ?? stubLiveFacade();
   const scheduler = options.scheduler ?? stubScheduler();
   TestBed.configureTestingModule({
     providers: [
       FleetMapStore,
       { provide: VisionApi, useValue: api },
-      { provide: LiveStore, useValue: live },
+      { provide: LiveFacade, useValue: live },
       { provide: PollScheduler, useValue: scheduler },
     ],
   });
@@ -307,7 +307,7 @@ describe('FleetMapStore', () => {
     it('never schedules the 5s asset poll while live is already open at construction', async () => {
       const api = stubApi({ listAssets: vi.fn().mockResolvedValue([]) });
       const scheduler = stubScheduler();
-      const { live } = create(api, { live: stubLiveStore('open'), scheduler });
+      const { live } = create(api, { live: stubLiveFacade('open'), scheduler });
       await flush();
 
       expect(api.listAssets).toHaveBeenCalledTimes(1); // the one-time reconcile — see class doc
@@ -472,7 +472,7 @@ describe('FleetMapStore', () => {
     }
 
     it('registers a 2s telemetry poll per tracked asset while live is unavailable', async () => {
-      const { scheduler } = create(streamingApi([]), { live: stubLiveStore('closed') });
+      const { scheduler } = create(streamingApi([]), { live: stubLiveFacade('closed') });
       await flush();
       await flush();
       await flush();
@@ -481,7 +481,7 @@ describe('FleetMapStore', () => {
     });
 
     it('registers no telemetry poll at all while live is open', async () => {
-      const { scheduler } = create(streamingApi([]), { live: stubLiveStore('open') });
+      const { scheduler } = create(streamingApi([]), { live: stubLiveFacade('open') });
       await flush();
       await flush();
       await flush();
@@ -490,7 +490,7 @@ describe('FleetMapStore', () => {
     });
 
     it('stops the telemetry poll when live comes back, and starts one when live drops', async () => {
-      const live = stubLiveStore('closed');
+      const live = stubLiveFacade('closed');
       const { scheduler } = create(streamingApi([]), { live });
       await flush();
       await flush();
@@ -513,7 +513,7 @@ describe('FleetMapStore', () => {
     it('keeps the marker current off the fallback poll instead of freezing at the backfill', async () => {
       const backfill: TelemetrySample = { deviceId: 'dev-0', at: '2026-07-22T00:00:00Z', latitude: 9, longitude: 8 };
       const api = streamingApi([backfill]);
-      const { store, scheduler } = create(api, { live: stubLiveStore('closed') });
+      const { store, scheduler } = create(api, { live: stubLiveFacade('closed') });
       await flush();
       await flush();
       await flush();
@@ -539,7 +539,7 @@ describe('FleetMapStore', () => {
 
     it('stops the fallback poll when the asset stops streaming', async () => {
       const api = streamingApi([]);
-      const { scheduler } = create(api, { live: stubLiveStore('closed') });
+      const { scheduler } = create(api, { live: stubLiveFacade('closed') });
       await flush();
       await flush();
       await flush();
