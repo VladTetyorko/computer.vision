@@ -107,8 +107,8 @@ features/<feature>/state/…                  # page-scoped slices, provided on 
 | Wave | Folder scope (disjoint) | Slices |
 |---|---|---|
 | **N0** foundation | `app.config.ts`, `core/state/`, `core/shell/`, `core/ui/architecture.spec.ts` | pilot: `theme`, `sidebar` |
-| N1 shell/UI | `core/ui/` | `ui`, `overlay` |
-| N2 session | `core/auth/`, `core/org/`, `core/seat/`, `core/settings/` | 4 |
+| N1 shell/UI | `core/ui/` | `overlay` **only** — see §8, `UiStore` is not a slice |
+| N2 session | `core/auth/`, `core/org/`, `core/seat/`, `core/settings/` | 4 — `seat` is page-provided, see §8 |
 | N3 live backbone | `core/live/` | `live` (+ `LiveGateway` seam) |
 | N4 fleet | `core/fleet/`, `core/system-status/`, `core/system-events/` | 3 (fleet = entity) |
 | N5 perception | `core/telemetry/`, `core/detections/`, `core/cv-trace/` | 3 |
@@ -169,6 +169,29 @@ Promise-returning method is added to `VisionApi` after N0 — new endpoints land
   fleet centroid, Fly on the flown asset). NgRx feature state is global by name, so this slice must
   key its readings by host rather than collapse into one shared `reading` — N7 owns that.
 - Hydration double-firing: persistence is a meta-reducer, never an effect.
+
+**Corrections found while briefing N1/N2 (2026-09-18) — the wave table above is amended, not the code.**
+
+- **`core/ui/ui-store.ts#UiStore` is not a slice and must not become one.** The wave table originally
+  listed a `ui` slice; there is no such thing to migrate. `UiStore` is a deliberately plain class with
+  no DI token, instantiated **27 times across the app** as a host-owned field
+  (`readonly dialogs = new UiStore()`, `new UiStore(ACTIVE_PANEL_KEY)`) — one instance per independent
+  overlay *group*, which is the entire point: overlays that must be exclusive share an instance,
+  overlays that may overlap get separate ones. NgRx feature state is global by name and cannot express
+  27 independent instances without inventing a key for each. It is also exactly what §2 calls
+  *ephemeral local* state. **N1 migrates `GlobalOverlayStore` only; `UiStore` stays as it is.**
+- **`GlobalOverlayStore` splits in two, because half of it is not serializable.** Its `OverlayHost`
+  registry holds live `HTMLElement` references (`root`, `trigger`) and it owns a `Router.events`
+  subscription plus `document`-level `Escape`/outside-click listeners. Only the *open overlay id*
+  goes into state (a `GlobalOverlayId | null`); the element registry stays in a small root service the
+  effects inject, and the three listeners become effects. Putting an element in state would trip
+  `strictStateSerializability` on the first `register()` — the check is doing its job, so keep the
+  DOM out of the store rather than weakening the check.
+- **`core/seat/seat-store.ts#SeatStore` is `@Injectable()`, not `providedIn:'root'`** — page-provided,
+  one instance per host, the same shape §8 already flags for `WeatherStore`. It is therefore **not** an
+  app-wide slice: either key its state by `assetId` in one feature slice, or provide it on the route.
+  It also has zero `.asReadonly()` pairs, so §5 step 1's "every `asReadonly()` is a state key" does not
+  apply — read its actual public surface instead.
 
 ## 9. Status
 
