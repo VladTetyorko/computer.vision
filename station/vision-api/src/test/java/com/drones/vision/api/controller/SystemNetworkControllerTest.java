@@ -39,7 +39,7 @@ class SystemNetworkControllerTest {
     private void setUp(int mavlinkPort, Integer videoPushPort, String videoPushPathPrefix) {
         localNetworkAddresses = mock(LocalNetworkAddresses.class);
         mockMvc = MockMvcBuilders.standaloneSetup(
-                        new SystemNetworkController(mavlinkPort, videoPushPort, videoPushPathPrefix,
+                        new SystemNetworkController(mavlinkPort, videoPushPort, videoPushPathPrefix, false,
                                 localNetworkAddresses))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
@@ -58,6 +58,21 @@ class SystemNetworkControllerTest {
                 .andExpect(jsonPath("$.addresses[0].interfaceName").value("wlp2s0"))
                 .andExpect(jsonPath("$.addresses[0].kind").value("LAN"))
                 .andExpect(jsonPath("$.mavlinkPort").value(MAVLINK_PORT));
+    }
+
+    /** docs/plans/active/LINK-PAIRING-PLAN.md §4 row L2: the Playground master switch round-trips. */
+    @Test
+    void networkReportsSimulationEnabledAsConfigured() throws Exception {
+        localNetworkAddresses = mock(LocalNetworkAddresses.class);
+        mockMvc = MockMvcBuilders.standaloneSetup(
+                        new SystemNetworkController(MAVLINK_PORT, null, null, true, localNetworkAddresses))
+                .setControllerAdvice(new ApiExceptionHandler())
+                .build();
+        when(localNetworkAddresses.list()).thenReturn(List.of());
+
+        mockMvc.perform(get("/api/system/network"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.simulationEnabled").value(true));
     }
 
     @Test

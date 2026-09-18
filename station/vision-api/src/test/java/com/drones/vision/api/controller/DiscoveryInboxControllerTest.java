@@ -5,6 +5,7 @@ import com.drones.vision.api.security.CurrentUser;
 import com.drones.vision.api.security.PrincipalResolver;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.CategoryId;
+import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.kernel.GroupId;
 import com.drones.vision.kernel.Ownership;
 import com.drones.vision.kernel.StreamDescriptor;
@@ -15,35 +16,47 @@ import com.drones.vision.platform.AccessDeniedException;
 import com.drones.vision.platform.VisibilityScope;
 import com.drones.vision.platform.Authority;
 import com.drones.vision.platform.Capability;
+import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.warehouse.application.asset.DuplicateDeviceMatch;
 import com.drones.vision.warehouse.application.discovery.DiscoveryCandidateAlreadyRegisteredException;
 import com.drones.vision.warehouse.application.discovery.DiscoveryInboxService;
 import com.drones.vision.warehouse.application.discovery.DiscoveryService;
 import com.drones.vision.warehouse.application.discovery.RegisterFromCandidateCommand;
 import com.drones.vision.warehouse.application.discovery.SourceHealth;
+import com.drones.vision.warehouse.application.pairing.PairingService;
 import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.Custody;
 import com.drones.vision.warehouse.domain.model.DiscoveredDevice;
 import com.drones.vision.warehouse.domain.model.DiscoveryCandidate;
 import com.drones.vision.warehouse.domain.model.DiscoveryCandidateId;
 import com.drones.vision.warehouse.domain.model.Identity;
+import com.drones.vision.warehouse.domain.model.Pairing;
+import com.drones.vision.warehouse.domain.model.PairingId;
+import com.drones.vision.warehouse.domain.model.RadioBind;
 import com.drones.vision.warehouse.domain.model.SourceStatus;
+import com.drones.vision.warehouse.domain.model.VehicleKey;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 
+import java.math.BigInteger;
 import java.net.URI;
 import java.time.Instant;
 import java.util.EnumSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -61,6 +74,8 @@ class DiscoveryInboxControllerTest {
 
     private final DiscoveryInboxService discoveryInboxService = mock(DiscoveryInboxService.class);
     private final DiscoveryService discoveryService = mock(DiscoveryService.class);
+    private final PairingService pairingService = mock(PairingService.class);
+    private final AssetService assetService = mock(AssetService.class);
 
     private static CurrentUser currentUserWithScope(VisibilityScope scope) {
         Ownership ownership = new Ownership(UserId.random(), GroupId.random());
@@ -99,8 +114,16 @@ class DiscoveryInboxControllerTest {
 
     private static MockMvc mockMvcFor(CurrentUser currentUser, DiscoveryInboxService discoveryInboxService,
                                        DiscoveryService discoveryService) {
+        return mockMvcFor(currentUser, discoveryInboxService, discoveryService, mock(PairingService.class),
+                mock(AssetService.class));
+    }
+
+    private static MockMvc mockMvcFor(CurrentUser currentUser, DiscoveryInboxService discoveryInboxService,
+                                       DiscoveryService discoveryService, PairingService pairingService,
+                                       AssetService assetService) {
         return MockMvcBuilders
-                .standaloneSetup(new DiscoveryInboxController(discoveryInboxService, discoveryService, currentUser))
+                .standaloneSetup(new DiscoveryInboxController(discoveryInboxService, discoveryService,
+                        pairingService, assetService, currentUser))
                 .setControllerAdvice(new ApiExceptionHandler())
                 .build();
     }
@@ -262,6 +285,37 @@ class DiscoveryInboxControllerTest {
         org.junit.jupiter.api.Assertions.assertEquals(currentUser.ownership(), captor.getValue().ownership());
     }
 
+    /**
+     * "Adopt is one motion" (docs/plans/active/LINK-PAIRING-PLAN.md §7 ruling 3): registering a
+     * {@code mavlink} candidate pairs the new device in the same request and reports the pairing
+     * outcome on the response, not merely the created asset.
+     */
+    @Test
+    void registerOfAMavlinkCandidatePairsTheNewDeviceAndReportsThePushRequiredSysid() throws Exception {
+        DiscoveryCandidate reported = candidate();
+        when(discoveryInboxService.candidates()).thenReturn(List.of(reported));
+        CurrentUser currentUser = currentUserWithScope(VisibilityScope.unbounded());
+        DeviceId deviceId = DeviceId.random();
+        Asset created = Asset.register(AssetId.random(), "new quad", new CategoryId("quadcopter"),
+                currentUser.ownership(), Set.of(deviceId), Map.of(), Identity.NONE, Custody.NONE);
+        when(discoveryInboxService.register(eq(reported.id()), any(), any(), any())).thenReturn(created);
+        Pairing pairing = new Pairing(PairingId.random(), deviceId, 42, new VehicleKey(new byte[32]), null,
+                RadioBind.NONE, Instant.now(), null);
+        when(pairingService.pair(eq(deviceId), eq(7), isNull(), any())).thenReturn(pairing);
+        MockMvc mockMvc = mockMvcFor(currentUser, discoveryInboxService, discoveryService, pairingService,
+                assetService);
+
+        String body = "{\"displayName\":\"new quad\",\"category\":\"quadcopter\"}";
+        mockMvc.perform(post("/api/discovery/inbox/" + reported.id().value() + "/register")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assetId").value(created.id().value().toString()))
+                .andExpect(jsonPath("$.sysidPushRequired").value(true))
+                .andExpect(jsonPath("$.assignedSysid").value(42));
+
+        verify(pairingService).pair(deviceId, 7, null, currentUser.userId());
+    }
+
     // --- attach ---
 
     @Test
@@ -313,6 +367,40 @@ class DiscoveryInboxControllerTest {
         mockMvc.perform(post("/api/discovery/inbox/" + DiscoveryCandidateId.random().value() + "/attach")
                         .contentType(MediaType.APPLICATION_JSON).content(body))
                 .andExpect(status().isConflict());
+    }
+
+    /**
+     * The other half of "adopt is one motion": {@link DiscoveryInboxController#attach} resolves the
+     * device {@link com.drones.vision.warehouse.application.discovery.DiscoveryInboxService#attach}
+     * just created via {@link AssetService#findDuplicateDevice} (it returns the candidate, not the
+     * device id), then pairs it. Here the heard sysid was free, so no push is required and {@code
+     * assignedSysid} stays absent from the response.
+     */
+    @Test
+    void attachOfAMavlinkCandidatePairsTheDeviceAndOmitsAssignedSysidWhenNoPushIsNeeded() throws Exception {
+        DiscoveryCandidate reported = candidate();
+        when(discoveryInboxService.candidates()).thenReturn(List.of(reported));
+        AssetId assetId = AssetId.random();
+        DiscoveryCandidate attached = reported.registeredTo(assetId);
+        when(discoveryInboxService.attach(eq(reported.id()), eq(assetId), any(), any())).thenReturn(attached);
+        DeviceId deviceId = DeviceId.random();
+        when(assetService.findDuplicateDevice(reported.discovered().suggestedStream()))
+                .thenReturn(Optional.of(new DuplicateDeviceMatch(deviceId, assetId)));
+        Pairing pairing = new Pairing(PairingId.random(), deviceId, 7, new VehicleKey(new byte[32]), null,
+                RadioBind.NONE, Instant.now(), null);
+        when(pairingService.pair(eq(deviceId), eq(7), isNull(), any())).thenReturn(pairing);
+        MockMvc mockMvc = mockMvcFor(currentUserWithScope(VisibilityScope.unbounded()), discoveryInboxService,
+                discoveryService, pairingService, assetService);
+
+        String body = "{\"assetId\":\"" + assetId.value() + "\"}";
+        mockMvc.perform(post("/api/discovery/inbox/" + reported.id().value() + "/attach")
+                        .contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value("REGISTERED"))
+                .andExpect(jsonPath("$.sysidPushRequired").value(false))
+                .andExpect(jsonPath("$.assignedSysid").doesNotExist());
+
+        verify(pairingService).pair(eq(deviceId), eq(7), isNull(), any());
     }
 
     // --- restore ---

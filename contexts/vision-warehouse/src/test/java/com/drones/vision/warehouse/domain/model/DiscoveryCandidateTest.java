@@ -42,8 +42,11 @@ class DiscoveryCandidateTest {
     }
 
     @Test
-    void identityKeyAppendsSysidReadFromSuggestedStreamOptions() {
-        assertEquals("mavlink|udp://0.0.0.0:14550|sysid=7", DiscoveryCandidate.identityKeyFor(mavlinkCandidate(7)));
+    void identityKeyAppendsSysidReadFromSuggestedStreamOptionsAndDropsTheAddress() {
+        // Identity-first (docs/plans/active/LINK-PAIRING-PLAN.md §3.3): once a sysid is known, the
+        // key is keyed on identity alone, no address component -- a device re-heard at a new
+        // address must resolve to the same identity key, not a different one.
+        assertEquals("mavlink|sysid=7", DiscoveryCandidate.identityKeyFor(mavlinkCandidate(7)));
     }
 
     @Test
@@ -51,7 +54,7 @@ class DiscoveryCandidateTest {
         DiscoveredDevice noStreamYet = new DiscoveredDevice("mavlink", "sysid 3", URI.create("udp://0.0.0.0:14550"),
                 null, null, Map.of("sysid", "3"));
 
-        assertEquals("mavlink|udp://0.0.0.0:14550|sysid=3", DiscoveryCandidate.identityKeyFor(noStreamYet));
+        assertEquals("mavlink|sysid=3", DiscoveryCandidate.identityKeyFor(noStreamYet));
     }
 
     @Test
@@ -63,7 +66,17 @@ class DiscoveryCandidateTest {
         DiscoveredDevice mismatched = new DiscoveredDevice("mavlink", "sysid 7", URI.create("udp://0.0.0.0:14550"),
                 null, stream, Map.of("sysid", "99"));
 
-        assertEquals("mavlink|udp://0.0.0.0:14550|sysid=7", DiscoveryCandidate.identityKeyFor(mismatched));
+        assertEquals("mavlink|sysid=7", DiscoveryCandidate.identityKeyFor(mismatched));
+    }
+
+    @Test
+    void identityKeySameSysidAtADifferentAddressIsTheSameIdentity() {
+        StreamDescriptor movedStream = new StreamDescriptor("mavlink", URI.create("udp://10.0.0.99:19999"),
+                Map.of("sysid", "7"));
+        DiscoveredDevice moved = new DiscoveredDevice("mavlink", "sysid 7", URI.create("udp://10.0.0.99:19999"),
+                null, movedStream, Map.of("sysid", "7"));
+
+        assertEquals(DiscoveryCandidate.identityKeyFor(mavlinkCandidate(7)), DiscoveryCandidate.identityKeyFor(moved));
     }
 
     @Test

@@ -24,9 +24,17 @@ import java.time.Duration;
  *                     whole when absent
  * @param telemetry    {@code SimulatedTelemetrySource}'s default circular-track center/radius/cadence/
  *                     battery-drain; defaulted as a whole when absent
+ * @param enabled      the Playground's own master switch (docs/plans/active/LINK-PAIRING-PLAN.md
+ *                     §4 row L2) — gates {@code POST /api/simulations} ({@code SimulationController})
+ *                     and the simulation discovery producers ({@code VideoSourceWiring}/{@code
+ *                     TelemetryWiring}'s simulated-source beans); default {@code false}. Deliberately
+ *                     independent of {@link #resumeOnBoot}, which only controls what an *already
+ *                     existing* simulated asset does at boot — {@code false} here must still refuse
+ *                     creating a *new* one, on a server where the feature was never turned on at all.
  */
 @ConfigurationProperties(prefix = "vision.simulation")
-public record VisionSimulationProperties(@DefaultValue("true") boolean resumeOnBoot, Video video, Telemetry telemetry) {
+public record VisionSimulationProperties(@DefaultValue("true") boolean resumeOnBoot, Video video, Telemetry telemetry,
+                                          @DefaultValue("false") boolean enabled) {
 
     @ConstructorBinding
     public VisionSimulationProperties {
@@ -42,11 +50,12 @@ public record VisionSimulationProperties(@DefaultValue("true") boolean resumeOnB
 
     /**
      * Convenience constructor covering just the original {@code vision.simulation.resume-on-boot}
-     * field (predating wave F4's {@code video}/{@code telemetry} extension) — both nested records
-     * default exactly as they would from an absent binding.
+     * field (predating wave F4's {@code video}/{@code telemetry} extension, and LINK-PAIRING's
+     * {@code enabled}) — both nested records default exactly as they would from an absent binding,
+     * and {@code enabled} defaults {@code false}.
      */
     public VisionSimulationProperties(boolean resumeOnBoot) {
-        this(resumeOnBoot, null, null);
+        this(resumeOnBoot, null, null, false);
     }
 
     /**

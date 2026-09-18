@@ -57,11 +57,14 @@ import java.util.stream.Collectors;
  * {@link VisibilityScope#includes} holds for the asset it names (a {@code DEVICE} entry resolves to
  * its owning asset via {@link AssetDirectoryService#findByDevice}); a {@code GROUP} entry is visible
  * iff {@link VisibilityScope#includesGroup} holds for the group id it names. {@code USER}/{@code
- * ASSIGNMENT}/{@code DATASET}/{@code MODEL} entries stay unfiltered — none of those target kinds
- * carries an {@code Ownership} a group subtree could check against (mirrors {@code
+ * ASSIGNMENT}/{@code DATASET}/{@code MODEL}/{@code PAIRING} entries stay unfiltered — none of those
+ * target kinds carries an {@code Ownership} a group subtree could check against (mirrors {@code
  * DiscoveryInboxService#candidates()}'s "no per-instance visibility check to authorise against"
- * reasoning), so an admitted MANAGER sees every one of those exactly as an ADMIN does; only the two
- * genuinely fleet-scoped target kinds are narrowed. An {@link Authority#scope()} that {@link
+ * reasoning) — {@code PAIRING}'s own {@code targetId} is a {@code PairingId}, not the {@code
+ * DeviceId} {@link AssetDirectoryService#findByDevice} would need to resolve an owning asset, so
+ * there is no cheap subtree check to add here even though the paired device itself does have one —
+ * so an admitted MANAGER sees every one of those exactly as an ADMIN does; only the two genuinely
+ * fleet-scoped target kinds are narrowed. An {@link Authority#scope()} that {@link
  * VisibilityScope#isUnbounded()} (ADMIN, or the dev principal with auth off) skips the filter
  * entirely rather than resolving every entry for nothing.
  */
@@ -132,7 +135,7 @@ public class AuditController {
                     .map((Asset asset) -> scope.includes(asset.id(), asset.ownership()))
                     .orElse(false);
             case GROUP -> scope.includesGroup(GroupId.of(entry.targetId()));
-            case USER, ASSIGNMENT, DATASET, MODEL -> true;
+            case USER, ASSIGNMENT, DATASET, MODEL, PAIRING -> true;
         };
     }
 

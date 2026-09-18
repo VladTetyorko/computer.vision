@@ -10,6 +10,7 @@ import com.drones.vision.warehouse.application.asset.AssetService;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.StreamId;
 import com.drones.vision.perception.domain.port.StreamPublisherPort;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -65,8 +66,18 @@ import com.drones.vision.api.security.CurrentUser;
  * <p>A {@code null}/blank {@code videoPath} with the default {@code direct} transport is not an
  * error (docs/main/CYCLES-PLAN.md §9, CU-a): {@code POST /api/simulations {}} yields a fully synthetic,
  * moving simulated drone — no video file required.
+ *
+ * <h2>Playground gate (docs/plans/active/LINK-PAIRING-PLAN.md §4 row L2)</h2>
+ * The whole controller is present only when {@code vision.simulation.enabled=true} ({@link
+ * com.drones.vision.app.config.properties.VisionSimulationProperties#enabled()}), mirroring {@link
+ * TrainingJobController}'s {@code vision.training.enabled} gate: a disabled Playground means this
+ * bean never exists, so {@code POST /api/simulations} 404s rather than 403ing — there is nothing to
+ * authorize, the feature itself is off. The web reads whether to show the Playground from {@code
+ * GET /api/system/network}'s {@code simulationEnabled} field ({@code SystemNetworkController}), not
+ * from probing this endpoint.
  */
 @RestController
+@ConditionalOnProperty(prefix = "vision.simulation", name = "enabled", havingValue = "true")
 public class SimulationController {
 
     private final SimulationService simulationService;

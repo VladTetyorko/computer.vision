@@ -831,6 +831,16 @@ vision:
 
   # --- adapter-simulation: simulated feeds + resume-on-boot (SimulationService#resumeAll) ---
   simulation:
+    # false (default): the Playground's own master switch (docs/plans/active/LINK-PAIRING-PLAN.md
+    # §4 row L2) -- SimulationController (POST /api/simulations) and the simulation discovery
+    # producers (VideoSourceWiring#simulatedVideoSource, TelemetryWiring#simulatedTelemetrySource)
+    # are entirely absent from the context, exactly like every other @ConditionalOnProperty-gated
+    # feature here. true: a zero-hardware simulated asset can be created and streamed. Deliberately
+    # independent of resume-on-boot below, which only concerns an *already existing* simulated
+    # asset at boot -- false here still refuses to create a *new* one. GET /api/system/network's
+    # simulationEnabled field mirrors this flag so the web can show/hide the Playground without
+    # probing POST /api/simulations itself.
+    enabled: false
     # Whether SimulationResumeRunner calls SimulationService#resumeAll() once at
     # boot, restarting the TX feed for every persisted simulated asset whose rtsp
     # video device is one of this app's own TX-fed feeds (fixes "frozen video"
@@ -848,6 +858,15 @@ vision:
     #   track-radius-meters: 200
     #   period: 1s
     #   battery-drain-percent-per-second: 0.05
+
+  # --- vision-warehouse: a vehicle's persisted identity (docs/plans/active/LINK-PAIRING-PLAN.md §7) ---
+  pairing:
+    # MAVLink sysid range PairingService#pair assigns the lowest free number from, on collision.
+    # 1 is the near-universal flight-controller factory default (never assign it, so a freshly
+    # reflashed/reset vehicle heard for the first time never collides with one already paired);
+    # 251-255 are conventionally reserved for ground control stations. 10-250 leaves both bands
+    # untouched while still giving a large fleet plenty of room.
+    sysid-range: 10-250
 
 
   # --- RC manual-control relay (docs/plans/done/RC-CONTROL-PHASE1-PLAN.md, RC-CONTROL Phase 1;

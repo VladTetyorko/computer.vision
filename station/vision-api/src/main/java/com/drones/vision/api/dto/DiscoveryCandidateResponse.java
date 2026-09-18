@@ -32,21 +32,48 @@ import java.util.Map;
  * @param lastSeen                 when this identity was most recently reported — the age a client derives "stale" from
  * @param status                   {@code NEW}, {@code DISMISSED}, or {@code REGISTERED}
  * @param registeredAssetId        the asset this candidate resolved to, as a canonical UUID string, or absent if none is known
+ * @param sysidPushRequired        "adopt is one motion" (docs/plans/active/LINK-PAIRING-PLAN.md §7
+ *                                 ruling 3): {@code true} when {@code DiscoveryInboxController#attach}
+ *                                 just paired this candidate's device and its assigned sysid differs
+ *                                 from the one it was heard announcing; absent (never serialized) for
+ *                                 every other read of this candidate, including a {@code mavlink}
+ *                                 one that was already paired earlier
+ * @param assignedSysid            the sysid {@link com.drones.vision.warehouse.application.pairing.PairingService#pair}
+ *                                 actually assigned, present exactly when {@link #sysidPushRequired}
+ *                                 is {@code true} — field name/shape frozen by {@code
+ *                                 station/vision-web}'s {@code core/api/models.ts} L4 mirror
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record DiscoveryCandidateResponse(String id, String method, String name, String address,
                                           String suggestedCategory, String suggestedStreamProtocol,
                                           String suggestedStreamUri, Map<String, String> suggestedStreamOptions,
                                           Map<String, String> details, Instant firstSeen, Instant lastSeen,
-                                          String status, String registeredAssetId) {
+                                          String status, String registeredAssetId, Boolean sysidPushRequired,
+                                          Integer assignedSysid) {
 
     /**
-     * Maps a domain {@link DiscoveryCandidate} to its wire representation.
+     * Maps a domain {@link DiscoveryCandidate} to its wire representation, with no pairing outcome
+     * to report — every read except a just-completed {@link #attach}.
      *
      * @param candidate the candidate to map
      * @return the response body element for {@code candidate}
      */
     public static DiscoveryCandidateResponse from(DiscoveryCandidate candidate) {
+        return from(candidate, null, null);
+    }
+
+    /**
+     * Maps a domain {@link DiscoveryCandidate} to its wire representation.
+     *
+     * @param candidate         the candidate to map
+     * @param sysidPushRequired see {@link #sysidPushRequired()}; {@code null} when pairing was not
+     *                          just attempted
+     * @param assignedSysid     see {@link #assignedSysid()}; {@code null} unless {@code
+     *                          sysidPushRequired} is {@code true}
+     * @return the response body element for {@code candidate}
+     */
+    public static DiscoveryCandidateResponse from(DiscoveryCandidate candidate, Boolean sysidPushRequired,
+                                                    Integer assignedSysid) {
         DiscoveredDevice discovered = candidate.discovered();
         var stream = discovered.suggestedStream();
         return new DiscoveryCandidateResponse(
@@ -62,6 +89,8 @@ public record DiscoveryCandidateResponse(String id, String method, String name, 
                 candidate.firstSeen(),
                 candidate.lastSeen(),
                 candidate.status().name(),
-                candidate.registeredAsset() != null ? candidate.registeredAsset().value().toString() : null);
+                candidate.registeredAsset() != null ? candidate.registeredAsset().value().toString() : null,
+                sysidPushRequired,
+                assignedSysid);
     }
 }

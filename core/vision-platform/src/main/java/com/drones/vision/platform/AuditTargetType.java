@@ -30,5 +30,9 @@ public enum AuditTargetType {
 
     /** A pilot&rarr;asset link — grant, revoke, or seat change between {@code PILOT}/{@code CREW}
      * (docs/plans/active/AUTH-ROLES-PLAN.md D15, wave B2). */
-    ASSIGNMENT
+    ASSIGNMENT,
+
+    /** A vehicle's persisted identity — sysid, key, hardware uid, radio bind
+     * (docs/plans/active/LINK-PAIRING-PLAN.md §3.5). */
+    PAIRING
 }

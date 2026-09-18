@@ -106,7 +106,7 @@ public final class CapabilityService {
                 + (packed >>> VERSION_PATCH_SHIFT & VERSION_BYTE_MASK);
         return new CapabilityReport(CapabilityReport.Status.OK, firmwareVersion,
                 maturityOf(packed & VERSION_BYTE_MASK), capabilitiesOf(version),
-                version.boardVersion(), version.vendorId(), version.productId(), version);
+                version.boardVersion(), version.vendorId(), version.productId(), version.uid(), version);
     }
 
     /** The {@code FIRMWARE_VERSION_TYPE} values, which the dialect does not generate as an enum. */
@@ -151,7 +151,7 @@ public final class CapabilityService {
         if (cause instanceof TimeoutException) {
             return CompletableFuture.completedFuture(new CapabilityReport(
                     CapabilityReport.Status.NO_REPLY, null, CapabilityReport.Maturity.UNKNOWN,
-                    Set.of(), 0, 0, 0, null));
+                    Set.of(), 0, 0, 0, null, null));
         }
         return CompletableFuture.failedFuture(error);
     }

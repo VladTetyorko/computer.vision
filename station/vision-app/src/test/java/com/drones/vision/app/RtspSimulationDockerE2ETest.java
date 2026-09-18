@@ -79,7 +79,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * entirely (the recording publisher wins either way), matching {@link FileSimulationSmokeTest}.
  */
 @EnabledIf(value = "dockerAvailable", disabledReason = "docker is not available in this environment")
-@SpringBootTest(properties = "vision.publish.enabled=false")
+@SpringBootTest(properties = {"vision.publish.enabled=false", "vision.simulation.enabled=true"})
 @Import(FileSimulationSmokeTest.RecordingPublisherConfig.class)
 class RtspSimulationDockerE2ETest {
 

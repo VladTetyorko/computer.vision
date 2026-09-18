@@ -68,7 +68,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * Spring Boot 4 classpath here) — same {@code webAppContextSetup} technique, just assembled
  * explicitly.
  */
-@SpringBootTest(properties = "vision.publish.enabled=false")
+@SpringBootTest(properties = {"vision.publish.enabled=false", "vision.simulation.enabled=true"})
 @Import(FileSimulationSmokeTest.RecordingPublisherConfig.class)
 class FileSimulationSmokeTest {
 

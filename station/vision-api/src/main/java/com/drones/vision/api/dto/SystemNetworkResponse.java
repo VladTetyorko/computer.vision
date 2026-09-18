@@ -27,8 +27,12 @@ import com.drones.vision.api.controller.SystemNetworkController;
  * @param videoPushPathPrefix mediamtx path-name prefix a device push must live under to be
  *                           reported as a discovery candidate; absent when mediamtx publish is
  *                           unconfigured
+ * @param simulationEnabled  the Playground's own master switch (docs/plans/active/
+ *                           LINK-PAIRING-PLAN.md §4 row L2, {@code vision.simulation.enabled}) — the
+ *                           web reads this field to decide whether to show the Playground at all,
+ *                           rather than probing {@code POST /api/simulations} to find out
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public record SystemNetworkResponse(List<NetworkAddressResponse> addresses, int mavlinkPort, Integer videoPushPort,
-                                     String videoPushPathPrefix) {
+                                     String videoPushPathPrefix, boolean simulationEnabled) {
 }

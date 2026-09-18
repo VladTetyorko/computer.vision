@@ -334,7 +334,7 @@ public final class MavlinkVehicleConfigurator implements VehicleConfigPort {
 
     private static CapabilityReport noCapabilityReport() {
         return new CapabilityReport(CapabilityReport.Status.NO_REPLY, null, CapabilityReport.Maturity.UNKNOWN,
-                java.util.Set.of(), 0, 0, 0, null);
+                java.util.Set.of(), 0, 0, 0, null, null);
     }
 
     private static List<String> capabilityFlagNames(CapabilityReport report) {

@@ -66,6 +66,9 @@ import com.drones.vision.warehouse.application.category.*;
 import com.drones.vision.warehouse.application.custody.*;
 import com.drones.vision.warehouse.application.device.*;
 import com.drones.vision.warehouse.application.maintenance.*;
+import com.drones.vision.warehouse.application.pairing.*;
+import com.drones.vision.warehouse.domain.port.PairingRepositoryPort;
+import com.drones.vision.app.config.properties.VisionPairingProperties;
 import com.drones.vision.warehouse.application.fleet.*;
 import com.drones.vision.flight.application.*;
 import com.drones.vision.flight.application.alerting.*;
@@ -146,7 +149,7 @@ import java.util.function.BiConsumer;
 @Configuration
 @EnableConfigurationProperties({VisionCvProperties.class, VisionLiveProperties.class, VisionRcProperties.class,
         VisionApplicationProperties.class, VisionPublishProperties.class, VisionSimulationProperties.class,
-        VisionCrewProperties.class, VisionEventHistoryProperties.class})
+        VisionCrewProperties.class, VisionEventHistoryProperties.class, VisionPairingProperties.class})
 public class ApplicationServiceWiring {
 
     /**
@@ -394,6 +397,21 @@ public class ApplicationServiceWiring {
                                         AuditTrailPort auditTrailPort,
                                         EventPublisherPort eventPublisherPort) {
         return new DefaultDeviceService(deviceRepositoryPort, assetLiveStatePort, auditTrailPort, eventPublisherPort);
+    }
+
+    /**
+     * docs/plans/active/LINK-PAIRING-PLAN.md §3.3 — a vehicle's persisted identity, kept separate
+     * from {@link DeviceService} the same way {@link AssetService} is: one collaborator per genuine
+     * dependency, config crossing the module boundary as a plain settings record ({@link
+     * VisionPairingProperties#toSettings()}) rather than a raw property string.
+     */
+    @Bean
+    public PairingService pairingService(PairingRepositoryPort pairingRepositoryPort,
+                                          DeviceService deviceService,
+                                          AuditTrailPort auditTrailPort,
+                                          VisionPairingProperties pairingProperties) {
+        return new DefaultPairingService(pairingRepositoryPort, deviceService, auditTrailPort,
+                pairingProperties.toSettings());
     }
 
     /**

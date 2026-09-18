@@ -252,7 +252,11 @@ there is nothing to structurally prevent here the way Mechanism A's opt-in remed
 - `public final class MavlinkVehicleConfigurator implements VehicleConfigPort` — the MAVLink half of
   vehicle onboarding. `supports(Device)`, `probe(String linkKey, Duration window): VehicleProfile`
   (passive inventory + one `AUTOPILOT_VERSION` + one batch of named parameter reads — never throws
-  for an incomplete answer), `requestMessageInterval(linkKey, messageId, interval):
+  for an incomplete answer; its private `requestCapabilities`/`noCapabilityReport` construct
+  `mavlink-core`'s `CapabilityReport` with its `uid` field, LINK-PAIRING-PLAN.md §3.6 — `null` on
+  `noCapabilityReport`'s `NO_REPLY` path, otherwise whatever `CapabilityService` decoded; not yet
+  threaded into `VehicleProfile` or `PairingService#pair`'s `hardwareUid` parameter — out of L2's
+  own scope, see that plan's §3.3), `requestMessageInterval(linkKey, messageId, interval):
   MessageIntervalOutcome` (**Mechanism A**, session-scoped, nothing persisted),
   `readParams(linkKey, names): List<ParameterReading>` (named reads only — an unanswered name has no
   entry, never a fabricated zero), `writeParam(linkKey, name, value): ParameterWriteOutcome`

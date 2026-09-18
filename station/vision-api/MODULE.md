@@ -202,8 +202,12 @@ the full mechanism.
 | DiscoveryInboxController | POST | `/api/discovery/inbox/{id}/attach` | Atomically attach a candidate's suggested stream to an **existing** asset (`{"assetId":"..."}`) — 404 unknown candidate/out-of-scope asset, 409 no suggested stream or a duplicate stream, 422 candidate already `REGISTERED` to a different asset (SOURCE-ONBOARDING-2-PLAN.md §3.2 C1) | manageOrg |
 | DiscoveryInboxController | POST | `/api/discovery/inbox/{id}/restore` | Undo a dismiss — status back to `NEW`, `registeredAssetId` cleared (SOURCE-ONBOARDING-2-PLAN.md §3.2 C5) | manageOrg |
 | DiscoveryStatusController | GET | `/api/discovery/status` | Sweep cadence + telemetry/video intake facts + per-source health, for a live onboarding status panel (SOURCE-ONBOARDING-2-PLAN.md §3.2 C2 — "the most important endpoint in the plan") | manageOrg |
-| SimulationController | POST | `/api/simulations` | Start a synthetic (or video-fed) simulated asset | manageOrg |
-| SimulationController | DELETE | `/api/simulations/{assetId}` | Stop it (idempotent) | scope |
+| PairingController | POST | `/api/devices/{id}/pairing` | Pair a manually registered device — heard sysid/hardware uid in the body (both optional); response carries `sysidPushRequired` when the assigned sysid differs from what was heard (LINK-PAIRING-PLAN.md §3.3) | device-keyed (`StreamAccess#requireVisible`) |
+| PairingController | DELETE | `/api/devices/{id}/pairing` | Forget a pairing — ⚠ hard delete, its sysid/key stop being valid immediately | device-keyed |
+| PairingController | POST | `/api/devices/{id}/pairing/replace-hardware` | Record a hardware swap — clears `hardwareUid`, bumps `replacedAt`, keeps sysid/key | device-keyed |
+| PairingController | GET | `/api/pairings/unpaired-devices` | Devices that have never been paired — the picklist a manual pair starts from | manageOrg |
+| SimulationController | POST | `/api/simulations` | Start a synthetic (or video-fed) simulated asset — controller bean absent (404) unless `vision.simulation.enabled=true` (LINK-PAIRING-PLAN.md §4 row L2) | manageOrg |
+| SimulationController | DELETE | `/api/simulations/{assetId}` | Stop it (idempotent) — same gate as above | scope |
 | AuthController | POST | `/api/auth/login` | Session login (always-200 dev admin when auth disabled); body `{username,password,kiosk?}` — a non-`VIEWER` requesting `kiosk:true` is refused `400 KIOSK_NOT_PERMITTED` *after* a real successful login, and the just-established session is torn down (AUTH-ROLES-PLAN.md §3.5/§3.7, wave B3) | open |
 | AuthController | POST | `/api/auth/logout` | Invalidate session (idempotent) | open |
 | AuthController | GET | `/api/auth/me` | Caller's own identity; `MeResponse` now carries `capabilities[]`/`scopeKind`/`mustChangePassword` (wave B3) | open (Spring Security's chain itself 401s when auth is enabled and unauthenticated) |
@@ -232,7 +236,7 @@ the full mechanism.
 | AfterActionController | GET | `/api/assets/{assetId}/usages/{usageId}/after-action` | JSON manifest of the evidence package | scope + export authority (`AccessDeniedException`→403 if visible but not exportable) |
 | AfterActionController | GET | `/api/assets/{assetId}/usages/{usageId}/after-action/archive` | The ZIP archive, streamed (never buffered whole) | scope + export authority |
 | SystemStatusController | GET | `/api/system/status` | Subsystem health rollup; never errors — rollup logic now lives in `support/SystemStatusReader#read` (LIVE-POLL-RETIREMENT wave L4a), this controller's wire output unchanged; the same reader backs the `system` SSE topic's server-side sampler (see "Live updates" below) | **unscoped** (ledger — deliberately: no secrets exposed) |
-| SystemNetworkController | GET | `/api/system/network` | Host's site-local IPv4 addresses (each now carrying a `kind` — `LAN`/`VIRTUAL`/`UNKNOWN`, sorted kind-first) plus `mavlinkPort` and, when mediamtx publish is configured, `videoPushPort`/`videoPushPathPrefix` (SOURCE-ONBOARDING-2-PLAN.md §3.2 C3) | **unscoped** (ledger) |
+| SystemNetworkController | GET | `/api/system/network` | Host's site-local IPv4 addresses (each now carrying a `kind` — `LAN`/`VIRTUAL`/`UNKNOWN`, sorted kind-first) plus `mavlinkPort`, `simulationEnabled` (LINK-PAIRING-PLAN.md §4 row L2 — mirrors `vision.simulation.enabled`, the flag the web reads to decide whether to offer the Playground) and, when mediamtx publish is configured, `videoPushPort`/`videoPushPathPrefix` (SOURCE-ONBOARDING-2-PLAN.md §3.2 C3) | **unscoped** (ledger) |
 | SystemEventsController | GET | `/api/system/events?sinceMs&limit` | Durable platform-`Event` history, newest-first (ALWAYS-ON-FLOW-PLAN wave B3) — the notification bell/`/manage/system`'s reconnect backfill; empty unless `vision.events.history.enabled` | `@OpenByDesign` (see class javadoc — durably replays exactly what the already-unscoped `event` SSE topic broadcasts) |
 | DemoController | GET | `/api/demo` | Demo-button availability probe | **unscoped** (ledger); gated by `vision.demo.enabled` (default on) |
 | DemoController | POST | `/api/demo/seed` | Seed demo assets/users/streams/zones/marks; fault-tolerant (failures land in `problems`, never an error status) | scope (`DemoScenario` resolves the acting user itself) |
@@ -593,6 +597,26 @@ extra collaborators (`AssetRowFacts`, image lookup) this endpoint has no call to
 wanting the full asset shape follows up with `GET /api/assets/{id}`, same posture as `AssetInventoryController`'s
 own after-mutation responses.
 
+**LINK-PAIRING-PLAN.md §3.3/§7, wave L2 additions** — `DiscoveryCandidateResponse`/
+`RegisterDiscoveryCandidateResponse` both gained a trailing `Integer assignedSysid`
+(`@JsonInclude(NON_NULL)`, widened `from(...)` overload to `from(candidate, sysidPushRequired,
+assignedSysid)`; a 1-arg/3-field `from(candidate)` remains for `LiveUpdateRegistry`'s own SSE-envelope
+call site, which delegates straight to the 3-arg form with both new fields `null` — the widening
+convention this file's DTO static factories follow, not one more constructor overload). Both fields
+come from `DiscoveryInboxController#register`/`#attach`'s own private `adopt(...)` helper, which now
+returns a private `AdoptOutcome(boolean sysidPushRequired, int assignedSysid)` record (was a bare
+`Boolean`) so the sysid a collision actually assigned reaches the response, not just the fact that one
+was pushed — mirrors `vision-web`'s `core/api/models.ts` `assignedSysid?: number` field the web L4
+wave already committed to, matched here field-for-field (see that wave's own contract note).
+`PairingController`'s own DTOs (`PairDeviceRequest(heardSysid, hardwareUid)`, `PairingResponse
+(pairingId, deviceId, sysid, hardwareUid, createdAt, replacedAt, sysidPushRequired)`,
+`UnpairedDeviceResponse(deviceId, name, capabilities)`) never carry `Pairing#vehicleKey()` — key
+material never reaches the wire, same reasoning `VehicleKey#toString()`'s own redaction already
+applies at the domain layer. `hardwareUid` is a decimal string both directions (`BigInteger` has no
+safe round-trip through JSON `number`); `PairDeviceRequest#parsedHardwareUid()` throws
+`IllegalArgumentException` (400) for a non-decimal value, checked before `StreamAccess#requireVisible`
+so a malformed request never leaks whether a device exists.
+
 **ASSET-FLOWS wave BK6 (A3) — `GET /api/discovery/inbox` wire-contract change (docs/plans/active/ASSET-FLOWS-PLAN.md
 §2, frozen).** This endpoint used to answer a bare `DiscoveryCandidateResponse[]`; it now answers
 `DiscoveryInboxResponse(candidates, sources)` — an envelope, `candidates` carrying exactly that same
@@ -760,6 +784,19 @@ call sites) — unlike `stats`/`latency`/`rate`/`follow`, `objects` is **not** c
 
 ## Gotchas
 
+- **Two test-fixture bugs LINK-PAIRING L2 found by actually running the required build, not by
+  inspection:** `DiscoveryInboxControllerTest` didn't compile at all after `DiscoveryInboxController`
+  grew `PairingService`/`AssetService` constructor parameters for "adopt is one motion" (§7 ruling
+  3) — its `mockMvcFor` helper now has a 5-arg overload the 3-arg one delegates to (fresh no-op
+  mocks), plus two new tests (`registerOfAMavlinkCandidatePairsTheNewDeviceAndReportsThePushRequired
+  Sysid`, `attachOfAMavlinkCandidatePairsTheDeviceAndOmitsAssignedSysidWhenNoPushIsNeeded`) that
+  actually exercise the composition, since none of the pre-existing register/attach tests happened to
+  stub `discoveryInboxService.candidates()` and so never reached it. Separately,
+  `PairingControllerTest`'s own `pairing(DeviceId, int)` helper hardcoded `hardwareUid =
+  BigInteger.valueOf(42L)` on every call regardless of what each test actually needed, which two
+  tests' own assertions contradicted (one expected `hardwareUid` absent, one expected the value it
+  had just "passed through" a mocked call) — fixed by defaulting the helper's `hardwareUid` to
+  `null` and having the one test that needs a real value construct its own `Pairing` inline.
 - **`AssetController#telemetry`, `TrainingJobController#job`/`#jobs`,
   `GeoRegionController#list`/`#progress`, `DiscoveryController#scan`, `SystemNetworkController#network`,
   `SystemStatusController#status`, `DemoController#status`, `OnboardingController#probeCandidate`, and
@@ -896,7 +933,11 @@ value via `application.yaml`'s `${vision.cv.enabled:false}` placeholder, **no lo
 answers 409, and so does `AssetParameterController#writeParameter` — see FLEET-RADIO R5 note below),
 `vision.geo.fixed-camera.enabled` (false — `CameraPoseController`/`MapTracksController`
 answer 409), `vision.api.rate-limit.enabled` (false, see "Rate limiting" above), `vision.auth.enabled`
-(false — every `CurrentUser` call resolves a fixed unbounded dev principal). On by default:
+(false — every `CurrentUser` call resolves a fixed unbounded dev principal), `vision.simulation.enabled`
+(false — `SimulationController` 404s like an unmapped route when off, LINK-PAIRING-PLAN.md §4 row L2;
+unlike every other flag in this list, a caller can also read its live value directly —
+`GET /api/system/network`'s `simulationEnabled` field, a plain unconditional `boolean` bean
+wired in `vision-app`, not another `ObjectProvider` case). On by default:
 `vision.live.enabled`, `vision.demo.enabled`. `CvProfileController` carries no flag at all —
 profiles ship unconditionally, built-ins exist regardless of `vision.cv.enabled`/`vision.cv.registry.enabled`.
 

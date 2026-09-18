@@ -305,10 +305,15 @@ class PostgresDockerIntegrationTest {
      * decision, not bulk collection data); {@code cv_training_runs} updates more often than most
      * audited tables (roughly once per epoch) but at a training-job's bounded volume, not the
      * per-frame/per-sample character of the excluded set below — see that migration's own header;
-     * and {@code discovery_candidates} added by {@code V31__discovery_inbox.sql} (docs/plans/active/
+     * {@code discovery_candidates} added by {@code V31__discovery_inbox.sql} (docs/plans/active/
      * ZERO-CONFIG-ONBOARDING-CONTEXT.md §11, Z2c) — "who dismissed/registered this candidate, and
      * when" is control-plane accountability, and write volume is sweep-driven (see that migration's
-     * own header).
+     * own header); and {@code pairings} added by {@code V37__pairing.sql} (docs/plans/active/
+     * LINK-PAIRING-PLAN.md §3.3) — a vehicle's identity (sysid/key/hardware uid) is the same
+     * "operator-authored, accountability-relevant, bounded write volume" character as {@code
+     * control_profiles}/{@code vehicle_profiles}, and {@code forget} is a deliberate ⚠ hard delete
+     * (§3.3) — the DB-level trigger is the only durable record of a forgotten pairing's last
+     * values, since the row itself is gone.
      */
     private static final Set<String> AUDITED_TABLES = Set.of(
             "categories", "devices", "device_capabilities", "assets", "asset_devices",
@@ -316,7 +321,7 @@ class PostgresDockerIntegrationTest {
             "marks", "datasets", "map_layers", "map_layer_grants", "map_drawings",
             "vehicle_profiles", "feature_requirements", "camera_poses", "control_profiles",
             "maintenance_records", "asset_notes", "cv_profiles", "cv_profile_bindings",
-            "cv_models", "cv_training_runs", "discovery_candidates");
+            "cv_models", "cv_training_runs", "discovery_candidates", "pairings");
 
     /**
      * Every other base table in the schema as of V22 — high-volume append-only event tables, the
@@ -4553,10 +4558,18 @@ class PostgresDockerIntegrationTest {
         private final DiscoveryCandidateRepositoryPort repository =
                 new JpaDiscoveryCandidateRepository(entityManagerFactory);
 
-        private DiscoveredDevice withStream(String address) {
+        /**
+         * {@code sysid} must be distinct per call in this class: identity is sysid-first now (docs/
+         * plans/active/LINK-PAIRING-PLAN.md §3.3, {@link DiscoveryCandidate#identityKeyFor}), so two
+         * candidates sharing a sysid collapse to the same {@code identity_key} regardless of address
+         * and collide against {@code uq_discovery_candidates_identity_key} -- this nested class's
+         * {@code POSTGRES} container, like every other class here, is shared across all its test
+         * methods and never reset between them.
+         */
+        private DiscoveredDevice withStream(String address, String sysid) {
             return new DiscoveredDevice("mavlink", "New quad", URI.create(address), new CategoryId("quadcopter"),
-                    new StreamDescriptor("mavlink", URI.create(address), Map.of("sysid", "7")),
-                    Map.of("sysid", "7", "raw", "heartbeat"));
+                    new StreamDescriptor("mavlink", URI.create(address), Map.of("sysid", sysid)),
+                    Map.of("sysid", sysid, "raw", "heartbeat"));
         }
 
         private DiscoveredDevice withoutStream(String address) {
@@ -4576,7 +4589,7 @@ class PostgresDockerIntegrationTest {
 
         @Test
         void savedCandidateWithAStreamRoundTripsEveryField() {
-            DiscoveredDevice discovered = withStream("udp://10.0.0.5:14550");
+            DiscoveredDevice discovered = withStream("udp://10.0.0.5:14550", "5");
             DiscoveryCandidate candidate =
                     DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(), discovered, NOW);
 
@@ -4584,8 +4597,8 @@ class PostgresDockerIntegrationTest {
 
             DiscoveryCandidate found = repository.findById(candidate.id()).orElseThrow();
             assertEquals(candidate, found);
-            assertEquals(Map.of("sysid", "7"), found.discovered().suggestedStream().options());
-            assertEquals(Map.of("sysid", "7", "raw", "heartbeat"), found.discovered().details());
+            assertEquals(Map.of("sysid", "5"), found.discovered().suggestedStream().options());
+            assertEquals(Map.of("sysid", "5", "raw", "heartbeat"), found.discovered().details());
         }
 
         @Test
@@ -4604,7 +4617,7 @@ class PostgresDockerIntegrationTest {
 
         @Test
         void findByIdentityKeyFindsTheUpsertTargetAndSaveIsAnUpsertPreservingId() {
-            DiscoveredDevice discovered = withStream("udp://10.0.0.6:14550");
+            DiscoveredDevice discovered = withStream("udp://10.0.0.6:14550", "6");
             DiscoveryCandidateId id = DiscoveryCandidateId.random();
             DiscoveryCandidate candidate = DiscoveryCandidate.newlyReported(id, discovered, NOW);
             repository.save(candidate);
@@ -4623,14 +4636,14 @@ class PostgresDockerIntegrationTest {
         @Test
         void dismissedAndRegisteredStatusesRoundTrip() {
             DiscoveryCandidate dismissed = DiscoveryCandidate
-                    .newlyReported(DiscoveryCandidateId.random(), withStream("udp://10.0.0.7:14550"), NOW)
+                    .newlyReported(DiscoveryCandidateId.random(), withStream("udp://10.0.0.7:14550", "7"), NOW)
                     .dismiss();
             repository.save(dismissed);
             assertEquals(CandidateStatus.DISMISSED, repository.findById(dismissed.id()).orElseThrow().status());
 
             AssetId owningAsset = AssetId.random();
             DiscoveryCandidate registered = DiscoveryCandidate
-                    .newlyReported(DiscoveryCandidateId.random(), withStream("udp://10.0.0.8:14550"), NOW)
+                    .newlyReported(DiscoveryCandidateId.random(), withStream("udp://10.0.0.8:14550", "8"), NOW)
                     .registeredTo(owningAsset);
             repository.save(registered);
 
@@ -4642,9 +4655,9 @@ class PostgresDockerIntegrationTest {
         @Test
         void findAllOrdersNewestReportedFirst() {
             DiscoveryCandidate older = DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(),
-                    withStream("udp://10.0.0.9:14550"), NOW.plusSeconds(5000));
+                    withStream("udp://10.0.0.9:14550", "9"), NOW.plusSeconds(5000));
             DiscoveryCandidate newer = DiscoveryCandidate.newlyReported(DiscoveryCandidateId.random(),
-                    withStream("udp://10.0.0.10:14550"), NOW.plusSeconds(6000));
+                    withStream("udp://10.0.0.10:14550", "10"), NOW.plusSeconds(6000));
             repository.save(older);
             repository.save(newer);
             Set<DiscoveryCandidateId> ours = Set.of(older.id(), newer.id());

@@ -69,7 +69,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * for why the per-viewer/per-open thread rename is deliberately load-bearing for exactly this kind
  * of check).
  */
-@SpringBootTest(properties = "vision.publish.enabled=false")
+@SpringBootTest(properties = {"vision.publish.enabled=false", "vision.simulation.enabled=true"})
 @Import(FileSimulationSmokeTest.RecordingPublisherConfig.class)
 class MjpegSimulationSmokeTest {
 

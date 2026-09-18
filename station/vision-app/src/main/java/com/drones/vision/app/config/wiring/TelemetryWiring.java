@@ -10,6 +10,7 @@ import com.drones.vision.app.config.properties.VisionMavlinkProperties;
 import com.drones.vision.app.config.properties.VisionOnboardingProperties;
 import com.drones.vision.app.config.properties.VisionRcProperties;
 import com.drones.vision.app.config.properties.VisionSimulationProperties;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -35,8 +36,13 @@ public class TelemetryWiring {
      * (alongside any other registered {@code TelemetrySourcePort} beans) into {@code
      * ApplicationServiceWiring#usageTracker}'s {@code List<TelemetrySourcePort>} so a {@code sim}
      * telemetry-capable device produces a demoable usage trail with zero hardware.
+     *
+     * <p>Gated behind {@code vision.simulation.enabled} (docs/plans/active/LINK-PAIRING-PLAN.md §4
+     * row L2), the same Playground master switch {@code VideoSourceWiring#simulatedVideoSource} and
+     * {@code SimulationController} are gated on — off by default.
      */
     @Bean
+    @ConditionalOnProperty(prefix = "vision.simulation", name = "enabled", havingValue = "true")
     public SimulatedTelemetrySource simulatedTelemetrySource(VisionSimulationProperties properties) {
         VisionSimulationProperties.Telemetry telemetry = properties.telemetry();
         return new SimulatedTelemetrySource(new TelemetrySettings(telemetry.centerLatitude(),

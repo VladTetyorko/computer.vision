@@ -17,11 +17,13 @@ import java.time.Instant;
  * change only through this record's own transition methods, never directly.
  *
  * <h2>Identity</h2>
- * {@link #identityKey()} is {@link #identityKeyFor(DiscoveredDevice)} — {@code method + "|" +
- * address}, plus {@code "|sysid=" + n} when the discovered device carries one — computed once at
- * {@link #newlyReported} time and carried unchanged afterward (the discovered device's own address
- * can legitimately drift across reports, e.g. a rebroadcast on a new ephemeral port; the identity
- * key must not).
+ * {@link #identityKey()} is {@link #identityKeyFor(DiscoveredDevice)} — identity-first (docs/plans/
+ * active/LINK-PAIRING-PLAN.md §3.3): {@code method + "|sysid=" + n} when a sysid is known, with
+ * <b>no address component</b>, else the next-best stable fact (ONVIF {@code epr}/mediamtx {@code
+ * path}), else {@code method + "|" + address} as the last resort — computed once at {@link
+ * #newlyReported} time and carried unchanged afterward (the discovered device's own address can
+ * legitimately drift across reports, e.g. a rebroadcast on a new ephemeral port; the identity key
+ * must not).
  *
  * <h2>{@code registeredAsset} may be {@code null} even when {@link #status()} is {@link
  * CandidateStatus#REGISTERED}</h2>
@@ -76,8 +78,11 @@ public record DiscoveryCandidate(DiscoveryCandidateId id, String identityKey, Di
 
     /**
      * The identity {@link com.drones.vision.warehouse.application.discovery.DiscoveryInboxService#report}
-     * upserts by: {@code method + "|" + address}, plus {@code "|sysid=" + n} when a sysid is
-     * carried. {@code sysid} is read the same lenient way {@link
+     * upserts by — identity-first, address last (docs/plans/active/LINK-PAIRING-PLAN.md §3.3):
+     * {@code sysid}, when carried, keys the candidate on its own, with <b>no address component</b>
+     * — a MAVLink sysid is the vehicle's identity, not its address, so a re-broadcast on a new
+     * ephemeral port/address must dedupe to the same candidate rather than fork a second one.
+     * {@code sysid} is read the same lenient way {@link
      * com.drones.vision.warehouse.application.asset.AssetService#createFromCandidate}'s duplicate
      * check already reads it — {@link StreamDescriptor#options()}'s {@code "sysid"} key, a raw
      * string, never parsed or format-validated — preferring {@link
@@ -86,6 +91,23 @@ public record DiscoveryCandidate(DiscoveryCandidateId id, String identityKey, Di
      * a ready-to-use stream, e.g. ONVIF before {@code GetStreamUri}, still carries the sysid there —
      * see {@code MavlinkHeartbeatScanner}, which sets both).
      *
+     * <p>Without a sysid, the next-best stable identity fact wins: the ONVIF WS-Discovery endpoint
+     * reference ({@code details["epr"]}, set by {@code OnvifWsDiscoveryScanner}) or the mediamtx
+     * path name ({@code details["path"]}, set by {@code MediamtxPathScanner}) — both survive the
+     * underlying camera's address changing (DHCP renewal, NIC swap), since mediamtx itself is keyed
+     * on the path, not the camera's IP. The plan's priority list also names a hardware-uid tier
+     * between sysid and ONVIF/mediamtx, but nothing populates one this early in discovery (a
+     * hardware uid only exists after a MAVLink capability probe, §3.6) — there is no such tier to
+     * implement yet. Only when none of these are available does the key fall back to {@code method
+     * + "|" + address}, unchanged from before.
+     *
+     * <p>Changing an already-seen identity's key format (e.g. adding sysid dedup to a candidate
+     * that was previously keyed on address alone) is not attempted here: {@link #identityKey()} is
+     * computed once, at {@link #newlyReported} time, and this method is never re-run against an
+     * existing row — a device already in the inbox under the old key simply gets re-discovered
+     * under the new one on its next report, which is no different from a device that went briefly
+     * offline and reappeared.
+     *
      * @param discovered the scan result to key
      * @return the dedup key
      */
@@ -93,9 +115,19 @@ public record DiscoveryCandidate(DiscoveryCandidateId id, String identityKey, Di
         if (discovered == null) {
             throw new IllegalArgumentException("DiscoveryCandidate identityKeyFor: discovered must not be null");
         }
-        String key = discovered.method() + "|" + discovered.address();
         String sysid = sysid(discovered);
-        return sysid != null ? key + "|sysid=" + sysid : key;
+        if (sysid != null) {
+            return discovered.method() + "|sysid=" + sysid;
+        }
+        String epr = discovered.details().get("epr");
+        if (epr != null && !epr.isBlank()) {
+            return discovered.method() + "|epr=" + epr;
+        }
+        String path = discovered.details().get("path");
+        if (path != null && !path.isBlank()) {
+            return discovered.method() + "|path=" + path;
+        }
+        return discovered.method() + "|" + discovered.address();
     }
 
     private static String sysid(DiscoveredDevice discovered) {

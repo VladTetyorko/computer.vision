@@ -13,6 +13,7 @@ import com.drones.vision.app.config.properties.VisionSimulationProperties;
 import com.drones.vision.app.config.properties.VisionV4l2Properties;
 import com.drones.vision.perception.application.pipeline.VideoSourceRegistry;
 import com.drones.vision.perception.domain.port.VideoSourcePort;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -34,7 +35,14 @@ import java.util.OptionalInt;
         VisionMjpegProperties.class, VisionV4l2Properties.class})
 public class VideoSourceWiring {
 
+    /**
+     * Gated behind {@code vision.simulation.enabled} (docs/plans/active/LINK-PAIRING-PLAN.md §4 row
+     * L2) — the Playground's own master switch, off by default: a simulation discovery producer is
+     * as much "creating a new simulated asset" as {@code SimulationController#simulate} is, so it
+     * closes the same way that endpoint does rather than staying live behind a disabled controller.
+     */
     @Bean
+    @ConditionalOnProperty(prefix = "vision.simulation", name = "enabled", havingValue = "true")
     public SimulatedVideoSource simulatedVideoSource(VisionSimulationProperties properties) {
         VisionSimulationProperties.Video video = properties.video();
         return new SimulatedVideoSource(new VideoSettings(video.width(), video.height(), video.fps()));

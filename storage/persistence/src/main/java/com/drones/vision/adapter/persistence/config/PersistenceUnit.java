@@ -33,6 +33,7 @@ import com.drones.vision.adapter.persistence.entity.TrainingRunEntity;
 import com.drones.vision.adapter.persistence.entity.TrainingSampleEntity;
 import com.drones.vision.adapter.persistence.entity.UserEntity;
 import com.drones.vision.adapter.persistence.entity.ControlProfileEntity;
+import com.drones.vision.adapter.persistence.entity.PairingEntity;
 import com.drones.vision.adapter.persistence.entity.VehicleProfileEntity;
 import com.drones.vision.perception.domain.model.TrackingKnobPatch;
 
@@ -320,6 +321,9 @@ public final class PersistenceUnit {
         // docs/plans/active/ALWAYS-ON-FLOW-PLAN.md wave B3 (V35__event_history.sql) -- the durable
         // home for platform Events the notification bell/`/manage/system` replay from.
         configuration.addAnnotatedClass(EventHistoryEntity.class);
+        // docs/plans/active/LINK-PAIRING-PLAN.md §3.3 (V37__pairing.sql) -- a vehicle's persisted
+        // identity (sysid, key, hardware uid), distinct from the DeviceEntity it answers through.
+        configuration.addAnnotatedClass(PairingEntity.class);
         return configuration.buildSessionFactory();
     }
 

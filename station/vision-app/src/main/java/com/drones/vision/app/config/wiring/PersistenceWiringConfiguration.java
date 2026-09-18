@@ -29,6 +29,7 @@ import com.drones.vision.warehouse.domain.port.CategoryRepositoryPort;
 import com.drones.vision.warehouse.domain.port.DeviceRepositoryPort;
 import com.drones.vision.warehouse.domain.port.DiscoveryCandidateRepositoryPort;
 import com.drones.vision.warehouse.domain.port.MaintenanceRepositoryPort;
+import com.drones.vision.warehouse.domain.port.PairingRepositoryPort;
 import com.drones.vision.adapter.persistence.config.PersistenceUnit;
 import com.drones.vision.adapter.persistence.repository.*;
 import com.drones.vision.app.config.properties.VisionPersistenceProperties;
@@ -357,5 +358,14 @@ public class PersistenceWiringConfiguration {
     public DiscoveryCandidateRepositoryPort discoveryCandidateRepositoryPort(
             EntityManagerFactory entityManagerFactory) {
         return new JpaDiscoveryCandidateRepository(entityManagerFactory);
+    }
+
+    /**
+     * docs/plans/active/LINK-PAIRING-PLAN.md §3.3 — a vehicle's persisted identity ({@code
+     * V37__pairing.sql}), wired unconditionally like every other port here.
+     */
+    @Bean
+    public PairingRepositoryPort pairingRepositoryPort(EntityManagerFactory entityManagerFactory) {
+        return new JpaPairingRepository(entityManagerFactory);
     }
 }

@@ -17,6 +17,7 @@ import com.drones.vision.app.config.properties.VisionApplicationProperties;
 import com.drones.vision.app.config.properties.VisionDiscoveryProperties;
 import com.drones.vision.app.config.properties.VisionMavlinkProperties;
 import com.drones.vision.app.config.properties.VisionPublishProperties;
+import com.drones.vision.app.config.properties.VisionSimulationProperties;
 import com.drones.vision.app.discovery.DiscoveryInboxRunner;
 import com.drones.vision.warehouse.application.discovery.DefaultDiscoveryService;
 import com.drones.vision.warehouse.application.discovery.DiscoveryService;
@@ -192,6 +193,21 @@ public class DiscoveryWiringConfiguration {
     @Bean
     public int mavlinkPort(VisionDiscoveryProperties properties) {
         return properties.mavlinkPort();
+    }
+
+    /**
+     * The Playground's own master switch {@code vision-api}'s {@code SystemNetworkController} needs
+     * for {@code GET /api/system/network}'s {@code simulationEnabled} field (docs/plans/active/
+     * LINK-PAIRING-PLAN.md §4 row L2) — the same plain-bean crossing {@link #mavlinkPort} establishes,
+     * so the web can show or hide the Playground without probing {@code POST /api/simulations}
+     * itself. {@link VisionSimulationProperties} is registered by {@code VideoSourceWiring}/{@code
+     * TelemetryWiring}'s own {@code @EnableConfigurationProperties} and is available here as a plain
+     * autowired bean, the same "already registered elsewhere" pattern {@link #videoPushPort}'s own
+     * javadoc documents for {@link VisionPublishProperties}.
+     */
+    @Bean
+    public boolean simulationEnabled(VisionSimulationProperties properties) {
+        return properties.enabled();
     }
 
     /**

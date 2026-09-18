@@ -3,6 +3,7 @@ package com.drones.mavlink.service;
 import io.dronefleet.mavlink.common.AutopilotVersion;
 import io.dronefleet.mavlink.common.MavProtocolCapability;
 
+import java.math.BigInteger;
 import java.util.Objects;
 import java.util.Set;
 
@@ -19,12 +20,16 @@ import java.util.Set;
  *
  * @param firmwareVersion {@code "major.minor.patch"}, or {@code null} for {@link Status#NO_REPLY}
  * @param maturity        the low byte of {@code flight_sw_version} — DEV/ALPHA/BETA/RC/OFFICIAL
+ * @param uid             {@code AUTOPILOT_VERSION.uid} — the flight-controller hardware uid, used
+ *                        by {@code PairingService} to detect a board swap
+ *                        (docs/plans/active/LINK-PAIRING-PLAN.md §3.6); {@code null} for {@link
+ *                        Status#NO_REPLY}
  * @param raw             the whole message, for a caller that needs a field this record omits;
  *                        {@code null} for {@link Status#NO_REPLY}
  */
 public record CapabilityReport(Status status, String firmwareVersion, Maturity maturity,
                                Set<MavProtocolCapability> capabilities, long boardVersion,
-                               int vendorId, int productId, AutopilotVersion raw) {
+                               int vendorId, int productId, BigInteger uid, AutopilotVersion raw) {
 
     public CapabilityReport {
         Objects.requireNonNull(status, "status");

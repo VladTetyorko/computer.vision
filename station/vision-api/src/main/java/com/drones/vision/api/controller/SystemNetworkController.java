@@ -42,6 +42,7 @@ public class SystemNetworkController {
     private final int mavlinkPort;
     private final Integer videoPushPort;
     private final String videoPushPathPrefix;
+    private final boolean simulationEnabled;
 
     /**
      * @param mavlinkPort         the MAVLink heartbeat port, supplied as a raw {@code int} bean by
@@ -62,20 +63,26 @@ public class SystemNetworkController {
      * @param videoPushPathPrefix provides the mediamtx ingest path-name prefix, from {@code
      *                            DiscoveryWiringConfiguration#videoPushPathPrefix} — see {@code
      *                            videoPushPort} for why this is an {@link ObjectProvider}
+     * @param simulationEnabled   the Playground's own master switch, from {@code
+     *                            DiscoveryWiringConfiguration#simulationEnabled} (docs/plans/active/
+     *                            LINK-PAIRING-PLAN.md §4 row L2) — a plain {@code boolean} bean like
+     *                            {@code mavlinkPort}, since it is always registered (never
+     *                            conditionally absent the way the mediamtx-only beans above are)
      */
     @Autowired
     public SystemNetworkController(int mavlinkPort, ObjectProvider<Integer> videoPushPort,
-                                    ObjectProvider<String> videoPushPathPrefix) {
-        this(mavlinkPort, videoPushPort.getIfAvailable(), videoPushPathPrefix.getIfAvailable(),
+                                    ObjectProvider<String> videoPushPathPrefix, boolean simulationEnabled) {
+        this(mavlinkPort, videoPushPort.getIfAvailable(), videoPushPathPrefix.getIfAvailable(), simulationEnabled,
                 new LocalNetworkAddresses());
     }
 
     /** Package-private test seam — see class javadoc. */
     SystemNetworkController(int mavlinkPort, Integer videoPushPort, String videoPushPathPrefix,
-                             LocalNetworkAddresses localNetworkAddresses) {
+                             boolean simulationEnabled, LocalNetworkAddresses localNetworkAddresses) {
         this.mavlinkPort = mavlinkPort;
         this.videoPushPort = videoPushPort;
         this.videoPushPathPrefix = videoPushPathPrefix;
+        this.simulationEnabled = simulationEnabled;
         this.localNetworkAddresses =
                 Objects.requireNonNull(localNetworkAddresses, "localNetworkAddresses must not be null");
     }
@@ -101,6 +108,6 @@ public class SystemNetworkController {
     @GetMapping("/api/system/network")
     public SystemNetworkResponse network() {
         return new SystemNetworkResponse(localNetworkAddresses.list(), mavlinkPort, videoPushPort,
-                videoPushPathPrefix);
+                videoPushPathPrefix, simulationEnabled);
     }
 }

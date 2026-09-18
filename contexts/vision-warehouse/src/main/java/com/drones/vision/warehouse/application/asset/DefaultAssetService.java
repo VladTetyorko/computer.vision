@@ -32,6 +32,8 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
+import com.drones.vision.warehouse.application.device.DeviceEdit;
 import com.drones.vision.warehouse.application.device.DeviceRegistration;
 import com.drones.vision.warehouse.application.device.DeviceService;
 import com.drones.vision.platform.VisibilityScope;
@@ -64,6 +66,15 @@ public final class DefaultAssetService implements AssetService {
 
     /** Unbounded fetch, used only to count what a deletion is preserving. */
     private static final int ALL_USAGES = Integer.MAX_VALUE;
+
+    /**
+     * Attributes changes this service makes on its own initiative (address self-heal in {@link
+     * #syncAddressIfDrifted}) rather than in response to one user's request — mirrors {@code
+     * com.drones.vision.map.application.LayerResolver#SYSTEM_USER_ID}; kept local rather than
+     * shared since vision-warehouse and vision-map are sibling contexts with no dependency between
+     * them.
+     */
+    private static final UserId SYSTEM_ACTOR = new UserId(new UUID(0, 0));
 
     private final AssetRepositoryPort assetRepository;
     private final CategoryRepositoryPort categoryRepository;
@@ -152,17 +163,41 @@ public final class DefaultAssetService implements AssetService {
     public Optional<DuplicateDeviceMatch> findDuplicateDevice(StreamDescriptor candidate) {
         Objects.requireNonNull(candidate, "candidate must not be null");
         return matchDevice(candidate)
+                .map(device -> syncAddressIfDrifted(device, candidate))
                 .map(device -> new DuplicateDeviceMatch(device.id(),
                         assetRepository.findByDeviceId(device.id()).map(Asset::id).orElse(null)));
     }
 
     /**
-     * The one place that walks every active device looking for a {@code (protocol, uri, sysid)}
-     * match — shared by {@link #requireNoDuplicate} (which throws) and {@link #findDuplicateDevice}
-     * (which answers), so the two never drift.
+     * The one place that walks every active device looking for an identity match — shared by
+     * {@link #requireNoDuplicate} (which throws) and {@link #findDuplicateDevice} (which answers),
+     * so the two never drift.
+     *
+     * <p>Identity-first (docs/plans/active/LINK-PAIRING-PLAN.md §3.3): a MAVLink sysid is the
+     * vehicle's identity, not its address, so a candidate carrying one is matched on {@code sysid}
+     * alone first — a device re-heard at a new {@code uri} (new ephemeral port, new radio hop) is
+     * recognised as the same airframe rather than forking a second one. Only when the candidate
+     * carries no sysid does this fall back to the original {@code (protocol, uri)} match.
+     *
+     * <p>The plan's stated priority also names hardware uid and ONVIF uuid/mediamtx path ahead of
+     * address, but neither is reachable from this method's signature: hardware uid is not yet
+     * attached to a {@link Device} anywhere a candidate stream could carry it, and the ONVIF/
+     * mediamtx identity facts ({@code details["epr"]}/{@code details["path"]}, see {@link
+     * com.drones.vision.warehouse.domain.model.DiscoveryCandidate#identityKeyFor}) live on the full
+     * {@link com.drones.vision.warehouse.domain.model.DiscoveredDevice}, not on the {@link
+     * StreamDescriptor} this method receives — widening this signature was out of scope for this
+     * change (docs/plans/active/LINK-PAIRING-PLAN.md §3.3 names this as an edit to the existing
+     * method body, not a new method/signature).
      */
     private Optional<Device> matchDevice(StreamDescriptor candidate) {
         String candidateSysid = candidate.options().get("sysid");
+        if (candidateSysid != null) {
+            for (Device device : deviceService.devices(false)) {
+                if (candidateSysid.equals(device.stream().options().get("sysid"))) {
+                    return Optional.of(device);
+                }
+            }
+        }
         for (Device device : deviceService.devices(false)) {
             StreamDescriptor existing = device.stream();
             boolean sameAirframe = existing.protocol().equals(candidate.protocol())
@@ -173,6 +208,24 @@ public final class DefaultAssetService implements AssetService {
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * A known identity heard at a new address updates the device's own stream in place rather than
+     * forking a second device (docs/plans/active/LINK-PAIRING-PLAN.md §3.3) — the freshest observed
+     * address always wins (CLAUDE.md rule 7). Runs on every {@link #findDuplicateDevice} call (every
+     * discovery report and every re-attach attempt), so a device's recorded address self-heals
+     * continuously instead of drifting until an operator notices and fixes it by hand.
+     *
+     * <p>Attributed to {@link #SYSTEM_ACTOR} since this runs on the service's own initiative, on
+     * every sighting, not in response to one user's request — mirrors {@code
+     * com.drones.vision.map.application.LayerResolver#SYSTEM_USER_ID}.
+     */
+    private Device syncAddressIfDrifted(Device device, StreamDescriptor observed) {
+        if (device.stream().equals(observed)) {
+            return device;
+        }
+        return deviceService.update(device.id(), new DeviceEdit(null, null, observed, null), SYSTEM_ACTOR);
     }
 
     // --- Reading -------------------------------------------------------------

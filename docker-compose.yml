@@ -637,6 +637,10 @@ services:
       # vision.training.enabled -- the capture -> label -> train -> promote loop.
       # Off, /api/datasets and the sample/training routes 404 like unmapped ones.
       VISION_TRAINING_ENABLED: "true"
+      # vision.simulation.enabled -- the zero-hardware Playground (docs/plans/active/
+      # LINK-PAIRING-PLAN.md §4 row L2). Off, POST /api/simulations 404s and the
+      # simulated video/telemetry discovery producers are entirely absent.
+      VISION_SIMULATION_ENABLED: "true"
 
       # The three below are judgment calls the owner took explicitly, not safe
       # defaults. Each is flagged here so a future reader knows it was a decision.
