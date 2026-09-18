@@ -4,7 +4,7 @@
 final result I need a well structured ngrx application … with all the reducers, actions, effects and
 so on."*
 
-**State:** N0–N2 **BUILT** 2026-09-18 on `feat/ngrx-migration` (merged at `f70afb09`), not yet on `master`. 7 slices done, **26 hand-rolled stores remain**. Waves N3–N9 open.
+**State:** N0–N3 **BUILT** 2026-09-18 on `feat/ngrx-migration` (`b0e0ce19`), not yet on `master`. 8 slices done, **25 hand-rolled stores remain**. Waves N4–N9 open.
 
 ---
 
@@ -201,7 +201,34 @@ Promise-returning method is added to `VisionApi` after N0 — new endpoints land
 | N1 | **BUILT**, `4cc6b3f4` — `overlay` slice; `GlobalOverlayStore` deleted. Its DOM half (the `HTMLElement` registry) stayed out of state in `core/ui/overlay-host-registry.ts`; the route fence listens for `ROUTER_NAVIGATED`, not `Router` |
 | N2 | **BUILT**, `1a3da7f0` — `settings`, `org`, `seat`, `auth`; all four legacy classes deleted. `seat` keys state by `assetId` instead of relying on injector scoping; `core/state/dispatch-bridge.ts#dispatchAndAwait` keeps `Promise`-returning facade commands |
 | N1+N2 merged | `f70afb09` — **231/231 files · 4 387/4 387 tests green**, production build exit 0 at **500.83 kB raw / 142.55 kB transfer** (835 B over the 500 kB *warning* budget, under the 550 kB error budget; left as a warning on purpose) |
-| N3–N9 | open |
+| N3 | **BUILT**, `b0e0ce19` — the `live` slice + `core/live/live-gateway.ts` (the seam owning the one `EventSource`; specs fake it, jsdom never needs one). 26 consumers rewired, `LiveStore` deleted. **234/234 files · 4 443/4 443 tests green**, build exit 0, bundle 500.83 → 505.87 kB raw |
+| N4–N9 | open |
+
+### Two things N3 established that later waves must not undo
+
+**A cross-slice *command* from an effect must be lazy — or better, an action.** N2's
+`auth.effects.ts` injected `LiveFacade` as an eager `createEffect` factory default parameter.
+`@ngrx/effects`' `EffectsRootModule` calls `runner.start()` **before** iterating `provideEffects()`'s
+groups, and `authEffects` registers ahead of `liveEffects`, so resolving the auth factories
+constructed `LiveFacade` — running its constructor's `reconnect()` dispatch — before `connection$`
+existed to receive it. Production masked it because `bootstrapSucceeded` re-triggers the reconnect
+later. N3 fixed it by resolving `LiveFacade` lazily inside each effect callback.
+
+> **Open follow-up, deliberately not done in N3:** the lazy `injector.get(LiveFacade)` fixes the
+> ordering hazard but keeps a slice's effect calling another slice's facade. Dispatching a `live`
+> action instead would remove the coupling *and* the hazard. Left alone rather than rewritten on a
+> hunch under a green suite — pick it up in N9's close-out.
+
+**Registration order in `provideAppState()` is load-bearing.** Anything a wave adds there can change
+which singleton constructs first. If a new effect needs another slice, dispatch to it; don't inject
+its facade eagerly.
+
+### Wave order amended, 2026-09-18
+
+The table runs N4 → N7; the *execution* order is **N5, N6, N7 in parallel, then N4 alone**. Measured
+consumer overlap decides it: N5∩N6 = 3 files, N5∩N7 = 4, N6∩N7 = 3, but N4 overlaps N5 by 9, N7 by 8
+and N6 by 5 — N4 touches the most shared feature facades of the four, so it runs on a settled tree
+rather than against two moving ones.
 
 **Carry into N1.** Two facts N0 established that every later wave depends on: (a) a spec that needs
 real state calls `provideAppState()` — never a hand-rolled `provideStore` — so adding a slice there is
