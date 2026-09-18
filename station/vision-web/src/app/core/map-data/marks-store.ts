@@ -87,8 +87,11 @@ const MARKS_POLL_INTERVAL_MS = 30_000;
  * shared across every page — that is this store's entire reason to be `root`), so only those three
  * reset, on every navigation whose **path** actually changes (a query-param-only navigation, e.g.
  * `CommandFacade`'s `?asset=` sync, does not — see `resetOnRouteChange`'s own doc comment). Modeled on
- * `core/ui/overlay-store.ts#GlobalOverlayStore`'s identical `Router.events` + `NavigationEnd` seam, the
- * only other place in this app a `root` store has to fence its own state off from routing.
+ * the shell `overlay` slice's identical route fence — which since the NgRx migration listens for
+ * `@ngrx/router-store`'s `ROUTER_NAVIGATED` action in `core/ui/state/overlay.effects.ts` rather than
+ * subscribing to `Router.events` itself. This store still owns its own `Router` subscription; it is
+ * the only other place in this app a `root` store has to fence its own state off from routing, and it
+ * moves to the same action-stream seam when its own wave migrates it.
  *
  * <h2>Polling is demand-gated (ALWAYS-ON-FLOW-PLAN.md §4 Wave C3), never "since app boot"</h2>
  * `providedIn: 'root'` means this store, once constructed, outlives every route — but before this

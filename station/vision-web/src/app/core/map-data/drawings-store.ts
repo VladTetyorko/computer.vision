@@ -62,7 +62,8 @@ const DRAWINGS_POLL_INTERVAL_MS = 30_000;
  * live drawing mode with nothing on screen explaining why. `mode` resets on every `NavigationEnd`
  * whose **path** actually changed (a same-page query-param navigation, e.g. `CommandFacade`'s
  * `?asset=` URL sync, does not — see `resetOnRouteChange`), mirroring `MarksStore`'s identical fix and
- * `core/ui/overlay-store.ts#GlobalOverlayStore`'s `Router.events` seam. Drawing *data* (`drawings`)
+ * the shell `overlay` slice's route fence (now a `ROUTER_NAVIGATED` effect, see
+ * `core/ui/state/overlay.effects.ts`). Drawing *data* (`drawings`)
  * stays exactly as shared as before — only this transient interaction flag resets.
  *
  * <h2>Polling is demand-gated (ALWAYS-ON-FLOW-PLAN.md §4 Wave C3)</h2>

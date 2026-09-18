@@ -7,7 +7,7 @@ import { SidebarFacade } from '../../../core/shell/sidebar-facade';
 import { ThemeFacade } from '../../../core/shell/theme-facade';
 import { shellStatusLabel, shellStatusSeverity } from '../../../core/system-status/system-status-logic';
 import { SystemStatusStore } from '../../../core/system-status/system-status-store';
-import { GlobalOverlayStore } from '../../../core/ui/overlay-store';
+import { OverlayFacade } from '../../../core/ui/overlay-facade';
 import { DemoButton } from '../../../features/demo/demo-button/demo-button';
 import { NAV_MODES, type NavMode } from '../../../features/hubs/nav-entries';
 import { Icon } from '../icon';
@@ -109,21 +109,22 @@ import { NotificationBell } from '../notification-bell';
  * Wave 1a has no page bar yet for a hamburger to live in (`docs/plans/done/NAV-IA-REDESIGN-PLAN.md` §3 puts the
  * page bar in Wave 2) — this component owns its own trigger rather than waiting for one.
  *
- * **The mobile sheet joins `GlobalOverlayStore`** (docs/plans/done/UI-STATE-PLAN.md §1/§2.2) as `'sidebar-mobile'`
+ * **The mobile sheet joins `OverlayFacade`** (docs/plans/done/UI-STATE-PLAN.md §1/§2.2, now an NgRx
+ * slice per docs/plans/active/NGRX-MIGRATION-PLAN.md §8) as `'sidebar-mobile'`
  * — it used to be a plain local `signal(false)`, invisible to the identity menu/notification bell it
  * shares this always-mounted shell with, so opening one could leave a *second* thing open behind it
  * (§1 D1/D3, generalized past just the two `<details>`-turned-overlays the plan's own reproduction
  * names). Now opening any one of the three closes the other two, and the same `Escape`/outside-click/
  * navigation rules apply here too, for free. `mobileOpen` is `computed(() =>
- * overlays.isOpen('sidebar-mobile'))` rather than the store's own bare boolean — same template usage
+ * overlays.isOpen('sidebar-mobile'))` rather than a bare boolean — same template usage
  * as before (`[class.mobile-open]="mobileOpen()"`), no call-site churn. The hamburger button registers
  * itself as `'sidebar-mobile'`'s trigger the same way `identity-chip.ts`/`notification-bell.ts` do —
  * except this one is swapped out for the scrim while the sheet is open (`app-sidebar.html`'s own
- * `@if`/`@else`), so `GlobalOverlayStore.register`'s own doc comment on re-registration covers exactly
+ * `@if`/`@else`), so `OverlayHostRegistry.register`'s own doc comment on re-registration covers exactly
  * this component. The local `(keydown.escape)="closeMobile()"` binding this `<aside>` root used to
- * carry is removed — the store's one document-level listener (docs/plans/done/UI-STATE-PLAN.md §2.2 rule 3: "one
- * listener pair … not one per component") now covers it, and covers strictly more (any focus anywhere
- * on the page, not just inside `.sidebar`).
+ * carry is removed — `core/ui/state/overlay.effects.ts`'s one document-level listener
+ * (docs/plans/done/UI-STATE-PLAN.md §2.2 rule 3: "one listener pair … not one per component") now
+ * covers it, and covers strictly more (any focus anywhere on the page, not just inside `.sidebar`).
  */
 @Component({
   selector: 'vision-app-sidebar',
@@ -147,7 +148,7 @@ export class AppSidebar {
    *  shell component, not a routed page" carve-out `theme`'s own doc comment above explains; the
    *  singleton store is already warm app-wide (see that store's own class doc), this just reads it. */
   private readonly systemStatus = inject(SystemStatusStore);
-  private readonly overlays = inject(GlobalOverlayStore);
+  private readonly overlays = inject(OverlayFacade);
   private readonly hostRef = inject(ElementRef<HTMLElement>);
   /** Optional — only present while the `@else` branch (closed) renders it; see class doc's mobile-sheet paragraph. */
   private readonly hamburgerEl = viewChild<ElementRef<HTMLButtonElement>>('hamburger');
@@ -240,7 +241,7 @@ export class AppSidebar {
     }
   });
 
-  /** The <640px off-canvas sheet's own open state — `GlobalOverlayStore`-backed (see class doc), so
+  /** The <640px off-canvas sheet's own open state — `OverlayFacade`-backed (see class doc), so
    *  it shares exclusivity/Escape/outside-click/close-on-navigation with the identity menu and
    *  notification bell. Still transient, never persisted — same reasoning as before this moved:
    *  docs/extracts/design/00-shell.md's responsive table only persists the docked/rail choice, not "was the

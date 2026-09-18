@@ -6,7 +6,7 @@ import { EventsStore } from '../../core/events/events-store';
 import { LiveStore } from '../../core/live/live-store';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { ToastService } from '../../core/toast.service';
-import { GlobalOverlayStore } from '../../core/ui/overlay-store';
+import { OverlayFacade } from '../../core/ui/overlay-facade';
 import { readPersistedString, writePersistedString } from '../../core/panel-state';
 import { eventNotificationText, relativeTimeLabel, resolveEventTarget, resolveReplayDeepLink } from '../../core/events/events-logic';
 import { geofenceBreachToastMessage, parseGeofenceBreach } from '../../core/geofence/geofence-logic';
@@ -104,10 +104,12 @@ import type { DetectionEvent } from '../../core/api/models';
  * (`app-sidebar.html`'s foot) and never destroyed on navigation, "the page component is destroyed on
  * route change" (this app's only other cleanup mechanism) never applied to it. Reproduced live: open
  * this bell, then the identity menu — both stayed open at once (D1); navigate to another page — both
- * stayed open there too (D2). The trigger now toggles `GlobalOverlayStore` (`'notification-bell'`),
- * which composes `core/ui/ui-store.ts#UiStore` for exclusivity with the identity menu and adds the
- * lifecycle rules the shell needs and no page does: closes on any navigation, on `Escape` (returning
- * focus to the trigger), and on a click outside — see that store's own class doc for the mechanism.
+ * stayed open there too (D2). The trigger now toggles `OverlayFacade` (`'notification-bell'`, an
+ * NgRx slice, docs/plans/active/NGRX-MIGRATION-PLAN.md §8 — the old `GlobalOverlayStore` composed
+ * `core/ui/ui-store.ts#UiStore` for this; the reducer now expresses one-open-at-a-time directly) for
+ * exclusivity with the identity menu and adds the lifecycle rules the shell needs and no page does:
+ * closes on any navigation, on `Escape` (returning focus to the trigger), and on a click outside —
+ * see `core/ui/state/overlay.effects.ts`'s own doc comment for the mechanism.
  * `toggleBell()` below is the one place opening still has a side effect beyond visibility (marking
  * events read), so it can't be a bare `overlays.toggle()` call in the template the way
  * `identity-chip.ts`'s trigger is.
@@ -142,7 +144,7 @@ export class NotificationBell {
   private readonly poll = inject(PollScheduler);
   protected readonly events = inject(EventsStore);
   protected readonly systemEvents = inject(SystemEventsStore);
-  protected readonly overlays = inject(GlobalOverlayStore);
+  protected readonly overlays = inject(OverlayFacade);
   private readonly host = inject(ElementRef<HTMLElement>);
   /** Optional, mirroring `identity-chip.ts`'s own `viewChild` — this trigger is in fact never behind
    *  an `@if` (`NotificationBell` itself only ever mounts once the shell already knows
@@ -190,8 +192,8 @@ export class NotificationBell {
     inject(DestroyRef).onDestroy(() => this.events.release());
 
     // Registers this component's own host (trigger + dropdown together) with the shell's overlay
-    // coordinator — see `identity-chip.ts`'s identical constructor comment and
-    // `GlobalOverlayStore.register`'s own doc comment for why `root` containing `trigger` is what
+    // registry — see `identity-chip.ts`'s identical constructor comment and
+    // `OverlayHostRegistry.register`'s own doc comment for why `root` containing `trigger` is what
     // lets a click on the trigger itself never fight the outside-click listener.
     effect(() => {
       const trigger = this.triggerEl();
@@ -281,7 +283,7 @@ export class NotificationBell {
    * The trigger's own `(click)` (`notification-bell.html`) — opening marks everything currently
    * listed as read, same as the old `<details>` `toggle` event's `isOpen` branch. Computes "opening"
    * from the pre-toggle state rather than reading `overlays.isOpen(...)` back out afterward, since a
-   * `GlobalOverlayStore.toggle` that *closed* the bell (or a click that opened a *different* overlay
+   * `OverlayFacade.toggle` that *closed* the bell (or a click that opened a *different* overlay
    * and thus closed this one first) must never mark anything read.
    */
   protected toggleBell(): void {

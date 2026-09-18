@@ -48,7 +48,7 @@ export interface PageBarCrumb {
  * page overlay (§2.1's "page overlays" tier) — so per §2.4 it keeps its own local `hintOpen` signal
  * rather than moving into the shell's `GlobalOverlayStore`; only the *behavior* (Escape + outside-click)
  * is mirrored, via the same "one document-level listener pair, `root.contains(target)` decides
- * inside-vs-outside" idiom `core/ui/overlay-store.ts#GlobalOverlayStore` uses for the shell's own
+ * inside-vs-outside" idiom `core/ui/state/overlay.effects.ts` uses for the shell's own
  * overlays — see this class's own `onDocumentKeydown`/`onDocumentClick` below.
  */
 @Component({

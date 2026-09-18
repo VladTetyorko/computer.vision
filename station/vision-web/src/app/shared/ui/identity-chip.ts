@@ -3,7 +3,7 @@ import { RouterLink } from '@angular/router';
 import { AuthStore } from '../../core/auth/auth-store';
 import { initialsFor, topRoleLabel } from '../../core/auth/auth-logic';
 import { canManageOrg } from '../../core/org/org-logic';
-import { GlobalOverlayStore } from '../../core/ui/overlay-store';
+import { OverlayFacade } from '../../core/ui/overlay-facade';
 
 /**
  * The header identity chip (docs/plans/done/U-AUTH-PLAN.md wave 4) — displayName + a role badge + a logout
@@ -44,11 +44,13 @@ import { GlobalOverlayStore } from '../../core/ui/overlay-store';
  * foot) and never destroyed on navigation, "the page component is destroyed on route change" (this
  * app's only other cleanup mechanism) never applied to it either. Reproduced live: open this menu,
  * then the notification bell — both stayed open at once (D1); navigate to another page — both stayed
- * open there too (D2). The trigger now toggles `GlobalOverlayStore` (`'identity-menu'`), which
- * composes `core/ui/ui-store.ts#UiStore` for exclusivity with the bell and adds the three lifecycle
- * rules the shell needs and no page does: closes on any navigation, on `Escape` (returning focus to
- * the trigger), and on a click outside — see that store's own class doc for the full mechanism. The
- * trigger registers itself (`GlobalOverlayStore.register`) via an `effect()` over its own `viewChild`,
+ * open there too (D2). The trigger now toggles `OverlayFacade` (`'identity-menu'`, an NgRx slice,
+ * docs/plans/active/NGRX-MIGRATION-PLAN.md §8 — the old `GlobalOverlayStore` composed
+ * `core/ui/ui-store.ts#UiStore` for this; the reducer now expresses one-open-at-a-time directly) for
+ * exclusivity with the bell and adds the three lifecycle rules the shell needs and no page does:
+ * closes on any navigation, on `Escape` (returning focus to the trigger), and on a click outside —
+ * see `core/ui/state/overlay.effects.ts`'s own doc comment for the full mechanism. The
+ * trigger registers itself (`OverlayFacade.register`) via an `effect()` over its own `viewChild`,
  * not `afterNextRender()`, because the trigger doesn't exist on the very first render — it sits behind
  * `@if (auth.user())`, and `user()` can still be `'loading'` at that point.
  */
@@ -61,7 +63,7 @@ import { GlobalOverlayStore } from '../../core/ui/overlay-store';
 })
 export class IdentityChip {
   protected readonly auth = inject(AuthStore);
-  protected readonly overlays = inject(GlobalOverlayStore);
+  protected readonly overlays = inject(OverlayFacade);
   private readonly host = inject(ElementRef<HTMLElement>);
   /** Optional, not `.required()` — see the class doc's "signal-backed open state" paragraph for why
    *  the trigger genuinely may not exist yet the first time this runs. */
@@ -80,7 +82,7 @@ export class IdentityChip {
 
   constructor() {
     // Registers this component's own host (trigger + dropdown together) with the shell's overlay
-    // coordinator the moment the trigger exists — see `GlobalOverlayStore.register`'s own doc comment
+    // registry the moment the trigger exists — see `OverlayHostRegistry.register`'s own doc comment
     // for why `root` containing `trigger` is what lets a click on the trigger itself never fight the
     // outside-click listener.
     effect(() => {

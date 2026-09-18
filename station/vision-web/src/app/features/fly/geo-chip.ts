@@ -29,8 +29,8 @@ import { Icon } from '../../shared/ui/icon';
  * (or clicking the chip again) closes it — the same plain toggle-button idiom
  * `features/fly/diagnostics-card.ts`'s own disclosure chevron already uses in this same OSD strip,
  * not a full click-outside/Escape overlay (this is a small, low-stakes popover, not a shell menu —
- * `core/ui/overlay-store.ts#GlobalOverlayStore` is reserved for shell-level chrome, per that class's
- * own doc comment).
+ * the `overlay` slice behind `core/ui/overlay-facade.ts#OverlayFacade` is reserved for shell-level
+ * chrome, per that facade's own doc comment).
  */
 @Component({
   selector: 'vision-geo-chip',

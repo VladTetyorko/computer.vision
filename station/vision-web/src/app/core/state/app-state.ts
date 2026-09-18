@@ -8,6 +8,8 @@ import { sidebarFeature } from '../shell/state/sidebar.reducer';
 import { themeEffects } from '../shell/state/theme.effects';
 import { themeHydrator } from '../shell/state/theme.hydration';
 import { themeFeature } from '../shell/state/theme.reducer';
+import { overlayEffects } from '../ui/state/overlay.effects';
+import { overlayFeature } from '../ui/state/overlay.reducer';
 import { hydrationMetaReducer } from './hydration';
 
 /**
@@ -19,7 +21,10 @@ import { hydrationMetaReducer } from './hydration';
  * registers the identical store, with the identical hydrators and runtime checks, instead of a
  * hand-rolled subset that can drift from what the app actually runs. Router wiring is deliberately
  * left out (see `app.config.ts`): `provideRouterStore` needs a `Router`, which most component specs
- * have no reason to provide.
+ * have no reason to provide — this is also why `overlay.effects.ts#closeOnNavigation$` listens for
+ * `@ngrx/router-store`'s own `ROUTER_NAVIGATED` action rather than injecting `Router` directly: every
+ * spec below that never provides a `Router` (`theme-facade.spec.ts`/`sidebar-facade.spec.ts`
+ * included) must still be able to construct this state without a `NullInjectorError`.
  */
 const HYDRATORS = [themeHydrator, sidebarHydrator];
 
@@ -41,6 +46,7 @@ export function provideAppState() {
     ),
     provideState(themeFeature),
     provideState(sidebarFeature),
-    provideEffects(themeEffects, sidebarEffects),
+    provideState(overlayFeature),
+    provideEffects(themeEffects, sidebarEffects, overlayEffects),
   ]);
 }

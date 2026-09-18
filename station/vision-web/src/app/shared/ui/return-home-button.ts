@@ -52,7 +52,7 @@ import { returnHomeToastFor } from './return-home-button-logic';
  * for the shell's own overlays. This confirm is page-scoped (dies with whichever host page mounted
  * it), so per §2.4 it keeps this state as a local `confirmOpen` signal rather than moving into the
  * shell's store — only the *behavior* is mirrored, via the same "one document-level listener pair,
- * containment decides inside-vs-outside" idiom `core/ui/overlay-store.ts#GlobalOverlayStore` uses.
+ * containment decides inside-vs-outside" idiom `core/ui/state/overlay.effects.ts` uses.
  * Both listeners no-op while {@link busy} is `true` (the request is already in flight — the dialog's
  * own Confirm/Cancel buttons are disabled for the same reason at that point, so an Escape/outside
  * click deserves the identical treatment, not a race with the pending request's own `finally`).

@@ -2512,3 +2512,106 @@ recorded here rather than buried in a budget bump: every wave N1–N9 that delet
 gives some of it back, and the next wave to touch budgets should re-measure rather than assume.
 
 - **Commit**: `feat(ngrx N0): NgRx foundation + theme/sidebar pilot slices`.
+
+## Status — NGRX-MIGRATION wave N1: the shell's overlay slice, and the DOM half it can't hold (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N1, §8 "Corrections found while briefing N1/N2") — 2026-09-18
+
+**Scope, corrected before the code.** The wave table originally read as if a `ui` slice belonged here;
+there is no such thing. `core/ui/ui-store.ts#UiStore` is a deliberately plain, DI-less class
+instantiated **27 times** across the app as a host-owned overlay *group* (`readonly dialogs = new
+UiStore()`) — exactly the ephemeral, per-host local state §2 says never belongs in NgRx, and NgRx
+feature state is global by name, so it cannot stand in for 27 independent instances without inventing
+a key for each. **N1 migrates `GlobalOverlayStore` only; `UiStore` is untouched, per §8.**
+
+**The one design decision that mattered: split the store, not the behaviour.** `GlobalOverlayStore`
+held two genuinely different things — the open overlay id (serializable, three lines of logic) and an
+`OverlayHost` registry of live `HTMLElement` `{root, trigger}` pairs (never serializable, ever).
+Putting the second into NgRx state trips `strictStateSerializability` on the very first `register()`
+call — the plan's own prediction, confirmed by trying it first and watching the runtime check fire.
+The fix is `core/ui/overlay-host-registry.ts#OverlayHostRegistry`: a small `providedIn: 'root'` class,
+**not** a slice, holding nothing but the `Map<GlobalOverlayId, OverlayHost>` — deliberately not named
+`*Store`, since `core/ui/architecture.spec.ts`'s guards (routed-page injection, NgRx layering) both key
+off that suffix and this class is neither a page nor a facade/effects file. `overlay.effects.ts` and
+`overlay-facade.ts` both inject it directly, alongside `Store`, for the one job each still needs from
+it (focus-on-Escape; the contains-check on outside-click; the `register()` passthrough).
+
+**Reducer expresses exclusivity directly — `UiStore` is not composed.** The old class explicitly
+composed `core/ui/ui-store.ts#UiStore` for one-open-at-a-time behaviour. Re-read for this wave, that
+precedent doesn't transplant: a reducer is a pure function of `(state, action)`, and `UiStore` is a
+stateful class with its own `signal()` — nothing to "hold" inside a `createReducer` call.
+`overlay.reducer.ts`'s `on(opened, (state, {id}) => ({...state, active: id}))` already **is** the
+one-open-at-a-time rule, as a plain assignment; composing a second primitive on top would add a
+dependency for zero behaviour. This is the "likely cleaner" option the plan's own §8 correction
+flagged without picking — picked here, and stated plainly: **not composed, by design.**
+
+**Close-on-navigation listens for `ROUTER_NAVIGATED`, not `Router.events` — a decision `app-state.ts`'s
+own doc comment made first.** The old store injected `Router` directly, in its own constructor's
+injection context. Copying that into an effect looks equivalent until the full suite runs:
+`app-state.ts` already documents that `provideAppState()` deliberately ships with **no** `Router`
+provider, "since most component specs have no reason to provide one" — and two of them,
+`theme-facade.spec.ts` and `sidebar-facade.spec.ts`, prove it by calling `provideAppState()` alone.
+`provideEffects()` subscribes every registered effect at `ROOT_EFFECTS_INIT`, eagerly, for every
+consumer of `provideAppState()` — so an effect that unconditionally does `inject(Router)` throws
+`NullInjectorError` the instant either of those two specs boots, nowhere near any test that mentions
+overlays at all. `@ngrx/router-store`'s own `ROUTER_NAVIGATED` action, filtered through the `Actions`
+stream instead, needs nothing but `Actions` — already a hard dependency of every effect — so it
+subscribes cleanly everywhere and simply never fires in a spec that never dispatches it. Production
+parity holds because `provideRouterStore()` is already wired in `app.config.ts` and dispatches this
+exact action on every real navigation. Flagging this because the plan's own phrasing ("owns a
+`Router.events` subscription... becomes effects") reads as license to inject `Router` straight into an
+effect; under the plan's own non-negotiable that the whole suite must stay green, it isn't, for any
+slice registered through `provideAppState()`.
+
+**Consumer rewiring stayed one line each, prose excepted.** `OverlayFacade` keeps
+`GlobalOverlayStore`'s exact public surface — `active`/`isOpen`/`open`/`close`/`toggle`/`register` — so
+`identity-chip.ts`, `notification-bell.ts` and `app-sidebar.ts` (plus their three specs) changed only
+`inject(GlobalOverlayStore)` → `inject(OverlayFacade)` and the import line. Two of the three specs
+(`identity-chip.spec.ts`, `notification-bell.spec.ts`) additionally needed `provideAppState()` added to
+their `TestBed` providers — they never registered any store before, since `GlobalOverlayStore` was a
+plain root-provided class needing no store at all. Doc comments in all three components that described
+the deleted "`GlobalOverlayStore` composes `UiStore`" mechanism were corrected in place rather than
+left to go stale, since the design decision above made that sentence false. Five further files
+(`shared/ui/return-home-button.ts`, `shared/ui/page-bar/page-bar.ts`, `features/fly/geo-chip.ts`,
+`core/map-data/drawings-store.ts`, `core/map-data/marks-store.ts`) cite
+`core/ui/overlay-store.ts#GlobalOverlayStore` only in doc-comment prose, as a design precedent, never
+as an import — left untouched, out of this wave's declared 6-consumer scope; their citations now point
+at a deleted path and are worth a follow-up pass.
+
+**Test shape mirrors the facade idiom N0 actually shipped, not the plan's abstract §3 rule 10.** Rule
+10 says "effects (`provideMockActions`)"; N0's own reference implementation shipped no
+`.effects.spec.ts` for either `theme` or `sidebar`, testing effects only indirectly through
+`*-facade.spec.ts` against real `provideAppState()`. `overlay.effects.ts`'s Escape/outside-click
+effects don't consume `actions$` at all — they source from `fromEvent(document, …)` — so
+`provideMockActions` has nothing to mock for two of the three effects; the third
+(`closeOnNavigation$`) is exercised by dispatching a bare `{ type: ROUTER_NAVIGATED }` into a real
+store instead of standing up `provideRouterStore()` + a real `Router` for one assertion. Following
+N0's own precedent over the abstract rule, this wave ships `overlay.reducer.spec.ts` (pure, 14 cases)
++ `overlay-host-registry.spec.ts` (plain class, 4 cases, no `TestBed`) + `overlay-facade.spec.ts` (16
+cases through real `provideAppState()`, replacing `overlay-store.spec.ts`'s 15 — exclusivity,
+stale-close no-op, Escape+focus-return, outside-click containment including the "trigger click doesn't
+fight the document listener" DOM-bubble-order case, and navigation) — no dedicated
+`overlay.effects.spec.ts`; `core/ui/architecture.spec.ts`'s sibling-file guard only requires
+`.actions.ts` + `.reducer.spec.ts` beside a reducer, not an effects spec.
+
+### Tests / build
+
+`npm run test:ci` — **222/222 files, 4 304/4 304 tests green** (+2 files / +19 tests over N0's
+220/4 285: `overlay.reducer.spec.ts`, `overlay-host-registry.spec.ts` and `overlay-facade.spec.ts`
+added, `overlay-store.spec.ts` deleted). `npx tsc --noEmit` clean on both `tsconfig.app.json` and
+`tsconfig.spec.json`. `npx ng build --configuration production` — exit 0.
+
+**Bundle cost, measured against N0's own tip**, not guessed: `git stash push -u` in this worktree,
+rebuilt, popped back, to isolate this wave's delta from N0's already-recorded one. N0 tip: **487.46 kB
+raw / 137.08 kB transfer**. This wave: **488.35 kB raw / 136.99 kB transfer** — **+0.89 kB raw / −0.09
+kB transfer**. Replacing one ~140-line class with six small files (`overlay.model.ts`,
+`overlay.actions.ts`, `overlay.reducer.ts`, `overlay.effects.ts`, `overlay-facade.ts`,
+`overlay-host-registry.ts`) nets out close to flat — the NgRx action/reducer/effect ceremony costs
+roughly what the deleted class's own `Router`/`document` wiring used to.
+
+**Nothing in the plan was found wrong for this wave** beyond the two corrections §8 already made
+before briefing started (`UiStore` not a slice; the store splits in two) — both confirmed exactly as
+described. The one thing not spelled out and worked out fresh here: `provideAppState()`'s
+already-documented "no `Router` provider" choice forces every future app-wide effect that cares about
+navigation through `ROUTER_NAVIGATED` rather than `Router.events`, not just this one — worth flagging
+for N3 (`live`) and any later wave whose store used to inject `Router` directly.
+
+- **Commit**: `feat(ngrx N1): overlay slice — GlobalOverlayStore splits into an NgRx slice + a DOM host registry`.

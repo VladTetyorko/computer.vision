@@ -7,17 +7,18 @@ import { EventsStore } from '../../core/events/events-store';
 import { LiveStore } from '../../core/live/live-store';
 import { ToastService } from '../../core/toast.service';
 import { VisionApi } from '../../core/api/vision-api';
-import { GlobalOverlayStore } from '../../core/ui/overlay-store';
+import { OverlayFacade } from '../../core/ui/overlay-facade';
+import { provideAppState } from '../../core/state/app-state';
 import type { DetectionEvent, LiveEvent } from '../../core/api/models';
 
 /**
  * `NotificationBell` pulls in `EventsStore`/`FleetStore`/`LiveStore`/`VisionApi` — every one faked
  * here (no HTTP, no polling, no real `EventSource`), mirroring `shared/ui/app-sidebar/app-sidebar.spec.ts`'s
- * own "fake every transitive dependency purely so the tree can mount" approach. `GlobalOverlayStore`
- * is left real (root-provided, no HTTP deps of its own) — its own behavior is covered by
- * `core/ui/overlay-store.spec.ts`; this file only checks that the bell wires into it correctly
- * (docs/plans/done/UI-STATE-PLAN.md §1 D1/D2/D4/D5, closed by `identity-chip.ts`/`notification-bell.ts` moving
- * off native `<details>`).
+ * own "fake every transitive dependency purely so the tree can mount" approach. `OverlayFacade`
+ * is left real (`provideAppState()`, an NgRx slice per docs/plans/active/NGRX-MIGRATION-PLAN.md §8,
+ * no HTTP deps of its own) — its own behavior is covered by `core/ui/overlay-facade.spec.ts`; this
+ * file only checks that the bell wires into it correctly (docs/plans/done/UI-STATE-PLAN.md §1
+ * D1/D2/D4/D5, closed by `identity-chip.ts`/`notification-bell.ts` moving off native `<details>`).
  */
 function event(partial: Partial<DetectionEvent> = {}): DetectionEvent {
   return {
@@ -66,6 +67,7 @@ function fakeLiveStore(events: LiveEvent[] = [], streamingAssetIds: readonly str
 function render(events: DetectionEvent[] = [], liveEvents: LiveEvent[] = [], streamingAssetIds: readonly string[] = []) {
   TestBed.configureTestingModule({
     providers: [
+      provideAppState(),
       provideRouter([]),
       { provide: FleetStore, useValue: fakeFleetStore() },
       { provide: EventsStore, useValue: fakeEventsStore(events) },
@@ -150,13 +152,13 @@ describe('NotificationBell — dropdown state (docs/plans/done/UI-STATE-PLAN.md)
     expect(fixture.nativeElement.querySelector('.bell-badge')).toBeNull(); // 'a' is still read
   });
 
-  it('opening a sibling shell overlay (identity-menu) closes the bell — exclusivity via GlobalOverlayStore (§1 D1)', () => {
+  it('opening a sibling shell overlay (identity-menu) closes the bell — exclusivity via OverlayFacade (§1 D1)', () => {
     const fixture = render([event()]);
     trigger(fixture).click();
     fixture.detectChanges();
     expect(trigger(fixture).getAttribute('aria-expanded')).toBe('true');
 
-    TestBed.inject(GlobalOverlayStore).open('identity-menu');
+    TestBed.inject(OverlayFacade).open('identity-menu');
     fixture.detectChanges();
 
     expect(trigger(fixture).getAttribute('aria-expanded')).toBe('false');
@@ -167,12 +169,12 @@ describe('NotificationBell — dropdown state (docs/plans/done/UI-STATE-PLAN.md)
     const fixture = render([event()]);
     trigger(fixture).click();
     fixture.detectChanges();
-    expect(TestBed.inject(GlobalOverlayStore).isOpen('notification-bell')).toBe(true);
+    expect(TestBed.inject(OverlayFacade).isOpen('notification-bell')).toBe(true);
 
     (fixture.componentInstance as unknown as { onRailOpen(event: DetectionEvent): void }).onRailOpen(event());
     fixture.detectChanges();
 
-    expect(TestBed.inject(GlobalOverlayStore).isOpen('notification-bell')).toBe(false);
+    expect(TestBed.inject(OverlayFacade).isOpen('notification-bell')).toBe(false);
     expect(fixture.nativeElement.querySelector('vision-events-rail')).toBeNull();
   });
 
@@ -180,12 +182,12 @@ describe('NotificationBell — dropdown state (docs/plans/done/UI-STATE-PLAN.md)
     const fixture = render([event()]);
     trigger(fixture).click();
     fixture.detectChanges();
-    expect(TestBed.inject(GlobalOverlayStore).isOpen('notification-bell')).toBe(true);
+    expect(TestBed.inject(OverlayFacade).isOpen('notification-bell')).toBe(true);
 
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     fixture.detectChanges();
 
-    expect(TestBed.inject(GlobalOverlayStore).isOpen('notification-bell')).toBe(false);
+    expect(TestBed.inject(OverlayFacade).isOpen('notification-bell')).toBe(false);
   });
 });
 
