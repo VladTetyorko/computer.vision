@@ -42,6 +42,7 @@ import java.util.concurrent.SubmissionPublisher;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.IntConsumer;
 
 /**
  * One shared MAVLink gateway per distinct bind address ({@code host:port}), reference-counted
@@ -467,6 +468,18 @@ final class MavlinkGateway implements LinkRegistry {
      */
     LinkGroupSnapshot linkGroupSnapshot(int sysid) {
         return linkGroupTracker.snapshot(sysid);
+    }
+
+    /**
+     * Subscribes {@code listener} to be told (by sysid) whenever a link-election group on this
+     * gateway changes on its own (docs/plans/active/LINK-PAIRING-PLAN.md §8 defect #5) — delegates
+     * straight to {@link #linkGroupTracker}; see its own {@code onChanged} javadoc for the exact
+     * "set before any frame can arrive" and single-listener contract. Called by {@code
+     * MavlinkTelemetrySource} immediately after construction, before this gateway is registered
+     * with any link or shared with any other caller.
+     */
+    void onGroupChanged(IntConsumer listener) {
+        linkGroupTracker.onChanged(listener);
     }
 
     /**

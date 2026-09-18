@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
+import java.util.function.IntConsumer;
 
 /**
  * Per-gateway sighting tracker and {@link LinkGroup} registry (LINK-PAIRING-PLAN.md §3.4/§4 row
@@ -45,6 +46,15 @@ final class LinkGroupTracker {
     private final Map<Integer, LinkGroup> groups = new ConcurrentHashMap<>();
     private final Subscription subscription;
 
+    /**
+     * Set once, after construction, by {@code MavlinkGateway}'s own {@code onGroupChanged} —
+     * never a constructor parameter, since this tracker (and the gateway it belongs to) is
+     * frequently created before the owning {@code MavlinkTelemetrySource} has anywhere to route a
+     * notification yet (docs/plans/active/LINK-PAIRING-PLAN.md §8 defect #5). {@code volatile}: set
+     * from the wiring/creation thread, read from every link's own reader thread.
+     */
+    private volatile IntConsumer changeListener;
+
     LinkGroupTracker(Dispatcher dispatcher, LinkQuality linkQuality, LinkElectionSettings settings,
                       Function<LinkId, LinkDescriptor> linkDescriptorLookup) {
         this.settings = Objects.requireNonNull(settings, "settings must not be null");
@@ -54,20 +64,42 @@ final class LinkGroupTracker {
                 .subscribe(MessageFilter.any(), this::onFrame);
     }
 
+    /**
+     * Subscribes {@code listener} to be told (by sysid) whenever a group's election state actually
+     * changes — at most one listener, since {@code MavlinkGateway} is this tracker's only owner and
+     * itself fans out to every interested party. Must be set before frames can arrive to avoid
+     * missing the very first change, the same benign-race tolerance {@link #onFrame}'s own javadoc
+     * already documents for {@code linkDescriptorLookup}.
+     */
+    void onChanged(IntConsumer listener) {
+        this.changeListener = Objects.requireNonNull(listener, "listener must not be null");
+    }
+
     private void onFrame(MavFrame frame) {
         LinkDescriptor descriptor = linkDescriptorLookup.apply(frame.link());
         if (descriptor == null) {
             return;
         }
         int sysid = frame.header().system().value();
-        group(sysid).sight(frame.link(), descriptor, frame.receivedAt());
+        if (group(sysid).sight(frame.link(), descriptor, frame.receivedAt())) {
+            notifyChanged(sysid);
+        }
     }
 
     /** Forgets {@code link} from every group it belongs to — called from {@link MavlinkGateway#unregister(LinkId)}. */
     void forgetLink(LinkId link) {
         Instant now = Instant.now();
-        for (LinkGroup group : groups.values()) {
-            group.forget(link, now);
+        for (Map.Entry<Integer, LinkGroup> entry : groups.entrySet()) {
+            if (entry.getValue().forget(link, now)) {
+                notifyChanged(entry.getKey());
+            }
+        }
+    }
+
+    private void notifyChanged(int sysid) {
+        IntConsumer listener = changeListener;
+        if (listener != null) {
+            listener.accept(sysid);
         }
     }
 

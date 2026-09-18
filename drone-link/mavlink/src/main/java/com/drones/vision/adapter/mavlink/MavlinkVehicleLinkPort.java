@@ -16,12 +16,15 @@ import com.drones.vision.flight.domain.port.VehicleLinkPort;
 import com.drones.vision.kernel.AssetId;
 import com.drones.vision.kernel.DeviceId;
 import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.warehouse.application.directory.AssetDirectoryService;
+import com.drones.vision.warehouse.domain.model.Asset;
 import com.drones.vision.warehouse.domain.model.Device;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Consumer;
 
 /**
  * {@link VehicleLinkPort} implementation (LINK-PAIRING-PLAN.md §3.4 frozen contract): resolves
@@ -58,15 +61,32 @@ import java.util.Objects;
  * share the exact same {@code toFlightCarrier}/{@code toFlightSerialRole} translation helpers and
  * the same one collaborator ({@link #telemetrySource}) — mirroring {@code LiveUpdateRegistry}'s own
  * "one adapter class, several related ports" precedent.
+ *
+ * <h2>{@link #onGroupChanged} — the reverse resolution</h2>
+ * Every other method here resolves {@code AssetId -> DeviceId} forward, via {@link #assetService}.
+ * {@link #onGroupChanged} needs the opposite direction — an automatic change is discovered
+ * {@code DeviceId}-first, deep inside {@link #telemetrySource} — so it is the one method on this
+ * class backed by {@link #assetDirectoryService} instead.
  */
 public final class MavlinkVehicleLinkPort implements VehicleLinkPort, CarrierDirectoryPort {
 
     private final MavlinkTelemetrySource telemetrySource;
     private final AssetService assetService;
+    private final AssetDirectoryService assetDirectoryService;
 
-    public MavlinkVehicleLinkPort(MavlinkTelemetrySource telemetrySource, AssetService assetService) {
+    /**
+     * @param assetDirectoryService the narrow device-&gt;asset reverse lookup {@link #onGroupChanged}
+     *                               needs (docs/plans/active/LINK-PAIRING-PLAN.md §8 defect #5) —
+     *                               deliberately the small {@link AssetDirectoryService} seam rather
+     *                               than scanning the wider {@link AssetService} surface, matching
+     *                               its own javadoc's intended use ("which asset does this device's
+     *                               stream/telemetry belong to")
+     */
+    public MavlinkVehicleLinkPort(MavlinkTelemetrySource telemetrySource, AssetService assetService,
+                                   AssetDirectoryService assetDirectoryService) {
         this.telemetrySource = Objects.requireNonNull(telemetrySource, "telemetrySource must not be null");
         this.assetService = Objects.requireNonNull(assetService, "assetService must not be null");
+        this.assetDirectoryService = Objects.requireNonNull(assetDirectoryService, "assetDirectoryService must not be null");
     }
 
     @Override
@@ -109,6 +129,22 @@ public final class MavlinkVehicleLinkPort implements VehicleLinkPort, CarrierDir
         for (DeviceId deviceId : mavlinkDeviceIds(assetId)) {
             telemetrySource.releasePin(deviceId);
         }
+    }
+
+    /**
+     * The other end of {@link MavlinkTelemetrySource#onGroupChanged}: resolves the {@link DeviceId}
+     * that fired to an {@link AssetId} via {@link AssetDirectoryService#findByDevice}, then forwards
+     * to {@code listener} — silently dropped if the device is unassigned or unknown (a device that
+     * fires a change but names no asset has nothing for a live subscriber to receive it against).
+     * Runs on {@code telemetrySource}'s own frame-reader thread; any exception here (including one
+     * from {@code listener} itself) is caught by {@code telemetrySource}'s own listener dispatch, so
+     * it never reaches that thread.
+     */
+    @Override
+    public void onGroupChanged(Consumer<AssetId> listener) {
+        Objects.requireNonNull(listener, "listener must not be null");
+        telemetrySource.onGroupChanged(deviceId ->
+                assetDirectoryService.findByDevice(deviceId).map(Asset::id).ifPresent(listener));
     }
 
     @Override

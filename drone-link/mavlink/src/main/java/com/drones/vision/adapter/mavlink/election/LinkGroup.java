@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Per-sysid link election state machine (LINK-PAIRING-PLAN.md §3.4/§4 row L3, docs/conclusions/
@@ -69,20 +70,35 @@ public final class LinkGroup {
         return sysid;
     }
 
-    /** Records a sighting of this sysid on {@code link} at {@code when}, then re-runs election. */
-    public synchronized void sight(LinkId link, LinkDescriptor descriptor, Instant when) {
+    /**
+     * Records a sighting of this sysid on {@code link} at {@code when}, then re-runs election.
+     *
+     * @return {@code true} if this sighting actually changed observable group state (a new member,
+     *         or the ACTIVE link) — the signal {@code LinkGroupTracker} uses to notify a change
+     *         listener only on a real change, not on every one of the many frames that leave
+     *         election untouched (docs/plans/active/LINK-PAIRING-PLAN.md §8 defect #5)
+     */
+    public synchronized boolean sight(LinkId link, LinkDescriptor descriptor, Instant when) {
         Objects.requireNonNull(link, "link must not be null");
         Objects.requireNonNull(descriptor, "descriptor must not be null");
         Objects.requireNonNull(when, "when must not be null");
+        ElectionState before = electionState();
         members.put(link, descriptor);
         lastHeard.put(link, when);
         elect(when);
+        return !before.equals(electionState());
     }
 
-    /** Forgets {@code link} entirely (it was unregistered, e.g. a hotplug-removed radio), then re-elects. */
-    public synchronized void forget(LinkId link, Instant now) {
+    /**
+     * Forgets {@code link} entirely (it was unregistered, e.g. a hotplug-removed radio), then
+     * re-elects.
+     *
+     * @return {@code true} if this actually changed observable group state — see {@link #sight}
+     */
+    public synchronized boolean forget(LinkId link, Instant now) {
         Objects.requireNonNull(link, "link must not be null");
         Objects.requireNonNull(now, "now must not be null");
+        ElectionState before = electionState();
         members.remove(link);
         lastHeard.remove(link);
         if (link.equals(pinnedLinkId)) {
@@ -95,6 +111,7 @@ public final class LinkGroup {
             activeLinkId = null;
         }
         elect(now);
+        return !before.equals(electionState());
     }
 
     /**
@@ -256,5 +273,14 @@ public final class LinkGroup {
     private boolean isHardAlive(LinkId link, Instant now) {
         Instant heard = lastHeard.get(link);
         return heard != null && Duration.between(heard, now).compareTo(settings.hardTimeout()) <= 0;
+    }
+
+    /** The slice of state a caller outside this class can observe — membership plus the ACTIVE/pinned links. */
+    private ElectionState electionState() {
+        return new ElectionState(Set.copyOf(members.keySet()), activeLinkId, pinnedLinkId);
+    }
+
+    /** {@code equals}-comparable snapshot {@link #sight}/{@link #forget} diff to report whether anything observable moved. */
+    private record ElectionState(Set<LinkId> members, LinkId activeLinkId, LinkId pinnedLinkId) {
     }
 }

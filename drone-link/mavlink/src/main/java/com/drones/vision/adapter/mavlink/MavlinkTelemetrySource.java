@@ -26,8 +26,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Flow;
 import java.util.concurrent.SubmissionPublisher;
+import java.util.function.Consumer;
 
 /**
  * {@link TelemetrySourcePort} implementation that ingests MAVLink 2 telemetry over UDP — the
@@ -103,10 +105,13 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
     private static final int MIN_SYSID = 1;
     private static final int MAX_SYSID = 255;
 
+    private static final System.Logger LOG = System.getLogger(MavlinkTelemetrySource.class.getName());
+
     private final String defaultBindHost;
     private final MavlinkSettings settings;
     private final Map<String, MavlinkGateway> gateways = new ConcurrentHashMap<>();
     private final Map<DeviceId, DeviceRuntime> runtimes = new ConcurrentHashMap<>();
+    private final List<Consumer<DeviceId>> groupChangeListeners = new CopyOnWriteArrayList<>();
 
     public MavlinkTelemetrySource() {
         this(MavlinkSettings.defaults());
@@ -293,6 +298,55 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
     }
 
     /**
+     * Subscribes {@code listener} to be told, by {@link DeviceId}, whenever that device's
+     * currently-claimed sysid's link-election group changes on its own (docs/plans/active/
+     * LINK-PAIRING-PLAN.md §8 defect #5) — a new/removed link, or the ACTIVE link changing. Backs
+     * {@code MavlinkVehicleLinkPort#onGroupChanged}, which resolves the further {@code DeviceId} ->
+     * {@code AssetId} step.
+     *
+     * <h2>Threading</h2>
+     * Fires from whichever gateway's own frame-reader thread detected the change. {@code listener}
+     * is called directly, in-line — an exception it throws is caught and logged here, never
+     * propagated back into that reader thread (the same "a bug in one must never affect the other"
+     * tolerance {@link LinkGroupTracker}'s own javadoc already documents for a benign registration
+     * race).
+     */
+    public void onGroupChanged(Consumer<DeviceId> listener) {
+        groupChangeListeners.add(Objects.requireNonNull(listener, "listener must not be null"));
+    }
+
+    /**
+     * {@link MavlinkGateway#onGroupChanged} callback: {@code gateway} reported a change for
+     * {@code sysid}, with no notion of which {@link DeviceId} (if any) currently claims it — this
+     * class is the one place that knows the {@link DeviceRuntime} -> claimed-sysid mapping, via the
+     * same {@link MavlinkGateway#commandTarget(DeviceId)} {@link #linkGroupSnapshot}/{@link
+     * #pinLink} already use.
+     */
+    private void onGatewayGroupChanged(MavlinkGateway gateway, int sysid) {
+        for (Map.Entry<DeviceId, DeviceRuntime> entry : runtimes.entrySet()) {
+            DeviceRuntime runtime = entry.getValue();
+            if (runtime.gateway() != gateway) {
+                continue;
+            }
+            MavlinkGateway.CommandTarget target = gateway.commandTarget(entry.getKey());
+            if (target != null && target.sysid() == sysid) {
+                notifyGroupChangeListeners(entry.getKey());
+            }
+        }
+    }
+
+    private void notifyGroupChangeListeners(DeviceId deviceId) {
+        for (Consumer<DeviceId> listener : groupChangeListeners) {
+            try {
+                listener.accept(deviceId);
+            } catch (RuntimeException e) {
+                LOG.log(System.Logger.Level.WARNING,
+                        "group-changed listener failed for device " + deviceId.value(), e);
+            }
+        }
+    }
+
+    /**
      * Every carrier currently registered across every open gateway (LINK-PAIRING-PLAN.md §3.4/§7
      * ruling 5, station-wide {@code GET /api/carriers}) — station-wide by definition (a carrier
      * belongs to no single asset), so this merges every gateway's own registered link descriptors
@@ -438,12 +492,24 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
     private MavlinkGateway newGateway(String host, int port) {
         try {
             UdpListenLink link = new UdpListenLink(host, port);
-            MavlinkGateway gateway = new MavlinkGateway(settings);
+            MavlinkGateway gateway = newBareGateway();
             gateway.register(link, new LinkDescriptor(CarrierKind.UDP, SerialRole.NONE, "udp:" + host + ":" + port, 0));
             return gateway;
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to bind MAVLink gateway on udp://" + host + ":" + port, e);
         }
+    }
+
+    /**
+     * Every gateway this class ever creates goes through this one factory, so {@link
+     * #onGatewayGroupChanged} is wired before any link is registered on it — a gateway with zero
+     * registered links receives no traffic at all (see {@code MavlinkGateway}'s own constructor
+     * javadoc), so there is no missed-first-frame race to tolerate here.
+     */
+    private MavlinkGateway newBareGateway() {
+        MavlinkGateway gateway = new MavlinkGateway(settings);
+        gateway.onGroupChanged(sysid -> onGatewayGroupChanged(gateway, sysid));
+        return gateway;
     }
 
     /**
@@ -466,7 +532,7 @@ public final class MavlinkTelemetrySource implements TelemetrySourcePort {
         }
         String bindKey = bindKey(DEFAULT_BIND_HOST, port);
         return gateways.compute(bindKey, (key, existing) ->
-                existing == null || existing.isClosed() ? new MavlinkGateway(settings) : existing);
+                existing == null || existing.isClosed() ? newBareGateway() : existing);
     }
 
     /**

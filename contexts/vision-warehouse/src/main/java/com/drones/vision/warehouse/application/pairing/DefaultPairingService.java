@@ -1,11 +1,13 @@
 package com.drones.vision.warehouse.application.pairing;
 
 import com.drones.vision.kernel.DeviceId;
+import com.drones.vision.kernel.StreamDescriptor;
 import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AuditAction;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.warehouse.application.device.DeviceEdit;
 import com.drones.vision.warehouse.application.device.DeviceService;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.warehouse.domain.model.Pairing;
@@ -17,7 +19,9 @@ import com.drones.vision.warehouse.domain.port.PairingRepositoryPort;
 import java.math.BigInteger;
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
@@ -31,6 +35,10 @@ public final class DefaultPairingService implements PairingService {
 
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final int VEHICLE_KEY_LENGTH = 32;
+
+    /** Mirrors {@code MavlinkTelemetrySource.OPTION_SYSID} — vision-warehouse cannot depend on the
+     * adapter module that owns the runtime constant, so the key is duplicated here by contract. */
+    private static final String OPTION_SYSID = "sysid";
 
     private final PairingRepositoryPort pairingRepository;
     private final DeviceService deviceService;
@@ -69,7 +77,30 @@ public final class DefaultPairingService implements PairingService {
                 RadioBind.NONE, Instant.now(), null);
         Pairing saved = pairingRepository.save(pairing);
         audit(actor, AuditAction.CREATED, saved, "Paired device " + deviceId.value() + " as sysid " + sysid);
+
+        // The pairing is the truth about identity; the device mirrors it. When the assigned sysid
+        // differs from the one heard, the runtime (MavlinkTelemetrySource) still opens using the
+        // stale options["sysid"] until this is updated -- a pairing the device does not answer to
+        // is a dead pairing (docs/plans/active/LINK-PAIRING-PLAN.md §8 defect #4).
+        if (sysid != heardSysid) {
+            mirrorSysidOntoDevice(deviceId, sysid, actor);
+        }
         return saved;
+    }
+
+    /**
+     * No-op when the device cannot be found: in practice {@code deviceId} always names a
+     * just-created device by the time {@link #pair} runs ("adopt is one motion", §7 ruling 3), so
+     * this only guards against a caller pairing an id that was never registered.
+     */
+    private void mirrorSysidOntoDevice(DeviceId deviceId, int sysid, UserId actor) {
+        deviceService.find(deviceId).ifPresent(device -> {
+            StreamDescriptor current = device.stream();
+            Map<String, String> options = new LinkedHashMap<>(current.options());
+            options.put(OPTION_SYSID, String.valueOf(sysid));
+            StreamDescriptor updated = new StreamDescriptor(current.protocol(), current.uri(), options);
+            deviceService.update(deviceId, new DeviceEdit(null, null, updated, null), actor);
+        });
     }
 
     @Override

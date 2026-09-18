@@ -20,7 +20,9 @@ import org.mockito.ArgumentCaptor;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.function.Consumer;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.ArgumentMatchers.any;
@@ -156,5 +158,47 @@ class DefaultLinkStateServiceTest {
         verify(vehicleLinkPort).release(ASSET_ID);
         assertEquals(LINK_A, result.activeLinkId());
         verify(eventPublisher, times(1)).publish(any());
+    }
+
+    // --- onGroupChanged: publish-on-change, not only on read (§8 defect #5) ---------------------
+
+    @SuppressWarnings("unchecked")
+    private Consumer<AssetId> capturedAutomaticChangeListener() {
+        ArgumentCaptor<Consumer<AssetId>> captor = ArgumentCaptor.forClass(Consumer.class);
+        verify(vehicleLinkPort).onGroupChanged(captor.capture());
+        return captor.getValue();
+    }
+
+    @Test
+    void constructorSubscribesExactlyOneListenerToThePort() {
+        verify(vehicleLinkPort).onGroupChanged(any());
+    }
+
+    @Test
+    void anAutomaticGroupChangeRepublishesAndFiresFailoverWhenTheActiveLinkChanged() {
+        when(vehicleLinkPort.linksFor(ASSET_ID))
+                .thenReturn(snapshot(LINK_A, LINK_A, LINK_B))
+                .thenReturn(snapshot(LINK_B, LINK_A, LINK_B));
+        service.linksFor(ASSET_ID); // baseline: LINK_A active, via the ordinary read path
+        Consumer<AssetId> listener = capturedAutomaticChangeListener();
+
+        listener.accept(ASSET_ID); // the adapter discovering a failover on its own, off any request thread
+
+        verify(liveUpdatePort, times(2)).publishLinks(eq(ASSET_ID), any());
+        ArgumentCaptor<Event> captor = ArgumentCaptor.forClass(Event.class);
+        verify(eventPublisher, times(1)).publish(captor.capture());
+        Event event = captor.getValue();
+        assertEquals(EventType.LINK_FAILOVER, event.type());
+        assertEquals(LINK_A.value(), event.attributes().get("fromLinkId"));
+        assertEquals(LINK_B.value(), event.attributes().get("toLinkId"));
+        assertEquals("auto", event.attributes().get("reason"));
+    }
+
+    @Test
+    void anAutomaticGroupChangeNeverPropagatesAnExceptionBackToTheCaller() {
+        when(vehicleLinkPort.linksFor(ASSET_ID)).thenThrow(new RuntimeException("boom"));
+        Consumer<AssetId> listener = capturedAutomaticChangeListener();
+
+        assertDoesNotThrow(() -> listener.accept(ASSET_ID));
     }
 }

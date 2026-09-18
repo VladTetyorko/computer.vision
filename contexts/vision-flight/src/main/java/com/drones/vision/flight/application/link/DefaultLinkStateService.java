@@ -35,8 +35,20 @@ import java.util.concurrent.ConcurrentHashMap;
  * baseline — a cold cache catching up to whatever state the adapter is already in is not itself a
  * "failover" — every observation after that fires {@link EventType#LINK_FAILOVER} exactly once per
  * actual change and never for a repeat of the same value.
+ *
+ * <h2>Publishing on change, not only on read (docs/plans/active/LINK-PAIRING-PLAN.md §8 defect #5)</h2>
+ * {@link #observe} is also reached from a second direction: the constructor subscribes {@link
+ * #onAutomaticGroupChange} to {@link VehicleLinkPort#onGroupChanged}, so an election change the
+ * adapter discovers on its own (a link appearing/disappearing, or the ACTIVE link changing) reaches
+ * {@link LinkStateLiveUpdatePort}/{@code EventType#LINK_FAILOVER} the same way a request-driven read
+ * does, instead of sitting unpublished until the next station poll or operator action happens to hit
+ * {@link #linksFor}. That subscription fires from the adapter's own frame-reader thread, which is why
+ * {@link #lastKnownActive} is a {@link ConcurrentHashMap} and {@link #onAutomaticGroupChange} never
+ * lets an exception escape back into that thread.
  */
 public final class DefaultLinkStateService implements LinkStateService {
+
+    private static final System.Logger LOG = System.getLogger(DefaultLinkStateService.class.getName());
 
     private final VehicleLinkPort vehicleLinkPort;
     private final LinkStateLiveUpdatePort liveUpdatePort;
@@ -48,6 +60,7 @@ public final class DefaultLinkStateService implements LinkStateService {
         this.vehicleLinkPort = Objects.requireNonNull(vehicleLinkPort, "vehicleLinkPort must not be null");
         this.liveUpdatePort = Objects.requireNonNull(liveUpdatePort, "liveUpdatePort must not be null");
         this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher must not be null");
+        this.vehicleLinkPort.onGroupChanged(this::onAutomaticGroupChange);
     }
 
     @Override
@@ -71,6 +84,23 @@ public final class DefaultLinkStateService implements LinkStateService {
         Objects.requireNonNull(actorId, "actorId must not be null");
         vehicleLinkPort.release(assetId);
         return observe(assetId, vehicleLinkPort.linksFor(assetId), "operator");
+    }
+
+    /**
+     * The listener registered against {@link VehicleLinkPort#onGroupChanged}: re-reads and
+     * re-publishes {@code assetId}'s snapshot through the same {@link #observe} path {@link
+     * #linksFor} uses. Called from the adapter's own frame-reader thread (see class javadoc) — a
+     * failure here (the live-update port throwing, a resolution error) must never propagate back
+     * into that thread, so it is caught and dropped: the next automatic change, or the next explicit
+     * read, recovers whatever this one missed.
+     */
+    private void onAutomaticGroupChange(AssetId assetId) {
+        try {
+            linksFor(assetId);
+        } catch (RuntimeException e) {
+            LOG.log(System.Logger.Level.WARNING, "failed to publish an automatic link-group change for asset "
+                    + assetId.value(), e);
+        }
     }
 
     private LinkGroupView observe(AssetId assetId, LinkGroupView snapshot, String reason) {

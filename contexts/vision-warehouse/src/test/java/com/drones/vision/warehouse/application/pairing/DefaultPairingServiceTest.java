@@ -9,6 +9,7 @@ import com.drones.vision.kernel.UserId;
 import com.drones.vision.platform.AuditEntry;
 import com.drones.vision.platform.AuditTargetType;
 import com.drones.vision.platform.AuditTrailPort;
+import com.drones.vision.warehouse.application.device.DeviceEdit;
 import com.drones.vision.warehouse.application.device.DeviceService;
 import com.drones.vision.warehouse.domain.model.Device;
 import com.drones.vision.warehouse.domain.model.Pairing;
@@ -32,7 +33,11 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -129,6 +134,43 @@ class DefaultPairingServiceTest {
         Pairing pairing = service.pair(DeviceId.random(), 1, null, actor); // factory default, below range min
 
         assertEquals(10, pairing.sysid());
+    }
+
+    // --- pair: mirrors the assigned sysid onto the device (§8 defect #4) ------
+
+    @Test
+    void pairMirrorsTheAssignedSysidOntoTheDeviceStreamOptionsWhenReassigned() {
+        DeviceId deviceId = DeviceId.random();
+        StreamDescriptor original = new StreamDescriptor("mavlink", URI.create("udp://0.0.0.0:14550"),
+                Map.of("bindHost", "0.0.0.0"));
+        Device device = new Device(deviceId, "rover", Set.of(Capability.TELEMETRY), original,
+                LifecycleState.ACTIVE, DeviceOrigin.LIVE);
+        when(deviceService.find(deviceId)).thenReturn(Optional.of(device));
+
+        Pairing pairing = service.pair(deviceId, 1, null, actor); // factory default -> always reassigned
+
+        assertEquals(10, pairing.sysid());
+        ArgumentCaptor<DeviceEdit> captor = ArgumentCaptor.forClass(DeviceEdit.class);
+        verify(deviceService).update(eq(deviceId), captor.capture(), eq(actor));
+        DeviceEdit edit = captor.getValue();
+        assertNull(edit.name());
+        assertNull(edit.capabilities());
+        assertNull(edit.origin());
+        assertEquals("mavlink", edit.stream().protocol());
+        assertEquals(original.uri(), edit.stream().uri());
+        assertEquals("10", edit.stream().options().get("sysid"));
+        assertEquals("0.0.0.0", edit.stream().options().get("bindHost"));
+        assertEquals(2, edit.stream().options().size());
+    }
+
+    @Test
+    void pairLeavesTheDeviceUntouchedWhenTheHeardSysidIsKept() {
+        DeviceId deviceId = DeviceId.random();
+
+        Pairing pairing = service.pair(deviceId, 42, null, actor); // free, in-range -> kept as-is
+
+        assertEquals(42, pairing.sysid());
+        verify(deviceService, never()).update(any(), any(), any());
     }
 
     // --- replaceHardware -------------------------------------------------------

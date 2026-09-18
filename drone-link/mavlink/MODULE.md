@@ -197,7 +197,11 @@ there is nothing to structurally prevent here the way Mechanism A's opt-in remed
   same collaborator (`MavlinkTelemetrySource`) and the same `toFlightCarrier`/`toFlightSerialRole`/
   `toFlightLinkId`/`toFlightQuality` translation helpers between this module's `com.drones.mavlink..`
   wire types and `vision-flight`'s local mirror model. Constructor `(MavlinkTelemetrySource,
-  AssetService)`. `linksFor(AssetId)` resolves the asset's MAVLink-protocol device(s) via the unscoped
+  AssetService, AssetDirectoryService)` — the third parameter is **(LINK-PAIRING-PLAN.md §8 defect #5,
+  new)**, added only for `onGroupChanged`'s reverse resolution below; `AssetDirectoryService` (this
+  module already depends on all of `vision-warehouse`, so this is a new import, not a new module edge)
+  rather than the wider `AssetService`, since the only thing needed is `findByDevice(DeviceId):
+  Optional<Asset>`. `linksFor(AssetId)` resolves the asset's MAVLink-protocol device(s) via the unscoped
   `AssetService#details(AssetId)` overload (safe here — the only caller, `LinkStateService`, is only
   ever reached through a controller that already checked the acting user's scope), iterates each
   device's `LinkGroupSnapshot` (from `MavlinkTelemetrySource#linkGroupSnapshot`), and tags every
@@ -216,7 +220,32 @@ there is nothing to structurally prevent here the way Mechanism A's opt-in remed
   rules (`station/vision-app`'s `ArchitectureTest`) forbid any `..domain..`/`..application..` class in
   `contexts/vision-flight` from depending on `com.drones.mavlink..` at all — this class is where the
   one-way translation between the two type systems happens, exactly as `LinkId`'s own javadoc (in
-  `vision-flight`) documents.
+  `vision-flight`) documents. **(LINK-PAIRING-PLAN.md §8 defect #5, new)** `onGroupChanged(Consumer<AssetId>
+  listener)` — the reverse resolution: subscribes to `MavlinkTelemetrySource#onGroupChanged(Consumer<
+  DeviceId>)` and, for each `DeviceId` it fires with, resolves `assetDirectoryService.findByDevice(deviceId)
+  .map(Asset::id)` and forwards only when present. The change-notification chain below this point is
+  entirely off the frame-processing thread by the time it reaches here; this method adds no thread of
+  its own, it only relays.
+  - **The chain, frame thread to listener:** `LinkGroup.sight`/`forget` now return `boolean` (`true` iff
+    the observable slice — membership plus ACTIVE/pinned link ids, captured as a private `ElectionState`
+    record — actually moved; `tick`/`pin`/`release` stayed `void`: `tick` is unused in production and
+    `pin`/`release` are already synchronously re-observed by `DefaultLinkStateService`'s own call chain,
+    so wiring them here would only double-publish) → `LinkGroupTracker` (package-private) checks that
+    return value in `onFrame` (on `sight`) and in `forgetLink` (on `forget`, now iterating `Map.Entry`
+    instead of bare values so the sysid key is available to report) and calls a `private volatile
+    IntConsumer changeListener` set post-construction via `void onChanged(IntConsumer)` (**not** a
+    constructor parameter — java-clean-code §3, this is genuinely optional and set once after
+    construction, not per-call) → `MavlinkGateway.onGroupChanged(IntConsumer)` thinly delegates to its
+    `linkGroupTracker.onChanged(...)` → `MavlinkTelemetrySource` registers one internal per-gateway
+    listener at gateway-construction time (`newBareGateway()`, the one remaining `new MavlinkGateway(
+    settings)` call site — both `newGateway(host, port)` and `linkRegistry(int)`'s `gateways.compute`
+    now route through it) that resolves the fired sysid back to every `DeviceId` whose `runtime.gateway()
+    == gateway` and whose `CommandTarget.sysid()` matches, then fans out to every listener in a
+    `CopyOnWriteArrayList<Consumer<DeviceId>>` registered via the new public `onGroupChanged(Consumer<
+    DeviceId>)`, each call wrapped in its own `try/catch (RuntimeException)` (`System.Logger`, WARNING)
+    so one bad listener can never break another or the frame path. `MavlinkVehicleConfigurator`'s own,
+    unrelated, throwaway `new MavlinkGateway(...)` construction site was deliberately left alone — out of
+    scope, it never joins the shared `gateways`/`runtimes` registry this chain walks.
 - `public final class MavlinkFlightCommander implements FlightCommandPort` — `setMode`/
   `returnToHome`/`arm`/`disarm`/`emergencyStop`/`auxFunction`/`capabilities`. Every command is one
   `COMMAND_LONG` from a fresh, per-call `CommandService` built on the resolved device's gateway.

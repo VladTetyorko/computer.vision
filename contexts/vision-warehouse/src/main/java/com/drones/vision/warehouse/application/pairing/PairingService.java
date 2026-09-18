@@ -41,6 +41,11 @@ public interface PairingService {
      * returned {@link Pairing#sysid()} to the {@code heardSysid} it passed in — when they differ,
      * {@code MAV_SYSID} must be pushed to the vehicle (ArduPilot applies it after reboot).
      *
+     * <p><b>Side effect:</b> when the assigned sysid differs from {@code heardSysid}, this also
+     * updates the device's persisted stream {@code options["sysid"]} to match — the runtime claims
+     * that option to select which vehicle it opens, so a pairing the device does not answer to
+     * would otherwise be a dead pairing.
+     *
      * @param deviceId    the device to pair
      * @param heardSysid  the sysid the vehicle was heard announcing itself with
      * @param hardwareUid the hardware uid read from a capability probe, or {@code null} if not yet

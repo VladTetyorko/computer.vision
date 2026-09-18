@@ -595,10 +595,10 @@ the `/add-source` wizard; all UI interaction was done via `javascript_tool` call
 | # | File:line | Defect |
 |---|---|---|
 | 1 | `station/vision-api/src/main/java/com/drones/vision/api/controller/DiscoveryInboxController.java:~249` | `pairingService.pair(deviceId, heardSysid, null, currentUser.userId())` — `hardwareUid` is hardcoded `null` on adopt, so the Pairing never records the vehicle's actual hardware uid even when `AUTOPILOT_VERSION.uid` is available. |
-| 2 | `station/vision-web/.../onboarding/sysid-collision-logic.ts`, `candidateSysidCollision()` | Dead code — not the mechanism actually wired to the confirm screen. The real mechanism is `applyFoundCandidateCollision()` (`onboarding-store.ts:~443`) reading `response.sysidPushRequired`/`response.assignedSysid` from the backend, confirmed live-working. |
-| 3 | `station/vision-web/.../onboarding/sysid-step.html:1,4` | `<h2>Fix the sysid collision</h2>` / "...another vehicle in the fleet already claims..." fires on every factory-default (sysid=1) first pairing, per the §7 ruling that a factory default is always reassigned — not just on a genuine fleet collision. Misleading operator-facing copy. |
-| 4 (root cause of Links/cockpit breakage) | `DiscoveryInboxController.java`, `adopt()` ~lines 244-251 | After `pairingService.pair()` assigns a sysid different from the one heard (the common case, since factory default 1 is always reassigned per §7 ruling #2), nothing updates the Device's persisted `stream().options()["sysid"]` to the newly assigned value. Traced down through `MavlinkVehicleLinkPort.linksFor` -> `MavlinkTelemetrySource.open`/`linkGroupSnapshot` (`drone-link/mavlink/.../MavlinkTelemetrySource.java:~143-170,246-256`): the runtime opens using the stale sysid option, so it never matches live traffic on the newly assigned sysid and the link never becomes live — permanently, for every factory-default device, until manually fixed. |
-| 5 | `station/vision-web/.../asset-detail/asset-detail.html:763` (`@else if (!facade.links.group())`) and lines `831-850` (entire Recovery section: Replace hardware / Fix address / Forget pairing / Pin, all nested inside that same `@else` branch) | The Links panel's `facade.links.group()` signal never becomes truthy — confirmed the backend (`AssetLinksController`, `GET/PUT/DELETE /api/assets/{id}/links[/pin]`) works correctly via direct curl, so this is frontend-only. Root mechanism in `links-store.ts` (`track(assetId)`/initial fetch) not fully pinned down within budget. Effect: the entire Recovery toolkit is unreachable via the UI for any asset, always. |
+| 2 | `station/vision-web/.../onboarding/sysid-collision-logic.ts`, `candidateSysidCollision()` | FIXED (LF2: removed the dead `candidateSysidCollision()`; the confirm-screen mechanism was always `applyFoundCandidateCollision()` reading the server's `sysidPushRequired`/`assignedSysid`). |
+| 3 | `station/vision-web/.../onboarding/sysid-step.html:1,4` | FIXED (LF2: `sysid-step.html` now renders `sysid-collision-logic.ts#describeSysidStep()`'s `title`/`message` — a `'factory-default'`/`'out-of-range'`/`'collision'` classification naming the assigned number, replacing the copy that called every factory-default first pairing a collision). |
+| 4 (root cause of Links/cockpit breakage) | `DiscoveryInboxController.java`, `adopt()` ~lines 244-251 | After `pairingService.pair()` assigns a sysid different from the one heard (the common case, since factory default 1 is always reassigned per §7 ruling #2), nothing updates the Device's persisted `stream().options()["sysid"]` to the newly assigned value. Traced down through `MavlinkVehicleLinkPort.linksFor` -> `MavlinkTelemetrySource.open`/`linkGroupSnapshot` (`drone-link/mavlink/.../MavlinkTelemetrySource.java:~143-170,246-256`): the runtime opens using the stale sysid option, so it never matches live traffic on the newly assigned sysid and the link never becomes live — permanently, for every factory-default device, until manually fixed. · FIXED (LF1: `DefaultPairingService.pair()` now mirrors the assigned sysid onto the device's own `StreamDescriptor.options()["sysid"]` whenever it differs from `heardSysid`) |
+| 5 | `station/vision-web/.../asset-detail/asset-detail.html:763` (`@else if (!facade.links.group())`) and lines `831-850` (entire Recovery section: Replace hardware / Fix address / Forget pairing / Pin, all nested inside that same `@else` branch) | The Links panel's `facade.links.group()` signal never becomes truthy — confirmed the backend (`AssetLinksController`, `GET/PUT/DELETE /api/assets/{id}/links[/pin]`) works correctly via direct curl, so this is frontend-only. Root mechanism in `links-store.ts` (`track(assetId)`/initial fetch) not fully pinned down within budget. Effect: the entire Recovery toolkit is unreachable via the UI for any asset, always. · web half FIXED (LF2: seed read) · Java half FIXED (LF1: the `links:<assetId>` live topic now also publishes on an adapter-detected election change, not only on a REST read — `VehicleLinkPort#onGroupChanged` -> `DefaultLinkStateService` constructor subscription) |
 
 None of the 5 defects were fixed live. Per the task's instruction to fix only small defects inside
 L1-L4's own files: #1 is a one-line change but touches the pair/adopt contract and its test coverage
@@ -631,3 +631,23 @@ Resources," and no further writes to port 5432 were attempted. The V37 migration
 applied on the shared database (additive, non-destructive) and was not reverted. Flagging this here
 so the user (or a permitted future agent) can decide whether to run the revert above.
 
+### After the walk (orchestrator, 2026-09-18)
+
+- **#4 and #5 fixed** — LF1 (Java) and LF2 (web), see the status cells above. Consequence of the #4
+  fix worth knowing: a vehicle adopted at factory-default sysid 1 is re-pointed at its assigned number
+  at once, so until `MAV_SYSID` is written and the vehicle reboots, it still heartbeats as 1 and shows
+  up again as a *new* "Found nearby" card (discovery keys by sysid). The wizard's sysid step writes
+  the number right away; an operator who skips it sees that duplicate card until they fix it from the
+  asset page. Accepted: the alternative (device listening for the old number) breaks the whole design.
+- **#1 deferred by decision** — no hardware uid exists at adopt time: the heartbeat scanner keys by
+  sysid only and `AUTOPILOT_VERSION` arrives only after the source opens (`CapabilityService`).
+  Recording it needs a flight→warehouse hand-off ("capability probe seen for a paired device → set
+  `Pairing.hardwareUid`"); that is the natural first task of wave S (signing), which needs the uid for
+  the same reason. Until then `POST /api/devices/{id}/pairing` accepts `hardwareUid` by hand.
+- **Shared-Postgres incident, verified read-only:** the V37 landed on the *native* Postgres on
+  `127.0.0.1:5432` (the app's default JDBC URL), not on the compose container (which maps to 5433).
+  `flyway_schema_history` there tops at 37 with an empty `pairings` table. Master (top V36) still boots
+  against it: Flyway 11/12 ignores applied *future* migrations by default (`ignoreMigrationPatterns =
+  *:future`), and the merged branch will carry the identical V37 file/checksum. The five row touches are
+  routine (the main app would have made them itself). Nothing was reverted; the owner may run the
+  transaction above if they want the timestamps back.

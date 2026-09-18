@@ -14,6 +14,7 @@ import com.drones.vision.app.config.properties.VisionOnboardingProperties;
 import com.drones.vision.app.config.properties.VisionRcProperties;
 import com.drones.vision.app.config.properties.VisionSimulationProperties;
 import com.drones.vision.warehouse.application.asset.AssetService;
+import com.drones.vision.warehouse.application.directory.AssetDirectoryService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -196,7 +197,8 @@ public class TelemetryWiring {
      */
     @Bean
     public MavlinkVehicleLinkPort mavlinkVehicleLinkPort(MavlinkTelemetrySource mavlinkTelemetrySource,
-                                                           AssetService assetService) {
-        return new MavlinkVehicleLinkPort(mavlinkTelemetrySource, assetService);
+                                                           AssetService assetService,
+                                                           AssetDirectoryService assetDirectoryService) {
+        return new MavlinkVehicleLinkPort(mavlinkTelemetrySource, assetService, assetDirectoryService);
     }
 }

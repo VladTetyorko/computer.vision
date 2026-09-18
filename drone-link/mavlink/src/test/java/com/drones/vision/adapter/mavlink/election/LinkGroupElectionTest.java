@@ -147,4 +147,26 @@ class LinkGroupElectionTest {
                 "release must re-run automatic election immediately -- the higher-priority link wins");
         assertEquals(releaseAt, group.lastFailoverAt(), "the automatic re-election on release is a real failover");
     }
+
+    // --- sight/forget report whether they actually changed anything (§8 defect #5) --------------
+
+    @Test
+    void sightReturnsTrueOnlyWhenObservableStateActuallyChanges() {
+        LinkGroup group = new LinkGroup(SYSID, SETTINGS);
+
+        assertTrue(group.sight(UDP_LINK, UDP_DESCRIPTOR, T0), "a brand-new member becoming ACTIVE is a real change");
+        assertFalse(group.sight(UDP_LINK, UDP_DESCRIPTOR, T0.plusSeconds(1)),
+                "re-sighting the same, still-active, still-sole link moves nothing observable");
+    }
+
+    @Test
+    void forgetReturnsTrueOnlyWhenObservableStateActuallyChanges() {
+        LinkGroup group = new LinkGroup(SYSID, SETTINGS);
+        group.sight(UDP_LINK, UDP_DESCRIPTOR, T0);
+        group.sight(SERIAL_LINK, SERIAL_DESCRIPTOR, T0); // higher priority, but still dwell-gated -- UDP stays active
+
+        assertTrue(group.forget(UDP_LINK, T0.plusSeconds(1)),
+                "losing the ACTIVE link (and failing over to SERIAL_LINK) is a real change");
+        assertFalse(group.forget(UDP_LINK, T0.plusSeconds(2)), "forgetting an already-absent link changes nothing");
+    }
 }
