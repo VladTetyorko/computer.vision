@@ -220,6 +220,44 @@ build**, and the decision can no longer wait for N9: raise the 550 kB error budg
 on route-level code-splitting for the slices only one feature needs. It is the owner's call either
 way — not a number for a wave to bump on its way past.
 
+### The two ways out of the budget, costed — 2026-09-19
+
+Measured on the N7 merge so the owner is choosing between numbers, not guesses. Routes are **already
+lazy** (48 lazy chunks); what sits in the initial bundle is `provideAppState()`, which registers all
+19 slices and their effects at the root injector.
+
+Grouping every slice by who actually reads its facade (`grep` over non-spec sources, `core/**`,
+`shared/**` and `app.ts` included):
+
+| Must stay root | Read by the shell, `app.ts`, `core/**` or a shared component |
+|---|---|
+| `theme`, `sidebar`, `overlay` | app shell chrome |
+| `auth`, `live`, `settings` | read from `core/**` by a dozen files each |
+| `events` | the always-on notification bell in `shared/ui` |
+
+| Route-splittable | Only lazy features read it |
+|---|---|
+| `thresholds`, `controlProfile`, `geo` | `features/fly` (+ `features/controller`) |
+| `links` | `features/asset-detail` |
+| `cvTrace` | `features/cv-inspector` |
+| `training` | `features/labeling`, `features/replay`, `features/models` |
+| `discoveryInbox` | `features/inventory`, `features/onboarding` |
+| `weather`, `seat`, `telemetry`, `detections`, `org` | 2–4 lazy features each |
+
+That second group is **148 kB of pre-minification source** — `provideState`/`provideEffects` moved
+from `provideAppState()` into each feature's own `*.routes.ts`, which is what §2 already prescribes
+for page-scoped slices. Minified and tree-shaken it is worth well under 148 kB, but the overage to
+clear is only 40 kB, so the headroom is real rather than hoped for. **Registering the same feature
+from two lazy routes is safe** — NgRx keys feature state by name and the second registration is a
+no-op — so a slice with two consuming features does not need a shared parent route.
+
+The alternative is one line: raise `angular.json`'s error budget past 550 kB. Honest, instant, and
+it spends the visibility the current warning buys.
+
+**Not started, deliberately**: both options rewrite `core/state/app-state.ts`, the one file every
+wave touches, so doing it while N6 is in flight would conflict with it. It is the first thing to do
+on a settled tree, before N4/N6/N8 land.
+
 ### N5 found a convention that does not generalise
 
 Poll-vs-live is *exclusive* everywhere except `cv-trace`, where poll and live run **concurrently by
