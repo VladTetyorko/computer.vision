@@ -651,3 +651,53 @@ so the user (or a permitted future agent) can decide whether to run the revert a
   *:future`), and the merged branch will carry the identical V37 file/checksum. The five row touches are
   routine (the main app would have made them itself). Nothing was reverted; the owner may run the
   transaction above if they want the timestamps back.
+
+### Re-walk on master (2026-09-19)
+
+Live re-verification of LF1 (`db4edb59`, Java sysid-mirror) and LF2 (`3518d640`, web) on **master**,
+post-NgRx-migration, in the main checkout (never the worktree). Own isolated instance:
+
+```
+VISION_DISCOVERY_MAVLINK_PORT=14560 SERVER_PORT=8081 \
+VISION_PERSISTENCE_JDBC_URL=jdbc:postgresql://localhost:5434/vision \
+./mvnw -B -pl station/vision-app spring-boot:run     # docker start of vision-link-pairing-postgres-1 first
+cd station/vision-web && npx ng serve --port 4201 --proxy-config <copy of proxy.conf.json, 8080->8081>
+fake_rover.py --sysid <N> --uid <hex> --port 14560 --label <A2|B|C>   # pymavlink, own venv
+```
+Hikari log line confirmed `jdbc:postgresql://localhost:5434/vision` before any UI action. `fake_rover.py`
+was extended to ACK `PARAM_SET MAV_SYSID/SYSID_THISMAV` then flip its own `srcSystem` ~2s later
+(ArduPilot reboot simulation). Rover A (sysid 1) from this session's own use was substituted with
+**sysid 2**: the 2026-09-18 walk's leftover orphan device/candidate for `mavlink|sysid=1` is still
+`REGISTERED` in the reused container and blocks a literal sysid-1 re-test (see Defect R3); sysid 2 is
+still below `vision.pairing.sysid-range=10-250`, so `DefaultPairingService.pair()` reassigns it
+identically to sysid 1, exercising the same code path without the collision.
+
+| Script | Verdict | Notes |
+|---|---|---|
+| 1. Factory-default adopt end to end | PARTIAL | Card→Confirm→Name→Done all worked; sysid step correctly titled "Give this vehicle its fleet number" (LF2 confirmed), prefilled in 10-250. **"Write sysid" never succeeds** — see Defect R1; wizard was clicked through past the failure. Links panel: FAIL as loaded, but PASS once `POST /api/assets/{id}/session` ("Engage link", cockpit RC panel) is used first — see below. |
+| 2. Publish-on-change failover | PARTIAL | Killing the rover: `receiving` flips `true→false` within 3s, live, no reload (LF1/LF2 confirmed). `active`/badge text never flips off — see Defect R2. Restarting: `receiving` back to `true` within 1s, live, no reload — PASS. |
+| 3. Recovery toolkit via UI | PARTIAL | Pin, Release ("Return to AUTO"), Replace hardware, Fix address (inline form, Cancel works) all fire and confirm via API (200/204). Forget pairing's in-app confirm dialog + DELETE (204) work. **Re-adopt after Forget pairing does not work** — see Defect R3. |
+| 4. In-range sysid kept | PASS | Fresh rover C, sysid 99, distinct uid: adopt went Confirm→Identify→Attach→Hand-over with **no sysid step at all**. Device option `sysid=99`, matches pairing. |
+| 5. Duplicate Found-nearby card | Confirmed | Rover A2 (sysid 2), already adopted (mirrored to a 10-250 number) but never rebooted (blocked by Defect R1's deadlock, so it can't reboot), still shows as its own "Found nearby: ArduPilot rover (sysid 2)" card. An operator sees what looks like a second, unpaired vehicle where there is only one — confusing, and per Defect R1 now permanent rather than transient, since the write that would clear it can never succeed. |
+| 6. Playground / wizard hygiene | PASS | `/playground` reachable, its own flag-gated page. `/add-source` showed no synthetic/test tile across every visit this walk. |
+
+**LF1/LF2 fix status: both confirmed working as designed.** Sysid-step copy (LF2) and the Links-panel
+seed-read + publish-on-change (LF1 `onGroupChanged` / LF2 store) both render real backend state now,
+not the permanently-stuck/miscaptioned UI the 2026-09-18 walk found. The Links panel only lights up
+once `MavlinkTelemetrySource.open(device)` has been called for that device — reachable today only via
+`POST /api/assets/{id}/session` (cockpit → Controller → "Engage link"; `AssetSessionController.java:126`,
+`UsageTracker.engage()`), a documented but easy-to-miss precondition, not a bug in LF1/LF2 themselves.
+
+### Defects found this walk (all OPEN — investigated only, none fixed)
+
+| id | File:line | Symptom |
+|---|---|---|
+| R1 | `contexts/vision-flight/.../DefaultRemediationService.java:160` (`requireDisarmed`) + `contexts/vision-warehouse/.../DefaultPairingService.java:96` (`mirrorSysidOntoDevice`) | Chicken-and-egg deadlock: LF1 re-points a freshly-adopted device's stream option to the assigned sysid *before* the vehicle has rebooted onto it, so `AssetLiveStatePort.latestTelemetry(assetId)` never has a sample and `armed` reads `null`. `requireDisarmed` treats unknown-armed exactly like armed and refuses **every** `MAV_SYSID` write, forever — the sysid step can never succeed for a factory-default or out-of-range vehicle. Live-confirmed: wizard's "Write sysid" always failed for rover A2 (sysid 2). |
+| R2 | `drone-link/mavlink/.../election/LinkGroup.java:157` (`tick`) + `LinkGroupTracker.java` (no caller) | `LinkGroup.tick(Instant)` — "call periodically to catch timeouts passing between frames" — has zero callers anywhere in the app; election (`elect()`, which nulls `activeLinkId` past `hardTimeout` with no alternative) only re-runs inside `sight()`/`pin()`/`release()`/`forget()`. A sysid that goes silent forever keeps reporting its last link `active:true` indefinitely — `receiving` alone (recomputed fresh per snapshot) carries the staleness signal. Live-confirmed: killed rover, `active` stayed `true` through 16s (past the 10s default hard timeout) with no new frame. |
+| R3 | `contexts/vision-warehouse/.../DefaultAssetService.java:192` (`matchDevice`) + `.../DefaultDiscoveryInboxService.java:84-105` (`report`, auto-reopen) | "Forget pairing" (`DELETE /api/devices/{id}/pairing`) deletes only the `Pairing` row; the orphan `Device` row (with its sysid option) survives and `matchDevice` keeps matching it by sysid alone, with no check for an active pairing. `report()`'s auto-reopen only flips `REGISTERED→NEW` when no match is found, so it never fires. Live-confirmed: forgot rover B's pairing (sysid 42, still broadcasting); `/api/discovery/inbox` kept the candidate `REGISTERED` to the same asset and it never reappeared in `/add-source` Found-nearby. Same root cause as the 2026-09-18 walk's sysid-1 orphan that forced this walk's own sysid-2 substitution — first seen there as a side effect, now confirmed as the direct cause of a documented Recovery-toolkit promise ("re-adopt works") failing. |
+
+**Not observed / out of scope this walk:** literal sysid=1 factory-default and the true dual-peer
+same-sysid collision — same reasons as 2026-09-18 (leftover orphan state; discovery keys by
+`(method, sysid)` with no uid disambiguation) plus, now, Defect R3 making the orphan permanent rather
+than clearable by a `DELETE .../pairing`. Camera/serial scripts skipped per instructions (already
+covered/host-limited).
