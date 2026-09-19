@@ -11,14 +11,18 @@ import type {
 } from '../../core/api/models';
 import {
   FIT_OUT_ROLES,
+  collectRowOptions,
+  effectiveProtocol,
   fitOutDeviceSpecs,
   type FitOutFindMethod,
   type FitOutRole,
+  type FitOutRowDraft,
   type FitOutRowValue,
   type FitOutRows,
 } from '../../core/onboarding/fit-out-logic';
 import type { SimulateMode } from '../../core/fleet/simulation-logic';
 import { humanAge } from '../../core/telemetry/telemetry-logic';
+import { protocolSelectionFor } from './protocols';
 
 /**
  * Pure logic behind the onboarding wizard (docs/plans/active/SOURCE-ONBOARDING-2-PLAN.md §3.1,
@@ -479,4 +483,82 @@ export function relativeAge(iso: string | undefined, nowMs: number): string | un
     return undefined;
   }
   return `${humanAge(Math.max(0, (nowMs - parsed) / 1000))} ago`;
+}
+
+// --- Prove step request builders + staleness check (wave N8b — moved here from `OnboardingStore`'s
+// own private instance methods so the reducer/facade can share one pure implementation instead of
+// duplicating the "is this row's request the same as the last one we probed" check.) --------------
+
+/** A resolved fit-out row's connection fields, in the shape both the Prove step's own probe/verify
+ *  requests and its own staleness check need. */
+export interface ResolvedRowConnection {
+  /** `undefined` for a discovery candidate that never echoed its own protocol back — {@link applyResolvedConnection} falls through to {@link protocolSelectionFor}'s own "custom" default, same as every other unresolved value. */
+  readonly protocol: string | undefined;
+  readonly uri: string;
+  readonly options?: Record<string, string>;
+}
+
+/** `null` for a row not currently resolved to `find` — mirrors `OnboardingStore#currentProbeRequest`. */
+export function currentProbeRequest(row: FitOutRowDraft): ProbeDeviceRequest | null {
+  if (row.value !== 'find') {
+    return null;
+  }
+  return buildProbeRequest({ protocol: effectiveProtocol(row), uri: row.uri, options: collectRowOptions(row) });
+}
+
+/** `null` for a row not currently resolved to `find` — mirrors `OnboardingStore#currentVerifyRequest`. */
+export function currentVerifyRequest(row: FitOutRowDraft): ProbeCandidateRequest | null {
+  if (row.value !== 'find') {
+    return null;
+  }
+  return buildVerifyRequest({ protocol: effectiveProtocol(row), uri: row.uri, options: collectRowOptions(row) });
+}
+
+/**
+ * Field-for-field equality — mirrors `OnboardingStore#sameConnection` exactly, `options` included:
+ * a naive `JSON.stringify` compare, so two option maps with the same entries in a different
+ * insertion order count as different (in practice never observed — a row's own `options` array
+ * order never changes between the connection that was probed and the one checked against it).
+ */
+export function sameConnection(a: ResolvedRowConnection | null, b: ResolvedRowConnection | null): boolean {
+  return (
+    a !== null &&
+    b !== null &&
+    a.protocol === b.protocol &&
+    a.uri === b.uri &&
+    JSON.stringify(a.options ?? {}) === JSON.stringify(b.options ?? {})
+  );
+}
+
+/**
+ * Whether the last successful probe for a row was for *these exact* connection fields, not a stale
+ * one — `undefined` before any probe has run against the current fields. Mirrors
+ * `OnboardingStore#lastProbeOk`, renamed to avoid colliding with `OnboardingWizardFacade#lastProbeOk`
+ * (which calls this with its own current-request/last-probe signals).
+ */
+export function isLastProbeOk(
+  currentRequest: ResolvedRowConnection | null,
+  lastProbeRequest: ResolvedRowConnection | null,
+  lastProbeResult: { readonly ok: boolean } | null,
+): boolean | undefined {
+  return sameConnection(lastProbeRequest, currentRequest) ? lastProbeResult?.ok === true : undefined;
+}
+
+/** Fills a row's register fields from a resolved connection — mirrors `OnboardingStore#applyResolvedConnection`. */
+export function applyResolvedConnection(row: FitOutRowDraft, resolved: ResolvedRowConnection): FitOutRowDraft {
+  const selection = protocolSelectionFor(resolved.protocol);
+  return {
+    ...row,
+    value: 'find',
+    findMethod: 'register',
+    protocolSelect: selection.select,
+    customProtocol: selection.custom,
+    uri: resolved.uri,
+    options: resolved.options ? Object.entries(resolved.options).map(([key, value]) => ({ key, value })) : [],
+  };
+}
+
+/** Resets everything about a row except its `role` — mirrors `onboarding-store.ts`'s own module-level `emptyFitOutRowLike`. */
+export function emptyFitOutRowLike(row: FitOutRowDraft): FitOutRowDraft {
+  return { role: row.role, value: 'none', findMethod: null, protocolSelect: '', customProtocol: '', uri: '', options: [] };
 }

@@ -5,6 +5,7 @@ import { provideGeoState } from '../../core/geo/state/geo.providers';
 import { provideControlProfileState } from '../../core/rc/state/control-profile.providers';
 import { provideDrawingsState } from '../../core/map-data/state/drawings.providers';
 import { provideGeofenceState } from '../../core/geofence/state/geofence.providers';
+import { provideGroundingState } from './state/grounding.providers';
 import { provideLayersState } from '../../core/map-data/state/layers.providers';
 import { provideMarksState } from '../../core/map-data/state/marks.providers';
 import { provideOrgState } from '../../core/org/state/org.providers';
@@ -42,6 +43,11 @@ import { flyRedirectGuard } from './fly-redirect-guard';
  * **Wave N4 added the five map-data slices** (`marks`, `layers`, `drawings`, `geofence`, `org`)
  * for the cockpit's map inset — needed by `CockpitFacade` and by every control inside
  * `<vision-map-tools>`, which injects those facades directly.
+ *
+ * **Wave N8 added `grounding`** — the only one of these that is a *feature-local* slice
+ * (`features/fly/state/`, not `core/`), because nothing outside `features/fly/**` has ever read it.
+ * It sits on the shared parent for the same reason `thresholds`/`controlProfile` do: the picker
+ * pays a registration and no fetch, since only `CockpitPage` provides `GroundingFacade`.
  */
 export const FLY_PAGE_ROUTES: Routes = [
   {
@@ -59,6 +65,7 @@ export const FLY_PAGE_ROUTES: Routes = [
       provideDrawingsState(),
       provideGeofenceState(),
       provideOrgState(),
+      provideGroundingState(),
     ],
     children: [
       {

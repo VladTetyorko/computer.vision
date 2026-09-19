@@ -1,7 +1,7 @@
 import { Injectable, computed, inject } from '@angular/core';
 import { SettingsFacade } from '../../core/settings/settings-facade';
 import { ToastService } from '../../core/toast.service';
-import { OnboardingStore } from './onboarding-store';
+import { OnboardingWizardFacade } from './onboarding-wizard-facade';
 import {
   relativeAge,
   senseTerminalProof,
@@ -125,31 +125,32 @@ const SOURCE_MODE_OPTIONS: readonly SourceModeOption[] = [
 ];
 
 /**
- * `OnboardingPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — orchestrates `OnboardingStore`/
- * `SettingsFacade`/`ToastService`. `OnboardingStore` already owns the wizard's whole step machine/
- * draft state/HTTP orchestration (this component's own page-provided "component store"); this facade
- * adds the page-local read-models/commands every step component needs (label maps, per-row
- * summaries, the rail's own items, the waiting room's live intake render, the clipboard/download
- * helpers) — every one byte-for-byte carried over from the pre-W2 wizard except where the fit-out
- * table's per-row shape or the new `source`/`attach` steps required a change (`connectionSummary`,
- * now `rowSummary`; `onConnectBack`, now `onRowBack`; the rail/intake/source-mode additions below are
- * new to this wave).
+ * `OnboardingPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — orchestrates
+ * `OnboardingWizardFacade`/`SettingsFacade`/`ToastService`. `OnboardingWizardFacade` (formerly
+ * `OnboardingStore`, an NgRx-backed facade since docs/plans/active/NGRX-MIGRATION-PLAN.md wave N8b)
+ * already owns the wizard's whole step machine/draft state/HTTP orchestration; this facade adds the
+ * page-local read-models/commands every step component needs (label maps, per-row summaries, the
+ * rail's own items, the waiting room's live intake render, the clipboard/download helpers) — every
+ * one byte-for-byte carried over from the pre-W2 wizard except where the fit-out table's per-row
+ * shape or the new `source`/`attach` steps required a change (`connectionSummary`, now `rowSummary`;
+ * `onConnectBack`, now `onRowBack`; the rail/intake/source-mode additions below are new to this wave).
  *
  * Every one of the six per-step components (`source-step`/`prove-step`/`identify-step`/
  * `attach-step`/`sysid-step`/`handover-step`) injects this facade directly — the non-routed-child
  * carve-out `core/ui/architecture.spec.ts` documents (they sit inside `OnboardingPage`'s own
- * `providers: [OnboardingStore, OnboardingFacade]` injector, so nothing is re-provided) — never
- * `OnboardingStore` itself, keeping one single access path (`facade.xxx`/`facade.store.xxx`)
- * consistent with the page shell's own rule (routed pages inject only their facade).
+ * `providers: [OnboardingWizardFacade, OnboardingFacade]` injector, so nothing is re-provided) —
+ * never `OnboardingWizardFacade` itself, keeping one single access path (`facade.xxx`/
+ * `facade.store.xxx`) consistent with the page shell's own rule (routed pages inject only their
+ * facade).
  *
- * `OnboardingStore.flightPlanDialogOpen` stays where it already lives (that store) rather than
- * moving to a `UiStore` group — it's the only dialog this page ever shows, so there is nothing for
- * it to be mutually exclusive *with* (docs/plans/done/UI-ARCHITECTURE-PLAN.md's own explicit carve-out for
+ * `OnboardingWizardFacade.flightPlanDialogOpen` stays where it already lives rather than moving to a
+ * `UiStore` group — it's the only dialog this page ever shows, so there is nothing for it to be
+ * mutually exclusive *with* (docs/plans/done/UI-ARCHITECTURE-PLAN.md's own explicit carve-out for
  * this exact field).
  */
 @Injectable()
 export class OnboardingFacade {
-  readonly store = inject(OnboardingStore);
+  readonly store = inject(OnboardingWizardFacade);
   readonly settings = inject(SettingsFacade);
   private readonly toasts = inject(ToastService);
 
@@ -237,7 +238,7 @@ export class OnboardingFacade {
 
   /** A row already resolved (filled, or pre-proven from a discovery-candidate entrance) — renders its own summary card regardless of `sourceMode` (`OnboardingStore#chooseSourceMode`'s own doc comment). */
   rowResolved(role: FitOutRole): boolean {
-    return this.store.preProvenRoles().has(role) || isRowFilled(this.store.rows()[role]);
+    return this.store.preProvenRoles().includes(role) || isRowFilled(this.store.rows()[role]);
   }
 
   /** The freshest `NEW` discovery candidate the waiting room's own live "Use" action would act on for this role — `undefined` until one has actually arrived. */

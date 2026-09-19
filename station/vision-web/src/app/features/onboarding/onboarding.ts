@@ -8,7 +8,7 @@ import { HandoverStep } from './handover-step';
 import { IdentifyStep } from './identify-step';
 import { OnboardingFacade } from './onboarding-facade';
 import { DiscoveryInboxFacade } from '../../core/discovery/discovery-inbox-facade';
-import { OnboardingStore } from './onboarding-store';
+import { OnboardingWizardFacade } from './onboarding-wizard-facade';
 import { ProveStep } from './prove-step';
 import { SourceStep } from './source-step';
 import { SysidStep } from './sysid-step';
@@ -37,8 +37,8 @@ import { SysidStep } from './sysid-step';
  *
  * Every step component injects `OnboardingFacade` directly (non-routed presentational children,
  * licensed by `core/ui/architecture.spec.ts`'s own carve-out) — this page is the sole place that
- * `provides` `OnboardingStore`/`OnboardingFacade` (docs/plans/done/UI-ARCHITECTURE-PLAN.md), same
- * DI-sharing idiom as `AssetDetailPage`'s `TelemetryStore`/`DetectionsStore`.
+ * `provides` `OnboardingWizardFacade`/`OnboardingFacade` (docs/plans/done/UI-ARCHITECTURE-PLAN.md),
+ * same DI-sharing idiom as `AssetDetailPage`'s `TelemetryStore`/`DetectionsStore`.
  *
  * **Page bar + centered form (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.2/§2.3,
  * docs/extracts/design/07-add-source.md, wave 2).** `.page--form` (`styles.css`) centers the whole
@@ -51,9 +51,9 @@ import { SysidStep } from './sysid-step';
   styleUrl: './onboarding.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
   // `DiscoveryInboxFacade` is page-provided since wave N-split — see its own doc comment;
-  // `OnboardingStore` injects it and the `discoveryInbox` slice is registered by
-  // `onboarding.page-routes.ts`.
-  providers: [OnboardingStore, OnboardingFacade, DiscoveryInboxFacade],
+  // `OnboardingWizardFacade` injects it and the `discoveryInbox` slice is registered by
+  // `onboarding.page-routes.ts`, alongside `provideOnboardingState()` (wave N8b).
+  providers: [OnboardingWizardFacade, OnboardingFacade, DiscoveryInboxFacade],
 })
 export class OnboardingPage {
   protected readonly facade = inject(OnboardingFacade);

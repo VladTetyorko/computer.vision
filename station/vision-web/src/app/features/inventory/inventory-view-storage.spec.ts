@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { InventoryViewStore } from './inventory-view-store';
+import { InventoryViewStorage } from './inventory-view-storage';
 
 const KEY = 'vision.inventory.view';
 
@@ -8,14 +8,14 @@ afterEach(() => {
   localStorage.clear();
 });
 
-describe('InventoryViewStore', () => {
+describe('InventoryViewStorage', () => {
   it('remembers a view across instances', () => {
-    new InventoryViewStore().write('issued');
-    expect(new InventoryViewStore().read()).toBe('issued');
+    new InventoryViewStorage().write('issued');
+    expect(new InventoryViewStorage().read()).toBe('issued');
   });
 
   it('remembers an explicit All as a value, distinct from never having chosen', () => {
-    const store = new InventoryViewStore();
+    const store = new InventoryViewStorage();
     expect(store.read()).toBeUndefined();
     store.write(null);
     expect(localStorage.getItem(KEY)).toBe('all');
@@ -24,20 +24,20 @@ describe('InventoryViewStore', () => {
 
   it('reads a stale or hand-edited value as never chosen', () => {
     localStorage.setItem(KEY, 'grounded');
-    expect(new InventoryViewStore().read()).toBeUndefined();
+    expect(new InventoryViewStorage().read()).toBeUndefined();
   });
 
   it('answers "never chosen" instead of throwing when storage is unreadable', () => {
     vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => {
       throw new DOMException('blocked');
     });
-    expect(new InventoryViewStore().read()).toBeUndefined();
+    expect(new InventoryViewStorage().read()).toBeUndefined();
   });
 
   it('swallows a write that storage refuses', () => {
     vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
       throw new DOMException('quota');
     });
-    expect(() => new InventoryViewStore().write('in-field')).not.toThrow();
+    expect(() => new InventoryViewStorage().write('in-field')).not.toThrow();
   });
 });

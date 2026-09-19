@@ -25,7 +25,7 @@ import { KebabMenu } from '../../shared/ui/kebab-menu';
 import { FlyOsd } from './fly-osd';
 import { FailsafeBanner } from './failsafe-banner';
 import { GroundedBanner } from './grounded-banner';
-import { GroundingStore } from './grounding-store';
+import { GroundingFacade } from './grounding-facade';
 import { DiagnosticsCard } from './diagnostics-card';
 import { ReturnHomeButton } from '../../shared/ui/return-home-button';
 import { CvControlPanel } from './cv-control-panel';
@@ -141,7 +141,7 @@ type CockpitDialog = 'stop' | 'cv-setup';
     GeofenceFacade,
     OrgFacade,
     CockpitFacade,
-    GroundingStore,
+    GroundingFacade,
   ],
 })
 export class CockpitPage {

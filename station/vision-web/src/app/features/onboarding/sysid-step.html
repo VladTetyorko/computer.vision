@@ -12,7 +12,7 @@
     max="255"
     step="1"
     [ngModel]="facade.store.sysidValue()"
-    (ngModelChange)="facade.store.sysidValue.set($event)"
+    (ngModelChange)="facade.store.setSysidValue($event)"
     placeholder="e.g. 2"
   />
 </div>

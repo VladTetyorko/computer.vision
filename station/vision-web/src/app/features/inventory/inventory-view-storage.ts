@@ -26,9 +26,25 @@ const INVENTORY_VIEW_KEY = 'vision.inventory.view';
  * The stored value is three-valued on purpose — see `InventoryViewSelection`: an explicit "All" is
  * written as a real value, so deselecting a view survives a reload instead of being undone by the
  * Needs-attention default on the next boot.
+ *
+ * <h2>Why this is not an NgRx slice (wave N8 judgement call)</h2>
+ * It was named `InventoryViewStore` until docs/plans/active/NGRX-MIGRATION-PLAN.md wave N8, which is
+ * what made it look like the migration had missed one. **It owns no state at all** — two methods, no
+ * signals, no fetch, no timer, no toast. The state it guards (`InventoryFacade#viewSelection`) is one
+ * enum among roughly twenty plain page signals on that facade, none of which N8 converts; promoting
+ * exactly one of them to a feature slice would be arbitrary, and the class that remained would still
+ * be this `localStorage` wrapper, because `core/state/hydration.ts#StateHydrator.read()` would have
+ * to call something exactly like it. So the *rename* is the migration: this is the storage adapter a
+ * hydrator would use, not a store, and it is now named for what it is. Same reasoning that left
+ * `core/system-events/` without a slice in wave N4b, and the same rule as `core/ui/ui-store.ts`
+ * (NGRX-MIGRATION-PLAN.md §8: deliberately plain, must not become a slice).
+ *
+ * If the Inventory page ever does grow a real slice, this is the piece that becomes its
+ * `StateHydrator` — and note that `hydrationMetaReducer`'s `UPDATE` branch already supports a
+ * page-scoped slice hydrating, a path nothing exercises yet.
  */
 @Injectable({ providedIn: 'root' })
-export class InventoryViewStore {
+export class InventoryViewStorage {
   /** The remembered view, `null` for an explicit All, `undefined` when nothing was ever stored (or storage is unreadable). */
   read(): InventoryViewSelection {
     try {
