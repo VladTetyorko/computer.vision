@@ -4,7 +4,7 @@ import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
 import { ToastService } from '../../core/toast.service';
-import { TrainingStore } from '../../core/training/training-store';
+import { TrainingFacade } from '../../core/training/training-facade';
 import { findVideoDevice } from '../../core/fleet/device-logic';
 import { deriveTrail, groupTelemetryByDevice, telemetryDevices } from '../../core/telemetry/telemetry-logic';
 import { formatDuration } from '../../core/stream-info-logic';
@@ -61,7 +61,7 @@ export interface ReplayRouteInputs {
  * `recordingStartMs`, `playing`) — only the DOM plumbing stays component-side.
  *
  * **"Add to dataset" (docs/plans/done/CV-TRAINING-V2-PLAN.md §8) — a second capture entry point, alongside
- * `DatasetDetailFacade`'s own live-stream capture.** `training` (`TrainingStore`, `providedIn:
+ * `DatasetDetailFacade`'s own live-stream capture.** `training` (`TrainingFacade`, `providedIn:
  * 'root'`) supplies the dataset picker's own list for free — the same store `features/labeling/**`
  * already reads, refreshed here too (mirrors `DatasetsFacade`'s own unconditional
  * `training.refresh()` on construction) since a viewer may land on `/replay` without ever having
@@ -83,7 +83,7 @@ export class ReplayFacade {
   private readonly toasts = inject(ToastService);
   private readonly router = inject(Router);
 
-  readonly training = inject(TrainingStore);
+  readonly training = inject(TrainingFacade);
 
   private assetIdSignal: Signal<string | undefined> = signal(undefined);
   private usageIdSignal: Signal<string | undefined> = signal(undefined);
@@ -276,7 +276,7 @@ export class ReplayFacade {
     });
 
     // Mirrors `DatasetsFacade`'s own unconditional `training.refresh()` on construction — a viewer
-    // may land on `/replay` without ever having visited `/manage/training` first, and `TrainingStore`
+    // may land on `/replay` without ever having visited `/manage/training` first, and `TrainingFacade`
     // is lazy (`providedIn: 'root'`, not self-initializing), so nothing else guarantees this runs.
     void this.training.refresh();
 

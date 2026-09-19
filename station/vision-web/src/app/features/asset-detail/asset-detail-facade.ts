@@ -1,16 +1,16 @@
 import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
-import { FleetStore } from '../../core/fleet/fleet-store';
-import { SettingsStore } from '../../core/settings/settings-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
+import { SettingsFacade } from '../../core/settings/settings-facade';
 import { ToastService } from '../../core/toast.service';
 import { UndoToastService } from '../../shared/ui/undo-toast.service';
 import { pluralize } from '../../shared/ui/text-logic';
 import { PollScheduler } from '../../core/poll-scheduler';
-import { TelemetryStore } from '../../core/telemetry/telemetry-store';
-import { EventsStore } from '../../core/events/events-store';
-import { LiveStore } from '../../core/live/live-store';
-import { LinksStore } from '../../core/pairing/links-store';
+import { TelemetryFacade } from '../../core/telemetry/telemetry-facade';
+import { EventsFacade } from '../../core/events/events-facade';
+import { LiveFacade } from '../../core/live/live-facade';
+import { LinksFacade } from '../../core/pairing/links-facade';
 import {
   failoverRowsForAsset,
   hasActiveBenchWarning,
@@ -20,13 +20,13 @@ import {
   sortedLinks,
   type LinkFailoverRow,
 } from '../../core/pairing/pairing-logic';
-import { GeofenceStore } from '../../core/geofence/geofence-store';
-import { MarksStore } from '../../core/map-data/marks-store';
-import { LayersStore } from '../../core/map-data/layers-store';
-import { DrawingsStore } from '../../core/map-data/drawings-store';
-import { TracksStore } from '../../core/map-data/tracks-store';
+import { GeofenceFacade } from '../../core/geofence/geofence-facade';
+import { MarksFacade } from '../../core/map-data/marks-facade';
+import { LayersFacade } from '../../core/map-data/layers-facade';
+import { DrawingsFacade } from '../../core/map-data/drawings-facade';
+import { TracksFacade } from '../../core/map-data/tracks-facade';
 import { followMarkers } from '../../shared/map/tactical-map/tactical-map-logic';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { canManageOrg } from '../../core/org/org-logic';
 import { describeHttpError } from '../../core/api-error';
 import { findVideoDevice } from '../../core/fleet/device-logic';
@@ -109,15 +109,15 @@ export class AssetDetailFacade {
   private readonly router = inject(Router);
   private readonly toasts = inject(ToastService);
   private readonly undoToast = inject(UndoToastService);
-  private readonly auth = inject(AuthStore);
-  private readonly telemetry = inject(TelemetryStore);
-  private readonly events = inject(EventsStore);
+  private readonly auth = inject(AuthFacade);
+  private readonly telemetry = inject(TelemetryFacade);
+  private readonly events = inject(EventsFacade);
   /** Named `liveStore`, not `live` — this class already has a `live` computed (whether *this asset*
    *  is currently streaming, see below); this is the generic SSE connection singleton. */
-  private readonly liveStore = inject(LiveStore);
+  private readonly liveStore = inject(LiveFacade);
 
-  readonly fleet = inject(FleetStore);
-  readonly settings = inject(SettingsStore);
+  readonly fleet = inject(FleetFacade);
+  readonly settings = inject(SettingsFacade);
 
   /** Gates the Pilots drill-in trigger itself — a non-manager should never see the affordance, not
    *  just find an empty drawer behind it (`PilotsCard`'s own internal gate stays as a second layer). */
@@ -196,15 +196,15 @@ export class AssetDetailFacade {
   // the same telemetry. This page also finally passes zones + marks (the plan's own bug fix — the old
   // inset dropped both silently), through the two root stores below.
 
-  readonly geofence = inject(GeofenceStore);
-  readonly marks = inject(MarksStore);
+  readonly geofence = inject(GeofenceFacade);
+  readonly marks = inject(MarksFacade);
   /** Layers name the map's data-layer rows and colour COP marks; drawings are the same shared picture every other host shows (docs/plans/done/MAP-REWORK-PLAN.md §5.2). */
-  readonly layers = inject(LayersStore);
-  readonly drawings = inject(DrawingsStore);
+  readonly layers = inject(LayersFacade);
+  readonly drawings = inject(DrawingsFacade);
   /** Projected fixed-camera tracks (docs/plans/done/FIXED-CAMERA-GEO-PLAN.md wave G5) — the same
    *  org-wide, already-scoped picture `marks`/`drawings`/`geofence` show on this card's map, not
    *  filtered to this one asset (this card's map has never been per-asset-scoped for its overlays). */
-  readonly tracks = inject(TracksStore);
+  readonly tracks = inject(TracksFacade);
 
   /** Switches the map into follow mode; `null` until the asset has loaded. */
   readonly mapFollowAssetId = computed(() => this.asset()?.assetId ?? null);
@@ -367,7 +367,7 @@ export class AssetDetailFacade {
   /** Called once by the page's own constructor `effect()` on every `assetId` route-input change. */
   load(assetId: string): void {
     this.currentAssetIdSignal.set(assetId);
-    this.links.track(assetId); // no-op for an unchanged id — see `LinksStore#track`'s own doc comment
+    this.links.track(assetId); // no-op for an unchanged id — see `LinksFacade#track`'s own doc comment
     void this.fetchAsset(assetId);
     void this.loadStats(assetId);
     void this.loadMaintenanceRecords(assetId);
@@ -449,7 +449,7 @@ export class AssetDetailFacade {
 
   /**
    * The cockpit-link band's primary CTA — remembers this asset as Fly's active pick
-   * (`SettingsStore.flyAssetId`, the same field `FlyPage#selectAsset` itself writes) so `/fly` lands
+   * (`SettingsFacade.flyAssetId`, the same field `FlyPage#selectAsset` itself writes) so `/fly` lands
    * directly in the cockpit for it, then navigates. Works whether or not the asset is streaming.
    */
   openCockpit(): void {
@@ -682,21 +682,21 @@ export class AssetDetailFacade {
 
   // --- Links panel (docs/plans/active/LINK-PAIRING-PLAN.md §3.4/§3.7, wave L4) --------------------
   // One asset can carry several redundant carriers for the same telemetry device (Wi-Fi, ground
-  // radio, a bench cable) — `LinksStore` tracks the whole group; every derivation below is a thin
+  // radio, a bench cable) — `LinksFacade` tracks the whole group; every derivation below is a thin
   // read-model over it, mirroring `geofence`/`marks` etc. immediately above. Degrades honestly per
-  // `LinksStore`'s own class doc: `links.disabled()` means the backend route isn't mounted at all
+  // `LinksFacade`'s own class doc: `links.disabled()` means the backend route isn't mounted at all
   // (not "no links yet"), `links.group()` staying `undefined` past that is the ordinary
   // still-loading/no-data case — the panel renders `vision-empty` either way, with a different
   // reason.
 
-  readonly links = inject(LinksStore);
+  readonly links = inject(LinksFacade);
 
   readonly linksSorted = computed(() => sortedLinks(this.links.group()?.links ?? []));
   readonly linksPinned = computed(() => this.links.group()?.pinned ?? false);
   readonly linksActiveId = computed(() => this.links.group()?.activeLinkId ?? null);
   readonly linksBenchWarning = computed(() => hasActiveBenchWarning(this.links.group()?.links ?? []));
 
-  /** Failover history off the existing generic events feed (`LiveStore.liveEvents()` — only ever
+  /** Failover history off the existing generic events feed (`LiveFacade.liveEvents()` — only ever
    *  populated while the SSE connection has been open; there is no REST history read for this, same
    *  as every other `LiveEvent` consumer in this app), filtered to this asset. */
   readonly linkFailovers = computed<readonly LinkFailoverRow[]>(() =>

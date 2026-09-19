@@ -5,7 +5,7 @@ import { relativeTimeLabel } from '../events/events-logic';
 /**
  * Pure decision logic behind the org-settings surface (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2) — the
  * role gate, the group-tree shape, the role picker, and the activity-row view model. Kept
- * framework-free and unit-tested here so `core/org/org-store.ts`, `core/org/org-guard.ts`,
+ * framework-free and unit-tested here so `core/org/org-facade.ts`, `core/org/org-guard.ts`,
  * `features/org-settings/**`, and `features/activity/**` stay dumb: each only reads a signal and
  * calls one of these, exactly like `core/auth/auth-logic.ts` backs the login/identity surface.
  */

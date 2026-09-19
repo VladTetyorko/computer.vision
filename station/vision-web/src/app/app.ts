@@ -11,12 +11,11 @@ import {
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterOutlet } from '@angular/router';
 import { filter, map } from 'rxjs';
-import { AuthStore } from './core/auth/auth-store';
-import { FleetStore } from './core/fleet/fleet-store';
+import { AuthFacade } from './core/auth/auth-facade';
+import { FleetFacade } from './core/fleet/fleet-facade';
 import { LeafletWarmup } from './core/leaflet-warmup';
-import { LiveStore } from './core/live/live-store';
-import { SidebarStore } from './core/shell/sidebar-store';
-import { ThemeStore } from './core/shell/theme-store';
+import { LiveFacade } from './core/live/live-facade';
+import { SidebarFacade } from './core/shell/sidebar-facade';
 import { AppSidebar } from './shared/ui/app-sidebar/app-sidebar';
 import { ForcePasswordChange } from './shared/ui/force-password-change';
 import { ReauthOverlay } from './shared/ui/reauth-overlay';
@@ -38,16 +37,16 @@ import { UndoToast } from './shared/ui/undo-toast';
  * sidebar with nowhere real to send its clicks, and there's no separate "am I on `/login`" route
  * check to keep in sync with the guard's own routing.
  *
- * **Dev parity (`vision.auth.enabled=false`)**: `AuthStore` resolves the fixed dev principal to
+ * **Dev parity (`vision.auth.enabled=false`)**: `AuthFacade` resolves the fixed dev principal to
  * `topRole: 'ADMIN'` exactly as before this task (unchanged mechanism, `core/org/org-guard.ts`'s own
  * doc comment) — `auth.user()` is non-null the instant `loadMe()` settles, so the sidebar renders
  * with the full ADMIN-scoped set, same as a real ADMIN session. Nothing here reads `authEnabled`
  * directly.
  *
- * **Theme bootstrap** (docs/plans/done/VISUAL-REFRESH-PLAN.md F3): eagerly injecting `ThemeStore` (see the
- * field below) applies the user's persisted light/dark choice as `data-theme` on `<html>` the moment
- * this component constructs — before `auth.user()` gates the sidebar, so it applies regardless of
- * auth state, unlike everything else in this class.
+ * **Theme bootstrap** (docs/plans/done/VISUAL-REFRESH-PLAN.md F3) is no longer this component's job:
+ * the theme slice's own boot effect (`core/shell/state/theme.effects.ts#applyThemeOnBoot$`) applies
+ * the persisted light/dark choice as `data-theme` on `<html>` as soon as the store is alive, which
+ * is before anything here renders and regardless of auth state.
  *
  * **Full-bleed auto-collapse** (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.1 rule 5, F11): `/fly`, `/wall`,
  * `/command` each carry `data: { fullBleed: true }` (a concurrent task's own route change, read
@@ -57,7 +56,7 @@ import { UndoToast } from './shared/ui/undo-toast';
  * entirely once a feature nests its real route under a path-less parent (this app's `authGuard`
  * wrapper already does exactly that for every route).
  *
- * This class owns the one router subscription and pushes each result into `SidebarStore.enterRoute`;
+ * This class owns the one router subscription and pushes each result into `SidebarFacade.enterRoute`;
  * the store layers it *under* any manual toggle (see its own precedence doc). Auto-collapse is a
  * **default, not a lock** — an earlier revision expressed it as `collapsed() || fullBleed()` and
  * disabled the toggle while full-bleed, which left the sidebar impossible to expand on `/fly`,
@@ -71,17 +70,10 @@ import { UndoToast } from './shared/ui/undo-toast';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class App {
-  protected readonly auth = inject(AuthStore);
-  private readonly fleet = inject(FleetStore);
-  private readonly liveStore = inject(LiveStore);
-  private readonly sidebar = inject(SidebarStore);
-  // Injected for its constructor side effect only (applies the persisted `data-theme` attribute to
-  // `<html>`, docs/plans/done/VISUAL-REFRESH-PLAN.md F3) — never read again after that, same "eager singleton
-  // mounted once by the shell" shape as `sidebar`/`fleet` above. `index.html`'s own inline bootstrap
-  // script already applies the same attribute before Angular loads (see its comment) so there is no
-  // flash of the wrong theme; this makes it official once the app itself is live and reapplies it if
-  // ever it drifts.
-  private readonly theme = inject(ThemeStore);
+  protected readonly auth = inject(AuthFacade);
+  private readonly fleet = inject(FleetFacade);
+  private readonly liveStore = inject(LiveFacade);
+  private readonly sidebar = inject(SidebarFacade);
   private readonly router = inject(Router);
 
   protected readonly offline = computed(() => this.fleet.reachable() === false);
@@ -91,10 +83,10 @@ export class App {
    * docs/conclusions/OPS-UX-REVIEW.md §O3 — "an operator has no way to know this station has no
    * login at all"). Requires **both** `auth.user()` resolved and `authEnabled() === false`, not
    * `authEnabled()` alone: `authEnabled` reads `false` for one tick before the boot `GET
-   * /api/auth/me` has ever answered (`AuthStore`'s own initial signal value), and showing a
+   * /api/auth/me` has ever answered (`AuthFacade`'s own initial signal value), and showing a
    * security-relevant claim before the session that claim is *about* has actually loaded would be a
    * boot-time flash of a banner that might immediately vanish once auth turns out to be enabled — the
-   * same "no boot-time render flash" contract `AuthStore`'s own class doc already promises the
+   * same "no boot-time render flash" contract `AuthFacade`'s own class doc already promises the
    * sidebar. Sits in `app.ts` (not `AppSidebar`) because it renders in `app.html`, outside the
    * sidebar entirely, in the shared `.shell-banners` stack (`app.css`'s own comment explains why
    * that stack is `position: fixed`, and why it must be a *stack* rather than one strip per banner).
@@ -105,7 +97,7 @@ export class App {
 
   /**
    * The one silent-degradation case docs/plans/done/SYSTEM-STATUS-PLAN.md §1/§3.1 names: the SSE `/api/live`
-   * connection is `closed` (its own 60s retry loop, `core/live/live-store.ts#SSE_RETRY_INTERVAL_MS`,
+   * connection is `closed` (its own 60s retry loop, `core/live/live-facade.ts#SSE_RETRY_INTERVAL_MS`,
    * exhausted at least once) while the backend's REST API is still perfectly `reachable()` — every
    * "live" surface in the app has already silently fallen back to its own 5s poll
    * (`core/fleet/fleet-store.ts#POLL_INTERVAL_MS`, `features/command/command-facade.ts`'s identical
@@ -132,8 +124,8 @@ export class App {
     afterNextRender(() => leafletWarmup.schedule());
 
     // Full-bleed auto-collapse (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.1 rule 5, F11). This class owns the
-    // single router read and pushes it into `SidebarStore`, which layers it under any manual toggle
-    // (see that store's own precedence doc) — the sidebar component itself stays router-agnostic.
+    // single router read and pushes it into `SidebarFacade`, which layers it under any manual toggle
+    // (see `core/shell/state/sidebar.model.ts`'s own precedence doc) — the sidebar component itself stays router-agnostic.
     // Seeded eagerly as well as on every `NavigationEnd`, so a first load straight into `/fly` never
     // renders one frame of docked sidebar before the first navigation event arrives.
     this.sidebar.enterRoute(routeTreeHasFullBleed(this.router.routerState.snapshot.root));

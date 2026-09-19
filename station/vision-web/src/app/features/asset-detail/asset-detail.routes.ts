@@ -1,19 +1,17 @@
 import type { Routes } from '@angular/router';
 
 /**
- * The `/assets/:assetId` route (the Devices page's asset-first list "Open" target,
- * docs/main/CYCLES-PLAN.md §11, CD-b item 2). Split into its own file per
- * vision-web/docs/plans/done/UI-STRUCTURE-PLAN.md §2.3/§3 (B8) — see `features/fly/fly.routes.ts`'s doc
- * comment for why.
+ * The `/assets/:assetId` route's own route entry, kept to a **lazy boundary only** (docs/plans/active/NGRX-MIGRATION-PLAN.md
+ * §9, wave N-split). `app.routes.ts` imports every feature's own `<feature>.routes.ts` **statically**, so
+ * anything named here lands in the initial bundle — including, transitively, any NgRx slice a
+ * `providers:` array on this route would reference. The real routes, and the `provideState`/
+ * `provideEffects` pair they need, therefore live in `asset-detail.page-routes.ts` behind this `loadChildren`.
+ *
+ * See `features/fly/fly.page-routes.ts` for what that file then looks like.
  */
 export const ASSET_DETAIL_ROUTES: Routes = [
   {
     path: 'assets/:assetId',
-    title: 'Asset · Vision',
-    // Param named `:assetId` (not `:id`) so it matches `AssetDetailPage.assetId`'s own input name
-    // exactly — `withComponentInputBinding()` binds a route param to a component input only when
-    // the names match (docs/plans/done/MVP2-PLAN.md §V, V-b — fixed a long-flagged Gotcha; see that entry in
-    // vision-web/MODULE.md for how this was silently broken before and what fixing it restores).
-    loadComponent: () => import('./asset-detail').then((m) => m.AssetDetailPage),
+    loadChildren: () => import('./asset-detail.page-routes').then((m) => m.ASSET_DETAIL_PAGE_ROUTES),
   },
 ];

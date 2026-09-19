@@ -1,16 +1,26 @@
 import { TestBed } from '@angular/core/testing';
-import { signal } from '@angular/core';
 import { provideRouter } from '@angular/router';
+import { Store } from '@ngrx/store';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { DrawingsStore } from '../map-data/drawings-store';
-import { LayersStore } from '../map-data/layers-store';
-import { MarksStore } from '../map-data/marks-store';
-import { TracksStore } from '../map-data/tracks-store';
-import { GeofenceStore } from '../geofence/geofence-store';
-import { SystemStatusStore } from '../system-status/system-status-store';
-import { FleetMapStore } from '../map/map-store';
-import { LiveStore } from './live-store';
+import { GeofenceFacade } from '../geofence/geofence-facade';
+import { DrawingsFacade } from '../map-data/drawings-facade';
+import { LayersFacade } from '../map-data/layers-facade';
+import { MarksFacade } from '../map-data/marks-facade';
+import { MapFacade } from '../map/map-facade';
+import { SystemStatusFacade } from '../system-status/system-status-facade';
+import { provideAppState } from '../state/app-state';
+import { provideDrawingsState } from '../map-data/state/drawings.providers';
+import { provideGeofenceState } from '../geofence/state/geofence.providers';
+import { provideLayersState } from '../map-data/state/layers.providers';
+import { provideMarksState } from '../map-data/state/marks.providers';
+import { provideMapState } from '../map/state/map.providers';
+import { provideRouteState } from '../map-data/state/route.providers';
+import { provideWeatherState } from '../weather/state/weather.providers';
+import { provideTelemetryState } from '../telemetry/state/telemetry.providers';
+import { provideDetectionsState } from '../detections/state/detections.providers';
+import { LiveFacade } from './live-facade';
+import { LiveSocketActions } from './state/live.actions';
 import { PollScheduler } from '../poll-scheduler';
 import { VisionApi } from '../api/vision-api';
 import { ToastService } from '../toast.service';
@@ -42,9 +52,37 @@ import type { AssetSummary } from '../api/models';
  * The seven root stores &sect;2's table names. The eighth row, `/command`'s own 5s
  * `GET /api/fleet/summary` (wave L8a), is **not** here: `CommandFacade` has no TestBed harness in
  * this repo (only `command-logic.spec.ts`, a pure-logic file) and standing one up would mean faking
- * `Router`/`ActivatedRoute`/`AuthStore`/`WeatherStore`/`RouteStore` for one number. Its retirement
+ * `Router`/`ActivatedRoute`/`AuthFacade`/`WeatherFacade`/`RouteFacade` for one number. Its retirement
  * is pinned instead by `features/fleet/summary-refresh-logic.spec.ts` and stated as arithmetic in
  * &sect;9 of the plan, labelled as such.
+ *
+ * <h2>docs/plans/active/NGRX-MIGRATION-PLAN.md wave N6</h2>
+ * Every root store this file drives moved to NgRx this wave (`MarksStore`→`MarksFacade`,
+ * `LayersStore`→`LayersFacade`, `DrawingsStore`→`DrawingsFacade`, `GeofenceStore`→`GeofenceFacade`,
+ * `FleetMapStore`→`MapFacade`; `TracksStore`→`TracksFacade` is imported nowhere here, unchanged from
+ * before — see the "deliberately absent" note below). `provideAppState()` plus each page-scoped slice's own `provide<Domain>State()` replaces the old hand-rolled
+ * `{ provide: LiveFacade, useValue: stubLiveFacade(transport) }`: `LiveFacade` itself is untouched
+ * `core/live/**` territory (out of this wave's scope) and every migrated slice's own gate effect now
+ * reads the real `live` feature state through its own selectors (NGRX-MIGRATION-PLAN.md §9's "never
+ * inject `LiveFacade` into an effect" rule) — so the only way left to drive `transport` here is to
+ * dispatch the same `LiveSocketActions.opened`/`closed` the real gateway would, straight onto the real
+ * `Store`. `MapFacade.markers` still composes the real `LiveFacade` directly (facade-to-facade, not
+ * effect-level — the rule's own distinction), so this file no longer needs to fake it at all.
+ *
+ * <h2>wave N4b — `fleetEffects` rides along for free, and must be silenced, not counted</h2>
+ * `provideAppState()` now also root-registers `fleet`/`systemStatus` and their effects
+ * (`core/state/app-state.ts`'s own doc comment). Unlike a `providedIn: 'root'` class — lazily
+ * constructed only once something actually injects it, which is why the pre-N4b `SystemStatusStore`
+ * needed its own explicit `TestBed.inject(SystemStatusStore)` line below to start polling at all —
+ * a root-registered NgRx *effect* starts the moment `EffectsRunner` boots, which happens as soon as
+ * this file's very first `TestBed.inject(Store)` call below realizes the environment injector,
+ * **whether or not anything ever injects `FleetFacade`**. That means `fleet.effects.ts#gate$` fires
+ * `api.listDevices()`/`api.listStreams()` on this very spec's `countingApi` too, even though `/command`
+ * never reads `FleetFacade` at all — `countingApi` answers both (unwrapped by `record(...)`, so they
+ * are never counted) purely so that call doesn't throw and kill the effect; `system-status.effects.ts
+ * #gate$` and its 15s poll is the one that genuinely belongs to this file's own measurement, and
+ * still gets there via the same "root effect starts at `Store` injection" mechanism — the explicit
+ * `TestBed.inject(SystemStatusFacade)` below is now read-only bookkeeping, not what starts the poll.
  */
 const WINDOW_MS = 60_000;
 
@@ -88,21 +126,11 @@ function countingApi(counts: Counts, assets: readonly AssetSummary[]) {
       recentUsages: [{ usageId: 'u-1', startedAt: 't0', sampleCount: 1 }],
     }),
     usageTelemetry: record('GET /api/usages/{id}/telemetry', []),
-  };
-}
-
-/** Real Angular signals so every store's own `effect()`/`computed` reacts as it would in the app. */
-function stubLiveStore(state: LiveConnectionState) {
-  const telemetry = signal<readonly never[]>([]);
-  return {
-    connectionState: signal<LiveConnectionState>(state),
-    mapEvents: signal([]).asReadonly(),
-    zoneEvents: signal([]).asReadonly(),
-    systemStatus: signal(undefined).asReadonly(),
-    fleet: signal(undefined).asReadonly(),
-    telemetryFor: () => telemetry.asReadonly(),
-    trackTelemetry: vi.fn(),
-    untrackTelemetry: vi.fn(),
+    // Deliberately *not* wrapped in `record(...)` — see this file's own "wave N4b" doc comment above:
+    // `fleet.effects.ts#gate$` now root-starts for free and needs an answer, but its own request rate
+    // is `fleet-store.spec.ts`/`fleet.effects.spec.ts` territory, not this file's.
+    listDevices: vi.fn().mockResolvedValue([]),
+    listStreams: vi.fn().mockResolvedValue([]),
   };
 }
 
@@ -132,30 +160,40 @@ async function measure(transport: LiveConnectionState, assets: readonly AssetSum
 
   TestBed.configureTestingModule({
     providers: [
-      MarksStore,
-      LayersStore,
-      DrawingsStore,
-      TracksStore,
-      GeofenceStore,
-      SystemStatusStore,
-      FleetMapStore,
+      provideAppState(), provideMapState(), provideRouteState(), provideWeatherState(), provideTelemetryState(), provideDetectionsState(),
+      provideMarksState(), provideLayersState(), provideDrawingsState(), provideGeofenceState(),
+      MarksFacade, LayersFacade, DrawingsFacade, GeofenceFacade,
+      SystemStatusFacade,
+      MapFacade,
       PollScheduler,
       { provide: VisionApi, useValue: api },
       { provide: ToastService, useValue: toasts },
       { provide: UndoToastService, useValue: { show: vi.fn() } },
-      { provide: LiveStore, useValue: stubLiveStore(transport) },
       provideRouter([]),
     ],
   });
 
-  // `/command`'s activation set. `TracksStore` is deliberately absent — §2: it costs 0 here,
+  // `LiveFacade`'s own constructor unconditionally dispatches `Reconnect Requested` (mirrors the old
+  // `LiveStore`'s own constructor `connect()` call) — and `MapFacade` (below) injects `LiveFacade`
+  // directly for `markers`' telemetry merge, so constructing it is unavoidable here just like in the
+  // real app. Under jsdom, `LiveGateway.isAvailable()` is always `false` (no `EventSource`), so that
+  // first attempt always settles to `'closed'` — exactly the real app's own honest behavior the very
+  // first time it ever runs in this environment. Forcing that settle *before* setting the desired
+  // `transport`, and before any demand exists, keeps it from firing as a spurious *second* mode
+  // transition once marks/layers/drawings/geofence/map activate below.
+  const store = TestBed.inject(Store);
+  TestBed.inject(LiveFacade);
+  await drain();
+  store.dispatch(transport === 'open' ? LiveSocketActions.opened() : LiveSocketActions.closed());
+
+  // `/command`'s activation set. `TracksFacade` is deliberately absent — §2: it costs 0 here,
   // because only `features/asset-detail/asset-detail-facade.ts` ever activates it.
-  TestBed.inject(MarksStore).activate();
-  TestBed.inject(LayersStore).activate();
-  TestBed.inject(DrawingsStore).activate();
-  TestBed.inject(GeofenceStore).activate();
-  TestBed.inject(SystemStatusStore); // root singleton, polls from construction on every page
-  TestBed.inject(FleetMapStore); // page-provided, polls from construction
+  TestBed.inject(MarksFacade).activate();
+  TestBed.inject(LayersFacade).activate();
+  TestBed.inject(DrawingsFacade).activate();
+  TestBed.inject(GeofenceFacade).activate();
+  TestBed.inject(SystemStatusFacade); // read-only here now — see this file's "wave N4b" doc comment
+  TestBed.inject(MapFacade); // page-provided, dispatches `activated()` from its own constructor
   TestBed.tick();
   await drain();
 

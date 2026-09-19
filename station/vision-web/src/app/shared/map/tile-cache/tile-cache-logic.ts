@@ -9,7 +9,7 @@
 
 /**
  * One cache key per layer+zoom/x/y (docs/plans/done/MVP3-PLAN.md: "per-layer keying incl. zoom") — the same
- * `{z}/{x}/{y}` a tile is fetched at is what the layer's `MapLayerId` (`core/settings/settings-store.ts`)
+ * `{z}/{x}/{y}` a tile is fetched at is what the layer's `MapLayerId` (`core/settings/settings-facade.ts`)
  * distinguishes: two layers can tile the same `z/x/y` slot with completely different imagery
  * (Standard vs. Satellite over the same coordinates), so the layer must be part of the key, not
  * an afterthought. The tile host is part of the key too: when a layer's source changes (Night

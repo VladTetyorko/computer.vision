@@ -1,13 +1,13 @@
 import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, input, viewChild } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
-import { AuthStore } from '../../../core/auth/auth-store';
-import { FleetStore } from '../../../core/fleet/fleet-store';
-import { LiveStore } from '../../../core/live/live-store';
-import { SidebarStore } from '../../../core/shell/sidebar-store';
-import { ThemeStore } from '../../../core/shell/theme-store';
+import { AuthFacade } from '../../../core/auth/auth-facade';
+import { FleetFacade } from '../../../core/fleet/fleet-facade';
+import { LiveFacade } from '../../../core/live/live-facade';
+import { SidebarFacade } from '../../../core/shell/sidebar-facade';
+import { ThemeFacade } from '../../../core/shell/theme-facade';
 import { shellStatusLabel, shellStatusSeverity } from '../../../core/system-status/system-status-logic';
-import { SystemStatusStore } from '../../../core/system-status/system-status-store';
-import { GlobalOverlayStore } from '../../../core/ui/overlay-store';
+import { SystemStatusFacade } from '../../../core/system-status/system-status-facade';
+import { OverlayFacade } from '../../../core/ui/overlay-facade';
 import { DemoButton } from '../../../features/demo/demo-button/demo-button';
 import { NAV_MODES, type NavMode } from '../../../features/hubs/nav-entries';
 import { Icon } from '../icon';
@@ -50,7 +50,7 @@ import { NotificationBell } from '../notification-bell';
  * (`system`, `NavMode.footer === true`, rendered in `.sidebar-foot` next to the identity chip) —
  * exactly the split WAREHOUSE-UX-PLAN.md §3.1's own mermaid diagram draws.
  *
- * **`effectiveCollapsed`** simply re-exposes `SidebarStore.collapsed`, which owns the whole
+ * **`effectiveCollapsed`** simply re-exposes `SidebarFacade.collapsed`, which owns the whole
  * override/route/preference precedence (see that store's own class doc). This component deliberately
  * knows nothing about routing — it neither reads the router nor takes a `fullBleed` input any more;
  * `app.ts` owns the single router subscription and pushes the result into the store, keeping this a
@@ -91,7 +91,7 @@ import { NotificationBell } from '../notification-bell';
  * `<svg>` idiom — `shared/ui/icon-registry.ts` is out of this task's file scope, so this follows the
  * pre-existing "a bespoke inline svg is fine for a one-off glyph" precedent that file itself names,
  * rather than adding a name to the frozen registry from a file this task cannot touch). Calls
- * `ThemeStore.toggle()` directly, no facade indirection (see the `theme` field's own doc comment for
+ * `ThemeFacade.toggle()` directly, no facade indirection (see the `theme` field's own doc comment for
  * why that's fine here but not on a routed page). Shows the *current* theme's glyph — sun while
  * light is active, moon while dark is active — with `title`/`aria-label` describing the action
  * ("Switch to dark theme" while showing the sun, and vice versa). Identical markup at every width;
@@ -99,7 +99,7 @@ import { NotificationBell } from '../notification-bell';
  * sits *inside* the brand `<a routerLink="/fly">` (so it shares that corner's layout); its own click
  * handler calls `$event.stopPropagation()` after `theme.toggle()` for exactly that reason — without
  * it, the click bubbles to the anchor and the router navigates to `/fly`, which (being full-bleed)
- * then auto-collapses the sidebar via `SidebarStore.enterRoute()`. A theme click must never double as
+ * then auto-collapses the sidebar via `SidebarFacade.enterRoute()`. A theme click must never double as
  * a navigation.
  *
  * **Responsive** (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.1, docs/extracts/design/00-shell.md): ≥1024px docked
@@ -109,21 +109,22 @@ import { NotificationBell } from '../notification-bell';
  * Wave 1a has no page bar yet for a hamburger to live in (`docs/plans/done/NAV-IA-REDESIGN-PLAN.md` §3 puts the
  * page bar in Wave 2) — this component owns its own trigger rather than waiting for one.
  *
- * **The mobile sheet joins `GlobalOverlayStore`** (docs/plans/done/UI-STATE-PLAN.md §1/§2.2) as `'sidebar-mobile'`
+ * **The mobile sheet joins `OverlayFacade`** (docs/plans/done/UI-STATE-PLAN.md §1/§2.2, now an NgRx
+ * slice per docs/plans/active/NGRX-MIGRATION-PLAN.md §8) as `'sidebar-mobile'`
  * — it used to be a plain local `signal(false)`, invisible to the identity menu/notification bell it
  * shares this always-mounted shell with, so opening one could leave a *second* thing open behind it
  * (§1 D1/D3, generalized past just the two `<details>`-turned-overlays the plan's own reproduction
  * names). Now opening any one of the three closes the other two, and the same `Escape`/outside-click/
  * navigation rules apply here too, for free. `mobileOpen` is `computed(() =>
- * overlays.isOpen('sidebar-mobile'))` rather than the store's own bare boolean — same template usage
+ * overlays.isOpen('sidebar-mobile'))` rather than a bare boolean — same template usage
  * as before (`[class.mobile-open]="mobileOpen()"`), no call-site churn. The hamburger button registers
  * itself as `'sidebar-mobile'`'s trigger the same way `identity-chip.ts`/`notification-bell.ts` do —
  * except this one is swapped out for the scrim while the sheet is open (`app-sidebar.html`'s own
- * `@if`/`@else`), so `GlobalOverlayStore.register`'s own doc comment on re-registration covers exactly
+ * `@if`/`@else`), so `OverlayHostRegistry.register`'s own doc comment on re-registration covers exactly
  * this component. The local `(keydown.escape)="closeMobile()"` binding this `<aside>` root used to
- * carry is removed — the store's one document-level listener (docs/plans/done/UI-STATE-PLAN.md §2.2 rule 3: "one
- * listener pair … not one per component") now covers it, and covers strictly more (any focus anywhere
- * on the page, not just inside `.sidebar`).
+ * carry is removed — `core/ui/state/overlay.effects.ts`'s one document-level listener
+ * (docs/plans/done/UI-STATE-PLAN.md §2.2 rule 3: "one listener pair … not one per component") now
+ * covers it, and covers strictly more (any focus anywhere on the page, not just inside `.sidebar`).
  */
 @Component({
   selector: 'vision-app-sidebar',
@@ -133,21 +134,21 @@ import { NotificationBell } from '../notification-bell';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class AppSidebar {
-  protected readonly sidebar = inject(SidebarStore);
-  protected readonly fleet = inject(FleetStore);
+  protected readonly sidebar = inject(SidebarFacade);
+  protected readonly fleet = inject(FleetFacade);
   /** Backs the foot's theme-toggle button (docs/plans/done/VISUAL-REFRESH-PLAN.md Wave 1) — a shared shell
    *  component, not a routed feature page, so `core/ui/architecture.spec.ts`'s "routed page injects
    *  only its facade" guard doesn't scan this file at all (it globs `features/**` only); the
    *  `Settings › Appearance` control (`features/settings/account-settings.ts`) IS a routed page and
    *  goes through `AccountSettingsFacade` instead for exactly that reason. */
-  protected readonly theme = inject(ThemeStore);
-  private readonly auth = inject(AuthStore);
-  private readonly liveStore = inject(LiveStore);
+  protected readonly theme = inject(ThemeFacade);
+  private readonly auth = inject(AuthFacade);
+  private readonly liveStore = inject(LiveFacade);
   /** Backs the shell rollup dot below (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.2) — the same "shared
    *  shell component, not a routed page" carve-out `theme`'s own doc comment above explains; the
    *  singleton store is already warm app-wide (see that store's own class doc), this just reads it. */
-  private readonly systemStatus = inject(SystemStatusStore);
-  private readonly overlays = inject(GlobalOverlayStore);
+  private readonly systemStatus = inject(SystemStatusFacade);
+  private readonly overlays = inject(OverlayFacade);
   private readonly hostRef = inject(ElementRef<HTMLElement>);
   /** Optional — only present while the `@else` branch (closed) renders it; see class doc's mobile-sheet paragraph. */
   private readonly hamburgerEl = viewChild<ElementRef<HTMLButtonElement>>('hamburger');
@@ -157,7 +158,7 @@ export class AppSidebar {
    * the one filter left here now that every `badge: 'soon'` scaffold entry has left `NAV_MODES`
    * outright (docs/plans/active/WAREHOUSE-UX-PLAN.md wave W1; `nav-entries.ts`'s own class doc has the
    * full writeup of what replaced the old `badge`-drop half of this filter). Reads
-   * `AuthStore.can()` directly per entry (docs/plans/active/AUTH-ROLES-PLAN.md §3.2, wave W2) rather
+   * `AuthFacade.can()` directly per entry (docs/plans/active/AUTH-ROLES-PLAN.md §3.2, wave W2) rather
    * than a single `canManage` computed pinned to `MANAGE_ORG` — every entry today happens to name
    * that one capability (F10), but a future entry naming a different one (e.g. `MANAGE_FLEET` alone)
    * is filtered correctly without this component growing a second gate.
@@ -240,7 +241,7 @@ export class AppSidebar {
     }
   });
 
-  /** The <640px off-canvas sheet's own open state — `GlobalOverlayStore`-backed (see class doc), so
+  /** The <640px off-canvas sheet's own open state — `OverlayFacade`-backed (see class doc), so
    *  it shares exclusivity/Escape/outside-click/close-on-navigation with the identity menu and
    *  notification bell. Still transient, never persisted — same reasoning as before this moved:
    *  docs/extracts/design/00-shell.md's responsive table only persists the docked/rail choice, not "was the

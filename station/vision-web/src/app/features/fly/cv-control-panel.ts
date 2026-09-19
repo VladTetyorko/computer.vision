@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
-import { FleetStore } from '../../core/fleet/fleet-store';
-import { DetectionsStore } from '../../core/detections/detections-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
+import { DetectionsFacade } from '../../core/detections/detections-facade';
 import type { EffectiveCvProfile, UpdateStreamConfigRequest } from '../../core/api/models';
 import type { BoxesMode } from '../../shared/player/player';
 import { DECLUTTER_LEVELS, DEFAULT_DECLUTTER_LEVEL, declutterLevelLabel } from '../../shared/player/detection-overlay-logic';
@@ -96,10 +96,10 @@ export class CvControlPanel {
   readonly setupRequested = output<void>();
 
   /** The detection-boxes declutter level (`FlyPage`'s own `facade.boxesMode`, itself an alias of
-   * `SettingsStore.declutterLevel` — wave W7, H12) — one shared, persisted **View** preference
+   * `SettingsFacade.declutterLevel` — wave W7, H12) — one shared, persisted **View** preference
    * (docs/plans/active/CV-SETTINGS-PLAN.md §3.5 rule 1: a control with no backend effect lives in a
    * View group and says so), never part of {@link ResolvedCvConfig}/the wire contract, so it still
-   * round-trips via a plain input/output pair rather than reading `SettingsStore` directly here. */
+   * round-trips via a plain input/output pair rather than reading `SettingsFacade` directly here. */
   readonly boxesMode = input<BoxesMode>(DEFAULT_DECLUTTER_LEVEL);
   readonly boxesModeChange = output<BoxesMode>();
   /** The four declutter levels, in cycle order — the segmented control's own `@for` source. */
@@ -128,11 +128,11 @@ export class CvControlPanel {
    *  comment for the three honest outcomes (docs/plans/active/CV-SETTINGS-PLAN.md §4 mockup). */
   protected readonly profileLine = computed(() => effectiveProfileLine(this.assetId(), this.effectiveProfile()));
 
-  private readonly fleet = inject(FleetStore);
+  private readonly fleet = inject(FleetFacade);
   /** Recent detection results and the tracks poll (`GET .../tracks`) alike — host-provided
    *  (`cockpit.ts`'s own `providers`), the same instance `CvSetupModal`, the detections strip, and
    *  `CockpitFacade` all share. See class doc's own "The tracks poll is still owned here" paragraph. */
-  protected readonly detections = inject(DetectionsStore);
+  protected readonly detections = inject(DetectionsFacade);
 
   // --- "Looking for" summary row (docs/plans/done/CV-PANEL-SPLIT-PLAN.md P1 §1.1 item 2) -------
 

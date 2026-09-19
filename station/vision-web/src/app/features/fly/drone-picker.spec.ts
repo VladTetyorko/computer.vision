@@ -4,9 +4,9 @@ import { provideRouter } from '@angular/router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DronePickerPage } from './drone-picker';
 import { VisionApi } from '../../core/api/vision-api';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
-import { LiveStore, type LiveConnectionState } from '../../core/live/live-store';
+import { LiveFacade, type LiveConnectionState } from '../../core/live/live-facade';
 import type { AssetSummary, AuthCapability, MeResponse, Role, ScopeKind } from '../../core/api/models';
 
 /**
@@ -52,10 +52,10 @@ const ROLE_SCOPE_KIND: Record<Role, ScopeKind> = {
   ADMIN: 'UNBOUNDED',
 };
 
-/** Mirrors `landing-guard.spec.ts#fakeAuthStore` — `user()`, plus `capabilities()`/`scopeKind()`
+/** Mirrors `landing-guard.spec.ts#fakeAuthFacade` — `user()`, plus `capabilities()`/`scopeKind()`
  *  (docs/plans/active/AUTH-ROLES-PLAN.md §3.2, wave W2), the fields `emptyState`
  *  (`drone-picker-facade.ts`) now reads instead of `user()?.topRole`. */
-function fakeAuthStore(user: Pick<MeResponse, 'topRole' | 'memberships'> | null = { topRole: 'ADMIN', memberships: [] }) {
+function fakeAuthFacade(user: Pick<MeResponse, 'topRole' | 'memberships'> | null = { topRole: 'ADMIN', memberships: [] }) {
   return {
     user: () => user,
     capabilities: () => (user ? ROLE_CAPABILITIES[user.topRole] : []),
@@ -69,10 +69,10 @@ function stubScheduler() {
   return { schedule: vi.fn(() => vi.fn()) };
 }
 
-/** Mirrors `fleet-store.spec.ts#stubLiveStore` — real signals, closed/undefined by default (the
- * same state the real `LiveStore` reports under jsdom, per that file's own doc comment), so the
+/** Mirrors `fleet-store.spec.ts#stubLiveFacade` — real signals, closed/undefined by default (the
+ * same state the real `LiveFacade` reports under jsdom, per that file's own doc comment), so the
  * facade's poll-vs-live effect stays on the poll path this stubbed `listAssets()` backs. */
-function stubLiveStore() {
+function stubLiveFacade() {
   return {
     connectionState: signal<LiveConnectionState>('closed').asReadonly(),
     fleet: signal<readonly AssetSummary[] | undefined>(undefined).asReadonly(),
@@ -90,9 +90,9 @@ async function render(assets: readonly AssetSummary[], user?: Pick<MeResponse, '
     providers: [
       provideRouter([]),
       { provide: VisionApi, useValue: stubApi(assets) as unknown as VisionApi },
-      { provide: AuthStore, useValue: fakeAuthStore(user) as unknown as AuthStore },
+      { provide: AuthFacade, useValue: fakeAuthFacade(user) as unknown as AuthFacade },
       { provide: PollScheduler, useValue: stubScheduler() as unknown as PollScheduler },
-      { provide: LiveStore, useValue: stubLiveStore() as unknown as LiveStore },
+      { provide: LiveFacade, useValue: stubLiveFacade() as unknown as LiveFacade },
     ],
   });
   const fixture = TestBed.createComponent(DronePickerPage);

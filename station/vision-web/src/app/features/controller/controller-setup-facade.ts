@@ -1,5 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { ControlProfileStore } from '../../core/rc/control-profile-store';
+import { ControlProfileFacade } from '../../core/rc/control-profile-facade';
 import { ToastService } from '../../core/toast.service';
 import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
@@ -52,7 +52,7 @@ const NO_KNOWN_MODE_NAMES: KnownModeNames = { names: [], assetCount: 0 };
  */
 @Injectable()
 export class ControllerSetupFacade {
-  private readonly store = inject(ControlProfileStore);
+  private readonly store = inject(ControlProfileFacade);
   private readonly toasts = inject(ToastService);
   private readonly api = inject(VisionApi);
 

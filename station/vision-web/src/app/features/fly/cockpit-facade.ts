@@ -1,32 +1,32 @@
 import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
-import { FleetStore } from '../../core/fleet/fleet-store';
-import { SettingsStore } from '../../core/settings/settings-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
+import { SettingsFacade } from '../../core/settings/settings-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
-import { TelemetryStore } from '../../core/telemetry/telemetry-store';
-import { DetectionsStore } from '../../core/detections/detections-store';
-import { SystemStatusStore } from '../../core/system-status/system-status-store';
-import { SeatStore } from '../../core/seat/seat-store';
-import { EventsStore } from '../../core/events/events-store';
-import { GeofenceStore } from '../../core/geofence/geofence-store';
-import { GeoStore } from '../../core/geo/geo-store';
+import { TelemetryFacade } from '../../core/telemetry/telemetry-facade';
+import { DetectionsFacade } from '../../core/detections/detections-facade';
+import { SystemStatusFacade } from '../../core/system-status/system-status-facade';
+import { SeatFacade } from '../../core/seat/seat-facade';
+import { EventsFacade } from '../../core/events/events-facade';
+import { GeofenceFacade } from '../../core/geofence/geofence-facade';
+import { GeoFacade } from '../../core/geo/geo-facade';
 import { hasFix } from '../../core/geo/geo-logic';
-import { GroundingStore } from './grounding-store';
-import { LiveStore } from '../../core/live/live-store';
+import { GroundingFacade } from './grounding-facade';
+import { LiveFacade } from '../../core/live/live-facade';
 import { isLiveAvailable } from '../../core/live/live-fallback-logic';
-import { MarksStore } from '../../core/map-data/marks-store';
-import { LayersStore } from '../../core/map-data/layers-store';
-import { DrawingsStore } from '../../core/map-data/drawings-store';
+import { MarksFacade } from '../../core/map-data/marks-facade';
+import { LayersFacade } from '../../core/map-data/layers-facade';
+import { DrawingsFacade } from '../../core/map-data/drawings-facade';
 import { resolveInteractionMode } from '../../core/map-data/drawings-logic';
-import { WeatherStore } from '../../core/weather/weather-store';
+import { WeatherFacade } from '../../core/weather/weather-facade';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { videoDevices } from '../../core/fleet/device-logic';
 import { ageSeconds, humanAge, selectOpenUsage, telemetryDevices } from '../../core/telemetry/telemetry-logic';
 import { canCommandReturnHome, deriveDiagnostics, derivePreflight, flightBanner, preflightSummary } from '../../core/telemetry/flight-state-logic';
 import { capitalizeLabel, filterEvents, formatConfidence } from '../../core/events/events-logic';
 import { parseWindLimitMps } from '../../core/weather/weather-logic';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { canManageOrg } from '../../core/org/org-logic';
 import type { Transport } from '../../shared/player/player';
 import { cycleBoxesMode } from '../../shared/player/detection-overlay-logic';
@@ -73,7 +73,7 @@ const ASSET_POLL_INTERVAL_MS = 5_000;
  * `PanelState`/`UiStore` and stays exactly as it was (docs/plans/done/UI-REDESIGN-PLAN.md D-D: the map inset is
  * a glanceable, separately-persisted toggle, not a tool-rail drawer, and per docs/plans/done/UI-ARCHITECTURE-PLAN.md
  * a non-mutually-exclusive toggle like this one lives in the feature facade, not `UiStore`). See
- * `core/panel-state.ts`'s own doc comment for why this isn't routed through `SettingsStore`. */
+ * `core/panel-state.ts`'s own doc comment for why this isn't routed through `SettingsFacade`. */
 const MAP_VISIBLE_KEY = 'vision.fly.mapVisible';
 
 /**
@@ -135,39 +135,39 @@ export class CockpitFacade {
   private readonly route = inject(ActivatedRoute);
   private readonly scheduler = inject(PollScheduler);
   /** Named `liveStore`, not `live` — this class already has a public `live` computed (below,
-   * "stream() !== undefined"), unrelated to `LiveStore`'s own connection state. */
-  private readonly liveStore = inject(LiveStore);
-  private readonly auth = inject(AuthStore);
+   * "stream() !== undefined"), unrelated to `LiveFacade`'s own connection state. */
+  private readonly liveStore = inject(LiveFacade);
+  private readonly auth = inject(AuthFacade);
 
-  readonly fleet = inject(FleetStore);
-  readonly settings = inject(SettingsStore);
-  readonly telemetry = inject(TelemetryStore);
-  readonly detections = inject(DetectionsStore);
+  readonly fleet = inject(FleetFacade);
+  readonly settings = inject(SettingsFacade);
+  readonly telemetry = inject(TelemetryFacade);
+  readonly detections = inject(DetectionsFacade);
   /** `providedIn: 'root'` singleton, injected here rather than read in `cockpit.ts` per
    * `architecture.spec.ts`'s own rule (a routed page injects only its facade) — {@link heroStatus}
    * below is its one reader in this cockpit. */
-  private readonly systemStatus = inject(SystemStatusStore);
+  private readonly systemStatus = inject(SystemStatusFacade);
   /** The asset's two seats (docs/plans/active/CREW-CONTROL-PLAN.md §3.1/§3.6, wave W4) — page-provided
    * like every other store here (`CockpitPage`'s own `providers` array), mirroring `features/crew/
    * crew-facade.ts`'s identical injection. The pilot's cockpit only ever reads the *camera* seat
    * (`cameraSeatHeldByOther`/`cameraSeatHolderLabel` below); the flight seat is this pilot's own by
    * construction of being on this page at all and has no reader here. */
-  readonly seats = inject(SeatStore);
-  readonly events = inject(EventsStore);
-  readonly geofence = inject(GeofenceStore);
+  readonly seats = inject(SeatFacade);
+  readonly events = inject(EventsFacade);
+  readonly geofence = inject(GeofenceFacade);
   /** Visual-geolocation corrections (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3/§3.4/§3.8, wave H6) — the
    * divergence chip/detail popover (`fly-osd.ts`) and `mapCorrections` below both read this directly. */
-  readonly geo = inject(GeoStore);
+  readonly geo = inject(GeoFacade);
   /**
    * Custody grounding (docs/plans/active/ASSET-FLOWS-PLAN.md §2 "S1 gate semantics", wave WB1) — its
    * own class, not folded into this facade's own state, so `cockpit-facade.ts`'s source stays free
    * of every readiness-API literal token `core/telemetry/preflight-readiness-independence.spec.ts`
-   * scans for (`GroundingStore`/`groundedReason` match none of them): the live-telemetry preflight
+   * scans for (`GroundingFacade`/`groundedReason` match none of them): the live-telemetry preflight
    * checklist must never be able to observe that the readiness API exists, even transitively through
    * this facade. {@link groundedReason} below is a plain pass-through — see that store's own doc
    * comment for the actual fetch/parse.
    */
-  private readonly grounding = inject(GroundingStore);
+  private readonly grounding = inject(GroundingFacade);
   /**
    * The three halves of the Common Operational Picture (docs/plans/done/MAP-REWORK-PLAN.md §5.2) — exposed as
    * whole stores (not thin passthroughs), mirroring `geofence` above: `cockpit.html` wires
@@ -177,9 +177,9 @@ export class CockpitFacade {
    * `providedIn: 'root'` singletons directly (non-routed presentational children, per
    * `architecture.spec.ts`'s own carve-out).
    */
-  readonly marks = inject(MarksStore);
-  readonly layers = inject(LayersStore);
-  readonly drawings = inject(DrawingsStore);
+  readonly marks = inject(MarksFacade);
+  readonly layers = inject(LayersFacade);
+  readonly drawings = inject(DrawingsFacade);
 
   /**
    * The map inset's single `[interactionMode]`, folded from the two independent arming states that
@@ -188,7 +188,7 @@ export class CockpitFacade {
    * this is the one place they meet.
    */
   readonly interactionMode = computed(() => resolveInteractionMode(this.marks.armed(), this.drawings.mode()));
-  private readonly weather = inject(WeatherStore);
+  private readonly weather = inject(WeatherFacade);
 
   // --- Header switcher's own asset list (renamed from the old FlyFacade's `pickerAssets` — see
   // this class's own doc comment) ---------------------------------------------------------------
@@ -262,7 +262,7 @@ export class CockpitFacade {
   readonly videoNotice = computed(() => videoNotice(this.live(), this.streamState()));
 
   // --- CV profile hierarchy / live config read-back (docs/plans/active/CV-SETTINGS-PLAN.md §3, wave
-  // W7) — the one honest replacement for the deleted `SettingsStore` CV-defaults draft (H2). Two
+  // W7) — the one honest replacement for the deleted `SettingsFacade` CV-defaults draft (H2). Two
   // independent reads, merged by `resolveCvConfig`: the asset's own effective profile
   // ({@link effectiveProfile}, §3.1's hierarchy — what the *next* Start will apply) and, once a
   // stream exists, that stream's own live config ({@link streamConfig}, `GET .../config` — H6's real
@@ -302,7 +302,7 @@ export class CockpitFacade {
    * **The one place this cockpit decides where a detection control's position comes from**
    * (docs/plans/done/STREAM-STATE-PLAN.md §3.1) — the running stream's own server-side intent while
    * something is running, the asset's own resolved CV config otherwise (wave W7 — previously this
-   * browser's `SettingsStore` draft; see {@link resolvedCvConfig}'s own doc comment for why that
+   * browser's `SettingsFacade` draft; see {@link resolvedCvConfig}'s own doc comment for why that
    * changed). The rail's off-dot, the video-surface "Turn on" chip and the drawer's Detect switch
    * all read this one value, so they cannot disagree with each other or with the backend.
    */
@@ -411,7 +411,7 @@ export class CockpitFacade {
   // already reads, no second telemetry source.
   readonly failsafeBanner = computed(() => flightBanner(this.telemetry.latest()));
 
-  /** `GroundingStore#groundedReason` for the currently tracked asset — `undefined` unless it carries
+  /** `GroundingFacade#groundedReason` for the currently tracked asset — `undefined` unless it carries
    * an open `MAINTENANCE_GROUNDED:` blocker. Renders `<vision-grounded-banner>` in the same
    * `.grid-banner` area as {@link failsafeBanner} above, and disables Arm via
    * `flight-command-panel.ts#armDisabled` (docs/plans/active/ASSET-FLOWS-PLAN.md §2, wave WB1). */
@@ -595,7 +595,7 @@ export class CockpitFacade {
 
   /**
    * `<vision-tactical-map>`'s `[corrections]` (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) — 0
-   * or 1 rows, the followed asset's own latest visual-geolocation correction. `GeoStore.latest()`
+   * or 1 rows, the followed asset's own latest visual-geolocation correction. `GeoFacade.latest()`
    * reads `undefined` on a `NO_FIX`/not-yet-computed row (and always while `vision.geo.visual.enabled`
    * is off, since the poll then either 404s silently or never returns this asset) — either way an
    * empty array here, so the map layer is simply absent, never a fabricated marker.
@@ -608,7 +608,7 @@ export class CockpitFacade {
   readonly latencySeconds = signal<number | null>(null);
   readonly transport = signal<Transport>('hls');
   /** The shared, persisted declutter level (docs/plans/active/CV-SETTINGS-PLAN.md wave W7, H12) —
-   * aliases `SettingsStore.declutterLevel` directly (the exact same `WritableSignal` instance, not a
+   * aliases `SettingsFacade.declutterLevel` directly (the exact same `WritableSignal` instance, not a
    * copy), so this facade, `LiveFacade` and `WallTile` all read/write one preference instead of each
    * keeping its own unshared in-memory signal. `cockpit.html` still binds `[boxesMode]="facade.
    * boxesMode()"` / `(boxesModeChange)="facade.boxesMode.set($event)"` unchanged — only what's behind
@@ -659,7 +659,7 @@ export class CockpitFacade {
    * there was; now (decision E25) `DetectionsStore.tracks` is transport-aware like `results`, so this
    * gates the tracks session's "wanted" state instead — `false` tears down both the poll and any live
    * read, `true` lets `tracks()` resolve to live `tracks:<assetId>` data whenever it can, falling back
-   * to the same poll only without an asset id or while `LiveStore` isn't open (that class's own doc
+   * to the same poll only without an asset id or while `LiveFacade` isn't open (that class's own doc
    * comment). The plan's own formula is "the Vision drawer is open OR the
    * per-frame lock is non-zero OR the last follow read was LOST"; the middle and last clauses are
    * exactly {@link lockedTrackId}/{@link follow} below. **The first clause is a deliberate
@@ -738,7 +738,7 @@ export class CockpitFacade {
     // initial `signal()` value above already restored whatever was last saved.
     effect(() => writePersistedFlag(MAP_VISIBLE_KEY, this.mapVisible()));
 
-    // Keeps the weather chip fresh as the flown asset's own position changes — `WeatherStore.track`
+    // Keeps the weather chip fresh as the flown asset's own position changes — `WeatherFacade.track`
     // itself no-ops instantly unless the 10-minute cache is actually stale (docs/plans/done/OPS-CORE-PLAN.md §W).
     effect(() => this.weather.track(this.weatherPosition()));
 
@@ -836,7 +836,7 @@ export class CockpitFacade {
 
     // Visual-geolocation corrections (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4, wave H6) — keyed
     // directly on `activeAssetId()`, no device/stream indirection to guard on (unlike telemetry/
-    // detections above): `GeoStore.track()` is already a no-op for an unchanged assetId (its own
+    // detections above): `GeoFacade.track()` is already a no-op for an unchanged assetId (its own
     // `lastTrackAssetId` field), so this effect needs no derived-primitive guard of its own.
     effect(() => {
       const assetId = this.activeAssetId();
@@ -848,7 +848,7 @@ export class CockpitFacade {
     });
 
     // Custody grounding (docs/plans/active/ASSET-FLOWS-PLAN.md §2, wave WB1) — same per-asset
-    // track/reset shape as `geo` above; `GroundingStore.track()` is a no-op for an unchanged
+    // track/reset shape as `geo` above; `GroundingFacade.track()` is a no-op for an unchanged
     // assetId (its own `lastTrackedAssetId` field), so no derived-primitive guard needed here either.
     effect(() => {
       const assetId = this.activeAssetId();
@@ -860,7 +860,7 @@ export class CockpitFacade {
     });
 
     // Seats (docs/plans/active/CREW-CONTROL-PLAN.md §3.1/§3.6, wave W4) — keyed on `activeAssetId()`
-    // alone, mirroring `geo.track()`/`grounding.track()` immediately above: `SeatStore.track()` is
+    // alone, mirroring `geo.track()`/`grounding.track()` immediately above: `SeatFacade.track()` is
     // already a no-op for an unchanged assetId, so no derived-primitive guard needed here either.
     effect(() => {
       const assetId = this.activeAssetId();
@@ -957,7 +957,7 @@ export class CockpitFacade {
     void this.refreshPoll();
     this.assetPollStopFn = this.scheduleAssetPoll();
 
-    // Pause/resume the asset poll against `LiveStore`'s own connection state
+    // Pause/resume the asset poll against `LiveFacade`'s own connection state
     // (docs/plans/done/SCALE-100-PLAN.md §5 S6, item 1) — mirrors
     // `core/fleet/fleet-store.ts#FleetStore`'s identical transport-switch effect: pause while live
     // is open, resume and refetch immediately the moment it drops (the switcher list/active asset
@@ -973,7 +973,7 @@ export class CockpitFacade {
     // switcher's own list exactly as fresh while live as the 5s poll kept it before — only
     // `loadAsset(id)`'s own richer `AssetDetails` (`devices`/`recentUsages` — no matching live
     // topic) actually goes stale for the length of the live connection, the same accepted
-    // trade-off `GeofenceStore` takes for its own near-static data.
+    // trade-off `GeofenceFacade` takes for its own near-static data.
     effect(() => {
       const snapshot = this.liveStore.fleet();
       if (snapshot !== undefined) {

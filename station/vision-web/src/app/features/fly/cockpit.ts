@@ -1,10 +1,17 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, effect, inject, input, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { TelemetryStore } from '../../core/telemetry/telemetry-store';
-import { DetectionsStore } from '../../core/detections/detections-store';
-import { WeatherStore } from '../../core/weather/weather-store';
-import { GeoStore } from '../../core/geo/geo-store';
-import { SeatStore } from '../../core/seat/seat-store';
+import { TelemetryFacade } from '../../core/telemetry/telemetry-facade';
+import { DetectionsFacade } from '../../core/detections/detections-facade';
+import { WeatherFacade } from '../../core/weather/weather-facade';
+import { GeoFacade } from '../../core/geo/geo-facade';
+import { SeatFacade } from '../../core/seat/seat-facade';
+import { ControlProfileFacade } from '../../core/rc/control-profile-facade';
+import { ThresholdsFacade } from '../../core/ops/thresholds-facade';
+import { DrawingsFacade } from '../../core/map-data/drawings-facade';
+import { GeofenceFacade } from '../../core/geofence/geofence-facade';
+import { LayersFacade } from '../../core/map-data/layers-facade';
+import { MarksFacade } from '../../core/map-data/marks-facade';
+import { OrgFacade } from '../../core/org/org-facade';
 import { UiStore } from '../../core/ui/ui-store';
 import { Player } from '../../shared/player/player';
 import { FollowHud } from '../../shared/player/follow-hud/follow-hud';
@@ -18,7 +25,7 @@ import { KebabMenu } from '../../shared/ui/kebab-menu';
 import { FlyOsd } from './fly-osd';
 import { FailsafeBanner } from './failsafe-banner';
 import { GroundedBanner } from './grounded-banner';
-import { GroundingStore } from './grounding-store';
+import { GroundingFacade } from './grounding-facade';
 import { DiagnosticsCard } from './diagnostics-card';
 import { ReturnHomeButton } from '../../shared/ui/return-home-button';
 import { CvControlPanel } from './cv-control-panel';
@@ -55,7 +62,7 @@ type CockpitDialog = 'stop' | 'cv-setup';
  *
  * **Layered per docs/plans/done/UI-ARCHITECTURE-PLAN.md (wave W1)**: every store/service injection, derived
  * read-model, and HTTP-backed command lives in {@link CockpitFacade} (provided below, alongside
- * `TelemetryStore`/`DetectionsStore`/`WeatherStore` — one poller-set per route activation). This
+ * `TelemetryStore`/`DetectionsStore`/`WeatherFacade` — one poller-set per route activation). This
  * component is left holding only:
  *   - the route-bound `assetId`/`watch`/`autostart` inputs (only a component can receive one) and
  *     the constructor wiring that forwards them into the facade — `assetId` is now the route's own
@@ -108,13 +115,34 @@ type CockpitDialog = 'stop' | 'cv-setup';
   styleUrl: './cockpit.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Own instance per route activation, identical convention to `LivePage`/`AssetDetailPage`.
-  // `WeatherStore` (docs/plans/done/OPS-CORE-PLAN.md §W) is page-provided too — see that class's own doc
-  // comment for why it can't be a shared root singleton. `SeatStore` (docs/plans/active/CREW-CONTROL-
+  // `WeatherFacade` (docs/plans/done/OPS-CORE-PLAN.md §W) is page-provided too — see that class's own doc
+  // comment for why it can't be a shared root singleton. `SeatFacade` (docs/plans/active/CREW-CONTROL-
   // PLAN.md §3.6, wave W4) is page-provided for the identical reason, mirroring `features/crew/crew.ts`'s
-  // own providers array. `CockpitFacade` shares this same injector so its own `inject(TelemetryStore)`/
-  // `inject(DetectionsStore)`/`inject(WeatherStore)`/`inject(SeatStore)` resolve to these exact
+  // own providers array. `CockpitFacade` shares this same injector so its own `inject(TelemetryFacade)`/
+  // `inject(DetectionsFacade)`/`inject(WeatherFacade)`/`inject(SeatFacade)` resolve to these exact
   // instances (see `CockpitFacade`'s own doc comment).
-  providers: [TelemetryStore, DetectionsStore, WeatherStore, GeoStore, SeatStore, CockpitFacade, GroundingStore],
+  // `ThresholdsFacade`/`ControlProfileFacade` joined this list in wave N-split: both are read only
+  // from inside this tree (`FlyHud`/`FlyOsd`/`RcMonitor`), so providing them here is what lets
+  // `fly.page-routes.ts` register their slices instead of `core/state/app-state.ts`.
+  // The map-data facades joined this list in wave N4 (NGRX-MIGRATION-PLAN.md §9): they are
+  // page-provided now, so their slices ride this route instead of the root injector. Needed by
+  // `CockpitFacade` *and* by every control inside the map inset's `<vision-map-tools>`.
+  providers: [
+    TelemetryFacade,
+    DetectionsFacade,
+    WeatherFacade,
+    GeoFacade,
+    SeatFacade,
+    ThresholdsFacade,
+    ControlProfileFacade,
+    MarksFacade,
+    LayersFacade,
+    DrawingsFacade,
+    GeofenceFacade,
+    OrgFacade,
+    CockpitFacade,
+    GroundingFacade,
+  ],
 })
 export class CockpitPage {
   /** Bound from the route by `withComponentInputBinding()` (`cockpit.routes.ts` names the segment
@@ -220,8 +248,8 @@ export class CockpitPage {
     effect(() => this.facade.setAutostart(this.autostart()));
 
     // Tactical marks (docs/plans/done/TACTICAL-MARKS-PLAN.md M5) — a captured map click always produces a
-    // `MarksStore.draft()` regardless of whether the `marks` drawer happens to be open at that
-    // moment (the map inset and the drawer are independent siblings — see `MarksStore`'s own class
+    // `MarksFacade.draft()` regardless of whether the `marks` drawer happens to be open at that
+    // moment (the map inset and the drawer are independent siblings — see `MarksFacade`'s own class
     // doc comment). Auto-reopening the drawer here is what keeps a draft from silently landing
     // out of sight if the operator armed a kind, closed the drawer, then clicked the map.
     effect(() => {

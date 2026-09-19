@@ -13,10 +13,10 @@ import { buildFollowLockPatch, buildHotKnobPatch, buildPointLockPatch, type Reso
  *
  * **Test boundary (this wave's own judgment call — the plan explicitly leaves it open, §7 D8's W3
  * row / the task brief's own "your call on the right test boundary")**: a full `CockpitFacade` has on
- * the order of twenty injected collaborators (`VisionApi`, `FleetStore`, `Router`, `ActivatedRoute`,
- * `SettingsStore`, `TelemetryStore`, `DetectionsStore`, `SeatStore`, `EventsStore`, `GeofenceStore`,
- * `GeoStore`, `GroundingStore`, `LiveStore`, `MarksStore`, `LayersStore`, `DrawingsStore`,
- * `WeatherStore`, `AuthStore`, …) and, as of this wave, no spec file anywhere in this codebase
+ * the order of twenty injected collaborators (`VisionApi`, `FleetFacade`, `Router`, `ActivatedRoute`,
+ * `SettingsFacade`, `TelemetryFacade`, `DetectionsFacade`, `SeatFacade`, `EventsFacade`, `GeofenceFacade`,
+ * `GeoFacade`, `GroundingFacade`, `LiveFacade`, `MarksFacade`, `LayersFacade`, `DrawingsFacade`,
+ * `WeatherFacade`, `AuthFacade`, …) and, as of this wave, no spec file anywhere in this codebase
  * instantiates it — building a harness for one just to count three calls would dwarf the thing being
  * measured, and would mean this spec's own setup code, not production logic, decides whether the
  * count comes out to three. Acts 2 and 3 below instead drive the **real, non-mocked** production

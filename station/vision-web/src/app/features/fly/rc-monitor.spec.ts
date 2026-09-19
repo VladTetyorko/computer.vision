@@ -9,7 +9,7 @@ import { KeyboardRcInputService } from '../../core/rc/keyboard-rc-input.service'
 import { RcSource } from '../../core/rc/rc-source.service';
 import { ManualControlClient, type ManualControlEngageState } from '../../core/rc/manual-control-client';
 import { ControlActionDispatcher } from '../../core/rc/control-action-dispatcher';
-import { ControlProfileStore } from '../../core/rc/control-profile-store';
+import { ControlProfileFacade } from '../../core/rc/control-profile-facade';
 import { rulesFrom } from '../../core/rc/control-action-logic';
 import { VisionApi } from '../../core/api/vision-api';
 import type {
@@ -99,7 +99,7 @@ class FakeManualControlClient {
 
 /** The layouts store, stubbed — the drawer only ever reads `profiles`/`rules`/`catalog` and calls
  * `load`. */
-class FakeControlProfileStore {
+class FakeControlProfileFacade {
   readonly profilesSignal = signal<readonly ControlProfile[]>([]);
   readonly catalogSignal = signal<ControlCatalog | undefined>(undefined);
   readonly profiles = this.profilesSignal.asReadonly();
@@ -189,7 +189,7 @@ function render(
   fakeRc: FakeRcInputService,
   fakeClient: FakeManualControlClient,
   extras: {
-    store?: FakeControlProfileStore;
+    store?: FakeControlProfileFacade;
     dispatcher?: FakeControlActionDispatcher;
     api?: FakeVisionApi;
   } = {},
@@ -199,7 +199,7 @@ function render(
   // (wave R) needs one too — same `provideRouter([])` precedent as transmitter-view.spec.ts
   // itself; RcMonitor doesn't route anywhere on its own, it just hosts these links.
   TestBed.configureTestingModule({ providers: [provideRouter([])] });
-  const store = extras.store ?? new FakeControlProfileStore();
+  const store = extras.store ?? new FakeControlProfileFacade();
   const dispatcher = extras.dispatcher ?? new FakeControlActionDispatcher();
   const api = extras.api ?? new FakeVisionApi();
   TestBed.overrideComponent(RcMonitor, {
@@ -210,7 +210,7 @@ function render(
         KeyboardRcInputService,
         RcSource,
         { provide: ManualControlClient, useValue: fakeClient },
-        { provide: ControlProfileStore, useValue: store },
+        { provide: ControlProfileFacade, useValue: store },
         { provide: ControlActionDispatcher, useValue: dispatcher },
         // `<vision-mode-picker>` injects this too; nothing in these tests clicks Set mode, and
         // wave R's own `assetReadiness` read resolves to `undefined` by default.
@@ -255,7 +255,7 @@ describe('RcMonitor — the transmitter view (docs/plans/active/CONTROLLER-UX-PL
     const fakeRc = new FakeRcInputService();
     fakeRc.setConnected(true);
     fakeRc.axes.set([0.5, 0, 0]);
-    const store = new FakeControlProfileStore();
+    const store = new FakeControlProfileFacade();
     store.profilesSignal.set([{ ...ROVER_PROFILE, channelMap: ROVER_CHANNEL_MAP }]);
     const fixture = render(fakeRc, new FakeManualControlClient(), { store });
     fixture.componentRef.setInput('capabilities', ROVER_CAPABILITY);
@@ -295,7 +295,7 @@ describe('RcMonitor — the transmitter view (docs/plans/active/CONTROLLER-UX-PL
   });
 
   it('prefers the engaged frame\'s own channel map over the browser-resolved profile once one exists', () => {
-    const store = new FakeControlProfileStore();
+    const store = new FakeControlProfileFacade();
     store.profilesSignal.set([ROVER_PROFILE]);
     const fakeClient = new FakeManualControlClient();
     const fixture = render(new FakeRcInputService(), fakeClient, { store });
@@ -312,7 +312,7 @@ describe('RcMonitor — the transmitter view (docs/plans/active/CONTROLLER-UX-PL
   });
 
   it('shows a quiet key-legend line once the keyboard source is selected and the layout binds axes', () => {
-    const store = new FakeControlProfileStore();
+    const store = new FakeControlProfileFacade();
     store.profilesSignal.set([{ ...ROVER_PROFILE, channelMap: ROVER_CHANNEL_MAP }]);
     const fixture = render(new FakeRcInputService(), new FakeManualControlClient(), { store });
     fixture.componentRef.setInput('capabilities', ROVER_CAPABILITY);
@@ -413,7 +413,7 @@ describe('RcMonitor — mapping & mode (docs/plans/active/FLY-CONTROL-UX-PLAN.md
   });
 
   it('lists the switches the operator bound as transmitter-view rows', () => {
-    const store = new FakeControlProfileStore();
+    const store = new FakeControlProfileFacade();
     store.profilesSignal.set([ROVER_PROFILE]);
     const fixture = render(new FakeRcInputService(), new FakeManualControlClient(), { store });
     fixture.componentRef.setInput('capabilities', ROVER_CAPABILITY);
@@ -426,7 +426,7 @@ describe('RcMonitor — mapping & mode (docs/plans/active/FLY-CONTROL-UX-PLAN.md
   });
 
   it('binds no switch-gauge rows for a vehicle kind the operator has no layout for', () => {
-    const store = new FakeControlProfileStore();
+    const store = new FakeControlProfileFacade();
     store.profilesSignal.set([ROVER_PROFILE]);
     const fixture = render(new FakeRcInputService(), new FakeManualControlClient(), { store });
     fixture.componentRef.setInput('capabilities', { ...ROVER_CAPABILITY, vehicleKind: 'COPTER' as VehicleKind });
@@ -436,7 +436,7 @@ describe('RcMonitor — mapping & mode (docs/plans/active/FLY-CONTROL-UX-PLAN.md
   });
 
   it('offers the way into the setup page when nothing is bound — the empty state is the signpost (C11)', () => {
-    const store = new FakeControlProfileStore();
+    const store = new FakeControlProfileFacade();
     const fixture = render(new FakeRcInputService(), new FakeManualControlClient(), { store });
     fixture.componentRef.setInput('capabilities', ROVER_CAPABILITY);
     fixture.detectChanges();
@@ -447,7 +447,7 @@ describe('RcMonitor — mapping & mode (docs/plans/active/FLY-CONTROL-UX-PLAN.md
   });
 
   it('still offers it once switches are bound, so a layout can be changed without hunting for the page', () => {
-    const store = new FakeControlProfileStore();
+    const store = new FakeControlProfileFacade();
     store.profilesSignal.set([ROVER_PROFILE]);
     const fixture = render(new FakeRcInputService(), new FakeManualControlClient(), { store });
     fixture.componentRef.setInput('capabilities', ROVER_CAPABILITY);
@@ -459,7 +459,7 @@ describe('RcMonitor — mapping & mode (docs/plans/active/FLY-CONTROL-UX-PLAN.md
   });
 
   it('computes the mode "also on" hint from the active profile and passes it to the mode picker', () => {
-    const store = new FakeControlProfileStore();
+    const store = new FakeControlProfileFacade();
     store.profilesSignal.set([
       {
         ...ROVER_PROFILE,

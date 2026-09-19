@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
-import { CvTraceStore } from '../../core/cv-trace/cv-trace-store';
+import { CvTraceFacade } from '../../core/cv-trace/cv-trace-facade';
 import type { ActiveStream, FrameLedger, GateDecision } from '../../core/api/models';
 import { clockTime, formatRecord } from './cv-inspector-logic';
 import { CvInspectorFacade } from './cv-inspector-facade';
@@ -42,7 +42,7 @@ import { CvInspectorFacade } from './cv-inspector-facade';
   templateUrl: './cv-inspector.html',
   styleUrl: './cv-inspector.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [CvTraceStore, CvInspectorFacade],
+  providers: [CvTraceFacade, CvInspectorFacade],
 })
 export class CvInspectorPage {
   protected readonly facade = inject(CvInspectorFacade);

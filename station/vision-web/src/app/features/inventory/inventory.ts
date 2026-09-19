@@ -7,6 +7,7 @@ import { Notice } from '../../shared/ui/notice';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { Stat } from '../../shared/ui/stat';
 import { pluralize } from '../../shared/ui/text-logic';
+import { DiscoveryInboxFacade } from '../../core/discovery/discovery-inbox-facade';
 import { InventoryFacade } from './inventory-facade';
 import { MyVehicles } from './my-vehicles';
 import { VehiclesTable } from './vehicles-table';
@@ -32,7 +33,7 @@ import type { VehicleInventoryStateFilter, VehicleReadinessFilter } from './vehi
  * old Reports-page "Fleet at a glance" strip (Total/Streaming/Active/Deactivated/Needs attention),
  * which occupied the widest band on the page to answer a question nobody in a hangar asks and could
  * not be acted on at all. Counts come from `InventoryFacade#viewTiles`, computed over the same
- * filtered rows the table renders. The pick survives a reload (`InventoryViewStore`).
+ * filtered rows the table renders. The pick survives a reload (`InventoryViewStorage`).
  *
  * **Export** — Reports' one other surviving idea — is a page-bar action, a plain `<a [href]>`
  * download following the after-action-archive pattern (`VisionApi.inventoryExportUrl`/
@@ -64,7 +65,10 @@ import type { VehicleInventoryStateFilter, VehicleReadinessFilter } from './vehi
   templateUrl: './inventory.html',
   styleUrl: './inventory.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [InventoryFacade],
+  // `DiscoveryInboxFacade` is page-provided since wave N-split — see its own doc comment; the
+  // `discoveryInbox` slice `<vision-found-devices>` reads is registered by
+  // `inventory.page-routes.ts`.
+  providers: [InventoryFacade, DiscoveryInboxFacade],
 })
 export class InventoryPage {
   /** `?tab=` — bound the same way `AssetsPage`'s old `category`/`sel` inputs were

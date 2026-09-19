@@ -3,7 +3,7 @@ import { HttpErrorResponse } from '@angular/common/http';
 import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
 import { ToastService } from '../../core/toast.service';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { UiStore } from '../../core/ui/ui-store';
 import type { CvModel } from '../../core/api/models';
 import {
@@ -54,7 +54,7 @@ const ROLLBACK_DIALOG_ID = 'rollback';
 export class ModelsFacade {
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
-  private readonly auth = inject(AuthStore);
+  private readonly auth = inject(AuthFacade);
 
   private readonly modelsSignal = signal<readonly CvModel[]>([]);
   private readonly loadingSignal = signal(false);

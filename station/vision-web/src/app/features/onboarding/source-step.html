@@ -340,7 +340,7 @@
                     <span class="muted">Timeout</span>
                     <select
                       [ngModel]="facade.store.scanTimeout()"
-                      (ngModelChange)="facade.store.scanTimeout.set($event)"
+                      (ngModelChange)="facade.store.setScanTimeout($event)"
                       name="scanTimeout"
                       [disabled]="facade.store.scanning()"
                     >
@@ -624,7 +624,7 @@
 
         <div class="field wide">
           <label class="label" for="source-sim-mode">Mode</label>
-          <select id="source-sim-mode" name="simMode" [ngModel]="facade.store.simMode()" (ngModelChange)="facade.store.simMode.set($event)">
+          <select id="source-sim-mode" name="simMode" [ngModel]="facade.store.simMode()" (ngModelChange)="facade.store.setSimMode($event)">
             <option value="direct">Play a file directly</option>
             <option value="rtsp">Transmit a file over RTSP</option>
             <option value="testDrone">Test drone (moving, no file)</option>
@@ -640,7 +640,7 @@
               name="simVideoPath"
               class="field-lg"
               [ngModel]="facade.store.simVideoPath()"
-              (ngModelChange)="facade.store.simVideoPath.set($event)"
+              (ngModelChange)="facade.store.setSimVideoPath($event)"
               placeholder="/srv/videos/flight.mp4"
               required
             />
@@ -677,7 +677,7 @@
                   type="number"
                   step="any"
                   [ngModel]="facade.store.simLatitude()"
-                  (ngModelChange)="facade.store.simLatitude.set($event)"
+                  (ngModelChange)="facade.store.setSimLatitude($event)"
                   placeholder="optional"
                 />
               </div>
@@ -689,7 +689,7 @@
                   type="number"
                   step="any"
                   [ngModel]="facade.store.simLongitude()"
-                  (ngModelChange)="facade.store.simLongitude.set($event)"
+                  (ngModelChange)="facade.store.setSimLongitude($event)"
                   placeholder="optional"
                 />
               </div>
@@ -697,7 +697,7 @@
           </details>
 
           <label class="field checkbox-field">
-            <input type="checkbox" name="simAutoStart" [ngModel]="facade.store.simAutoStart()" (ngModelChange)="facade.store.simAutoStart.set($event)" />
+            <input type="checkbox" name="simAutoStart" [ngModel]="facade.store.simAutoStart()" (ngModelChange)="facade.store.setSimAutoStart($event)" />
             <span>Start streaming immediately</span>
           </label>
         }

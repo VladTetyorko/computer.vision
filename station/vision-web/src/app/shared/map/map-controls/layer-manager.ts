@@ -1,8 +1,8 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { LayersStore } from '../../../core/map-data/layers-store';
-import { AuthStore } from '../../../core/auth/auth-store';
-import { OrgStore } from '../../../core/org/org-store';
+import { LayersFacade } from '../../../core/map-data/layers-facade';
+import { AuthFacade } from '../../../core/auth/auth-facade';
+import { OrgFacade } from '../../../core/org/org-facade';
 import {
   ACCESS_LEVELS,
   accessLevelLabel,
@@ -13,7 +13,7 @@ import {
 } from '../../../core/map-data/layers-logic';
 import type { BuiltinRow, LayerRow } from '../tactical-map/tactical-map-logic';
 import type { MapLayerDef } from '../tile-cache/leaflet-loader';
-import type { MapLayerId } from '../../../core/settings/settings-store';
+import type { MapLayerId } from '../../../core/settings/settings-facade';
 import { Icon } from '../../ui/icon';
 import { Notice } from '../../ui/notice';
 import type { AccessLevel, GrantSubjectType, LayerGrant, LayerKind, MapLayer } from '../../../core/api/models';
@@ -59,12 +59,12 @@ interface SubjectOption {
  *
  * **Honest degrade on the subject pickers.** `/api/users` and `/api/groups` are an admin surface — a
  * MANAGER who may legitimately grant access to their own layer can still get a 403 listing users.
- * `OrgStore` is therefore loaded lazily and quietly (no toast) the first time an Access editor
+ * `OrgFacade` is therefore loaded lazily and quietly (no toast) the first time an Access editor
  * opens, and when it comes back empty the editor says so and still lets existing grants be
  * re-levelled or removed, rather than pretending there is nobody to add or blocking the whole panel.
  *
  * **Dev parity** (`vision.auth.enabled=false`): the dev admin resolves to `scopeKind: 'UNBOUNDED'`,
- * so the Team-layer path resolves its group list from `OrgStore.groups()` (unbounded for that
+ * so the Team-layer path resolves its group list from `OrgFacade.groups()` (unbounded for that
  * account) and every management control is available exactly as it is for a real admin — the app
  * behaves as before with zero auth.
  *
@@ -79,9 +79,9 @@ interface SubjectOption {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class LayerManager {
-  protected readonly layers = inject(LayersStore);
-  private readonly auth = inject(AuthStore);
-  protected readonly org = inject(OrgStore);
+  protected readonly layers = inject(LayersFacade);
+  private readonly auth = inject(AuthFacade);
+  protected readonly org = inject(OrgFacade);
 
   constructor() {
     // ALWAYS-ON-FLOW-PLAN.md §4 Wave C3 — see `MarksPanel`'s identical constructor comment.
@@ -157,7 +157,7 @@ export class LayerManager {
   /**
    * Groups this account may own a TEAM layer in. A MANAGER's own memberships are the honest answer
    * (`MeResponse.memberships` always ships with the session, no extra request); an ADMIN is
-   * unbounded, so their list comes from `OrgStore` once it has loaded, falling back to memberships
+   * unbounded, so their list comes from `OrgFacade` once it has loaded, falling back to memberships
    * so the control still works before/without that admin-only fetch.
    */
   protected readonly teamGroups = computed<readonly SubjectOption[]>(() => {
@@ -296,7 +296,7 @@ export class LayerManager {
   /**
    * Two steps, not an undo toast: deleting a layer cascades its marks and drawings server-side, and
    * re-creating the layer would not bring those back — so this asks first rather than promising a
-   * restore it cannot deliver (`LayersStore.remove`'s own doc comment).
+   * restore it cannot deliver (`LayersFacade.remove`'s own doc comment).
    */
   protected requestDelete(layer: MapLayer): void {
     this.confirmingDeleteSignal.set(layer.layerId);

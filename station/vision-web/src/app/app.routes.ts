@@ -100,14 +100,22 @@ export const routes: Routes = [
       ...WALL_ROUTES,
       ...MAP_ROUTES,
       ...DEVICES_ROUTES,
-      ...INVENTORY_ROUTES,
       ...WAREHOUSE_ROUTES,
       ...ONBOARDING_ROUTES,
       ...PLAYGROUND_ROUTES,
       ...PROVISIONING_ROUTES,
-      ...ASSET_DETAIL_ROUTES,
+      // The whole `/assets` family is ordered longest-path-first, deliberately
+      // (NGRX-MIGRATION-PLAN.md §9, wave N-split). Each of these is now a `loadChildren` boundary,
+      // and a boundary matches its own segments as a *prefix* where a plain `loadComponent` route
+      // had to consume the entire URL: `/assets` would otherwise swallow `/assets/:assetId`, and
+      // `/assets/:assetId` would swallow `/assets/:assetId/replay/:usageId`. Listing the deeper
+      // paths first means none can ever be shadowed, without relying on the router backtracking out
+      // of a child-match failure — the prefix-matching trap CREW-CONTROL's own `pathMatch` finding
+      // recorded. Ordering is the guarantee; nothing else here depends on it.
       ...READINESS_ROUTES,
       ...REPLAY_ROUTES,
+      ...ASSET_DETAIL_ROUTES,
+      ...INVENTORY_ROUTES,
       ...LIVE_ROUTES,
       ...SETTINGS_ROUTES,
       ...ORG_ROUTES,

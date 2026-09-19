@@ -3,14 +3,15 @@ import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AppSidebar } from './app-sidebar';
-import { AuthStore } from '../../../core/auth/auth-store';
-import { FleetStore } from '../../../core/fleet/fleet-store';
-import { EventsStore } from '../../../core/events/events-store';
-import { LiveStore } from '../../../core/live/live-store';
+import { AuthFacade } from '../../../core/auth/auth-facade';
+import { FleetFacade } from '../../../core/fleet/fleet-facade';
+import { EventsFacade } from '../../../core/events/events-facade';
+import { LiveFacade } from '../../../core/live/live-facade';
 import { VisionApi } from '../../../core/api/vision-api';
-import { SidebarStore } from '../../../core/shell/sidebar-store';
-import { ThemeStore } from '../../../core/shell/theme-store';
-import { SystemStatusStore } from '../../../core/system-status/system-status-store';
+import { SidebarFacade } from '../../../core/shell/sidebar-facade';
+import { provideAppState } from '../../../core/state/app-state';
+import { ThemeFacade } from '../../../core/shell/theme-facade';
+import { SystemStatusFacade } from '../../../core/system-status/system-status-facade';
 import { NAV_MODES } from '../../../features/hubs/nav-entries';
 import { hasCapability } from '../../../core/auth/auth-logic';
 import type { AuthCapability, OverallHealth, Role } from '../../../core/api/models';
@@ -30,7 +31,7 @@ const ROLE_CAPABILITIES: Record<Role, readonly AuthCapability[]> = {
  * `EventSource`), mirroring the pre-existing shell spec's own "fake every transitive dependency
  * purely so the tree can mount" approach (see `app.spec.ts`).
  */
-function fakeFleetStore(overrides: { streams?: unknown[]; reachable?: boolean | undefined } = {}) {
+function fakeFleetFacade(overrides: { streams?: unknown[]; reachable?: boolean | undefined } = {}) {
   return {
     streams: () => overrides.streams ?? [],
     reachable: () => (overrides.reachable === undefined ? true : overrides.reachable),
@@ -41,16 +42,16 @@ function fakeEventsStore() {
   return { activate: () => {}, release: () => {}, events: () => [] as unknown[] };
 }
 
-function fakeLiveStore(connectionState: 'connecting' | 'open' | 'closed' = 'open') {
+function fakeLiveFacade(connectionState: 'connecting' | 'open' | 'closed' = 'open') {
   return { liveEvents: () => [] as unknown[], connectionState: () => connectionState };
 }
 
 /** Only `overall` is read by `AppSidebar` (`system-status.overall()`). */
-function fakeSystemStatusStore(overall: OverallHealth | undefined) {
+function fakeSystemStatusFacade(overall: OverallHealth | undefined) {
   return { overall: () => overall };
 }
 
-function fakeAuthStore(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT') {
+function fakeAuthFacade(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT') {
   const capabilities = topRole ? ROLE_CAPABILITIES[topRole] : [];
   return {
     user: () => (topRole ? { topRole, displayName: 'Test User', username: 'test' } : null),
@@ -73,28 +74,29 @@ function render(options: {
 } = {}) {
   TestBed.configureTestingModule({
     providers: [
+      provideAppState(),
       provideRouter([
         { path: 'fly', component: StubPage },
         { path: 'command', component: StubPage },
         { path: 'assets', component: StubPage },
         { path: 'manage/system', component: StubPage },
       ]),
-      { provide: FleetStore, useValue: fakeFleetStore(options) },
-      { provide: AuthStore, useValue: fakeAuthStore(options.topRole) },
-      { provide: EventsStore, useValue: fakeEventsStore() },
-      { provide: LiveStore, useValue: fakeLiveStore(options.connectionState) },
+      { provide: FleetFacade, useValue: fakeFleetFacade(options) },
+      { provide: AuthFacade, useValue: fakeAuthFacade(options.topRole) },
+      { provide: EventsFacade, useValue: fakeEventsStore() },
+      { provide: LiveFacade, useValue: fakeLiveFacade(options.connectionState) },
       // `overall` defaults to `'OK'` — not `undefined` — so every pre-existing test in this file
       // (written before the shell rollup dot read this third axis, docs/plans/done/SYSTEM-STATUS-PLAN.md
       // §5.2) keeps its original "everything is fine" baseline unless a test explicitly opts into
       // `overall: undefined` (the pre-first-fetch state) or a degraded/down value.
-      { provide: SystemStatusStore, useValue: fakeSystemStatusStore('overall' in options ? options.overall : 'OK') },
+      { provide: SystemStatusFacade, useValue: fakeSystemStatusFacade('overall' in options ? options.overall : 'OK') },
       { provide: VisionApi, useValue: {} },
     ],
   });
-  // `fullBleed` is no longer an input — the route flag reaches the sidebar through `SidebarStore`
+  // `fullBleed` is no longer an input — the route flag reaches the sidebar through `SidebarFacade`
   // (`app.ts` calls `enterRoute` on every NavigationEnd), which layers it under any manual toggle.
   if (options.fullBleed !== undefined) {
-    TestBed.inject(SidebarStore).enterRoute(options.fullBleed);
+    TestBed.inject(SidebarFacade).enterRoute(options.fullBleed);
   }
   const fixture = TestBed.createComponent(AppSidebar);
   fixture.detectChanges();
@@ -240,9 +242,9 @@ describe('AppSidebar — collapse', () => {
     expect(aside.classList.contains('collapsed')).toBe(false);
   });
 
-  it('collapses when SidebarStore.collapsed is toggled', () => {
+  it('collapses when SidebarFacade.collapsed is toggled', () => {
     const fixture = render();
-    TestBed.inject(SidebarStore).toggle();
+    TestBed.inject(SidebarFacade).toggle();
     fixture.detectChanges();
 
     const aside = (fixture.nativeElement as HTMLElement).querySelector('.sidebar')!;
@@ -334,10 +336,11 @@ describe('AppSidebar — mobile off-canvas sheet + foot', () => {
   });
 
   /**
-   * docs/plans/done/UI-STATE-PLAN.md §1 D1/D3, §2.2: the mobile sheet now shares `GlobalOverlayStore` with the
-   * identity menu/notification bell it's mounted alongside, so opening one closes the other — this is
-   * the same exclusivity `core/ui/overlay-store.spec.ts` proves at the store level, checked here
-   * through the real rendered shell (the actual scenario the sheet and the chip share one DOM tree).
+   * docs/plans/done/UI-STATE-PLAN.md §1 D1/D3, §2.2: the mobile sheet now shares `OverlayFacade` (an
+   * NgRx slice, docs/plans/active/NGRX-MIGRATION-PLAN.md §8) with the identity menu/notification bell
+   * it's mounted alongside, so opening one closes the other — this is the same exclusivity
+   * `core/ui/overlay-facade.spec.ts` proves at the facade level, checked here through the real
+   * rendered shell (the actual scenario the sheet and the chip share one DOM tree).
    */
   it('opening the identity menu (a sibling shell overlay) closes an open mobile sheet, and vice versa', () => {
     const fixture = render({ topRole: 'PILOT' });
@@ -458,10 +461,10 @@ describe('AppSidebar — shell rollup dot (docs/plans/done/SYSTEM-STATUS-PLAN.md
 });
 
 /**
- * `ThemeStore` is injected directly here (never faked) — the same "exercise the real, simple,
- * `providedIn: 'root'` store" precedent `SidebarStore` already gets throughout this file, since it
+ * `ThemeFacade` is injected directly here (never faked) — the same "exercise the real, simple,
+ * `providedIn: 'root'` boundary" precedent `SidebarFacade` already gets throughout this file, since it
  * is a plain persisted-signal store, not something with an HTTP/SSE dependency graph worth stubbing
- * (contrast `FleetStore`/`EventsStore`/`LiveStore` above, faked purely so the tree can mount).
+ * (contrast `FleetStore`/`EventsFacade`/`LiveFacade` above, faked purely so the tree can mount).
  */
 describe('AppSidebar — theme toggle (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/Wave 1)', () => {
   beforeEach(() => localStorage.clear());
@@ -471,7 +474,7 @@ describe('AppSidebar — theme toggle (docs/plans/done/VISUAL-REFRESH-PLAN.md F3
     const root = fixture.nativeElement as HTMLElement;
     const toggle = root.querySelector('.theme-toggle') as HTMLButtonElement;
 
-    expect(TestBed.inject(ThemeStore).theme()).toBe('light');
+    expect(TestBed.inject(ThemeFacade).theme()).toBe('light');
     expect(toggle.getAttribute('aria-label')).toBe('Switch to dark theme');
     // Sun glyph is the <circle>-based svg; moon is a bare <path> with no circle — see this
     // component's own doc comment: the icon shows the *current* theme, not the destination.
@@ -479,7 +482,7 @@ describe('AppSidebar — theme toggle (docs/plans/done/VISUAL-REFRESH-PLAN.md F3
     expect(toggle.querySelector('svg path')).toBeNull();
   });
 
-  it('clicking the toggle flips ThemeStore.theme, the button label/glyph, and <html data-theme>', () => {
+  it('clicking the toggle flips ThemeFacade.theme, the button label/glyph, and <html data-theme>', () => {
     const fixture = render();
     const root = fixture.nativeElement as HTMLElement;
     const toggle = root.querySelector('.theme-toggle') as HTMLButtonElement;
@@ -487,7 +490,7 @@ describe('AppSidebar — theme toggle (docs/plans/done/VISUAL-REFRESH-PLAN.md F3
     toggle.click();
     fixture.detectChanges();
 
-    expect(TestBed.inject(ThemeStore).theme()).toBe('dark');
+    expect(TestBed.inject(ThemeFacade).theme()).toBe('dark');
     expect(toggle.getAttribute('aria-label')).toBe('Switch to light theme');
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark');
     expect(toggle.querySelector('svg path')).not.toBeNull();
@@ -496,7 +499,7 @@ describe('AppSidebar — theme toggle (docs/plans/done/VISUAL-REFRESH-PLAN.md F3
     toggle.click();
     fixture.detectChanges();
 
-    expect(TestBed.inject(ThemeStore).theme()).toBe('light');
+    expect(TestBed.inject(ThemeFacade).theme()).toBe('light');
     expect(toggle.getAttribute('aria-label')).toBe('Switch to dark theme');
     expect(document.documentElement.getAttribute('data-theme')).toBe('light');
     expect(toggle.querySelector('svg circle')).not.toBeNull();
@@ -512,13 +515,13 @@ describe('AppSidebar — theme toggle (docs/plans/done/VISUAL-REFRESH-PLAN.md F3
     expect(toggle).not.toBeNull();
     toggle.click();
     fixture.detectChanges();
-    expect(TestBed.inject(ThemeStore).theme()).toBe('dark');
+    expect(TestBed.inject(ThemeFacade).theme()).toBe('dark');
   });
 
   // Regression guard: the toggle sits inside the brand `<a routerLink="/fly">` (see this file's own
   // class doc). Without `$event.stopPropagation()` in its click handler, the click bubbles to that
   // anchor and the router navigates to /fly — which then auto-collapses the sidebar via
-  // `SidebarStore.enterRoute()` (`app.ts`'s `NavigationEnd` handler), since /fly is full-bleed. A
+  // `SidebarFacade.enterRoute()` (`app.ts`'s `NavigationEnd` handler), since /fly is full-bleed. A
   // theme click must never double as a navigation.
   it('does not navigate — it sits inside the brand <a routerLink="/fly"> and must stop click propagation', async () => {
     const fixture = render();
@@ -533,6 +536,6 @@ describe('AppSidebar — theme toggle (docs/plans/done/VISUAL-REFRESH-PLAN.md F3
     fixture.detectChanges();
 
     expect(router.url).toBe('/assets');
-    expect(TestBed.inject(ThemeStore).theme()).toBe('dark');
+    expect(TestBed.inject(ThemeFacade).theme()).toBe('dark');
   });
 });

@@ -46,7 +46,7 @@ export class FollowHud {
   readonly canRelease = input<boolean>(false);
 
   /**
-   * F2 digital crop-follow's own per-viewer setting (`SettingsStore.cropFollowEnabled`,
+   * F2 digital crop-follow's own per-viewer setting (`SettingsFacade.cropFollowEnabled`,
    * docs/plans/active/TRACK-FOLLOW-PLAN.md §3.1 item 4, wave W6) — passed straight through like
    * every other input here; this component injects no store (see class doc). Unlike
    * {@link canRelease}, this is **not** an authority gate: crop-follow is a purely client-side
@@ -65,7 +65,7 @@ export class FollowHud {
 
   /**
    * The operator's own "Zoom ×2" click, carrying the *desired* new value — the host flips its own
-   * `SettingsStore.cropFollowEnabled` signal and re-passes the result down next render, mirroring
+   * `SettingsFacade.cropFollowEnabled` signal and re-passes the result down next render, mirroring
    * `CvControlPanel#detectionEnabledChange`'s own `output<boolean>()` idiom rather than a bare
    * "toggled" event this component would have to invert state to interpret.
    */

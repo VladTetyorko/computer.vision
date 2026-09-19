@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, output, signal } from '@angular/core';
-import { FleetStore } from '../../core/fleet/fleet-store';
-import { EventsStore } from '../../core/events/events-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
+import { EventsFacade } from '../../core/events/events-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { describeEventSource, distinctLabels, filterEvents, relativeTimeLabel, resolveEventTarget } from '../../core/events/events-logic';
 import { isRemovedDeviceSource } from './notification-logic';
@@ -15,7 +15,7 @@ const CLOCK_TICK_MS = 1_000;
 
 /**
  * The detection-events rail (docs/plans/done/MVP2-PLAN.md §E, E-b bullet 1): label/asset filters over
- * `EventsStore`'s shared feed, a newest-first list capped to `EVENTS_DISPLAY_LIMIT`, each row
+ * `EventsFacade`'s shared feed, a newest-first list capped to `EVENTS_DISPLAY_LIMIT`, each row
  * naming its source/confidence/relative time and, when resolvable, opening the owning asset's
  * cockpit or detail page on click.
  *
@@ -31,8 +31,8 @@ const CLOCK_TICK_MS = 1_000;
  * applied to this component's own host element, mirroring `shared/map/fleet-map.ts`'s `.map-panel`
  * precedent) — this component only owns what's *inside* its own card.
  *
- * **Does not manage `EventsStore.activate()`/`release()` itself** — like `shared/map/fleet-map.ts` injecting
- * `EventsStore` directly for its own event markers, that lifecycle stays the host page's job
+ * **Does not manage `EventsFacade.activate()`/`release()` itself** — like `shared/map/fleet-map.ts` injecting
+ * `EventsFacade` directly for its own event markers, that lifecycle stays the host page's job
  * (`WallPage`/`CommandPage` each call `activate()`/`release()` once in their own constructor,
  * exactly as before); a page that renders both this rail and the fleet map only needs to own the
  * refcount once, not per consumer.
@@ -66,8 +66,8 @@ const CLOCK_TICK_MS = 1_000;
   styleUrl: './events-rail.css',
 })
 export class EventsRail {
-  private readonly fleet = inject(FleetStore);
-  protected readonly events = inject(EventsStore);
+  private readonly fleet = inject(FleetFacade);
+  protected readonly events = inject(EventsFacade);
 
   /** Emits the row's own event; the host page resolves navigation via `resolveEventTarget`. */
   readonly open = output<DetectionEvent>();

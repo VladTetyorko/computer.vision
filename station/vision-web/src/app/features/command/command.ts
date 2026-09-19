@@ -1,9 +1,9 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { UiStore } from '../../core/ui/ui-store';
-import { FleetMapStore } from '../../core/map/map-store';
-import { RouteStore } from '../../core/map-data/route-store';
-import { WeatherStore } from '../../core/weather/weather-store';
+import { MapFacade } from '../../core/map/map-facade';
+import { RouteFacade } from '../../core/map-data/route-facade';
+import { WeatherFacade } from '../../core/weather/weather-facade';
 import { TacticalMap } from '../../shared/map/tactical-map/tactical-map';
 import { WeatherChip } from '../../shared/ui/weather-chip';
 import { Notice } from '../../shared/ui/notice';
@@ -13,6 +13,11 @@ import { AssetPanel } from './asset-panel';
 import { SetupChecklist } from './setup-checklist';
 import { CommandRailRow } from './rail-row';
 import { CommandFacade } from './command-facade';
+import { MarksFacade } from '../../core/map-data/marks-facade';
+import { LayersFacade } from '../../core/map-data/layers-facade';
+import { DrawingsFacade } from '../../core/map-data/drawings-facade';
+import { GeofenceFacade } from '../../core/geofence/geofence-facade';
+import { OrgFacade } from '../../core/org/org-facade';
 
 /**
  * `/command` — the manager dashboard (docs/plans/done/UX-REWORK-PLAN.md §U-c, superseding docs/plans/done/MVP3-PLAN.md
@@ -44,7 +49,7 @@ import { CommandFacade } from './command-facade';
  * "resolve a device and dock `LiveDock`" to "select this asset" (`CommandFacade.selectAsset`).
  *
  * **The map component is dumb now** (docs/plans/done/MAP-REWORK-PLAN.md §5.1 Wave D): the deleted `FleetMap`
- * injected `FleetMapStore`/`EventsStore` itself; `<vision-tactical-map>` takes `[assets]`/`[events]`/
+ * injected `MapFacade`/`EventsStore` itself; `<vision-tactical-map>` takes `[assets]`/`[events]`/
  * `[unplottedAssets]` as plain inputs from `CommandFacade` instead. Every other binding — zones,
  * marks, focus, attention, selection, and all three outputs — is unchanged.
  */
@@ -54,12 +59,15 @@ import { CommandFacade } from './command-facade';
   templateUrl: './command.html',
   styleUrl: './command.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  // `FleetMapStore`/`WeatherStore`/`RouteStore`: own instance per route activation (page-provided,
+  // `MapFacade`/`WeatherFacade`/`RouteFacade`: own instance per route activation (page-provided,
   // not `providedIn: 'root'` — see their own class doc comments). `CommandFacade` is provided
   // alongside them so it can `inject()` all three; `<vision-weather-chip>` still resolves
-  // `WeatherStore` through this same component-level injector, while the map now receives its
+  // `WeatherFacade` through this same component-level injector, while the map now receives its
   // markers/routes as inputs instead.
-  providers: [FleetMapStore, WeatherStore, RouteStore, CommandFacade],
+  // The map-data facades joined this list in wave N4 (NGRX-MIGRATION-PLAN.md §9): they are
+  // page-provided now, so their slices ride this page's route instead of the root injector.
+  // Needed by this page's own facade *and* by every control inside `<vision-map-tools>`.
+  providers: [MapFacade, WeatherFacade, RouteFacade, CommandFacade, MarksFacade, LayersFacade, DrawingsFacade, GeofenceFacade, OrgFacade],
 })
 export class CommandPage {
   protected readonly facade = inject(CommandFacade);
@@ -131,7 +139,7 @@ export class CommandPage {
     this.facade.trackRequestedAsset(this.requestedAssetId);
 
     // Tactical marks (docs/plans/done/TACTICAL-MARKS-PLAN.md M5) — see `fly.ts`'s identical effect's own doc
-    // comment: a map click always produces a `MarksStore.draft()` regardless of whether the drawer
+    // comment: a map click always produces a `MarksFacade.draft()` regardless of whether the drawer
     // happens to be open; this is what keeps a draft from landing out of sight.
     effect(() => {
       if (this.facade.marks.draft()) {

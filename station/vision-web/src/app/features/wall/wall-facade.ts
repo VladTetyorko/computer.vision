@@ -1,10 +1,10 @@
 import { DestroyRef, Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
 import type { FleetSummary } from '../../core/api/models';
-import { FleetStore } from '../../core/fleet/fleet-store';
-import { SettingsStore } from '../../core/settings/settings-store';
-import { EventsStore } from '../../core/events/events-store';
-import { LiveStore } from '../../core/live/live-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
+import { SettingsFacade } from '../../core/settings/settings-facade';
+import { EventsFacade } from '../../core/events/events-facade';
+import { LiveFacade } from '../../core/live/live-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { isLiveAvailable } from '../../core/live/live-fallback-logic';
 import {
@@ -46,7 +46,7 @@ const CLOCK_TICK_MS = 5_000;
  * **Replaces per-tile polling with one fleet-wide join** (§2.1 D4/D5, accepted decision #3): a 5s
  * `api.fleetSummary()` poll (the exact `command-facade.ts` precedent — same interval, same
  * silent-degrade-on-background-failure shape) feeds `buildWallTiles` alongside `FleetStore`'s
- * devices/streams, `EventsStore`'s shared detection-event feed, `LiveStore.liveEvents()`-derived
+ * devices/streams, `EventsFacade`'s shared detection-event feed, `LiveFacade.liveEvents()`-derived
  * pipeline-error/geofence-breach facts, and the wall clock — one 5s tick for identity, attention,
  * health and pulses across every tile, replacing the old per-tile `TelemetryStore`+`DetectionsStore`
  * pair `WallTile` used to stand up itself (D5). `DetectionsStore` still lives in `wall-tile.ts` (W2
@@ -80,11 +80,11 @@ const CLOCK_TICK_MS = 5_000;
 @Injectable()
 export class WallFacade {
   private readonly api = inject(VisionApi);
-  private readonly fleet = inject(FleetStore);
-  private readonly events = inject(EventsStore);
-  private readonly live = inject(LiveStore);
+  private readonly fleet = inject(FleetFacade);
+  private readonly events = inject(EventsFacade);
+  private readonly live = inject(LiveFacade);
   private readonly scheduler = inject(PollScheduler);
-  private readonly settings = inject(SettingsStore);
+  private readonly settings = inject(SettingsFacade);
 
   private readonly summarySignal = signal<FleetSummary | undefined>(undefined);
   /** Flips once, after `refreshSummary`'s first attempt settles (success or failure) — see the class
@@ -118,7 +118,7 @@ export class WallFacade {
 
   // --- Density (§3.1, D11 — replaces the old `Tiles per row` <select>) ------------------------
 
-  /** Aliases `SettingsStore.wallDensity` directly — unchanged key/type, so an operator's existing
+  /** Aliases `SettingsFacade.wallDensity` directly — unchanged key/type, so an operator's existing
    *  preference (2..6 from the old select) survives this wave; {@link tileMinPx} clamps it to the
    *  nearest of the three frozen stops. */
   readonly density = this.settings.wallDensity;
@@ -129,11 +129,11 @@ export class WallFacade {
 
   // --- Declutter (D6 — one wall-level control, no longer per-tile) ----------------------------
 
-  /** Aliases `SettingsStore.declutterLevel` directly — the same shared, persisted preference the
+  /** Aliases `SettingsFacade.declutterLevel` directly — the same shared, persisted preference the
    *  Fly cockpit and `/live` already read/write (H12, `CockpitFacade#boxesMode`'s identical
    *  simplification). */
   readonly boxesMode = this.settings.declutterLevel;
-  /** F2 crop-follow — the same per-viewer `SettingsStore` signal Fly/Live write; tiles get it as
+  /** F2 crop-follow — the same per-viewer `SettingsFacade` signal Fly/Live write; tiles get it as
    *  an input and echo changes back, per the wall's facade-owns-settings idiom (`boxesMode`). */
   readonly cropFollowEnabled = this.settings.cropFollowEnabled;
   cycleBoxesMode(): void {
@@ -190,7 +190,7 @@ export class WallFacade {
   }
 
   constructor() {
-    // "O(visible) discipline" (docs/plans/done/MVP2-PLAN.md §E, E-b bullet 5) — see `EventsStore`'s own
+    // "O(visible) discipline" (docs/plans/done/MVP2-PLAN.md §E, E-b bullet 5) — see `EventsFacade`'s own
     // doc comment: the header bell has held a refcount since app boot, so this call is honest about
     // what it does (bumps the refcount) but not about ever actually pausing the poll on its own — D22.
     this.events.activate();
@@ -198,7 +198,7 @@ export class WallFacade {
 
     // No `refreshSummary()` here: `applySummaryTransport` below fetches once on its own first run,
     // whichever transport it resolves to. Calling it here as well would double-fetch at construction
-    // -- the same reason `MarksStore.activate()` routes through `applyTransport` instead of
+    // -- the same reason `MarksFacade.activate()` routes through `applyTransport` instead of
     // refreshing directly.
     const stopClock = this.scheduler.schedule(CLOCK_TICK_MS, () => this.nowSignal.set(Date.now()));
     inject(DestroyRef).onDestroy(stopClock);

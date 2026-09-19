@@ -1,5 +1,5 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { OrgStore } from '../../core/org/org-store';
+import { OrgFacade } from '../../core/org/org-facade';
 import { flattenGroupTree, roleOptions } from '../../core/org/org-logic';
 import { roleLabel } from '../../core/auth/auth-logic';
 import type { CreateUserRequest, Role, UserMembership, UserSummary } from '../../core/api/models';
@@ -7,7 +7,7 @@ import type { CreateUserRequest, Role, UserMembership, UserSummary } from '../..
 type Tab = 'users' | 'groups';
 
 /**
- * `OrgSettingsPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — orchestrates `OrgStore` plus the two
+ * `OrgSettingsPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — orchestrates `OrgFacade` plus the two
  * forms' own draft state; every read-model/command below is byte-for-byte what `OrgSettingsPage`
  * owned before this refactor. `tab` is a plain non-exclusive view toggle (a segmented tab, not an
  * overlay another route/component could ever need to stay consistent with), so it stays a plain
@@ -16,7 +16,7 @@ type Tab = 'users' | 'groups';
  */
 @Injectable()
 export class OrgSettingsFacade {
-  readonly org = inject(OrgStore);
+  readonly org = inject(OrgFacade);
 
   readonly tab = signal<Tab>('users');
   readonly roleOptions = roleOptions();

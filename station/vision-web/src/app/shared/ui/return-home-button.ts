@@ -48,11 +48,11 @@ import { returnHomeToastFor } from './return-home-button-logic';
  * calls {@link cancel}, the exact same transition the dialog's own Cancel button already makes, so
  * the one thing `ConfirmDialog`'s rule actually guards against (an accidental confirm) still cannot
  * happen. What changes is only *which explicit gestures count as "the operator's decision"* — Escape
- * and a click on the scrim are now two more, matching the instinct §2.2's `GlobalOverlayStore` serves
+ * and a click on the scrim are now two more, matching the instinct §2.2's shell overlay store (now the `overlay` slice) serves
  * for the shell's own overlays. This confirm is page-scoped (dies with whichever host page mounted
  * it), so per §2.4 it keeps this state as a local `confirmOpen` signal rather than moving into the
  * shell's store — only the *behavior* is mirrored, via the same "one document-level listener pair,
- * containment decides inside-vs-outside" idiom `core/ui/overlay-store.ts#GlobalOverlayStore` uses.
+ * containment decides inside-vs-outside" idiom `core/ui/state/overlay.effects.ts` uses.
  * Both listeners no-op while {@link busy} is `true` (the request is already in flight — the dialog's
  * own Confirm/Cancel buttons are disabled for the same reason at that point, so an Escape/outside
  * click deserves the identical treatment, not a race with the pending request's own `finally`).
@@ -79,7 +79,7 @@ export class ReturnHomeButton {
   protected readonly busy = signal(false);
 
   /** The trigger button (`return-home-button.html`'s `#trigger`) — Escape returns focus to it, the
-   *  same "give it back to whatever opened this" courtesy `GlobalOverlayStore`'s own Escape handler
+   *  same "give it back to whatever opened this" courtesy the shell overlay slice's own Escape effect
    *  extends to the shell's overlays. */
   private readonly trigger = viewChild<ElementRef<HTMLElement>>('trigger');
 
@@ -125,7 +125,7 @@ export class ReturnHomeButton {
    * `Escape` cancels the confirm — never confirms it, see this class's own doc comment. No-ops while
    * {@link busy} (the request is in flight; the dialog's own buttons are disabled for the same reason
    * right now). Returns focus to the trigger, `isConnected`-guarded the same defensive way
-   * `GlobalOverlayStore.handleKeydown` guards its own refocus — this trigger can't actually be
+   * `core/ui/state/overlay.effects.ts`'s Escape effect guards its own refocus — this trigger can't actually be
    * detached mid-confirm today, but costs nothing to guard the same way regardless.
    */
   @HostListener('document:keydown.escape')

@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, HostListener, effect, inject, input, output } from '@angular/core';
 import { Player, type BoxesMode } from '../../shared/player/player';
 import { IconButton } from '../../shared/ui/icon-button';
-import { DetectionsStore } from '../../core/detections/detections-store';
+import { DetectionsFacade } from '../../core/detections/detections-facade';
 import type { WallTileModel } from './wall-logic';
 
 /**
@@ -21,7 +21,7 @@ import type { WallTileModel } from './wall-logic';
   selector: 'vision-wall-focus',
   imports: [Player, IconButton],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [DetectionsStore],
+  providers: [DetectionsFacade],
   templateUrl: './wall-focus.html',
   styleUrl: './wall-focus.css',
 })
@@ -33,7 +33,7 @@ export class WallFocus {
   readonly openCockpit = output<string>();
   readonly watchLive = output<string>();
 
-  protected readonly detections = inject(DetectionsStore);
+  protected readonly detections = inject(DetectionsFacade);
 
   @HostListener('document:keydown.escape')
   protected onEscape(): void {

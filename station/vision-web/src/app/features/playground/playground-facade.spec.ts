@@ -2,7 +2,7 @@ import { TestBed } from '@angular/core/testing';
 import { describe, expect, it, vi } from 'vitest';
 import { PlaygroundFacade } from './playground-facade';
 import { VisionApi } from '../../core/api/vision-api';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { ToastService } from '../../core/toast.service';
 import type { FlightPlanForm } from '../../shared/map/flight-plan-logic';
 import type { SimulationResponse, SystemNetworkResponse } from '../../core/api/models';
@@ -39,7 +39,7 @@ function inject(options: {
     providers: [
       PlaygroundFacade,
       { provide: VisionApi, useValue: api },
-      { provide: FleetStore, useValue: fleet },
+      { provide: FleetFacade, useValue: fleet },
       { provide: ToastService, useValue: toasts },
     ],
   });

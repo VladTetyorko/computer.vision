@@ -2438,3 +2438,852 @@ both `tsconfig.app.json` and `tsconfig.spec.json`. No `features/vision-profiles/
 concurrently on `CvProfile*`/profile-as-patch, a disjoint file scope from this wave).
 
 - **Commit**: `feat(cv-orchestration W9.2): tracks: SSE flip reaches the web store`.
+
+## Status — NGRX-MIGRATION wave N0: the state engine, and two slices to prove it (docs/plans/active/NGRX-MIGRATION-PLAN.md §2/§3, §4 row N0) — 2026-09-18
+
+**What the owner asked for and what was actually missing.** The ask was *"move from injections to the
+signals … as a final result a well structured ngrx application, with all the reducers, actions,
+effects and so on."* The first half was already true and is worth recording so nobody re-does it:
+this SPA has **1 137 `signal`/`computed`/`effect` call sites, zero `BehaviorSubject`/`Subject`, and no
+`zone.js` dependency at all**. Signals are not the gap. The gap is a state **engine** — shared state
+lived in **32 hand-rolled store classes (9 026 lines)** each re-inventing the same five mechanisms
+(private `signal()` + `.asReadonly()` pairs, `async` methods wrapping `VisionApi` in `try/catch`, a
+per-store `run()` that fires one error toast, `PollScheduler` timers that pause while SSE is open, and
+ad-hoc `localStorage` reads), with **38 facades (11 291 lines)** re-exporting those stores wholesale
+(`readonly fleet = inject(FleetStore)`) so templates read `facade.fleet.devices()` and store internals
+leak into HTML. NgRx replaces the five mechanisms; the facade rule in `MODULE.md` closes the leak.
+
+**Why NgRx 21.1.1 and not 22.** 21.x is the last line declaring `@angular/core ^21.0.0`; NgRx 22
+requires Angular 22, which this repo is not on.
+
+**The three foundation pieces** (all in `core/state/`, see `MODULE.md` for the contract):
+`provideAppState()` is deliberately a function rather than an inline block in `app.config.ts`, because
+a spec that needs real state must register *the identical* store — same hydrators, same runtime
+checks — instead of a hand-rolled subset free to drift from what ships. `hydration.ts` makes
+persistence a **meta-reducer**, the plan's §8 risk: an effect that re-reads storage on every action
+double-fires, a meta-reducer keyed on `INIT`/`UPDATE` cannot. `UPDATE` matters as much as `INIT` —
+without it, a slice provided later by a lazy route never hydrates. Router state uses
+`MinimalRouterStateSerializer`: the full `RouterStateSnapshot` carries component classes and
+injectors, and would trip `strictStateSerializability` on the first navigation. All four runtime
+checks are on, deliberately — this app's state is plain data end to end, so a mutation or a
+non-serializable value is a defect, not a trade-off.
+
+**Pilot slices: `theme` and `sidebar`.** Both were `localStorage`-backed root stores, which makes them
+the right pilots — they exercise hydration, effects-own-the-side-effect (the `data-theme` attribute on
+`<html>` is written by an effect, never a reducer), and consumer rewiring, without touching HTTP.
+`sidebar` carried the harder invariant: its collapsed state is a three-layer precedence
+(`override ?? (preference || fullBleed)`) that had to survive as a *pure* function of state
+(`sidebarCollapsed`, exposed through `extraSelectors`), and its persist effect is filtered on
+`!fullBleed` so an operator who never touched the toggle still has no key written — a behaviour the
+old store got by accident and the effect now gets on purpose.
+
+**Facades are named 1:1 with the store they replaced** (`ThemeFacade#theme()`/`setTheme()`,
+`SidebarFacade#collapsed()`/`toggle()`), which is the whole reason a 12-consumer rewiring was
+one line each: `inject(ThemeStore)` → `inject(ThemeFacade)` and nothing else. The legacy classes were
+deleted in the same wave — the plan's §5 step 9, never two engines for one piece of state.
+
+**The guard grew a third concern.** `core/ui/architecture.spec.ts` now also asserts that only a
+`*-facade.ts` **or** a `*.effects.ts` may `inject(Store)`. Its first run failed on the two effects
+files, correctly: an effect reading state through `concatLatestFrom` legitimately holds `Store`, and
+the predicate had to say so. The other two invariants — reducers contain no
+`inject(`/`Date.now(`/`Math.random(`/`localStorage`/`document.`, and every `*.reducer.ts` has a
+sibling `*.actions.ts` and `*.reducer.spec.ts` — passed first try.
+
+**`VisionApi` deliberately stays Promise-shaped until N9** (plan §7). It is 1 802 lines, 162 methods,
+**289 call sites across 70 source files plus 265 in specs**; flipping it now would spend a ~135-file
+blast radius on files this migration is about to delete, and leave the tree half-converted along two
+axes at once. The cost of waiting is cancellation — `switchMap` over `from(promise)` discards a
+superseded result but does not abort the request — and this app polls and does CRUD, it has no
+typeahead, so the difference is nil until N9 makes it exact.
+
+### Tests / build
+
+`npm run test:ci` — **220/220 files, 4 285/4 285 tests green** (+3 files / +24 tests over the 217/4 261
+baseline: `theme.reducer.spec.ts`, `sidebar.reducer.spec.ts` and the two facade specs replacing the
+two deleted store specs). `npx ng build --configuration production` — exit 0.
+
+**Bundle cost, measured honestly.** The first production build *failed* (487.46 kB against a 445 kB
+error budget), so the baseline was measured properly rather than guessed: a detached
+`git worktree add HEAD` with a symlinked `node_modules` builds at **442.45 kB raw / 123.81 kB
+transfer** — i.e. the app was already only 2.5 kB under its own error budget before NgRx existed.
+NgRx itself costs **+45.01 kB raw / +13.31 kB transfer**. `angular.json`'s initial budget moved
+`390/445 kB` → **`500/550 kB`** (a clean 2-line diff). That is a real, deliberate cost of the engine,
+recorded here rather than buried in a budget bump: every wave N1–N9 that deletes a hand-rolled store
+gives some of it back, and the next wave to touch budgets should re-measure rather than assume.
+
+- **Commit**: `feat(ngrx N0): NgRx foundation + theme/sidebar pilot slices`.
+
+## Status — NGRX-MIGRATION wave N1: the shell's overlay slice, and the DOM half it can't hold (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N1, §8 "Corrections found while briefing N1/N2") — 2026-09-18
+
+**Scope, corrected before the code.** The wave table originally read as if a `ui` slice belonged here;
+there is no such thing. `core/ui/ui-store.ts#UiStore` is a deliberately plain, DI-less class
+instantiated **27 times** across the app as a host-owned overlay *group* (`readonly dialogs = new
+UiStore()`) — exactly the ephemeral, per-host local state §2 says never belongs in NgRx, and NgRx
+feature state is global by name, so it cannot stand in for 27 independent instances without inventing
+a key for each. **N1 migrates `GlobalOverlayStore` only; `UiStore` is untouched, per §8.**
+
+**The one design decision that mattered: split the store, not the behaviour.** `GlobalOverlayStore`
+held two genuinely different things — the open overlay id (serializable, three lines of logic) and an
+`OverlayHost` registry of live `HTMLElement` `{root, trigger}` pairs (never serializable, ever).
+Putting the second into NgRx state trips `strictStateSerializability` on the very first `register()`
+call — the plan's own prediction, confirmed by trying it first and watching the runtime check fire.
+The fix is `core/ui/overlay-host-registry.ts#OverlayHostRegistry`: a small `providedIn: 'root'` class,
+**not** a slice, holding nothing but the `Map<GlobalOverlayId, OverlayHost>` — deliberately not named
+`*Store`, since `core/ui/architecture.spec.ts`'s guards (routed-page injection, NgRx layering) both key
+off that suffix and this class is neither a page nor a facade/effects file. `overlay.effects.ts` and
+`overlay-facade.ts` both inject it directly, alongside `Store`, for the one job each still needs from
+it (focus-on-Escape; the contains-check on outside-click; the `register()` passthrough).
+
+**Reducer expresses exclusivity directly — `UiStore` is not composed.** The old class explicitly
+composed `core/ui/ui-store.ts#UiStore` for one-open-at-a-time behaviour. Re-read for this wave, that
+precedent doesn't transplant: a reducer is a pure function of `(state, action)`, and `UiStore` is a
+stateful class with its own `signal()` — nothing to "hold" inside a `createReducer` call.
+`overlay.reducer.ts`'s `on(opened, (state, {id}) => ({...state, active: id}))` already **is** the
+one-open-at-a-time rule, as a plain assignment; composing a second primitive on top would add a
+dependency for zero behaviour. This is the "likely cleaner" option the plan's own §8 correction
+flagged without picking — picked here, and stated plainly: **not composed, by design.**
+
+**Close-on-navigation listens for `ROUTER_NAVIGATED`, not `Router.events` — a decision `app-state.ts`'s
+own doc comment made first.** The old store injected `Router` directly, in its own constructor's
+injection context. Copying that into an effect looks equivalent until the full suite runs:
+`app-state.ts` already documents that `provideAppState()` deliberately ships with **no** `Router`
+provider, "since most component specs have no reason to provide one" — and two of them,
+`theme-facade.spec.ts` and `sidebar-facade.spec.ts`, prove it by calling `provideAppState()` alone.
+`provideEffects()` subscribes every registered effect at `ROOT_EFFECTS_INIT`, eagerly, for every
+consumer of `provideAppState()` — so an effect that unconditionally does `inject(Router)` throws
+`NullInjectorError` the instant either of those two specs boots, nowhere near any test that mentions
+overlays at all. `@ngrx/router-store`'s own `ROUTER_NAVIGATED` action, filtered through the `Actions`
+stream instead, needs nothing but `Actions` — already a hard dependency of every effect — so it
+subscribes cleanly everywhere and simply never fires in a spec that never dispatches it. Production
+parity holds because `provideRouterStore()` is already wired in `app.config.ts` and dispatches this
+exact action on every real navigation. Flagging this because the plan's own phrasing ("owns a
+`Router.events` subscription... becomes effects") reads as license to inject `Router` straight into an
+effect; under the plan's own non-negotiable that the whole suite must stay green, it isn't, for any
+slice registered through `provideAppState()`.
+
+**Consumer rewiring stayed one line each, prose excepted.** `OverlayFacade` keeps
+`GlobalOverlayStore`'s exact public surface — `active`/`isOpen`/`open`/`close`/`toggle`/`register` — so
+`identity-chip.ts`, `notification-bell.ts` and `app-sidebar.ts` (plus their three specs) changed only
+`inject(GlobalOverlayStore)` → `inject(OverlayFacade)` and the import line. Two of the three specs
+(`identity-chip.spec.ts`, `notification-bell.spec.ts`) additionally needed `provideAppState()` added to
+their `TestBed` providers — they never registered any store before, since `GlobalOverlayStore` was a
+plain root-provided class needing no store at all. Doc comments in all three components that described
+the deleted "`GlobalOverlayStore` composes `UiStore`" mechanism were corrected in place rather than
+left to go stale, since the design decision above made that sentence false. Five further files
+(`shared/ui/return-home-button.ts`, `shared/ui/page-bar/page-bar.ts`, `features/fly/geo-chip.ts`,
+`core/map-data/drawings-store.ts`, `core/map-data/marks-store.ts`) cite
+`core/ui/overlay-store.ts#GlobalOverlayStore` only in doc-comment prose, as a design precedent, never
+as an import — left untouched, out of this wave's declared 6-consumer scope; their citations now point
+at a deleted path and are worth a follow-up pass.
+
+**Test shape mirrors the facade idiom N0 actually shipped, not the plan's abstract §3 rule 10.** Rule
+10 says "effects (`provideMockActions`)"; N0's own reference implementation shipped no
+`.effects.spec.ts` for either `theme` or `sidebar`, testing effects only indirectly through
+`*-facade.spec.ts` against real `provideAppState()`. `overlay.effects.ts`'s Escape/outside-click
+effects don't consume `actions$` at all — they source from `fromEvent(document, …)` — so
+`provideMockActions` has nothing to mock for two of the three effects; the third
+(`closeOnNavigation$`) is exercised by dispatching a bare `{ type: ROUTER_NAVIGATED }` into a real
+store instead of standing up `provideRouterStore()` + a real `Router` for one assertion. Following
+N0's own precedent over the abstract rule, this wave ships `overlay.reducer.spec.ts` (pure, 14 cases)
++ `overlay-host-registry.spec.ts` (plain class, 4 cases, no `TestBed`) + `overlay-facade.spec.ts` (16
+cases through real `provideAppState()`, replacing `overlay-store.spec.ts`'s 15 — exclusivity,
+stale-close no-op, Escape+focus-return, outside-click containment including the "trigger click doesn't
+fight the document listener" DOM-bubble-order case, and navigation) — no dedicated
+`overlay.effects.spec.ts`; `core/ui/architecture.spec.ts`'s sibling-file guard only requires
+`.actions.ts` + `.reducer.spec.ts` beside a reducer, not an effects spec.
+
+### Tests / build
+
+`npm run test:ci` — **222/222 files, 4 304/4 304 tests green** (+2 files / +19 tests over N0's
+220/4 285: `overlay.reducer.spec.ts`, `overlay-host-registry.spec.ts` and `overlay-facade.spec.ts`
+added, `overlay-store.spec.ts` deleted). `npx tsc --noEmit` clean on both `tsconfig.app.json` and
+`tsconfig.spec.json`. `npx ng build --configuration production` — exit 0.
+
+**Bundle cost, measured against N0's own tip**, not guessed: `git stash push -u` in this worktree,
+rebuilt, popped back, to isolate this wave's delta from N0's already-recorded one. N0 tip: **487.46 kB
+raw / 137.08 kB transfer**. This wave: **488.35 kB raw / 136.99 kB transfer** — **+0.89 kB raw / −0.09
+kB transfer**. Replacing one ~140-line class with six small files (`overlay.model.ts`,
+`overlay.actions.ts`, `overlay.reducer.ts`, `overlay.effects.ts`, `overlay-facade.ts`,
+`overlay-host-registry.ts`) nets out close to flat — the NgRx action/reducer/effect ceremony costs
+roughly what the deleted class's own `Router`/`document` wiring used to.
+
+**Nothing in the plan was found wrong for this wave** beyond the two corrections §8 already made
+before briefing started (`UiStore` not a slice; the store splits in two) — both confirmed exactly as
+described. The one thing not spelled out and worked out fresh here: `provideAppState()`'s
+already-documented "no `Router` provider" choice forces every future app-wide effect that cares about
+navigation through `ROUTER_NAVIGATED` rather than `Router.events`, not just this one — worth flagging
+for N3 (`live`) and any later wave whose store used to inject `Router` directly.
+
+- **Commit**: `feat(ngrx N1): overlay slice — GlobalOverlayStore splits into an NgRx slice + a DOM host registry`.
+## Status — NGRX-MIGRATION wave N2: four hand-rolled stores become slices — settings, org, seat, auth (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N2) — 2026-09-18
+
+**Scope.** Four of the remaining hand-rolled stores became `core/<domain>/state/<domain>.{model,actions,reducer,effects}.ts` slices + a `core/<domain>/<domain>-facade.ts`, registered in `provideAppState()`: `SettingsStore`, `OrgStore`, `SeatStore`, and `AuthStore` — the last, at 276 lines / 6 state keys / ~30 consumer files, the biggest single store this whole migration touches. All four legacy classes and their specs are deleted in this same wave; every real consumer was rewired (`inject(XStore)` → `inject(XFacade)`, import path swap only — nothing else changed at any call site). **This is not the end of the migration.** 26 `*-store.ts` files remain — `live`, `fleet`, `telemetry`, `detections`, the four map-data stores, `map`, `geofence`, `geo`, `events`, `system-events`, `system-status`, `weather`, `ops`, `rc`, `training`, `discovery`, `pairing`, `cv-trace`, plus the three feature-local ones and `ui-store.ts` (which stays, by decision) — waves N3–N8.
+
+**`SeatFacade` decision: page-scoped facade over an app-wide slice, not injector scoping.** `SeatStore` was page-provided (`CrewPage`/`CockpitPage` each got their own instance) specifically so two hosts tracking two different assets could never see each other's seat data. NgRx slices are registered once, app-wide, so that isolation had to move into the *data shape* instead of the DI tree: the slice's state is `Record<assetId, SeatsResponse | undefined>`, and its poll/renewal effects run through `groupBy(assetId) + mergeMap`, giving each asset id its own independent, non-cancelling inner pipeline — one host's poll or renewal can never cancel or clobber another asset's in-flight one, which a naive `switchMap` keyed only on the action stream would. `SeatFacade` itself stays `@Injectable()` and page-provided, exactly as before (`CrewPage`'s/`CockpitPage`'s own `providers:`) — only the storage moved app-wide, not the facade's lifetime, so a consumer's construction/teardown story is unchanged.
+
+**`AuthFacade`'s `ready: Promise<void>` — a corrected design from the plan's own tentative sketch.** The plan's working assumption going in was a boot effect gated on `ROOT_EFFECTS_INIT`. That was dropped: `AuthFacade`'s constructor now dispatches `AuthPageActions.bootRequested()` itself and builds `ready` via the existing `dispatchAndAwait` bridge (`core/state/dispatch-bridge.ts`, unmodified, reused verbatim), listening for `AuthApiActions.meLoaded`/`meLoadFailed`. The triggering effect, `bootMe$`, is an ordinary `ofType(AuthPageActions.bootRequested)` effect — nothing `ROOT_EFFECTS_INIT`-special about it. This is race-free without that hook because Angular's `ENVIRONMENT_INITIALIZER` ordering guarantees `provideEffects(...)`'s own initializer (which subscribes every registered effect, `bootMe$` included) runs before any consumer can be constructed and reach the facade's own constructor — by the time `AuthFacade`'s constructor dispatches, something is already listening. Flagging this here because it is a deviation from the plan's own sketch, reasoned through and empirically checked (see the Router-DI finding below for the verification method), not a shortcut.
+
+**`login`/`logout`/`changePassword`/`bootstrap`/`bootstrapRequired` — two shapes, not one.** `login`, `changePassword` and `bootstrap` each have a natural success/failure action pair (`loginSucceeded`/`loginFailed`, etc.) and return their `Promise<T>` through `dispatchAndAwait` exactly like org's five mutations already do. `logout` and `bootstrapRequired` do not — both mirror the original `AuthStore`'s own contract of never throwing/rejecting, always resolving with a safe default — so both instead await one specific action directly: `firstValueFrom(actions$.pipe(ofType(X), take(1)))`, dispatched immediately after. `logout` in particular is a two-stage effect chain: `logout$` (reads `wasAuthEnabled` via `concatLatestFrom` *before* the reducer clears it, best-effort calls `POST /api/auth/logout`, always emits `logoutCompleted`) feeds `logoutSideEffects$` (conditionally stops `LiveStore`, navigates, emits `logoutFinished`) — split in two so the state read that must happen before the clear, and the side effects that must happen after it, can't be reordered by accident. `changePassword$` emits *two* actions from one dispatch, in order — `meLoaded` (reusing the exact reducer branch boot already uses, since the original `changePassword()` called into the same session-refresh path) then `changePasswordSucceeded` — via an async IIFE returning a short array flattened with `mergeMap(actions => from(actions))`; a dedicated effects-spec test asserts that exact order, since `dispatchAndAwait`'s listener depends on `changePasswordSucceeded` never overtaking the session refresh it's paired with.
+
+**Router-DI finding (empirically checked, not assumed).** `logoutSideEffects$` injects a plain `Router`, and NgRx eagerly runs every registered effect factory once, synchronously, on first use of the environment injector — so the worry going in was that every existing `provideAppState()`-based spec lacking an explicit `provideRouter(...)` would now break. It doesn't: Angular's own `@angular/build:unit-test` environment supplies a real default `Router` in every spec, confirmed by temporarily probing `bootMe$`/`logoutSideEffects$`'s factory bodies with `console.error` and running an unrelated spec (`seat-facade.spec.ts`) with `--reporters=verbose` — both effects' factories ran regardless, and the injected `Router` was a genuine instance, not a stub. No spec needed a `provideRouter([])` addition anywhere in this wave.
+
+**Two spec files needed a structural change, not just a token swap**, because they provided the old store as a bare class provider rather than through `provideAppState()`: `core/auth/session-interceptor.spec.ts` (the cold-boot circular-DI regression test — `AuthStore` needed only `VisionApi`/`Router`/`LiveStore`, `AuthFacade` additionally needs the NgRx `Store`/`Actions` machinery) and `shared/ui/identity-chip.spec.ts`. Both now provide `provideAppState()` alongside their existing stubs; the circular-DI fix itself in `session-interceptor.ts` (lazy `Injector.get(AuthFacade)`, only inside the 401 branch) was left untouched — the same eager-constructor-time `GET /api/auth/me` race the original comment describes still exists structurally under `AuthFacade`, so the same fix is still required and still correct, confirmed by re-reading the call chain rather than by assumption.
+
+**Consumer rewiring** covered 25 real `inject(AuthStore)` sites plus 9 doc-comment-only files, all via one mechanical `AuthStore`→`AuthFacade` / `auth-store`→`auth-facade` pass — safe because every real consumer used the identical `inject(AuthStore)` pattern. Two doc comments were hand-edited rather than blanket-renamed: `core/state/dispatch-bridge.ts`'s (its "the old `AuthStore#login`/etc." mention is deliberately historical) and `core/auth/auth-logic.ts`'s header (which pointed at a since-removed `AuthStore.loadMe` method, now pointed at `auth.effects.ts`'s `bootMe$` instead).
+
+### Tests / build
+
+`npm run test:ci` — **229/229 files, 4 368/4 368 tests green** (+9 files / +83 tests over the N0 baseline of 220 files / 4 285 tests: 12 new slice/facade spec files across the four domains, offset by the 4 deleted legacy store specs; net files were already at 227/4 335 after settings+org+seat, auth alone added the final +2 files / +33 tests). `npx tsc --noEmit` clean on both `tsconfig.app.json` and `tsconfig.spec.json`. `npx ng build --configuration production` — exit 0 (only pre-existing, unrelated warnings: an `NG8107` optional-chain hint in `cockpit.html` and a CSS budget warning on `tactical-map.css`, both present in the pre-N2 baseline too).
+
+**Bundle cost, measured honestly.** Built the full wave-N2 tree: **499.93 kB raw / 142.82 kB transfer** initial total. Then built the exact commit this wave branched from (`cda2429b` — N0 plus plan docs, **not** including N1, which landed on the migration branch in parallel) in a throwaway `git worktree` with a symlinked `node_modules` to skip a slow reinstall: **487.46 kB raw / 137.10 kB transfer**. Wave N2's four slices combined cost **+12.47 kB raw (+2.56%) / +5.72 kB transfer (+4.17%)** over that N0 baseline. Because N1 was measured against the same baseline rather than against N2's tip, **these two waves' deltas must not be added together** — the merged tree was re-measured by the orchestrator after both landed, and that number is the one to trust. The scratch worktree was removed after measuring.
+
+- **Commit** (suggested; this agent does not commit per its task — the orchestrator commits each wave): `feat(ngrx N2): the session slices — auth, org, settings, seat`.
+
+### Merge note — N1 + N2 on `feat/ngrx-migration`, 2026-09-18
+
+The two waves were built in parallel worktrees off the same N0 tip, so their separately-measured
+bundle deltas do not compose. Merged and re-verified by the orchestrator on the combined tree:
+**231/231 files, 4 387/4 387 tests green**, `tsc --noEmit` clean on both configs, production build
+exit 0 at **500.83 kB raw / 142.55 kB transfer**.
+
+That is **835 bytes over `angular.json`'s 500 kB warning budget** (the 550 kB error budget is what
+keeps the build green). Left as a warning on purpose: raising it now would silence the only signal
+that tracks this migration's cost, and every wave from N3 on deletes a hand-rolled store.
+
+Six files conflicted, all of them predictable and none of them subtle: `core/state/app-state.ts`
+(both waves registered a slice — kept both), `shared/ui/identity-chip.ts`/`.spec.ts` (each wave
+swapped a different `inject()` in the same two lines — kept both), `core/ui/overlay-store.ts` (N1
+deleted it, N2 had only renamed a doc comment inside it — stayed deleted), and the two module docs
+(both appended their own section — kept both, N1 then N2).
+
+Three claims in N2's own entry were corrected while merging rather than left standing: it said every
+hand-rolled store the plan named was now a slice (26 remain), it described its bundle baseline as
+"after N0+N1" when that commit predated N1, and its suggested commit subject repeated the first
+error. Also repointed seven doc comments in `return-home-button.ts`/`page-bar.ts` that still named
+`GlobalOverlayStore` methods as if the class existed.
+
+## Status — NGRX-MIGRATION wave N3: the live slice — one SSE connection becomes a full NgRx slice + a `LiveGateway` seam (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N3) — 2026-09-18
+
+**Scope.** `core/live/live-store.ts` (735 lines, the app's one `GET /api/live` SSE connection, 25
+real consumer files — 26 counting `core/cv-trace/cv-trace-store.ts`, missed by an initial `grep`
+survey and caught by `tsc`, see the tooling note below) became `core/live/state/live.{model,actions,
+reducer,effects}.ts` + `core/live/live-facade.ts` + `core/live/live-gateway.ts`, registered in
+`provideAppState()`. `LiveStore` and its behaviour (ref-counted topic subscribe/unsubscribe,
+append-only per-topic logs, the manual retry loop on a fatal SSE close, the accepted "ref-count
+change during a native auto-retry" gap) carry over unchanged; every consumer's own `inject(LiveStore)`
+became `inject(LiveFacade)`, nothing else, because `LiveFacade` kept every one of the old class's
+signal and method names on purpose. Left untouched, correctly: nine files whose only `LiveStore`
+mention is historical doc-comment prose (`attention-logic.ts`, `geofence-logic.ts`,
+`map-event-logic.ts`, `pairing-logic.ts`, `system-events-logic.ts`, `notification-logic.ts`,
+`wall-tile.ts`, `auth.actions.ts`, `auth.reducer.ts`) plus `core/api/vision-api.ts` and
+`core/rc/manual-control-client.ts`; `core/api/models.ts`'s own stale `LiveEnvelope` doc comment
+(same missing-`links` defect category as the heading fixed below) is outside `core/live/`'s file
+scope and was left alone.
+
+**`LiveGateway` is this migration's first seam built specifically to keep a non-serializable browser
+object out of state**, following `OverlayHostRegistry`'s N1 precedent rather than inventing a new
+shape: a plain `providedIn: 'root'` class, `isAvailable()` reads `typeof EventSource !== 'undefined'`
+(false under jsdom — every spec's own confirmation of "no `EventSource` at all" rather than an
+assumption), `open(topics)` returns a cold `Observable<LiveGatewayEvent>` that owns exactly one real
+`EventSource` for its subscription's lifetime and closes it on teardown. `live.effects.ts#connection$`
+is the only subscriber, mapping each `LiveGatewayEvent` (`open`/`connected`/`message`/`retrying`/
+`fatal`) to a `LiveSocketActions` dispatch and owning the `SSE_RETRY_INTERVAL_MS` manual retry loop
+after a fatal close — a *transient* drop is the browser's own native reconnect, reported as
+`'retrying'` with no action from this code, which is exactly where the inherited gap lives: a topic
+tracked or untracked while a native auto-retry is in flight is missed until the next full reconnect,
+since the browser silently re-fetches the previous URL. **Preserved, not fixed** — the task's own
+instruction, and the honest thing to do given the alternative (canceling and reopening on every
+tracker change) would defeat the ref-counting's whole purpose of coalescing rapid mount/unmount
+churn into one PATCH.
+
+**Ref-counting split cleanly across the reducer/effects boundary using one NgRx guarantee**: a
+dispatched action's reducer always runs before any effect observes that same action. `topicRefs:
+Record<string, number>` lives in the reducer; `patchOnTrack$`/`patchOnUntrack$` read
+`topicRefs[topic]` immediately after via `concatLatestFrom`, so `=== 1` reliably means "I am the
+first subscriber, PATCH add" and an absent key after decrementing reliably means "I was the last,
+PATCH remove" — no separate counter or lock needed on the effects side.
+
+**Topic count doc defect, verified rather than assumed**: the old class's doc comment (and this
+file's own stores table, now fixed) said "Twelve topics now, twelve projected stores." Counting
+`LiveEnvelope`'s actual discriminated union in `core/api/models.ts` gives **fourteen** — `fleet`,
+`event`, `telemetry`, `detections`, `devices`, `detection-events`, `map`, `geo`, `discovery`,
+`zones`, `system`, `tracks`, `cv-trace`, `links` — and thirteen store classes project them (`tracks`
+and `geo` each get their own dedicated projection *and* feed a second facade reader —
+`worldObjectsFor`/`geoFor` — off the same topic, which is also why there are **seven** `xFor` reader
+methods but only **six** independent `trackX`/`untrackX` ref-count pairs: `worldObjectsFor` has no
+pair of its own, it piggybacks on `trackWorldObjects`/`untrackWorldObjects`'s `tracks:<assetId>`
+subscription, same as `tracksFor` does). `LiveFacade`'s class doc now reads "Fourteen topics now."
+
+**A production defect this wave found and fixed, not a test artifact — flagging for N4–N8 the same
+way N1 flagged the Router-DI finding for this one.** `auth.effects.ts`'s `reconnectLiveOnSession$`/
+`logoutSideEffects$` injected `LiveFacade` as an eager `createEffect` factory default parameter —
+the same idiom every other effect in the file uses for `Actions`/`VisionApi`/`Router`/`Store`, all of
+which are side-effect-free to construct. `LiveFacade` is not: its constructor dispatches
+`LivePageActions.reconnectRequested()` once, on construction, mirroring `AuthFacade`'s own
+constructor-dispatch precedent from N2. Read `@ngrx/effects`' own source
+(`node_modules/@ngrx/effects/fesm2022/ngrx-effects.mjs`, `EffectsRootModule`'s constructor): it calls
+`runner.start()` — subscribing the merged effect stream — **before** looping over every registered
+effects group and calling `sources.addEffects(group)` for each, in `provideEffects(...)`'s own array
+order. `app-state.ts` registers `authEffects` ahead of `liveEffects`. Resolving `authEffects`'s
+functional-effect factories therefore eagerly constructs `LiveFacade` — running its constructor's own
+`reconnect()` dispatch — **before** `liveEffects.connection$` has even been created to receive it,
+silently dropping that boot-time reconnect on every cold load. This was masked in practice, not
+absent: `AuthFacade`'s own later `bootstrapSucceeded`/`loginSucceeded` dispatch re-triggers
+`reconnectLiveOnSession$` well after every effect is live, so the connection still opens — just never
+from the constructor path the class's own doc comment claims, and never at all if that later dispatch
+were ever skipped. Caught by `live-facade.spec.ts`'s "degrades to closed shortly after construction"
+case, confirmed deterministic (not flaky, reproduced across repeated runs) and root-caused by
+bisection against a byte-for-byte copy of `live-facade.ts` under a different class name in a
+different file (which passed, isolating the cause to *which* class token `auth.effects.ts` itself
+eagerly resolves, not to `LiveFacade`'s own shape or field count). **Fixed** by replacing the eager
+`liveStore = inject(LiveFacade)` parameter with `injector = inject(Injector)` and resolving
+`injector.get(LiveFacade)` **inside** each effect's own `tap`/`switchMap` callback instead — deferring
+construction until the action genuinely fires, by which point every effect (including `connection$`)
+is already subscribed. **The general lesson for later waves**: any effects file that eagerly injects
+(as a factory default parameter, not inside the pipeline) a facade whose constructor has a dispatch or
+other side effect is order-dependent on `provideEffects(...)`'s array position in a way that is easy
+to get right by accident and easy to break silently — resolve such a facade lazily via `Injector.get`
+inside the operator chain instead, every time.
+
+**Tooling note: the interactive shell's `grep` is aliased to `ugrep` with flags that produce false
+negatives.** `grep -rn 'LiveStore' src/` missed the real `import { LiveStore } from '../live/
+live-store'` in `core/cv-trace/cv-trace-store.ts` (caught only once `tsc --noEmit` reported the now-
+dangling import) and separately misreported a "binary file" match on a file containing a legitimate
+raw NUL byte (`cv-trace-store.ts`'s own `` `${streamId}\x00${assetId ?? ''}\x00${last}` `` cache-key
+delimiter — confirmed pre-existing via `git show HEAD:...`, not introduced by this wave, left
+untouched). **Use `command grep` to bypass the shell alias for any search whose completeness matters.**
+
+### Tests / build
+
+`npm run test:ci` — **234/234 files, 4443/4443 tests green** (+3 files / +56 tests over the N1+N2
+merged baseline of 231/4387: `live.reducer.spec.ts` (33 tests), `live.effects.spec.ts` (13 tests),
+`live-facade.spec.ts` (10 tests) — no legacy spec file existed for `live-store.ts` to delete, unlike
+every prior wave). `npx tsc --noEmit` clean on both `tsconfig.app.json` and `tsconfig.spec.json`.
+`npx ng build --configuration production` — exit 0 (same two pre-existing, unrelated warnings as
+every prior wave: the `NG8107` optional-chain hint in `cockpit.html` and the CSS budget warning on
+`tactical-map.css`).
+
+**Bundle cost, measured honestly.** This wave's tree: **505.87 kB raw / 143.74 kB transfer** initial
+total. Rebuilt the exact commit this wave branched from (`e67ae16a`, N1+N2 merged) via `git stash
+push -u` in this same worktree rather than a separate throwaway one (no reinstall needed either way —
+`node_modules` is symlinked): **500.83 kB raw / 142.62 kB transfer**. This wave's own cost: **+5.04 kB
+raw (+1.0%) / +1.12 kB transfer (+0.8%)**. `angular.json`'s initial-bundle budget is 500 kB warn /
+550 kB error — the build stays green, now **5.87 kB over the warning line** (835 bytes of that already
+present before this wave, per N1+N2's own entry above). Left as a warning on purpose, same rule as
+every prior wave: raising it would silence the only signal tracking this migration's cost, and N4–N8
+each delete a hand-rolled store in turn.
+
+**Nothing in the plan itself was found wrong** beyond the stale "Twelve topics" doc-comment heading
+(now "Fourteen topics", verified by counting `LiveEnvelope`'s actual union rather than trusting the
+old prose) and the 6-pairs-vs-7-readers detail above, which the plan's own recipe didn't need to spell
+out but is worth knowing before touching this facade again. The `auth.effects.ts` eager-injection
+defect was not a plan defect — it was a pre-existing correctness bug in code the plan's brief never
+asked to change, found only because the migration made `LiveFacade`'s construction observable through
+NgRx's own effects machinery for the first time (`LiveStore` had no such ordering hazard, being a
+plain, self-contained, eagerly-constructed class with no dependency on effects registration order at
+all).
+
+- **Commit** (suggested; this agent does not commit per its task — the orchestrator commits each wave): `feat(ngrx N3): the live slice — SSE connection as an NgRx slice + LiveGateway seam, and an auth.effects.ts eager-injection fix`.
+
+## Status — NGRX-MIGRATION wave N5: telemetry, detections, cv-trace (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N5) — 2026-09-18
+
+Three per-asset slices, converted with the idiom N2/N3 already established — `Record` keying rather
+than injector scoping, poll-vs-live gating read through selectors over the `live` slice rather than
+by injecting `LiveFacade` into an effect. Two things are worth recording beyond that.
+
+**The plan's poll-vs-live convention does not hold for `cv-trace`, and forcing it would have been
+wrong.** Everywhere else in this app a live topic *replaces* a poll: the poller pauses while SSE is
+up. `cv-trace` runs both **concurrently, on purpose**. Its `gate`/`world` fields have no live topic
+at all — the 3 s poll is their only freshness source — while `frame` is a ring the poll
+authoritatively replaces every tick, into which a live `cv-trace:<assetId>` arrival merely merges
+between ticks (`appendFrameLedger`) to cut latency. A live frame is never trusted *over* the next
+poll. So `CvTraceFacade` has no transport selector and does not inject `LiveFacade`: subscription is
+a plain RxJS resource in `cv-trace.effects.ts#session$` dispatching `LivePageActions.cvTraceTracked`/
+`cvTraceUntracked`, and live frames arrive through `LiveSocketActions.envelopeReceived`. A wave that
+"fixes" this asymmetry to match the other slices will silently drop `gate`/`world` freshness.
+
+**One failure asymmetry is deliberate and was preserved.** `pollFailed` no-ops everywhere — last
+known good stays on screen — *except* detections' `tracksPollFailed`, which explicitly nulls the
+tracks response. That mirrors the old stores' catch branches exactly; it is the difference between
+"we still believe the last reading" and "we no longer know what is being tracked", and the second
+must not render as the first.
+
+### Tests / build
+
+`npm run test:ci` — **240/240 files, 4 492/4 492 tests green** (+6 files / +49 tests over N3's
+234/4 443). `npx tsc --noEmit` clean on both configs. `npx ng build --configuration production` —
+exit 0. Bundle measured against this wave's own base (`93af4a4d`) via `git stash -u`: **505.87 →
+515.83 kB raw, 143.74 → 146.49 kB transfer (+9.96 kB raw / +2.75 kB transfer)**.
+
+**The bundle trend, stated honestly.** Every wave so far has *added* net bytes despite deleting the
+store it replaced: N1 +0.89, N2 +12.47, N3 +5.04, N5 +9.96 kB raw. An NgRx slice — model, actions,
+reducer, effects, facade, plus `@ngrx/entity`/`createFeature` machinery — is simply more shipped code
+than the hand-rolled class it replaces. The earlier expectation that deletions would claw the engine
+cost back is not holding, and nothing in the remaining waves suggests it will. The initial bundle is
+now **15.83 kB over the 500 kB warning budget** (the 550 kB error budget still keeps builds green);
+that is a decision for the owner at N9, not a number to quietly bump.
+## Status — NGRX-MIGRATION wave N7: the ops slices — events, discovery, pairing, geo, training, rc, weather, thresholds (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N7) — 2026-09-19
+
+Eight stores, ~1 420 lines, converted with the idioms N2/N3/N5 established. Three things are worth
+recording beyond the mechanical conversion.
+
+**Two demand-gate shapes, both now named.** A *root-singleton ref-count* (`discovery`, `events`)
+keeps `activeConsumers: number` in state, moved by plain reducer handlers, while the poll-vs-live
+phase is computed inside the effects file from `combineLatest([selectActiveConsumers,
+selectConnectionState])` — never by injecting `LiveFacade` into an effect (plan §9). A
+*`Record`-keyed slice* (`weather`, `geo`, `pairing`) gives two hosts or assets state that cannot
+collide. `weather-facade.spec.ts` proves the second the only way that means anything: it builds two
+independent `WeatherFacade` instances off one shared parent injector with `Injector.create`, tracks
+each host's own signal, and asserts a poll resolving for host A never moves host B's reading.
+
+**`EventsStore#applyIncoming` mixed a pure merge with impure browser reads** — `Notification.permission`
+and `document.hidden` — which a reducer may not do. The merge stayed in `events.reducer.ts`; the
+notify decision became its own `notify$` effect (`dispatch: false`) holding a closure-scoped
+`seenIds: Set<string>` created once when the effect factory runs at bootstrap, which is exactly the
+lifetime the original class field had. This is the general shape for any "store method that was
+half data and half browser".
+
+**Two live phases that look inconsistent and are not.** `events`' `'live'` phase is `EMPTY` — no
+sidecar poll — while `discovery`'s still fires one reconcile `GET`. That asymmetry is deliberate and
+predates the migration: the `discovery` SSE topic carries only candidate deltas and never `sources`,
+so the reconcile `GET` is the only channel `sources` has left once the poll stops. Confirmed against
+the original sources rather than regularised; a reducer-level test now pins it.
+
+### Tests / build
+
+`npm run test:ci` — **251/251 files, 4 604/4 604 tests green**. `npx tsc --noEmit` clean on both
+configs. `npx ng build --configuration production` — exit 0. Bundle measured against this wave's own
+base (`93af4a4d`) on a disposable worktree: **505.87 → 530.49 kB raw, 143.69 → 152.40 kB transfer
+(+24.62 kB raw / +8.71 kB transfer)** for eight stores' worth of slice scaffolding — the largest
+single-wave delta so far, and consistent with the trend the N5 entry records: a slice ships more
+code than the class it replaces.
+
+### Merge note — N7 onto `feat/ngrx-migration` (N0–N5 already merged), 2026-09-19
+
+Six files conflicted, all of them places where N5 and N7 had each renamed *different* classes in the
+same paragraph or table row: `core/state/app-state.ts` (both waves appended registrations),
+`asset-detail-facade.ts`, `asset-detail.ts`, `cockpit.ts`, and both module docs. Every one resolved
+to the **union** — neither wave's rename may be dropped, because the class each side kept calling by
+its old name is deleted on the other side. The docs were merged row by row rather than side by side:
+taking one side wholesale would have silently reverted the other wave's rows to names that no longer
+compile.
+
+Verified on the merged tree, not taken from either agent's report: `npx tsc --noEmit` clean on
+`tsconfig.app.json` **and** `tsconfig.spec.json`, `npm run test:ci` **257/257 files · 4 653/4 653
+tests green**, `npx ng build --configuration production` exit 0.
+
+**The merged bundle is 540.44 kB raw / 155.15 kB transfer** — measured here, not composed from N5's
+and N7's separately-measured deltas (the rule this module's own MODULE.md states). That is 40.44 kB
+over the 500 kB warning budget and only **9.56 kB under the 550 kB error budget**, which is less than
+any single wave has cost so far. N4, N6 and N8 will break the build. The choice — raise the error
+budget or route-split the app — is the owner's, and it is now due before the next merge rather than
+at N9 as originally scheduled.
+
+## Status — NGRX-MIGRATION wave N6: the map/geofence stores — all seven in one pass (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N6) — 2026-09-19
+
+**Scope.** The largest wave by line count (~2,240 lines across 7 hand-rolled classes), built in its
+own worktree (`feat/ngrx-n6-map`, branched from `93af4a4d` — the N3-merged tip) concurrently with N5
+(perception slices) and N7 (ops slices) in separate worktrees. All seven became
+`core/<domain>/state/<domain>.{model,actions,reducer,effects}.ts` + a `core/<domain>/<domain>-facade.ts`,
+registered in `provideAppState()`: `core/map/map-store.ts` → `MapFacade` (page-provided, `CommandPage`'s
+`providers:`), `core/map-data/{marks,layers,drawings,tracks}-store.ts` → their `*Facade` siblings
+(all `providedIn: 'root'`), `core/map-data/route-store.ts` → `RouteFacade` (page-provided), and
+`core/geofence/geofence-store.ts` → `GeofenceFacade` (`providedIn: 'root'`). Every real consumer
+changed only its one `inject(XStore)` → `inject(XFacade)` line, import path swap only. All seven
+legacy classes and their specs are deleted in this same wave (14 files).
+
+**`@ngrx/entity` fits all four mandatory collections cleanly, same shape every time.** `marks`,
+`layers`, `drawings`, `tracks` each use `createEntityAdapter<T>({selectId})` with **no**
+`sortComparer` — display order (`selectDisplayMarks`/`selectDisplayDrawings`/etc.) is a pure
+derivation over `selectAll`, never storage order, so the adapter only ever needs unordered upsert/
+remove. Every live/REST fold routes through the domain's pre-existing pure `apply*Events` function
+first (`map-event-logic.ts#applyMapEvent`, `camera-geo-logic.ts#applyTrackEvent`, `layers-logic.ts#
+applyLayerEvents`) and only the *result* array goes into `adapter.setAll([...], state)` — the adapter
+never does a per-field entity mutation, keeping the pure-fold precedent these domains already had
+before NgRx existed in this codebase. `geofence`'s zones stayed a plain array (no adapter) — no
+collection here needed keyed lookup or upsert-by-id at adapter granularity, `applyZoneEvent`'s own
+fold already does the equivalent work over a small array.
+
+**Domain semantics carried over exactly, verified by reading the fold logic rather than assumed while
+writing specs** (two were gotten wrong on the first pass and caught by the reducer specs, not by
+review): a mark or drawing/track event with `action: 'cleared'` **removes** the entity outright — the
+same branch `'deleted'` takes (`map-event-logic.ts#isRemoval`) — it does not linger with a
+`status: 'CLEARED'` field; `interactionModeForDrawKind(kind)` returns `'view'` for `null`/the default
+case, never `null` itself, so `drawings.reducer.spec.ts`'s not-drawing assertion had to be `.toBe
+('view')`, not `.toBeNull()`. A layer arriving over the `map` SSE topic with no `grants` field keeps
+the previously-known grants (`layers.reducer.ts#adoptLayer`) — correct for everything except a grant
+**revocation**, which that fold still cannot represent, same accepted gap as the old class.
+
+**`FleetMapStore`'s "construction is demand" contract does not survive the move to NgRx unchanged —
+the one real plan-shaped defect this wave found.** The old class was page-provided with no ref-count
+of its own: its constructor running *was* the demand signal, since nothing else could construct it
+except `CommandPage`. An NgRx slice can't express that — `map` is registered once, root-scoped, in
+`provideAppState()`, and its effects subscribe for the app's whole lifetime regardless of whether any
+facade instance currently exists. Fix: a **new** `activeConsumers` ref-count on the `map` slice
+itself, bumped/dropped by `MapPageActions.activated()`/`released()` from `MapFacade`'s constructor/
+`DestroyRef.onDestroy` — the same ref-count idiom `map-data`'s four stores already used for the same
+reason, just newly needed here because `FleetMapStore` alone among this wave's stores had never
+needed one before. `RouteFacade` carries a smaller version of the same lesson: its constructor now
+dispatches `hide()` on every mount, because the `route` slice is app-wide storage for what used to be
+a page-scoped-by-construction value — without the reset, a second `/command` visit would flash the
+previous visit's stale route span before its own `show()` call landed.
+
+**A wave-wide latent gap this wave found and fixed, not specific to map/geofence**: none of the seven
+new `*.reducer.ts` files had the sibling `*.reducer.spec.ts` that `core/ui/architecture.spec.ts`'s
+NgRx layering guard requires (every `.reducer.ts` needs a sibling `.actions.ts` *and* `.reducer.spec.ts`).
+The guard was passing throughout — not because it couldn't catch this, but because nothing had
+tripped it yet at the point this wave started. Wrote all seven specs (71 tests total: geofence 9,
+layers 9, marks 16, drawings 13, tracks 8, route 6, map 10, plus `map-facade.spec.ts`'s own 20 = 91)
+rather than loosen the guard.
+
+**`map-facade.spec.ts` needed two new test patterns this codebase didn't have yet.** First: a `vi.spyOn
+(store, 'dispatch')` set up before construction never sees an action an *effect* redispatches (here,
+`LivePageActions.telemetryTracked`/`telemetryUntracked` from the merge-and-redispatch in
+`reconcileTrackers$`) — only a subscription to the `Actions` service (`@ngrx/effects`) reliably
+observes every dispatch regardless of path. Second: asserting a side effect of a page-provided
+facade's *own* `DestroyRef.onDestroy` (here, untracking every remaining tracked asset on teardown)
+needs the facade destroyed without tearing down the shared `Store`/`Actions`/effects the rest of the
+spec still needs — `TestBed.resetTestingModule()` tears down too much and races the callback.
+Constructing `MapFacade` in a **child** injector (`Injector.create({providers: [MapFacade], parent})`)
+and calling `child.destroy()` isolates exactly the facade's own teardown, mirroring a real page
+component's injector lifecycle. Both patterns are reusable for any future page-provided facade spec
+that needs to watch effect-originated dispatches or isolated teardown.
+
+### Tests / build
+
+`npm run test:ci` — **241/241 files, 4538/4538 tests green** (+7 files / +95 tests over the N3
+baseline of 234/4443). Every domain lost one `*-store.spec.ts` and gained exactly two: a
+`*-facade.spec.ts` and a `*.reducer.spec.ts` (14 new files, 7 deleted, net +7) — 201 new tests
+(facade specs: map 20, marks 30, layers 19, drawings 22, tracks 9, route 8, geofence 22 = 130;
+reducer specs: map 10, marks 16, layers 9, drawings 13, tracks 8, route 6, geofence 9 = 71) against
+106 deleted legacy tests (map-store 19, marks-store 30, layers-store 12, drawings-store 8,
+tracks-store 8, route-store 7, geofence-store 22), netting the confirmed +95. `npx tsc --noEmit`
+clean on both `tsconfig.app.json` and `tsconfig.spec.json`, including after all 14 legacy-file
+deletions (a genuine backstop — would have caught any stale import).
+
+**`npx ng build --configuration production` fails: exit 1.** Initial bundle **553.08 kB raw / 157.88
+kB transfer**. Rebuilt the exact commit this wave branched from (`93af4a4d`) in a throwaway `git
+worktree` with a symlinked `node_modules` (no reinstall needed): **505.87 kB raw / 143.69 kB
+transfer**, exit 0. This wave's own cost: **+47.21 kB raw (+9.3%) / +14.19 kB transfer (+9.9%)** — by
+far the largest single-wave jump in this migration so far, and enough on its own to cross
+`angular.json`'s 550 kB **error** budget (over by 3.08 kB; also 53.08 kB over the 500 kB warning
+line). Every prior wave's growth stayed inside the warning band, so this is the first wave where the
+"leave it as a warning, it's the only signal tracking cost" call from N1–N3 turns the build red rather
+than merely loud. The cost itself is architecturally inherent, not a mistake: four `@ngrx/entity`
+adapters that never existed in the bundle before, plus seven slices' worth of
+`createFeature`/`createReducer`/`createActionGroup`/effects boilerplate, none of it optional if the
+plan's own recipe (entity adapters for the four collections) is followed. Investigated for legitimate
+in-scope savings (accidental non-type imports, duplicated helpers, eager registration, disabled
+runtime checks) and found none that both stayed inside this wave's file scope and didn't violate an
+explicit constraint (`angular.json` untouched; `core/seat/`'s established per-file `ticks$` duplication
+convention left alone; `provideAppState()`'s eager-registration architecture left alone; runtime checks
+all stay on, per the plan). `angular.json` was **not** edited, per this task's explicit instruction —
+raising the error budget is an orchestrator-level call, ideally made once against the combined tip of
+N4–N8 rather than per-wave, since N5 and N7 each add their own cost on top of this one before N4 closes
+the migration out. This is the wave's principal open finding.
+
+**Nothing in the plan's own recipe for the seven stores was wrong.** The two things worth flagging for
+future waves are procedural, not architectural: (1) a wave converting several stores at once should
+write each reducer's spec *as it writes the reducer*, not after — the layering-guard gap here was only
+caught because `test:ci` was run at all, and a wave that skipped that step would have shipped silently
+uncovered reducers; (2) any store whose page-provided lifetime doubled as its demand signal (only
+`FleetMapStore`, of the seven) needs an explicit new ref-count the moment it moves to a root-registered
+slice — worth a one-line callout in the plan itself for N4/N8 if either touches a store with the same
+shape.
+
+- **Commit** (suggested; this agent does not commit per its task — the orchestrator commits each
+  wave): `feat(ngrx N6): the map/geofence stores — map, marks, layers, drawings, tracks, route,
+  geofence`.
+
+### Merge note — N6 onto `feat/ngrx-migration` (N0–N5 + N7 already merged), 2026-09-19
+
+Seven files conflicted, the same shape as the N7 merge before it: N5/N7 and N6 had each renamed
+*different* classes inside the same paragraph, table row or `providers:` array. All resolved to the
+union. `core/state/app-state.ts` was a pure double-append (both sides added registrations) — the only
+care needed was dropping the duplicated `liveEffects`/`liveFeature` import pair the naive union
+produced. Two documentation rows needed a genuine hand-merge rather than a rename sweep:
+`map / geofence / weather`, because N6 owns its map/geofence halves while N7 owns its weather half,
+and the "own lifetime *is* its demand signal" clause N6 had to replace; and the `core/state/`
+"converted so far" paragraph, where three waves' lists had to be folded into one.
+
+**26 of the app's state slices are now NgRx.** What is left hand-rolled: `fleet`, `systemStatus`,
+`systemEvents` (wave N4), `onboarding` and the feature-local stores (wave N8).
+
+Verified on the merged tree: `npx tsc --noEmit` clean on both configs, `npm run test:ci`
+**264/264 files · 4 748/4 748 tests green**.
+
+**`npx ng build --configuration production` is RED: 587.42 kB raw / 168.30 kB transfer, 37.42 kB over
+`angular.json`'s 550 kB error budget.** This was predicted in the N7 merge note — the headroom was
+9.56 kB and N6 cost +47.21 kB on its own branch. It is not a surprise and not a reason to bump the
+budget: `provideAppState()` registers all 26 slices at the root injector, so slices only one lazy
+feature ever reads are shipped to every visitor on first paint. The next commit moves them.
+
+## Status — NGRX-MIGRATION wave N-split: page-scoped slices move off the root injector (docs/plans/active/NGRX-MIGRATION-PLAN.md §9) — 2026-09-19
+
+**The build is green again: 587.42 kB → 541.37 kB raw (−46.05 kB), 168.30 → 155.34 kB transfer,
+`ng build --configuration production` exit 0 with 8.63 kB of headroom under the 550 kB error
+budget.** `angular.json` is untouched — the owner chose this over raising the budget, and a wave may
+not raise a failing budget on its own anyway. 264/264 spec files, 4754/4754 tests (2 new), both
+tsconfigs clean.
+
+**What moved.** 13 of the 26 slices stay in `provideAppState()`; the other 13 are now registered by
+the route of the page that reads them, each through its own
+`core/<domain>/state/<domain>.providers.ts#provide<Domain>State()`: telemetry, detections, seat,
+weather, geo, thresholds, controlProfile (fly); map, route (command); cvTrace (manage/cv); links
+(asset detail); training (manage/training + replay); discoveryInbox (assets + add-source).
+
+**The eligibility rule, which is not "how many consumers".** A `providedIn: 'root'` facade outlives
+the route that registered its slice, and would then select a feature NgRx has already removed — so
+only a **page-provided** facade's slice may move. The usable form of that test is *"does every class
+injecting this facade already sit behind a lazy route?"*. Four facades passed it and were converted
+from `providedIn: 'root'` to `@Injectable()` in their host page's `providers:` as part of this wave —
+`ThresholdsFacade` (fly), `ControlProfileFacade` (fly + manage/controller), `TrainingFacade`
+(manage/training + replay), `DiscoveryInboxFacade` (assets + add-source). `OrgFacade` failed it and
+stayed root: `shared/map/map-controls/layer-manager.ts` injects it and that control renders on
+several map surfaces. **Each conversion is a real behaviour change** — state now loads per page visit
+rather than per session, so the two pages that used to share one fetch each fetch for themselves —
+and each is written into the facade's own doc comment rather than left for a reader to infer. They
+are defensible individually (thresholds are small rarely-changing ops config; a control profile
+re-read after the setup page saved one is the *fresher* answer, CLAUDE.md rule 7; discovery is a
+live feed that re-polls every few seconds and was never durable state), which is the bar — not the
+bytes they happened to save.
+
+**Why it was a wave and not an afternoon's edit.** `app.routes.ts` imports every feature's route file
+**statically**, so a `providers:` array in one drags the slice it names straight back into the
+initial bundle. Twelve features are therefore now bare `loadChildren` boundaries, with the real
+routes and their providers in a sibling `<feature>.page-routes.ts`. That cascaded twice:
+
+- **Prefix matching.** A `loadChildren` route matches its own segments as a prefix, where a plain
+  `loadComponent` route only matched with no leftovers. `/assets` would now swallow
+  `/assets/:assetId`; `/manage/training` would swallow `/manage/training/models`. Both families are
+  ordered longest-path-first in `app.routes.ts` (`INVENTORY_ROUTES` moved below `ASSET_DETAIL_ROUTES`
+  for exactly this), and `app.routes.spec.ts` now asserts that order **by index** — the router is not
+  guaranteed to backtrack out of a child-match failure, so ordering is the whole guarantee. This is
+  the same trap CREW-CONTROL's own `pathMatch` finding recorded.
+- **The route audit went blind.** `features/hubs/route-audit-logic.ts#flattenRoutes` walks static
+  `children` and cannot see past a boundary — it would have reported all twelve as dead links. New
+  async `flattenRoutesDeep` resolves `loadChildren` first; `app.routes.spec.ts` uses it, and
+  `findRouteByPath` there became async for the same reason. **That this suite passes unchanged is the
+  proof the split moved no URL** — it is the wave's real regression test, not the byte count.
+
+**Measurement note, and a correction to an earlier expectation.** The five biggest remaining root
+slices were probed in one throwaway build (strip them from `app-state.ts`, build, revert) to find out
+what the ceiling actually was — 19.09 kB for five — before any facade was touched. Do that first: it
+turns "which slices do I convert" from a guess into arithmetic, and it is the only reason this wave
+converted four facades rather than all five. Headroom is now 8.63 kB, which N4 and N8 will consume:
+each must land its own split, not measure at the end and discover it is red.
+
+## Status — NGRX-MIGRATION wave N4: the last three root stores, and the split that paid for them (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N4, §9) — 2026-09-19
+
+Two halves, in this order on purpose. **N4a (`29aca82f`) moved six more facades off the root
+injector *before* a line of N4b was written**; **N4b** then converted `FleetStore` and
+`SystemStatusStore` into NgRx slices that had no choice but to register at the root. The order is
+the finding: N4's own three stores are all read by `app.ts`, `AppSidebar` and `NotificationBell` —
+components that render before any lazy route resolves — so N4 could not pay for itself, and with
+8.63 kB of headroom left by N-split it would have gone red on arrival. The relief had to be found
+somewhere else first, and it was: the map/org family gave back 43.61 kB (541.37 → **497.76 kB**),
+which N4b then spent 14.58 kB of (→ **512.34 kB**, exit 0, 37.66 kB under the 550 kB error budget).
+
+**Probe before writing code, again.** The candidate map/org slices were stripped from
+`app-state.ts`, built once and reverted, exactly as N-split established — the ceiling was known
+before any facade was converted. `angular.json` stayed untouched throughout; raising a failing
+budget remains the owner's policy decision, not a wave's.
+
+**Consumer-counting gets the eligibility test wrong in both directions, and N4a hit both.**
+The rule is unchanged — only a *page-provided* facade's slice may move — but the way to check it is
+not "who injects this":
+
+- `OrgFacade` *looked* root-bound because `shared/map/map-controls/layer-manager.ts` injects it.
+  That control only ever renders inside a map, and every map sits behind a lazy route. What actually
+  decides it is whether a **root-reachable injector** exists, and the single fact that settled it was
+  that `org-guard.ts` injects `AuthFacade`, not `OrgFacade`. N-split's own history section above
+  records `OrgFacade` as having failed this test — that verdict was wrong, and this is the correction.
+- `CrewSeatPage` needs all five map facades while `CrewFacade` injects **none** of them: its
+  *template* renders `<vision-map-tools>`, whose children inject them directly.
+
+A grep for `inject(XFacade)` finds the first case and misses the second — and the second fails only
+at **runtime**, with a `NullInjectorError` that neither `tsc` nor the spec suite catches. Host pages
+were therefore enumerated by walking template usage of every map-control selector, not injector
+lists. One near-miss came out of that walk: the `<vision-layer-manager>` hit inside
+`tactical-map.html` is a **comment**, not a render (`TacticalMap`'s `imports:` is `[Icon]`), so
+camera-geo's bare tactical map would have been wrongly given providers on the raw grep's word.
+
+Ten facades are now page-provided across the two splits; `app-state.ts` was down to the **seven**
+root slices NGRX-MIGRATION-PLAN.md §9 predicted before either split was attempted — `theme`,
+`sidebar`, `overlay`, `settings`, `auth`, `live`, `events` — and N4b adds `fleet` and `systemStatus`
+to make nine.
+
+**A root-registered NgRx effect auto-starts the moment the environment injector realizes.** This is
+the trap N4b introduced for every existing spec of a particular shape, and it is new with the engine:
+the old `providedIn: 'root'` classes were *constructed* lazily, on first injection, so a spec that
+never touched `FleetStore` never triggered its HTTP calls. `provideEffects(fleetEffects,
+systemStatusEffects, …)` inside `provideAppState()` is different — `gate$` subscribes and issues
+`GET /api/devices`, `GET /api/streams` and `GET /api/system/status` the instant `EffectsRootModule`
+runs `runner.start()`, triggered by the *first* `TestBed.inject(...)` of any kind. `core/live/poll-rate.spec.ts`
+and `core/auth/session-interceptor.spec.ts` both broke on it and were fixed by accounting for those
+three requests (a `flushFleetBoot(http)` helper, and two deliberately un-counted stubs on the
+`countingApi`). Any future root-registered slice reintroduces it for every spec built on
+`provideAppState()` plus a real `VisionApi`/`HttpClientTesting`.
+
+**Two plan defects found by building it, both recorded rather than quietly worked around:**
+
+- **§3 rule 7 was wrong about `getStreamTracks()`.** It named the method as needing a `*Failed`
+  action, but its contract is to *rethrow* the raw `Error`/`HttpErrorResponse` to a video-track
+  probe the player itself must react to — and a thrown value cannot be a serializable action payload
+  under `strictActionSerializability`. It stays a direct, undispatched `VisionApi` passthrough, the
+  precedent `MapFacade#resolveWatchDevice` already set; `fleet-facade.spec.ts`'s last case pins the
+  rethrow.
+- **§4's "N4 fleet: 3 slices" was wrong, and the table is corrected to 2.** `SystemEventsStore`
+  became `SystemEventsFacade` with **no slice at all**: it owns no state, makes no HTTP call and
+  dispatches nothing — it is one `computed()` over `LiveFacade.liveEvents()`, already NgRx state
+  since N3, projected through the pure, unchanged `system-events-logic.ts#systemEventRows`. A
+  `createFeature` there would be a reducer with no reachable action and a facade re-deriving its
+  parent's data a second time. Deriving from another facade is allowed and long-established
+  (`GeoFacade`, `MapFacade#resolveWatchDevice`); only an *effects* class is barred from
+  cross-injecting.
+
+**One accepted behaviour simplification, written into `FleetFacade`'s own doc comment**: `loading` no
+longer reflects background poll/reconcile activity the way `FleetStore#loading` did, because
+automatic refreshes no longer route through `FleetPageActions.refreshRequested`. Its only consumer is
+the Devices page's "disable Refresh while a fetch is in flight" affordance, which still reads
+correctly for a user-initiated refresh — just not for a silent background one. Toasting moved off
+`run()`'s single call site onto three dedicated effects (`notifySuccess$`, `notifyFailure$`,
+`notifyRefreshFailure$`, the last quiet-aware so a background poll failure never surfaces a toast).
+Every mutation effect keeps `FleetStore#run()`'s original "always refetch after a write" contract —
+a full `listDevices()`/`listStreams()` reconcile on success, never a targeted entity upsert.
+
+## Status — NGRX-MIGRATION wave N8: the last two hand-rolled stores, and the first wave that cost nothing (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N8, §9) — 2026-09-19
+
+Two halves again, but for a different reason than N4's: these were simply very different jobs.
+**N8a** converted `GroundingStore` — 86 lines, one fetch — and assessed `InventoryViewStore`.
+**N8b** converted `OnboardingStore`: **1 656 lines, 66 signals, 13 computeds, ~60 methods, 21 direct
+`VisionApi` calls**, the biggest single-file store this migration has touched.
+
+**The headline is the measurement.** Every previous wave added net bytes to the initial bundle
+despite deleting the class it replaced — N1 +0.89, N2 +12.47, N3 +5.04, N5 +9.96, N7 +24.62,
+N6 +47.21, N4 +14.58 kB raw. N8 converted the largest store in the app and the initial bundle came
+back **byte-for-byte unchanged**: 512.34 kB raw, and transfer 0.02 kB *down* at 146.04 kB. The whole wizard — slice,
+~105 actions, ~25 effects, facade and photo buffer — ships in the `onboarding` lazy chunk
+(100.16 kB raw / 21.14 kB transfer). Nothing clever was done to achieve that; both stores were
+already `@Injectable()` page-provided, which made their slices route-registrable by the N-split
+eligibility rule. **This is what the split was for**: after N-split and N4a, page-scoping stopped
+being a rescue and became the default, and a wave this size arrived free.
+
+**The non-serializable split, for the second time.** `overlay` (wave N1) was the first slice that
+could not hold all of its own state; `onboardingWizard` is the second, and a much larger instance.
+Three things stayed out:
+
+- the photo `File`/`Blob`/object URL → `OnboardingPhotoBuffer`, which also owns the
+  `URL.revokeObjectURL` lifecycle;
+- `preProvenRoles`, a `ReadonlySet<FitOutRole>` → a plain `readonly FitOutRole[]` (a `Set` is not a
+  plain object; every `.has()` became `.includes()`, including one in a template that only the
+  Angular compiler caught, not `tsc`);
+- the `PollScheduler` teardown handle → `discoveryStatusPoll$`, gated on `store.select` of
+  `step === 'source'`.
+
+**The subtlety worth carrying to any future non-serializable split**: `OnboardingPhotoBuffer` is
+registered *inside* `provideOnboardingState()`, **not** in `OnboardingPage`'s component `providers:`
+— even though only the page reads it through its facade. An `@ngrx/effects` class's `inject()`
+resolves against the **environment** injector `provideEffects()` was registered on, and can never see
+an element-injector provider. `uploadAssetImage$` injects the buffer, so it must sit at the slice's
+own level. The wrong placement type-checks cleanly and fails only at runtime, on the first photo
+upload.
+
+**Not every store needs a slice — the second time this wave, and the third in the migration.**
+`InventoryViewStore` was assessed and deliberately left unconverted. It owns no state whatsoever:
+two `localStorage` methods, no signals, no fetch, no timer. The state it *guards* is one enum among
+roughly twenty plain page signals on the 916-line `InventoryFacade`, so promoting exactly that one to
+a feature slice would have been arbitrary — and whatever remained would still have been this wrapper,
+because `core/state/hydration.ts#StateHydrator.read()` would have had to call something just like it.
+So the rename was the migration: it is `InventoryViewStorage` now, named for what it is, with the
+reasoning in its own class doc. Same call as `SystemEventsFacade` in N4b, and the same rule §8
+already fixed for `UiStore`. After N8 those two are the only non-slice state classes left, both by
+explicit decision rather than omission.
+
+**A latent capability nobody is using.** `hydrationMetaReducer` handles `UPDATE` as well as `INIT`
+specifically so a lazily-registered, page-scoped slice can hydrate from `localStorage` — and
+**nothing exercises that branch**. All three hydrators (`theme`, `sidebar`, `settings`) are root
+slices hydrated at `INIT`. It is the seam to use if Inventory ever does grow a real slice; it is also
+untested code, and should be treated as such by whoever gets there first.
+
+**Two defects found reviewing the wizard conversion rather than trusting it green.** The suite,
+both tsconfigs and the production build were all clean, and neither of these would have failed any
+of them:
+
+- `OnboardingPhotoBuffer`'s class doc claimed it was provided on `OnboardingPage` — the exact
+  opposite of the environment-injector constraint that forced its real placement, and precisely the
+  sentence that would talk the next reader into "fixing" it into the component and breaking uploads.
+- `private file: File | null` was written in `choose()` and nulled in `remove()` and **never read**,
+  pinning the operator's original full-size image in memory for the page's lifetime for nothing.
+
+**The specs could not see the slice's real risk, either.** `onboarding.reducer.spec.ts` calls the
+reducer function directly and `onboarding.effects.spec.ts` uses `provideMockActions` — so neither
+constructs a real `Store`, and neither exercises `provideAppState()`'s four `runtimeChecks`. The
+largest slice in the app, ~105 actions wide, had never had a single action dispatched through a store
+with `strictActionSerializability` on. `state/onboarding.wiring.spec.ts` now does that, and also
+resolves `OnboardingPhotoBuffer` from the environment injector to pin the placement above. Worth
+copying for any slice big enough that a `Date`, `Set` or `Map` could hide in one payload — `tsc`
+cannot see it, and a direct-reducer spec will not either.
+
+## Status — NGRX-MIGRATION wave N9: the dependency that pointed the wrong way, and the refactor that measurement killed — 2026-09-19
+
+The last wave. It had two items, and they ended differently: one was the cleanest fix in the
+migration, the other was deleted from the plan after being measured.
+
+**The auth→live dependency is inverted.** Since N3, `auth.effects.ts` had reached into another
+slice's facade — `injector.get(LiveFacade).reconnect()` after a sign-in, `.stop()` after a sign-out —
+behind a *lazy* `Injector.get` rather than an effect factory parameter, because resolving it eagerly
+constructed the `LiveFacade` singleton (and ran its constructor's `reconnect()` dispatch) before
+`liveEffects.connection$` existed to receive it. That was a real production defect when N3 found it,
+and the lazy resolution genuinely fixed it — but it fixed the *symptom*. The cause was that a slice's
+effect was calling another slice's facade at all.
+
+What made the real fix trivial is that neither method was ever more than a dispatch:
+`LiveFacade.reconnect()` is `store.dispatch(LivePageActions.reconnectRequested())` and `stop()` is
+the `stopRequested()` equivalent. So there was nothing to *call*. `core/live/state/live.effects.ts`
+now owns both reactions itself — `reconnectOnSession$` on `AuthApiActions.loginSucceeded`/
+`bootstrapSucceeded`, `stopOnLogout$` on `logoutCompleted` with that action's `wasAuthEnabled` guard
+kept intact (dev parity never had a session to invalidate) — and `auth.effects.ts` dropped its
+`Injector`, `LiveFacade` and `tap` imports. It no longer knows a live connection exists.
+
+**The ordering hazard did not need dodging once the coupling was gone.** Reacting to an action
+constructs nothing, so there is no singleton whose constructor can run before the effect that must
+hear it. This is worth remembering as a general shape: a lazy `Injector.get` inside an effect is
+almost always a sign that the effect is calling something it should be dispatching to. `Logout
+Completed` already carried `wasAuthEnabled` forward precisely so a second, independent reactor could
+read it after the reducer had cleared the session — the action was designed for this before anyone
+had written the effect that needed it.
+
+**The specs got stronger, not just relocated.** `auth.effects.spec.ts` lost its `reconnectLiveOnSession$`
+block and its `LiveFacade` stub; the equivalent cases live in `live.effects.spec.ts`, where they need
+nothing but the action stream — no store, no gateway, no `VisionApi`, which is itself the proof the
+inversion worked. The four cases in `auth-facade.spec.ts` are the interesting ones: they used to
+stub `LiveFacade` and spy `reconnect`/`stop`, i.e. assert that auth called a collaborator. Nothing
+injects `LiveFacade` there any more, so they now record the real `Actions` stream over the single
+`provideAppState()` store and assert that `Live Page` action actually arrives — the genuine
+cross-feature wiring, which the spy never covered. A stubbed collaborator cannot tell you the two
+features are connected; only the real store can.
+
+**The `VisionApi` flip was measured and declined.** Plan §7 had deferred flipping all 161
+`Promise<T>` methods to Observables until N9, on the stated premise that by then the legacy stores
+would have carried most call sites into effects, leaving a small remainder. With every one of the 32
+hand-rolled stores retired, that premise is testable, and it is false: **120 call sites sit in 25
+`*.effects.ts` files, and 170 sit in 43 other files** — measured by resolving each file's
+`inject(VisionApi)` binding and matching calls on that reference, so a same-named method elsewhere is
+not counted. The 170 are the page-facade layer this app deliberately keeps (UI-ARCHITECTURE's
+Component → Facade → Store split); they are not leftovers and nothing further is coming to absorb
+them.
+
+So the flip would remove 120 `from(...)` wrappers and add 170 `firstValueFrom(...)` wrappers — net
+worse by the plan's own metric, across 68 files, with no behaviour change. Several sites are not even
+mechanical: `Promise.all([...])` fan-outs, `await` inside a `.map()`, `.catch()` fallbacks. The one
+thing the flip genuinely bought — aborting a superseded request, which `from(promise)` cannot do —
+remains available per-endpoint: add an `Observable`-returning sibling for that method and use it from
+the effect. This is the fourth time in this migration the right answer was "decline the ceremony and
+write down why" (`system-events` in N4b, `UiStore`, `InventoryViewStorage` in N8a, now the API shape),
+and the first time the *plan itself* was the thing found wrong rather than a store.
+
+**Cost:** 274/274 files · 4 853/4 853 tests green, both tsconfigs clean, production build exit 0 at
+**512.42 kB raw / 146.04 kB transfer** — +0.08 kB raw for two new effects net of three deleted
+imports, transfer unchanged, 37.58 kB of headroom under the 550 kB error budget. `angular.json`
+untouched, as it has been for the whole migration.

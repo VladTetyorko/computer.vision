@@ -9,7 +9,7 @@ import { KeyboardRcInputService } from '../../core/rc/keyboard-rc-input.service'
 import { RcSource } from '../../core/rc/rc-source.service';
 import { ManualControlClient } from '../../core/rc/manual-control-client';
 import { ControlActionDispatcher } from '../../core/rc/control-action-dispatcher';
-import { ControlProfileStore } from '../../core/rc/control-profile-store';
+import { ControlProfileFacade } from '../../core/rc/control-profile-facade';
 import { activeProfileFor } from '../../core/rc/control-action-logic';
 import { VisionApi } from '../../core/api/vision-api';
 import { ModePicker } from './mode-picker';
@@ -81,7 +81,7 @@ export class RcMonitor implements OnInit {
   protected readonly dispatcher = inject(ControlActionDispatcher);
   protected readonly virtual = inject(VirtualRcInputService);
   protected readonly keyboard = inject(KeyboardRcInputService);
-  protected readonly profiles = inject(ControlProfileStore);
+  protected readonly profiles = inject(ControlProfileFacade);
   private readonly api = inject(VisionApi);
 
   /** The currently-flown asset — mirrors `flight-command-panel.ts`'s own `assetId`/

@@ -3,7 +3,7 @@ import type { AssetSummary, AssignedPilot, UserSummary } from '../../core/api/mo
 /**
  * Pure, Angular-free logic behind `RosterPage` (`/manage/roster`, docs/plans/done/UI-REDESIGN-PLAN.md Wave 4
  * — FUNCTIONAL-NOW per the plan's own Additions table: `AssignmentController`/`PilotResponse`/
- * `OrgStore` are all already live, this is the first dedicated frontend surface for them). Mirrors
+ * `OrgFacade` are all already live, this is the first dedicated frontend surface for them). Mirrors
  * `features/asset-detail/pilots-card.ts`'s own `assigned` computed (userId → display name, falling
  * back to a short id fragment for an unresolvable user) at the *fleet* scope instead of one asset.
  */

@@ -15,8 +15,8 @@ import {
 import { FormsModule } from '@angular/forms';
 import type * as Leaflet from 'leaflet';
 import type { GeoPosition, ZoneKind } from '../../core/api/models';
-import { SettingsStore, type MapLayerId } from '../../core/settings/settings-store';
-import { ThemeStore } from '../../core/shell/theme-store';
+import { SettingsFacade, type MapLayerId } from '../../core/settings/settings-facade';
+import { ThemeFacade } from '../../core/shell/theme-facade';
 import {
   MAP_LAYERS,
   effectiveMapLayerId,
@@ -63,7 +63,7 @@ export interface ZoneDraft {
  *
  * **KEEP_IN save-time advisory** (docs/plans/done/OPS-CORE-PLAN.md §G-c: "3 assets currently outside this
  * zone" — poka-yoke, informational, never blocking): `assetPositions` (every asset with a
- * currently-known position, from `CommandPage`'s own `FleetMapStore.markers()`) is compared against
+ * currently-known position, from `CommandPage`'s own `MapFacade.markers()`) is compared against
  * the draft polygon via `assetsOutsideZoneCount`; shown only for `KEEP_IN` (a KEEP_OUT zone
  * "how many assets are outside" isn't the risk it's drawn to catch) and only once the polygon is
  * actually save-able (a 1-vertex polygon has no "inside" to be outside of yet).
@@ -86,8 +86,8 @@ export class GeofenceZoneDialog {
   readonly cancelled = output<void>();
 
   protected readonly layers = MAP_LAYERS;
-  protected readonly settings = inject(SettingsStore);
-  protected readonly theme = inject(ThemeStore);
+  protected readonly settings = inject(SettingsFacade);
+  protected readonly theme = inject(ThemeFacade);
 
   /** The layer actually rendered (docs/plans/done/VISUAL-REFRESH-PLAN.md F7) — see `FleetMap`'s identical
    * field's own doc comment for the full "explicit pick always wins" contract. */

@@ -292,7 +292,7 @@ export interface NotificationDecisionInput {
    * notified" set.
    */
   readonly alreadySeen: boolean;
-  /** `SettingsStore.eventNotifications()` — the user's own opt-in toggle. */
+  /** `SettingsFacade.eventNotifications()` — the user's own opt-in toggle. */
   readonly notificationsEnabled: boolean;
   /** The browser's own grant — flipping `notificationsEnabled` alone can never bypass this. */
   readonly permission: NotificationPermission;

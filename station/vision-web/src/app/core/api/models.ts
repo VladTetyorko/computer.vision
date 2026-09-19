@@ -159,7 +159,7 @@ export type StreamState = 'STARTING' | 'LIVE' | 'STALLED' | 'RECONNECTING' | 'UN
  * is opt-in per stream now, not opt-out).
  *
  * **Wave W7 (docs/plans/active/CV-SETTINGS-PLAN.md §3.1, H2) deleted the browser-local draft this app
- * used to always send explicitly** (`SettingsStore#effective()` — that slice of `SettingsStore` no
+ * used to always send explicitly** (`SettingsFacade#effective()` — that slice of `SettingsFacade` no
  * longer exists at all). Every call site that starts a stream (`features/fly/cockpit-facade.ts#start`,
  * `features/live/live-facade.ts#start`, `features/devices/devices-facade.ts#start`) now sends **no
  * body at all**, so this request's own documented fallback governs instead: the server resolves the
@@ -189,7 +189,7 @@ export interface StartStreamRequest {
 // Gives the Fly cockpit's CV control panel (`features/fly/cv-control-panel.ts`) live control of a
 // *running* stream's detection pipeline, plus a data-driven model roster for the picker (replacing
 // the old hardcoded `DETECTION_MODEL_OPTIONS`/`DetectionModelId` union — see
-// `core/settings/settings-store.ts`'s own doc comment for that migration).
+// `core/settings/settings-facade.ts`'s own doc comment for that migration).
 
 /**
  * Mirrors the body of `PATCH /api/streams/{streamId}/config` — every field independently optional;
@@ -1818,7 +1818,7 @@ export interface SeatsResponse {
 /**
  * Mirrors `dto.TakeSeatRequest` — the optional body of `POST /api/assets/{id}/seats/{kind}`. The
  * whole body may be absent; `force` defaults `false` server-side and is honoured only for a caller
- * with `mayForceSeat` (mirrors the `arm` endpoint's optional-body idiom). This wave's `SeatStore`
+ * with `mayForceSeat` (mirrors the `arm` endpoint's optional-body idiom). This wave's `SeatFacade`
  * never sends `force: true` — forcing the flight seat is a manager affordance built in a later wave.
  */
 export interface TakeSeatRequest {
@@ -2529,7 +2529,7 @@ export interface DevicesSnapshot {
  * **`zones` and `system` are the 10th and 11th, from docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md
  * §4.1/§4.2 (waves L3/L4/L5)** — both always-on, both gate a poll that used to run unconditionally
  * (D1). `zones` is delta-only like `discovery`/`map` (no snapshot-on-connect — `core/geofence/
- * geofence-store.ts#GeofenceStore`'s own `GET /api/geofences` on `activate()` is the snapshot),
+ * geofence-facade.ts#GeofenceFacade`'s own `GET /api/geofences` on `activate()` is the snapshot),
  * payload {@link GeofenceZoneEventPayload}; `action` is `CREATED`/`UPDATED`/`DELETED`, and `DELETED`
  * carries the zone's **last-known full body**, not just its id — that store's existing 10s Undo
  * re-`POST`s it. `system` is latest-value-only (ring capacity 1, like `detections`/`geo`) — a
@@ -3837,7 +3837,7 @@ export interface Membership {
  * is `VisibilityScope.Kind`'s name — what it may *see*. Neither rides on `topRole`, which stays
  * purely a display concern (the identity chip's role badge) — every real gate in this app reads
  * `capabilities`/`scopeKind` via `core/auth/auth-logic.ts#hasCapability`/`canAdminister` instead.
- * `mustChangePassword` mirrors `User#mustChangePassword()` — `true` forces `AuthStore` to surface a
+ * `mustChangePassword` mirrors `User#mustChangePassword()` — `true` forces `AuthFacade` to surface a
  * change-password gate before anything else (see that store's own `mustChangePassword` accessor).
  */
 export interface MeResponse {
@@ -3855,7 +3855,7 @@ export interface MeResponse {
 
 // --- Bootstrap + password management (docs/plans/active/AUTH-ROLES-PLAN.md §3.5, wave B3) -------------
 // `core/auth/auth-store.ts` is the only caller of `bootstrapStatus`/`bootstrap`/`changePassword`;
-// `core/org/org-store.ts` the only caller of `adminSetPassword`/`setMemberships` (admin-on-behalf-of
+// `core/org/org-facade.ts` the only caller of `adminSetPassword`/`setMemberships` (admin-on-behalf-of
 // another user). Same "no page talks to a URL directly" rule as everywhere else in this file.
 
 /**

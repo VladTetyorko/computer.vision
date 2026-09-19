@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject } from '@angular/core';
-import { TelemetryStore } from '../../core/telemetry/telemetry-store';
+import { TelemetryFacade } from '../../core/telemetry/telemetry-facade';
 import { batterySeverity } from '../../core/telemetry/telemetry-logic';
 import { humanAge } from '../../core/telemetry/telemetry-logic';
 
@@ -211,7 +211,7 @@ import { humanAge } from '../../core/telemetry/telemetry-logic';
   `,
 })
 export class TelemetryOsd {
-  protected readonly store = inject(TelemetryStore);
+  protected readonly store = inject(TelemetryFacade);
 
   protected readonly coords = computed(() => {
     const latest = this.store.latest();

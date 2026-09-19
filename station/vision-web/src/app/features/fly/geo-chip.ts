@@ -1,11 +1,11 @@
 import { ChangeDetectionStrategy, Component, computed, inject, signal } from '@angular/core';
-import { GeoStore } from '../../core/geo/geo-store';
+import { GeoFacade } from '../../core/geo/geo-facade';
 import { geoChipLabel, geoChipTone, geoDetailRows } from '../../core/geo/geo-logic';
 import { Icon } from '../../shared/ui/icon';
 
 /**
  * The Fly cockpit's visual-geolocation divergence chip (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.8,
- * wave H6) — embedded in `fly-osd.ts`'s Nav cluster, DI-sharing whichever {@link GeoStore} instance
+ * wave H6) — embedded in `fly-osd.ts`'s Nav cluster, DI-sharing whichever {@link GeoFacade} instance
  * `CockpitPage` provided, the exact same "second consumer → a shared, dumb, DI-sharing component"
  * idiom `shared/ui/weather-chip.ts` already established for the Env cluster's own chip. Takes no
  * data inputs at all.
@@ -17,7 +17,7 @@ import { Icon } from '../../shared/ui/icon';
  * accident) — and `'GEO —'` (dim) whenever `latest()` is `undefined`, the ordinary "no fix
  * computed yet for this asset" case.
  *
- * **Absent, not dim, while the feature is off.** `GeoStore.disabled()` is the one case that must
+ * **Absent, not dim, while the feature is off.** `GeoFacade.disabled()` is the one case that must
  * render *nothing at all* rather than a `'GEO —'` chip — VISUAL-GEO-V2-PLAN.md §3.8's own "Off
  * state: every geo surface is absent, not empty" row. `latest() === undefined` alone cannot tell
  * "no fix yet" apart from "the flag is off"; `disabled()` is the store's own answer to exactly that
@@ -29,8 +29,8 @@ import { Icon } from '../../shared/ui/icon';
  * (or clicking the chip again) closes it — the same plain toggle-button idiom
  * `features/fly/diagnostics-card.ts`'s own disclosure chevron already uses in this same OSD strip,
  * not a full click-outside/Escape overlay (this is a small, low-stakes popover, not a shell menu —
- * `core/ui/overlay-store.ts#GlobalOverlayStore` is reserved for shell-level chrome, per that class's
- * own doc comment).
+ * the `overlay` slice behind `core/ui/overlay-facade.ts#OverlayFacade` is reserved for shell-level
+ * chrome, per that facade's own doc comment).
  */
 @Component({
   selector: 'vision-geo-chip',
@@ -40,7 +40,7 @@ import { Icon } from '../../shared/ui/icon';
   styleUrl: './geo-chip.css',
 })
 export class GeoChip {
-  private readonly geo = inject(GeoStore);
+  private readonly geo = inject(GeoFacade);
 
   protected readonly disabled = computed(() => this.geo.disabled());
   protected readonly latest = computed(() => this.geo.latest());

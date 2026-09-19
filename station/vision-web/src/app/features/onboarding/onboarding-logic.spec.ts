@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { DiscoveryCandidate, NetworkAddress, ProbeDeviceResult, VehicleProfile } from '../../core/api/models';
 import { emptyFitOutRows, type FitOutRowDraft, type FitOutRows } from '../../core/onboarding/fit-out-logic';
 import {
+  applyResolvedConnection,
   buildCreateAssetRequest,
   buildIdentityRequest,
   buildPostSimulationAssetEdit,
@@ -9,13 +10,18 @@ import {
   buildVerifyRequest,
   canAdvanceFromIdentify,
   composePushAddress,
+  currentProbeRequest,
+  currentVerifyRequest,
+  emptyFitOutRowLike,
   isEquipmentPath,
+  isLastProbeOk,
   isTelemetryOnlyProtocol,
   nextStep,
   prefillFromDiscoveryCandidate,
   prevStep,
   relativeAge,
   roleForDiscoveryMethod,
+  sameConnection,
   senseTerminalProof,
   simulateNeedsVideoPath,
   sightTerminalProof,
@@ -543,5 +549,74 @@ describe('relativeAge', () => {
 
   it('renders a humanized "ago" suffix', () => {
     expect(relativeAge('2026-09-01T00:00:45Z', now)).toBe('15s ago');
+  });
+});
+
+// --- Prove step request builders + staleness check (wave N8b — moved here from `OnboardingStore`'s
+// own `currentProbeRequest`/`currentVerifyRequest`/`sameConnection`/`lastProbeOk`/
+// `applyResolvedConnection` methods so `onboarding.reducer.ts`'s `extraSelectors` and
+// `OnboardingWizardFacade` can share one implementation). ------------------------------------------
+
+describe('currentProbeRequest / currentVerifyRequest', () => {
+  it('is null for a row not currently resolved to "find"', () => {
+    expect(currentProbeRequest(row({ role: 'sight', value: 'none' }))).toBeNull();
+    expect(currentVerifyRequest(row({ role: 'sight', value: 'simulate' }))).toBeNull();
+  });
+
+  it('builds the wire request from the row\'s effective protocol/uri/options for a "find" row', () => {
+    const filled = row({ role: 'sight', value: 'find', protocolSelect: 'rtsp', uri: 'rtsp://cam' });
+    expect(currentProbeRequest(filled)).toEqual(buildProbeRequest({ protocol: 'rtsp', uri: 'rtsp://cam', options: undefined }));
+    expect(currentVerifyRequest(filled)).toEqual(buildVerifyRequest({ protocol: 'rtsp', uri: 'rtsp://cam', options: undefined }));
+  });
+});
+
+describe('sameConnection / isLastProbeOk', () => {
+  it('sameConnection compares protocol + uri + options field-for-field, and is false for either null', () => {
+    const a = { protocol: 'rtsp', uri: 'rtsp://x', options: { a: '1', b: '2' } };
+    const b = { protocol: 'rtsp', uri: 'rtsp://x', options: { a: '1', b: '2' } };
+    expect(sameConnection(a, b)).toBe(true);
+    expect(sameConnection(a, null)).toBe(false);
+    expect(sameConnection(null, null)).toBe(false);
+  });
+
+  it('sameConnection is a naive JSON.stringify compare — a reordered options map counts as different (matches `OnboardingStore#sameConnection` exactly)', () => {
+    const a = { protocol: 'rtsp', uri: 'rtsp://x', options: { a: '1', b: '2' } };
+    const b = { protocol: 'rtsp', uri: 'rtsp://x', options: { b: '2', a: '1' } };
+    expect(sameConnection(a, b)).toBe(false);
+  });
+
+  it('isLastProbeOk is undefined until a probe has run against the current fields', () => {
+    expect(isLastProbeOk({ protocol: 'rtsp', uri: 'rtsp://x' }, null, null)).toBeUndefined();
+  });
+
+  it('isLastProbeOk reflects the last result only when it was for these exact fields', () => {
+    const current = { protocol: 'rtsp', uri: 'rtsp://x' };
+    expect(isLastProbeOk(current, current, { ok: true })).toBe(true);
+    expect(isLastProbeOk(current, current, { ok: false })).toBe(false);
+  });
+
+  it('isLastProbeOk goes stale (undefined) the instant the fields change', () => {
+    const stale = { protocol: 'rtsp', uri: 'rtsp://old' };
+    const current = { protocol: 'rtsp', uri: 'rtsp://new' };
+    expect(isLastProbeOk(current, stale, { ok: true })).toBeUndefined();
+  });
+});
+
+describe('applyResolvedConnection', () => {
+  it('fills a row\'s register fields and always lands on findMethod "register"', () => {
+    const filled = applyResolvedConnection(row({ role: 'sight', findMethod: 'discover' }), { protocol: 'rtsp', uri: 'rtsp://cam', options: { user: 'admin' } });
+    expect(filled).toMatchObject({ value: 'find', findMethod: 'register', uri: 'rtsp://cam', options: [{ key: 'user', value: 'admin' }] });
+  });
+
+  it('a candidate with no echoed protocol resolves to the blank "choose a protocol" state, never throwing', () => {
+    const filled = applyResolvedConnection(row({ role: 'sense' }), { protocol: undefined, uri: 'udp://1.2.3.4:14550' });
+    expect(filled).toMatchObject({ protocolSelect: '', customProtocol: '', uri: 'udp://1.2.3.4:14550' });
+  });
+});
+
+describe('emptyFitOutRowLike', () => {
+  it('resets every field except role', () => {
+    const filled = row({ role: 'sight', value: 'find', findMethod: 'register', uri: 'rtsp://x', protocolSelect: 'rtsp', options: [{ key: 'a', value: 'b' }] });
+    expect(emptyFitOutRowLike(filled)).toEqual(row({ role: 'sight' }));
   });
 });

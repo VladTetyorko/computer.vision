@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
-import { DetectionsStore } from '../../core/detections/detections-store';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { DetectionsFacade } from '../../core/detections/detections-facade';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { HIDDEN_CLASS_TRUTH, toggleLabelDeny } from '../../core/detections/detections-logic';
 import { worldObjectsByTrackId } from './detection-overlay-logic';
 import { stripChips, STRIP_CHIP_CAP, type StripChip } from './detections-strip-logic';
@@ -21,7 +21,7 @@ import { stripChips, STRIP_CHIP_CAP, type StripChip } from './detections-strip-l
  *   `<vision-player [hoveredClass]>`, which temporarily promotes every box of that class to T1
  *   (`shared/player/detection-overlay-logic.ts#detectionTiers`). Pure client-side, never PATCHes.
  * - **Click** a chip toggles it in {@link labelDenyFilter} (`CockpitFacade#resolvedCvConfig`, wave
- *   W7 — no more `SettingsStore` draft) and PATCHes `FleetStore.patchStreamConfig` immediately, then
+ *   W7 — no more `SettingsFacade` draft) and PATCHes `FleetStore.patchStreamConfig` immediately, then
  *   emits {@link configChanged} on success so the host re-reads the wire (H6) — the honest, one-time disclosure
  *   ({@link hiddenClassTruth}) is shown once, at rest, whenever this mode is active. **Never** touches
  *   `labelFilter` (the allowlist) — see `toggleLabelDeny`'s own doc comment
@@ -53,8 +53,8 @@ import { stripChips, STRIP_CHIP_CAP, type StripChip } from './detections-strip-l
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class DetectionsStrip {
-  protected readonly store = inject(DetectionsStore);
-  private readonly fleet = inject(FleetStore);
+  protected readonly store = inject(DetectionsFacade);
+  private readonly fleet = inject(FleetFacade);
 
   /** The running stream's id — binding this switches the strip into its interactive mode (see class
    *  doc). Left unbound, the strip stays exactly the plain read-only list it has always been. */
@@ -62,7 +62,7 @@ export class DetectionsStrip {
   protected readonly interactive = computed(() => !!this.streamId());
 
   /** The stream's own currently-resolved deny-list (`CockpitFacade#resolvedCvConfig()?.
-   *  labelDenyFilter`, wave W7 — no more `SettingsStore` draft) — only meaningful in
+   *  labelDenyFilter`, wave W7 — no more `SettingsFacade` draft) — only meaningful in
    *  {@link interactive} mode; the host simply never binds it in read-only mode (see class doc's
    *  own "Read-only" paragraph), same as {@link streamId}. */
   readonly labelDenyFilter = input<readonly string[]>([]);

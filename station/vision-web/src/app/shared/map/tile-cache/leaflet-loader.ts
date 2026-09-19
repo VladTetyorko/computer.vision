@@ -1,7 +1,7 @@
 import { signal } from '@angular/core';
 import type * as Leaflet from 'leaflet';
-import type { MapLayerId } from '../../../core/settings/settings-store';
-import type { Theme } from '../../../core/shell/theme-store';
+import type { MapLayerId } from '../../../core/settings/settings-facade';
+import type { Theme } from '../../../core/shell/state/theme.model';
 import { readPersistedFlag, writePersistedFlag } from '../../../core/panel-state';
 import { getCachedTile, putCachedTile } from './tile-cache-db';
 import { tileCacheKey, tileHost } from './tile-cache-logic';
@@ -34,7 +34,7 @@ const LEAFLET_STYLESHEET_HREF = '/leaflet/leaflet.css';
  * be, started returning "API KEY REQUIRED" tiles, per docs/plans/active/OPERATOR-UX-6-PLAN.md M1),
  * **Relief** (OpenTopoMap, contour shading), and **Satellite** (Esri World Imagery). Each carries
  * its own attribution text, shown by Leaflet's attribution control automatically whenever that
- * layer is the one added to the map. Selection is `SettingsStore.mapLayer` — persisted, one choice
+ * layer is the one added to the map. Selection is `SettingsFacade.mapLayer` — persisted, one choice
  * shared by every map in the app.
  */
 export interface MapLayerDef {
@@ -116,13 +116,13 @@ export function mapLayerDef(id: MapLayerId): MapLayerDef {
 
 // --- Theme-aware default layer (docs/plans/done/VISUAL-REFRESH-PLAN.md F7, Wave 3) ------------------------
 //
-// `SettingsStore.mapLayer` (docs/main/CYCLES-PLAN.md §9) is a single persisted signal shared by every
+// `SettingsFacade.mapLayer` (docs/main/CYCLES-PLAN.md §9) is a single persisted signal shared by every
 // map — it always holds a concrete `MapLayerId` (its own hardcoded `DEFAULT_MAP_LAYER = 'night'`
 // until something changes it), so a consumer reading it alone cannot tell "the operator has never
 // touched the layer picker" apart from "the operator explicitly chose Night". That distinction is
 // exactly what F7 needs ("the default follows the theme … an explicit user pick always wins"), so
 // this module tracks it separately, in its own tiny persisted flag, rather than needing a change to
-// `core/settings/settings-store.ts` (out of this wave's own file scope — see `vision-web/MODULE.md`'s
+// `core/settings/settings-facade.ts` (out of this wave's own file scope — see `vision-web/MODULE.md`'s
 // dated Wave 3 entry for the full accounting, including why a returning user's *already*-persisted
 // `mapLayer` value cannot retroactively be told apart from the store's own unconditional default).
 
@@ -160,7 +160,7 @@ export function isMapLayerExplicit(): boolean {
 }
 
 /** Records an explicit layer-picker click — every host's own `setBasemap`/`setLayer` calls this
- * alongside `SettingsStore.mapLayer.set(id)`, so the two persisted values always change together.
+ * alongside `SettingsFacade.mapLayer.set(id)`, so the two persisted values always change together.
  * Writes {@link explicitMapLayer} first (the reactive notification) and `localStorage` second (the
  * persistence) — see that signal's own doc comment for why the signal write is load-bearing, not
  * redundant with the `localStorage` one. */
@@ -170,11 +170,11 @@ export function markMapLayerExplicit(): void {
 }
 
 /**
- * The layer id a map should actually render: `chosen` (`SettingsStore.mapLayer()`) once the
+ * The layer id a map should actually render: `chosen` (`SettingsFacade.mapLayer()`) once the
  * operator has made an explicit pick, otherwise the theme's own default — "an explicit user pick
  * always wins" (docs/plans/done/VISUAL-REFRESH-PLAN.md F7). Pure and unit-tested (`leaflet-loader.spec.ts`);
- * `TacticalMap` wraps it in a `computed()` reading `ThemeStore.theme()` +
- * `SettingsStore.mapLayer()`, so both re-render the instant either changes.
+ * `TacticalMap` wraps it in a `computed()` reading `ThemeFacade.theme()` +
+ * `SettingsFacade.mapLayer()`, so both re-render the instant either changes.
  */
 export function effectiveMapLayerId(theme: Theme, chosen: MapLayerId, explicit: boolean): MapLayerId {
   return explicit ? chosen : defaultMapLayerIdForTheme(theme);

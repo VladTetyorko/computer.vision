@@ -1,4 +1,4 @@
-import type { LiveConnectionState } from '../live/live-store';
+import type { LiveConnectionState } from '../live/live-fallback-logic';
 import type { OverallHealth, SubsystemHealth, SubsystemStatus } from '../api/models';
 
 /**

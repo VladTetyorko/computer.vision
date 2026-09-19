@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { describe, expect, it } from 'vitest';
 import { landingGuard } from './landing-guard';
-import { AuthStore } from '../auth/auth-store';
+import { AuthFacade } from '../auth/auth-facade';
 import type { AuthCapability, MeResponse, Role } from '../api/models';
 
 /**
@@ -11,7 +11,7 @@ import type { AuthCapability, MeResponse, Role } from '../api/models';
  * `landing-logic.spec.ts`), the same "no dedicated spec" precedent `core/auth/auth-guard.ts`'s own
  * doc comment states. This one file earns an exception: the routing *shape* it needs —
  * `{ path: '', canActivate: [...], children: [] }`, the standard trick for a guard whose redirect
- * target can only be known after an async `AuthStore.ready` (`redirectTo` alone can't be async or
+ * target can only be known after an async `AuthFacade.ready` (`redirectTo` alone can't be async or
  * DI-computed) — is itself the thing worth regression-covering, decoupled from the real app's heavy
  * feature routes (`app.routes.spec.ts` covers the real table's shape, not runtime navigation).
  */
@@ -25,7 +25,7 @@ const ROLE_CAPABILITIES: Record<Role, readonly AuthCapability[]> = {
   ADMIN: ['OPERATE_PAYLOAD', 'COMMAND_FLIGHT', 'MANAGE_FLEET', 'MANAGE_ORG'],
 };
 
-function fakeAuthStore(user: Pick<MeResponse, 'topRole'> | null, authEnabled: boolean) {
+function fakeAuthFacade(user: Pick<MeResponse, 'topRole'> | null, authEnabled: boolean) {
   return {
     ready: Promise.resolve(),
     user: () => user,
@@ -45,7 +45,7 @@ function configure(user: Pick<MeResponse, 'topRole'> | null, authEnabled = true)
         { path: 'fly', component: StubPage },
         { path: 'command', component: StubPage },
       ]),
-      { provide: AuthStore, useValue: fakeAuthStore(user, authEnabled) },
+      { provide: AuthFacade, useValue: fakeAuthFacade(user, authEnabled) },
     ],
   });
 }

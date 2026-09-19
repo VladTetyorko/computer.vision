@@ -1,9 +1,9 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
-import { AuthStore } from '../../core/auth/auth-store';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { canManageOrg } from '../../core/org/org-logic';
-import { SettingsStore } from '../../core/settings/settings-store';
-import { ThemeStore } from '../../core/shell/theme-store';
+import { SettingsFacade } from '../../core/settings/settings-facade';
+import { ThemeFacade } from '../../core/shell/theme-facade';
 import { ToastService } from '../../core/toast.service';
 
 /**
@@ -23,24 +23,24 @@ import { ToastService } from '../../core/toast.service';
  * spirit to Interface/Notifications than to a fleet-wide default, so it stays on the account page.
  *
  * **Tiles-per-row is gone from here entirely** (docs/extracts/design/11-settings.md's own "delete, don't
- * duplicate" call, task 5) — `SettingsStore.wallDensity` is still the one signal both this app and
+ * duplicate" call, task 5) — `SettingsFacade.wallDensity` is still the one signal both this app and
  * the Wall read/write; only this page's second `<select>` control is deleted.
  * `features/wall/wall.html`'s own `[pageBarFilters]` control (`WallFacade.setDensity`) is untouched
  * and is now the *only* place that writes it.
  */
 @Injectable()
 export class AccountSettingsFacade {
-  readonly settings = inject(SettingsStore);
-  readonly fleet = inject(FleetStore);
+  readonly settings = inject(SettingsFacade);
+  readonly fleet = inject(FleetFacade);
   /** Backs the page's own "Appearance" section (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/Wave 1) — the same
-   *  `ThemeStore` the sidebar-footer switch calls directly, injected here instead because
+   *  `ThemeFacade` the sidebar-footer switch calls directly, injected here instead because
    *  `AccountSettingsPage` **is** a routed page (`core/ui/architecture.spec.ts`'s "injects only its
    *  facade, never a bare `*Store`" guard scans every `ROUTED_PAGES` entry, and this route is one of
    *  them) — `account-settings.html` reads/writes it as `facade.theme.theme()`/
    *  `facade.theme.setTheme(...)`, the same direct-field idiom `facade.settings`/`facade.fleet`
    *  already use above rather than this class growing passthrough wrapper methods. */
-  readonly theme = inject(ThemeStore);
-  private readonly auth = inject(AuthStore);
+  readonly theme = inject(ThemeFacade);
+  private readonly auth = inject(AuthFacade);
   private readonly toasts = inject(ToastService);
 
   /**

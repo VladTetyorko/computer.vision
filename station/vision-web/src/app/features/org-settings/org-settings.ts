@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { OrgSettingsFacade } from './org-settings-facade';
+import { OrgFacade } from '../../core/org/org-facade';
 
 /**
  * The org-settings surface (`/org`, docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2) — a manager/admin's
@@ -16,7 +17,7 @@ import { OrgSettingsFacade } from './org-settings-facade';
  * Two sections behind a segmented tab (this app's `.segmented` idiom, `styles.css`): **Users**
  * (list + invite form + enable/disable toggle) and **Groups** (hierarchy tree + create form). Dumb
  * by convention (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — every fetch/mutation and its one-toast handling
- * lives in `OrgStore`, every pure derivation (group tree, role options) in `core/org/org-logic.ts`,
+ * lives in `OrgFacade`, every pure derivation (group tree, role options) in `core/org/org-logic.ts`,
  * and all of it is orchestrated by `OrgSettingsFacade`, which this component injects exclusively.
  * Reuses the existing management-page look wholesale (`.page`/`.card`/`.btn`/`.chip`/`.segmented`/
  * `.empty`), no new colors. Responsive: the page is a single scrolling column of cards; each list row
@@ -63,7 +64,9 @@ import { OrgSettingsFacade } from './org-settings-facade';
   templateUrl: './org-settings.html',
   styleUrl: './org-settings.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [OrgSettingsFacade],
+  // `OrgFacade` is page-provided since wave N4 (NGRX-MIGRATION-PLAN.md §9). This page is not
+  // routed itself — it is embedded in `CrewPage` at `manage/roster`, which registers the slice.
+  providers: [OrgSettingsFacade, OrgFacade],
 })
 export class OrgSettingsPage {
   protected readonly facade = inject(OrgSettingsFacade);

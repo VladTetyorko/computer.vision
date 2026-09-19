@@ -2,10 +2,11 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { describe, expect, it, vi } from 'vitest';
 import { IdentityChip } from './identity-chip';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { VisionApi } from '../../core/api/vision-api';
-import { GlobalOverlayStore } from '../../core/ui/overlay-store';
 import type { AuthCapability, MeResponse, Role, ScopeKind } from '../../core/api/models';
+import { provideAppState } from '../../core/state/app-state';
+import { OverlayFacade } from '../../core/ui/overlay-facade';
 
 /** Mirrors the real `RoleAuthority`/`DefaultScopeResolver` policy table closely enough for a
  *  fixture — see `core/auth/auth-logic.spec.ts`'s identical helper for the full reasoning. */
@@ -46,10 +47,10 @@ async function render(me: MeResponse | null) {
     authLogout: vi.fn().mockResolvedValue(undefined),
   };
   TestBed.configureTestingModule({
-    providers: [provideRouter([]), AuthStore, { provide: VisionApi, useValue: api }],
+    providers: [provideRouter([]), provideAppState(), { provide: VisionApi, useValue: api }],
   });
-  const store = TestBed.inject(AuthStore);
-  await store.ready;
+  const facade = TestBed.inject(AuthFacade);
+  await facade.ready;
   const fixture = TestBed.createComponent(IdentityChip);
   fixture.detectChanges();
   return fixture;
@@ -99,9 +100,10 @@ describe('IdentityChip — profile menu', () => {
 
 /**
  * The dropdown's open state (docs/plans/done/UI-STATE-PLAN.md §1/§2.2) — moved off native `<details>` onto
- * `GlobalOverlayStore`'s `'identity-menu'` id. `GlobalOverlayStore` itself is left real (root-provided,
- * no HTTP deps) — its own exclusivity/Escape/outside-click/close-on-navigation behavior is covered by
- * `core/ui/overlay-store.spec.ts`; these tests only check that this component wires into it correctly.
+ * `OverlayFacade`'s `'identity-menu'` id (an NgRx slice, docs/plans/active/NGRX-MIGRATION-PLAN.md §8).
+ * `OverlayFacade` itself is left real (`provideAppState()`, no HTTP deps) — its own
+ * exclusivity/Escape/outside-click/close-on-navigation behavior is covered by
+ * `core/ui/overlay-facade.spec.ts`; these tests only check that this component wires into it correctly.
  */
 describe('IdentityChip — overlay state', () => {
   it('starts closed: no menu in the DOM, aria-expanded=false, aria-haspopup="menu"', async () => {
@@ -140,12 +142,12 @@ describe('IdentityChip — overlay state', () => {
     expect(trigger(fixture).getAttribute('aria-expanded')).toBe('false');
   });
 
-  it('opening a sibling shell overlay (notification-bell) closes this menu — exclusivity via GlobalOverlayStore (§1 D1)', async () => {
+  it('opening a sibling shell overlay (notification-bell) closes this menu — exclusivity via OverlayFacade (§1 D1)', async () => {
     const fixture = await render(meResponse());
     openMenu(fixture);
     expect(trigger(fixture).getAttribute('aria-expanded')).toBe('true');
 
-    TestBed.inject(GlobalOverlayStore).open('notification-bell');
+    TestBed.inject(OverlayFacade).open('notification-bell');
     fixture.detectChanges();
 
     expect(trigger(fixture).getAttribute('aria-expanded')).toBe('false');
@@ -155,11 +157,11 @@ describe('IdentityChip — overlay state', () => {
   it('closes on Escape and returns focus to the trigger', async () => {
     const fixture = await render(meResponse());
     openMenu(fixture);
-    expect(TestBed.inject(GlobalOverlayStore).isOpen('identity-menu')).toBe(true);
+    expect(TestBed.inject(OverlayFacade).isOpen('identity-menu')).toBe(true);
 
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     fixture.detectChanges();
 
-    expect(TestBed.inject(GlobalOverlayStore).isOpen('identity-menu')).toBe(false);
+    expect(TestBed.inject(OverlayFacade).isOpen('identity-menu')).toBe(false);
   });
 });

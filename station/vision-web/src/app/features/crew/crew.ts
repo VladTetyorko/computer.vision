@@ -1,8 +1,8 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { TelemetryStore } from '../../core/telemetry/telemetry-store';
-import { DetectionsStore } from '../../core/detections/detections-store';
-import { SeatStore } from '../../core/seat/seat-store';
+import { TelemetryFacade } from '../../core/telemetry/telemetry-facade';
+import { DetectionsFacade } from '../../core/detections/detections-facade';
+import { SeatFacade } from '../../core/seat/seat-facade';
 import { UiStore } from '../../core/ui/ui-store';
 import { Player } from '../../shared/player/player';
 import { FollowHud } from '../../shared/player/follow-hud/follow-hud';
@@ -16,6 +16,11 @@ import { CvControlPanel } from '../fly/cv-control-panel';
 import { CvSetupModal } from '../fly/cv-setup-modal';
 import { MapTools, type MapToolsCapabilities } from '../../shared/map/map-controls/map-tools/map-tools';
 import { CrewFacade } from './crew-facade';
+import { MarksFacade } from '../../core/map-data/marks-facade';
+import { LayersFacade } from '../../core/map-data/layers-facade';
+import { DrawingsFacade } from '../../core/map-data/drawings-facade';
+import { GeofenceFacade } from '../../core/geofence/geofence-facade';
+import { OrgFacade } from '../../core/org/org-facade';
 
 /** `UiStore`'s own storage key for this page's tool-rail — mirrors `cockpit.ts#ACTIVE_PANEL_KEY`'s
  * identical convention, its own localStorage key. */
@@ -65,7 +70,10 @@ type CrewPanelId = 'vision' | 'map';
   styleUrl: './crew.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Own instance per route activation, identical convention to `CockpitPage`/`LivePage`.
-  providers: [TelemetryStore, DetectionsStore, SeatStore, CrewFacade],
+  // The map-data facades joined this list in wave N4 (NGRX-MIGRATION-PLAN.md §9): they are
+  // page-provided now, so their slices ride this page's route instead of the root injector.
+  // Needed by this page's own facade *and* by every control inside `<vision-map-tools>`.
+  providers: [TelemetryFacade, DetectionsFacade, SeatFacade, CrewFacade, MarksFacade, LayersFacade, DrawingsFacade, GeofenceFacade, OrgFacade],
 })
 export class CrewSeatPage {
   /** Bound from the route by `withComponentInputBinding()` (`crew.routes.ts` names the segment

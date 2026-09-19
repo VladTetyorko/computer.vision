@@ -1,11 +1,11 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { Notice } from './notice';
 
 /**
  * The mid-flight reauth overlay (docs/plans/active/AUTH-ROLES-PLAN.md §3.7 clause 2, wave W1) — mounted
  * once, unconditionally, in `app.html` (same "always in the DOM, self-gating" shape as
- * `<vision-toast-host>`/`<vision-undo-toast>`), rendering nothing unless `AuthStore.reauthRequired()`
+ * `<vision-toast-host>`/`<vision-undo-toast>`), rendering nothing unless `AuthFacade.reauthRequired()`
  * is `true`.
  *
  * **The frozen rule this exists for**: a session that dies while the operator is on `/fly` must be
@@ -15,14 +15,14 @@ import { Notice } from './notice';
  * backdrop, so whatever's on screen behind it (the cockpit, a live manual-control session) is
  * completely undisturbed and still there the instant this closes.
  *
- * **Reuses `AuthStore.login()` verbatim** — the same call the `/login` page itself makes — rather
+ * **Reuses `AuthFacade.login()` verbatim** — the same call the `/login` page itself makes — rather
  * than a separate reauth-specific method: a successful call already clears `reauthRequired`
- * (`AuthStore.applySession` always resets it) and refreshes the session in place, with no navigation
+ * (`AuthFacade.applySession` always resets it) and refreshes the session in place, with no navigation
  * anywhere, which is exactly this overlay's contract. `loginBusy`/`loginError` are the same signals
  * the login page reads; the two are never visible at the same time in practice (one requires a
  * session already present, the other requires none), so sharing them causes no cross-talk.
  *
- * Injects `AuthStore` directly — a `shared/ui/**` component, not a routed page, so
+ * Injects `AuthFacade` directly — a `shared/ui/**` component, not a routed page, so
  * `core/ui/architecture.spec.ts`'s facade rule doesn't apply (same precedent as
  * `shared/ui/identity-chip.ts`'s own class doc explains for its identical direct injection).
  *
@@ -47,7 +47,7 @@ import { Notice } from './notice';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ReauthOverlay {
-  protected readonly auth = inject(AuthStore);
+  protected readonly auth = inject(AuthFacade);
 
   protected readonly username = signal('');
   protected readonly password = signal('');

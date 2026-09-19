@@ -2,19 +2,19 @@ import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { describe, expect, it, vi } from 'vitest';
 import { DrawingToolbar } from './drawing-toolbar';
-import { DrawingsStore } from '../../../core/map-data/drawings-store';
-import { LayersStore } from '../../../core/map-data/layers-store';
-import { MarksStore } from '../../../core/map-data/marks-store';
+import { DrawingsFacade } from '../../../core/map-data/drawings-facade';
+import { LayersFacade } from '../../../core/map-data/layers-facade';
+import { MarksFacade } from '../../../core/map-data/marks-facade';
 import { DRAWING_COLOR_TOKENS } from '../../../core/map-data/drawings-logic';
 import type { MapDrawingResponse } from '../../../core/api/models';
 
 /**
- * BUG 2 regression coverage (drawing-toolbar half): `DrawingsStore.selected` is a `computed()` that
- * `.find()`s the currently-selected drawing out of `drawingsSignal()` — a list `DrawingsStore` replaces
+ * BUG 2 regression coverage (drawing-toolbar half): `DrawingsFacade.selected` is a `computed()` that
+ * `.find()`s the currently-selected drawing out of `drawingsSignal()` — a list `DrawingsFacade` replaces
  * wholesale on every SSE `map` event and 30s safety-net poll (`drawings-store.ts`), so `selected()`
  * hands back a brand-new object on every refresh even when the same drawing is still selected. `editLabel`
  * used to re-seed straight off `selected()?.label`, silently discarding an in-progress label edit on the
- * next refresh. The fix keys the re-seed on `DrawingsStore.selectedDrawingId` (already a primitive id
+ * next refresh. The fix keys the re-seed on `DrawingsFacade.selectedDrawingId` (already a primitive id
  * signal) instead. Mirrors `mark-palette.spec.ts`'s identical two cases.
  */
 function drawing(overrides: Partial<MapDrawingResponse> = {}): MapDrawingResponse {
@@ -76,9 +76,9 @@ async function create(initial: MapDrawingResponse) {
   const drawingsStore = stubDrawingsStore(initial);
   TestBed.configureTestingModule({
     providers: [
-      { provide: DrawingsStore, useValue: drawingsStore },
-      { provide: LayersStore, useValue: stubLayersStore() },
-      { provide: MarksStore, useValue: { disarm: vi.fn(), activate: vi.fn(), release: vi.fn() } },
+      { provide: DrawingsFacade, useValue: drawingsStore },
+      { provide: LayersFacade, useValue: stubLayersStore() },
+      { provide: MarksFacade, useValue: { disarm: vi.fn(), activate: vi.fn(), release: vi.fn() } },
     ],
   });
   const fixture = TestBed.createComponent(DrawingToolbar);

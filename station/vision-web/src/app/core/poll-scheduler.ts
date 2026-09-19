@@ -2,7 +2,7 @@ import { Injectable } from '@angular/core';
 
 /**
  * Background polling pauses while the tab is hidden rather than stopping forever — the idiom
- * every poller in this app (`FleetStore`, `TelemetryStore`, `FleetMapStore`, `DetectionsStore`)
+ * every poller in this app (`FleetStore`, `TelemetryStore`, `MapFacade`, `DetectionsStore`)
  * followed before `PollScheduler` consolidated them. Kept here as the scheduler's single source
  * of truth; `core/telemetry/telemetry-logic.ts#shouldPoll` re-exports this so existing imports of the
  * telemetry-flavored name keep working.
@@ -49,7 +49,7 @@ export interface ScheduleOptions {
  * One timer authority for every "poll while the tab is visible" consumer in the app
  * (docs/main/CYCLES-PLAN.md §9, CU-b item 3).
  *
- * Before this, `FleetStore`, `TelemetryStore`, `FleetMapStore` (both its asset poll and its
+ * Before this, `FleetStore`, `TelemetryStore`, `MapFacade` (both its asset poll and its
  * per-streaming-asset telemetry trackers, one `setInterval` each) and `DetectionsStore` each ran
  * their own `setInterval` — up to 1 + 1 + (1 + N) + 1 real browser timers alive at once on the
  * `/map` tab alone, N being however many assets are currently streaming. `PollScheduler` replaces

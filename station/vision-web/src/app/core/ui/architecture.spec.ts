@@ -129,3 +129,64 @@ describe('UI architecture guard (routed page components)', () => {
     expect(has, `expected ${seg}-facade.ts to exist`).toBe(true);
   });
 });
+
+/**
+ * NgRx layering guard (docs/plans/active/NGRX-MIGRATION-PLAN.md §6) — the same cheap source-scanning
+ * shape as the suite above, widened past `features/` because the state slices themselves live under
+ * `core/` and the components that read them live under `shared/` as well.
+ *
+ * Three invariants:
+ *   1. Only a `*-facade.ts` (the read/dispatch boundary) and a `*.effects.ts` (which reads state to
+ *      answer "what is true now" alongside an action) inject NgRx's `Store`. Everything else goes
+ *      through a facade, so a template can never reach an action or a selector directly.
+ *   2. A reducer is pure — no `inject`, no clock, no randomness, no storage, no DOM. Anything that
+ *      needs one of those is an effect, which is what makes state reproducible from its actions.
+ *   3. A reducer has a sibling action group and its own spec, so a slice cannot ship half-written.
+ */
+const APP_SOURCES = import.meta.glob('../../**/*.ts', {
+  query: '?raw',
+  import: 'default',
+  eager: true,
+}) as Record<string, string>;
+
+function appFiles(predicate: (path: string) => boolean): [string, string][] {
+  return Object.entries(APP_SOURCES)
+    .filter(([path]) => predicate(path))
+    .map(([path, source]) => [path, stripComments(source)]);
+}
+
+describe('NgRx layering guard', () => {
+  it('only a facade or an effect injects the NgRx Store', () => {
+    const offenders = appFiles(
+      (p) => !p.endsWith('.spec.ts') && !p.endsWith('-facade.ts') && !p.endsWith('.effects.ts'),
+    )
+      .filter(([, code]) => /inject\(\s*Store\s*\)/.test(code))
+      .map(([path]) => path);
+    expect(
+      offenders,
+      `these inject NgRx's Store directly — read the slice through its facade instead: ${offenders.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it.each(['inject\\(', 'Date\\.now\\(', 'Math\\.random\\(', 'localStorage', 'document\\.'])(
+    'no reducer touches %s',
+    (forbidden) => {
+      const offenders = appFiles((p) => p.endsWith('.reducer.ts'))
+        .filter(([, code]) => new RegExp(forbidden).test(code))
+        .map(([path]) => path);
+      expect(
+        offenders,
+        `a reducer must stay pure — move this into the slice's effects: ${offenders.join(', ')}`,
+      ).toEqual([]);
+    },
+  );
+
+  it('every reducer has a sibling actions file and a spec', () => {
+    const missing = appFiles((p) => p.endsWith('.reducer.ts')).flatMap(([path]) => {
+      const base = path.replace(/\.reducer\.ts$/, '');
+      const wanted = [`${base}.actions.ts`, `${base}.reducer.spec.ts`];
+      return wanted.filter((w) => !(w in APP_SOURCES));
+    });
+    expect(missing, `missing beside their reducer: ${missing.join(', ')}`).toEqual([]);
+  });
+});

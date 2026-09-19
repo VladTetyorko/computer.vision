@@ -16,7 +16,7 @@ import { LoginFacade } from './login-facade';
  * than inventing a parallel visual language for the one unauthenticated page.
  *
  * Dumb by this codebase's own convention: every real decision — busy state, what the inline error
- * says, what "success" means — lives in `AuthStore.login()`, orchestrated by `LoginFacade`
+ * says, what "success" means — lives in `AuthFacade.login()`, orchestrated by `LoginFacade`
  * (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — this component owns only the route-bound `returnUrl` input and
  * renders the facade's signals/commands.
  */

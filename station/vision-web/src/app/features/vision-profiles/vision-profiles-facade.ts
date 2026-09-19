@@ -2,7 +2,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
 import { ToastService } from '../../core/toast.service';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { canManageOrg } from '../../core/org/org-logic';
 import type {
   AssetSummary,
@@ -65,7 +65,7 @@ const LOG_PREFIX = '[vision-profiles]';
 export class VisionProfilesFacade {
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
-  private readonly auth = inject(AuthStore);
+  private readonly auth = inject(AuthFacade);
 
   private readonly profilesSignal = signal<readonly CvProfile[]>([]);
   private readonly modelsSignal = signal<readonly CvModel[]>([]);

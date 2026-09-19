@@ -1,8 +1,9 @@
 import type { SeatHolderResponse, SeatKind, SeatsResponse } from '../api/models';
 
 /**
- * Pure helpers for `core/seat/seat-store.ts` (docs/plans/active/CREW-CONTROL-PLAN.md §3.6, the
- * frozen wire contract). Angular-free, unit-tested directly — see `seat-logic.spec.ts`.
+ * Pure helpers for `core/seat/state/seat.effects.ts` and `core/seat/seat-facade.ts`
+ * (docs/plans/active/CREW-CONTROL-PLAN.md §3.6, the frozen wire contract). Angular-free,
+ * unit-tested directly — see `seat-logic.spec.ts`.
  */
 
 /** A seat nobody holds — four explicit `null`s, matching the wire contract's own "free" shape

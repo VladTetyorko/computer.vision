@@ -1,36 +1,24 @@
 import type { Routes } from '@angular/router';
 
 /**
- * `/assets/:assetId/replay/:usageId` — the asset detail page's usage history "Replay" target for a
- * finished usage (docs/plans/done/MVP2-PLAN.md §R, R-b), unchanged — and `/replay` — the replay library
- * (docs/extracts/design/10-replay.md, Wave 4, F8) **and** the event → replay deep link's own flat,
- * query-param route (docs/plans/done/OPS-CORE-PLAN.md §Q1: `?asset=…&usage=…&t=…`), both at once: `/replay`
- * now loads `ReplayLibraryPage`, which renders the library when no `?usage=` is given and defers
- * straight to `ReplayPage` (embedded, not routed) when one is — see that component's own class doc
- * comment for the full "how the two are told apart" writeup. Split into its own file per
- * vision-web/docs/plans/done/UI-STRUCTURE-PLAN.md §2.3/§3 (B8) — see `features/fly/fly.routes.ts`'s doc
- * comment for why.
+ * The replay routes. Only the per-usage player needs a `providers:` array (the `training` slice its
+ * `ReplayFacade` reads), so only that one is a **lazy boundary** — see
+ * `features/fly/fly.routes.ts`'s doc comment for why a slice may not be named in a
+ * statically-imported route file (docs/plans/active/NGRX-MIGRATION-PLAN.md §9, wave N-split). The
+ * library below keeps its plain `loadComponent`: it reads no page-scoped slice.
  *
- * **Wave 1's own "why the bare route can't be deleted" reasoning still holds, updated for who
- * answers it.** `shared/ui/notification-bell.ts`, `features/wall/wall-facade.ts`, and
- * `features/alerts/alerts-facade.ts` all call `router.navigate(['/replay'], {queryParams: {asset,
- * usage, t}})` — the real, shipped event → replay deep link — grep-verified live call sites, not a
- * hypothetical. Before Wave 4 this route pointed at `ReplayPage` directly, which answered a
- * param-less visit with "No usage specified."; Wave 1 closed the one navigation path that could
- * reach that (a `monitor/replay` → `ComingSoon` scaffold, since deleted — docs/plans/done/IA-TRUTH-PLAN.md
- * §2 U1.2, once this route served a real library the scaffold was advertising a shipped feature as
- * unbuilt) without touching this route, since deleting it outright would have 404'd all three
- * deep-link callers. Wave 4 goes
- * one step further and makes the param-less case itself honest: it now answers with an actual
- * library instead of an error state that merely became unreachable.
+ * This entry must keep sitting *before* `ASSET_DETAIL_ROUTES` in `app.routes.ts` — `assets/:assetId`
+ * prefix-matches, and ordering is what guarantees the longer path wins.
  */
 export const REPLAY_ROUTES: Routes = [
   {
-    path: 'assets/:assetId/replay/:usageId',
-    title: 'Replay · Vision',
     // Param names match `ReplayPage`'s `assetId`/`usageId` inputs exactly so
-    // `withComponentInputBinding()` binds them — see that component's own doc comment.
-    loadComponent: () => import('./replay').then((m) => m.ReplayPage),
+    // `withComponentInputBinding()` binds them — see that component's own doc comment. They sit on
+    // the boundary rather than on the page, and reach the component through Angular's default
+    // `paramsInheritanceStrategy: 'emptyOnly'`, which passes a parent's params down to an
+    // empty-path child.
+    path: 'assets/:assetId/replay/:usageId',
+    loadChildren: () => import('./replay.page-routes').then((m) => m.REPLAY_PAGE_ROUTES),
   },
   {
     path: 'replay',

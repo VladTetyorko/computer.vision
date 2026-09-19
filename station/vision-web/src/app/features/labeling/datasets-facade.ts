@@ -1,7 +1,7 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
-import { TrainingStore } from '../../core/training/training-store';
-import { AuthStore } from '../../core/auth/auth-store';
+import { TrainingFacade } from '../../core/training/training-facade';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { UiStore } from '../../core/ui/ui-store';
 import { canManageOrg } from '../../core/org/org-logic';
 import type { Category } from '../../core/api/models';
@@ -9,7 +9,7 @@ import { canSubmitDataset, parseClassesInput } from './datasets-logic';
 
 /**
  * `DatasetsPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — the `/manage/training` dataset list +
- * "New dataset" form. `TrainingStore` (`training`) is the shared dataset-list source of truth;
+ * "New dataset" form. `TrainingFacade` (`training`) is the shared dataset-list source of truth;
  * everything else here (the create form's own draft fields, the category picker, per-row delete
  * confirm) is page-local.
  *
@@ -26,10 +26,10 @@ import { canSubmitDataset, parseClassesInput } from './datasets-logic';
  */
 @Injectable()
 export class DatasetsFacade {
-  private readonly auth = inject(AuthStore);
+  private readonly auth = inject(AuthFacade);
   private readonly api = inject(VisionApi);
 
-  readonly training = inject(TrainingStore);
+  readonly training = inject(TrainingFacade);
   readonly canManage = computed(() => canManageOrg(this.auth.capabilities()));
 
   /** Per-row delete confirm — one group, so at most one row's confirm is ever open at once. */

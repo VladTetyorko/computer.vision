@@ -18,7 +18,7 @@
         type="password"
         class="field-lg"
         [ngModel]="facade.store.confirmCredential()"
-        (ngModelChange)="facade.store.confirmCredential.set($event)"
+        (ngModelChange)="facade.store.setConfirmCredential($event)"
         placeholder="Needed to connect to this device"
       />
     </div>

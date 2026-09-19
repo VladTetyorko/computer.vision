@@ -8,7 +8,7 @@
     name="displayName"
     class="field-md"
     [ngModel]="facade.store.displayName()"
-    (ngModelChange)="facade.store.displayName.set($event)"
+    (ngModelChange)="facade.store.setDisplayName($event)"
     placeholder="Falcon-2"
     required
   />
@@ -46,7 +46,7 @@
     name="registrationNumber"
     class="field-sm"
     [ngModel]="facade.store.registrationNumber()"
-    (ngModelChange)="facade.store.registrationNumber.set($event)"
+    (ngModelChange)="facade.store.setRegistrationNumber($event)"
     placeholder="N12345"
   />
 </div>
@@ -58,7 +58,7 @@
     name="serialNumber"
     class="field-sm"
     [ngModel]="facade.store.serialNumber()"
-    (ngModelChange)="facade.store.serialNumber.set($event)"
+    (ngModelChange)="facade.store.setSerialNumber($event)"
     placeholder="e.g. SN-00231"
   />
 </div>
@@ -70,7 +70,7 @@
     name="make"
     class="field-sm"
     [ngModel]="facade.store.make()"
-    (ngModelChange)="facade.store.make.set($event)"
+    (ngModelChange)="facade.store.setMake($event)"
     placeholder="e.g. DJI"
   />
 </div>
@@ -82,7 +82,7 @@
     name="model"
     class="field-sm"
     [ngModel]="facade.store.model()"
-    (ngModelChange)="facade.store.model.set($event)"
+    (ngModelChange)="facade.store.setModel($event)"
     placeholder="e.g. Mavic 3"
   />
 </div>

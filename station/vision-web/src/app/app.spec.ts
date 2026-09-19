@@ -3,38 +3,51 @@ import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { describe, expect, it } from 'vitest';
 import { App, type RouteDataNode, routeTreeHasFullBleed } from './app';
-import { FleetStore } from './core/fleet/fleet-store';
+import { FleetFacade } from './core/fleet/fleet-facade';
 import { LeafletWarmup } from './core/leaflet-warmup';
-import { AuthStore } from './core/auth/auth-store';
+import { AuthFacade } from './core/auth/auth-facade';
 import { hasCapability } from './core/auth/auth-logic';
 import type { AuthCapability } from './core/api/models';
-import { EventsStore } from './core/events/events-store';
-import { LiveStore } from './core/live/live-store';
+import { EventsFacade } from './core/events/events-facade';
+import { LiveFacade } from './core/live/live-facade';
 import { VisionApi } from './core/api/vision-api';
-import { SidebarStore } from './core/shell/sidebar-store';
+import { SidebarFacade } from './core/shell/sidebar-facade';
+import { SystemStatusFacade } from './core/system-status/system-status-facade';
+import { provideAppState } from './core/state/app-state';
 
 /**
  * `App` pulls in `AppSidebar`, which in turn mounts `IdentityChip`/`NotificationBell`, each with
- * their own deep store graph (`AuthStore`, `FleetStore`, `EventsStore`, `LiveStore`, `VisionApi`) —
- * every one of those is overridden with a minimal, side-effect-free fake here (no HTTP, no polling,
- * no real `EventSource`) purely so the shell can mount at all; none of their own behavior is under
- * test in this file (see each store's own spec, and `shared/ui/app-sidebar/app-sidebar.spec.ts` for
- * the sidebar's own tiering/role-gate/collapse behavior). `ToastService`/`UndoToastService` are left
- * real — both are self-contained `signal()`-only state with no injected dependencies of their own.
- * `AppSidebar` also constructs a real `SystemStatusStore` for the shell health dot (§5.2),
- * which since docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md wave L5 reads `LiveStore.systemStatus()`
- * — `fakeLiveStore` below carries that member too, purely so `SystemStatusStore` can construct
- * without throwing; nothing in this file exercises its value.
+ * their own deep store graph (`AuthFacade`, `FleetFacade`, `SystemStatusFacade`, `EventsFacade`,
+ * `LiveFacade`, `VisionApi`) — every one of those is overridden with a minimal, side-effect-free fake
+ * here (no HTTP, no polling, no real `EventSource`) purely so the shell can mount at all; none of
+ * their own behavior is under test in this file (see each facade's own spec, and
+ * `shared/ui/app-sidebar/app-sidebar.spec.ts` for the sidebar's own tiering/role-gate/collapse
+ * behavior). `ToastService`/`UndoToastService` are left real — both are self-contained
+ * `signal()`-only state with no injected dependencies of their own.
+ *
+ * `FleetFacade`/`SystemStatusFacade` are both root-registered NgRx facades as of wave N4b — DI-level
+ * `useValue` overrides (rather than letting them construct for real against a stubbed `VisionApi`,
+ * the pre-N4b posture for `SystemStatusStore`) because a real `FleetFacade`/`SystemStatusFacade`
+ * dispatches into `fleet.effects.ts#gate$`/`system-status.effects.ts#gate$` the instant the store is
+ * assembled, which would call `VisionApi.listDevices`/`.systemStatus` synchronously inside a
+ * `switchMap` project — a method `VisionApi` provided as `{}` here has no answer for, and RxJS turns
+ * that synchronous throw into an effect-stream error rather than the old class's own tidy try/catch.
+ * `SystemEventsFacade` needs no override: it owns no state of its own and only reads
+ * `LiveFacade.liveEvents()`, which `fakeLiveFacade` below already answers.
  */
-function fakeFleetStore(reachable: boolean | undefined = true) {
+function fakeFleetFacade(reachable: boolean | undefined = true) {
   return { streams: () => [] as unknown[], reachable: () => reachable };
+}
+
+function fakeSystemStatusFacade() {
+  return { overall: () => undefined };
 }
 
 function fakeEventsStore() {
   return { activate: () => {}, release: () => {}, events: () => [] as unknown[] };
 }
 
-function fakeLiveStore(connectionState: 'connecting' | 'open' | 'closed' = 'open') {
+function fakeLiveFacade(connectionState: 'connecting' | 'open' | 'closed' = 'open') {
   return {
     liveEvents: () => [] as unknown[],
     connectionState: () => connectionState,
@@ -43,7 +56,7 @@ function fakeLiveStore(connectionState: 'connecting' | 'open' | 'closed' = 'open
 }
 
 /** Mirrors the real policy table closely enough for a fixture (docs/plans/active/AUTH-ROLES-PLAN.md §3.2,
- *  wave W2) — `AppSidebar`'s `modes` computed now calls `AuthStore.can(entry.requires)`, so this fake
+ *  wave W2) — `AppSidebar`'s `modes` computed now calls `AuthFacade.can(entry.requires)`, so this fake
  *  needs a `capabilities()`/`can()` pair even though nothing in this file exercises role-gating
  *  itself (`app-sidebar.spec.ts` owns that). This file's `topRole` type never includes `VIEWER`, so
  *  the table doesn't need that row either. */
@@ -56,7 +69,7 @@ const ROLE_CAPABILITIES: Record<'ADMIN' | 'MANAGER' | 'PILOT', readonly AuthCapa
 /** `authEnabled` defaults to `false` — this app's own real default (`vision.auth.enabled=false`),
  *  so every existing call site here keeps exercising dev parity unless a test opts into a "real"
  *  secured session (docs/plans/done/OPS-UX-PLAN.md §2 A6's own dedicated tests below). */
-function fakeAuthStore(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT', authEnabled = false) {
+function fakeAuthFacade(topRole?: 'ADMIN' | 'MANAGER' | 'PILOT', authEnabled = false) {
   const capabilities = topRole ? ROLE_CAPABILITIES[topRole] : [];
   return {
     user: () => (topRole ? { topRole, displayName: 'Test User', username: 'test' } : null),
@@ -93,15 +106,17 @@ function render(
 ) {
   TestBed.configureTestingModule({
     providers: [
+      provideAppState(),
       provideRouter([
         { path: 'fly', component: StubPage, data: { fullBleed: true } },
         { path: 'assets', component: StubPage },
       ]),
-      { provide: FleetStore, useValue: fakeFleetStore(options.reachable) },
+      { provide: FleetFacade, useValue: fakeFleetFacade(options.reachable) },
+      { provide: SystemStatusFacade, useValue: fakeSystemStatusFacade() },
       { provide: LeafletWarmup, useValue: { schedule: () => {} } },
-      { provide: AuthStore, useValue: fakeAuthStore(options.topRole, options.authEnabled) },
-      { provide: EventsStore, useValue: fakeEventsStore() },
-      { provide: LiveStore, useValue: fakeLiveStore(options.connectionState) },
+      { provide: AuthFacade, useValue: fakeAuthFacade(options.topRole, options.authEnabled) },
+      { provide: EventsFacade, useValue: fakeEventsStore() },
+      { provide: LiveFacade, useValue: fakeLiveFacade(options.connectionState) },
       { provide: VisionApi, useValue: {} },
     ],
   });
@@ -312,10 +327,10 @@ describe('App shell', () => {
   });
 
   describe('the "[" shortcut', () => {
-    it('toggles SidebarStore.collapsed', () => {
+    it('toggles SidebarFacade.collapsed', () => {
       localStorage.clear();
       render({ topRole: 'PILOT' });
-      const sidebar = TestBed.inject(SidebarStore);
+      const sidebar = TestBed.inject(SidebarFacade);
       expect(sidebar.collapsed()).toBe(false);
 
       document.dispatchEvent(new KeyboardEvent('keydown', { key: '[' }));
@@ -328,7 +343,7 @@ describe('App shell', () => {
     it('is ignored while focus is inside a text input', () => {
       localStorage.clear();
       render({ topRole: 'PILOT' });
-      const sidebar = TestBed.inject(SidebarStore);
+      const sidebar = TestBed.inject(SidebarFacade);
 
       const input = document.createElement('input');
       document.body.appendChild(input);
@@ -341,7 +356,7 @@ describe('App shell', () => {
     it('is ignored while focus is inside a contenteditable region', () => {
       localStorage.clear();
       render({ topRole: 'PILOT' });
-      const sidebar = TestBed.inject(SidebarStore);
+      const sidebar = TestBed.inject(SidebarFacade);
 
       const div = document.createElement('div');
       // `setAttribute`, not the `.contentEditable` IDL property — see `app.ts#isEditableRegion`'s
@@ -357,7 +372,7 @@ describe('App shell', () => {
     it('is ignored when a modifier key is held', () => {
       localStorage.clear();
       render({ topRole: 'PILOT' });
-      const sidebar = TestBed.inject(SidebarStore);
+      const sidebar = TestBed.inject(SidebarFacade);
 
       document.dispatchEvent(new KeyboardEvent('keydown', { key: '[', metaKey: true }));
       expect(sidebar.collapsed()).toBe(false);
@@ -367,7 +382,7 @@ describe('App shell', () => {
       localStorage.clear();
       const fixture = render({ topRole: 'PILOT' });
       const router = TestBed.inject(Router);
-      const sidebar = TestBed.inject(SidebarStore);
+      const sidebar = TestBed.inject(SidebarFacade);
 
       await router.navigateByUrl('/fly');
       fixture.detectChanges();

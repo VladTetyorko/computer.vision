@@ -1,11 +1,11 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
-import { FleetStore } from '../../core/fleet/fleet-store';
-import { SettingsStore } from '../../core/settings/settings-store';
-import { TelemetryStore } from '../../core/telemetry/telemetry-store';
-import { DetectionsStore } from '../../core/detections/detections-store';
-import { SeatStore } from '../../core/seat/seat-store';
-import { AuthStore } from '../../core/auth/auth-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
+import { SettingsFacade } from '../../core/settings/settings-facade';
+import { TelemetryFacade } from '../../core/telemetry/telemetry-facade';
+import { DetectionsFacade } from '../../core/detections/detections-facade';
+import { SeatFacade } from '../../core/seat/seat-facade';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { canManageOrg } from '../../core/org/org-logic';
 import { videoDevices } from '../../core/fleet/device-logic';
 import { telemetryDevices, trackingIdChanged } from '../../core/telemetry/telemetry-logic';
@@ -47,7 +47,7 @@ const LOG_PREFIX = '[crew]';
  * in this facade — §3.4's dock table gives this page exactly one clickable affordance, C0's Start
  * video; stopping a stream is the pilot's own call, made from `/fly`.
  *
- * **What is new**: {@link seats} ({@link SeatStore}, page-provided like every other store here) and
+ * **What is new**: {@link seats} ({@link SeatFacade}, page-provided like every other store here) and
  * the {@link stage}/{@link dock} pair built from it via `crew-logic.ts`'s pure functions — the one
  * thing this page adds to the shape `LiveFacade`/`CockpitFacade` already established.
  *
@@ -58,7 +58,7 @@ const LOG_PREFIX = '[crew]';
  * directly, the same non-routed-child carve-out `architecture.spec.ts` already grants them) and
  * merely tell this facade to re-read afterwards via `(configChanged)`. {@link refreshStreamConfig}
  * is therefore the **one choke point** every CV write path funnels through, success or failure alike
- * — it re-reads the stream config *and* nudges {@link SeatStore.refreshNow}, so a write that 409'd
+ * — it re-reads the stream config *and* nudges {@link SeatFacade.refreshNow}, so a write that 409'd
  * because the camera seat was preempted between two polls flips this page to `C2` on the very next
  * tick rather than waiting out the ordinary 3s seat-poll cadence. The 409's own message is already
  * surfaced by `FleetStore.patchStreamConfig`'s own `run()` wrapper (one toast, `describeHttpError`)
@@ -67,13 +67,13 @@ const LOG_PREFIX = '[crew]';
 @Injectable()
 export class CrewFacade {
   private readonly api = inject(VisionApi);
-  private readonly auth = inject(AuthStore);
+  private readonly auth = inject(AuthFacade);
 
-  readonly fleet = inject(FleetStore);
-  readonly settings = inject(SettingsStore);
-  readonly telemetry = inject(TelemetryStore);
-  readonly detections = inject(DetectionsStore);
-  readonly seats = inject(SeatStore);
+  readonly fleet = inject(FleetFacade);
+  readonly settings = inject(SettingsFacade);
+  readonly telemetry = inject(TelemetryFacade);
+  readonly detections = inject(DetectionsFacade);
+  readonly seats = inject(SeatFacade);
 
   readonly activeAssetId = signal<string | undefined>(undefined);
   readonly asset = signal<AssetDetails | undefined>(undefined);
@@ -128,7 +128,7 @@ export class CrewFacade {
   readonly detectionPending = signal(false);
 
   /** The shared, persisted declutter level — same instance `CockpitFacade`/`LiveFacade` read/write
-   * (`SettingsStore.declutterLevel`), so all three surfaces stay in visual agreement. */
+   * (`SettingsFacade.declutterLevel`), so all three surfaces stay in visual agreement. */
   readonly boxesMode = this.settings.declutterLevel;
 
   /** Fed to `<vision-player>`'s `[hoveredClass]`, written by `<vision-detections-strip>`'s
@@ -242,7 +242,7 @@ export class CrewFacade {
     });
 
     // Seats (new here) — keyed on `activeAssetId()` alone, like `GeoStore.track()`/`GroundingStore.
-    // track()` elsewhere in this app: `SeatStore.track()` is already a no-op for an unchanged
+    // track()` elsewhere in this app: `SeatFacade.track()` is already a no-op for an unchanged
     // assetId, so no derived-primitive guard needed.
     effect(() => {
       const assetId = this.activeAssetId();

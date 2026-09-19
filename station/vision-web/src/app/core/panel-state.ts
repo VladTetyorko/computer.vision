@@ -3,7 +3,7 @@
  * shown) — docs/plans/done/UX-REWORK-PLAN.md §U-b item 7 ("panel state persists per user via localStorage,
  * Traccar-style: explicit collapse, reopen via toggle chip").
  *
- * Deliberately **not** routed through `core/settings/settings-store.ts`: that store owns
+ * Deliberately **not** routed through `core/settings/settings-facade.ts`: that store owns
  * account-level choices restored/persisted together as one JSON blob (the active pipeline profile,
  * the map layer, `wallDensity` — the last of which already persisted before this task and needed
  * no change here). A panel's open/closed flag is a much smaller, purely cosmetic per-page memory

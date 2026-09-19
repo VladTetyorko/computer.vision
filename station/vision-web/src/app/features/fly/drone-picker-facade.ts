@@ -1,9 +1,9 @@
 import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { hasCapability } from '../../core/auth/auth-logic';
 import { PollScheduler } from '../../core/poll-scheduler';
-import { LiveStore } from '../../core/live/live-store';
+import { LiveFacade } from '../../core/live/live-facade';
 import { isLiveAvailable } from '../../core/live/live-fallback-logic';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { pickerEmptyStateCopy } from './fly-logic';
@@ -41,7 +41,7 @@ const HIDE_SIMULATED_KEY = 'vision.fly.hideSimulated';
  * picker visit is typically brief. Narrowing this page's own dependencies to what it actually
  * displays is a deliberate simplification of the split, not an oversight.
  *
- * **`AuthStore` (docs/plans/done/OPS-UX-PLAN.md §2 A2)** — the one addition this wave makes. `emptyState`
+ * **`AuthFacade` (docs/plans/done/OPS-UX-PLAN.md §2 A2)** — the one addition this wave makes. `emptyState`
  * feeds `drone-picker.html`'s empty leg entirely from `fly-logic.ts#pickerEmptyStateCopy`: `scopeKind`
  * decides the wording (`ASSIGNED_ASSETS` ⇒ PILOT copy vs the MANAGER/ADMIN copy), `capabilities`
  * decides the CTA, `memberships` names the PILOT's group (docs/plans/active/AUTH-ROLES-PLAN.md §3.2,
@@ -49,9 +49,9 @@ const HIDE_SIMULATED_KEY = 'vision.fly.hideSimulated';
  * an empty response for a PILOT already means "nothing assigned to you" (see that function's own doc
  * comment).
  *
- * **Poll gated on `LiveStore` (docs/plans/done/SCALE-100-PLAN.md §5 S6, item 1)** — mirrors
+ * **Poll gated on `LiveFacade` (docs/plans/done/SCALE-100-PLAN.md §5 S6, item 1)** — mirrors
  * `core/fleet/fleet-store.ts#FleetStore`'s identical transport-switch effect: the 5s poll pauses
- * while `LiveStore` reports an open connection and resumes, refetching immediately, the moment it
+ * while `LiveFacade` reports an open connection and resumes, refetching immediately, the moment it
  * drops. The `fleet` topic (`List<AssetSummaryResponse>`) is exactly this picker's own domain, so a
  * snapshot arriving while the poll is paused is applied straight onto {@link pickerAssets} — the
  * grid stays live-fresh rather than merely frozen at whatever the poll last fetched, the same
@@ -73,9 +73,9 @@ const HIDE_SIMULATED_KEY = 'vision.fly.hideSimulated';
 @Injectable()
 export class DronePickerFacade {
   private readonly api = inject(VisionApi);
-  private readonly auth = inject(AuthStore);
+  private readonly auth = inject(AuthFacade);
   private readonly scheduler = inject(PollScheduler);
-  private readonly live = inject(LiveStore);
+  private readonly live = inject(LiveFacade);
 
   /** Skeleton card count while the first `listAssets()` call is in flight. */
   readonly skeletonRows = [1, 2, 3] as const;
@@ -103,7 +103,7 @@ export class DronePickerFacade {
   /** Whether the "Simulated" group's cards are collapsed (docs/plans/active/OPERATOR-UX-3-PLAN.md §2
    * T1's "Hide simulated" toggle) — persisted per operator, mirrors `cockpit-facade.ts#mapVisible`'s
    * own `readPersistedFlag`/`writePersistedFlag` idiom exactly (`core/panel-state.ts`, already used
-   * identically by `live-facade.ts`/`cockpit-facade.ts`/`SidebarStore`/`ThemeStore` — this app's one
+   * identically by `live-facade.ts`/`cockpit-facade.ts`/`SidebarFacade`/`ThemeFacade` — this app's one
    * `localStorage` persistence mechanism for a single boolean/string preference). The group header
    * itself (with its own count) always stays visible; only the card grid beneath it collapses. */
   readonly hideSimulated = signal(readPersistedFlag(HIDE_SIMULATED_KEY, false));

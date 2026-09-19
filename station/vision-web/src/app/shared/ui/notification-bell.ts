@@ -1,17 +1,17 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
-import { FleetStore } from '../../core/fleet/fleet-store';
-import { EventsStore } from '../../core/events/events-store';
-import { LiveStore } from '../../core/live/live-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
+import { EventsFacade } from '../../core/events/events-facade';
+import { LiveFacade } from '../../core/live/live-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { ToastService } from '../../core/toast.service';
-import { GlobalOverlayStore } from '../../core/ui/overlay-store';
+import { OverlayFacade } from '../../core/ui/overlay-facade';
 import { readPersistedString, writePersistedString } from '../../core/panel-state';
 import { eventNotificationText, relativeTimeLabel, resolveEventTarget, resolveReplayDeepLink } from '../../core/events/events-logic';
 import { geofenceBreachToastMessage, parseGeofenceBreach } from '../../core/geofence/geofence-logic';
 import { describeSystemEventSource, type SystemEventRow as SystemEventRowModel } from '../../core/system-events/system-events-logic';
-import { SystemEventsStore } from '../../core/system-events/system-events-store';
+import { SystemEventsFacade } from '../../core/system-events/system-events-facade';
 import { EventsRail } from './events-rail';
 import {
   BELL_READ_IDS_CAP,
@@ -34,23 +34,23 @@ import type { DetectionEvent } from '../../core/api/models';
  * ("reuse events-rail's row rendering … by moving it into the dropdown", read literally — the
  * whole component moves in, not just its template).
  *
- * **`EventsStore` stays the data source** (unchanged public API, per this task's own scope note) —
+ * **`EventsFacade` stays the data source** (unchanged public API, per this task's own scope note) —
  * this is simply a *third* long-lived consumer of its `activate()`/`release()` refcount, alongside
  * `WallPage`/`AssetDetailPage`. The one real cost-model change: this component lives in `App`'s own
  * header, mounted for the entire session (never destroyed until the tab itself closes/reloads), so
- * `EventsStore`'s 5s poll is now **effectively always-on** — the exact same "starts at boot, never
+ * `EventsFacade`'s 5s poll is now **effectively always-on** — the exact same "starts at boot, never
  * stops" posture `FleetStore` already has, not the store's old "O(visible) discipline" (no poll
- * while on Devices/Settings/Debug/Live/Replay) that `EventsStore`'s own doc comment used to
+ * while on Devices/Settings/Debug/Live/Replay) that `EventsFacade`'s own doc comment used to
  * describe as its defining trait. That trait is now stale by construction, not a bug — a header
  * bell showing unread events *only while the operator happens to be on Wall/Command/an asset page*
  * would defeat the entire point of a persistent notification affordance. `FleetMap`'s own event
- * markers (`shared/map/fleet-map.ts`, which injects `EventsStore` directly but never activates it
+ * markers (`shared/map/fleet-map.ts`, which injects `EventsFacade` directly but never activates it
  * itself) keep working unchanged — they now simply read a feed this component keeps warm
  * everywhere, instead of one `CommandPage`/`MapPage` used to keep warm only on their own routes.
  *
  * **Two independent jobs, two independent id-tracking sets** (deliberately not one): `readIds`
  * (a signal — marks every currently-listed event "read" the moment the dropdown opens, driving the
- * unread badge) and `toastedIds` (a plain field, mirroring `EventsStore`'s own private `seenIds`
+ * unread badge) and `toastedIds` (a plain field, mirroring `EventsFacade`'s own private `seenIds`
  * precedent — marks an id "already toasted" so a still-OPEN event's `lastSeen` advancing on a later
  * poll doesn't re-toast it). Opening the dropdown does **not** suppress future toasts for events
  * that arrive afterward, and a toast firing does **not** count as "read" — a manager who dismissed a
@@ -64,7 +64,7 @@ import type { DetectionEvent } from '../../core/api/models';
  * `resolveEventTarget` behavior (asset detail / live cockpit) unchanged.
  *
  * **Geofence breaches (docs/plans/done/OPS-CORE-PLAN.md §G-c)** ride a *different* feed —
- * `LiveStore.liveEvents()`, the generic `event` SSE topic, not this bell's own `DetectionEvent`
+ * `LiveFacade.liveEvents()`, the generic `event` SSE topic, not this bell's own `DetectionEvent`
  * dropdown list (see `LiveEvent`'s own doc comment for why the two are genuinely different domain
  * concepts). This component is still where they toast from (the app's one "background thing just
  * happened" chrome), via a second, independent id-tracking set (`toastedBreachIds`, mirroring
@@ -104,10 +104,12 @@ import type { DetectionEvent } from '../../core/api/models';
  * (`app-sidebar.html`'s foot) and never destroyed on navigation, "the page component is destroyed on
  * route change" (this app's only other cleanup mechanism) never applied to it. Reproduced live: open
  * this bell, then the identity menu — both stayed open at once (D1); navigate to another page — both
- * stayed open there too (D2). The trigger now toggles `GlobalOverlayStore` (`'notification-bell'`),
- * which composes `core/ui/ui-store.ts#UiStore` for exclusivity with the identity menu and adds the
- * lifecycle rules the shell needs and no page does: closes on any navigation, on `Escape` (returning
- * focus to the trigger), and on a click outside — see that store's own class doc for the mechanism.
+ * stayed open there too (D2). The trigger now toggles `OverlayFacade` (`'notification-bell'`, an
+ * NgRx slice, docs/plans/active/NGRX-MIGRATION-PLAN.md §8 — the old `GlobalOverlayStore` composed
+ * `core/ui/ui-store.ts#UiStore` for this; the reducer now expresses one-open-at-a-time directly) for
+ * exclusivity with the identity menu and adds the lifecycle rules the shell needs and no page does:
+ * closes on any navigation, on `Escape` (returning focus to the trigger), and on a click outside —
+ * see `core/ui/state/overlay.effects.ts`'s own doc comment for the mechanism.
  * `toggleBell()` below is the one place opening still has a side effect beyond visibility (marking
  * events read), so it can't be a bare `overlays.toggle()` call in the template the way
  * `identity-chip.ts`'s trigger is.
@@ -117,7 +119,7 @@ import type { DetectionEvent } from '../../core/api/models';
  * (`EventsRail`'s own row component), not a widened version of it, since `EventRow.event` is typed
  * to `DetectionEvent` and every one of its existing call sites stays untouched by this wave; see
  * `system-event-row.ts`'s own class doc for the full "why a sibling" writeup. `SystemEventsStore`
- * (`providedIn: 'root'`, backed by `LiveStore.liveEvents()`) is this section's one data source —
+ * (`providedIn: 'root'`, backed by `LiveFacade.liveEvents()`) is this section's one data source —
  * `DETECTION` is excluded there already (that store's own doc comment), so this section can never
  * duplicate a detection the card above it already shows, avoiding exactly the alert-noise failure
  * mode `SYSTEM-STATUS-PLAN.md §1` names. `GEOFENCE_BREACH` still toasts *in addition* (the breach
@@ -136,13 +138,13 @@ import type { DetectionEvent } from '../../core/api/models';
 export class NotificationBell {
   private readonly router = inject(Router);
   private readonly api = inject(VisionApi);
-  private readonly fleet = inject(FleetStore);
+  private readonly fleet = inject(FleetFacade);
   private readonly toasts = inject(ToastService);
-  private readonly liveStore = inject(LiveStore);
+  private readonly liveStore = inject(LiveFacade);
   private readonly poll = inject(PollScheduler);
-  protected readonly events = inject(EventsStore);
-  protected readonly systemEvents = inject(SystemEventsStore);
-  protected readonly overlays = inject(GlobalOverlayStore);
+  protected readonly events = inject(EventsFacade);
+  protected readonly systemEvents = inject(SystemEventsFacade);
+  protected readonly overlays = inject(OverlayFacade);
   private readonly host = inject(ElementRef<HTMLElement>);
   /** Optional, mirroring `identity-chip.ts`'s own `viewChild` — this trigger is in fact never behind
    *  an `@if` (`NotificationBell` itself only ever mounts once the shell already knows
@@ -160,7 +162,7 @@ export class NotificationBell {
   private readIdsSeeded = false;
 
   /** Toast-dedup only — never read by a `computed()`, so a plain mutable set is fine here (mirrors
-   * `core/events/events-store.ts`'s own private `seenIds`). */
+   * `core/events/events-facade.ts`'s own private `seenIds`). */
   private readonly toastedIds = new Set<string>();
   private seededToasts = false;
 
@@ -190,8 +192,8 @@ export class NotificationBell {
     inject(DestroyRef).onDestroy(() => this.events.release());
 
     // Registers this component's own host (trigger + dropdown together) with the shell's overlay
-    // coordinator — see `identity-chip.ts`'s identical constructor comment and
-    // `GlobalOverlayStore.register`'s own doc comment for why `root` containing `trigger` is what
+    // registry — see `identity-chip.ts`'s identical constructor comment and
+    // `OverlayHostRegistry.register`'s own doc comment for why `root` containing `trigger` is what
     // lets a click on the trigger itself never fight the outside-click listener.
     effect(() => {
       const trigger = this.triggerEl();
@@ -281,7 +283,7 @@ export class NotificationBell {
    * The trigger's own `(click)` (`notification-bell.html`) — opening marks everything currently
    * listed as read, same as the old `<details>` `toggle` event's `isOpen` branch. Computes "opening"
    * from the pre-toggle state rather than reading `overlays.isOpen(...)` back out afterward, since a
-   * `GlobalOverlayStore.toggle` that *closed* the bell (or a click that opened a *different* overlay
+   * `OverlayFacade.toggle` that *closed* the bell (or a click that opened a *different* overlay
    * and thus closed this one first) must never mark anything read.
    */
   protected toggleBell(): void {
@@ -310,7 +312,7 @@ export class NotificationBell {
     return relativeTimeLabel(row.atIso, this.nowSignal());
   }
 
-  /** `shouldToast`'s own "is this asset currently streaming" input — `LiveStore.fleet()` (the
+  /** `shouldToast`'s own "is this asset currently streaming" input — `LiveFacade.fleet()` (the
    *  always-on `fleet` SSE topic's own `AssetSummary[]`, already flowing into this same store for
    *  `liveEvents()`; no new subscription) is `undefined` only before that topic's first snapshot
    *  ever arrives, which reads as "not streaming" — the honest default while nothing is confirmed

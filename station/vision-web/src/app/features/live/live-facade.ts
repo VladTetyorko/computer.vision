@@ -1,14 +1,14 @@
 import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import type { BoxesMode, Transport } from '../../shared/player/player';
-import { FleetStore } from '../../core/fleet/fleet-store';
-import { SettingsStore } from '../../core/settings/settings-store';
-import { TelemetryStore } from '../../core/telemetry/telemetry-store';
-import { DetectionsStore } from '../../core/detections/detections-store';
-import { GeofenceStore } from '../../core/geofence/geofence-store';
-import { MarksStore } from '../../core/map-data/marks-store';
-import { LayersStore } from '../../core/map-data/layers-store';
-import { DrawingsStore } from '../../core/map-data/drawings-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
+import { SettingsFacade } from '../../core/settings/settings-facade';
+import { TelemetryFacade } from '../../core/telemetry/telemetry-facade';
+import { DetectionsFacade } from '../../core/detections/detections-facade';
+import { GeofenceFacade } from '../../core/geofence/geofence-facade';
+import { MarksFacade } from '../../core/map-data/marks-facade';
+import { LayersFacade } from '../../core/map-data/layers-facade';
+import { DrawingsFacade } from '../../core/map-data/drawings-facade';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { followMarkers } from '../../shared/map/tactical-map/tactical-map-logic';
 import type { BoundingBox, FollowStatus } from '../../core/api/models';
@@ -21,12 +21,12 @@ import { buildFollowLockPatch, buildReleaseLockPatch } from '../fly/cv-control-p
 
 /** Panel-state memory (docs/plans/done/UX-REWORK-PLAN.md §U-b item 7) — the two toggles below already
  * existed; only the localStorage key names are new. See `core/panel-state.ts`'s own doc comment
- * for why this isn't routed through `SettingsStore`. */
+ * for why this isn't routed through `SettingsFacade`. */
 const RAIL_OPEN_KEY = 'vision.live.railOpen';
 const MAP_INSET_VISIBLE_KEY = 'vision.live.mapInsetVisible';
 
 /**
- * `LivePage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — orchestrates `FleetStore`/`SettingsStore`/
+ * `LivePage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — orchestrates `FleetStore`/`SettingsFacade`/
  * `TelemetryStore`/`DetectionsStore`/`Router`, exactly what the page injected directly before this
  * refactor. `TelemetryStore`/`DetectionsStore` stay listed in `LivePage`'s own `providers` array
  * (unchanged) alongside this facade, so this facade and the page's child components
@@ -43,10 +43,10 @@ const MAP_INSET_VISIBLE_KEY = 'vision.live.mapInsetVisible';
 @Injectable()
 export class LiveFacade {
   private readonly router = inject(Router);
-  readonly fleet = inject(FleetStore);
-  readonly settings = inject(SettingsStore);
-  readonly telemetry = inject(TelemetryStore);
-  readonly detections = inject(DetectionsStore);
+  readonly fleet = inject(FleetFacade);
+  readonly settings = inject(SettingsFacade);
+  readonly telemetry = inject(TelemetryFacade);
+  readonly detections = inject(DetectionsFacade);
 
   /**
    * The two shared operational-picture stores (both `providedIn: 'root'`, started at boot) —
@@ -55,11 +55,11 @@ export class LiveFacade {
    * the Fly cockpit were looking at. `<vision-tactical-map>` now gets both, read-only for zones and
    * click/drag-interactive for marks, exactly as the other two hosts do.
    */
-  readonly geofence = inject(GeofenceStore);
-  readonly marks = inject(MarksStore);
+  readonly geofence = inject(GeofenceFacade);
+  readonly marks = inject(MarksFacade);
   /** Layers name the map's data-layer rows and colour COP marks; drawings are the same shared picture every other host shows (docs/plans/done/MAP-REWORK-PLAN.md §5.2). */
-  readonly layers = inject(LayersStore);
-  readonly drawings = inject(DrawingsStore);
+  readonly layers = inject(LayersFacade);
+  readonly drawings = inject(DrawingsFacade);
 
   private readonly deviceIdSignal = signal<string | undefined>(undefined);
 
@@ -93,7 +93,7 @@ export class LiveFacade {
   readonly live = computed(() => this.stream() !== undefined);
 
   /** The shared, persisted declutter level (docs/plans/active/CV-SETTINGS-PLAN.md wave W7, H12) —
-   * aliases `SettingsStore.declutterLevel` directly, the same instance `CockpitFacade`/`WallTile`
+   * aliases `SettingsFacade.declutterLevel` directly, the same instance `CockpitFacade`/`WallTile`
    * read/write, replacing this page's own previously-unshared in-memory signal (see
    * `CockpitFacade#boxesMode`'s identical simplification, and that field's own doc comment for the
    * full rationale). */

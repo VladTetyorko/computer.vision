@@ -2,10 +2,10 @@ import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
-import { AuthStore } from '../../core/auth/auth-store';
+import { AuthFacade } from '../../core/auth/auth-facade';
 import { canManageOrg as computeCanManageOrg } from '../../core/org/org-logic';
-import { FleetStore } from '../../core/fleet/fleet-store';
-import { SettingsStore } from '../../core/settings/settings-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
+import { SettingsFacade } from '../../core/settings/settings-facade';
 import { ToastService } from '../../core/toast.service';
 import { UndoToastService } from '../../shared/ui/undo-toast.service';
 import { pluralize } from '../../shared/ui/text-logic';
@@ -24,7 +24,7 @@ import {
 } from '../../core/fleet/inventory-logic';
 import { findVideoDevice } from '../../core/fleet/device-logic';
 import { creatorOwnershipGroup, custodianPickerGroups, type CustodianPickerGroups } from '../../core/org/pilot-logic';
-import { InventoryViewStore } from './inventory-view-store';
+import { InventoryViewStorage } from './inventory-view-storage';
 import {
   defaultInventoryView,
   filterRowsByInventoryView,
@@ -91,7 +91,7 @@ import type {
  *
  * **The stats are the filter** (plan §5.1, D7, wave W4): {@link viewTiles} counts the five views over
  * the tab's rows *after* every other filter and *before* {@link view} narrows them, so a tile reading
- * `3` always yields exactly three rows. The pick persists per browser through `InventoryViewStore`.
+ * `3` always yields exactly three rows. The pick persists per browser through `InventoryViewStorage`.
  *
  * **Every verb on screen is one this session may actually use** — {@link actor} × {@link actionsFor}
  * (`core/fleet/inventory-logic.ts#vehicleRowActions`, plan §5.2). No template in this feature makes
@@ -115,11 +115,11 @@ export class InventoryFacade {
   private readonly undoToast = inject(UndoToastService);
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
-  private readonly auth = inject(AuthStore);
-  private readonly settings = inject(SettingsStore);
-  private readonly viewStore = inject(InventoryViewStore);
+  private readonly auth = inject(AuthFacade);
+  private readonly settings = inject(SettingsFacade);
+  private readonly viewStorage = inject(InventoryViewStorage);
 
-  readonly fleet = inject(FleetStore);
+  readonly fleet = inject(FleetFacade);
 
   // --- Tab + role gate (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1: a pilot only sees Vehicles/Equipment) --
 
@@ -252,9 +252,9 @@ export class InventoryFacade {
   /**
    * What this browser last chose — `undefined` until somebody chooses (or when storage is blocked),
    * which is what lets {@link view} fall through to §5.1's own default. Seeded once, from
-   * `InventoryViewStore`, so a reload lands the operator back on the view they were working in.
+   * `InventoryViewStorage`, so a reload lands the operator back on the view they were working in.
    */
-  private readonly viewSelection = signal<InventoryViewSelection>(this.viewStore.read());
+  private readonly viewSelection = signal<InventoryViewSelection>(this.viewStorage.read());
 
   /**
    * The five stat tiles that *are* the view switcher — label, count and tone, computed over the
@@ -291,7 +291,7 @@ export class InventoryFacade {
   selectView(view: InventoryView): void {
     const next = toggleInventoryView(this.view(), view);
     this.viewSelection.set(next);
-    this.viewStore.write(next);
+    this.viewStorage.write(next);
   }
 
   readonly vehicleRows = computed<readonly VehicleRow[]>(() => filterRowsByInventoryView(this.preViewVehicleRows(), this.view()));
@@ -309,7 +309,7 @@ export class InventoryFacade {
    * (`latchDefaultView`) still runs unconditionally in {@link loadAll}. Reading the post-view signals
    * here would silently hide a pilot's own *fine* vehicles the moment any one of theirs needed
    * attention (the tile that would explain why is a control they never see), and worse, `view()` is
-   * remembered per **browser** (`InventoryViewStore`), not per session — a manager's last pick on a
+   * remembered per **browser** (`InventoryViewStorage`), not per session — a manager's last pick on a
    * shared station would leak into whatever a pilot logging in next sees. Search/category still
    * apply (both tabs' filter pipeline runs before the view split), so the page bar's search box
    * (§5's own gate) narrows these exactly as it narrows the manager's table.

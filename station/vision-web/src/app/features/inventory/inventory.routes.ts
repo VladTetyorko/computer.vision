@@ -1,22 +1,22 @@
 import type { Routes } from '@angular/router';
 
 /**
- * `/assets` — the Inventory page (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1 rule 3/§3.3, wave W4):
- * one page, four tabs (`?tab=vehicles|equipment|links|categories`, default `vehicles` — OQ4: the URL
- * itself is unchanged, `/assets` stays the canonical entry point, only its contents grew tabs).
- * Supersedes `features/assets/**` (deleted this wave — that page's own table/filters/two-pane moved
- * here as the Vehicles tab, `features/assets/assets-logic.ts` → `vehicles-logic.ts`) and absorbs
- * `features/devices/**`/`features/categories/**` as imported tab content (`/devices`,
- * `/manage/categories`, `/manage/reports` all now redirect here — see each of those features' own
- * `<name>.routes.ts`). No `canActivate` — `/assets` has always been open to every signed-in role;
- * the Links/Categories *tabs* are what's gated, inside the page itself
- * (`InventoryFacade#visibleTabs`, `core/fleet/inventory-logic.ts#visibleInventoryTabs`), same as the
- * old `orgGuard`-on-route pattern those two pages used, just moved one level down.
+ * `/assets`'s own route entry, kept to a **lazy boundary only** (wave N-split,
+ * docs/plans/active/NGRX-MIGRATION-PLAN.md §9) — see `features/fly/fly.routes.ts`'s doc comment for
+ * why a `providers:` array may not appear in a statically-imported route file, and
+ * `inventory.page-routes.ts` for what the page itself is.
+ *
+ * **Ordering is load-bearing.** A route with `loadChildren` prefix-matches, so this `assets` entry
+ * now also matches the first segment of `/assets/:assetId`, `/assets/:assetId/readiness` and
+ * `/assets/:assetId/replay/:usageId`. It therefore sits *after* `READINESS_ROUTES`,
+ * `REPLAY_ROUTES` and `ASSET_DETAIL_ROUTES` in `app.routes.ts`, which own those longer paths —
+ * exactly the guarantee `ASSET_DETAIL_ROUTES` itself relies on, and the same prefix-matching trap
+ * CREW-CONTROL's own `pathMatch` finding recorded. Before this wave the plain `loadComponent` here
+ * could not swallow them: a childless route only matches when it consumes the whole URL.
  */
 export const INVENTORY_ROUTES: Routes = [
   {
     path: 'assets',
-    title: 'Inventory · Vision',
-    loadComponent: () => import('./inventory').then((m) => m.InventoryPage),
+    loadChildren: () => import('./inventory.page-routes').then((m) => m.INVENTORY_PAGE_ROUTES),
   },
 ];

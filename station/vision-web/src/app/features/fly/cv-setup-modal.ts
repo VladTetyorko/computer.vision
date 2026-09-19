@@ -1,9 +1,9 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, input, output, signal } from '@angular/core';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { VisionApi } from '../../core/api/vision-api';
 import { ToastService } from '../../core/toast.service';
 import { describeHttpError } from '../../core/api-error';
-import { DetectionsStore } from '../../core/detections/detections-store';
+import { DetectionsFacade } from '../../core/detections/detections-facade';
 import { HIDDEN_CLASS_TRUTH, isLabelDenied, toggleLabelDeny } from '../../core/detections/detections-logic';
 import type { CvProfileSources, EffectiveCvProfile, TrackingMode, UpdateStreamConfigRequest } from '../../core/api/models';
 import { resolvedSourceLine } from './cv-setup-modal-logic';
@@ -196,12 +196,12 @@ export class CvSetupModal {
    *  (`CockpitFacade#refreshEffectiveProfile`) re-reads the asset's own effective profile. */
   readonly profileSaved = output<void>();
 
-  private readonly fleet = inject(FleetStore);
+  private readonly fleet = inject(FleetFacade);
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
   /** Read-only here — see this class's own doc comment for why `trackTracks`/`untrackTracks` are
    *  never called from this component. */
-  protected readonly detections = inject(DetectionsStore);
+  protected readonly detections = inject(DetectionsFacade);
 
   protected readonly hasStream = computed(() => !!this.streamId());
 
@@ -526,7 +526,7 @@ export class CvSetupModal {
    * A model change is always its own separate PATCH (`buildModelChangePatch`, `model` alone — see
    * `core/api/models.ts#UpdateStreamConfigRequest`'s own frozen "two families of change never mix
    * in one call" rule). The seeded label filter this used to only reach the wire lazily, via
-   * whatever *unrelated* hot-knob edit happened to come next (`SettingsStore#adjust` mutating a
+   * whatever *unrelated* hot-knob edit happened to come next (`SettingsFacade#adjust` mutating a
    * local draft the old `buildHotKnobPatch` read on its own later schedule) — wave W7 sends it
    * promptly instead, as its own **second**, still-separate hot-knob PATCH right after the model
    * PATCH succeeds, rather than folding it into the model PATCH itself (which would blur the exact
