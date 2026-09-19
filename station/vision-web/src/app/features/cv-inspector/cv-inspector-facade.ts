@@ -1,9 +1,9 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
 import { CvTraceFacade } from '../../core/cv-trace/cv-trace-facade';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { healthLabel, healthSeverity } from '../../core/system-status/system-status-logic';
-import { SystemStatusStore } from '../../core/system-status/system-status-store';
+import { SystemStatusFacade } from '../../core/system-status/system-status-facade';
 import type { CvTrace } from '../../core/api/models';
 import {
   allTrackIds,
@@ -63,8 +63,8 @@ import {
 export class CvInspectorFacade {
   private readonly api = inject(VisionApi);
   private readonly trace = inject(CvTraceFacade);
-  private readonly fleet = inject(FleetStore);
-  private readonly statusStore = inject(SystemStatusStore);
+  private readonly fleet = inject(FleetFacade);
+  private readonly statusStore = inject(SystemStatusFacade);
 
   /** Running streams only — the plan's own §4.8 instruction; a stream that already stopped has
    *  nothing left to trace live, and its last-known trace stays reachable by re-picking it if it

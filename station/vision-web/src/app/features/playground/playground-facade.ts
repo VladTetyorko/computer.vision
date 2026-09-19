@@ -1,6 +1,6 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { ToastService } from '../../core/toast.service';
 import {
   buildSimulationRequest,
@@ -37,7 +37,7 @@ import type { SimulationResponse, StartSimulationRequest } from '../../core/api/
 export class PlaygroundFacade {
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
-  readonly fleet = inject(FleetStore);
+  readonly fleet = inject(FleetFacade);
 
   readonly modes = PLAYGROUND_MODES;
   readonly modeLabels = PLAYGROUND_MODE_LABELS;

@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, effect, inject, signal, viewChild } from '@angular/core';
 import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { EventsFacade } from '../../core/events/events-facade';
 import { LiveFacade } from '../../core/live/live-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
@@ -11,7 +11,7 @@ import { readPersistedString, writePersistedString } from '../../core/panel-stat
 import { eventNotificationText, relativeTimeLabel, resolveEventTarget, resolveReplayDeepLink } from '../../core/events/events-logic';
 import { geofenceBreachToastMessage, parseGeofenceBreach } from '../../core/geofence/geofence-logic';
 import { describeSystemEventSource, type SystemEventRow as SystemEventRowModel } from '../../core/system-events/system-events-logic';
-import { SystemEventsStore } from '../../core/system-events/system-events-store';
+import { SystemEventsFacade } from '../../core/system-events/system-events-facade';
 import { EventsRail } from './events-rail';
 import {
   BELL_READ_IDS_CAP,
@@ -138,12 +138,12 @@ import type { DetectionEvent } from '../../core/api/models';
 export class NotificationBell {
   private readonly router = inject(Router);
   private readonly api = inject(VisionApi);
-  private readonly fleet = inject(FleetStore);
+  private readonly fleet = inject(FleetFacade);
   private readonly toasts = inject(ToastService);
   private readonly liveStore = inject(LiveFacade);
   private readonly poll = inject(PollScheduler);
   protected readonly events = inject(EventsFacade);
-  protected readonly systemEvents = inject(SystemEventsStore);
+  protected readonly systemEvents = inject(SystemEventsFacade);
   protected readonly overlays = inject(OverlayFacade);
   private readonly host = inject(ElementRef<HTMLElement>);
   /** Optional, mirroring `identity-chip.ts`'s own `viewChild` — this trigger is in fact never behind

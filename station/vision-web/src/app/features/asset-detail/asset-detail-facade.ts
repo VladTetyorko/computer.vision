@@ -1,7 +1,7 @@
 import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { SettingsFacade } from '../../core/settings/settings-facade';
 import { ToastService } from '../../core/toast.service';
 import { UndoToastService } from '../../shared/ui/undo-toast.service';
@@ -116,7 +116,7 @@ export class AssetDetailFacade {
    *  is currently streaming, see below); this is the generic SSE connection singleton. */
   private readonly liveStore = inject(LiveFacade);
 
-  readonly fleet = inject(FleetStore);
+  readonly fleet = inject(FleetFacade);
   readonly settings = inject(SettingsFacade);
 
   /** Gates the Pilots drill-in trigger itself — a non-manager should never see the affordance, not

@@ -3072,3 +3072,82 @@ what the ceiling actually was — 19.09 kB for five — before any facade was to
 turns "which slices do I convert" from a guess into arithmetic, and it is the only reason this wave
 converted four facades rather than all five. Headroom is now 8.63 kB, which N4 and N8 will consume:
 each must land its own split, not measure at the end and discover it is red.
+
+## Status — NGRX-MIGRATION wave N4: the last three root stores, and the split that paid for them (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N4, §9) — 2026-09-19
+
+Two halves, in this order on purpose. **N4a (`29aca82f`) moved six more facades off the root
+injector *before* a line of N4b was written**; **N4b** then converted `FleetStore` and
+`SystemStatusStore` into NgRx slices that had no choice but to register at the root. The order is
+the finding: N4's own three stores are all read by `app.ts`, `AppSidebar` and `NotificationBell` —
+components that render before any lazy route resolves — so N4 could not pay for itself, and with
+8.63 kB of headroom left by N-split it would have gone red on arrival. The relief had to be found
+somewhere else first, and it was: the map/org family gave back 43.61 kB (541.37 → **497.76 kB**),
+which N4b then spent 14.58 kB of (→ **512.34 kB**, exit 0, 37.66 kB under the 550 kB error budget).
+
+**Probe before writing code, again.** The candidate map/org slices were stripped from
+`app-state.ts`, built once and reverted, exactly as N-split established — the ceiling was known
+before any facade was converted. `angular.json` stayed untouched throughout; raising a failing
+budget remains the owner's policy decision, not a wave's.
+
+**Consumer-counting gets the eligibility test wrong in both directions, and N4a hit both.**
+The rule is unchanged — only a *page-provided* facade's slice may move — but the way to check it is
+not "who injects this":
+
+- `OrgFacade` *looked* root-bound because `shared/map/map-controls/layer-manager.ts` injects it.
+  That control only ever renders inside a map, and every map sits behind a lazy route. What actually
+  decides it is whether a **root-reachable injector** exists, and the single fact that settled it was
+  that `org-guard.ts` injects `AuthFacade`, not `OrgFacade`. N-split's own history section above
+  records `OrgFacade` as having failed this test — that verdict was wrong, and this is the correction.
+- `CrewSeatPage` needs all five map facades while `CrewFacade` injects **none** of them: its
+  *template* renders `<vision-map-tools>`, whose children inject them directly.
+
+A grep for `inject(XFacade)` finds the first case and misses the second — and the second fails only
+at **runtime**, with a `NullInjectorError` that neither `tsc` nor the spec suite catches. Host pages
+were therefore enumerated by walking template usage of every map-control selector, not injector
+lists. One near-miss came out of that walk: the `<vision-layer-manager>` hit inside
+`tactical-map.html` is a **comment**, not a render (`TacticalMap`'s `imports:` is `[Icon]`), so
+camera-geo's bare tactical map would have been wrongly given providers on the raw grep's word.
+
+Ten facades are now page-provided across the two splits; `app-state.ts` was down to the **seven**
+root slices NGRX-MIGRATION-PLAN.md §9 predicted before either split was attempted — `theme`,
+`sidebar`, `overlay`, `settings`, `auth`, `live`, `events` — and N4b adds `fleet` and `systemStatus`
+to make nine.
+
+**A root-registered NgRx effect auto-starts the moment the environment injector realizes.** This is
+the trap N4b introduced for every existing spec of a particular shape, and it is new with the engine:
+the old `providedIn: 'root'` classes were *constructed* lazily, on first injection, so a spec that
+never touched `FleetStore` never triggered its HTTP calls. `provideEffects(fleetEffects,
+systemStatusEffects, …)` inside `provideAppState()` is different — `gate$` subscribes and issues
+`GET /api/devices`, `GET /api/streams` and `GET /api/system/status` the instant `EffectsRootModule`
+runs `runner.start()`, triggered by the *first* `TestBed.inject(...)` of any kind. `core/live/poll-rate.spec.ts`
+and `core/auth/session-interceptor.spec.ts` both broke on it and were fixed by accounting for those
+three requests (a `flushFleetBoot(http)` helper, and two deliberately un-counted stubs on the
+`countingApi`). Any future root-registered slice reintroduces it for every spec built on
+`provideAppState()` plus a real `VisionApi`/`HttpClientTesting`.
+
+**Two plan defects found by building it, both recorded rather than quietly worked around:**
+
+- **§3 rule 7 was wrong about `getStreamTracks()`.** It named the method as needing a `*Failed`
+  action, but its contract is to *rethrow* the raw `Error`/`HttpErrorResponse` to a video-track
+  probe the player itself must react to — and a thrown value cannot be a serializable action payload
+  under `strictActionSerializability`. It stays a direct, undispatched `VisionApi` passthrough, the
+  precedent `MapFacade#resolveWatchDevice` already set; `fleet-facade.spec.ts`'s last case pins the
+  rethrow.
+- **§4's "N4 fleet: 3 slices" was wrong, and the table is corrected to 2.** `SystemEventsStore`
+  became `SystemEventsFacade` with **no slice at all**: it owns no state, makes no HTTP call and
+  dispatches nothing — it is one `computed()` over `LiveFacade.liveEvents()`, already NgRx state
+  since N3, projected through the pure, unchanged `system-events-logic.ts#systemEventRows`. A
+  `createFeature` there would be a reducer with no reachable action and a facade re-deriving its
+  parent's data a second time. Deriving from another facade is allowed and long-established
+  (`GeoFacade`, `MapFacade#resolveWatchDevice`); only an *effects* class is barred from
+  cross-injecting.
+
+**One accepted behaviour simplification, written into `FleetFacade`'s own doc comment**: `loading` no
+longer reflects background poll/reconcile activity the way `FleetStore#loading` did, because
+automatic refreshes no longer route through `FleetPageActions.refreshRequested`. Its only consumer is
+the Devices page's "disable Refresh while a fetch is in flight" affordance, which still reads
+correctly for a user-initiated refresh — just not for a silent background one. Toasting moved off
+`run()`'s single call site onto three dedicated effects (`notifySuccess$`, `notifyFailure$`,
+`notifyRefreshFailure$`, the last quiet-aware so a background poll failure never surfaces a toast).
+Every mutation effect keeps `FleetStore#run()`'s original "always refetch after a write" contract —
+a full `listDevices()`/`listStreams()` reconcile on success, never a targeted entity upsert.

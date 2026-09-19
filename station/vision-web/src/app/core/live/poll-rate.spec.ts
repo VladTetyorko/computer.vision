@@ -8,7 +8,7 @@ import { DrawingsFacade } from '../map-data/drawings-facade';
 import { LayersFacade } from '../map-data/layers-facade';
 import { MarksFacade } from '../map-data/marks-facade';
 import { MapFacade } from '../map/map-facade';
-import { SystemStatusStore } from '../system-status/system-status-store';
+import { SystemStatusFacade } from '../system-status/system-status-facade';
 import { provideAppState } from '../state/app-state';
 import { provideDrawingsState } from '../map-data/state/drawings.providers';
 import { provideGeofenceState } from '../geofence/state/geofence.providers';
@@ -68,6 +68,21 @@ import type { AssetSummary } from '../api/models';
  * dispatch the same `LiveSocketActions.opened`/`closed` the real gateway would, straight onto the real
  * `Store`. `MapFacade.markers` still composes the real `LiveFacade` directly (facade-to-facade, not
  * effect-level — the rule's own distinction), so this file no longer needs to fake it at all.
+ *
+ * <h2>wave N4b — `fleetEffects` rides along for free, and must be silenced, not counted</h2>
+ * `provideAppState()` now also root-registers `fleet`/`systemStatus` and their effects
+ * (`core/state/app-state.ts`'s own doc comment). Unlike a `providedIn: 'root'` class — lazily
+ * constructed only once something actually injects it, which is why the pre-N4b `SystemStatusStore`
+ * needed its own explicit `TestBed.inject(SystemStatusStore)` line below to start polling at all —
+ * a root-registered NgRx *effect* starts the moment `EffectsRunner` boots, which happens as soon as
+ * this file's very first `TestBed.inject(Store)` call below realizes the environment injector,
+ * **whether or not anything ever injects `FleetFacade`**. That means `fleet.effects.ts#gate$` fires
+ * `api.listDevices()`/`api.listStreams()` on this very spec's `countingApi` too, even though `/command`
+ * never reads `FleetFacade` at all — `countingApi` answers both (unwrapped by `record(...)`, so they
+ * are never counted) purely so that call doesn't throw and kill the effect; `system-status.effects.ts
+ * #gate$` and its 15s poll is the one that genuinely belongs to this file's own measurement, and
+ * still gets there via the same "root effect starts at `Store` injection" mechanism — the explicit
+ * `TestBed.inject(SystemStatusFacade)` below is now read-only bookkeeping, not what starts the poll.
  */
 const WINDOW_MS = 60_000;
 
@@ -111,6 +126,11 @@ function countingApi(counts: Counts, assets: readonly AssetSummary[]) {
       recentUsages: [{ usageId: 'u-1', startedAt: 't0', sampleCount: 1 }],
     }),
     usageTelemetry: record('GET /api/usages/{id}/telemetry', []),
+    // Deliberately *not* wrapped in `record(...)` — see this file's own "wave N4b" doc comment above:
+    // `fleet.effects.ts#gate$` now root-starts for free and needs an answer, but its own request rate
+    // is `fleet-store.spec.ts`/`fleet.effects.spec.ts` territory, not this file's.
+    listDevices: vi.fn().mockResolvedValue([]),
+    listStreams: vi.fn().mockResolvedValue([]),
   };
 }
 
@@ -143,7 +163,7 @@ async function measure(transport: LiveConnectionState, assets: readonly AssetSum
       provideAppState(), provideMapState(), provideRouteState(), provideWeatherState(), provideTelemetryState(), provideDetectionsState(),
       provideMarksState(), provideLayersState(), provideDrawingsState(), provideGeofenceState(),
       MarksFacade, LayersFacade, DrawingsFacade, GeofenceFacade,
-      SystemStatusStore,
+      SystemStatusFacade,
       MapFacade,
       PollScheduler,
       { provide: VisionApi, useValue: api },
@@ -172,7 +192,7 @@ async function measure(transport: LiveConnectionState, assets: readonly AssetSum
   TestBed.inject(LayersFacade).activate();
   TestBed.inject(DrawingsFacade).activate();
   TestBed.inject(GeofenceFacade).activate();
-  TestBed.inject(SystemStatusStore); // root singleton, polls from construction on every page
+  TestBed.inject(SystemStatusFacade); // read-only here now — see this file's "wave N4b" doc comment
   TestBed.inject(MapFacade); // page-provided, dispatches `activated()` from its own constructor
   TestBed.tick();
   await drain();

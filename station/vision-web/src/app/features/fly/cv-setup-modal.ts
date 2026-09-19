@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, input, output, signal } from '@angular/core';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { VisionApi } from '../../core/api/vision-api';
 import { ToastService } from '../../core/toast.service';
 import { describeHttpError } from '../../core/api-error';
@@ -196,7 +196,7 @@ export class CvSetupModal {
    *  (`CockpitFacade#refreshEffectiveProfile`) re-reads the asset's own effective profile. */
   readonly profileSaved = output<void>();
 
-  private readonly fleet = inject(FleetStore);
+  private readonly fleet = inject(FleetFacade);
   private readonly api = inject(VisionApi);
   private readonly toasts = inject(ToastService);
   /** Read-only here — see this class's own doc comment for why `trackTracks`/`untrackTracks` are

@@ -4,14 +4,14 @@ import { Router, provideRouter } from '@angular/router';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { AppSidebar } from './app-sidebar';
 import { AuthFacade } from '../../../core/auth/auth-facade';
-import { FleetStore } from '../../../core/fleet/fleet-store';
+import { FleetFacade } from '../../../core/fleet/fleet-facade';
 import { EventsFacade } from '../../../core/events/events-facade';
 import { LiveFacade } from '../../../core/live/live-facade';
 import { VisionApi } from '../../../core/api/vision-api';
 import { SidebarFacade } from '../../../core/shell/sidebar-facade';
 import { provideAppState } from '../../../core/state/app-state';
 import { ThemeFacade } from '../../../core/shell/theme-facade';
-import { SystemStatusStore } from '../../../core/system-status/system-status-store';
+import { SystemStatusFacade } from '../../../core/system-status/system-status-facade';
 import { NAV_MODES } from '../../../features/hubs/nav-entries';
 import { hasCapability } from '../../../core/auth/auth-logic';
 import type { AuthCapability, OverallHealth, Role } from '../../../core/api/models';
@@ -31,7 +31,7 @@ const ROLE_CAPABILITIES: Record<Role, readonly AuthCapability[]> = {
  * `EventSource`), mirroring the pre-existing shell spec's own "fake every transitive dependency
  * purely so the tree can mount" approach (see `app.spec.ts`).
  */
-function fakeFleetStore(overrides: { streams?: unknown[]; reachable?: boolean | undefined } = {}) {
+function fakeFleetFacade(overrides: { streams?: unknown[]; reachable?: boolean | undefined } = {}) {
   return {
     streams: () => overrides.streams ?? [],
     reachable: () => (overrides.reachable === undefined ? true : overrides.reachable),
@@ -47,7 +47,7 @@ function fakeLiveFacade(connectionState: 'connecting' | 'open' | 'closed' = 'ope
 }
 
 /** Only `overall` is read by `AppSidebar` (`system-status.overall()`). */
-function fakeSystemStatusStore(overall: OverallHealth | undefined) {
+function fakeSystemStatusFacade(overall: OverallHealth | undefined) {
   return { overall: () => overall };
 }
 
@@ -81,7 +81,7 @@ function render(options: {
         { path: 'assets', component: StubPage },
         { path: 'manage/system', component: StubPage },
       ]),
-      { provide: FleetStore, useValue: fakeFleetStore(options) },
+      { provide: FleetFacade, useValue: fakeFleetFacade(options) },
       { provide: AuthFacade, useValue: fakeAuthFacade(options.topRole) },
       { provide: EventsFacade, useValue: fakeEventsStore() },
       { provide: LiveFacade, useValue: fakeLiveFacade(options.connectionState) },
@@ -89,7 +89,7 @@ function render(options: {
       // (written before the shell rollup dot read this third axis, docs/plans/done/SYSTEM-STATUS-PLAN.md
       // §5.2) keeps its original "everything is fine" baseline unless a test explicitly opts into
       // `overall: undefined` (the pre-first-fetch state) or a degraded/down value.
-      { provide: SystemStatusStore, useValue: fakeSystemStatusStore('overall' in options ? options.overall : 'OK') },
+      { provide: SystemStatusFacade, useValue: fakeSystemStatusFacade('overall' in options ? options.overall : 'OK') },
       { provide: VisionApi, useValue: {} },
     ],
   });

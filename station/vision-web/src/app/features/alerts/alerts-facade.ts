@@ -2,7 +2,7 @@ import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core'
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { EventsFacade } from '../../core/events/events-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { ToastService } from '../../core/toast.service';
@@ -41,7 +41,7 @@ export class AlertsFacade {
   private readonly router = inject(Router);
   private readonly route = inject(ActivatedRoute);
   private readonly api = inject(VisionApi);
-  private readonly fleet = inject(FleetStore);
+  private readonly fleet = inject(FleetFacade);
   private readonly toasts = inject(ToastService);
   readonly events = inject(EventsFacade);
 

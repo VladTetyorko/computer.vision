@@ -3,7 +3,7 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { AuthFacade } from '../../core/auth/auth-facade';
 import { canAdminister } from '../../core/auth/auth-logic';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { buildTestDroneRequest } from '../../core/fleet/simulation-logic';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { MapFacade } from '../../core/map/map-facade';
@@ -111,7 +111,7 @@ export class CommandFacade {
   private readonly route = inject(ActivatedRoute);
   private readonly api = inject(VisionApi);
   private readonly auth = inject(AuthFacade);
-  private readonly fleet = inject(FleetStore);
+  private readonly fleet = inject(FleetFacade);
   private readonly mapStore = inject(MapFacade);
   private readonly geofence = inject(GeofenceFacade);
   private readonly events = inject(EventsFacade);

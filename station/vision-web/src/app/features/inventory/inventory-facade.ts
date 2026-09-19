@@ -4,7 +4,7 @@ import { VisionApi } from '../../core/api/vision-api';
 import { describeHttpError } from '../../core/api-error';
 import { AuthFacade } from '../../core/auth/auth-facade';
 import { canManageOrg as computeCanManageOrg } from '../../core/org/org-logic';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { SettingsFacade } from '../../core/settings/settings-facade';
 import { ToastService } from '../../core/toast.service';
 import { UndoToastService } from '../../shared/ui/undo-toast.service';
@@ -119,7 +119,7 @@ export class InventoryFacade {
   private readonly settings = inject(SettingsFacade);
   private readonly viewStore = inject(InventoryViewStore);
 
-  readonly fleet = inject(FleetStore);
+  readonly fleet = inject(FleetFacade);
 
   // --- Tab + role gate (docs/plans/active/WAREHOUSE-UX-PLAN.md §3.1: a pilot only sees Vehicles/Equipment) --
 

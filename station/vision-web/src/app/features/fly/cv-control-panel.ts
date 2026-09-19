@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { DetectionsFacade } from '../../core/detections/detections-facade';
 import type { EffectiveCvProfile, UpdateStreamConfigRequest } from '../../core/api/models';
 import type { BoxesMode } from '../../shared/player/player';
@@ -128,7 +128,7 @@ export class CvControlPanel {
    *  comment for the three honest outcomes (docs/plans/active/CV-SETTINGS-PLAN.md §4 mockup). */
   protected readonly profileLine = computed(() => effectiveProfileLine(this.assetId(), this.effectiveProfile()));
 
-  private readonly fleet = inject(FleetStore);
+  private readonly fleet = inject(FleetFacade);
   /** Recent detection results and the tracks poll (`GET .../tracks`) alike — host-provided
    *  (`cockpit.ts`'s own `providers`), the same instance `CvSetupModal`, the detections strip, and
    *  `CockpitFacade` all share. See class doc's own "The tracks poll is still owned here" paragraph. */

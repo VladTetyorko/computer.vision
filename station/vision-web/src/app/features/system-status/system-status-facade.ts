@@ -1,10 +1,10 @@
 import { DestroyRef, Injectable, computed, inject, signal } from '@angular/core';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { LiveFacade } from '../../core/live/live-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { relativeTimeLabel } from '../../core/events/events-logic';
 import { describeSystemEventSource, type SystemEventRow } from '../../core/system-events/system-events-logic';
-import { SystemEventsStore } from '../../core/system-events/system-events-store';
+import { SystemEventsFacade } from '../../core/system-events/system-events-facade';
 import {
   connectionSeverity,
   reachableSeverity,
@@ -12,7 +12,9 @@ import {
   type ShellSeverity,
   type SystemVerdict,
 } from '../../core/system-status/system-status-logic';
-import { SystemStatusStore } from '../../core/system-status/system-status-store';
+// Aliased: this page's own facade below is also named `SystemStatusFacade` (pre-existing name,
+// unrelated to wave N4b's rewire, which only swaps which class `statusStore` injects).
+import { SystemStatusFacade as CoreSystemStatusFacade } from '../../core/system-status/system-status-facade';
 
 /** How often the page's own "…s ago" labels (`checkedAt`, each subsystem's `since`, every event row)
  *  re-render — the same 1s cadence `notification-bell.ts#nowSignal`/`events-rail.ts` already use for
@@ -39,9 +41,9 @@ const CLOCK_TICK_MS = 1_000;
  */
 @Injectable()
 export class SystemStatusFacade {
-  private readonly statusStore = inject(SystemStatusStore);
-  private readonly eventsStore = inject(SystemEventsStore);
-  private readonly fleet = inject(FleetStore);
+  private readonly statusStore = inject(CoreSystemStatusFacade);
+  private readonly eventsStore = inject(SystemEventsFacade);
+  private readonly fleet = inject(FleetFacade);
   private readonly live = inject(LiveFacade);
   private readonly scheduler = inject(PollScheduler);
 

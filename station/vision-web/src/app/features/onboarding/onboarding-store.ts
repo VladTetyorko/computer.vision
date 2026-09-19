@@ -2,7 +2,7 @@ import { DestroyRef, Injectable, computed, effect, inject, signal, untracked } f
 import { ActivatedRoute } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { AuthFacade } from '../../core/auth/auth-facade';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { DiscoveryInboxFacade } from '../../core/discovery/discovery-inbox-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { WebSerialGateway } from '../provisioning/web-serial-gateway';
@@ -184,7 +184,7 @@ function emptyRowProveState(): RowProveState {
 @Injectable()
 export class OnboardingStore {
   private readonly api = inject(VisionApi);
-  private readonly fleet = inject(FleetStore);
+  private readonly fleet = inject(FleetFacade);
   private readonly toasts = inject(ToastService);
   private readonly route = inject(ActivatedRoute);
   private readonly auth = inject(AuthFacade);

@@ -19,6 +19,10 @@ import { overlayEffects } from '../ui/state/overlay.effects';
 import { overlayFeature } from '../ui/state/overlay.reducer';
 import { eventsEffects } from '../events/state/events.effects';
 import { eventsFeature } from '../events/state/events.reducer';
+import { fleetEffects } from '../fleet/state/fleet.effects';
+import { fleetFeature } from '../fleet/state/fleet.reducer';
+import { systemStatusEffects } from '../system-status/state/system-status.effects';
+import { systemStatusFeature } from '../system-status/state/system-status.reducer';
 import { hydrationMetaReducer } from './hydration';
 
 /**
@@ -26,8 +30,16 @@ import { hydrationMetaReducer } from './hydration';
  * for wave N-split). "Root" means reachable before any lazy route loads: `app.ts` itself, the five
  * always-on shell components (`app-sidebar`/`notification-bell`/`identity-chip` included), and every
  * `providedIn: 'root'` service or guard. Those **7** slices — `theme`, `sidebar`, `overlay`,
- * `settings`, `auth`, `live`, `events` — ship in the initial bundle because they genuinely must, and
- * they are exactly the seven NGRX-MIGRATION-PLAN.md §9 predicted before the split was attempted.
+ * `settings`, `auth`, `live`, `events` — shipped in the initial bundle from wave N-split onward because
+ * they genuinely must, and were exactly the seven NGRX-MIGRATION-PLAN.md §9 predicted before the
+ * split was attempted. **Wave N4b adds two more: `fleet` and `systemStatus`.** Both are read by
+ * `app.ts`/`shared/ui/app-sidebar/app-sidebar.ts`/`shared/ui/notification-bell.ts` — components that
+ * render before any lazy route resolves — so neither is eligible for the page-scoped
+ * `provide<Domain>State()` treatment described two paragraphs down; see `fleet-facade.ts`'s and
+ * `system-status-facade.ts`'s own class docs for the specific always-on reader each must serve.
+ * `core/system-events/` deliberately contributes **no** slice at all — see
+ * `system-events-facade.ts`'s own class doc for why (NGRX-MIGRATION-PLAN.md §4's "N4 fleet: 3 slices"
+ * is corrected by that doc comment, not this one).
  *
  * **A page-scoped slice is registered by its route instead**, through its own
  * `core/<domain>/state/<domain>.providers.ts#provide<Domain>State()` — see
@@ -100,6 +112,8 @@ export function provideAppState() {
     provideState(authFeature),
     provideState(liveFeature),
     provideState(eventsFeature),
+    provideState(fleetFeature),
+    provideState(systemStatusFeature),
     provideEffects(
       themeEffects,
       sidebarEffects,
@@ -108,6 +122,8 @@ export function provideAppState() {
       authEffects,
       liveEffects,
       eventsEffects,
+      fleetEffects,
+      systemStatusEffects,
     ),
   ]);
 }

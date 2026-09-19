@@ -1,12 +1,12 @@
 import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { SettingsFacade } from '../../core/settings/settings-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { TelemetryFacade } from '../../core/telemetry/telemetry-facade';
 import { DetectionsFacade } from '../../core/detections/detections-facade';
-import { SystemStatusStore } from '../../core/system-status/system-status-store';
+import { SystemStatusFacade } from '../../core/system-status/system-status-facade';
 import { SeatFacade } from '../../core/seat/seat-facade';
 import { EventsFacade } from '../../core/events/events-facade';
 import { GeofenceFacade } from '../../core/geofence/geofence-facade';
@@ -139,14 +139,14 @@ export class CockpitFacade {
   private readonly liveStore = inject(LiveFacade);
   private readonly auth = inject(AuthFacade);
 
-  readonly fleet = inject(FleetStore);
+  readonly fleet = inject(FleetFacade);
   readonly settings = inject(SettingsFacade);
   readonly telemetry = inject(TelemetryFacade);
   readonly detections = inject(DetectionsFacade);
   /** `providedIn: 'root'` singleton, injected here rather than read in `cockpit.ts` per
    * `architecture.spec.ts`'s own rule (a routed page injects only its facade) — {@link heroStatus}
    * below is its one reader in this cockpit. */
-  private readonly systemStatus = inject(SystemStatusStore);
+  private readonly systemStatus = inject(SystemStatusFacade);
   /** The asset's two seats (docs/plans/active/CREW-CONTROL-PLAN.md §3.1/§3.6, wave W4) — page-provided
    * like every other store here (`CockpitPage`'s own `providers` array), mirroring `features/crew/
    * crew-facade.ts`'s identical injection. The pilot's cockpit only ever reads the *camera* seat

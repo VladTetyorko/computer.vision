@@ -12,7 +12,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NavigationEnd, Router, RouterLink, RouterOutlet } from '@angular/router';
 import { filter, map } from 'rxjs';
 import { AuthFacade } from './core/auth/auth-facade';
-import { FleetStore } from './core/fleet/fleet-store';
+import { FleetFacade } from './core/fleet/fleet-facade';
 import { LeafletWarmup } from './core/leaflet-warmup';
 import { LiveFacade } from './core/live/live-facade';
 import { SidebarFacade } from './core/shell/sidebar-facade';
@@ -71,7 +71,7 @@ import { UndoToast } from './shared/ui/undo-toast';
 })
 export class App {
   protected readonly auth = inject(AuthFacade);
-  private readonly fleet = inject(FleetStore);
+  private readonly fleet = inject(FleetFacade);
   private readonly liveStore = inject(LiveFacade);
   private readonly sidebar = inject(SidebarFacade);
   private readonly router = inject(Router);

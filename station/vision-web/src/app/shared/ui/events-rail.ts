@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, output, signal } from '@angular/core';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { EventsFacade } from '../../core/events/events-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { describeEventSource, distinctLabels, filterEvents, relativeTimeLabel, resolveEventTarget } from '../../core/events/events-logic';
@@ -66,7 +66,7 @@ const CLOCK_TICK_MS = 1_000;
   styleUrl: './events-rail.css',
 })
 export class EventsRail {
-  private readonly fleet = inject(FleetStore);
+  private readonly fleet = inject(FleetFacade);
   protected readonly events = inject(EventsFacade);
 
   /** Emits the row's own event; the host page resolves navigation via `resolveEventTarget`. */
