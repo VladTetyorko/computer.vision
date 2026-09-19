@@ -8,9 +8,9 @@ import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { DetectionsStore } from '../../core/detections/detections-store';
 import { SystemStatusStore } from '../../core/system-status/system-status-store';
 import { SeatFacade } from '../../core/seat/seat-facade';
-import { EventsStore } from '../../core/events/events-store';
+import { EventsFacade } from '../../core/events/events-facade';
 import { GeofenceStore } from '../../core/geofence/geofence-store';
-import { GeoStore } from '../../core/geo/geo-store';
+import { GeoFacade } from '../../core/geo/geo-facade';
 import { hasFix } from '../../core/geo/geo-logic';
 import { GroundingStore } from './grounding-store';
 import { LiveFacade } from '../../core/live/live-facade';
@@ -19,7 +19,7 @@ import { MarksStore } from '../../core/map-data/marks-store';
 import { LayersStore } from '../../core/map-data/layers-store';
 import { DrawingsStore } from '../../core/map-data/drawings-store';
 import { resolveInteractionMode } from '../../core/map-data/drawings-logic';
-import { WeatherStore } from '../../core/weather/weather-store';
+import { WeatherFacade } from '../../core/weather/weather-facade';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { videoDevices } from '../../core/fleet/device-logic';
 import { ageSeconds, humanAge, selectOpenUsage, telemetryDevices } from '../../core/telemetry/telemetry-logic';
@@ -153,11 +153,11 @@ export class CockpitFacade {
    * (`cameraSeatHeldByOther`/`cameraSeatHolderLabel` below); the flight seat is this pilot's own by
    * construction of being on this page at all and has no reader here. */
   readonly seats = inject(SeatFacade);
-  readonly events = inject(EventsStore);
+  readonly events = inject(EventsFacade);
   readonly geofence = inject(GeofenceStore);
   /** Visual-geolocation corrections (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3/§3.4/§3.8, wave H6) — the
    * divergence chip/detail popover (`fly-osd.ts`) and `mapCorrections` below both read this directly. */
-  readonly geo = inject(GeoStore);
+  readonly geo = inject(GeoFacade);
   /**
    * Custody grounding (docs/plans/active/ASSET-FLOWS-PLAN.md §2 "S1 gate semantics", wave WB1) — its
    * own class, not folded into this facade's own state, so `cockpit-facade.ts`'s source stays free
@@ -188,7 +188,7 @@ export class CockpitFacade {
    * this is the one place they meet.
    */
   readonly interactionMode = computed(() => resolveInteractionMode(this.marks.armed(), this.drawings.mode()));
-  private readonly weather = inject(WeatherStore);
+  private readonly weather = inject(WeatherFacade);
 
   // --- Header switcher's own asset list (renamed from the old FlyFacade's `pickerAssets` — see
   // this class's own doc comment) ---------------------------------------------------------------
@@ -595,7 +595,7 @@ export class CockpitFacade {
 
   /**
    * `<vision-tactical-map>`'s `[corrections]` (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.8, wave H6) — 0
-   * or 1 rows, the followed asset's own latest visual-geolocation correction. `GeoStore.latest()`
+   * or 1 rows, the followed asset's own latest visual-geolocation correction. `GeoFacade.latest()`
    * reads `undefined` on a `NO_FIX`/not-yet-computed row (and always while `vision.geo.visual.enabled`
    * is off, since the poll then either 404s silently or never returns this asset) — either way an
    * empty array here, so the map layer is simply absent, never a fabricated marker.
@@ -738,7 +738,7 @@ export class CockpitFacade {
     // initial `signal()` value above already restored whatever was last saved.
     effect(() => writePersistedFlag(MAP_VISIBLE_KEY, this.mapVisible()));
 
-    // Keeps the weather chip fresh as the flown asset's own position changes — `WeatherStore.track`
+    // Keeps the weather chip fresh as the flown asset's own position changes — `WeatherFacade.track`
     // itself no-ops instantly unless the 10-minute cache is actually stale (docs/plans/done/OPS-CORE-PLAN.md §W).
     effect(() => this.weather.track(this.weatherPosition()));
 
@@ -836,7 +836,7 @@ export class CockpitFacade {
 
     // Visual-geolocation corrections (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.4, wave H6) — keyed
     // directly on `activeAssetId()`, no device/stream indirection to guard on (unlike telemetry/
-    // detections above): `GeoStore.track()` is already a no-op for an unchanged assetId (its own
+    // detections above): `GeoFacade.track()` is already a no-op for an unchanged assetId (its own
     // `lastTrackAssetId` field), so this effect needs no derived-primitive guard of its own.
     effect(() => {
       const assetId = this.activeAssetId();

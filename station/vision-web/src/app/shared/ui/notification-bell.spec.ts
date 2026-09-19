@@ -3,7 +3,7 @@ import { provideRouter } from '@angular/router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NotificationBell } from './notification-bell';
 import { FleetStore } from '../../core/fleet/fleet-store';
-import { EventsStore } from '../../core/events/events-store';
+import { EventsFacade } from '../../core/events/events-facade';
 import { LiveFacade } from '../../core/live/live-facade';
 import { ToastService } from '../../core/toast.service';
 import { VisionApi } from '../../core/api/vision-api';
@@ -12,7 +12,7 @@ import { provideAppState } from '../../core/state/app-state';
 import type { DetectionEvent, LiveEvent } from '../../core/api/models';
 
 /**
- * `NotificationBell` pulls in `EventsStore`/`FleetStore`/`LiveFacade`/`VisionApi` — every one faked
+ * `NotificationBell` pulls in `EventsFacade`/`FleetStore`/`LiveFacade`/`VisionApi` — every one faked
  * here (no HTTP, no polling, no real `EventSource`), mirroring `shared/ui/app-sidebar/app-sidebar.spec.ts`'s
  * own "fake every transitive dependency purely so the tree can mount" approach. `OverlayFacade`
  * is left real (`provideAppState()`, an NgRx slice per docs/plans/active/NGRX-MIGRATION-PLAN.md §8,
@@ -70,7 +70,7 @@ function render(events: DetectionEvent[] = [], liveEvents: LiveEvent[] = [], str
       provideAppState(),
       provideRouter([]),
       { provide: FleetStore, useValue: fakeFleetStore() },
-      { provide: EventsStore, useValue: fakeEventsStore(events) },
+      { provide: EventsFacade, useValue: fakeEventsStore(events) },
       { provide: LiveFacade, useValue: fakeLiveFacade(liveEvents, streamingAssetIds) },
       { provide: VisionApi, useValue: {} },
     ],

@@ -8,9 +8,9 @@ import { UndoToastService } from '../../shared/ui/undo-toast.service';
 import { pluralize } from '../../shared/ui/text-logic';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
-import { EventsStore } from '../../core/events/events-store';
+import { EventsFacade } from '../../core/events/events-facade';
 import { LiveFacade } from '../../core/live/live-facade';
-import { LinksStore } from '../../core/pairing/links-store';
+import { LinksFacade } from '../../core/pairing/links-facade';
 import {
   failoverRowsForAsset,
   hasActiveBenchWarning,
@@ -111,7 +111,7 @@ export class AssetDetailFacade {
   private readonly undoToast = inject(UndoToastService);
   private readonly auth = inject(AuthFacade);
   private readonly telemetry = inject(TelemetryStore);
-  private readonly events = inject(EventsStore);
+  private readonly events = inject(EventsFacade);
   /** Named `liveStore`, not `live` — this class already has a `live` computed (whether *this asset*
    *  is currently streaming, see below); this is the generic SSE connection singleton. */
   private readonly liveStore = inject(LiveFacade);
@@ -367,7 +367,7 @@ export class AssetDetailFacade {
   /** Called once by the page's own constructor `effect()` on every `assetId` route-input change. */
   load(assetId: string): void {
     this.currentAssetIdSignal.set(assetId);
-    this.links.track(assetId); // no-op for an unchanged id — see `LinksStore#track`'s own doc comment
+    this.links.track(assetId); // no-op for an unchanged id — see `LinksFacade#track`'s own doc comment
     void this.fetchAsset(assetId);
     void this.loadStats(assetId);
     void this.loadMaintenanceRecords(assetId);
@@ -682,14 +682,14 @@ export class AssetDetailFacade {
 
   // --- Links panel (docs/plans/active/LINK-PAIRING-PLAN.md §3.4/§3.7, wave L4) --------------------
   // One asset can carry several redundant carriers for the same telemetry device (Wi-Fi, ground
-  // radio, a bench cable) — `LinksStore` tracks the whole group; every derivation below is a thin
+  // radio, a bench cable) — `LinksFacade` tracks the whole group; every derivation below is a thin
   // read-model over it, mirroring `geofence`/`marks` etc. immediately above. Degrades honestly per
-  // `LinksStore`'s own class doc: `links.disabled()` means the backend route isn't mounted at all
+  // `LinksFacade`'s own class doc: `links.disabled()` means the backend route isn't mounted at all
   // (not "no links yet"), `links.group()` staying `undefined` past that is the ordinary
   // still-loading/no-data case — the panel renders `vision-empty` either way, with a different
   // reason.
 
-  readonly links = inject(LinksStore);
+  readonly links = inject(LinksFacade);
 
   readonly linksSorted = computed(() => sortedLinks(this.links.group()?.links ?? []));
   readonly linksPinned = computed(() => this.links.group()?.pinned ?? false);

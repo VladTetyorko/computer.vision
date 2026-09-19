@@ -2784,3 +2784,39 @@ plain, self-contained, eagerly-constructed class with no dependency on effects r
 all).
 
 - **Commit** (suggested; this agent does not commit per its task — the orchestrator commits each wave): `feat(ngrx N3): the live slice — SSE connection as an NgRx slice + LiveGateway seam, and an auth.effects.ts eager-injection fix`.
+
+## Status — NGRX-MIGRATION wave N7: the ops slices — events, discovery, pairing, geo, training, rc, weather, thresholds (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N7) — 2026-09-19
+
+Eight stores, ~1 420 lines, converted with the idioms N2/N3/N5 established. Three things are worth
+recording beyond the mechanical conversion.
+
+**Two demand-gate shapes, both now named.** A *root-singleton ref-count* (`discovery`, `events`)
+keeps `activeConsumers: number` in state, moved by plain reducer handlers, while the poll-vs-live
+phase is computed inside the effects file from `combineLatest([selectActiveConsumers,
+selectConnectionState])` — never by injecting `LiveFacade` into an effect (plan §9). A
+*`Record`-keyed slice* (`weather`, `geo`, `pairing`) gives two hosts or assets state that cannot
+collide. `weather-facade.spec.ts` proves the second the only way that means anything: it builds two
+independent `WeatherFacade` instances off one shared parent injector with `Injector.create`, tracks
+each host's own signal, and asserts a poll resolving for host A never moves host B's reading.
+
+**`EventsStore#applyIncoming` mixed a pure merge with impure browser reads** — `Notification.permission`
+and `document.hidden` — which a reducer may not do. The merge stayed in `events.reducer.ts`; the
+notify decision became its own `notify$` effect (`dispatch: false`) holding a closure-scoped
+`seenIds: Set<string>` created once when the effect factory runs at bootstrap, which is exactly the
+lifetime the original class field had. This is the general shape for any "store method that was
+half data and half browser".
+
+**Two live phases that look inconsistent and are not.** `events`' `'live'` phase is `EMPTY` — no
+sidecar poll — while `discovery`'s still fires one reconcile `GET`. That asymmetry is deliberate and
+predates the migration: the `discovery` SSE topic carries only candidate deltas and never `sources`,
+so the reconcile `GET` is the only channel `sources` has left once the poll stops. Confirmed against
+the original sources rather than regularised; a reducer-level test now pins it.
+
+### Tests / build
+
+`npm run test:ci` — **251/251 files, 4 604/4 604 tests green**. `npx tsc --noEmit` clean on both
+configs. `npx ng build --configuration production` — exit 0. Bundle measured against this wave's own
+base (`93af4a4d`) on a disposable worktree: **505.87 → 530.49 kB raw, 143.69 → 152.40 kB transfer
+(+24.62 kB raw / +8.71 kB transfer)** for eight stores' worth of slice scaffolding — the largest
+single-wave delta so far, and consistent with the trend the N5 entry records: a slice ships more
+code than the class it replaces.

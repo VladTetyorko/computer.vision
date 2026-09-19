@@ -3,7 +3,7 @@ import { ActivatedRoute } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { AuthFacade } from '../../core/auth/auth-facade';
 import { FleetStore } from '../../core/fleet/fleet-store';
-import { DiscoveryInboxStore } from '../../core/discovery/discovery-inbox-store';
+import { DiscoveryInboxFacade } from '../../core/discovery/discovery-inbox-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { WebSerialGateway } from '../provisioning/web-serial-gateway';
 import { ToastService } from '../../core/toast.service';
@@ -107,7 +107,7 @@ const DEFAULT_MAVLINK_PORT = 14_550;
 
 /**
  * The waiting room's own poll cadence (§3.1, wave W3) — a multiple of `PollScheduler`'s 1s heartbeat
- * (its own doc comment). Snappier than `DiscoveryInboxStore`'s 30s inbox-sweep floor (matches the
+ * (its own doc comment). Snappier than `DiscoveryInboxFacade`'s 30s inbox-sweep floor (matches the
  * backend's own sweep cadence, `vision.discovery.inbox.sweep-seconds`) since this is an
  * actively-watched screen — an operator staring at "listening… nothing yet" notices a 30s lag; a
  * one-off `GET /api/discovery/status` summary is cheap enough that 3s doesn't meaningfully load the
@@ -188,7 +188,7 @@ export class OnboardingStore {
   private readonly toasts = inject(ToastService);
   private readonly route = inject(ActivatedRoute);
   private readonly auth = inject(AuthFacade);
-  private readonly discoveryInbox = inject(DiscoveryInboxStore);
+  private readonly discoveryInbox = inject(DiscoveryInboxFacade);
   private readonly poll = inject(PollScheduler);
   private readonly webSerial = inject(WebSerialGateway);
 
@@ -883,7 +883,7 @@ export class OnboardingStore {
   readonly discoveryStatus = signal<DiscoveryStatusResponse | null>(null);
   /** Threaded into `intakeState`'s own `nowMs` so a candidate's age stays live without a second clock timer — ticked once per poll, same cadence as `discoveryStatus` itself. */
   readonly nowMs = signal(Date.now());
-  /** The discovery inbox's own live candidate list (`DiscoveryInboxStore`, SSE-fed) — reused as-is rather than re-polled here; see this class's own `discoveryInbox` field doc. */
+  /** The discovery inbox's own live candidate list (`DiscoveryInboxFacade`, SSE-fed) — reused as-is rather than re-polled here; see this class's own `discoveryInbox` field doc. */
   readonly discoveryCandidates = this.discoveryInbox.candidates;
 
   private stopDiscoveryStatusPoll: (() => void) | null = null;
@@ -1134,7 +1134,7 @@ export class OnboardingStore {
       const draft = { displayName: this.displayName().trim() || 'New asset', category: this.category().trim() };
       const result = await this.discoveryInbox.register(candidateId, draft);
       if (!result) {
-        return; // failure already toasted by DiscoveryInboxStore#run
+        return; // failure already toasted by DiscoveryInboxFacade#run
       }
       this.applyFoundCandidateCollision(result);
       const edit = buildPostSimulationAssetEdit(this.identifyDraft());
@@ -1161,10 +1161,10 @@ export class OnboardingStore {
 
   /**
    * "Attach to existing" (§0.2's "Attach" fork, "existing" branch): the candidate-entrance's atomic
-   * `POST /api/discovery/inbox/{id}/attach` (C1, via `DiscoveryInboxStore#attachCandidate`) when this
+   * `POST /api/discovery/inbox/{id}/attach` (C1, via `DiscoveryInboxFacade#attachCandidate`) when this
    * visit started from a discovery candidate ({@link originCandidateId}); a plain
    * register-device-then-assign otherwise ({@link registerAndAssignRows}) — the same two-call shape
-   * `DiscoveryInboxStore#attach` already uses for its own candidate case, repeated here rather than
+   * `DiscoveryInboxFacade#attach` already uses for its own candidate case, repeated here rather than
    * shared since there is no candidate id to reuse that method's own signature with.
    */
   private async attachToExistingAsset(): Promise<void> {
@@ -1185,7 +1185,7 @@ export class OnboardingStore {
       }
       if (candidateId) {
         // §7 ruling #3: `attach` pairs in the same transaction as `register` — read the freshly
-        // patched candidate back (DiscoveryInboxStore#attachCandidate already replaced it in its own
+        // patched candidate back (DiscoveryInboxFacade#attachCandidate already replaced it in its own
         // list with the server's real response) for the same `sysidPushRequired`/`assignedSysid` pair
         // `createViaCandidateRegister` reads off `register`'s response directly.
         const updated = this.discoveryInbox.candidates().find((c) => c.id === candidateId);

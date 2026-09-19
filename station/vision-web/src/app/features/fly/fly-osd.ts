@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, signal } from '@angular/core';
 import { TelemetryStore } from '../../core/telemetry/telemetry-store';
 import { batterySeverity, humanAge, telemetryAgeSeverity } from '../../core/telemetry/telemetry-logic';
-import { ThresholdsStore } from '../../core/ops/thresholds-store';
+import { ThresholdsFacade } from '../../core/ops/thresholds-facade';
 import { gpsFixLabel, gpsSeverity } from '../../core/telemetry/flight-state-logic';
 import { formatLatency, transportLabel } from '../../core/stream-info-logic';
 import { DEFAULT_WIND_LIMIT_MPS } from '../../core/weather/weather-logic';
@@ -110,7 +110,7 @@ export class FlyOsd {
   /** The one served severity source (S3, docs/plans/active/ASSET-FLOWS-PLAN.md §2 D6) —
    *  {@link batterySeverityTier} below now reads this instead of `batterySeverity`'s own old fixed
    *  45/20 pair, so the OSD's battery color and the fleet attention list's can never disagree again. */
-  private readonly thresholds = inject(ThresholdsStore);
+  private readonly thresholds = inject(ThresholdsFacade);
 
   /** `shared/player/player.ts`'s own measured seconds-behind-live, piped up via its `latencyChanged` output. */
   readonly latencySeconds = input<number | null>(null);

@@ -8,7 +8,7 @@ import { LeafletWarmup } from './core/leaflet-warmup';
 import { AuthFacade } from './core/auth/auth-facade';
 import { hasCapability } from './core/auth/auth-logic';
 import type { AuthCapability } from './core/api/models';
-import { EventsStore } from './core/events/events-store';
+import { EventsFacade } from './core/events/events-facade';
 import { LiveFacade } from './core/live/live-facade';
 import { VisionApi } from './core/api/vision-api';
 import { SidebarFacade } from './core/shell/sidebar-facade';
@@ -16,7 +16,7 @@ import { provideAppState } from './core/state/app-state';
 
 /**
  * `App` pulls in `AppSidebar`, which in turn mounts `IdentityChip`/`NotificationBell`, each with
- * their own deep store graph (`AuthFacade`, `FleetStore`, `EventsStore`, `LiveFacade`, `VisionApi`) —
+ * their own deep store graph (`AuthFacade`, `FleetStore`, `EventsFacade`, `LiveFacade`, `VisionApi`) —
  * every one of those is overridden with a minimal, side-effect-free fake here (no HTTP, no polling,
  * no real `EventSource`) purely so the shell can mount at all; none of their own behavior is under
  * test in this file (see each store's own spec, and `shared/ui/app-sidebar/app-sidebar.spec.ts` for
@@ -102,7 +102,7 @@ function render(
       { provide: FleetStore, useValue: fakeFleetStore(options.reachable) },
       { provide: LeafletWarmup, useValue: { schedule: () => {} } },
       { provide: AuthFacade, useValue: fakeAuthFacade(options.topRole, options.authEnabled) },
-      { provide: EventsStore, useValue: fakeEventsStore() },
+      { provide: EventsFacade, useValue: fakeEventsStore() },
       { provide: LiveFacade, useValue: fakeLiveFacade(options.connectionState) },
       { provide: VisionApi, useValue: {} },
     ],

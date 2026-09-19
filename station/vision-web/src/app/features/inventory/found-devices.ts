@@ -3,7 +3,7 @@ import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { AuthFacade } from '../../core/auth/auth-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
-import { DiscoveryInboxStore } from '../../core/discovery/discovery-inbox-store';
+import { DiscoveryInboxFacade } from '../../core/discovery/discovery-inbox-facade';
 import {
   DEFAULT_DISCOVERY_INBOX_VISIBILITY,
   buildRegisterCommand,
@@ -30,7 +30,7 @@ const CLOCK_TICK_MS = 1_000;
  * (docs/plans/active/ZERO-CONFIG-ONBOARDING-CONTEXT.md §3 P2, §11, wave Z2d). A non-routed
  * presentational child (`core/ui/architecture.spec.ts`'s own carve-out for pages like this one —
  * see that suite's class doc: "`pilots-card`, `wall-tile`… may still DI-share a host-provided
- * store"), so it injects `DiscoveryInboxStore`/`VisionApi` directly rather than going through a
+ * store"), so it injects `DiscoveryInboxFacade`/`VisionApi` directly rather than going through a
  * page facade of its own; `InventoryPage` mounts this with no inputs at all.
  *
  * **Unobtrusively invisible when there is nothing to show** — renders nothing at all while the
@@ -38,7 +38,7 @@ const CLOCK_TICK_MS = 1_000;
  * the count badge next to the section heading is the "how many need me" signal, mirroring the
  * app's other attention counts (Command's queue, the header bell).
  *
- * **Polling**: activates `DiscoveryInboxStore` once this session is known to hold `MANAGE_ORG`
+ * **Polling**: activates `DiscoveryInboxFacade` once this session is known to hold `MANAGE_ORG`
  * ({@link canSeeInbox}), releases on destroy — the store's own activate/release refcount is what
  * makes "no polling when unmounted" true, not a bespoke teardown here (see that store's own class
  * doc). A pilot/viewer never activates it and never renders: the endpoint is `mayManageOrg`-only
@@ -61,7 +61,7 @@ const CLOCK_TICK_MS = 1_000;
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class FoundDevices {
-  protected readonly store = inject(DiscoveryInboxStore);
+  protected readonly store = inject(DiscoveryInboxFacade);
   private readonly api = inject(VisionApi);
   private readonly auth = inject(AuthFacade);
   private readonly router = inject(Router);

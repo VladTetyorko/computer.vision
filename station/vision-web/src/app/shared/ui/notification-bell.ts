@@ -2,7 +2,7 @@ import { ChangeDetectionStrategy, Component, DestroyRef, ElementRef, computed, e
 import { Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet/fleet-store';
-import { EventsStore } from '../../core/events/events-store';
+import { EventsFacade } from '../../core/events/events-facade';
 import { LiveFacade } from '../../core/live/live-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { ToastService } from '../../core/toast.service';
@@ -34,23 +34,23 @@ import type { DetectionEvent } from '../../core/api/models';
  * ("reuse events-rail's row rendering … by moving it into the dropdown", read literally — the
  * whole component moves in, not just its template).
  *
- * **`EventsStore` stays the data source** (unchanged public API, per this task's own scope note) —
+ * **`EventsFacade` stays the data source** (unchanged public API, per this task's own scope note) —
  * this is simply a *third* long-lived consumer of its `activate()`/`release()` refcount, alongside
  * `WallPage`/`AssetDetailPage`. The one real cost-model change: this component lives in `App`'s own
  * header, mounted for the entire session (never destroyed until the tab itself closes/reloads), so
- * `EventsStore`'s 5s poll is now **effectively always-on** — the exact same "starts at boot, never
+ * `EventsFacade`'s 5s poll is now **effectively always-on** — the exact same "starts at boot, never
  * stops" posture `FleetStore` already has, not the store's old "O(visible) discipline" (no poll
- * while on Devices/Settings/Debug/Live/Replay) that `EventsStore`'s own doc comment used to
+ * while on Devices/Settings/Debug/Live/Replay) that `EventsFacade`'s own doc comment used to
  * describe as its defining trait. That trait is now stale by construction, not a bug — a header
  * bell showing unread events *only while the operator happens to be on Wall/Command/an asset page*
  * would defeat the entire point of a persistent notification affordance. `FleetMap`'s own event
- * markers (`shared/map/fleet-map.ts`, which injects `EventsStore` directly but never activates it
+ * markers (`shared/map/fleet-map.ts`, which injects `EventsFacade` directly but never activates it
  * itself) keep working unchanged — they now simply read a feed this component keeps warm
  * everywhere, instead of one `CommandPage`/`MapPage` used to keep warm only on their own routes.
  *
  * **Two independent jobs, two independent id-tracking sets** (deliberately not one): `readIds`
  * (a signal — marks every currently-listed event "read" the moment the dropdown opens, driving the
- * unread badge) and `toastedIds` (a plain field, mirroring `EventsStore`'s own private `seenIds`
+ * unread badge) and `toastedIds` (a plain field, mirroring `EventsFacade`'s own private `seenIds`
  * precedent — marks an id "already toasted" so a still-OPEN event's `lastSeen` advancing on a later
  * poll doesn't re-toast it). Opening the dropdown does **not** suppress future toasts for events
  * that arrive afterward, and a toast firing does **not** count as "read" — a manager who dismissed a
@@ -142,7 +142,7 @@ export class NotificationBell {
   private readonly toasts = inject(ToastService);
   private readonly liveStore = inject(LiveFacade);
   private readonly poll = inject(PollScheduler);
-  protected readonly events = inject(EventsStore);
+  protected readonly events = inject(EventsFacade);
   protected readonly systemEvents = inject(SystemEventsStore);
   protected readonly overlays = inject(OverlayFacade);
   private readonly host = inject(ElementRef<HTMLElement>);
@@ -162,7 +162,7 @@ export class NotificationBell {
   private readIdsSeeded = false;
 
   /** Toast-dedup only — never read by a `computed()`, so a plain mutable set is fine here (mirrors
-   * `core/events/events-store.ts`'s own private `seenIds`). */
+   * `core/events/events-facade.ts`'s own private `seenIds`). */
   private readonly toastedIds = new Set<string>();
   private seededToasts = false;
 
