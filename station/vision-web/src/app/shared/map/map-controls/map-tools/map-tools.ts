@@ -46,7 +46,7 @@ export interface MapToolsCapabilities {
  * `zones-panel.ts`'s own class doc for the full reasoning and `MODULE.md`'s changelog entry for this
  * wave.
  *
- * Everything else each section needs (`MarksStore`, `LayersStore`, `DrawingsStore`, `GeofenceStore`)
+ * Everything else each section needs (`MarksFacade`, `LayersFacade`, `DrawingsFacade`, `GeofenceFacade`)
  * is injected by that section's own component, not here — this component holds no store references
  * of its own, only the `map`-derived Zones advisory above.
  */

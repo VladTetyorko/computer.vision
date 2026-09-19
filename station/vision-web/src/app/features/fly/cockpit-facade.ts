@@ -9,15 +9,15 @@ import { DetectionsFacade } from '../../core/detections/detections-facade';
 import { SystemStatusStore } from '../../core/system-status/system-status-store';
 import { SeatFacade } from '../../core/seat/seat-facade';
 import { EventsFacade } from '../../core/events/events-facade';
-import { GeofenceStore } from '../../core/geofence/geofence-store';
+import { GeofenceFacade } from '../../core/geofence/geofence-facade';
 import { GeoFacade } from '../../core/geo/geo-facade';
 import { hasFix } from '../../core/geo/geo-logic';
 import { GroundingStore } from './grounding-store';
 import { LiveFacade } from '../../core/live/live-facade';
 import { isLiveAvailable } from '../../core/live/live-fallback-logic';
-import { MarksStore } from '../../core/map-data/marks-store';
-import { LayersStore } from '../../core/map-data/layers-store';
-import { DrawingsStore } from '../../core/map-data/drawings-store';
+import { MarksFacade } from '../../core/map-data/marks-facade';
+import { LayersFacade } from '../../core/map-data/layers-facade';
+import { DrawingsFacade } from '../../core/map-data/drawings-facade';
 import { resolveInteractionMode } from '../../core/map-data/drawings-logic';
 import { WeatherFacade } from '../../core/weather/weather-facade';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
@@ -154,7 +154,7 @@ export class CockpitFacade {
    * construction of being on this page at all and has no reader here. */
   readonly seats = inject(SeatFacade);
   readonly events = inject(EventsFacade);
-  readonly geofence = inject(GeofenceStore);
+  readonly geofence = inject(GeofenceFacade);
   /** Visual-geolocation corrections (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3/§3.4/§3.8, wave H6) — the
    * divergence chip/detail popover (`fly-osd.ts`) and `mapCorrections` below both read this directly. */
   readonly geo = inject(GeoFacade);
@@ -177,9 +177,9 @@ export class CockpitFacade {
    * `providedIn: 'root'` singletons directly (non-routed presentational children, per
    * `architecture.spec.ts`'s own carve-out).
    */
-  readonly marks = inject(MarksStore);
-  readonly layers = inject(LayersStore);
-  readonly drawings = inject(DrawingsStore);
+  readonly marks = inject(MarksFacade);
+  readonly layers = inject(LayersFacade);
+  readonly drawings = inject(DrawingsFacade);
 
   /**
    * The map inset's single `[interactionMode]`, folded from the two independent arming states that
@@ -973,7 +973,7 @@ export class CockpitFacade {
     // switcher's own list exactly as fresh while live as the 5s poll kept it before — only
     // `loadAsset(id)`'s own richer `AssetDetails` (`devices`/`recentUsages` — no matching live
     // topic) actually goes stale for the length of the live connection, the same accepted
-    // trade-off `GeofenceStore` takes for its own near-static data.
+    // trade-off `GeofenceFacade` takes for its own near-static data.
     effect(() => {
       const snapshot = this.liveStore.fleet();
       if (snapshot !== undefined) {

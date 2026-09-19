@@ -2,13 +2,13 @@ import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
 import { describe, expect, it, vi } from 'vitest';
 import { MarkPalette } from './mark-palette';
-import { MarksStore } from '../../../core/map-data/marks-store';
-import { LayersStore } from '../../../core/map-data/layers-store';
-import { DrawingsStore } from '../../../core/map-data/drawings-store';
+import { MarksFacade } from '../../../core/map-data/marks-facade';
+import { LayersFacade } from '../../../core/map-data/layers-facade';
+import { DrawingsFacade } from '../../../core/map-data/drawings-facade';
 import type { MapMark } from '../../../core/api/models';
 
 /**
- * BUG 2 regression coverage: `MarksStore` replaces its whole `marks` list with brand-new objects on
+ * BUG 2 regression coverage: `MarksFacade` replaces its whole `marks` list with brand-new objects on
  * every SSE `map` event and on its 30s safety-net poll (`marks-store.ts`), so `[mark]` receives a new
  * object reference on every refresh even when the mark itself hasn't changed. `editPalette`/
  * `editLabel`/`editNote` used to re-seed straight off `mark()`, which silently discarded an operator's
@@ -73,9 +73,9 @@ function stubDrawingsStore() {
 function create() {
   TestBed.configureTestingModule({
     providers: [
-      { provide: MarksStore, useValue: stubMarksStore() },
-      { provide: LayersStore, useValue: stubLayersStore() },
-      { provide: DrawingsStore, useValue: stubDrawingsStore() },
+      { provide: MarksFacade, useValue: stubMarksStore() },
+      { provide: LayersFacade, useValue: stubLayersStore() },
+      { provide: DrawingsFacade, useValue: stubDrawingsStore() },
     ],
   });
   return TestBed.createComponent(MarkPalette);

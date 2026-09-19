@@ -5,10 +5,10 @@ import { FleetStore } from '../../core/fleet/fleet-store';
 import { SettingsFacade } from '../../core/settings/settings-facade';
 import { TelemetryFacade } from '../../core/telemetry/telemetry-facade';
 import { DetectionsFacade } from '../../core/detections/detections-facade';
-import { GeofenceStore } from '../../core/geofence/geofence-store';
-import { MarksStore } from '../../core/map-data/marks-store';
-import { LayersStore } from '../../core/map-data/layers-store';
-import { DrawingsStore } from '../../core/map-data/drawings-store';
+import { GeofenceFacade } from '../../core/geofence/geofence-facade';
+import { MarksFacade } from '../../core/map-data/marks-facade';
+import { LayersFacade } from '../../core/map-data/layers-facade';
+import { DrawingsFacade } from '../../core/map-data/drawings-facade';
 import { readPersistedFlag, writePersistedFlag } from '../../core/panel-state';
 import { followMarkers } from '../../shared/map/tactical-map/tactical-map-logic';
 import type { BoundingBox, FollowStatus } from '../../core/api/models';
@@ -55,11 +55,11 @@ export class LiveFacade {
    * the Fly cockpit were looking at. `<vision-tactical-map>` now gets both, read-only for zones and
    * click/drag-interactive for marks, exactly as the other two hosts do.
    */
-  readonly geofence = inject(GeofenceStore);
-  readonly marks = inject(MarksStore);
+  readonly geofence = inject(GeofenceFacade);
+  readonly marks = inject(MarksFacade);
   /** Layers name the map's data-layer rows and colour COP marks; drawings are the same shared picture every other host shows (docs/plans/done/MAP-REWORK-PLAN.md §5.2). */
-  readonly layers = inject(LayersStore);
-  readonly drawings = inject(DrawingsStore);
+  readonly layers = inject(LayersFacade);
+  readonly drawings = inject(DrawingsFacade);
 
   private readonly deviceIdSignal = signal<string | undefined>(undefined);
 

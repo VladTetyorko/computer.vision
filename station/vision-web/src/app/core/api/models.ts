@@ -2529,7 +2529,7 @@ export interface DevicesSnapshot {
  * **`zones` and `system` are the 10th and 11th, from docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md
  * §4.1/§4.2 (waves L3/L4/L5)** — both always-on, both gate a poll that used to run unconditionally
  * (D1). `zones` is delta-only like `discovery`/`map` (no snapshot-on-connect — `core/geofence/
- * geofence-store.ts#GeofenceStore`'s own `GET /api/geofences` on `activate()` is the snapshot),
+ * geofence-facade.ts#GeofenceFacade`'s own `GET /api/geofences` on `activate()` is the snapshot),
  * payload {@link GeofenceZoneEventPayload}; `action` is `CREATED`/`UPDATED`/`DELETED`, and `DELETED`
  * carries the zone's **last-known full body**, not just its id — that store's existing 10s Undo
  * re-`POST`s it. `system` is latest-value-only (ring capacity 1, like `detections`/`geo`) — a

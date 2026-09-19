@@ -22,11 +22,11 @@ export type AssetPanelTab = 'status' | 'telemetry' | 'video';
  * **Deliberately dumb** — every input is data `CommandPage` already has from its own existing
  * pollers (see that page's own class doc comment for the full "zero new recurring requests" case):
  * `asset` from the one `GET /api/fleet/summary` poll, `marker` from the embedded
- * `CommandFacade`'s own `FleetMapStore` (battery/altitude/heading/position/sample-age, so this
+ * `CommandFacade`'s own `MapFacade` (battery/altitude/heading/position/sample-age, so this
  * panel never spins up a second `TelemetryStore` poller for an asset the map is already tracking —
  * same reuse `shared/map/live-dock.ts` already established for the docked-preview panel this
  * replaces), and `videoDeviceId`/`stream` from `CommandPage`'s one-shot
- * `FleetMapStore.resolveWatchDevice` call on selection plus the always-on root `FleetStore`. This
+ * `MapFacade.resolveWatchDevice` call on selection plus the always-on root `FleetStore`. This
  * component issues no HTTP itself and holds no store — only the active-tab signal.
  *
  * Tabs, not stacked sections (the plan allowed either) — a `.segmented` control (docs/plans/done/UX-REWORK-PLAN.md
@@ -59,9 +59,9 @@ export class AssetPanel {
 
   /**
    * The Telemetry tab's Route control (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.4, wave W3) —
-   * every one of these is a plain input/output fed from `CommandFacade`'s own `RouteStore`
+   * every one of these is a plain input/output fed from `CommandFacade`'s own `RouteFacade`
    * orchestration, same "deliberately dumb" discipline as the rest of this panel's inputs (this
-   * class doc comment's own "zero new recurring requests" case still holds: `RouteStore` fetches
+   * class doc comment's own "zero new recurring requests" case still holds: `RouteFacade` fetches
    * on `show()`/`hide()`, never a poll). `routeSpanChanged` is the segmented control's own click.
    */
   readonly routeSpan = input.required<RouteSpan>();

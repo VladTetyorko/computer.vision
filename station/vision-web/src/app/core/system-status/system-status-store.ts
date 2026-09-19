@@ -47,7 +47,7 @@ const LOG_PREFIX = '[system-status]';
  * page, not just while `/manage/system` happens to be open (see the paragraph above) — there is no
  * "nobody needs this right now" state to ref-count in the first place, so adding `activate()`/
  * `release()` here would just be ceremony around a refcount that never reaches zero. **Do not add
- * it** — this asymmetry with `GeofenceStore`/`MarksStore`/etc. is intentional, not an oversight.
+ * it** — this asymmetry with `GeofenceFacade`/`MarksFacade`/etc. is intentional, not an oversight.
  * `applyTransport(liveAvailable)` therefore only ever asks "is live available", identical in shape
  * to the other stores' method of the same name minus the `activeConsumers` branch.
  *

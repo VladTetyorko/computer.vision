@@ -6,17 +6,17 @@ import { canAdminister } from '../../core/auth/auth-logic';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { buildTestDroneRequest } from '../../core/fleet/simulation-logic';
 import { PollScheduler } from '../../core/poll-scheduler';
-import { FleetMapStore } from '../../core/map/map-store';
+import { MapFacade } from '../../core/map/map-facade';
 import { resolveLastContact, withLastContact, type LastContact } from '../../core/map/map-logic';
 import { readPersistedFlag, readPersistedString, writePersistedFlag, writePersistedString } from '../../core/panel-state';
-import { RouteStore } from '../../core/map-data/route-store';
+import { RouteFacade } from '../../core/map-data/route-facade';
 import type { RouteSpan } from '../../core/map-data/route-logic';
-import { GeofenceStore } from '../../core/geofence/geofence-store';
+import { GeofenceFacade } from '../../core/geofence/geofence-facade';
 import { activeGeofenceBreaches, groupBreachesByAsset } from '../../core/geofence/geofence-logic';
 import { activePipelineErrorMessagesByStreamId } from '../../core/system-events/system-events-logic';
-import { MarksStore } from '../../core/map-data/marks-store';
-import { LayersStore } from '../../core/map-data/layers-store';
-import { DrawingsStore } from '../../core/map-data/drawings-store';
+import { MarksFacade } from '../../core/map-data/marks-facade';
+import { LayersFacade } from '../../core/map-data/layers-facade';
+import { DrawingsFacade } from '../../core/map-data/drawings-facade';
 import { resolveInteractionMode } from '../../core/map-data/drawings-logic';
 import { EventsFacade } from '../../core/events/events-facade';
 import { selectEventMarkers } from '../../core/events/events-logic';
@@ -80,14 +80,14 @@ const HIDE_SIMULATED_KEY = 'vision.fly.hideSimulated';
 
 /**
  * `CommandPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md wave W2) — owns every store/service the page
- * needs (`FleetStore`, `FleetMapStore`, `GeofenceStore`, `LiveFacade`, `WeatherFacade`, `VisionApi`,
+ * needs (`FleetStore`, `MapFacade`, `GeofenceFacade`, `LiveFacade`, `WeatherFacade`, `VisionApi`,
  * `Router`, `PollScheduler`), the fleet-summary poll, and every read-model/command the template binds
  * to. `CommandPage` itself injects only this facade (plus its own `UiStore` for the Zones overlay —
  * see that class's own doc comment for why the overlay stays component-local rather than moving here).
  *
- * **Provided per route activation**, listed alongside `FleetMapStore`/`WeatherFacade` in
+ * **Provided per route activation**, listed alongside `MapFacade`/`WeatherFacade` in
  * `CommandPage`'s own `providers` array (both page-scoped, not `providedIn: 'root'` — see their own
- * class doc comments) — all three share one injector, so this facade's own `inject(FleetMapStore)`/
+ * class doc comments) — all three share one injector, so this facade's own `inject(MapFacade)`/
  * `inject(WeatherFacade)` resolve to the exact same instances `<vision-weather-chip>`
  * (children of `CommandPage`, injecting those stores directly themselves) already get. Moving the
  * *injection* here changes nothing about *which* instance anything sees — same DI subtree as before,
@@ -112,15 +112,15 @@ export class CommandFacade {
   private readonly api = inject(VisionApi);
   private readonly auth = inject(AuthFacade);
   private readonly fleet = inject(FleetStore);
-  private readonly mapStore = inject(FleetMapStore);
-  private readonly geofence = inject(GeofenceStore);
+  private readonly mapStore = inject(MapFacade);
+  private readonly geofence = inject(GeofenceFacade);
   private readonly events = inject(EventsFacade);
   private readonly liveStore = inject(LiveFacade);
   private readonly scheduler = inject(PollScheduler);
   private readonly weather = inject(WeatherFacade);
-  /** §3.4's on-demand route fetch — page-provided alongside `FleetMapStore`/`WeatherFacade` in
-   *  `CommandPage`'s own `providers` (see `RouteStore`'s own class doc comment for why). */
-  private readonly routeStore = inject(RouteStore);
+  /** §3.4's on-demand route fetch — page-provided alongside `MapFacade`/`WeatherFacade` in
+   *  `CommandPage`'s own `providers` (see `RouteFacade`'s own class doc comment for why). */
+  private readonly routeStore = inject(RouteFacade);
 
   private readonly summarySignal = signal<FleetSummary | undefined>(undefined);
   readonly summary = this.summarySignal.asReadonly();
@@ -130,7 +130,7 @@ export class CommandFacade {
   private readonly includeArchivedSignal = signal(false);
   readonly includeArchived = this.includeArchivedSignal.asReadonly();
 
-  /** The Zones panel's own zone list — a thin passthrough of `GeofenceStore.zones()` so `CommandPage`
+  /** The Zones panel's own zone list — a thin passthrough of `GeofenceFacade.zones()` so `CommandPage`
    * never injects that store directly. */
   readonly zones = this.geofence.zones;
 
@@ -141,11 +141,11 @@ export class CommandFacade {
    * `(mapClicked)`/`(drawingCompleted)`/`(drawingSelected)` straight to them, and the
    * shared `shared/map/map-controls/**` components plus `features/command/marks-panel.ts` inject the
    * same `providedIn: 'root'` singletons directly (non-routed presentational children, mirroring
-   * `zones-panel.ts` injecting `GeofenceStore` directly).
+   * `zones-panel.ts` injecting `GeofenceFacade` directly).
    */
-  readonly marks = inject(MarksStore);
-  readonly layers = inject(LayersStore);
-  readonly drawings = inject(DrawingsStore);
+  readonly marks = inject(MarksFacade);
+  readonly layers = inject(LayersFacade);
+  readonly drawings = inject(DrawingsFacade);
 
   // --- Recent-flight routes (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.4, wave W3) ---------------
   // `AssetPanel` stays "deliberately dumb" (its own class doc comment) — every route read-model and
@@ -173,7 +173,7 @@ export class CommandFacade {
   readonly interactionMode = computed(() => resolveInteractionMode(this.marks.armed(), this.drawings.mode()));
 
   /**
-   * `assetId → gpsFixType`, built from `FleetMapStore` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — feeds
+   * `assetId → gpsFixType`, built from `MapFacade` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d) — feeds
    * `command-logic.ts#attentionReasons`' `gps-degraded` reason via `buildEntityRows`'s own optional
    * second argument; an asset with no live marker (not currently plotted) simply has no entry, so that
    * one reason never fires for it — see `gpsDegradedReason`'s own doc comment for why this can't be
@@ -284,7 +284,7 @@ export class CommandFacade {
    * `assetId → LastContact` (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.3, wave W3 closing the
    * fallback gap wave W1 left open) — resolved per marker from whichever tier actually has an
    * answer: `AssetAttention.telemetryAgeMs` (the fleet-summary poll, tier 1) first, then
-   * `AssetSummary.lastUsedAt` (`FleetMapStore.assets()`, tier 2 — the offline bucket gets no live
+   * `AssetSummary.lastUsedAt` (`MapFacade.assets()`, tier 2 — the offline bucket gets no live
    * telemetry poll at all, so this is its only honest fact), `'unknown'` otherwise
    * (`resolveLastContact`'s own doc comment has the full three-tier account). `nowSignal` is the
    * same wall clock `pipelineErrorMessagesByStreamId` above already ticks off the 5s summary poll —
@@ -307,7 +307,7 @@ export class CommandFacade {
 
   /**
    * `<vision-tactical-map>`'s `[assets]` (docs/plans/done/MAP-REWORK-PLAN.md §5.1). The map component is dumb
-   * now — unlike the deleted `FleetMap`, which injected `FleetMapStore` itself and therefore only
+   * now — unlike the deleted `FleetMap`, which injected `MapFacade` itself and therefore only
    * worked on a page that provided it — so the store's markers are handed over as an input from
    * here, the one place already holding that store. Enriched with `lastContact` (§3.3/W3, above) so
    * the map's own tri-state freshness colouring and "Last contact …" popup line are honest for the
@@ -441,14 +441,14 @@ export class CommandFacade {
   constructor() {
     // No `refreshSummary()` here: `applySummaryTransport` below fetches once on its own first run,
     // whichever transport it resolves to. Calling it here as well would double-fetch at construction
-    // -- the same reason `MarksStore.activate()` routes through `applyTransport` instead of
+    // -- the same reason `MarksFacade.activate()` routes through `applyTransport` instead of
     // refreshing directly.
     const stopClock = this.scheduler.schedule(CLOCK_TICK_MS, () => this.nowSignal.set(Date.now()));
     inject(DestroyRef).onDestroy(stopClock);
 
     // D1 + L8a: while live is open the summary refetches on invalidation plus a floor; while it is
     // not, the original 5s poll is the fallback. Same `liveGated` shape as every store this plan
-    // gates — see `core/map-data/marks-store.ts#applyTransport` for the frozen table.
+    // gates — see `core/map-data/marks-facade.ts#applyTransport` for the frozen table.
     effect(() => {
       this.applySummaryTransport(isLiveAvailable(this.liveStore.connectionState()));
     });
@@ -504,7 +504,7 @@ export class CommandFacade {
     // The route interaction contract, frozen (docs/plans/active/COMMAND-MAP-FLOW-PLAN.md §3.4):
     // selecting an asset auto-shows its route at the current span; changing span while selected
     // re-shows at the new span; deselecting clears it. One effect over both signals covers all
-    // three — `RouteStore.show`/`hide` are themselves idempotent/generation-guarded, so there is no
+    // three — `RouteFacade.show`/`hide` are themselves idempotent/generation-guarded, so there is no
     // "did this already fire" bookkeeping needed here.
     effect(() => {
       const assetId = this.selectedAssetId();
@@ -607,7 +607,7 @@ export class CommandFacade {
     });
   }
 
-  /** Cursor into `LiveFacade.detectionEvents()` — the same idiom `MarksStore` uses for `map`. */
+  /** Cursor into `LiveFacade.detectionEvents()` — the same idiom `MarksFacade` uses for `map`. */
   private processedDetectionEventCount = 0;
   /** Swallows the invalidation effect's own first run; the constructor already fetched. */
   private summaryBootstrapped = false;
@@ -625,7 +625,7 @@ export class CommandFacade {
   /**
    * D1's frozen gate for the fleet-summary read (docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md §3,
    * wave L8a), live axis only — this facade is page-provided, so its lifetime already is its demand
-   * signal, exactly like `FleetMapStore`'s.
+   * signal, exactly like `MapFacade`'s.
    *
    * | `liveAvailable` | previous | Action |
    * |---|---|---|
@@ -659,7 +659,7 @@ export class CommandFacade {
    * Queues one debounced refetch. A second invalidation arriving while one is already queued is
    * folded into it rather than adding a request — the debounce bounds the *rate*, so a burst of
    * arrivals costs exactly one fetch. Raw `setTimeout` rather than `PollScheduler`, matching
-   * `LayersStore#scheduleGrantsReconcile`'s own one-shot-debounce precedent (that scheduler is a
+   * `LayersFacade#scheduleGrantsReconcile`'s own one-shot-debounce precedent (that scheduler is a
    * fixed-cadence heartbeat, not a one-shot timer).
    */
   private invalidateSummary(): void {
@@ -822,7 +822,7 @@ export class CommandFacade {
    * `<vision-tactical-map>`'s `(drawingCompleted)` — the map owns the in-progress vertex list and
    * only ever emits a shape that already passes `Drawing`'s own minimum-point rule
    * (`tactical-map-logic.ts#completedDraft`), so this is a straight `POST`. The colour comes from
-   * `DrawingsStore`'s own picker state, which is why the toolbar doesn't need to be reachable from
+   * `DrawingsFacade`'s own picker state, which is why the toolbar doesn't need to be reachable from
    * here.
    */
   async completeDrawing(draft: DrawingDraft): Promise<void> {

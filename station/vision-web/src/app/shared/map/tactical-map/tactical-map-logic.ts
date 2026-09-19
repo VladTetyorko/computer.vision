@@ -341,7 +341,7 @@ export interface AssetLegendCounts {
  * Counts the plotted assets by state. `noPosition` cannot be derived from `assets` at all — a
  * marker only exists for an asset that *has* a position (`core/map/map-logic.ts#buildMarker`
  * returns `undefined` otherwise) — so it is passed in by the host that knows (Command's own
- * `FleetMapStore.buckets()`), and stays 0 (row hidden) everywhere else. Honest by construction:
+ * `MapFacade.buckets()`), and stays 0 (row hidden) everywhere else. Honest by construction:
  * the map never invents a count for assets it was never given.
  *
  * `streaming`/`offline` are split by {@link isMarkerLive}, not the raw `asset.live` bucket, so the

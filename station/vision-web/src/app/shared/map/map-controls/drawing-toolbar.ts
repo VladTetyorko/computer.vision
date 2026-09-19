@@ -1,8 +1,8 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, linkedSignal, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { DrawingsStore } from '../../../core/map-data/drawings-store';
-import { LayersStore } from '../../../core/map-data/layers-store';
-import { MarksStore } from '../../../core/map-data/marks-store';
+import { DrawingsFacade } from '../../../core/map-data/drawings-facade';
+import { LayersFacade } from '../../../core/map-data/layers-facade';
+import { MarksFacade } from '../../../core/map-data/marks-facade';
 import { DRAW_KINDS, drawKindLabel, remainingPoints } from '../../../core/map-data/drawings-logic';
 import type { DrawKind } from '../../../core/api/models';
 
@@ -11,7 +11,7 @@ import type { DrawKind } from '../../../core/api/models';
  * editor (docs/plans/done/MAP-REWORK-PLAN.md §5.2). Shared by the Fly cockpit's Map drawer and Command's
  * floating map card.
  *
- * **What it drives, and what it doesn't.** Arming a mode writes `DrawingsStore.mode`, which the
+ * **What it drives, and what it doesn't.** Arming a mode writes `DrawingsFacade.mode`, which the
  * host's facade folds into the map's single `[interactionMode]`
  * (`drawings-logic.ts#resolveInteractionMode`). The map itself owns the in-progress vertex list —
  * only it knows where a click landed — and emits `(drawingCompleted)` once the gesture finishes
@@ -23,11 +23,11 @@ import type { DrawKind } from '../../../core/api/models';
  * **Role gating mirrors the server, and hides rather than disables.** With no CONTRIBUTE layer at
  * all, the mode buttons are replaced by one honest sentence instead of four dead buttons — §5.2's
  * "UI hides actions when `myAccess < CONTRIBUTE`". Edit/Delete on the selected drawing follow
- * `DrawingsStore.canEditSelected` for the same reason. Neither is a security boundary: the server
+ * `DrawingsFacade.canEditSelected` for the same reason. Neither is a security boundary: the server
  * still arbitrates and its 403 surfaces as a toast.
  *
  * **Deviation from §5.2, flagged**: "select → drag vertices to edit" is not implemented — see
- * `DrawingsStore`'s own class doc. The selected drawing's *details* (label, colour) are editable
+ * `DrawingsFacade`'s own class doc. The selected drawing's *details* (label, colour) are editable
  * here, and deleting + redrawing achieves a geometry change without restructuring
  * `<vision-tactical-map>`'s internals, which Wave E is explicitly scoped out of.
  */
@@ -42,9 +42,9 @@ export class DrawingToolbar {
   /** `'card'` floats over a map (Command); `'stacked'` fills a drawer column (Fly). Layout only — same controls, same order. */
   readonly layout = input<'card' | 'stacked'>('stacked');
 
-  protected readonly drawings = inject(DrawingsStore);
-  protected readonly layers = inject(LayersStore);
-  private readonly marks = inject(MarksStore);
+  protected readonly drawings = inject(DrawingsFacade);
+  protected readonly layers = inject(LayersFacade);
+  private readonly marks = inject(MarksFacade);
 
   constructor() {
     // ALWAYS-ON-FLOW-PLAN.md §4 Wave C3 — see `MarksPanel`'s identical constructor comment.
@@ -74,8 +74,8 @@ export class DrawingToolbar {
 
   /**
    * The selected drawing's label as an editable working copy — re-seeded only when the *selected
-   * drawing's identity* changes (`DrawingsStore.selectedDrawingId`, already a primitive id signal),
-   * never on an unrelated data refresh of the same drawing. `DrawingsStore.selected` hands out a
+   * drawing's identity* changes (`DrawingsFacade.selectedDrawingId`, already a primitive id signal),
+   * never on an unrelated data refresh of the same drawing. `DrawingsFacade.selected` hands out a
    * brand-new `MapDrawing` object on every SSE event and 30s safety-net poll (`drawings-store.ts`)
    * even when the selection hasn't moved — seeding straight off that object (as this used to) silently
    * discarded an in-progress label edit whenever a poll landed mid-edit. Mirrors `MarkPalette`'s

@@ -36,8 +36,8 @@ export type { LiveConnectionState } from './live-fallback-logic';
  * per-topic framing (always-on vs. opt-in, snapshot-on-connect vs. delta-only, FIFO log vs.
  * latest-wins) that this class's doc comment used to carry directly. Thirteen distinct store classes
  * project at least one of them today (`TelemetryStore`, `DetectionsStore` — also `tracks`/`geo`'s own
- * `worldObjectsFor`/`geoFor` — `FleetStore`, `EventsStore`, `LayersStore`/`MarksStore`/`DrawingsStore`
- * sharing `map`, `GeoStore`, `DiscoveryInboxStore`, `GeofenceStore`, `SystemStatusStore`,
+ * `worldObjectsFor`/`geoFor` — `FleetStore`, `EventsStore`, `LayersFacade`/`MarksFacade`/`DrawingsFacade`
+ * sharing `map`, `GeoStore`, `DiscoveryInboxStore`, `GeofenceFacade`, `SystemStatusStore`,
  * `CvTraceStore`, `LinksStore`); `fleet`'s own {@link AssetSummary} list and the generic `event`
  * topic (`liveEvents` below) still have no dedicated store — see `FleetFacade`/`FleetStore`'s own doc
  * comment for the former, and `liveEvents`'s own doc comment for the latter.
@@ -73,11 +73,11 @@ export class LiveFacade {
   readonly devices = this.store.selectSignal(liveFeature.selectDevices);
   /** `core/events/events-store.ts#EventsStore`'s own projection source — chronological (oldest-first). */
   readonly detectionEvents = this.store.selectSignal(liveFeature.selectDetectionEvents);
-  /** The projection source shared by `LayersStore`/`MarksStore`/`DrawingsStore` — chronological (oldest-first). */
+  /** The projection source shared by `LayersFacade`/`MarksFacade`/`DrawingsFacade` — chronological (oldest-first). */
   readonly mapEvents = this.store.selectSignal(liveFeature.selectMapEvents);
   /** `core/discovery/discovery-inbox-store.ts#DiscoveryInboxStore`'s own projection source — chronological (oldest-first). */
   readonly discoveryEvents = this.store.selectSignal(liveFeature.selectDiscoveryEvents);
-  /** `core/geofence/geofence-store.ts#GeofenceStore`'s own projection source — chronological (oldest-first). */
+  /** `core/geofence/geofence-facade.ts#GeofenceFacade`'s own projection source — chronological (oldest-first). */
   readonly zoneEvents = this.store.selectSignal(liveFeature.selectZoneEvents);
   /** The latest `system` sample (always-on) — a full snapshot, never a diff. */
   readonly systemStatus = this.store.selectSignal(liveFeature.selectSystemStatus);

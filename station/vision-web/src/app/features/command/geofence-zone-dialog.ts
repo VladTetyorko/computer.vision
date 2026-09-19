@@ -63,7 +63,7 @@ export interface ZoneDraft {
  *
  * **KEEP_IN save-time advisory** (docs/plans/done/OPS-CORE-PLAN.md §G-c: "3 assets currently outside this
  * zone" — poka-yoke, informational, never blocking): `assetPositions` (every asset with a
- * currently-known position, from `CommandPage`'s own `FleetMapStore.markers()`) is compared against
+ * currently-known position, from `CommandPage`'s own `MapFacade.markers()`) is compared against
  * the draft polygon via `assetsOutsideZoneCount`; shown only for `KEEP_IN` (a KEEP_OUT zone
  * "how many assets are outside" isn't the risk it's drawn to catch) and only once the polygon is
  * actually save-able (a 1-vertex polygon has no "inside" to be outside of yet).

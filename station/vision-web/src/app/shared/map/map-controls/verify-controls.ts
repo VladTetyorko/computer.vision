@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
-import { MarksStore } from '../../../core/map-data/marks-store';
-import { LayersStore } from '../../../core/map-data/layers-store';
+import { MarksFacade } from '../../../core/map-data/marks-facade';
+import { LayersFacade } from '../../../core/map-data/layers-facade';
 import { verificationChipClass, verificationLabel } from '../../../core/map-data/mark-logic';
 import type { MapMark } from '../../../core/api/models';
 
@@ -12,10 +12,10 @@ import type { MapMark } from '../../../core/api/models';
  * every viewer needs — an UNVERIFIED pin is a claim, not a fact, and the map draws it dashed for the
  * same reason — so it renders for everyone, alongside the mark's layer name (an em dash while the
  * layer list is still loading or the layer is unknown, never a raw uuid and never a guess).
- * Confirm / Reject / **Promote to common picture** render only when `LayersStore.canManageLayer`
+ * Confirm / Reject / **Promote to common picture** render only when `LayersFacade.canManageLayer`
  * says the server resolved MANAGE on this mark's layer (§3's own rule for `verify` and `promote`).
  * That is a *hiding* rule, not an authorization one: every action still goes to the server, and a
- * 403/404 surfaces as a toast through `MarksStore`'s shared error seam.
+ * 403/404 surfaces as a toast through `MarksFacade`'s shared error seam.
  *
  * **Promote hides once the mark is already on the common picture** — there is nowhere left to
  * promote it to, and a button that would no-op is worse than no button. Confirm/Reject stay
@@ -31,8 +31,8 @@ import type { MapMark } from '../../../core/api/models';
 export class VerifyControls {
   readonly mark = input.required<MapMark>();
 
-  private readonly marks = inject(MarksStore);
-  private readonly layers = inject(LayersStore);
+  private readonly marks = inject(MarksFacade);
+  private readonly layers = inject(LayersFacade);
 
   constructor() {
     // ALWAYS-ON-FLOW-PLAN.md §4 Wave C3 — see `MarksPanel`'s identical constructor comment. One
