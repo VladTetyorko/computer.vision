@@ -4,6 +4,7 @@ import { FormsModule } from '@angular/forms';
 import { EmptyState } from '../../shared/ui/empty-state';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { OrgSettingsFacade } from './org-settings-facade';
+import { OrgFacade } from '../../core/org/org-facade';
 
 /**
  * The org-settings surface (`/org`, docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2) — a manager/admin's
@@ -63,7 +64,9 @@ import { OrgSettingsFacade } from './org-settings-facade';
   templateUrl: './org-settings.html',
   styleUrl: './org-settings.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [OrgSettingsFacade],
+  // `OrgFacade` is page-provided since wave N4 (NGRX-MIGRATION-PLAN.md §9). This page is not
+  // routed itself — it is embedded in `CrewPage` at `manage/roster`, which registers the slice.
+  providers: [OrgSettingsFacade, OrgFacade],
 })
 export class OrgSettingsPage {
   protected readonly facade = inject(OrgSettingsFacade);

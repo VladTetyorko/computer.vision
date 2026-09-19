@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { DetectionsFacade } from '../../core/detections/detections-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { ToastService } from '../../core/toast.service';
@@ -159,7 +159,7 @@ export class StreamInfoPanel {
   /** `shared/player/player.ts`'s own live transport, piped up via its `transportChanged` output (docs/plans/done/MVP2-PLAN.md §L / §U3). */
   readonly transport = input<Transport>('hls');
 
-  private readonly fleet = inject(FleetStore);
+  private readonly fleet = inject(FleetFacade);
   private readonly detections = inject(DetectionsFacade);
   private readonly toasts = inject(ToastService);
 

@@ -32,10 +32,10 @@ describe('FLY_ROUTES', () => {
     expect(FLY_ROUTES[0].loadComponent).toBeUndefined();
   });
 
-  it('registers its seven page-scoped NgRx slices on the pathless parent, so picker → cockpit keeps one registration', async () => {
+  it('registers its twelve page-scoped NgRx slices on the pathless parent, so picker → cockpit keeps one registration', async () => {
     const loaded = await (FLY_ROUTES[0].loadChildren as () => Promise<Routes>)();
     expect(loaded.map((route) => route.path)).toEqual(['']);
-    expect(loaded[0].providers, 'the slices must be provided once, above both routes').toHaveLength(7);
+    expect(loaded[0].providers, 'the slices must be provided once, above both routes').toHaveLength(12);
   });
 
   it('/fly (the picker) resolves to DronePickerPage, carries fullBleed, and is gated by flyRedirectGuard', async () => {

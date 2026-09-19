@@ -22,6 +22,16 @@ import { sessionInterceptor } from './session-interceptor';
  * while all tests stayed green, because they always built the facade against a stubbed api, never
  * through the real `HttpClient` pipeline. This spec builds exactly that pipeline (real `VisionApi`,
  * real `provideAppState()`) and asserts the request reaches the backend.
+ *
+ * <h2>wave N4b — `fleet`/`systemStatus` are root-registered too</h2>
+ * `provideAppState()` now also root-registers `fleet`/`systemStatus` and their effects
+ * (`core/state/app-state.ts`'s own doc comment) — a root NgRx effect starts the moment the
+ * environment injector realizes (this file's own first `TestBed.inject(...)` call), independent of
+ * whether anything ever injects `FleetFacade`/`SystemStatusFacade` (see `core/live/poll-rate.spec.ts`'s
+ * identical "wave N4b" doc comment for the mechanism). That is exactly what the *real* app does at
+ * cold boot too (`AppSidebar` mounts both unconditionally), so `GET /api/devices`/`GET /api/streams`/
+ * `GET /api/system/status` are now genuine, expected requests here — `flushFleetBoot` answers them so
+ * `HttpTestingController.verify()` in `afterEach` sees no unhandled traffic.
  */
 describe('sessionInterceptor cold boot', () => {
   afterEach(() => {
@@ -44,6 +54,14 @@ describe('sessionInterceptor cold boot', () => {
     });
   }
 
+  /** Answers the three requests `fleet`/`systemStatus`'s own root-registered `gate$` effects issue
+   *  unconditionally at boot — see this file's own "wave N4b" doc comment. */
+  function flushFleetBoot(http: HttpTestingController): void {
+    http.expectOne('/api/devices').flush([]);
+    http.expectOne('/api/streams').flush([]);
+    http.expectOne('/api/system/status').flush({ overall: 'OK', checkedAt: '2026-08-15T00:00:00Z', subsystems: [] });
+  }
+
   it('lets AuthFacade’s constructor-time GET /api/auth/me reach the wire (no circular injection)', async () => {
     setup();
 
@@ -53,6 +71,7 @@ describe('sessionInterceptor cold boot', () => {
     // With the eager inject(AuthFacade) bug, no request ever left the client — expectOne throws.
     const req = http.expectOne('/api/auth/me');
     req.flush(null, { status: 401, statusText: 'Unauthorized' });
+    flushFleetBoot(http);
 
     await facade.ready;
     // 401 on /me is the honest signed-out answer, not a degraded error path.
@@ -65,6 +84,7 @@ describe('sessionInterceptor cold boot', () => {
     const facade = TestBed.inject(AuthFacade);
     const http = TestBed.inject(HttpTestingController);
     http.expectOne('/api/auth/me').flush(null, { status: 401, statusText: 'Unauthorized' });
+    flushFleetBoot(http);
     await facade.ready;
 
     const expired = vi.spyOn(facade, 'sessionExpired');

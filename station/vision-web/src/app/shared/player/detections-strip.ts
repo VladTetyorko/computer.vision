@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, computed, inject, input, output } from '@angular/core';
 import { DetectionsFacade } from '../../core/detections/detections-facade';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { HIDDEN_CLASS_TRUTH, toggleLabelDeny } from '../../core/detections/detections-logic';
 import { worldObjectsByTrackId } from './detection-overlay-logic';
 import { stripChips, STRIP_CHIP_CAP, type StripChip } from './detections-strip-logic';
@@ -54,7 +54,7 @@ import { stripChips, STRIP_CHIP_CAP, type StripChip } from './detections-strip-l
 })
 export class DetectionsStrip {
   protected readonly store = inject(DetectionsFacade);
-  private readonly fleet = inject(FleetStore);
+  private readonly fleet = inject(FleetFacade);
 
   /** The running stream's id — binding this switches the strip into its interactive mode (see class
    *  doc). Left unbound, the strip stays exactly the plain read-only list it has always been. */

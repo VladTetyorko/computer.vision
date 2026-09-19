@@ -13,6 +13,11 @@ import { AssetPanel } from './asset-panel';
 import { SetupChecklist } from './setup-checklist';
 import { CommandRailRow } from './rail-row';
 import { CommandFacade } from './command-facade';
+import { MarksFacade } from '../../core/map-data/marks-facade';
+import { LayersFacade } from '../../core/map-data/layers-facade';
+import { DrawingsFacade } from '../../core/map-data/drawings-facade';
+import { GeofenceFacade } from '../../core/geofence/geofence-facade';
+import { OrgFacade } from '../../core/org/org-facade';
 
 /**
  * `/command` — the manager dashboard (docs/plans/done/UX-REWORK-PLAN.md §U-c, superseding docs/plans/done/MVP3-PLAN.md
@@ -59,7 +64,10 @@ import { CommandFacade } from './command-facade';
   // alongside them so it can `inject()` all three; `<vision-weather-chip>` still resolves
   // `WeatherFacade` through this same component-level injector, while the map now receives its
   // markers/routes as inputs instead.
-  providers: [MapFacade, WeatherFacade, RouteFacade, CommandFacade],
+  // The map-data facades joined this list in wave N4 (NGRX-MIGRATION-PLAN.md §9): they are
+  // page-provided now, so their slices ride this page's route instead of the root injector.
+  // Needed by this page's own facade *and* by every control inside `<vision-map-tools>`.
+  providers: [MapFacade, WeatherFacade, RouteFacade, CommandFacade, MarksFacade, LayersFacade, DrawingsFacade, GeofenceFacade, OrgFacade],
 })
 export class CommandPage {
   protected readonly facade = inject(CommandFacade);

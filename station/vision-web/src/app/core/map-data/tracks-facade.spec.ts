@@ -6,6 +6,7 @@ import { VisionApi } from '../api/vision-api';
 import { LiveSocketActions } from '../live/state/live.actions';
 import { PollScheduler } from '../poll-scheduler';
 import { provideAppState } from '../state/app-state';
+import { provideTracksState } from './state/tracks.providers';
 import { TracksFacade } from './tracks-facade';
 
 /**
@@ -46,7 +47,7 @@ function stubScheduler() {
 
 function create(api: ReturnType<typeof stubApi>, scheduler = stubScheduler()) {
   TestBed.configureTestingModule({
-    providers: [provideAppState(), { provide: VisionApi, useValue: api }, { provide: PollScheduler, useValue: scheduler }],
+    providers: [provideAppState(), provideTracksState(), TracksFacade, { provide: VisionApi, useValue: api }, { provide: PollScheduler, useValue: scheduler }],
   });
   const facade = TestBed.inject(TracksFacade);
   const store = TestBed.inject(Store);

@@ -6,6 +6,7 @@ import { VisionApi } from '../api/vision-api';
 import { LiveSocketActions } from '../live/state/live.actions';
 import { PollScheduler } from '../poll-scheduler';
 import { provideAppState } from '../state/app-state';
+import { provideGeofenceState } from './state/geofence.providers';
 import { ToastService } from '../toast.service';
 import { UndoToastService } from '../../shared/ui/undo-toast.service';
 import { GeofenceFacade } from './geofence-facade';
@@ -52,6 +53,8 @@ function createInactive(api: ReturnType<typeof stubApi>, scheduler = stubSchedul
   TestBed.configureTestingModule({
     providers: [
       provideAppState(),
+      provideGeofenceState(),
+      GeofenceFacade,
       { provide: VisionApi, useValue: api },
       { provide: ToastService, useValue: toasts },
       { provide: UndoToastService, useValue: undoToast },

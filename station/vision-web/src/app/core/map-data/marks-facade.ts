@@ -18,8 +18,17 @@ import { marksFeature } from './state/marks.reducer';
  * `LayersFacade` or `Router` at all, matching the plan's "read another slice through its own
  * selectors, never by injecting its facade/service into an effect" rule (generalized here to mean
  * this facade doesn't need either dependency to do its job).
+ *
+ * **Page-provided since wave N4, not `providedIn: 'root'`** (NGRX-MIGRATION-PLAN.md §9). Every class
+ * that injects this sits behind a lazy route — the four map-surface page facades and the controls
+ * inside `<vision-map-tools>` (`shared/map/map-controls/**`) — so the `marks` slice is registered by
+ * each of those five routes instead of shipping in every visitor's initial bundle. **Behaviour change
+ * this carries:** the slice no longer survives navigating between map surfaces, so entering
+ * `/command` from `/fly` reconciles from the server rather than inheriting the previous page's copy.
+ * The demand ref-count (`activate()`/`release()`) is unaffected — it always protected *concurrent*
+ * consumers within one page, and one page is all that is ever mounted.
  */
-@Injectable({ providedIn: 'root' })
+@Injectable()
 export class MarksFacade {
   private readonly store = inject(Store);
   private readonly actions$ = inject(Actions);

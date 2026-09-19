@@ -7,8 +7,13 @@ import { tracksFeature } from './state/tracks.reducer';
  * `TracksStore`'s read/dispatch boundary (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N6).
  * `providedIn: 'root'`, exactly like the store it replaces — started at boot alongside
  * `MarksFacade`/`LayersFacade`/`DrawingsFacade`, one poller for every host.
+ *
+ * **Page-provided since wave N4, not `providedIn: 'root'`** (NGRX-MIGRATION-PLAN.md §9).
+ * `AssetDetailFacade` is its only injector and sits behind a lazy route, so the `tracks` slice is
+ * registered by `assets/:assetId` rather than shipped to every visitor. **Behaviour change this
+ * carries:** the track list is re-read on each visit to an asset rather than kept for the session.
  */
-@Injectable({ providedIn: 'root' })
+@Injectable()
 export class TracksFacade {
   private readonly store = inject(Store);
 

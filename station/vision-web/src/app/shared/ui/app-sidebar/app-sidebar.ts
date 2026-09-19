@@ -1,12 +1,12 @@
 import { ChangeDetectionStrategy, Component, ElementRef, computed, effect, inject, input, viewChild } from '@angular/core';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { AuthFacade } from '../../../core/auth/auth-facade';
-import { FleetStore } from '../../../core/fleet/fleet-store';
+import { FleetFacade } from '../../../core/fleet/fleet-facade';
 import { LiveFacade } from '../../../core/live/live-facade';
 import { SidebarFacade } from '../../../core/shell/sidebar-facade';
 import { ThemeFacade } from '../../../core/shell/theme-facade';
 import { shellStatusLabel, shellStatusSeverity } from '../../../core/system-status/system-status-logic';
-import { SystemStatusStore } from '../../../core/system-status/system-status-store';
+import { SystemStatusFacade } from '../../../core/system-status/system-status-facade';
 import { OverlayFacade } from '../../../core/ui/overlay-facade';
 import { DemoButton } from '../../../features/demo/demo-button/demo-button';
 import { NAV_MODES, type NavMode } from '../../../features/hubs/nav-entries';
@@ -135,7 +135,7 @@ import { NotificationBell } from '../notification-bell';
 })
 export class AppSidebar {
   protected readonly sidebar = inject(SidebarFacade);
-  protected readonly fleet = inject(FleetStore);
+  protected readonly fleet = inject(FleetFacade);
   /** Backs the foot's theme-toggle button (docs/plans/done/VISUAL-REFRESH-PLAN.md Wave 1) — a shared shell
    *  component, not a routed feature page, so `core/ui/architecture.spec.ts`'s "routed page injects
    *  only its facade" guard doesn't scan this file at all (it globs `features/**` only); the
@@ -147,7 +147,7 @@ export class AppSidebar {
   /** Backs the shell rollup dot below (docs/plans/done/SYSTEM-STATUS-PLAN.md §5.2) — the same "shared
    *  shell component, not a routed page" carve-out `theme`'s own doc comment above explains; the
    *  singleton store is already warm app-wide (see that store's own class doc), this just reads it. */
-  private readonly systemStatus = inject(SystemStatusStore);
+  private readonly systemStatus = inject(SystemStatusFacade);
   private readonly overlays = inject(OverlayFacade);
   private readonly hostRef = inject(ElementRef<HTMLElement>);
   /** Optional — only present while the `@else` branch (closed) renders it; see class doc's mobile-sheet paragraph. */

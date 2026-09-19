@@ -1,6 +1,6 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { AuthFacade } from '../../core/auth/auth-facade';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { canManageOrg } from '../../core/org/org-logic';
 import { SettingsFacade } from '../../core/settings/settings-facade';
 import { ThemeFacade } from '../../core/shell/theme-facade';
@@ -31,7 +31,7 @@ import { ToastService } from '../../core/toast.service';
 @Injectable()
 export class AccountSettingsFacade {
   readonly settings = inject(SettingsFacade);
-  readonly fleet = inject(FleetStore);
+  readonly fleet = inject(FleetFacade);
   /** Backs the page's own "Appearance" section (docs/plans/done/VISUAL-REFRESH-PLAN.md F3/Wave 1) — the same
    *  `ThemeFacade` the sidebar-footer switch calls directly, injected here instead because
    *  `AccountSettingsPage` **is** a routed page (`core/ui/architecture.spec.ts`'s "injects only its

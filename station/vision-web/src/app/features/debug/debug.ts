@@ -3,7 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { healthLabel, healthSeverity } from '../../core/system-status/system-status-logic';
-import { SystemStatusStore } from '../../core/system-status/system-status-store';
+import { SystemStatusFacade } from '../../core/system-status/system-status-facade';
 import { DebugApiService, type RawResponse } from './debug-api.service';
 import { buildCurl } from './debug-curl';
 import { DebugRail } from './debug-rail';
@@ -58,7 +58,7 @@ const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
  * for real, this is the one place to check whether the two ever disagree, rather than the console's
  * one and only health source. **This page is not in `core/ui/architecture.spec.ts`'s `ROUTED_PAGES`
  * list** (it predates the facade sweep and stays exempt, matching its own pre-existing "injects
- * `DebugApiService` directly" shape) — `inject(SystemStatusStore)` below is therefore in-contract,
+ * `DebugApiService` directly" shape) — `inject(SystemStatusFacade)` below is therefore in-contract,
  * unlike a page the architecture guard does scan.
  */
 @Component({
@@ -70,7 +70,7 @@ const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const;
 })
 export class DebugPage {
   private readonly api = inject(DebugApiService);
-  private readonly systemStatusStore = inject(SystemStatusStore);
+  private readonly systemStatusStore = inject(SystemStatusFacade);
 
   protected readonly endpoints = DEBUG_ENDPOINTS;
   protected readonly methods = METHODS;

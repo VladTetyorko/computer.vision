@@ -1,7 +1,7 @@
 import { DestroyRef, Injectable, computed, effect, inject, signal, untracked } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
 import type { FleetSummary } from '../../core/api/models';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { SettingsFacade } from '../../core/settings/settings-facade';
 import { EventsFacade } from '../../core/events/events-facade';
 import { LiveFacade } from '../../core/live/live-facade';
@@ -80,7 +80,7 @@ const CLOCK_TICK_MS = 5_000;
 @Injectable()
 export class WallFacade {
   private readonly api = inject(VisionApi);
-  private readonly fleet = inject(FleetStore);
+  private readonly fleet = inject(FleetFacade);
   private readonly events = inject(EventsFacade);
   private readonly live = inject(LiveFacade);
   private readonly scheduler = inject(PollScheduler);

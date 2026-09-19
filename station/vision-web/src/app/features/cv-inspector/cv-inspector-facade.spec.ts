@@ -4,11 +4,11 @@ import { Store } from '@ngrx/store';
 import { describe, expect, it, vi } from 'vitest';
 import { CvInspectorFacade } from './cv-inspector-facade';
 import { CvTraceFacade } from '../../core/cv-trace/cv-trace-facade';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { provideAppState } from '../../core/state/app-state';
 import { provideCvTraceState } from '../../core/cv-trace/state/cv-trace.providers';
-import { SystemStatusStore } from '../../core/system-status/system-status-store';
+import { SystemStatusFacade } from '../../core/system-status/system-status-facade';
 import { VisionApi } from '../../core/api/vision-api';
 import type { AssetAttention, FleetSummary } from '../../core/api/models';
 
@@ -54,11 +54,11 @@ function stubScheduler() {
   return { schedule: vi.fn(() => vi.fn()) };
 }
 
-function stubFleetStore() {
+function stubFleetFacade() {
   return { streams: signal([]) };
 }
 
-function stubStatusStore() {
+function stubStatusFacade() {
   return { status: signal(undefined), refresh: vi.fn() };
 }
 
@@ -70,8 +70,8 @@ function create(api: ReturnType<typeof stubApi>) {
       CvTraceFacade,
       { provide: VisionApi, useValue: api },
       { provide: PollScheduler, useValue: stubScheduler() },
-      { provide: FleetStore, useValue: stubFleetStore() },
-      { provide: SystemStatusStore, useValue: stubStatusStore() },
+      { provide: FleetFacade, useValue: stubFleetFacade() },
+      { provide: SystemStatusFacade, useValue: stubStatusFacade() },
     ],
   });
   return { facade: TestBed.inject(CvInspectorFacade), store: TestBed.inject(Store) };

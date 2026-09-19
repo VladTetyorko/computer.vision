@@ -1,7 +1,7 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { ToastService } from '../../core/toast.service';
 import { UndoToastService } from '../../shared/ui/undo-toast.service';
 import { describeHttpError } from '../../core/api-error';
@@ -57,7 +57,7 @@ export class DevicesFacade {
    *  `clearSelection` anchor their `relativeTo` on. */
   private readonly route = inject(ActivatedRoute);
 
-  readonly fleet = inject(FleetStore);
+  readonly fleet = inject(FleetFacade);
 
   readonly busyDeviceId = signal<string | null>(null);
 

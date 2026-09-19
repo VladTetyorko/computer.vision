@@ -3,7 +3,7 @@ import { TestBed } from '@angular/core/testing';
 import { Router, provideRouter } from '@angular/router';
 import { describe, expect, it } from 'vitest';
 import { App, type RouteDataNode, routeTreeHasFullBleed } from './app';
-import { FleetStore } from './core/fleet/fleet-store';
+import { FleetFacade } from './core/fleet/fleet-facade';
 import { LeafletWarmup } from './core/leaflet-warmup';
 import { AuthFacade } from './core/auth/auth-facade';
 import { hasCapability } from './core/auth/auth-logic';
@@ -12,23 +12,35 @@ import { EventsFacade } from './core/events/events-facade';
 import { LiveFacade } from './core/live/live-facade';
 import { VisionApi } from './core/api/vision-api';
 import { SidebarFacade } from './core/shell/sidebar-facade';
+import { SystemStatusFacade } from './core/system-status/system-status-facade';
 import { provideAppState } from './core/state/app-state';
 
 /**
  * `App` pulls in `AppSidebar`, which in turn mounts `IdentityChip`/`NotificationBell`, each with
- * their own deep store graph (`AuthFacade`, `FleetStore`, `EventsFacade`, `LiveFacade`, `VisionApi`) —
- * every one of those is overridden with a minimal, side-effect-free fake here (no HTTP, no polling,
- * no real `EventSource`) purely so the shell can mount at all; none of their own behavior is under
- * test in this file (see each store's own spec, and `shared/ui/app-sidebar/app-sidebar.spec.ts` for
- * the sidebar's own tiering/role-gate/collapse behavior). `ToastService`/`UndoToastService` are left
- * real — both are self-contained `signal()`-only state with no injected dependencies of their own.
- * `AppSidebar` also constructs a real `SystemStatusStore` for the shell health dot (§5.2),
- * which since docs/plans/active/LIVE-POLL-RETIREMENT-PLAN.md wave L5 reads `LiveFacade.systemStatus()`
- * — `fakeLiveFacade` below carries that member too, purely so `SystemStatusStore` can construct
- * without throwing; nothing in this file exercises its value.
+ * their own deep store graph (`AuthFacade`, `FleetFacade`, `SystemStatusFacade`, `EventsFacade`,
+ * `LiveFacade`, `VisionApi`) — every one of those is overridden with a minimal, side-effect-free fake
+ * here (no HTTP, no polling, no real `EventSource`) purely so the shell can mount at all; none of
+ * their own behavior is under test in this file (see each facade's own spec, and
+ * `shared/ui/app-sidebar/app-sidebar.spec.ts` for the sidebar's own tiering/role-gate/collapse
+ * behavior). `ToastService`/`UndoToastService` are left real — both are self-contained
+ * `signal()`-only state with no injected dependencies of their own.
+ *
+ * `FleetFacade`/`SystemStatusFacade` are both root-registered NgRx facades as of wave N4b — DI-level
+ * `useValue` overrides (rather than letting them construct for real against a stubbed `VisionApi`,
+ * the pre-N4b posture for `SystemStatusStore`) because a real `FleetFacade`/`SystemStatusFacade`
+ * dispatches into `fleet.effects.ts#gate$`/`system-status.effects.ts#gate$` the instant the store is
+ * assembled, which would call `VisionApi.listDevices`/`.systemStatus` synchronously inside a
+ * `switchMap` project — a method `VisionApi` provided as `{}` here has no answer for, and RxJS turns
+ * that synchronous throw into an effect-stream error rather than the old class's own tidy try/catch.
+ * `SystemEventsFacade` needs no override: it owns no state of its own and only reads
+ * `LiveFacade.liveEvents()`, which `fakeLiveFacade` below already answers.
  */
-function fakeFleetStore(reachable: boolean | undefined = true) {
+function fakeFleetFacade(reachable: boolean | undefined = true) {
   return { streams: () => [] as unknown[], reachable: () => reachable };
+}
+
+function fakeSystemStatusFacade() {
+  return { overall: () => undefined };
 }
 
 function fakeEventsStore() {
@@ -99,7 +111,8 @@ function render(
         { path: 'fly', component: StubPage, data: { fullBleed: true } },
         { path: 'assets', component: StubPage },
       ]),
-      { provide: FleetStore, useValue: fakeFleetStore(options.reachable) },
+      { provide: FleetFacade, useValue: fakeFleetFacade(options.reachable) },
+      { provide: SystemStatusFacade, useValue: fakeSystemStatusFacade() },
       { provide: LeafletWarmup, useValue: { schedule: () => {} } },
       { provide: AuthFacade, useValue: fakeAuthFacade(options.topRole, options.authEnabled) },
       { provide: EventsFacade, useValue: fakeEventsStore() },

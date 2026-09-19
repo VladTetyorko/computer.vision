@@ -15,6 +15,11 @@ import { EmptyState } from '../../shared/ui/empty-state';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { MapTools, type MapToolsCapabilities } from '../../shared/map/map-controls/map-tools/map-tools';
 import { LiveFacade } from './live-facade';
+import { MarksFacade } from '../../core/map-data/marks-facade';
+import { LayersFacade } from '../../core/map-data/layers-facade';
+import { DrawingsFacade } from '../../core/map-data/drawings-facade';
+import { GeofenceFacade } from '../../core/geofence/geofence-facade';
+import { OrgFacade } from '../../core/org/org-facade';
 
 /**
  * The single-device cockpit (`/live/:deviceId`) — video-first with a collapsible rail
@@ -35,7 +40,10 @@ import { LiveFacade } from './live-facade';
   templateUrl: './live.html',
   styleUrl: './live.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [TelemetryFacade, DetectionsFacade, LiveFacade],
+  // The map-data facades joined this list in wave N4 (NGRX-MIGRATION-PLAN.md §9): they are
+  // page-provided now, so their slices ride this page's route instead of the root injector.
+  // Needed by this page's own facade *and* by every control inside `<vision-map-tools>`.
+  providers: [TelemetryFacade, DetectionsFacade, LiveFacade, MarksFacade, LayersFacade, DrawingsFacade, GeofenceFacade, OrgFacade],
 })
 export class LivePage {
   /** Bound from the route by `withComponentInputBinding()`. */

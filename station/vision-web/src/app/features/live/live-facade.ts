@@ -1,7 +1,7 @@
 import { DestroyRef, Injectable, computed, effect, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import type { BoxesMode, Transport } from '../../shared/player/player';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { SettingsFacade } from '../../core/settings/settings-facade';
 import { TelemetryFacade } from '../../core/telemetry/telemetry-facade';
 import { DetectionsFacade } from '../../core/detections/detections-facade';
@@ -43,7 +43,7 @@ const MAP_INSET_VISIBLE_KEY = 'vision.live.mapInsetVisible';
 @Injectable()
 export class LiveFacade {
   private readonly router = inject(Router);
-  readonly fleet = inject(FleetStore);
+  readonly fleet = inject(FleetFacade);
   readonly settings = inject(SettingsFacade);
   readonly telemetry = inject(TelemetryFacade);
   readonly detections = inject(DetectionsFacade);

@@ -1,6 +1,6 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { VisionApi } from '../../core/api/vision-api';
-import { FleetStore } from '../../core/fleet/fleet-store';
+import { FleetFacade } from '../../core/fleet/fleet-facade';
 import { SettingsFacade } from '../../core/settings/settings-facade';
 import { TelemetryFacade } from '../../core/telemetry/telemetry-facade';
 import { DetectionsFacade } from '../../core/detections/detections-facade';
@@ -69,7 +69,7 @@ export class CrewFacade {
   private readonly api = inject(VisionApi);
   private readonly auth = inject(AuthFacade);
 
-  readonly fleet = inject(FleetStore);
+  readonly fleet = inject(FleetFacade);
   readonly settings = inject(SettingsFacade);
   readonly telemetry = inject(TelemetryFacade);
   readonly detections = inject(DetectionsFacade);
