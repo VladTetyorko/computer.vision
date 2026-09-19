@@ -3,7 +3,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
 import { VisionApi } from '../../core/api/vision-api';
 import { FleetStore } from '../../core/fleet/fleet-store';
-import { EventsStore } from '../../core/events/events-store';
+import { EventsFacade } from '../../core/events/events-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { ToastService } from '../../core/toast.service';
 import { describeHttpError } from '../../core/api-error';
@@ -24,7 +24,7 @@ const CLOCK_TICK_MS = 1_000;
 /**
  * `AlertsPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — `/monitor/alerts`, Wave 3 of
  * docs/plans/done/NAV-IA-REDESIGN-PLAN.md (§2.4, docs/extracts/design/08-alerts.md): a two-pane triage view over the
- * shared `EventsStore` feed. Saved threshold rules + acknowledge are still not built (the page's own
+ * shared `EventsFacade` feed. Saved threshold rules + acknowledge are still not built (the page's own
  * honest `<vision-notice>` covers that, unchanged from before this task).
  *
  * **No longer embeds `<vision-events-rail>`** (the pre-Wave-3 shape, see this file's own git
@@ -43,7 +43,7 @@ export class AlertsFacade {
   private readonly api = inject(VisionApi);
   private readonly fleet = inject(FleetStore);
   private readonly toasts = inject(ToastService);
-  readonly events = inject(EventsStore);
+  readonly events = inject(EventsFacade);
 
   private readonly nowSignal = signal(Date.now());
 
@@ -87,7 +87,7 @@ export class AlertsFacade {
    * describing it, since the point of `?sel=` surviving refresh/Back is that it survives, not that
    * it's contingent on today's filter state too). Degrades to `undefined` — never a crash — the
    * moment the id doesn't match anything currently retained: a bogus id typed into the URL, or one
-   * evicted from `EventsStore`'s own `MAX_RETAINED_EVENTS` cap (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4's
+   * evicted from `EventsFacade`'s own `MAX_RETAINED_EVENTS` cap (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.4's
    * own "must degrade to no selection" rule).
    */
   readonly selectedEvent = computed(() => this.events.events().find((event) => event.id === this.selectedId()));

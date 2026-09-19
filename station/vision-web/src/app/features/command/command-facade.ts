@@ -18,7 +18,7 @@ import { MarksStore } from '../../core/map-data/marks-store';
 import { LayersStore } from '../../core/map-data/layers-store';
 import { DrawingsStore } from '../../core/map-data/drawings-store';
 import { resolveInteractionMode } from '../../core/map-data/drawings-logic';
-import { EventsStore } from '../../core/events/events-store';
+import { EventsFacade } from '../../core/events/events-facade';
 import { selectEventMarkers } from '../../core/events/events-logic';
 import { LiveFacade } from '../../core/live/live-facade';
 import { isLiveAvailable } from '../../core/live/live-fallback-logic';
@@ -28,7 +28,7 @@ import {
   invalidationDelayMs,
   listedAssetIds,
 } from '../../core/fleet/summary-refresh-logic';
-import { WeatherStore } from '../../core/weather/weather-store';
+import { WeatherFacade } from '../../core/weather/weather-facade';
 import { fleetCentroid } from '../../core/weather/weather-logic';
 import { buildEntityRows, buildRailGroups, commandGridColumns, type AttentionReason, type DetailPanelState, type EntityRow, type RailRow } from './command-logic';
 import type { PickerGroups } from '../../core/fleet/triage-logic';
@@ -80,15 +80,15 @@ const HIDE_SIMULATED_KEY = 'vision.fly.hideSimulated';
 
 /**
  * `CommandPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md wave W2) — owns every store/service the page
- * needs (`FleetStore`, `FleetMapStore`, `GeofenceStore`, `LiveFacade`, `WeatherStore`, `VisionApi`,
+ * needs (`FleetStore`, `FleetMapStore`, `GeofenceStore`, `LiveFacade`, `WeatherFacade`, `VisionApi`,
  * `Router`, `PollScheduler`), the fleet-summary poll, and every read-model/command the template binds
  * to. `CommandPage` itself injects only this facade (plus its own `UiStore` for the Zones overlay —
  * see that class's own doc comment for why the overlay stays component-local rather than moving here).
  *
- * **Provided per route activation**, listed alongside `FleetMapStore`/`WeatherStore` in
+ * **Provided per route activation**, listed alongside `FleetMapStore`/`WeatherFacade` in
  * `CommandPage`'s own `providers` array (both page-scoped, not `providedIn: 'root'` — see their own
  * class doc comments) — all three share one injector, so this facade's own `inject(FleetMapStore)`/
- * `inject(WeatherStore)` resolve to the exact same instances `<vision-weather-chip>`
+ * `inject(WeatherFacade)` resolve to the exact same instances `<vision-weather-chip>`
  * (children of `CommandPage`, injecting those stores directly themselves) already get. Moving the
  * *injection* here changes nothing about *which* instance anything sees — same DI subtree as before,
  * just orchestrated from one class instead of the component.
@@ -114,11 +114,11 @@ export class CommandFacade {
   private readonly fleet = inject(FleetStore);
   private readonly mapStore = inject(FleetMapStore);
   private readonly geofence = inject(GeofenceStore);
-  private readonly events = inject(EventsStore);
+  private readonly events = inject(EventsFacade);
   private readonly liveStore = inject(LiveFacade);
   private readonly scheduler = inject(PollScheduler);
-  private readonly weather = inject(WeatherStore);
-  /** §3.4's on-demand route fetch — page-provided alongside `FleetMapStore`/`WeatherStore` in
+  private readonly weather = inject(WeatherFacade);
+  /** §3.4's on-demand route fetch — page-provided alongside `FleetMapStore`/`WeatherFacade` in
    *  `CommandPage`'s own `providers` (see `RouteStore`'s own class doc comment for why). */
   private readonly routeStore = inject(RouteStore);
 
@@ -326,7 +326,7 @@ export class CommandFacade {
   /**
    * The map's `[events]` — position-carrying detection events, most recent first, capped
    * (`selectEventMarkers`). Same reason as `markers` above: the deleted `FleetMap` injected
-   * `EventsStore` directly; the store is still never activated/released here (the app-shell
+   * `EventsFacade` directly; the store is still never activated/released here (the app-shell
    * notification bell keeps it warm for the whole session), this facade only reads it.
    */
   readonly eventMarkers = computed(() => selectEventMarkers(this.events.events()));
@@ -497,7 +497,7 @@ export class CommandFacade {
     effect(() => writePersistedFlag(PANEL_OPEN_KEY, this.panelOpenPreferenceSignal()));
     effect(() => writePersistedFlag(HIDE_SIMULATED_KEY, this.hideSimulated()));
 
-    // Keeps the weather chip fresh as the fleet centroid moves — `WeatherStore.track` itself
+    // Keeps the weather chip fresh as the fleet centroid moves — `WeatherFacade.track` itself
     // no-ops instantly unless the 10-minute cache is actually stale (docs/plans/done/OPS-CORE-PLAN.md §W).
     effect(() => this.weather.track(this.weatherPosition()));
 

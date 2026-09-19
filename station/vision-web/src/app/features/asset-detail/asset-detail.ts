@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, signal, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { TelemetryFacade } from '../../core/telemetry/telemetry-facade';
-import { LinksStore } from '../../core/pairing/links-store';
+import { LinksFacade } from '../../core/pairing/links-facade';
 import { UiStore } from '../../core/ui/ui-store';
 import { relativeTimeLabel } from '../../core/events/events-logic';
 import { ageSeconds, isStale } from '../../core/telemetry/telemetry-logic';
@@ -116,7 +116,7 @@ type IdentityDraft = { serialNumber: string; make: string; model: string; regist
   templateUrl: './asset-detail.html',
   styleUrl: './asset-detail.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [AssetDetailFacade, TelemetryFacade, LinksStore],
+  providers: [AssetDetailFacade, TelemetryFacade, LinksFacade],
 })
 export class AssetDetailPage {
   /** Bound from the route by `withComponentInputBinding()`. */

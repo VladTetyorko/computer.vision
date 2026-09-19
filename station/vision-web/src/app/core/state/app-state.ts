@@ -27,6 +27,22 @@ import { settingsHydrator } from '../settings/state/settings.hydration';
 import { settingsFeature } from '../settings/state/settings.reducer';
 import { overlayEffects } from '../ui/state/overlay.effects';
 import { overlayFeature } from '../ui/state/overlay.reducer';
+import { trainingEffects } from '../training/state/training.effects';
+import { trainingFeature } from '../training/state/training.reducer';
+import { thresholdsEffects } from '../ops/state/thresholds.effects';
+import { thresholdsFeature } from '../ops/state/thresholds.reducer';
+import { controlProfileEffects } from '../rc/state/control-profile.effects';
+import { controlProfileFeature } from '../rc/state/control-profile.reducer';
+import { weatherEffects } from '../weather/state/weather.effects';
+import { weatherFeature } from '../weather/state/weather.reducer';
+import { geoEffects } from '../geo/state/geo.effects';
+import { geoFeature } from '../geo/state/geo.reducer';
+import { linksEffects } from '../pairing/state/links.effects';
+import { linksFeature } from '../pairing/state/links.reducer';
+import { discoveryEffects } from '../discovery/state/discovery.effects';
+import { discoveryInboxFeature } from '../discovery/state/discovery.reducer';
+import { eventsEffects } from '../events/state/events.effects';
+import { eventsFeature } from '../events/state/events.reducer';
 import { hydrationMetaReducer } from './hydration';
 
 /**
@@ -82,6 +98,14 @@ export function provideAppState() {
     provideState(telemetryFeature),
     provideState(detectionsFeature),
     provideState(cvTraceFeature),
+    provideState(trainingFeature),
+    provideState(thresholdsFeature),
+    provideState(controlProfileFeature),
+    provideState(weatherFeature),
+    provideState(geoFeature),
+    provideState(linksFeature),
+    provideState(discoveryInboxFeature),
+    provideState(eventsFeature),
     provideEffects(
       themeEffects,
       sidebarEffects,
@@ -94,6 +118,14 @@ export function provideAppState() {
       telemetryEffects,
       detectionsEffects,
       cvTraceEffects,
+      trainingEffects,
+      thresholdsEffects,
+      controlProfileEffects,
+      weatherEffects,
+      geoEffects,
+      linksEffects,
+      discoveryEffects,
+      eventsEffects,
     ),
   ]);
 }

@@ -9,8 +9,8 @@ import { KeyboardRcInputService } from '../../core/rc/keyboard-rc-input.service'
 import { RcSource, type RcSourceKind } from '../../core/rc/rc-source.service';
 import { ManualControlClient, type ManualControlEngageState } from '../../core/rc/manual-control-client';
 import { ControlActionDispatcher } from '../../core/rc/control-action-dispatcher';
-import { ControlProfileStore } from '../../core/rc/control-profile-store';
-import { ThresholdsStore } from '../../core/ops/thresholds-store';
+import { ControlProfileFacade } from '../../core/rc/control-profile-facade';
+import { ThresholdsFacade } from '../../core/ops/thresholds-facade';
 import { ToastService } from '../../core/toast.service';
 import { activeProfileFor } from '../../core/rc/control-action-logic';
 import { armAlsoOnHint, engageDisabledReason, type EngageGateInput } from './rc-monitor-logic';
@@ -117,8 +117,8 @@ export class FlyHud implements OnInit {
   protected readonly dispatcher = inject(ControlActionDispatcher);
   protected readonly virtual = inject(VirtualRcInputService);
   protected readonly keyboard = inject(KeyboardRcInputService);
-  protected readonly profiles = inject(ControlProfileStore);
-  private readonly thresholds = inject(ThresholdsStore);
+  protected readonly profiles = inject(ControlProfileFacade);
+  private readonly thresholds = inject(ThresholdsFacade);
   private readonly toasts = inject(ToastService);
 
   readonly assetId = input.required<string>();

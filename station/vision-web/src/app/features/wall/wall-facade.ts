@@ -3,7 +3,7 @@ import { VisionApi } from '../../core/api/vision-api';
 import type { FleetSummary } from '../../core/api/models';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { SettingsFacade } from '../../core/settings/settings-facade';
-import { EventsStore } from '../../core/events/events-store';
+import { EventsFacade } from '../../core/events/events-facade';
 import { LiveFacade } from '../../core/live/live-facade';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { isLiveAvailable } from '../../core/live/live-fallback-logic';
@@ -46,7 +46,7 @@ const CLOCK_TICK_MS = 5_000;
  * **Replaces per-tile polling with one fleet-wide join** (§2.1 D4/D5, accepted decision #3): a 5s
  * `api.fleetSummary()` poll (the exact `command-facade.ts` precedent — same interval, same
  * silent-degrade-on-background-failure shape) feeds `buildWallTiles` alongside `FleetStore`'s
- * devices/streams, `EventsStore`'s shared detection-event feed, `LiveFacade.liveEvents()`-derived
+ * devices/streams, `EventsFacade`'s shared detection-event feed, `LiveFacade.liveEvents()`-derived
  * pipeline-error/geofence-breach facts, and the wall clock — one 5s tick for identity, attention,
  * health and pulses across every tile, replacing the old per-tile `TelemetryStore`+`DetectionsStore`
  * pair `WallTile` used to stand up itself (D5). `DetectionsStore` still lives in `wall-tile.ts` (W2
@@ -81,7 +81,7 @@ const CLOCK_TICK_MS = 5_000;
 export class WallFacade {
   private readonly api = inject(VisionApi);
   private readonly fleet = inject(FleetStore);
-  private readonly events = inject(EventsStore);
+  private readonly events = inject(EventsFacade);
   private readonly live = inject(LiveFacade);
   private readonly scheduler = inject(PollScheduler);
   private readonly settings = inject(SettingsFacade);
@@ -190,7 +190,7 @@ export class WallFacade {
   }
 
   constructor() {
-    // "O(visible) discipline" (docs/plans/done/MVP2-PLAN.md §E, E-b bullet 5) — see `EventsStore`'s own
+    // "O(visible) discipline" (docs/plans/done/MVP2-PLAN.md §E, E-b bullet 5) — see `EventsFacade`'s own
     // doc comment: the header bell has held a refcount since app boot, so this call is honest about
     // what it does (bumps the refcount) but not about ever actually pausing the poll on its own — D22.
     this.events.activate();

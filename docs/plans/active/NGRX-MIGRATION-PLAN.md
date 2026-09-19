@@ -203,7 +203,9 @@ Promise-returning method is added to `VisionApi` after N0 — new endpoints land
 | N1+N2 merged | `f70afb09` — **231/231 files · 4 387/4 387 tests green**, production build exit 0 at **500.83 kB raw / 142.55 kB transfer** (835 B over the 500 kB *warning* budget, under the 550 kB error budget; left as a warning on purpose) |
 | N3 | **BUILT**, `b0e0ce19` — the `live` slice + `core/live/live-gateway.ts` (the seam owning the one `EventSource`; specs fake it, jsdom never needs one). 26 consumers rewired, `LiveStore` deleted. **234/234 files · 4 443/4 443 tests green**, build exit 0, bundle 500.83 → 505.87 kB raw |
 | N5 | **BUILT**, `91143666` — `telemetry`, `detections`, `cv-trace`; 24 consumers rewired, all three classes deleted. **240/240 files · 4 492/4 492 tests green**, build exit 0, bundle 505.87 → 515.83 kB raw |
-| N6, N7 | in flight |
+| N7 | **BUILT**, `ecc84dd7` — eight slices at once: `training`, `thresholds`, `controlProfile`, `weather`, `geo`, `links`, `discoveryInbox`, `events`; all eight classes deleted. Settled the two demand-gate idioms later waves reuse (per-host page-provided facade with its own live-bridging `effect()`; root-singleton whose ref-count lives in NgRx state, phase computed by cross-`store.select()` inside the effects file) |
+| N7 merged | **257/257 files · 4 653/4 653 tests green**, both tsconfigs clean, production build exit 0 at **540.44 kB raw / 155.15 kB transfer** — 40.44 kB over the 500 kB *warning* budget, **9.56 kB under the 550 kB error budget** |
+| N6 | in flight |
 | N4, N8, N9 | open |
 
 ### The bundle expectation was wrong — recorded, not quietly dropped
@@ -212,9 +214,11 @@ This section previously assumed waves that *delete* a hand-rolled store would cl
 45 kB. Four waves in, that is false: **N1 +0.89, N2 +12.47, N3 +5.04, N5 +9.96 kB raw**, every one
 after deleting the class it replaced. A slice (model + actions + reducer + effects + facade, plus
 `createFeature`/`@ngrx/entity` machinery) ships more code than the class it replaces. The initial
-bundle is now ~15.8 kB over the 500 kB **warning** budget, still under the 550 kB error budget.
-**This is an owner decision at N9** — raise the budget, or spend a wave on route-level code-splitting
-for the slices only one feature needs — not a number for a wave to bump on its way past.
+bundle is now 40.44 kB over the 500 kB **warning** budget, still under the 550 kB error budget —
+but by only **9.56 kB**, which is less than any single wave has cost. **N4, N6 and N8 will break the
+build**, and the decision can no longer wait for N9: raise the 550 kB error budget, or spend a wave
+on route-level code-splitting for the slices only one feature needs. It is the owner's call either
+way — not a number for a wave to bump on its way past.
 
 ### N5 found a convention that does not generalise
 
