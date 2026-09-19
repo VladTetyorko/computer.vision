@@ -26,10 +26,14 @@ import { orgGuard } from '../../core/org/org-guard';
  */
 export const ROSTER_ROUTES: Routes = [
   {
+    // A **lazy boundary only** since wave N4 (NGRX-MIGRATION-PLAN.md §9): this page embeds
+    // `OrgSettingsPage`, whose `OrgFacade` is page-provided, so the `org` slice is registered on the
+    // route in `roster.page-routes.ts`. It cannot be named here — `app.routes.ts` imports this file
+    // statically, which would pull the slice back into the initial bundle. `orgGuard` stays on the
+    // boundary so an unauthorised visitor never fetches the chunk. See `features/fly/fly.routes.ts`.
     path: 'manage/roster',
-    title: 'Crew · Vision',
     canActivate: [orgGuard],
-    loadComponent: () => import('./crew').then((m) => m.CrewPage),
+    loadChildren: () => import('./roster.page-routes').then((m) => m.ROSTER_PAGE_ROUTES),
   },
   {
     path: 'fleet/maintenance',

@@ -4,6 +4,7 @@ import type { GroupSummary, UserSummary } from '../api/models';
 import { VisionApi } from '../api/vision-api';
 import { ToastService } from '../toast.service';
 import { provideAppState } from '../state/app-state';
+import { provideOrgState } from './state/org.providers';
 import { OrgFacade } from './org-facade';
 
 function user(overrides: Partial<UserSummary> = {}): UserSummary {
@@ -50,7 +51,7 @@ describe('OrgFacade', () => {
     };
     toasts = { ok: vi.fn(), error: vi.fn() };
     TestBed.configureTestingModule({
-      providers: [provideAppState(), { provide: VisionApi, useValue: api }, { provide: ToastService, useValue: toasts }],
+      providers: [provideAppState(), provideOrgState(), OrgFacade, { provide: VisionApi, useValue: api }, { provide: ToastService, useValue: toasts }],
     });
   });
 

@@ -8,6 +8,9 @@ import { LiveSocketActions } from '../live/state/live.actions';
 import { LayersApiActions } from './state/layers.actions';
 import { PollScheduler } from '../poll-scheduler';
 import { provideAppState } from '../state/app-state';
+import { LayersFacade } from './layers-facade';
+import { provideDrawingsState } from './state/drawings.providers';
+import { provideLayersState } from './state/layers.providers';
 import { ToastService } from '../toast.service';
 import { DrawingsFacade } from './drawings-facade';
 
@@ -68,6 +71,12 @@ function createInactive(api: ReturnType<typeof stubApi>, scheduler = stubSchedul
   TestBed.configureTestingModule({
     providers: [
       provideAppState(),
+      provideDrawingsState(),
+      // `DrawingsFacade` injects `LayersFacade` (the default target layer), and both are
+      // page-provided since wave N4 — so this spec must register the pair the route does.
+      provideLayersState(),
+      DrawingsFacade,
+      LayersFacade,
       { provide: VisionApi, useValue: api },
       { provide: ToastService, useValue: toasts },
       { provide: PollScheduler, useValue: scheduler },

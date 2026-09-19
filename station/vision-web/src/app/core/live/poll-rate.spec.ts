@@ -10,6 +10,10 @@ import { MarksFacade } from '../map-data/marks-facade';
 import { MapFacade } from '../map/map-facade';
 import { SystemStatusStore } from '../system-status/system-status-store';
 import { provideAppState } from '../state/app-state';
+import { provideDrawingsState } from '../map-data/state/drawings.providers';
+import { provideGeofenceState } from '../geofence/state/geofence.providers';
+import { provideLayersState } from '../map-data/state/layers.providers';
+import { provideMarksState } from '../map-data/state/marks.providers';
 import { provideMapState } from '../map/state/map.providers';
 import { provideRouteState } from '../map-data/state/route.providers';
 import { provideWeatherState } from '../weather/state/weather.providers';
@@ -56,7 +60,7 @@ import type { AssetSummary } from '../api/models';
  * Every root store this file drives moved to NgRx this wave (`MarksStore`→`MarksFacade`,
  * `LayersStore`→`LayersFacade`, `DrawingsStore`→`DrawingsFacade`, `GeofenceStore`→`GeofenceFacade`,
  * `FleetMapStore`→`MapFacade`; `TracksStore`→`TracksFacade` is imported nowhere here, unchanged from
- * before — see the "deliberately absent" note below). `provideAppState(), provideMapState(), provideRouteState(), provideWeatherState(), provideTelemetryState(), provideDetectionsState()` replaces the old hand-rolled
+ * before — see the "deliberately absent" note below). `provideAppState()` plus each page-scoped slice's own `provide<Domain>State()` replaces the old hand-rolled
  * `{ provide: LiveFacade, useValue: stubLiveFacade(transport) }`: `LiveFacade` itself is untouched
  * `core/live/**` territory (out of this wave's scope) and every migrated slice's own gate effect now
  * reads the real `live` feature state through its own selectors (NGRX-MIGRATION-PLAN.md §9's "never
@@ -137,6 +141,8 @@ async function measure(transport: LiveConnectionState, assets: readonly AssetSum
   TestBed.configureTestingModule({
     providers: [
       provideAppState(), provideMapState(), provideRouteState(), provideWeatherState(), provideTelemetryState(), provideDetectionsState(),
+      provideMarksState(), provideLayersState(), provideDrawingsState(), provideGeofenceState(),
+      MarksFacade, LayersFacade, DrawingsFacade, GeofenceFacade,
       SystemStatusStore,
       MapFacade,
       PollScheduler,

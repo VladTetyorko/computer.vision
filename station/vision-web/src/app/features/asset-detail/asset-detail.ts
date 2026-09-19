@@ -40,6 +40,12 @@ import {
   type TelemetryFactRow,
 } from './asset-detail-logic';
 import type { AssetUsage, Device, DetectionEvent } from '../../core/api/models';
+import { MarksFacade } from '../../core/map-data/marks-facade';
+import { LayersFacade } from '../../core/map-data/layers-facade';
+import { DrawingsFacade } from '../../core/map-data/drawings-facade';
+import { GeofenceFacade } from '../../core/geofence/geofence-facade';
+import { OrgFacade } from '../../core/org/org-facade';
+import { TracksFacade } from '../../core/map-data/tracks-facade';
 
 /** The page's four independent editor overlays — docs/plans/done/UI-ARCHITECTURE-PLAN.md's own migration
  *  target for this page — consolidated into ONE mutually-exclusive `UiStore` group, mirroring
@@ -116,7 +122,10 @@ type IdentityDraft = { serialNumber: string; make: string; model: string; regist
   templateUrl: './asset-detail.html',
   styleUrl: './asset-detail.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [AssetDetailFacade, TelemetryFacade, LinksFacade],
+  // The map-data facades joined this list in wave N4 (NGRX-MIGRATION-PLAN.md §9): they are
+  // page-provided now, so their slices ride this page's route instead of the root injector.
+  // Needed by this page's own facade *and* by every control inside `<vision-map-tools>`.
+  providers: [AssetDetailFacade, TelemetryFacade, LinksFacade, MarksFacade, LayersFacade, DrawingsFacade, GeofenceFacade, OrgFacade, TracksFacade],
 })
 export class AssetDetailPage {
   /** Bound from the route by `withComponentInputBinding()`. */

@@ -6,6 +6,7 @@ import { VisionApi } from '../api/vision-api';
 import { LiveSocketActions } from '../live/state/live.actions';
 import { PollScheduler } from '../poll-scheduler';
 import { provideAppState } from '../state/app-state';
+import { provideLayersState } from './state/layers.providers';
 import { ToastService } from '../toast.service';
 import { LayersFacade } from './layers-facade';
 
@@ -49,6 +50,8 @@ function createInactive(api: ReturnType<typeof stubApi>, scheduler = stubSchedul
   TestBed.configureTestingModule({
     providers: [
       provideAppState(),
+      provideLayersState(),
+      LayersFacade,
       { provide: VisionApi, useValue: api },
       { provide: ToastService, useValue: toasts },
       { provide: PollScheduler, useValue: scheduler },

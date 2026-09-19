@@ -7,6 +7,11 @@ import { GeoFacade } from '../../core/geo/geo-facade';
 import { SeatFacade } from '../../core/seat/seat-facade';
 import { ControlProfileFacade } from '../../core/rc/control-profile-facade';
 import { ThresholdsFacade } from '../../core/ops/thresholds-facade';
+import { DrawingsFacade } from '../../core/map-data/drawings-facade';
+import { GeofenceFacade } from '../../core/geofence/geofence-facade';
+import { LayersFacade } from '../../core/map-data/layers-facade';
+import { MarksFacade } from '../../core/map-data/marks-facade';
+import { OrgFacade } from '../../core/org/org-facade';
 import { UiStore } from '../../core/ui/ui-store';
 import { Player } from '../../shared/player/player';
 import { FollowHud } from '../../shared/player/follow-hud/follow-hud';
@@ -119,6 +124,9 @@ type CockpitDialog = 'stop' | 'cv-setup';
   // `ThresholdsFacade`/`ControlProfileFacade` joined this list in wave N-split: both are read only
   // from inside this tree (`FlyHud`/`FlyOsd`/`RcMonitor`), so providing them here is what lets
   // `fly.page-routes.ts` register their slices instead of `core/state/app-state.ts`.
+  // The map-data facades joined this list in wave N4 (NGRX-MIGRATION-PLAN.md §9): they are
+  // page-provided now, so their slices ride this route instead of the root injector. Needed by
+  // `CockpitFacade` *and* by every control inside the map inset's `<vision-map-tools>`.
   providers: [
     TelemetryFacade,
     DetectionsFacade,
@@ -127,6 +135,11 @@ type CockpitDialog = 'stop' | 'cv-setup';
     SeatFacade,
     ThresholdsFacade,
     ControlProfileFacade,
+    MarksFacade,
+    LayersFacade,
+    DrawingsFacade,
+    GeofenceFacade,
+    OrgFacade,
     CockpitFacade,
     GroundingStore,
   ],

@@ -20,8 +20,17 @@ import { drawingsFeature } from './state/drawings.reducer';
  * facade layer — exactly how `DrawingsStore` itself called `this.layers.canContributeTo(...)` and
  * `this.layers.defaultLayerId()` — needs no action/effect machinery at all. The distinction is
  * "does this need to persist and be reconciled" (marks' palette does; these do not).
+ *
+ * **Page-provided since wave N4, not `providedIn: 'root'`** (NGRX-MIGRATION-PLAN.md §9). Every class
+ * that injects this sits behind a lazy route — the four map-surface page facades and the controls
+ * inside `<vision-map-tools>` (`shared/map/map-controls/**`) — so the `drawings` slice is registered by
+ * each of those five routes instead of shipping in every visitor's initial bundle. **Behaviour change
+ * this carries:** the slice no longer survives navigating between map surfaces, so entering
+ * `/command` from `/fly` reconciles from the server rather than inheriting the previous page's copy.
+ * The demand ref-count (`activate()`/`release()`) is unaffected — it always protected *concurrent*
+ * consumers within one page, and one page is all that is ever mounted.
  */
-@Injectable({ providedIn: 'root' })
+@Injectable()
 export class DrawingsFacade {
   private readonly store = inject(Store);
   private readonly actions$ = inject(Actions);

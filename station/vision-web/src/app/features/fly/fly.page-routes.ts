@@ -3,6 +3,11 @@ import type { Routes } from '@angular/router';
 import { provideDetectionsState } from '../../core/detections/state/detections.providers';
 import { provideGeoState } from '../../core/geo/state/geo.providers';
 import { provideControlProfileState } from '../../core/rc/state/control-profile.providers';
+import { provideDrawingsState } from '../../core/map-data/state/drawings.providers';
+import { provideGeofenceState } from '../../core/geofence/state/geofence.providers';
+import { provideLayersState } from '../../core/map-data/state/layers.providers';
+import { provideMarksState } from '../../core/map-data/state/marks.providers';
+import { provideOrgState } from '../../core/org/state/org.providers';
 import { provideSeatState } from '../../core/seat/state/seat.providers';
 import { provideThresholdsState } from '../../core/ops/state/thresholds.providers';
 import { provideTelemetryState } from '../../core/telemetry/state/telemetry.providers';
@@ -33,6 +38,10 @@ import { flyRedirectGuard } from './fly-redirect-guard';
  * into its own `providers:`; both are read only from inside the cockpit's own component tree
  * (`FlyHud`/`FlyOsd`/`RcMonitor`), never from the picker, so registering them on the shared parent
  * costs the picker a registration but no fetch — nothing constructs either facade there.
+ *
+ * **Wave N4 added the five map-data slices** (`marks`, `layers`, `drawings`, `geofence`, `org`)
+ * for the cockpit's map inset — needed by `CockpitFacade` and by every control inside
+ * `<vision-map-tools>`, which injects those facades directly.
  */
 export const FLY_PAGE_ROUTES: Routes = [
   {
@@ -45,6 +54,11 @@ export const FLY_PAGE_ROUTES: Routes = [
       provideGeoState(),
       provideThresholdsState(),
       provideControlProfileState(),
+      provideMarksState(),
+      provideLayersState(),
+      provideDrawingsState(),
+      provideGeofenceState(),
+      provideOrgState(),
     ],
     children: [
       {

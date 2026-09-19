@@ -17,8 +17,16 @@ import { orgFeature } from './state/org.reducer';
  * mutation keeps `OrgStore`'s exact `Promise<T | null>` (or `Promise<boolean>`) return contract via
  * {@link dispatchAndAwait} — `OrgSettingsFacade` (unmigrated, out of this wave's scope) awaits each
  * one and branches on the result, so the value must still arrive, not just an event.
+ *
+ * **Page-provided since wave N4, not `providedIn: 'root'`** (NGRX-MIGRATION-PLAN.md §9). Both
+ * injectors sit behind a lazy route — `OrgSettingsFacade` (embedded in `CrewPage` at
+ * `manage/roster`) and `<vision-layer-manager>` inside the map tool rail — so the `org` slice is
+ * registered by those routes instead of the root injector. **`org-guard.ts` injects `AuthFacade`,
+ * not this** — that was the one thing that would have forced this slice to stay root, since the
+ * guard runs on routes reachable before any of these pages load. **Behaviour change this carries:**
+ * the org read-model is re-read per page visit rather than once per session.
  */
-@Injectable({ providedIn: 'root' })
+@Injectable()
 export class OrgFacade {
   private readonly store = inject(Store);
   private readonly actions$ = inject(Actions);

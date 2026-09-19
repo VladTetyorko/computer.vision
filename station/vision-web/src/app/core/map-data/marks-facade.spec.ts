@@ -8,6 +8,8 @@ import { LiveSocketActions } from '../live/state/live.actions';
 import { LayersApiActions } from './state/layers.actions';
 import { PollScheduler } from '../poll-scheduler';
 import { provideAppState } from '../state/app-state';
+import { provideMarksState } from './state/marks.providers';
+import { provideLayersState } from './state/layers.providers';
 import { ToastService } from '../toast.service';
 import { MarksFacade } from './marks-facade';
 
@@ -72,6 +74,11 @@ function createInactive(api: ReturnType<typeof stubApi>, scheduler = stubSchedul
   TestBed.configureTestingModule({
     providers: [
       provideAppState(),
+      provideMarksState(),
+      // `MarksFacade` selects the `layers` slice directly (the palette's default target layer), so
+      // that slice has to be registered here too now that neither is root-registered (wave N4).
+      provideLayersState(),
+      MarksFacade,
       { provide: VisionApi, useValue: api },
       { provide: ToastService, useValue: toasts },
       { provide: PollScheduler, useValue: scheduler },

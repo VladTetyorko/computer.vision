@@ -15,8 +15,17 @@ import { layersFeature } from './state/layers.reducer';
  * The six lookup methods below stay plain synchronous methods reading `this.layers()` (not
  * selectors of their own) so every call site needs nothing beyond the `inject()` swap — they read
  * identically to `LayersStore`'s own methods of the same name.
+ *
+ * **Page-provided since wave N4, not `providedIn: 'root'`** (NGRX-MIGRATION-PLAN.md §9). Every class
+ * that injects this sits behind a lazy route — the four map-surface page facades and the controls
+ * inside `<vision-map-tools>` (`shared/map/map-controls/**`) — so the `layers` slice is registered by
+ * each of those five routes instead of shipping in every visitor's initial bundle. **Behaviour change
+ * this carries:** the slice no longer survives navigating between map surfaces, so entering
+ * `/command` from `/fly` reconciles from the server rather than inheriting the previous page's copy.
+ * The demand ref-count (`activate()`/`release()`) is unaffected — it always protected *concurrent*
+ * consumers within one page, and one page is all that is ever mounted.
  */
-@Injectable({ providedIn: 'root' })
+@Injectable()
 export class LayersFacade {
   private readonly store = inject(Store);
   private readonly actions$ = inject(Actions);
