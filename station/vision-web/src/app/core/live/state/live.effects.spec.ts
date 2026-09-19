@@ -5,11 +5,13 @@ import type { Action } from '@ngrx/store';
 import { Observable, ReplaySubject } from 'rxjs';
 import type { Subscriber } from 'rxjs';
 import { describe, expect, it, vi } from 'vitest';
+import type { MeResponse } from '../../api/models';
 import { VisionApi } from '../../api/vision-api';
+import { AuthApiActions } from '../../auth/state/auth.actions';
 import { SSE_RETRY_INTERVAL_MS, telemetryTopic } from '../live-fallback-logic';
 import { LiveGateway, type LiveGatewayEvent } from '../live-gateway';
 import { LiveApiActions, LivePageActions, LiveSocketActions } from './live.actions';
-import { connection$, patchOnTrack$, patchOnUntrack$ } from './live.effects';
+import { connection$, patchOnTrack$, patchOnUntrack$, reconnectOnSession$, stopOnLogout$ } from './live.effects';
 import { liveFeature } from './live.reducer';
 
 /** Lets a fire-and-forget promise chain inside an effect (`patchTopics`'s own `from(api...)`) settle. */
@@ -258,5 +260,81 @@ describe('live effects — patchOnUntrack$', () => {
     await flush();
 
     expect(api.updateLiveTopics).not.toHaveBeenCalled();
+  });
+});
+
+/** The two session-bridge effects (wave N9) need nothing but the action stream — no store, no
+ *  gateway, no `VisionApi`. That is the whole point of the inversion: `live` reacts to auth's
+ *  published facts instead of auth resolving a `LiveFacade` out of the injector. These cases moved
+ *  here verbatim from `core/auth/state/auth.effects.spec.ts`. */
+function setupBridge() {
+  const actions = new ReplaySubject<Action>(1);
+  TestBed.configureTestingModule({ providers: [provideMockActions(() => actions)] });
+  const seen: Action[] = [];
+  return { actions, seen };
+}
+
+function me(overrides: Partial<MeResponse> = {}): MeResponse {
+  return {
+    userId: 'u-1',
+    username: 'pilot',
+    displayName: 'Pat Pilot',
+    email: 'pilot@example.com',
+    memberships: [],
+    topRole: 'PILOT',
+    authEnabled: true,
+    capabilities: [],
+    scopeKind: 'ASSIGNED_ASSETS',
+    mustChangePassword: false,
+    ...overrides,
+  };
+}
+
+describe('live effects — reconnectOnSession$', () => {
+  it('reconnects once a login resolves a session', () => {
+    const { actions, seen } = setupBridge();
+    TestBed.runInInjectionContext(() => reconnectOnSession$()).subscribe((a) => seen.push(a));
+
+    actions.next(AuthApiActions.loginSucceeded({ me: me() }));
+
+    expect(seen).toEqual([LivePageActions.reconnectRequested()]);
+  });
+
+  it('reconnects for the first-admin bootstrap too — it mints a session exactly like a login', () => {
+    const { actions, seen } = setupBridge();
+    TestBed.runInInjectionContext(() => reconnectOnSession$()).subscribe((a) => seen.push(a));
+
+    actions.next(AuthApiActions.bootstrapSucceeded({ me: me({ topRole: 'ADMIN' }) }));
+
+    expect(seen).toEqual([LivePageActions.reconnectRequested()]);
+  });
+
+  it('does not reconnect on a failed login — no session was minted', () => {
+    const { actions, seen } = setupBridge();
+    TestBed.runInInjectionContext(() => reconnectOnSession$()).subscribe((a) => seen.push(a));
+
+    actions.next(AuthApiActions.loginFailed({ message: 'Incorrect username or password.' }));
+
+    expect(seen).toEqual([]);
+  });
+});
+
+describe('live effects — stopOnLogout$', () => {
+  it('stops the connection when a real session was signed out of', () => {
+    const { actions, seen } = setupBridge();
+    TestBed.runInInjectionContext(() => stopOnLogout$()).subscribe((a) => seen.push(a));
+
+    actions.next(AuthApiActions.logoutCompleted({ wasAuthEnabled: true }));
+
+    expect(seen).toEqual([LivePageActions.stopRequested()]);
+  });
+
+  it('leaves the connection alone in dev parity — there was no session to invalidate', () => {
+    const { actions, seen } = setupBridge();
+    TestBed.runInInjectionContext(() => stopOnLogout$()).subscribe((a) => seen.push(a));
+
+    actions.next(AuthApiActions.logoutCompleted({ wasAuthEnabled: false }));
+
+    expect(seen).toEqual([]);
   });
 });

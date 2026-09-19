@@ -3224,3 +3224,66 @@ with `strictActionSerializability` on. `state/onboarding.wiring.spec.ts` now doe
 resolves `OnboardingPhotoBuffer` from the environment injector to pin the placement above. Worth
 copying for any slice big enough that a `Date`, `Set` or `Map` could hide in one payload — `tsc`
 cannot see it, and a direct-reducer spec will not either.
+
+## Status — NGRX-MIGRATION wave N9: the dependency that pointed the wrong way, and the refactor that measurement killed — 2026-09-19
+
+The last wave. It had two items, and they ended differently: one was the cleanest fix in the
+migration, the other was deleted from the plan after being measured.
+
+**The auth→live dependency is inverted.** Since N3, `auth.effects.ts` had reached into another
+slice's facade — `injector.get(LiveFacade).reconnect()` after a sign-in, `.stop()` after a sign-out —
+behind a *lazy* `Injector.get` rather than an effect factory parameter, because resolving it eagerly
+constructed the `LiveFacade` singleton (and ran its constructor's `reconnect()` dispatch) before
+`liveEffects.connection$` existed to receive it. That was a real production defect when N3 found it,
+and the lazy resolution genuinely fixed it — but it fixed the *symptom*. The cause was that a slice's
+effect was calling another slice's facade at all.
+
+What made the real fix trivial is that neither method was ever more than a dispatch:
+`LiveFacade.reconnect()` is `store.dispatch(LivePageActions.reconnectRequested())` and `stop()` is
+the `stopRequested()` equivalent. So there was nothing to *call*. `core/live/state/live.effects.ts`
+now owns both reactions itself — `reconnectOnSession$` on `AuthApiActions.loginSucceeded`/
+`bootstrapSucceeded`, `stopOnLogout$` on `logoutCompleted` with that action's `wasAuthEnabled` guard
+kept intact (dev parity never had a session to invalidate) — and `auth.effects.ts` dropped its
+`Injector`, `LiveFacade` and `tap` imports. It no longer knows a live connection exists.
+
+**The ordering hazard did not need dodging once the coupling was gone.** Reacting to an action
+constructs nothing, so there is no singleton whose constructor can run before the effect that must
+hear it. This is worth remembering as a general shape: a lazy `Injector.get` inside an effect is
+almost always a sign that the effect is calling something it should be dispatching to. `Logout
+Completed` already carried `wasAuthEnabled` forward precisely so a second, independent reactor could
+read it after the reducer had cleared the session — the action was designed for this before anyone
+had written the effect that needed it.
+
+**The specs got stronger, not just relocated.** `auth.effects.spec.ts` lost its `reconnectLiveOnSession$`
+block and its `LiveFacade` stub; the equivalent cases live in `live.effects.spec.ts`, where they need
+nothing but the action stream — no store, no gateway, no `VisionApi`, which is itself the proof the
+inversion worked. The four cases in `auth-facade.spec.ts` are the interesting ones: they used to
+stub `LiveFacade` and spy `reconnect`/`stop`, i.e. assert that auth called a collaborator. Nothing
+injects `LiveFacade` there any more, so they now record the real `Actions` stream over the single
+`provideAppState()` store and assert that `Live Page` action actually arrives — the genuine
+cross-feature wiring, which the spy never covered. A stubbed collaborator cannot tell you the two
+features are connected; only the real store can.
+
+**The `VisionApi` flip was measured and declined.** Plan §7 had deferred flipping all 161
+`Promise<T>` methods to Observables until N9, on the stated premise that by then the legacy stores
+would have carried most call sites into effects, leaving a small remainder. With every one of the 32
+hand-rolled stores retired, that premise is testable, and it is false: **120 call sites sit in 25
+`*.effects.ts` files, and 170 sit in 43 other files** — measured by resolving each file's
+`inject(VisionApi)` binding and matching calls on that reference, so a same-named method elsewhere is
+not counted. The 170 are the page-facade layer this app deliberately keeps (UI-ARCHITECTURE's
+Component → Facade → Store split); they are not leftovers and nothing further is coming to absorb
+them.
+
+So the flip would remove 120 `from(...)` wrappers and add 170 `firstValueFrom(...)` wrappers — net
+worse by the plan's own metric, across 68 files, with no behaviour change. Several sites are not even
+mechanical: `Promise.all([...])` fan-outs, `await` inside a `.map()`, `.catch()` fallbacks. The one
+thing the flip genuinely bought — aborting a superseded request, which `from(promise)` cannot do —
+remains available per-endpoint: add an `Observable`-returning sibling for that method and use it from
+the effect. This is the fourth time in this migration the right answer was "decline the ceremony and
+write down why" (`system-events` in N4b, `UiStore`, `InventoryViewStorage` in N8a, now the API shape),
+and the first time the *plan itself* was the thing found wrong rather than a store.
+
+**Cost:** 274/274 files · 4 853/4 853 tests green, both tsconfigs clean, production build exit 0 at
+**512.42 kB raw / 146.04 kB transfer** — +0.08 kB raw for two new effects net of three deleted
+imports, transfer unchanged, 37.58 kB of headroom under the 550 kB error budget. `angular.json`
+untouched, as it has been for the whole migration.

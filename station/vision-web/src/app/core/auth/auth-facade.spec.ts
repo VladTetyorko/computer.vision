@@ -1,10 +1,12 @@
 import { TestBed } from '@angular/core/testing';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
+import { Actions } from '@ngrx/effects';
+import type { Action } from '@ngrx/store';
 import { describe, expect, it, vi } from 'vitest';
 import type { AuthCapability, MeResponse, Role, ScopeKind } from '../api/models';
 import { VisionApi } from '../api/vision-api';
-import { LiveFacade } from '../live/live-facade';
+import { LivePageActions } from '../live/state/live.actions';
 import { provideAppState } from '../state/app-state';
 import { AuthFacade } from './auth-facade';
 
@@ -60,25 +62,33 @@ function stubRouter() {
   return { navigateByUrl: vi.fn().mockResolvedValue(true) };
 }
 
-/** `reconnect`/`stop` spied so `login`/`logout`'s own hooks into it are directly assertable. */
-function stubLiveFacade() {
-  return { reconnect: vi.fn(), stop: vi.fn() };
-}
-
-function create(
-  api: ReturnType<typeof stubApi>,
-  router: ReturnType<typeof stubRouter> = stubRouter(),
-  liveStore: ReturnType<typeof stubLiveFacade> = stubLiveFacade(),
-): AuthFacade {
+function create(api: ReturnType<typeof stubApi>, router: ReturnType<typeof stubRouter> = stubRouter()): AuthFacade {
   TestBed.configureTestingModule({
-    providers: [
-      provideAppState(),
-      { provide: VisionApi, useValue: api },
-      { provide: Router, useValue: router },
-      { provide: LiveFacade, useValue: liveStore },
-    ],
+    providers: [provideAppState(), { provide: VisionApi, useValue: api }, { provide: Router, useValue: router }],
   });
   return TestBed.inject(AuthFacade);
+}
+
+/**
+ * Records every action the real store publishes, so the one cross-feature reaction this facade
+ * still participates in stays assertable from here.
+ *
+ * Wave N9 inverted that relationship: `auth.effects.ts` used to resolve a `LiveFacade` out of the
+ * injector and call `reconnect()`/`stop()` on it, so this spec stubbed the facade and spied the two
+ * methods. `live.effects.ts#reconnectOnSession$`/`#stopOnLogout$` now react to auth's own published
+ * actions instead, which means nothing here injects `LiveFacade` any more — what is observable is
+ * the `Live Page` action the live feature's effect emits in response. `provideAppState()` registers
+ * both features' effects against one real store, so this is the genuine end-to-end wiring, not a
+ * restatement of `live.effects.spec.ts`'s unit coverage of the same two effects.
+ */
+function recordActions(): readonly Action[] {
+  const seen: Action[] = [];
+  TestBed.inject(Actions).subscribe((action) => seen.push(action));
+  return seen;
+}
+
+function dispatched(seen: readonly Action[], action: { type: string }): boolean {
+  return seen.some((a) => a.type === action.type);
 }
 
 /**
@@ -245,52 +255,52 @@ describe('AuthFacade', () => {
     expect(router.navigateByUrl).toHaveBeenCalledWith('/login');
   });
 
-  it('login: reconnects the live store on success (a fresh session supersedes whatever it was open under)', async () => {
+  it('login: the live feature reconnects on success (a fresh session supersedes whatever it was open under)', async () => {
     const api = stubApi({ authMe: vi.fn().mockResolvedValue(null), authLogin: vi.fn().mockResolvedValue(meResponse()) });
-    const liveStore = stubLiveFacade();
-    const facade = create(api, stubRouter(), liveStore);
+    const facade = create(api);
     await facade.ready;
+    const seen = recordActions();
 
     await facade.login('pilot', 'pilot');
 
-    expect(liveStore.reconnect).toHaveBeenCalled();
-    expect(liveStore.stop).not.toHaveBeenCalled();
+    expect(dispatched(seen, LivePageActions.reconnectRequested())).toBe(true);
+    expect(dispatched(seen, LivePageActions.stopRequested())).toBe(false);
   });
 
-  it('login: does not touch the live store on a failed attempt', async () => {
+  it('login: a failed attempt leaves the live feature alone', async () => {
     const api = stubApi({
       authMe: vi.fn().mockResolvedValue(null),
       authLogin: vi.fn().mockRejectedValue(new HttpErrorResponse({ status: 401 })),
     });
-    const liveStore = stubLiveFacade();
-    const facade = create(api, stubRouter(), liveStore);
+    const facade = create(api);
     await facade.ready;
+    const seen = recordActions();
 
     await facade.login('pilot', 'wrong');
 
-    expect(liveStore.reconnect).not.toHaveBeenCalled();
+    expect(dispatched(seen, LivePageActions.reconnectRequested())).toBe(false);
   });
 
-  it('logout: stops the live store when auth was enabled', async () => {
+  it('logout: the live feature stops when auth was enabled', async () => {
     const api = stubApi({ authMe: vi.fn().mockResolvedValue(meResponse({ authEnabled: true })) });
-    const liveStore = stubLiveFacade();
-    const facade = create(api, stubRouter(), liveStore);
+    const facade = create(api);
     await facade.ready;
+    const seen = recordActions();
 
     await facade.logout();
 
-    expect(liveStore.stop).toHaveBeenCalled();
+    expect(dispatched(seen, LivePageActions.stopRequested())).toBe(true);
   });
 
-  it('logout: leaves the live store alone in dev parity (authEnabled=false) — there was no real session change', async () => {
+  it('logout: leaves the live feature alone in dev parity (authEnabled=false) — there was no real session change', async () => {
     const api = stubApi({ authMe: vi.fn().mockResolvedValue(meResponse({ authEnabled: false })) });
-    const liveStore = stubLiveFacade();
-    const facade = create(api, stubRouter(), liveStore);
+    const facade = create(api);
     await facade.ready;
+    const seen = recordActions();
 
     await facade.logout();
 
-    expect(liveStore.stop).not.toHaveBeenCalled();
+    expect(dispatched(seen, LivePageActions.stopRequested())).toBe(false);
   });
 
   describe('capabilities/scopeKind/mustChangePassword accessors', () => {
@@ -443,12 +453,12 @@ describe('AuthFacade', () => {
   });
 
   describe('bootstrap', () => {
-    it('success applies the new admin session and reconnects the live store, returning null', async () => {
+    it('success applies the new admin session and reconnects the live feature, returning null', async () => {
       const created = meResponse({ topRole: 'ADMIN', username: 'root-admin' });
       const api = stubApi({ bootstrap: vi.fn().mockResolvedValue(created) });
-      const liveStore = stubLiveFacade();
-      const facade = create(api, stubRouter(), liveStore);
+      const facade = create(api);
       await facade.ready;
+      const seen = recordActions();
 
       const result = await facade.bootstrap({
         username: 'root-admin',
@@ -460,7 +470,7 @@ describe('AuthFacade', () => {
       expect(result).toBeNull();
       expect(facade.status()).toBe('authed');
       expect(facade.user()).toEqual(created);
-      expect(liveStore.reconnect).toHaveBeenCalled();
+      expect(dispatched(seen, LivePageActions.reconnectRequested())).toBe(true);
     });
 
     it('a failure (e.g. the latch already closed) returns the server message and never throws', async () => {

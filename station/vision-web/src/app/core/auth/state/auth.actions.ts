@@ -32,7 +32,9 @@ export const AuthApiActions = createActionGroup({
     'Login Succeeded': props<{ me: MeResponse }>(),
     'Login Failed': props<{ message: string }>(),
     /** Stage 1 of logout — carries `wasAuthEnabled`, read *before* the reducer clears the session,
-     *  forward to stage 2 (`Logout Finished`'s effect) which needs it to decide navigation/LiveStore. */
+     *  because both of its reactors need it after the reducer has already forgotten it: stage 2
+     *  (`logoutSideEffects$`) picks the redirect with it, and `live.effects.ts#stopOnLogout$` decides
+     *  whether there is a real connection to close. */
     'Logout Completed': props<{ wasAuthEnabled: boolean }>(),
     /** Stage 2 — the bridge signal `AuthFacade#logout()` actually awaits. */
     'Logout Finished': emptyProps(),

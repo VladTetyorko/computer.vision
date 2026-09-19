@@ -9,7 +9,6 @@ import { firstValueFrom, ReplaySubject } from 'rxjs';
 import { describe, expect, it, vi } from 'vitest';
 import type { MeResponse } from '../../api/models';
 import { VisionApi } from '../../api/vision-api';
-import { LiveFacade } from '../../live/live-facade';
 import { AuthApiActions, AuthPageActions } from './auth.actions';
 import {
   bootMe$,
@@ -19,7 +18,6 @@ import {
   logout$,
   logoutSideEffects$,
   login$,
-  reconnectLiveOnSession$,
 } from './auth.effects';
 import { authFeature } from './auth.reducer';
 
@@ -39,7 +37,7 @@ function me(overrides: Partial<MeResponse> = {}): MeResponse {
   };
 }
 
-function setup(overrides: { api?: Partial<VisionApi>; router?: Partial<Router>; liveStore?: Partial<LiveFacade> } = {}) {
+function setup(overrides: { api?: Partial<VisionApi>; router?: Partial<Router> } = {}) {
   const actions = new ReplaySubject<Action>(1);
   const api = {
     authMe: vi.fn().mockResolvedValue(null),
@@ -51,7 +49,6 @@ function setup(overrides: { api?: Partial<VisionApi>; router?: Partial<Router>; 
     ...overrides.api,
   };
   const router = { navigateByUrl: vi.fn().mockResolvedValue(true), ...overrides.router };
-  const liveStore = { reconnect: vi.fn(), stop: vi.fn(), ...overrides.liveStore };
   TestBed.configureTestingModule({
     providers: [
       provideMockActions(() => actions),
@@ -59,11 +56,10 @@ function setup(overrides: { api?: Partial<VisionApi>; router?: Partial<Router>; 
       provideState(authFeature),
       { provide: VisionApi, useValue: api },
       { provide: Router, useValue: router },
-      { provide: LiveFacade, useValue: liveStore },
     ],
   });
   const store = TestBed.inject(Store);
-  return { actions, api, router, liveStore, store };
+  return { actions, api, router, store };
 }
 
 describe('auth effects', () => {
@@ -152,29 +148,6 @@ describe('auth effects', () => {
     });
   });
 
-  describe('reconnectLiveOnSession$', () => {
-    it('reconnects on Login Succeeded', () => {
-      const { actions, liveStore } = setup();
-      TestBed.runInInjectionContext(() => reconnectLiveOnSession$()).subscribe();
-      actions.next(AuthApiActions.loginSucceeded({ me: me() }));
-      expect(liveStore.reconnect).toHaveBeenCalled();
-    });
-
-    it('reconnects on Bootstrap Succeeded', () => {
-      const { actions, liveStore } = setup();
-      TestBed.runInInjectionContext(() => reconnectLiveOnSession$()).subscribe();
-      actions.next(AuthApiActions.bootstrapSucceeded({ me: me() }));
-      expect(liveStore.reconnect).toHaveBeenCalled();
-    });
-
-    it('does not reconnect on a failed login', () => {
-      const { actions, liveStore } = setup();
-      TestBed.runInInjectionContext(() => reconnectLiveOnSession$()).subscribe();
-      actions.next(AuthApiActions.loginFailed({ message: 'nope' }));
-      expect(liveStore.reconnect).not.toHaveBeenCalled();
-    });
-  });
-
   describe('logout$ (stage 1 — reads wasAuthEnabled before the reducer clears it)', () => {
     it('reads authEnabled=true off state and forwards it once the best-effort request settles', async () => {
       const { actions, api, store } = setup();
@@ -212,21 +185,22 @@ describe('auth effects', () => {
   });
 
   describe('logoutSideEffects$ (stage 2)', () => {
-    it('stops the live store and routes to /login when auth was enabled', async () => {
-      const { actions, router, liveStore } = setup();
+    // Stopping the live connection is no longer this file's business — wave N9 moved it to
+    // `core/live/state/live.effects.ts#stopOnLogout$`, which reacts to the same `Logout Completed`
+    // action. These two cases now assert only the redirect, and that spec asserts the stop.
+    it('routes to /login when auth was enabled', async () => {
+      const { actions, router } = setup();
       const result = firstValueFrom(TestBed.runInInjectionContext(() => logoutSideEffects$()));
       actions.next(AuthApiActions.logoutCompleted({ wasAuthEnabled: true }));
       expect(await result).toEqual(AuthApiActions.logoutFinished());
-      expect(liveStore.stop).toHaveBeenCalled();
       expect(router.navigateByUrl).toHaveBeenCalledWith('/login');
     });
 
-    it('leaves the live store alone and routes to /fly in dev parity', async () => {
-      const { actions, router, liveStore } = setup();
+    it('routes to /fly in dev parity', async () => {
+      const { actions, router } = setup();
       const result = firstValueFrom(TestBed.runInInjectionContext(() => logoutSideEffects$()));
       actions.next(AuthApiActions.logoutCompleted({ wasAuthEnabled: false }));
       expect(await result).toEqual(AuthApiActions.logoutFinished());
-      expect(liveStore.stop).not.toHaveBeenCalled();
       expect(router.navigateByUrl).toHaveBeenCalledWith('/fly');
     });
   });

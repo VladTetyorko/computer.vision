@@ -4,7 +4,7 @@
 final result I need a well structured ngrx application … with all the reducers, actions, effects and
 so on."*
 
-**State:** N0–N3 + N5 **BUILT** 2026-09-18 on `feat/ngrx-migration` (`91143666`), not yet on `master`. 11 slices done, **22 hand-rolled stores remain**. N6/N7 in flight; N4, N8, N9 open.
+**State:** **N0–N9 BUILT** 2026-09-19 on `feat/ngrx-migration`. 30 slices, **no hand-rolled store left**, production build green. The migration is complete; §9 is the per-wave record.
 
 ---
 
@@ -115,7 +115,7 @@ features/<feature>/state/…                  # page-scoped slices, provided on 
 | N6 map | `core/map/`, `core/map-data/`, `core/geofence/` | 7 |
 | N7 ops | `core/ops/`, `core/weather/`, `core/training/`, `core/rc/`, `core/discovery/`, `core/pairing/`, `core/geo/`, `core/events/` | 8 |
 | N8 feature slices | `features/onboarding/`, `features/fly/grounding-store.ts` | 2 (+ facade rewiring) — held exactly; `features/inventory/inventory-view-store.ts` was **not** a third, see §9's N8a row |
-| N9 close-out | `core/api/`, guards, `MODULE.md` | flip `VisionApi` to Observables, delete dead helpers |
+| N9 close-out | `core/auth/state/`, `core/live/state/`, `MODULE.md` | invert the auth→live dependency (**done**); `VisionApi` flip **measured and declined**, see §7 |
 
 N1…N7 are disjoint by folder and run three agents at a time.
 
@@ -157,6 +157,36 @@ it exact.
 **Rule while this holds:** an effect calls a Promise-returning `VisionApi` method **only** through
 `from(...)`/`defer(...)` inside a flattening operator. No `async` effect bodies. No new
 Promise-returning method is added to `VisionApi` after N0 — new endpoints land Observable-shaped.
+
+### N9 measured the premise and it is FALSE — the flip is not done
+
+The paragraphs above rest on one unstated prediction: that by N9, the legacy stores would have taken
+*most* `VisionApi` call sites into effects with them, leaving a small remainder to convert. Measured
+on the N8 tree (every one of the 32 hand-rolled stores retired, so this is the final distribution,
+not a waypoint):
+
+| where | call sites | files |
+|---|---|---|
+| inside `*.effects.ts` | **120** | 25 |
+| everywhere else in `src/` (facades, guards, components) | **170** | 43 |
+
+Counted by resolving each file's `inject(VisionApi)` binding and matching calls on *that* reference
+against the 161 `Promise<T>`-returning methods, so a same-named method on some other object is not
+counted. 59 % of the surface never moved into an effect, and never will: those 170 sites are the
+page-facade layer this architecture deliberately keeps (`UI-ARCHITECTURE`'s Component → Facade →
+Store split), not leftovers of the old stores.
+
+So the flip as specced **removes 120 `from(...)` wrappers and adds 170 `firstValueFrom(...)`
+wrappers** — net worse by its own metric, across a 68-file blast radius, with no behaviour change to
+show for it. Several of those sites are not mechanical either: `Promise.all([...])` fan-outs, `await`
+inside a `.map()`, `.catch()` fallbacks — each a genuine rewrite with its own failure semantics.
+
+**Decision (N9): `VisionApi` stays Promise-shaped, permanently.** The rule in bold above is not a
+temporary measure any more — it is the standing convention. The one thing the flip genuinely bought,
+request *abort* on a superseded `switchMap`, is still available where it is ever needed: add an
+`Observable`-returning sibling for that one endpoint (`this.http.get(...)` un-wrapped) and let the
+effect use it. Nothing else has to move. This is the same call as `system-events`, `UiStore` and
+`InventoryViewStorage` — decline the ceremony, and write down why.
 
 ## 8. Risks
 
@@ -213,7 +243,7 @@ Promise-returning method is added to `VisionApi` after N0 — new endpoints land
 | N8a | **BUILT** — `GroundingStore`→`GroundingFacade` over `features/fly/state/**`, the **first feature-local slice** in the app (every prior one lives in `core/`). Page-scoped on `fly.page-routes.ts`'s pathless parent, so the picker pays a registration and no fetch — the same posture `thresholds`/`controlProfile` already had. The two derived values are `extraSelectors`, not facade `computed()`s, so the `MAINTENANCE_GROUNDED:` parse lives once beside the state. **`InventoryViewStore` was assessed and deliberately not migrated** — it owns no state at all (two `localStorage` methods, no signals, no fetch, no timer), and the state it guards is one enum among ~20 plain page signals on `InventoryFacade`, so converting exactly that one would be arbitrary while whatever remained would still be the same wrapper a `StateHydrator` would call. Renamed `InventoryViewStorage` instead, with the reasoning in its own class doc — the same "decline the ceremony, write it down" call N4b made for `system-events` |
 | N8b | **BUILT** — `OnboardingStore` (1 656 lines, 66 signals, 13 computeds, ~60 methods, 21 `VisionApi` calls) → the `onboardingWizard` slice + `OnboardingWizardFacade`, the **biggest single-file store this migration has converted** and the second (after `overlay`) to need a **non-serializable split**: the photo `File`/`Blob`/object-URL moved to `OnboardingPhotoBuffer`, `preProvenRoles` went `ReadonlySet` → plain array, and the `PollScheduler` handle became `discoveryStatusPoll$`. Page-scoped on `onboarding.page-routes.ts`. **The subtlety worth reusing**: `OnboardingPhotoBuffer` is registered *inside* `provideOnboardingState()`, not in `OnboardingPage`'s component `providers:` — an `@ngrx/effects` class resolves against the **environment** injector, never an element injector, so a service an effect needs must sit at the slice's own level; the wrong placement compiles cleanly and fails only at runtime on the first upload |
 | N8 (both) | **273/273 files · 4 847/4 847 tests green**, both tsconfigs clean, production build exit 0 at **512.34 kB raw / 146.04 kB transfer** — raw *unchanged*, transfer 0.02 kB *down*. **The first wave in this migration to cost the initial bundle nothing**, because both slices were page-scoped from the start: the entire wizard ships in the `onboarding` lazy chunk (100.16 kB raw / 21.14 kB transfer). That is the split rule paying off rather than being paid for |
-| N9 | open — flip `VisionApi` to Observables; replace the lazy `injector.get(LiveFacade)` in `auth.effects.ts` with a dispatched action. Headroom is 37.66 kB |
+| N9 | **BUILT** — the auth→live dependency is inverted. `auth.effects.ts` no longer injects `LiveFacade`, `Injector` or `tap`; `live.effects.ts` gains `reconnectOnSession$` (on `Login Succeeded`/`Bootstrap Succeeded`) and `stopOnLogout$` (on `Logout Completed`, still guarded by `wasAuthEnabled`), closing N3's open follow-up. `auth-facade.spec.ts`'s four live cases stopped stubbing `LiveFacade` and now assert the real cross-feature action over one `provideAppState()` store — strictly more coverage than the spy they replaced. **The `VisionApi` flip was measured and declined** — §7 carries the numbers (120 effect call sites vs 170 elsewhere) and the standing rule that replaces it. **274/274 files · 4 853/4 853 tests green**, both tsconfigs clean, production build exit 0 at **512.42 kB raw / 146.04 kB transfer** — +0.08 kB raw (two new effects, minus three deleted imports), transfer unchanged; 37.58 kB headroom under the 550 kB error budget |
 
 ### The bundle expectation was wrong — recorded, not quietly dropped
 
@@ -329,10 +359,12 @@ constructed `LiveFacade` — running its constructor's `reconnect()` dispatch �
 existed to receive it. Production masked it because `bootstrapSucceeded` re-triggers the reconnect
 later. N3 fixed it by resolving `LiveFacade` lazily inside each effect callback.
 
-> **Open follow-up, deliberately not done in N3:** the lazy `injector.get(LiveFacade)` fixes the
-> ordering hazard but keeps a slice's effect calling another slice's facade. Dispatching a `live`
-> action instead would remove the coupling *and* the hazard. Left alone rather than rewritten on a
-> hunch under a green suite — pick it up in N9's close-out.
+> **Closed in N9.** The lazy `injector.get(LiveFacade)` fixed the ordering hazard but kept a slice's
+> effect calling another slice's facade. N9 inverted it: `LiveFacade.reconnect()`/`stop()` were both
+> pure `store.dispatch(...)` already, so `live.effects.ts` now reacts to `AuthApiActions` itself
+> (`reconnectOnSession$`, `stopOnLogout$`) and `auth.effects.ts` no longer knows a live connection
+> exists. Reacting to an action constructs nothing, so the ordering hazard disappears with the
+> coupling rather than being dodged.
 
 **Registration order in `provideAppState()` is load-bearing.** Anything a wave adds there can change
 which singleton constructs first. If a new effect needs another slice, dispatch to it; don't inject
@@ -381,7 +413,7 @@ N0 shipped a complete, working slice twice. **Copy its shape; do not invent a se
    spec; that is exactly the drift `provideAppState()` exists to prevent.
 5. **An effect may `inject(Store)`; a component may not.** `core/ui/architecture.spec.ts` enforces it,
    along with reducer purity and the reducer↔actions↔spec sibling rule. Run it; don't weaken it.
-6. **No `async` effect bodies.** `VisionApi` is Promise-shaped until N9 — wrap with
+6. **No `async` effect bodies.** `VisionApi` is Promise-shaped **permanently** (§7 — N9 measured the flip and declined it) — wrap with
    `from(...)`/`defer(...)` inside a flattening operator (§7).
 7. **A silent degrade stays silent**, but becomes a `*Failed` action the reducer handles — never a
    `console.warn` nothing can select on (§3 rule 7).
