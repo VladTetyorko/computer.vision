@@ -5,6 +5,8 @@ import { DetectionsFacade } from '../../core/detections/detections-facade';
 import { WeatherFacade } from '../../core/weather/weather-facade';
 import { GeoFacade } from '../../core/geo/geo-facade';
 import { SeatFacade } from '../../core/seat/seat-facade';
+import { ControlProfileFacade } from '../../core/rc/control-profile-facade';
+import { ThresholdsFacade } from '../../core/ops/thresholds-facade';
 import { UiStore } from '../../core/ui/ui-store';
 import { Player } from '../../shared/player/player';
 import { FollowHud } from '../../shared/player/follow-hud/follow-hud';
@@ -114,7 +116,20 @@ type CockpitDialog = 'stop' | 'cv-setup';
   // own providers array. `CockpitFacade` shares this same injector so its own `inject(TelemetryFacade)`/
   // `inject(DetectionsFacade)`/`inject(WeatherFacade)`/`inject(SeatFacade)` resolve to these exact
   // instances (see `CockpitFacade`'s own doc comment).
-  providers: [TelemetryFacade, DetectionsFacade, WeatherFacade, GeoFacade, SeatFacade, CockpitFacade, GroundingStore],
+  // `ThresholdsFacade`/`ControlProfileFacade` joined this list in wave N-split: both are read only
+  // from inside this tree (`FlyHud`/`FlyOsd`/`RcMonitor`), so providing them here is what lets
+  // `fly.page-routes.ts` register their slices instead of `core/state/app-state.ts`.
+  providers: [
+    TelemetryFacade,
+    DetectionsFacade,
+    WeatherFacade,
+    GeoFacade,
+    SeatFacade,
+    ThresholdsFacade,
+    ControlProfileFacade,
+    CockpitFacade,
+    GroundingStore,
+  ],
 })
 export class CockpitPage {
   /** Bound from the route by `withComponentInputBinding()` (`cockpit.routes.ts` names the segment

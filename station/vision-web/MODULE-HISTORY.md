@@ -3017,3 +3017,58 @@ Verified on the merged tree: `npx tsc --noEmit` clean on both configs, `npm run 
 9.56 kB and N6 cost +47.21 kB on its own branch. It is not a surprise and not a reason to bump the
 budget: `provideAppState()` registers all 26 slices at the root injector, so slices only one lazy
 feature ever reads are shipped to every visitor on first paint. The next commit moves them.
+
+## Status — NGRX-MIGRATION wave N-split: page-scoped slices move off the root injector (docs/plans/active/NGRX-MIGRATION-PLAN.md §9) — 2026-09-19
+
+**The build is green again: 587.42 kB → 541.37 kB raw (−46.05 kB), 168.30 → 155.34 kB transfer,
+`ng build --configuration production` exit 0 with 8.63 kB of headroom under the 550 kB error
+budget.** `angular.json` is untouched — the owner chose this over raising the budget, and a wave may
+not raise a failing budget on its own anyway. 264/264 spec files, 4754/4754 tests (2 new), both
+tsconfigs clean.
+
+**What moved.** 13 of the 26 slices stay in `provideAppState()`; the other 13 are now registered by
+the route of the page that reads them, each through its own
+`core/<domain>/state/<domain>.providers.ts#provide<Domain>State()`: telemetry, detections, seat,
+weather, geo, thresholds, controlProfile (fly); map, route (command); cvTrace (manage/cv); links
+(asset detail); training (manage/training + replay); discoveryInbox (assets + add-source).
+
+**The eligibility rule, which is not "how many consumers".** A `providedIn: 'root'` facade outlives
+the route that registered its slice, and would then select a feature NgRx has already removed — so
+only a **page-provided** facade's slice may move. The usable form of that test is *"does every class
+injecting this facade already sit behind a lazy route?"*. Four facades passed it and were converted
+from `providedIn: 'root'` to `@Injectable()` in their host page's `providers:` as part of this wave —
+`ThresholdsFacade` (fly), `ControlProfileFacade` (fly + manage/controller), `TrainingFacade`
+(manage/training + replay), `DiscoveryInboxFacade` (assets + add-source). `OrgFacade` failed it and
+stayed root: `shared/map/map-controls/layer-manager.ts` injects it and that control renders on
+several map surfaces. **Each conversion is a real behaviour change** — state now loads per page visit
+rather than per session, so the two pages that used to share one fetch each fetch for themselves —
+and each is written into the facade's own doc comment rather than left for a reader to infer. They
+are defensible individually (thresholds are small rarely-changing ops config; a control profile
+re-read after the setup page saved one is the *fresher* answer, CLAUDE.md rule 7; discovery is a
+live feed that re-polls every few seconds and was never durable state), which is the bar — not the
+bytes they happened to save.
+
+**Why it was a wave and not an afternoon's edit.** `app.routes.ts` imports every feature's route file
+**statically**, so a `providers:` array in one drags the slice it names straight back into the
+initial bundle. Twelve features are therefore now bare `loadChildren` boundaries, with the real
+routes and their providers in a sibling `<feature>.page-routes.ts`. That cascaded twice:
+
+- **Prefix matching.** A `loadChildren` route matches its own segments as a prefix, where a plain
+  `loadComponent` route only matched with no leftovers. `/assets` would now swallow
+  `/assets/:assetId`; `/manage/training` would swallow `/manage/training/models`. Both families are
+  ordered longest-path-first in `app.routes.ts` (`INVENTORY_ROUTES` moved below `ASSET_DETAIL_ROUTES`
+  for exactly this), and `app.routes.spec.ts` now asserts that order **by index** — the router is not
+  guaranteed to backtrack out of a child-match failure, so ordering is the whole guarantee. This is
+  the same trap CREW-CONTROL's own `pathMatch` finding recorded.
+- **The route audit went blind.** `features/hubs/route-audit-logic.ts#flattenRoutes` walks static
+  `children` and cannot see past a boundary — it would have reported all twelve as dead links. New
+  async `flattenRoutesDeep` resolves `loadChildren` first; `app.routes.spec.ts` uses it, and
+  `findRouteByPath` there became async for the same reason. **That this suite passes unchanged is the
+  proof the split moved no URL** — it is the wave's real regression test, not the byte count.
+
+**Measurement note, and a correction to an earlier expectation.** The five biggest remaining root
+slices were probed in one throwaway build (strip them from `app-state.ts`, build, revert) to find out
+what the ceiling actually was — 19.09 kB for five — before any facade was touched. Do that first: it
+turns "which slices do I convert" from a guess into arithmetic, and it is the only reason this wave
+converted four facades rather than all five. Headroom is now 8.63 kB, which N4 and N8 will consume:
+each must land its own split, not measure at the end and discover it is red.

@@ -40,6 +40,13 @@ export function flattenRoutes(routes: Routes, prefix = ''): FlatRoute[] {
     if (route.children) {
       out.push(...flattenRoutes(route.children, full));
     }
+    if (route.loadChildren && !route.children) {
+      // A lazy boundary whose children were never resolved. Emitting nothing here would make the
+      // path read as "never registered" — a false 404 — so it is *skipped*, not flattened: callers
+      // that care about what lies behind it use `flattenRoutesDeep` instead. `resolveLazyRoutes`
+      // below is what turns one into the `children` branch above.
+      continue;
+    }
     if (route.loadComponent || route.component) {
       out.push({ path: full || '/', kind: 'component' });
     } else if (typeof route.redirectTo === 'string' || typeof route.redirectTo === 'function') {
@@ -74,4 +81,44 @@ export function routeExists(flat: readonly FlatRoute[], candidate: string): bool
 
 function segmentsOf(path: string): string[] {
   return path.split('?')[0].split('/').filter((segment) => segment.length > 0);
+}
+
+/**
+ * `flattenRoutes`, but resolving every `loadChildren` boundary first.
+ *
+ * Since NGRX-MIGRATION wave N-split (docs/plans/active/NGRX-MIGRATION-PLAN.md §9) seven features —
+ * `/fly`, `/command`, `/crew`, `/wall`, `/live/:deviceId`, `/assets/:assetId`, `/manage/cv` — are
+ * `loadChildren` routes rather than `loadComponent` ones, so that the NgRx slices their
+ * `providers:` arrays register stay out of the initial bundle. Their real paths therefore only
+ * exist inside a dynamically-imported module, and the synchronous walker above cannot see them: an
+ * audit that used `flattenRoutes` alone would report `/fly` as a dead link.
+ *
+ * Async because `loadChildren` is, and recursive because a resolved child may itself be one. The
+ * sync walker stays exported and unchanged — it is still the right tool for asserting the *shape*
+ * of a single feature's own route array, where nothing is lazy.
+ */
+export async function flattenRoutesDeep(routes: Routes, prefix = ''): Promise<FlatRoute[]> {
+  return flattenRoutes(await resolveLazyRoutes(routes), prefix);
+}
+
+/**
+ * Recursively replaces every `loadChildren` with the `children` it resolves to, leaving the rest of
+ * the route object untouched, so the pure walker above can treat the result as an ordinary nested
+ * table. A `loadChildren` that resolves to a `Routes` array is used as-is; Angular also permits one
+ * resolving to a module with a `ROUTES`-shaped default export, which this does not handle because
+ * this app has none — it would need adding alongside a route that uses it, never speculatively.
+ */
+async function resolveLazyRoutes(routes: Routes): Promise<Routes> {
+  return Promise.all(
+    routes.map(async (route) => {
+      if (route.children) {
+        return { ...route, children: await resolveLazyRoutes(route.children) };
+      }
+      if (route.loadChildren) {
+        const loaded = await (route.loadChildren as () => Promise<Routes>)();
+        return { ...route, loadChildren: undefined, children: await resolveLazyRoutes(loaded) };
+      }
+      return route;
+    }),
+  );
 }

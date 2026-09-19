@@ -7,6 +7,7 @@ import { EmptyState } from '../../shared/ui/empty-state';
 import { ConfirmDialog } from '../../shared/ui/confirm-dialog';
 import { SectionHeader } from '../../shared/ui/section-header';
 import { CvSubnav } from '../../shared/ui/cv-subnav';
+import { TrainingFacade } from '../../core/training/training-facade';
 import { DatasetsFacade } from './datasets-facade';
 
 /**
@@ -36,7 +37,9 @@ import { DatasetsFacade } from './datasets-facade';
   templateUrl: './datasets.html',
   styleUrl: './datasets.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [DatasetsFacade],
+  // `TrainingFacade` is page-provided since wave N-split — see its own doc comment; the `training`
+  // slice it reads is registered by `labeling.page-routes.ts`.
+  providers: [DatasetsFacade, TrainingFacade],
 })
 export class DatasetsPage {
   protected readonly facade = inject(DatasetsFacade);

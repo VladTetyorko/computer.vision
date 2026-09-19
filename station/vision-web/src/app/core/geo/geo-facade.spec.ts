@@ -7,6 +7,7 @@ import { VisionApi } from '../api/vision-api';
 import { LiveFacade, type LiveConnectionState } from '../live/live-facade';
 import { PollScheduler } from '../poll-scheduler';
 import { provideAppState } from '../state/app-state';
+import { provideGeoState } from './state/geo.providers';
 import { GeoFacade } from './geo-facade';
 
 /** Lets the fire-and-forget promise chain inside `track()`'s dispatched effect settle before asserting. */
@@ -72,7 +73,7 @@ function setUpFacade(
   const scheduler = options.scheduler ?? stubScheduler();
   TestBed.configureTestingModule({
     providers: [
-      provideAppState(),
+      provideAppState(), provideGeoState(),
       GeoFacade,
       { provide: VisionApi, useValue: api },
       { provide: LiveFacade, useValue: live },
@@ -290,7 +291,7 @@ describe('GeoFacade', () => {
       const scheduler = stubScheduler();
       TestBed.configureTestingModule({
         providers: [
-          provideAppState(),
+          provideAppState(), provideGeoState(),
           { provide: VisionApi, useValue: api },
           { provide: LiveFacade, useValue: live },
           { provide: PollScheduler, useValue: scheduler },
@@ -318,7 +319,7 @@ describe('GeoFacade', () => {
       const live = stubLiveFacade('closed');
       TestBed.configureTestingModule({
         providers: [
-          provideAppState(),
+          provideAppState(), provideGeoState(),
           { provide: VisionApi, useValue: api },
           { provide: LiveFacade, useValue: live },
         ],

@@ -5,6 +5,7 @@ import { VisionApi } from '../api/vision-api';
 import { PollScheduler } from '../poll-scheduler';
 import { ToastService } from '../toast.service';
 import { provideAppState } from '../state/app-state';
+import { provideDiscoveryState } from './state/discovery.providers';
 import { DiscoveryInboxFacade } from './discovery-inbox-facade';
 
 function flush(): Promise<void> {
@@ -47,6 +48,8 @@ function setUpFacade(api: ReturnType<typeof stubApi>, toasts = { ok: vi.fn(), er
   TestBed.configureTestingModule({
     providers: [
       provideAppState(),
+      provideDiscoveryState(),
+      DiscoveryInboxFacade,
       { provide: VisionApi, useValue: api },
       { provide: PollScheduler, useValue: stubScheduler() },
       { provide: ToastService, useValue: toasts },

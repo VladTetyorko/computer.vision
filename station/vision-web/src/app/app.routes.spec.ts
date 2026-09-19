@@ -1,24 +1,32 @@
 import type { Route, Routes } from '@angular/router';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { routes } from './app.routes';
-import { flattenRoutes, routeExists } from './features/hubs/route-audit-logic';
+import { flattenRoutesDeep, routeExists } from './features/hubs/route-audit-logic';
+import type { FlatRoute } from './features/hubs/route-audit-logic';
 import { NAV_MODES } from './features/hubs/nav-entries';
 
 /**
  * Recursively finds the route object whose joined `path` (parent segments included, mirroring
- * `route-audit-logic.ts#flattenRoutes`' own walk) equals `target` — used by the Wave 4 "resolves to
- * its own component, not ComingSoon" regression check below, which needs the actual route object
- * (to call its `loadComponent`), not just a path-shape match.
+ * `route-audit-logic.ts#flattenRoutes`' own walk) equals `target` — used by the "resolves to its own
+ * component, not ComingSoon" regression checks below, which need the actual route object (to call
+ * its `loadComponent`), not just a path-shape match.
+ *
+ * **Async, and it descends through `loadChildren` as well as `children`** (NGRX-MIGRATION wave
+ * N-split): a page behind a lazy boundary keeps its real path and component, but both now live
+ * inside a dynamically-imported module, so a purely synchronous walk would report it missing. Same
+ * resolution `route-audit-logic.ts#flattenRoutesDeep` does, kept here rather than exported from
+ * there because this returns the `Route` itself, not a flattened path.
  */
-function findRouteByPath(list: Routes, target: string, prefix = ''): Route | undefined {
+async function findRouteByPath(list: Routes, target: string, prefix = ''): Promise<Route | undefined> {
   for (const route of list) {
     const segment = route.path ?? '';
     const full = segment ? `${prefix}/${segment}` : prefix;
     if (full.replace(/^\//, '') === target && (route.loadComponent || route.component)) {
       return route;
     }
-    if (route.children) {
-      const found = findRouteByPath(route.children, target, full);
+    const children = route.children ?? (route.loadChildren ? await (route.loadChildren as () => Promise<Routes>)() : undefined);
+    if (children) {
+      const found = await findRouteByPath(children, target, full);
       if (found) {
         return found;
       }
@@ -36,7 +44,18 @@ function findRouteByPath(list: Routes, target: string, prefix = ''): Route | und
  * catch-all.
  */
 describe('app.routes — every URL in the F4 route table resolves (no dead link)', () => {
-  const flat = flattenRoutes(routes);
+  // `flattenRoutesDeep`, not the sync walker: since NGRX-MIGRATION wave N-split twelve features are
+  // `loadChildren` boundaries (so their NgRx slices stay out of the initial bundle), and their real
+  // paths only exist inside a dynamically-imported module. The sync walker would report every one of
+  // them — `/fly`, `/command`, `/wall`, `/crew/:assetId`, `/live/:deviceId`, `/assets/:assetId`,
+  // `/manage/cv`, `/manage/controller`, `/manage/training`, `/assets/:assetId/replay/:usageId`,
+  // `/assets`, `/add-source` — as a dead link. That this suite still passes unchanged is the check
+  // that the split moved no URL.
+  let flat: FlatRoute[];
+
+  beforeAll(async () => {
+    flat = await flattenRoutesDeep(routes);
+  });
 
   it('every NAV_MODES entry (every hub tile + dropdown row) resolves to a real route', () => {
     for (const mode of NAV_MODES) {
@@ -62,7 +81,7 @@ describe('app.routes — every URL in the F4 route table resolves (no dead link)
     const legacyHubs = ['/operate', '/monitor', '/manage'];
     for (const hubPath of legacyHubs) {
       expect(routeExists(flat, hubPath), hubPath).toBe(true);
-      expect(flattenRoutes(routes).find((route) => route.path === hubPath)?.kind, hubPath).toBe('redirect');
+      expect(flat.find((route) => route.path === hubPath)?.kind, hubPath).toBe('redirect');
     }
   });
 
@@ -105,12 +124,12 @@ describe('app.routes — every URL in the F4 route table resolves (no dead link)
 
   it('/warehouse redirects to /assets (docs/conclusions/UX-SIMPLIFY-REVIEW.md F2 — Warehouse deleted, not just unrouted); /devices redirects into the Inventory page\'s Links tab (WAREHOUSE-UX W4), off the primary nav but not removed', () => {
     expect(routeExists(flat, '/warehouse')).toBe(true);
-    expect(flattenRoutes(routes).find((route) => route.path === '/warehouse')?.kind).toBe('redirect');
+    expect(flat.find((route) => route.path === '/warehouse')?.kind).toBe('redirect');
     expect(routeExists(flat, '/devices')).toBe(true);
     // `/devices`' own `redirectTo` is a `RedirectFunction` (carries `?tab=links`) — see
     // `features/devices/devices.routes.spec.ts` for the actual query-param assertion; this file's
     // `route-audit-logic.ts` helper only proves the path is registered as *some* redirect.
-    expect(flattenRoutes(routes).find((route) => route.path === '/devices')?.kind).toBe('redirect');
+    expect(flat.find((route) => route.path === '/devices')?.kind).toBe('redirect');
   });
 
   it('every remaining pure-scaffold ComingSoon path resolves', () => {
@@ -124,7 +143,7 @@ describe('app.routes — every URL in the F4 route table resolves (no dead link)
     const folded = ['/devices', '/manage/categories', '/manage/reports', '/manage/health'];
     for (const path of folded) {
       expect(routeExists(flat, path), path).toBe(true);
-      expect(flattenRoutes(routes).find((route) => route.path === path)?.kind, path).toBe('redirect');
+      expect(flat.find((route) => route.path === path)?.kind, path).toBe('redirect');
     }
   });
 
@@ -136,7 +155,7 @@ describe('app.routes — every URL in the F4 route table resolves (no dead link)
   });
 
   it('the Inventory page (WAREHOUSE-UX W4 — supersedes the old /assets grid, now tabbed) resolves at /assets, as a sibling of /assets/:assetId', async () => {
-    const route = findRouteByPath(routes, 'assets');
+    const route = await findRouteByPath(routes, 'assets');
     expect(route?.loadComponent, '/assets').toBeDefined();
     const component = (await route!.loadComponent!()) as { name: string };
     expect(component.name.endsWith('InventoryPage'), `/assets: got "${component.name}"`).toBe(true);
@@ -150,7 +169,7 @@ describe('app.routes — every URL in the F4 route table resolves (no dead link)
       { path: 'fleet/maintenance', className: 'MaintenancePage' },
     ];
     for (const { path, className } of wave4) {
-      const route = findRouteByPath(routes, path);
+      const route = await findRouteByPath(routes, path);
       expect(route?.loadComponent, path).toBeDefined();
       // Every `loadComponent` in this app already unwraps to the component class itself
       // (`() => import('./x').then((m) => m.XPage)`, not the raw module namespace) — see
@@ -164,5 +183,42 @@ describe('app.routes — every URL in the F4 route table resolves (no dead link)
 
   it('an actually-unregistered path does not resolve (sanity check on the matcher itself)', () => {
     expect(routeExists(flat, '/definitely-not-a-real-route')).toBe(false);
+  });
+});
+
+/**
+ * Wave N-split turned twelve feature entries into `loadChildren` boundaries, and a boundary matches
+ * its own segments as a **prefix** where a plain `loadComponent` route had to consume the whole URL
+ * (a childless route is only a match with no leftovers). Two families therefore now depend on their
+ * order in `app.routes.ts` — and on nothing else, since the router is not guaranteed to backtrack
+ * out of a child-match failure. This is the trap CREW-CONTROL's own `pathMatch` finding recorded,
+ * and the reason `INVENTORY_ROUTES` moved below `ASSET_DETAIL_ROUTES` in that wave.
+ *
+ * Asserted structurally, by index, rather than by navigating: every route below is behind a
+ * `loadChildren` whose page then wants its own NgRx slice, so a real `Router` here would have to
+ * stand up the whole store to prove a matcher question that the ordering alone decides.
+ */
+describe('app.routes — prefix-matching boundaries stay ordered longest-path-first', () => {
+  const shellChildren = routes.find((route) => (route.children?.length ?? 0) > 0)?.children ?? [];
+  const indexOf = (path: string) => shellChildren.findIndex((route) => route.path === path);
+
+  it('/assets sits below every deeper /assets/… path, so it can never swallow one', () => {
+    const inventory = indexOf('assets');
+    expect(inventory, '/assets must be registered').toBeGreaterThan(-1);
+    for (const deeper of ['assets/:assetId', 'assets/:assetId/readiness', 'assets/:assetId/replay/:usageId']) {
+      const at = indexOf(deeper);
+      expect(at, `${deeper} must be registered`).toBeGreaterThan(-1);
+      expect(at, `${deeper} must be listed before /assets`).toBeLessThan(inventory);
+    }
+  });
+
+  it('/manage/training sits below its deeper siblings, which are separate features, not its children', () => {
+    const labeling = indexOf('manage/training');
+    expect(labeling, '/manage/training must be registered').toBeGreaterThan(-1);
+    for (const sibling of ['manage/training/models', 'manage/training/runs', 'manage/training/jobs/:jobId']) {
+      const at = indexOf(sibling);
+      expect(at, `${sibling} must be registered`).toBeGreaterThan(-1);
+      expect(at, `${sibling} must be listed before /manage/training`).toBeLessThan(labeling);
+    }
   });
 });

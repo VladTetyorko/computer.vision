@@ -6,6 +6,7 @@ import { VisionApi } from '../api/vision-api';
 import { LiveSocketActions } from '../live/state/live.actions';
 import { PollScheduler } from '../poll-scheduler';
 import { provideAppState } from '../state/app-state';
+import { provideCvTraceState } from './state/cv-trace.providers';
 import { CvTraceFacade } from './cv-trace-facade';
 
 function flush(): Promise<void> {
@@ -69,7 +70,7 @@ function setup(apiOverrides: Partial<VisionApi> = {}, scheduler = stubScheduler(
   const api = { getCvTrace: vi.fn().mockResolvedValue(trace()), ...apiOverrides };
   TestBed.configureTestingModule({
     providers: [
-      provideAppState(),
+      provideAppState(), provideCvTraceState(),
       CvTraceFacade,
       { provide: VisionApi, useValue: api },
       { provide: PollScheduler, useValue: scheduler },

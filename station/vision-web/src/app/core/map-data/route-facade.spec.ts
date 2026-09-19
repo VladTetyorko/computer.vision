@@ -1,6 +1,7 @@
 import { TestBed } from '@angular/core/testing';
 import { describe, expect, it, vi } from 'vitest';
 import { provideAppState } from '../state/app-state';
+import { provideRouteState } from './state/route.providers';
 import { VisionApi } from '../api/vision-api';
 import type { TelemetrySample, UsageSummary, UsageTimeline } from '../api/models';
 import { RouteFacade } from './route-facade';
@@ -43,7 +44,7 @@ function stubApi(overrides: Partial<Record<'listUsages' | 'usageTimeline', Retur
 }
 
 function create(api: ReturnType<typeof stubApi>): RouteFacade {
-  TestBed.configureTestingModule({ providers: [provideAppState(), RouteFacade, { provide: VisionApi, useValue: api }] });
+  TestBed.configureTestingModule({ providers: [provideAppState(), provideRouteState(), RouteFacade, { provide: VisionApi, useValue: api }] });
   return TestBed.inject(RouteFacade);
 }
 
@@ -141,7 +142,7 @@ describe('RouteFacade', () => {
   });
 
   it('a fresh mount resets any stale global slice state left by a previous visit', () => {
-    TestBed.configureTestingModule({ providers: [provideAppState(), RouteFacade, { provide: VisionApi, useValue: stubApi() }] });
+    TestBed.configureTestingModule({ providers: [provideAppState(), provideRouteState(), RouteFacade, { provide: VisionApi, useValue: stubApi() }] });
     const first = TestBed.inject(RouteFacade);
     void first;
     // A second facade instance in the same injector simulates a second page mount reusing the

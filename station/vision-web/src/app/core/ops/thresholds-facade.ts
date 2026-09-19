@@ -7,11 +7,19 @@ import { thresholdsFeature } from './state/thresholds.reducer';
 
 /**
  * The ops-thresholds slice's read/dispatch boundary (docs/plans/active/NGRX-MIGRATION-PLAN.md §2),
- * replacing `ThresholdsStore`. Fetches once per instance, exactly like the old `providedIn: 'root'`
- * store's own constructor-triggered `void this.refresh()` — see that class's (deleted) doc comment,
- * preserved by `thresholds.effects.ts`.
+ * replacing `ThresholdsStore`. Fetches once per instance, exactly like the old store's own
+ * constructor-triggered `void this.refresh()` — see that class's (deleted) doc comment, preserved by
+ * `thresholds.effects.ts`.
+ *
+ * **Page-provided, not `providedIn: 'root'`** (wave N-split, NGRX-MIGRATION-PLAN.md §9). Its only
+ * consumers are `FlyHud`/`FlyOsd`, both children of `CockpitPage`, which lists this in its own
+ * `providers:`; that shared lifetime is what lets the `thresholds` slice be registered by
+ * `features/fly/fly.page-routes.ts` instead of shipping in everyone's initial bundle. **Behaviour
+ * change this carries:** "fetch once per instance" now means once per cockpit entry rather than once
+ * per session. Thresholds are small, rarely-changing ops config, so a refetch on entering the
+ * cockpit is both cheap and fresher — the honest direction (CLAUDE.md architecture rule 7).
  */
-@Injectable({ providedIn: 'root' })
+@Injectable()
 export class ThresholdsFacade {
   private readonly store = inject(Store);
   private readonly actions$ = inject(Actions);

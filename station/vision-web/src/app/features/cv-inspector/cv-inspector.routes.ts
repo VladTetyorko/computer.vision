@@ -1,23 +1,17 @@
 import type { Routes } from '@angular/router';
-import { orgGuard } from '../../core/org/org-guard';
 
 /**
- * `/manage/cv` (docs/plans/active/CV-ORCHESTRATION-PLAN.md §9 decision 3, wave W5.3) — own lazy
- * chunk, same `loadComponent` split every other feature route uses (`system-status.routes.ts`'s
- * identical shape). Spread inside `app.routes.ts`'s `authGuard`-wrapped children group, alongside
- * `VISION_PROFILES_ROUTES` — this is the `vision` nav group's fourth entry (`features/hubs/nav-entries.ts`).
+ * The `/manage/cv` route's own route entry, kept to a **lazy boundary only** (docs/plans/active/NGRX-MIGRATION-PLAN.md
+ * §9, wave N-split). `app.routes.ts` imports every feature's own `<feature>.routes.ts` **statically**, so
+ * anything named here lands in the initial bundle — including, transitively, any NgRx slice a
+ * `providers:` array on this route would reference. The real routes, and the `provideState`/
+ * `provideEffects` pair they need, therefore live in `cv-inspector.page-routes.ts` behind this `loadChildren`.
  *
- * `orgGuard` (WAREHOUSE-UX-PLAN.md §3.1 rule 6) — every `vision` nav entry is `requires: 'MANAGE_ORG'`
- * (the engineer/ops audience §4.8 names for this surface, same tier as CV training/model registry/
- * Geo regions), so its route carries the matching `canActivate: [orgGuard]` gate; unlike
- * `/manage/system`, this page has no "an operator needs to see why" carve-out — it is the full
- * per-frame ledger, not the one honest status line the fly cockpit already gives every operator.
+ * See `features/fly/fly.page-routes.ts` for what that file then looks like.
  */
 export const CV_INSPECTOR_ROUTES: Routes = [
   {
     path: 'manage/cv',
-    title: 'CV inspector · Vision',
-    canActivate: [orgGuard],
-    loadComponent: () => import('./cv-inspector').then((m) => m.CvInspectorPage),
+    loadChildren: () => import('./cv-inspector.page-routes').then((m) => m.CV_INSPECTOR_PAGE_ROUTES),
   },
 ];

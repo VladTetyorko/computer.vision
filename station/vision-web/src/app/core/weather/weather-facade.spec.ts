@@ -2,6 +2,7 @@ import { EnvironmentInjector, Injector } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { provideAppState } from '../state/app-state';
+import { provideWeatherState } from './state/weather.providers';
 import { WeatherFacade } from './weather-facade';
 
 const HERE = { latitude: 10, longitude: 20 };
@@ -18,7 +19,7 @@ function flush(): Promise<void> {
 
 /** A fresh child injector providing its own `WeatherFacade`, parented to the shared TestBed root —
  *  exactly `CommandPage`'s and `FlyPage`'s own separate `providers: [WeatherFacade]` arrays, each a
- *  distinct component injector sharing the one app-wide `provideAppState()` root. */
+ *  distinct component injector sharing the one app-wide `provideAppState(), provideWeatherState()` root. */
 function newHost(): WeatherFacade {
   const injector = Injector.create({ providers: [WeatherFacade], parent: TestBed.inject(EnvironmentInjector) });
   return injector.get(WeatherFacade);
@@ -30,7 +31,7 @@ describe('WeatherFacade', () => {
   beforeEach(() => {
     fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
-    TestBed.configureTestingModule({ providers: [provideAppState(), WeatherFacade] });
+    TestBed.configureTestingModule({ providers: [provideAppState(), provideWeatherState(), WeatherFacade] });
   });
 
   afterEach(() => {

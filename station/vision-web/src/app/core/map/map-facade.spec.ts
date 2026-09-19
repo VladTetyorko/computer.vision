@@ -10,6 +10,7 @@ import { LiveFacade } from '../live/live-facade';
 import { LivePageActions, LiveSocketActions } from '../live/state/live.actions';
 import { PollScheduler } from '../poll-scheduler';
 import { provideAppState } from '../state/app-state';
+import { provideMapState } from './state/map.providers';
 import { MapFacade } from './map-facade';
 
 /**
@@ -86,7 +87,7 @@ function stubScheduler() {
 function configure(api: ReturnType<typeof stubApi>, scheduler: ReturnType<typeof stubScheduler>) {
   TestBed.configureTestingModule({
     providers: [
-      provideAppState(),
+      provideAppState(), provideMapState(),
       { provide: VisionApi, useValue: api },
       { provide: PollScheduler, useValue: scheduler },
     ],

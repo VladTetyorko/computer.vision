@@ -8,8 +8,16 @@ import { controlProfileFeature } from './state/control-profile.reducer';
 
 /**
  * Replaces `ControlProfileStore` (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N7).
- * `providedIn: 'root'`, unchanged from the old store: the `/manage/controller` setup page and the
- * Fly cockpit's Controller drawer share one load rather than each fetching.
+ *
+ * **Page-provided since wave N-split** (NGRX-MIGRATION-PLAN.md §9), where the old store — and this
+ * facade until then — was `providedIn: 'root'` so that the `/manage/controller` setup page and the
+ * Fly cockpit's Controller drawer shared one load. Both hosts (`ControllerSetupPage`, `CockpitPage`)
+ * now list this in their own `providers:` and register the `controlProfile` slice on their own
+ * routes. **Behaviour change this carries:** each of those two pages loads the profile list for
+ * itself, so opening the cockpit after saving a layout on the setup page re-reads it from the server
+ * rather than reusing the setup page's copy. That is the direction CLAUDE.md architecture rule 7
+ * asks for — the newest data wins — and it is what makes a `/settings` visitor stop downloading the
+ * RC slice at all.
  *
  * <h2>Mutations still throw the real error — deliberately, unlike every other N7 facade</h2>
  * `ControllerSetupFacade` (the one feature-level caller of every write below) already owns turning a
@@ -32,7 +40,7 @@ import { controlProfileFeature } from './state/control-profile.reducer';
  * `Object.prototype` (`@ngrx/store`'s own `isPlainObject`), so preserving *that* exact instance
  * end-to-end was never on the table; preserving its rendered *message* is, and this does.
  */
-@Injectable({ providedIn: 'root' })
+@Injectable()
 export class ControlProfileFacade {
   private readonly store = inject(Store);
   private readonly actions$ = inject(Actions);

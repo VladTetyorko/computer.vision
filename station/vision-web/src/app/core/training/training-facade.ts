@@ -13,8 +13,15 @@ import { trainingFeature } from './state/training.reducer';
  * replacing `TrainingStore`. Every method keeps that class's exact name/signature/return contract so
  * `DatasetsPage`/`DatasetDetailFacade`/`ModelsFacade`/`ReplayFacade` change only `inject(TrainingStore)`
  * → `inject(TrainingFacade)`.
+ *
+ * **Page-provided, not `providedIn: 'root'`** (wave N-split, NGRX-MIGRATION-PLAN.md §9). The two
+ * classes that inject it — `DatasetsFacade` and `ReplayFacade` — are themselves provided by
+ * `DatasetsPage` and `ReplayPage`, so this now shares their lifetime and the `training` slice is
+ * registered on `manage/training` and `assets/:assetId/replay/:usageId` rather than at the root.
+ * **Behaviour change this carries:** the dataset list is no longer cached across those two pages, so
+ * each re-reads it on entry instead of inheriting the other's copy.
  */
-@Injectable({ providedIn: 'root' })
+@Injectable()
 export class TrainingFacade {
   private readonly store = inject(Store);
   private readonly actions$ = inject(Actions);

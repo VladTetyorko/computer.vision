@@ -1,6 +1,6 @@
 import type { Routes } from '@angular/router';
 import { describe, expect, it } from 'vitest';
-import { flattenRoutes, routeExists } from './route-audit-logic';
+import { flattenRoutes, flattenRoutesDeep, routeExists } from './route-audit-logic';
 
 /** A trivial, synchronously-typed stand-in — `component` (not `loadComponent`) sidesteps the lazy
  * loader's own `Promise<Type<unknown> | DefaultExport<...>>` return-type contract, irrelevant here
@@ -50,6 +50,53 @@ describe('flattenRoutes', () => {
       { path: '', canActivate: [() => true], children: [{ path: 'fly', component: Dummy }] },
     ];
     expect(flattenRoutes(routes)).toEqual([{ path: '/fly', kind: 'component' }]);
+  });
+});
+
+describe('flattenRoutesDeep — lazy boundaries (NGRX-MIGRATION wave N-split)', () => {
+  it('resolves a loadChildren boundary and joins the parent segment onto its children', async () => {
+    const routes: Routes = [
+      {
+        path: 'fly',
+        loadChildren: () =>
+          Promise.resolve([
+            {
+              path: '',
+              children: [
+                { path: '', loadComponent: () => Promise.resolve(class Picker {}) },
+                { path: ':assetId', loadComponent: () => Promise.resolve(class Cockpit {}) },
+              ],
+            },
+          ] as Routes),
+      },
+    ];
+    expect(await flattenRoutesDeep(routes)).toEqual([
+      { path: '/fly', kind: 'component' },
+      { path: '/fly/:assetId', kind: 'component' },
+    ]);
+  });
+
+  it('resolves a boundary nested inside ordinary children', async () => {
+    const routes: Routes = [
+      {
+        path: '',
+        children: [
+          {
+            path: 'manage/cv',
+            loadChildren: () =>
+              Promise.resolve([{ path: '', loadComponent: () => Promise.resolve(class Inspector {}) }] as Routes),
+          },
+        ],
+      },
+    ];
+    expect(await flattenRoutesDeep(routes)).toEqual([{ path: '/manage/cv', kind: 'component' }]);
+  });
+
+  it('the sync walker reports nothing for an unresolved boundary — it must never be read as a dead link', () => {
+    const routes: Routes = [{ path: 'fly', loadChildren: () => Promise.resolve([] as Routes) }];
+    // Deliberately empty, not `{ path: '/fly', kind: ... }`: the sync walker cannot know what is
+    // behind the boundary, so callers that care use `flattenRoutesDeep`. `app.routes.spec.ts` does.
+    expect(flattenRoutes(routes)).toEqual([]);
   });
 });
 

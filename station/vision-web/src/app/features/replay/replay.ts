@@ -5,6 +5,7 @@ import { ReplayMap } from './replay-map';
 import { AfterActionPanel } from './after-action-panel';
 import { PageBar, type PageBarCrumb } from '../../shared/ui/page-bar/page-bar';
 import { pluralize } from '../../shared/ui/text-logic';
+import { TrainingFacade } from '../../core/training/training-facade';
 import { ReplayFacade } from './replay-facade';
 import { shouldSeekVideo, videoOffsetSeconds, videoTimeToAtMs, type DetectionDensityBucket } from './replay-logic';
 
@@ -51,7 +52,9 @@ import { shouldSeekVideo, videoOffsetSeconds, videoTimeToAtMs, type DetectionDen
   templateUrl: './replay.html',
   styleUrl: './replay.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [ReplayFacade],
+  // `TrainingFacade` is page-provided since wave N-split — see its own doc comment; the `training`
+  // slice it reads is registered by `replay.page-routes.ts`.
+  providers: [ReplayFacade, TrainingFacade],
 })
 export class ReplayPage {
   /** Bound from the nested route by `withComponentInputBinding()` — both names match their `:param`s exactly. */

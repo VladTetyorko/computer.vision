@@ -1,19 +1,17 @@
 import type { Routes } from '@angular/router';
 
 /**
- * The `/command` route (docs/plans/done/MVP3-PLAN.md §C-c: the manager dashboard). Split into its own file
- * per vision-web/docs/plans/done/UI-STRUCTURE-PLAN.md §2.3/§3 (B8) — see `features/fly/fly.routes.ts`'s doc
- * comment for why.
+ * The `/command` route's own route entry, kept to a **lazy boundary only** (docs/plans/active/NGRX-MIGRATION-PLAN.md
+ * §9, wave N-split). `app.routes.ts` imports every feature's own `<feature>.routes.ts` **statically**, so
+ * anything named here lands in the initial bundle — including, transitively, any NgRx slice a
+ * `providers:` array on this route would reference. The real routes, and the `provideState`/
+ * `provideEffects` pair they need, therefore live in `command.page-routes.ts` behind this `loadChildren`.
+ *
+ * See `features/fly/fly.page-routes.ts` for what that file then looks like.
  */
 export const COMMAND_ROUTES: Routes = [
   {
     path: 'command',
-    title: 'Command · Vision',
-    // A real top-level tab, so it's idle-preloaded like every other one (no `data: { preload: false }`).
-    // `fullBleed` (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.1 rule 5, docs/extracts/design/00-shell.md): read by
-    // `shared/ui/app-sidebar/**` to auto-collapse the sidebar to its icon rail on this map-first
-    // view, rather than reflowing the map to make room for an expanded nav column.
-    data: { fullBleed: true },
-    loadComponent: () => import('./command').then((m) => m.CommandPage),
+    loadChildren: () => import('./command.page-routes').then((m) => m.COMMAND_PAGE_ROUTES),
   },
 ];

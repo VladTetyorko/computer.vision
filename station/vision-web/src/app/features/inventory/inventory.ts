@@ -7,6 +7,7 @@ import { Notice } from '../../shared/ui/notice';
 import { PageBar } from '../../shared/ui/page-bar/page-bar';
 import { Stat } from '../../shared/ui/stat';
 import { pluralize } from '../../shared/ui/text-logic';
+import { DiscoveryInboxFacade } from '../../core/discovery/discovery-inbox-facade';
 import { InventoryFacade } from './inventory-facade';
 import { MyVehicles } from './my-vehicles';
 import { VehiclesTable } from './vehicles-table';
@@ -64,7 +65,10 @@ import type { VehicleInventoryStateFilter, VehicleReadinessFilter } from './vehi
   templateUrl: './inventory.html',
   styleUrl: './inventory.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [InventoryFacade],
+  // `DiscoveryInboxFacade` is page-provided since wave N-split — see its own doc comment; the
+  // `discoveryInbox` slice `<vision-found-devices>` reads is registered by
+  // `inventory.page-routes.ts`.
+  providers: [InventoryFacade, DiscoveryInboxFacade],
 })
 export class InventoryPage {
   /** `?tab=` — bound the same way `AssetsPage`'s old `category`/`sel` inputs were

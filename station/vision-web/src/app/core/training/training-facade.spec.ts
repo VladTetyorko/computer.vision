@@ -5,6 +5,7 @@ import type { Dataset } from '../api/models';
 import { VisionApi } from '../api/vision-api';
 import { ToastService } from '../toast.service';
 import { provideAppState } from '../state/app-state';
+import { provideTrainingState } from './state/training.providers';
 import { TrainingFacade } from './training-facade';
 
 function dataset(overrides: Partial<Dataset> = {}): Dataset {
@@ -35,7 +36,13 @@ describe('TrainingFacade', () => {
     };
     toasts = { ok: vi.fn(), error: vi.fn() };
     TestBed.configureTestingModule({
-      providers: [provideAppState(), { provide: VisionApi, useValue: api }, { provide: ToastService, useValue: toasts }],
+      providers: [
+        provideAppState(),
+        provideTrainingState(),
+        TrainingFacade,
+        { provide: VisionApi, useValue: api },
+        { provide: ToastService, useValue: toasts },
+      ],
     });
   });
 

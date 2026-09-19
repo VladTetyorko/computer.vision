@@ -207,8 +207,8 @@ Promise-returning method is added to `VisionApi` after N0 — new endpoints land
 | N7 merged | **257/257 files · 4 653/4 653 tests green**, both tsconfigs clean, production build exit 0 at **540.44 kB raw / 155.15 kB transfer** — 40.44 kB over the 500 kB *warning* budget, **9.56 kB under the 550 kB error budget** |
 | N6 | **BUILT**, `09fefaca` — `map`, `marks`, `layers`, `drawings`, `tracks`, `route`, `geofence`; all seven classes deleted. `@ngrx/entity` backs the four collections; `FleetMapStore`'s "construction is demand" contract needed an explicit `activeConsumers` ref-count to survive app-wide registration |
 | N6 merged | `00d74f12` — **26 slices now NgRx**. 264/264 files · 4 748/4 748 tests green, both tsconfigs clean. **Production build RED**: 587.42 kB raw / 168.30 kB transfer, 37.42 kB over the 550 kB error budget — see the costed options below |
-| N-split | **OPEN, and it blocks N4/N8** — the build does not currently produce a bundle. Owner picks: raise the budget, or move the page-scoped slices off the root injector |
-| N4, N8, N9 | open |
+| N-split | **BUILT** 2026-09-19 — owner chose the split over a budget bump. 13 of 26 slices moved to route-level registration; 12 features became `loadChildren` boundaries; 4 facades converted from `providedIn: 'root'` to page-provided. **Production build GREEN**: 587.42 → **541.37 kB raw / 155.34 kB transfer**, exit 0, 8.63 kB under the 550 kB error budget. 264/264 files · 4 754/4 754 tests green, both tsconfigs clean. `angular.json` untouched |
+| N4, N8, N9 | open — each must carry its own split; headroom is 8.63 kB, less than any single wave has cost |
 
 ### The bundle expectation was wrong — recorded, not quietly dropped
 
@@ -222,14 +222,16 @@ build**, and the decision can no longer wait for N9: raise the 550 kB error budg
 on route-level code-splitting for the slices only one feature needs. It is the owner's call either
 way — not a number for a wave to bump on its way past.
 
-### The two ways out of the budget, costed — 2026-09-19
+### The two ways out of the budget, costed — 2026-09-19; **owner chose Option 2, built the same day**
 
-**The production build is RED as of the N6 merge**: 587.42 kB raw against a 550 kB error budget.
-`npm run test:ci` and both `tsc` configs are green; only `-c production` fails. Measured so the
-owner is choosing between numbers, not guesses.
+**The production build was RED as of the N6 merge**: 587.42 kB raw against a 550 kB error budget.
+`npm run test:ci` and both `tsc` configs were green; only `-c production` failed. Measured so the
+owner was choosing between numbers, not guesses. **Outcome: Option 2 shipped — 541.37 kB, exit 0,
+`angular.json` unchanged.** What the wave actually did, and what it cost, is below the two options.
 
 **Option 1 — raise `angular.json`'s error budget.** One line. Instant, reversible, and it spends the
-visibility the 500 kB warning currently buys. 620 kB would clear N6 and leave room for N4/N8.
+visibility the 500 kB warning currently buys. 620 kB would clear N6 and leave room for N4/N8. **Not
+taken.**
 
 **Option 2 — wave N-split: stop registering page-scoped slices at the root injector.** Routes are
 *already* lazy (48 chunks); what fills the initial bundle is `provideAppState()` registering all 26
@@ -263,11 +265,46 @@ imported** by `app.routes.ts`. Putting `provideState(...)` there pulls the slice
 the initial chunk. The providers must sit behind a `loadChildren` boundary — which removes those
 routes from the static `children` tree that `features/hubs/route-audit-logic.ts#flattenRoutes` walks,
 and `app.routes.spec.ts`'s "no dead link" suite plus the in-app route audit both depend on that walk.
-So N-split is: seven features converted to `loadChildren`, **plus** teaching the route audit to
+So N-split is: features converted to `loadChildren`, **plus** teaching the route audit to
 resolve a `loadChildren` boundary. Do not attempt it as a tail-end fix to another wave.
 
 **Not decided by an agent.** Option 1 is a policy change about what the project is willing to ship;
 it belongs to the owner, and no wave may take it unilaterally on its way past.
+
+### What N-split actually shipped — 2026-09-19
+
+**587.42 → 541.37 kB raw (−46.05 kB), 168.30 → 155.34 kB transfer, exit 0, 8.63 kB of headroom.**
+264/264 files · 4 754/4 754 tests · both tsconfigs clean. `angular.json` untouched.
+
+The table above under-counted, in two ways found while building it.
+
+**Five more slices were in reach than the table listed, and the ceiling was measured before anything
+was converted.** Stripping the five largest remaining root slices from `app-state.ts` and building
+once (then reverting) put the ceiling at **19.09 kB for five** — arithmetic instead of a guess, and
+the reason four facades were converted rather than all five. Do this probe first in N4/N8 too.
+
+**The eligibility rule has a usable form.** "Only a page-provided facade's slice may move" is the
+*invariant*; the test that decides a candidate is **"does every class injecting this facade already
+sit behind a lazy route?"**. If yes, converting the facade from `providedIn: 'root'` to
+`@Injectable()` in its host page's `providers:` is part of the split, not a byte-chase — but it is a
+real behaviour change (state loaded per page visit, not per session; two pages that shared a fetch
+now each fetch) and belongs in the facade's own doc comment. Four passed: `ThresholdsFacade` (fly),
+`ControlProfileFacade` (fly + manage/controller), `TrainingFacade` (manage/training + replay),
+`DiscoveryInboxFacade` (assets + add-source). **`OrgFacade` failed and stayed root** —
+`shared/map/map-controls/layer-manager.ts` injects it and that control renders on several map
+surfaces at once. Final split: **13 root slices, 13 route-registered**.
+
+**Two cascades the plan did not predict, both now guarded by tests:**
+
+- **A `loadChildren` boundary prefix-matches** where a `loadComponent` route only matched with no
+  leftovers. `/assets` would swallow `/assets/:assetId`; `/manage/training` would swallow
+  `/manage/training/models`. Both families are ordered longest-path-first in `app.routes.ts`
+  (`INVENTORY_ROUTES` moved below `ASSET_DETAIL_ROUTES`), and `app.routes.spec.ts` asserts that order
+  **by index** — the router is not guaranteed to backtrack out of a child-match failure, so ordering
+  is the whole guarantee. Same trap CREW-CONTROL's `pathMatch` finding recorded.
+- **`findRouteByPath` in `app.routes.spec.ts` went blind too**, not just `flattenRoutes`. Both now
+  resolve `loadChildren` (the former async, the latter via the new `flattenRoutesDeep`). That the
+  "no dead link" suite passes unchanged is the proof the split moved no URL.
 
 ### N5 found a convention that does not generalise
 

@@ -11,6 +11,7 @@ import { stepStatus, wizardSteps, type WizardStep as WizardStepModel } from '../
 import { channelOutputs, type ChannelOutput } from '../../core/rc/channel-output-logic';
 import { asStickMode, channelOptions } from '../../core/rc/controller-setup-logic';
 import { DEFAULT_STICK_MODE, STICK_MODES, type StickMode } from '../../core/rc/controller-diagram-logic';
+import { ControlProfileFacade } from '../../core/rc/control-profile-facade';
 import { ControllerSetupFacade } from './controller-setup-facade';
 import { StepRail, type StepRailItem } from '../../shared/ui/step-rail';
 import { WizardStep as WizardStepComponent } from './wizard-step';
@@ -43,7 +44,9 @@ import type { ControlProfile, VehicleKind } from '../../core/api/models';
   templateUrl: './controller-setup.html',
   styleUrl: './controller-setup.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [ControllerSetupFacade, RcInputService],
+  // `ControlProfileFacade` is page-provided since wave N-split — see its own doc comment; the
+  // `controlProfile` slice it reads is registered by `controller.page-routes.ts`.
+  providers: [ControllerSetupFacade, ControlProfileFacade, RcInputService],
 })
 export class ControllerSetupPage implements OnInit {
   protected readonly facade = inject(ControllerSetupFacade);

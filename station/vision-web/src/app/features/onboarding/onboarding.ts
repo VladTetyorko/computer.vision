@@ -7,6 +7,7 @@ import { ConfirmStep } from './confirm-step';
 import { HandoverStep } from './handover-step';
 import { IdentifyStep } from './identify-step';
 import { OnboardingFacade } from './onboarding-facade';
+import { DiscoveryInboxFacade } from '../../core/discovery/discovery-inbox-facade';
 import { OnboardingStore } from './onboarding-store';
 import { ProveStep } from './prove-step';
 import { SourceStep } from './source-step';
@@ -49,7 +50,10 @@ import { SysidStep } from './sysid-step';
   templateUrl: './onboarding.html',
   styleUrl: './onboarding.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  providers: [OnboardingStore, OnboardingFacade],
+  // `DiscoveryInboxFacade` is page-provided since wave N-split — see its own doc comment;
+  // `OnboardingStore` injects it and the `discoveryInbox` slice is registered by
+  // `onboarding.page-routes.ts`.
+  providers: [OnboardingStore, OnboardingFacade, DiscoveryInboxFacade],
 })
 export class OnboardingPage {
   protected readonly facade = inject(OnboardingFacade);

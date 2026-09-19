@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { OpsThresholdsResponse } from '../api/models';
 import { VisionApi } from '../api/vision-api';
 import { provideAppState } from '../state/app-state';
+import { provideThresholdsState } from './state/thresholds.providers';
 import { DEFAULT_BATTERY_THRESHOLDS, DEFAULT_RC_THRESHOLDS } from './thresholds-logic';
 import { ThresholdsFacade } from './thresholds-facade';
 
@@ -19,7 +20,14 @@ describe('ThresholdsFacade', () => {
   });
 
   function create(): ThresholdsFacade {
-    TestBed.configureTestingModule({ providers: [provideAppState(), { provide: VisionApi, useValue: api }] });
+    TestBed.configureTestingModule({
+      providers: [
+        provideAppState(),
+        provideThresholdsState(),
+        ThresholdsFacade,
+        { provide: VisionApi, useValue: api },
+      ],
+    });
     return TestBed.inject(ThresholdsFacade);
   }
 

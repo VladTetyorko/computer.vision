@@ -4,6 +4,7 @@ import type { SeatsResponse } from '../api/models';
 import { VisionApi } from '../api/vision-api';
 import { PollScheduler } from '../poll-scheduler';
 import { provideAppState } from '../state/app-state';
+import { provideSeatState } from './state/seat.providers';
 import { singleOperatorSeats } from './seat-logic';
 import { SeatFacade } from './seat-facade';
 
@@ -38,7 +39,7 @@ function setup(apiOverrides: Partial<VisionApi> = {}, scheduler = stubScheduler(
   };
   TestBed.configureTestingModule({
     providers: [
-      provideAppState(),
+      provideAppState(), provideSeatState(),
       SeatFacade,
       { provide: VisionApi, useValue: api },
       { provide: PollScheduler, useValue: scheduler },

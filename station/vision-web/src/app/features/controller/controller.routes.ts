@@ -1,17 +1,15 @@
 import type { Routes } from '@angular/router';
 
 /**
- * `/manage/controller` (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md C11) — own lazy chunk, split
- * per vision-web/docs/plans/done/UI-STRUCTURE-PLAN.md §2.3/§3 (B8). Spread inside `app.routes.ts`'s
- * `authGuard`-wrapped children group with **no role gate**, unlike its `/manage/**` neighbours: a
- * control profile is owned by the operator who made it (decision C6), so a pilot configuring their
- * own transmitter is not performing a management action, and `orgGuard` here would lock every pilot
- * out of the one page that is entirely about their own hardware.
+ * `/manage/controller`'s own route entry, kept to a **lazy boundary only** (wave N-split,
+ * docs/plans/active/NGRX-MIGRATION-PLAN.md §9) — `app.routes.ts` imports every feature's own
+ * `<feature>.routes.ts` statically, so a `providers:` array here would drag the `controlProfile`
+ * slice it names into the initial bundle. See `features/fly/fly.routes.ts`'s doc comment for the
+ * rule in full, and `controller.page-routes.ts` for the real route.
  */
 export const CONTROLLER_ROUTES: Routes = [
   {
     path: 'manage/controller',
-    title: 'Controller · Vision',
-    loadComponent: () => import('./controller-setup').then((m) => m.ControllerSetupPage),
+    loadChildren: () => import('./controller.page-routes').then((m) => m.CONTROLLER_PAGE_ROUTES),
   },
 ];

@@ -6,6 +6,7 @@ import { VisionApi } from '../api/vision-api';
 import { LiveSocketActions } from '../live/state/live.actions';
 import { PollScheduler } from '../poll-scheduler';
 import { provideAppState } from '../state/app-state';
+import { provideTelemetryState } from './state/telemetry.providers';
 import { TelemetryFacade } from './telemetry-facade';
 
 function flush(): Promise<void> {
@@ -53,7 +54,7 @@ function setup(apiOverrides: Partial<VisionApi> = {}, scheduler = stubScheduler(
   };
   TestBed.configureTestingModule({
     providers: [
-      provideAppState(),
+      provideAppState(), provideTelemetryState(),
       TelemetryFacade,
       { provide: VisionApi, useValue: api },
       { provide: PollScheduler, useValue: scheduler },

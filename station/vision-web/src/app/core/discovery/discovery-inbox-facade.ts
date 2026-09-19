@@ -13,14 +13,22 @@ import { DiscoveryApiActions, DiscoveryPageActions } from './state/discovery.act
 import { discoveryInboxFeature } from './state/discovery.reducer';
 
 /**
- * Replaces `DiscoveryInboxStore` (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N7) — `providedIn:
- * 'root'`, same as that class: a root singleton with `activate()`/`release()` ref-counting, since
- * `discoveryInboxFeature`'s state is genuinely app-wide (unlike `WeatherFacade`/`GeoFacade`/
- * `LinksFacade`'s per-host `byHostId` slices, which need a fresh non-root instance per mounted page).
- * See `discovery.effects.ts#poll$`'s own doc comment for exactly how the ref-count (state) and the
- * live-vs-poll timer (effect) divide the old class's `applyTransport` state machine between them.
+ * Replaces `DiscoveryInboxStore` (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N7), keeping its
+ * `activate()`/`release()` ref-counting: several mounted consumers share one poll, and the timer
+ * stops when the last one releases. See `discovery.effects.ts#poll$`'s own doc comment for how the
+ * ref-count (state) and the live-vs-poll timer (effect) divide the old class's `applyTransport`
+ * state machine between them.
+ *
+ * **Page-provided since wave N-split** (NGRX-MIGRATION-PLAN.md §9), where the old store — and this
+ * facade until then — was a root singleton. What the ref-count actually protects is *concurrent*
+ * consumers, and the only two that exist (`FoundDevices` inside `InventoryPage`, `OnboardingStore`
+ * inside `OnboardingPage`) live on different pages that are never mounted at once; within one page
+ * they still share this one instance, so the ref-count keeps working unchanged. **Behaviour change
+ * this carries:** the candidate list no longer survives navigating between `/assets` and
+ * `/add-source` — each page starts its own poll, whose first tick refills the list. Discovery is a
+ * live feed that re-polls every few seconds anyway, so nothing here was durable state.
  */
-@Injectable({ providedIn: 'root' })
+@Injectable()
 export class DiscoveryInboxFacade {
   private readonly store = inject(Store);
   private readonly actions$ = inject(Actions);

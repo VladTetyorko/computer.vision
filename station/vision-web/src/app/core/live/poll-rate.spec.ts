@@ -10,6 +10,11 @@ import { MarksFacade } from '../map-data/marks-facade';
 import { MapFacade } from '../map/map-facade';
 import { SystemStatusStore } from '../system-status/system-status-store';
 import { provideAppState } from '../state/app-state';
+import { provideMapState } from '../map/state/map.providers';
+import { provideRouteState } from '../map-data/state/route.providers';
+import { provideWeatherState } from '../weather/state/weather.providers';
+import { provideTelemetryState } from '../telemetry/state/telemetry.providers';
+import { provideDetectionsState } from '../detections/state/detections.providers';
 import { LiveFacade } from './live-facade';
 import { LiveSocketActions } from './state/live.actions';
 import { PollScheduler } from '../poll-scheduler';
@@ -51,7 +56,7 @@ import type { AssetSummary } from '../api/models';
  * Every root store this file drives moved to NgRx this wave (`MarksStore`→`MarksFacade`,
  * `LayersStore`→`LayersFacade`, `DrawingsStore`→`DrawingsFacade`, `GeofenceStore`→`GeofenceFacade`,
  * `FleetMapStore`→`MapFacade`; `TracksStore`→`TracksFacade` is imported nowhere here, unchanged from
- * before — see the "deliberately absent" note below). `provideAppState()` replaces the old hand-rolled
+ * before — see the "deliberately absent" note below). `provideAppState(), provideMapState(), provideRouteState(), provideWeatherState(), provideTelemetryState(), provideDetectionsState()` replaces the old hand-rolled
  * `{ provide: LiveFacade, useValue: stubLiveFacade(transport) }`: `LiveFacade` itself is untouched
  * `core/live/**` territory (out of this wave's scope) and every migrated slice's own gate effect now
  * reads the real `live` feature state through its own selectors (NGRX-MIGRATION-PLAN.md §9's "never
@@ -131,7 +136,7 @@ async function measure(transport: LiveConnectionState, assets: readonly AssetSum
 
   TestBed.configureTestingModule({
     providers: [
-      provideAppState(),
+      provideAppState(), provideMapState(), provideRouteState(), provideWeatherState(), provideTelemetryState(), provideDetectionsState(),
       SystemStatusStore,
       MapFacade,
       PollScheduler,

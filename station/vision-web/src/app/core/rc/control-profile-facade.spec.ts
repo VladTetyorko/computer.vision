@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ControlCatalog, ControlProfile } from '../api/models';
 import { VisionApi } from '../api/vision-api';
 import { provideAppState } from '../state/app-state';
+import { provideControlProfileState } from './state/control-profile.providers';
 import { ControlProfileFacade } from './control-profile-facade';
 
 function profile(overrides: Partial<ControlProfile> = {}): ControlProfile {
@@ -53,7 +54,14 @@ describe('ControlProfileFacade', () => {
       activateControlProfile: vi.fn().mockResolvedValue(undefined),
       deleteControlProfile: vi.fn().mockResolvedValue(undefined),
     };
-    TestBed.configureTestingModule({ providers: [provideAppState(), { provide: VisionApi, useValue: api }] });
+    TestBed.configureTestingModule({
+      providers: [
+        provideAppState(),
+        provideControlProfileState(),
+        ControlProfileFacade,
+        { provide: VisionApi, useValue: api },
+      ],
+    });
   });
 
   it('starts empty, unloaded, not loading', () => {

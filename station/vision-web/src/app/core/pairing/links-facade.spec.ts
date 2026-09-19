@@ -8,6 +8,7 @@ import { LiveFacade, type LiveConnectionState } from '../live/live-facade';
 import { PollScheduler } from '../poll-scheduler';
 import { ToastService } from '../toast.service';
 import { provideAppState } from '../state/app-state';
+import { provideLinksState } from './state/links.providers';
 import { LinksFacade } from './links-facade';
 
 function flush(): Promise<void> {
@@ -87,7 +88,7 @@ function setUpFacade(
 ): LinksFacade {
   TestBed.configureTestingModule({
     providers: [
-      provideAppState(),
+      provideAppState(), provideLinksState(),
       LinksFacade,
       { provide: VisionApi, useValue: api },
       { provide: LiveFacade, useValue: options.live ?? stubLiveFacade() },
@@ -370,7 +371,7 @@ describe('LinksFacade', () => {
       const live = stubLiveFacade('closed');
       TestBed.configureTestingModule({
         providers: [
-          provideAppState(),
+          provideAppState(), provideLinksState(),
           { provide: VisionApi, useValue: api },
           { provide: LiveFacade, useValue: live },
           { provide: PollScheduler, useValue: stubScheduler() },
@@ -399,7 +400,7 @@ describe('LinksFacade', () => {
       const live = stubLiveFacade('closed');
       TestBed.configureTestingModule({
         providers: [
-          provideAppState(),
+          provideAppState(), provideLinksState(),
           { provide: VisionApi, useValue: api },
           { provide: LiveFacade, useValue: live },
           { provide: PollScheduler, useValue: stubScheduler() },

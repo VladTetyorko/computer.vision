@@ -7,6 +7,7 @@ import { CvTraceFacade } from '../../core/cv-trace/cv-trace-facade';
 import { FleetStore } from '../../core/fleet/fleet-store';
 import { PollScheduler } from '../../core/poll-scheduler';
 import { provideAppState } from '../../core/state/app-state';
+import { provideCvTraceState } from '../../core/cv-trace/state/cv-trace.providers';
 import { SystemStatusStore } from '../../core/system-status/system-status-store';
 import { VisionApi } from '../../core/api/vision-api';
 import type { AssetAttention, FleetSummary } from '../../core/api/models';
@@ -14,7 +15,7 @@ import type { AssetAttention, FleetSummary } from '../../core/api/models';
 /**
  * Proves wave W5.7's "Live subscription" paragraph on `CvInspectorFacade`'s own class doc: picking
  * a stream resolves its owning asset (`VisionApi#fleetSummary()` + `assetIdForStream`) and starts
- * the LIVE `cv-trace:<assetId>` topic through the REAL `CvTraceFacade` — `provideAppState()` wires
+ * the LIVE `cv-trace:<assetId>` topic through the REAL `CvTraceFacade` — `provideAppState(), provideCvTraceState()` wires
  * the genuine NgRx store/effects (wave N5 replaced the old `CvTraceStore`'s direct `LiveFacade`
  * method calls with dispatched `LivePageActions.cvTraceTracked`/`cvTraceUntracked` actions read
  * straight off the real store below, rather than a stubbed `LiveFacade`) — the only way to prove the
@@ -64,7 +65,7 @@ function stubStatusStore() {
 function create(api: ReturnType<typeof stubApi>) {
   TestBed.configureTestingModule({
     providers: [
-      provideAppState(),
+      provideAppState(), provideCvTraceState(),
       CvInspectorFacade,
       CvTraceFacade,
       { provide: VisionApi, useValue: api },
