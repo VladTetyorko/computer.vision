@@ -5,7 +5,7 @@ import { provideDetectionsState } from '../../core/detections/state/detections.p
 /**
  * The `/wall` route (docs/plans/active/WALL-FLOW-PLAN.md) behind `wall.routes.ts`'s `loadChildren`
  * boundary; see `features/fly/fly.page-routes.ts` for the rationale
- * (docs/plans/active/NGRX-MIGRATION-PLAN.md §9, wave N-split).
+ * (docs/plans/done/NGRX-MIGRATION-PLAN.md §9, wave N-split).
  *
  * `detections` only: `WallTile`/`WallFocus` each own a private `providers: [DetectionsFacade]` for
  * live per-frame boxes. The wall reads telemetry through the fleet-summary fetch, not the

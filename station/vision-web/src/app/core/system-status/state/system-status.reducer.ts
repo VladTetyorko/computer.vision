@@ -4,7 +4,7 @@ import { SystemStatusApiActions, SystemStatusPageActions } from './system-status
 import { initialSystemStatusState, type SystemStatusState } from './system-status.model';
 
 /**
- * `SystemStatusStore`'s own reducer half, ported wholesale (docs/plans/active/NGRX-MIGRATION-PLAN.md
+ * `SystemStatusStore`'s own reducer half, ported wholesale (docs/plans/done/NGRX-MIGRATION-PLAN.md
  * wave N4b). **Degrades to stale-but-present data, not a wiped page, on a failed fetch** — `status`
  * is only ever replaced by a *successful* fetch (REST or the always-on `system` SSE topic); a
  * failure updates only {@link SystemStatusState.error} so a caller can show a small "couldn't

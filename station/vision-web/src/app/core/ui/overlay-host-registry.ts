@@ -12,7 +12,7 @@ export interface OverlayHost {
 }
 
 /**
- * The non-serializable half of the old `GlobalOverlayStore` (docs/plans/active/NGRX-MIGRATION-PLAN.md
+ * The non-serializable half of the old `GlobalOverlayStore` (docs/plans/done/NGRX-MIGRATION-PLAN.md
  * §8 "GlobalOverlayStore splits in two"). Live `HTMLElement` references can never go into NgRx
  * state — `strictStateSerializability` would trip on the first `register()` call, and rightly so —
  * so this stays a small, plain `providedIn: 'root'` service the overlay slice's effects and facade

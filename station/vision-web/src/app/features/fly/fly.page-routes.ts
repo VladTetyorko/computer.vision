@@ -19,7 +19,7 @@ import { flyRedirectGuard } from './fly-redirect-guard';
  * The `/fly` route family (docs/plans/done/MVP3-PLAN.md §C-b: the operator cockpit, the app's default
  * landing page), behind `fly.routes.ts`'s `loadChildren` boundary so that everything named here —
  * the two page components *and* the seven NgRx slices below — is fetched on first visit to `/fly`
- * rather than shipped to every visitor (docs/plans/active/NGRX-MIGRATION-PLAN.md §9, wave N-split).
+ * rather than shipped to every visitor (docs/plans/done/NGRX-MIGRATION-PLAN.md §9, wave N-split).
  *
  * **Two routes** (docs/plans/done/NAV-IA-REDESIGN-PLAN.md §2.5 F12 — "the cockpit is not addressable"):
  * `''` (i.e. `/fly`) is the drone picker (`DronePickerPage`), `':assetId'` (`/fly/:assetId`) is the

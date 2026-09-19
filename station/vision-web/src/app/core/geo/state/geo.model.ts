@@ -2,7 +2,7 @@ import type { AssetScopedTransport } from '../../live/live-fallback-logic';
 import type { CorrectionResponse } from '../../api/models';
 
 /**
- * One `GeoFacade` host's own session (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N7, replacing
+ * One `GeoFacade` host's own session (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N7, replacing
  * `GeoStore`) — keyed by a synthetic `hostId` in {@link GeoState.byHostId}, exactly `WeatherState`'s
  * own `byHostId` posture (`core/weather/state/weather.model.ts`): today only `CockpitPage` provides
  * `GeoFacade`, but keying by a per-instance `hostId` rather than by `assetId` means two independent

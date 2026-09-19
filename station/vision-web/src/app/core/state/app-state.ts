@@ -26,7 +26,7 @@ import { systemStatusFeature } from '../system-status/state/system-status.reduce
 import { hydrationMetaReducer } from './hydration';
 
 /**
- * Every **root** state slice, registered once (docs/plans/active/NGRX-MIGRATION-PLAN.md §2, and §9
+ * Every **root** state slice, registered once (docs/plans/done/NGRX-MIGRATION-PLAN.md §2, and §9
  * for wave N-split). "Root" means reachable before any lazy route loads: `app.ts` itself, the five
  * always-on shell components (`app-sidebar`/`notification-bell`/`identity-chip` included), and every
  * `providedIn: 'root'` service or guard. Those **7** slices — `theme`, `sidebar`, `overlay`,

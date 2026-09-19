@@ -10,7 +10,7 @@ import { provideOnboardingState } from './state/onboarding.providers';
  *
  * `OnboardingWizardFacade` (provided by `OnboardingPage`) injects `DiscoveryInboxFacade`, so the
  * `discoveryInbox` slice is registered here rather than in `core/state/app-state.ts` — wave N-split,
- * docs/plans/active/NGRX-MIGRATION-PLAN.md §9. `/assets` registers the identical slice on its own
+ * docs/plans/done/NGRX-MIGRATION-PLAN.md §9. `/assets` registers the identical slice on its own
  * route; see the facade's doc comment for what stops being shared between the two.
  *
  * `provideOnboardingState()` (wave N8b) registers the wizard's own `onboardingWizard` slice + effects

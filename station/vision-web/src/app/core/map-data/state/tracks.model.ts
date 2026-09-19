@@ -3,7 +3,7 @@ import type { ProjectedTrackResponse } from '../../api/models';
 import { trackKey } from '../../camera-geo/camera-geo-logic';
 
 /**
- * `@ngrx/entity` for `ProjectedTrackResponse` (docs/plans/active/NGRX-MIGRATION-PLAN.md §3 rule 4 —
+ * `@ngrx/entity` for `ProjectedTrackResponse` (docs/plans/done/NGRX-MIGRATION-PLAN.md §3 rule 4 —
  * mandatory for this slice). `selectId` reuses `trackKey`, the same `(assetId, trackId)` composite
  * identity `camera-geo-logic.ts#applyTrackEvent`/`trackChipLabel` already key by — never the bare
  * `trackId`, which is only unique per asset, not across the whole fleet.

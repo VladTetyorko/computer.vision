@@ -7,7 +7,7 @@ import { tracksFeature } from './tracks.reducer';
 
 /**
  * The `tracks` slice + its effects, registered by the routes that use it instead of at the root
- * injector (docs/plans/active/NGRX-MIGRATION-PLAN.md §9, waves N-split and N4). Consumed by `assets/:assetId` alone — `AssetDetailFacade` is its only injector.
+ * injector (docs/plans/done/NGRX-MIGRATION-PLAN.md §9, waves N-split and N4). Consumed by `assets/:assetId` alone — `AssetDetailFacade` is its only injector.
  *
  * Its facade is `@Injectable()` and listed in `AssetDetailPage`'s own `providers:`, which is what makes
  * the slice eligible to live here: facade and slice share one lifetime, so neither outlives the

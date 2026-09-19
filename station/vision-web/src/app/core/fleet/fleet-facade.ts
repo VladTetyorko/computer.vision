@@ -25,7 +25,7 @@ import { FleetApiActions, FleetPageActions } from './state/fleet.actions';
 import { fleetFeature } from './state/fleet.reducer';
 
 /**
- * `FleetStore`'s read/dispatch boundary (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N4b).
+ * `FleetStore`'s read/dispatch boundary (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N4b).
  * `providedIn: 'root'`, exactly like the store it replaces — devices/streams are shared app-wide (the
  * Wall, the Devices tab and a Live view must never disagree), and this facade is injected directly
  * by `app.ts` plus `shared/ui/app-sidebar/**`/`notification-bell.ts`/`events-rail.ts`, all reachable

@@ -8,7 +8,7 @@ import { MarksApiActions, MarksPageActions } from './state/marks.actions';
 import { marksFeature } from './state/marks.reducer';
 
 /**
- * `MarksStore`'s read/dispatch boundary (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N6).
+ * `MarksStore`'s read/dispatch boundary (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N6).
  * `providedIn: 'root'`, exactly like the store it replaces — the marks list and palette are shared
  * app-wide (Fly, Command and every other map host see the same pins), only the interaction flags
  * (`armed`/`draft`) reset per genuine page change (`marks.reducer.ts#routeChanged`).

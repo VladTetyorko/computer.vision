@@ -66,7 +66,7 @@ function connectWithRetry(gateway: LiveGateway, store: Store): Observable<Action
 }
 
 /**
- * The connection lifecycle (docs/plans/active/NGRX-MIGRATION-PLAN.md §8) — every `LiveGateway` event
+ * The connection lifecycle (docs/plans/done/NGRX-MIGRATION-PLAN.md §8) — every `LiveGateway` event
  * translated to a plain action. `switchMap` over the merged trigger stream is what gives
  * `reconnect()`/`stop()` their original "teardown, then maybe reopen" behaviour for free: a fresh
  * trigger unsubscribes whatever attempt (or pending retry timer) was previously running, which is

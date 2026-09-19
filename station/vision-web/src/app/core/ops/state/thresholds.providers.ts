@@ -7,7 +7,7 @@ import { thresholdsFeature } from './thresholds.reducer';
 
 /**
  * The `thresholds` slice + its effects, registered by the route that uses it instead of at the root
- * injector (docs/plans/active/NGRX-MIGRATION-PLAN.md §9, wave N-split). Consumed by `fly` alone — `FlyHud`/`FlyOsd`, both children of `CockpitPage`.
+ * injector (docs/plans/done/NGRX-MIGRATION-PLAN.md §9, wave N-split). Consumed by `fly` alone — `FlyHud`/`FlyOsd`, both children of `CockpitPage`.
  *
  * Its facade (`core/ops/thresholds-facade.ts`) is `@Injectable()` and listed in `CockpitPage`’s own `providers:` — that is
  * what makes this slice eligible to live here rather than in `core/state/app-state.ts`: facade and

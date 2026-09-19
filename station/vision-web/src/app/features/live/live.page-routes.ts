@@ -11,7 +11,7 @@ import { provideOrgState } from '../../core/org/state/org.providers';
 /**
  * The `/live/:deviceId` route — the single-device, video-first watch page (docs/main/CYCLES-PLAN.md
  * §2, §9) — behind `live.routes.ts`'s `loadChildren` boundary; see
- * `features/fly/fly.page-routes.ts` for the rationale (docs/plans/active/NGRX-MIGRATION-PLAN.md §9,
+ * `features/fly/fly.page-routes.ts` for the rationale (docs/plans/done/NGRX-MIGRATION-PLAN.md §9,
  * wave N-split). The `:deviceId` param lives on the **parent** in `live.routes.ts`, so
  * `withComponentInputBinding()` still binds it to `LivePage#deviceId` by name.
  *

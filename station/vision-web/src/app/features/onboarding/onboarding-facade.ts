@@ -127,7 +127,7 @@ const SOURCE_MODE_OPTIONS: readonly SourceModeOption[] = [
 /**
  * `OnboardingPage`'s facade (docs/plans/done/UI-ARCHITECTURE-PLAN.md) — orchestrates
  * `OnboardingWizardFacade`/`SettingsFacade`/`ToastService`. `OnboardingWizardFacade` (formerly
- * `OnboardingStore`, an NgRx-backed facade since docs/plans/active/NGRX-MIGRATION-PLAN.md wave N8b)
+ * `OnboardingStore`, an NgRx-backed facade since docs/plans/done/NGRX-MIGRATION-PLAN.md wave N8b)
  * already owns the wizard's whole step machine/draft state/HTTP orchestration; this facade adds the
  * page-local read-models/commands every step component needs (label maps, per-row summaries, the
  * rail's own items, the waiting room's live intake render, the clipboard/download helpers) — every

@@ -337,7 +337,7 @@ describe('AppSidebar — mobile off-canvas sheet + foot', () => {
 
   /**
    * docs/plans/done/UI-STATE-PLAN.md §1 D1/D3, §2.2: the mobile sheet now shares `OverlayFacade` (an
-   * NgRx slice, docs/plans/active/NGRX-MIGRATION-PLAN.md §8) with the identity menu/notification bell
+   * NgRx slice, docs/plans/done/NGRX-MIGRATION-PLAN.md §8) with the identity menu/notification bell
    * it's mounted alongside, so opening one closes the other — this is the same exclusivity
    * `core/ui/overlay-facade.spec.ts` proves at the facade level, checked here through the real
    * rendered shell (the actual scenario the sheet and the chip share one DOM tree).

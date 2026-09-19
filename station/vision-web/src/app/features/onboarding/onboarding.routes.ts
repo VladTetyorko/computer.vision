@@ -3,7 +3,7 @@ import { orgGuard } from '../../core/org/org-guard';
 
 /**
  * `/add-source`'s own route entry, kept to a **lazy boundary only** (wave N-split,
- * docs/plans/active/NGRX-MIGRATION-PLAN.md §9) — see `features/fly/fly.routes.ts`'s doc comment for
+ * docs/plans/done/NGRX-MIGRATION-PLAN.md §9) — see `features/fly/fly.routes.ts`'s doc comment for
  * why a `providers:` array may not appear in a statically-imported route file.
  *
  * `orgGuard` (`core/org/org-guard.ts`) stays here on the boundary, so a visitor without the

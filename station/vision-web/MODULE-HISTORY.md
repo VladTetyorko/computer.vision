@@ -2439,7 +2439,7 @@ concurrently on `CvProfile*`/profile-as-patch, a disjoint file scope from this w
 
 - **Commit**: `feat(cv-orchestration W9.2): tracks: SSE flip reaches the web store`.
 
-## Status — NGRX-MIGRATION wave N0: the state engine, and two slices to prove it (docs/plans/active/NGRX-MIGRATION-PLAN.md §2/§3, §4 row N0) — 2026-09-18
+## Status — NGRX-MIGRATION wave N0: the state engine, and two slices to prove it (docs/plans/done/NGRX-MIGRATION-PLAN.md §2/§3, §4 row N0) — 2026-09-18
 
 **What the owner asked for and what was actually missing.** The ask was *"move from injections to the
 signals … as a final result a well structured ngrx application, with all the reducers, actions,
@@ -2513,7 +2513,7 @@ gives some of it back, and the next wave to touch budgets should re-measure rath
 
 - **Commit**: `feat(ngrx N0): NgRx foundation + theme/sidebar pilot slices`.
 
-## Status — NGRX-MIGRATION wave N1: the shell's overlay slice, and the DOM half it can't hold (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N1, §8 "Corrections found while briefing N1/N2") — 2026-09-18
+## Status — NGRX-MIGRATION wave N1: the shell's overlay slice, and the DOM half it can't hold (docs/plans/done/NGRX-MIGRATION-PLAN.md §4 row N1, §8 "Corrections found while briefing N1/N2") — 2026-09-18
 
 **Scope, corrected before the code.** The wave table originally read as if a `ui` slice belonged here;
 there is no such thing. `core/ui/ui-store.ts#UiStore` is a deliberately plain, DI-less class
@@ -2615,7 +2615,7 @@ navigation through `ROUTER_NAVIGATED` rather than `Router.events`, not just this
 for N3 (`live`) and any later wave whose store used to inject `Router` directly.
 
 - **Commit**: `feat(ngrx N1): overlay slice — GlobalOverlayStore splits into an NgRx slice + a DOM host registry`.
-## Status — NGRX-MIGRATION wave N2: four hand-rolled stores become slices — settings, org, seat, auth (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N2) — 2026-09-18
+## Status — NGRX-MIGRATION wave N2: four hand-rolled stores become slices — settings, org, seat, auth (docs/plans/done/NGRX-MIGRATION-PLAN.md §4 row N2) — 2026-09-18
 
 **Scope.** Four of the remaining hand-rolled stores became `core/<domain>/state/<domain>.{model,actions,reducer,effects}.ts` slices + a `core/<domain>/<domain>-facade.ts`, registered in `provideAppState()`: `SettingsStore`, `OrgStore`, `SeatStore`, and `AuthStore` — the last, at 276 lines / 6 state keys / ~30 consumer files, the biggest single store this whole migration touches. All four legacy classes and their specs are deleted in this same wave; every real consumer was rewired (`inject(XStore)` → `inject(XFacade)`, import path swap only — nothing else changed at any call site). **This is not the end of the migration.** 26 `*-store.ts` files remain — `live`, `fleet`, `telemetry`, `detections`, the four map-data stores, `map`, `geofence`, `geo`, `events`, `system-events`, `system-status`, `weather`, `ops`, `rc`, `training`, `discovery`, `pairing`, `cv-trace`, plus the three feature-local ones and `ui-store.ts` (which stays, by decision) — waves N3–N8.
 
@@ -2662,7 +2662,7 @@ hand-rolled store the plan named was now a slice (26 remain), it described its b
 error. Also repointed seven doc comments in `return-home-button.ts`/`page-bar.ts` that still named
 `GlobalOverlayStore` methods as if the class existed.
 
-## Status — NGRX-MIGRATION wave N3: the live slice — one SSE connection becomes a full NgRx slice + a `LiveGateway` seam (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N3) — 2026-09-18
+## Status — NGRX-MIGRATION wave N3: the live slice — one SSE connection becomes a full NgRx slice + a `LiveGateway` seam (docs/plans/done/NGRX-MIGRATION-PLAN.md §4 row N3) — 2026-09-18
 
 **Scope.** `core/live/live-store.ts` (735 lines, the app's one `GET /api/live` SSE connection, 25
 real consumer files — 26 counting `core/cv-trace/cv-trace-store.ts`, missed by an initial `grep`
@@ -2785,7 +2785,7 @@ all).
 
 - **Commit** (suggested; this agent does not commit per its task — the orchestrator commits each wave): `feat(ngrx N3): the live slice — SSE connection as an NgRx slice + LiveGateway seam, and an auth.effects.ts eager-injection fix`.
 
-## Status — NGRX-MIGRATION wave N5: telemetry, detections, cv-trace (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N5) — 2026-09-18
+## Status — NGRX-MIGRATION wave N5: telemetry, detections, cv-trace (docs/plans/done/NGRX-MIGRATION-PLAN.md §4 row N5) — 2026-09-18
 
 Three per-asset slices, converted with the idiom N2/N3 already established — `Record` keying rather
 than injector scoping, poll-vs-live gating read through selectors over the `live` slice rather than
@@ -2822,7 +2822,7 @@ than the hand-rolled class it replaces. The earlier expectation that deletions w
 cost back is not holding, and nothing in the remaining waves suggests it will. The initial bundle is
 now **15.83 kB over the 500 kB warning budget** (the 550 kB error budget still keeps builds green);
 that is a decision for the owner at N9, not a number to quietly bump.
-## Status — NGRX-MIGRATION wave N7: the ops slices — events, discovery, pairing, geo, training, rc, weather, thresholds (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N7) — 2026-09-19
+## Status — NGRX-MIGRATION wave N7: the ops slices — events, discovery, pairing, geo, training, rc, weather, thresholds (docs/plans/done/NGRX-MIGRATION-PLAN.md §4 row N7) — 2026-09-19
 
 Eight stores, ~1 420 lines, converted with the idioms N2/N3/N5 established. Three things are worth
 recording beyond the mechanical conversion.
@@ -2879,7 +2879,7 @@ any single wave has cost so far. N4, N6 and N8 will break the build. The choice 
 budget or route-split the app — is the owner's, and it is now due before the next merge rather than
 at N9 as originally scheduled.
 
-## Status — NGRX-MIGRATION wave N6: the map/geofence stores — all seven in one pass (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N6) — 2026-09-19
+## Status — NGRX-MIGRATION wave N6: the map/geofence stores — all seven in one pass (docs/plans/done/NGRX-MIGRATION-PLAN.md §4 row N6) — 2026-09-19
 
 **Scope.** The largest wave by line count (~2,240 lines across 7 hand-rolled classes), built in its
 own worktree (`feat/ngrx-n6-map`, branched from `93af4a4d` — the N3-merged tip) concurrently with N5
@@ -3018,7 +3018,7 @@ Verified on the merged tree: `npx tsc --noEmit` clean on both configs, `npm run 
 budget: `provideAppState()` registers all 26 slices at the root injector, so slices only one lazy
 feature ever reads are shipped to every visitor on first paint. The next commit moves them.
 
-## Status — NGRX-MIGRATION wave N-split: page-scoped slices move off the root injector (docs/plans/active/NGRX-MIGRATION-PLAN.md §9) — 2026-09-19
+## Status — NGRX-MIGRATION wave N-split: page-scoped slices move off the root injector (docs/plans/done/NGRX-MIGRATION-PLAN.md §9) — 2026-09-19
 
 **The build is green again: 587.42 kB → 541.37 kB raw (−46.05 kB), 168.30 → 155.34 kB transfer,
 `ng build --configuration production` exit 0 with 8.63 kB of headroom under the 550 kB error
@@ -3073,7 +3073,7 @@ turns "which slices do I convert" from a guess into arithmetic, and it is the on
 converted four facades rather than all five. Headroom is now 8.63 kB, which N4 and N8 will consume:
 each must land its own split, not measure at the end and discover it is red.
 
-## Status — NGRX-MIGRATION wave N4: the last three root stores, and the split that paid for them (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N4, §9) — 2026-09-19
+## Status — NGRX-MIGRATION wave N4: the last three root stores, and the split that paid for them (docs/plans/done/NGRX-MIGRATION-PLAN.md §4 row N4, §9) — 2026-09-19
 
 Two halves, in this order on purpose. **N4a (`29aca82f`) moved six more facades off the root
 injector *before* a line of N4b was written**; **N4b** then converted `FleetStore` and
@@ -3152,7 +3152,7 @@ correctly for a user-initiated refresh — just not for a silent background one.
 Every mutation effect keeps `FleetStore#run()`'s original "always refetch after a write" contract —
 a full `listDevices()`/`listStreams()` reconcile on success, never a targeted entity upsert.
 
-## Status — NGRX-MIGRATION wave N8: the last two hand-rolled stores, and the first wave that cost nothing (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N8, §9) — 2026-09-19
+## Status — NGRX-MIGRATION wave N8: the last two hand-rolled stores, and the first wave that cost nothing (docs/plans/done/NGRX-MIGRATION-PLAN.md §4 row N8, §9) — 2026-09-19
 
 Two halves again, but for a different reason than N4's: these were simply very different jobs.
 **N8a** converted `GroundingStore` — 86 lines, one fetch — and assessed `InventoryViewStore`.

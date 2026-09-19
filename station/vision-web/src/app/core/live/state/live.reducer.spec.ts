@@ -171,7 +171,7 @@ describe('live reducer', () => {
     expect(initialLiveState.liveEvents).toEqual([]);
   });
 
-  describe('connection commands (docs/plans/active/NGRX-MIGRATION-PLAN.md §8 — synchronous, ahead of any gateway event)', () => {
+  describe('connection commands (docs/plans/done/NGRX-MIGRATION-PLAN.md §8 — synchronous, ahead of any gateway event)', () => {
     it('Reconnect Requested resets to connecting and drops the old connectionId', () => {
       const open = { ...initialLiveState, connectionState: 'open' as const, connectionId: 'conn-1' };
       const next = reduce(open, LivePageActions.reconnectRequested());

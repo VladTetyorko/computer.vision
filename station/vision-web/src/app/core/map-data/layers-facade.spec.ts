@@ -12,7 +12,7 @@ import { LayersFacade } from './layers-facade';
 
 /**
  * `LayersFacade` end to end — replaces `layers-store.spec.ts` case for case
- * (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N6). The live gate is driven by dispatching real
+ * (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N6). The live gate is driven by dispatching real
  * `LiveSocketActions` against the actually-registered `live` slice (§9 — effects read `live` only
  * through its own selectors), never by stubbing `LiveFacade`.
  */

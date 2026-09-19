@@ -16,7 +16,7 @@ import { DrawingsFacade } from './drawings-facade';
 
 /**
  * `DrawingsFacade` end to end — replaces `drawings-store.spec.ts` case for case
- * (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N6), plus new coverage for the CRUD methods and
+ * (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N6), plus new coverage for the CRUD methods and
  * `canEditSelected`/`targetLayerId`, which the old store-level spec never exercised (only
  * `marks-store.spec.ts` did, for its own sibling methods). Live gate driven by dispatching real
  * `LiveSocketActions`; the layer cross-slice reads by seeding the actually-registered `layers` slice.

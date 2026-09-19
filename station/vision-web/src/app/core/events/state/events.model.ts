@@ -1,7 +1,7 @@
 import type { DetectionEvent } from '../../api/models';
 
 /**
- * Replaces `EventsStore`'s three private fields (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N7) —
+ * Replaces `EventsStore`'s three private fields (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N7) —
  * `eventsSignal`/`sinceMs`/`activeConsumers`. **Not** `seenIds`: that bookkeeping only ever gates the
  * (impure — reads `Notification.permission`/`document.hidden`) notify decision, never the merged
  * list itself, so it is kept out of serializable state entirely and lives instead as a closure-local

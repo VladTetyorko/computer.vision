@@ -10,7 +10,7 @@ import { weatherFeature } from './state/weather.reducer';
 let nextHostSequence = 0;
 
 /**
- * Replaces `WeatherStore` (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N7) — Open-Meteo wind/
+ * Replaces `WeatherStore` (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N7) — Open-Meteo wind/
  * precipitation for the go/no-go chip. `@Injectable()`, **not** `providedIn: 'root'` — unchanged
  * from the old store: `CommandPage`/`FlyPage` (`cockpit.ts`) each list this in their own `providers`,
  * so a fresh instance starts/stops with the route, exactly like `SeatFacade`, and

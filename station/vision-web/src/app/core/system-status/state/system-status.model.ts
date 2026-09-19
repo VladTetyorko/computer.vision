@@ -1,7 +1,7 @@
 import type { SystemStatus } from '../../api/models';
 
 /**
- * `SystemStatusStore`'s own state shape, ported wholesale (docs/plans/active/NGRX-MIGRATION-PLAN.md
+ * `SystemStatusStore`'s own state shape, ported wholesale (docs/plans/done/NGRX-MIGRATION-PLAN.md
  * wave N4b). `status` is `undefined` only before the first fetch ever succeeds; a later failure
  * leaves it exactly as it was and only sets {@link SystemStatusState.error} — see
  * `system-status.reducer.ts`'s own doc comment for the "stale-but-present, never wiped" contract

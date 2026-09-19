@@ -7,7 +7,7 @@ import { provideAppState } from '../state/app-state';
 import { SystemStatusFacade } from './system-status-facade';
 
 /**
- * `SystemStatusFacade`'s own read/dispatch boundary spec (docs/plans/active/NGRX-MIGRATION-PLAN.md
+ * `SystemStatusFacade`'s own read/dispatch boundary spec (docs/plans/done/NGRX-MIGRATION-PLAN.md
  * wave N4b) — `provideAppState()` registers the real `systemStatus` slice + its effects (root, see
  * `core/state/app-state.ts`'s own doc comment), `VisionApi`/`PollScheduler` stubbed. The slice's own
  * folding/gating logic already has full coverage in `state/system-status.reducer.spec.ts`/

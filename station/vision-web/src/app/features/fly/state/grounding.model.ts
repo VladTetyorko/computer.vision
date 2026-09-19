@@ -2,7 +2,7 @@ import type { ReadinessReport } from '../../../core/api/models';
 
 /**
  * One asset's custody-grounding state for the Fly cockpit (docs/plans/active/ASSET-FLOWS-PLAN.md §2
- * "S1 gate semantics", wave WB1; NgRx since docs/plans/active/NGRX-MIGRATION-PLAN.md wave N8,
+ * "S1 gate semantics", wave WB1; NgRx since docs/plans/done/NGRX-MIGRATION-PLAN.md wave N8,
  * replacing `GroundingStore`).
  *
  * **Deliberately not keyed by host**, unlike `core/geo/state/geo.model.ts`'s own `byHostId` record.

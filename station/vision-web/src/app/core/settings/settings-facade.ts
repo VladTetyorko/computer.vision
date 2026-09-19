@@ -16,7 +16,7 @@ export type { MapLayerId };
  * `WallFacade.boxesMode = this.settings.declutterLevel`) need no redesign, per this wave's "one-line
  * consumer swap" mandate. The getter delegates to the real `Signal` from `store.selectSignal(...)`,
  * so reads stay fully reactive; only the identity is a facade-owned wrapper, never the `Store` itself
- * (docs/plans/active/NGRX-MIGRATION-PLAN.md §3 rule 8's actual concern).
+ * (docs/plans/done/NGRX-MIGRATION-PLAN.md §3 rule 8's actual concern).
  */
 function dispatchingSignal<T>(read: () => T, write: (value: T) => void): WritableSignal<T> {
   const sig = ((): T => read()) as unknown as WritableSignal<T>;
@@ -27,7 +27,7 @@ function dispatchingSignal<T>(read: () => T, write: (value: T) => void): Writabl
 }
 
 /**
- * The settings slice's read/dispatch boundary (docs/plans/active/NGRX-MIGRATION-PLAN.md §2). Every
+ * The settings slice's read/dispatch boundary (docs/plans/done/NGRX-MIGRATION-PLAN.md §2). Every
  * field keeps the exact name and the exact `WritableSignal`-shaped call surface the old
  * `SettingsStore` exposed — see {@link dispatchingSignal}.
  */

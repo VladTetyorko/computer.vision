@@ -17,7 +17,7 @@ import { provideDiscoveryState } from '../../core/discovery/state/discovery.prov
  *
  * The `discoveryInbox` slice is registered here rather than in `core/state/app-state.ts` because
  * `<vision-found-devices>` (this page's own child) reads it through `DiscoveryInboxFacade`, which
- * `InventoryPage` now provides — wave N-split, docs/plans/active/NGRX-MIGRATION-PLAN.md §9.
+ * `InventoryPage` now provides — wave N-split, docs/plans/done/NGRX-MIGRATION-PLAN.md §9.
  * `/add-source` registers the identical slice on its own route.
  */
 export const INVENTORY_PAGE_ROUTES: Routes = [

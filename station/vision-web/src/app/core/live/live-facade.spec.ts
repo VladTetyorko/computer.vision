@@ -35,7 +35,7 @@ function detectionResult(streamId: string): DetectionResult {
  * fakes the gateway itself. `live.reducer.spec.ts`/`live.effects.spec.ts` already cover every
  * branch and timing edge directly; this file's job is only the facade's own wiring: signal
  * projection, per-asset `Signal` identity caching, and that every dispatch method reaches the
- * right action (docs/plans/active/NGRX-MIGRATION-PLAN.md §8).
+ * right action (docs/plans/done/NGRX-MIGRATION-PLAN.md §8).
  */
 describe('LiveFacade', () => {
   it('degrades to closed shortly after construction — no EventSource under jsdom', async () => {

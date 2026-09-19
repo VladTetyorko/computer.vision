@@ -2,7 +2,7 @@ import type { AssetScopedTransport } from '../../live/live-fallback-logic';
 import type { LinkGroupResponse } from '../../api/models';
 
 /**
- * One `LinksFacade` host's own session (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N7, replacing
+ * One `LinksFacade` host's own session (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N7, replacing
  * `LinksStore`) — keyed by a synthetic `hostId` in {@link LinksState.byHostId}, the same posture as
  * `WeatherState`/`GeoState`.
  *

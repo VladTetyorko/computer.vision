@@ -8,7 +8,7 @@ import { LayersApiActions, LayersPageActions } from './state/layers.actions';
 import { layersFeature } from './state/layers.reducer';
 
 /**
- * `LayersStore`'s read/dispatch boundary (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N6).
+ * `LayersStore`'s read/dispatch boundary (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N6).
  * `providedIn: 'root'`, exactly like the store it replaces — see that class's own doc comment for
  * why every map host must share the one instance rather than standing up its own poller.
  *

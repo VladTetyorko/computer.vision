@@ -7,7 +7,7 @@ import { layersFeature } from './layers.reducer';
 
 /**
  * The `layers` slice + its effects, registered by the routes that use it instead of at the root
- * injector (docs/plans/active/NGRX-MIGRATION-PLAN.md §9, waves N-split and N4). Consumed by the five map surfaces — `fly`, `command`, `crew`, `live` and `assets/:assetId`.
+ * injector (docs/plans/done/NGRX-MIGRATION-PLAN.md §9, waves N-split and N4). Consumed by the five map surfaces — `fly`, `command`, `crew`, `live` and `assets/:assetId`.
  *
  * Its facade is `@Injectable()` and listed in each of those pages' own `providers:`, which is what
  * makes the slice eligible to live here: facade and slice share one lifetime, so neither outlives

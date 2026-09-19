@@ -6,7 +6,7 @@ import { provideControlProfileState } from '../../core/rc/state/control-profile.
  * The controller setup page (docs/plans/active/CONTROLLER-UX-PLAN.md), behind
  * `controller.routes.ts`'s `loadChildren` boundary so that the `controlProfile` slice below is
  * fetched on first visit to `/manage/controller` rather than shipped to every visitor
- * (docs/plans/active/NGRX-MIGRATION-PLAN.md §9, wave N-split).
+ * (docs/plans/done/NGRX-MIGRATION-PLAN.md §9, wave N-split).
  *
  * The slice lives here, not in `core/state/app-state.ts`, because `ControlProfileFacade` became
  * page-provided in the same wave — `ControllerSetupPage` lists it in its own `providers:`, so facade

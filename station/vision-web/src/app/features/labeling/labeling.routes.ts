@@ -3,7 +3,7 @@ import { orgGuard } from '../../core/org/org-guard';
 
 /**
  * The `/manage/training` dataset routes, kept to a **lazy boundary only** (wave N-split,
- * docs/plans/active/NGRX-MIGRATION-PLAN.md §9) — see `features/fly/fly.routes.ts`'s doc comment for
+ * docs/plans/done/NGRX-MIGRATION-PLAN.md §9) — see `features/fly/fly.routes.ts`'s doc comment for
  * why a `providers:` array may not appear in a statically-imported route file.
  *
  * **`orgGuard` stays here, on the boundary**, rather than moving to each child: a visitor without

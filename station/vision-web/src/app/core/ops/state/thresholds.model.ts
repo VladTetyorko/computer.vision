@@ -5,7 +5,7 @@ import { DEFAULT_BATTERY_THRESHOLDS, DEFAULT_RC_THRESHOLDS } from '../thresholds
  * The one served severity source for battery urgency (S3, docs/plans/active/ASSET-FLOWS-PLAN.md §2
  * D6) plus the neutral-stick arm gate's tolerance (docs/plans/active/FLY-CONTROL-UX-PLAN.md §2) —
  * `GET /api/ops/thresholds` read once per SPA session; migrated off `ThresholdsStore` per
- * docs/plans/active/NGRX-MIGRATION-PLAN.md wave N7 (the plan's own "fetch-once, no poller" trap:
+ * docs/plans/done/NGRX-MIGRATION-PLAN.md wave N7 (the plan's own "fetch-once, no poller" trap:
  * `vision.ops.battery.*`/`vision.ops.rc.*` are process-level config, not telemetry, so one fetch per
  * session is enough — see `thresholds.effects.ts`).
  *

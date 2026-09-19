@@ -7,7 +7,7 @@ import { GeofenceApiActions, GeofencePageActions } from './state/geofence.action
 import { geofenceFeature } from './state/geofence.reducer';
 
 /**
- * `GeofenceStore`'s read/dispatch boundary (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N6).
+ * `GeofenceStore`'s read/dispatch boundary (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N6).
  * `providedIn: 'root'`, exactly like the store it replaces — zones back both Command's Zones panel
  * and Fly's read-only layer, and both should see the same list without standing up their own poller.
  *

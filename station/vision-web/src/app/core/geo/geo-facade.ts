@@ -10,7 +10,7 @@ import { geoFeature } from './state/geo.reducer';
 let nextHostSequence = 0;
 
 /**
- * Replaces `GeoStore` (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N7) — one asset's latest
+ * Replaces `GeoStore` (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N7) — one asset's latest
  * visual-geolocation correction (docs/plans/done/VISUAL-GEO-V2-PLAN.md §3.3/§3.4), the cockpit
  * divergence chip + detail popover's and `TacticalMap`'s corrected-track layer's own source.
  * `@Injectable()`, **not** `providedIn: 'root'` — unchanged from the old store: `CockpitPage` lists

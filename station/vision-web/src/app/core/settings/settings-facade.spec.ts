@@ -8,7 +8,7 @@ const STORAGE_KEY = 'vision.settings.v1';
 
 /**
  * The settings slice end to end — facade → action → reducer → effect → one `localStorage` blob.
- * Replaces `SettingsStore`'s own spec case for case (docs/plans/active/NGRX-MIGRATION-PLAN.md N2).
+ * Replaces `SettingsStore`'s own spec case for case (docs/plans/done/NGRX-MIGRATION-PLAN.md N2).
  */
 describe('SettingsFacade', () => {
   beforeEach(() => {

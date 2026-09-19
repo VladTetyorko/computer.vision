@@ -1,7 +1,7 @@
 import type { AssetSummary, TelemetrySample } from '../../api/models';
 
 /**
- * One streaming asset's telemetry bookkeeping (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N6,
+ * One streaming asset's telemetry bookkeeping (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N6,
  * replacing `map-store.ts#AssetTracker`). No `generation` counter — `map.effects.ts#trackerLifecycle$`
  * uses RxJS `groupBy(assetId)` + `switchMap` cancellation instead (see that file's own doc comment),
  * the same substitution `route.effects.ts#show$` already established for `RouteStore`'s old counter.

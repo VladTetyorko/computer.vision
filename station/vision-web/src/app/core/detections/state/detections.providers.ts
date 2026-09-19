@@ -7,7 +7,7 @@ import { detectionsFeature } from './detections.reducer';
 
 /**
  * The `detections` slice + its effects, registered by the route that uses it instead of at the root
- * injector (docs/plans/active/NGRX-MIGRATION-PLAN.md §9, wave N-split). Consumed by `fly`, `crew`, `live` and `wall`.
+ * injector (docs/plans/done/NGRX-MIGRATION-PLAN.md §9, wave N-split). Consumed by `fly`, `crew`, `live` and `wall`.
  *
  * Exported as a function for the same reason `core/state/app-state.ts#provideAppState()` is: the
  * route and every spec that needs real `detections` state register the **identical** pair, so a test can

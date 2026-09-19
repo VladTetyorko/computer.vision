@@ -13,7 +13,7 @@ import { DiscoveryApiActions, DiscoveryPageActions } from './state/discovery.act
 import { discoveryInboxFeature } from './state/discovery.reducer';
 
 /**
- * Replaces `DiscoveryInboxStore` (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N7), keeping its
+ * Replaces `DiscoveryInboxStore` (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N7), keeping its
  * `activate()`/`release()` ref-counting: several mounted consumers share one poll, and the timer
  * stops when the last one releases. See `discovery.effects.ts#poll$`'s own doc comment for how the
  * ref-count (state) and the live-vs-poll timer (effect) divide the old class's `applyTransport`

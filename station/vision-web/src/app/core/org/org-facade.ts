@@ -13,7 +13,7 @@ import { OrgApiActions, OrgPageActions } from './state/org.actions';
 import { orgFeature } from './state/org.reducer';
 
 /**
- * The org slice's read/dispatch boundary (docs/plans/active/NGRX-MIGRATION-PLAN.md §2). Every
+ * The org slice's read/dispatch boundary (docs/plans/done/NGRX-MIGRATION-PLAN.md §2). Every
  * mutation keeps `OrgStore`'s exact `Promise<T | null>` (or `Promise<boolean>`) return contract via
  * {@link dispatchAndAwait} — `OrgSettingsFacade` (unmigrated, out of this wave's scope) awaits each
  * one and branches on the result, so the value must still arrive, not just an event.

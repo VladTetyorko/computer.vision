@@ -6,7 +6,7 @@ import { SystemStatusApiActions, SystemStatusPageActions } from './state/system-
 import { systemStatusFeature } from './state/system-status.reducer';
 
 /**
- * `SystemStatusStore`'s read/dispatch boundary (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N4b).
+ * `SystemStatusStore`'s read/dispatch boundary (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N4b).
  * `providedIn: 'root'` and polling unconditionally from the moment `system-status.effects.ts#gate$`
  * is wired up at boot — **not** gated behind `/manage/system` being open — because
  * `shared/ui/app-sidebar/app-sidebar.ts`'s shell rollup dot needs {@link overall} on every page. The

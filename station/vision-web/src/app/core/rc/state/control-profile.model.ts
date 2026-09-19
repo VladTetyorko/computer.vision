@@ -3,7 +3,7 @@ import type { ControlCatalog, ControlProfile } from '../../api/models';
 /**
  * The operator's controller layouts and the catalogue they're built from
  * (docs/plans/active/CONTROLLER-SETUP-CONTEXT.md decisions C6/C8) — migrated off
- * `ControlProfileStore` per docs/plans/active/NGRX-MIGRATION-PLAN.md wave N7.
+ * `ControlProfileStore` per docs/plans/done/NGRX-MIGRATION-PLAN.md wave N7.
  *
  * Two consumers, one load: `/manage/controller`'s setup page edits these layouts, the Fly cockpit's
  * Controller drawer reads the active one so a bound switch can fire without engaging a session

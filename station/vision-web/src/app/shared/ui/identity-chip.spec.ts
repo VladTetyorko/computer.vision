@@ -100,7 +100,7 @@ describe('IdentityChip — profile menu', () => {
 
 /**
  * The dropdown's open state (docs/plans/done/UI-STATE-PLAN.md §1/§2.2) — moved off native `<details>` onto
- * `OverlayFacade`'s `'identity-menu'` id (an NgRx slice, docs/plans/active/NGRX-MIGRATION-PLAN.md §8).
+ * `OverlayFacade`'s `'identity-menu'` id (an NgRx slice, docs/plans/done/NGRX-MIGRATION-PLAN.md §8).
  * `OverlayFacade` itself is left real (`provideAppState()`, no HTTP deps) — its own
  * exclusivity/Escape/outside-click/close-on-navigation behavior is covered by
  * `core/ui/overlay-facade.spec.ts`; these tests only check that this component wires into it correctly.

@@ -4,7 +4,7 @@ import type { MapMark } from '../../api/models';
 import { DEFAULT_MARK_PALETTE, type MarkDraft, type MarkPalette } from '../mark-logic';
 
 /**
- * `@ngrx/entity` for `MapMark` (docs/plans/active/NGRX-MIGRATION-PLAN.md §3 rule 4 — mandatory).
+ * `@ngrx/entity` for `MapMark` (docs/plans/done/NGRX-MIGRATION-PLAN.md §3 rule 4 — mandatory).
  *
  * **No `sortComparer`**: the list is newest-first by *arrival*, not by any field
  * (`map-event-logic.ts#upsertById`'s own doc comment: "prepends a genuinely new one"), which a

@@ -56,7 +56,7 @@ import type { AssetSummary } from '../api/models';
  * is pinned instead by `features/fleet/summary-refresh-logic.spec.ts` and stated as arithmetic in
  * &sect;9 of the plan, labelled as such.
  *
- * <h2>docs/plans/active/NGRX-MIGRATION-PLAN.md wave N6</h2>
+ * <h2>docs/plans/done/NGRX-MIGRATION-PLAN.md wave N6</h2>
  * Every root store this file drives moved to NgRx this wave (`MarksStore`→`MarksFacade`,
  * `LayersStore`→`LayersFacade`, `DrawingsStore`→`DrawingsFacade`, `GeofenceStore`→`GeofenceFacade`,
  * `FleetMapStore`→`MapFacade`; `TracksStore`→`TracksFacade` is imported nowhere here, unchanged from

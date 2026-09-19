@@ -10,7 +10,7 @@ import { AuthApiActions, AuthPageActions } from './state/auth.actions';
 import { authFeature } from './state/auth.reducer';
 
 /**
- * The app's one source of truth for "who is logged in" (docs/plans/active/NGRX-MIGRATION-PLAN.md
+ * The app's one source of truth for "who is logged in" (docs/plans/done/NGRX-MIGRATION-PLAN.md
  * wave N2, replacing the old `AuthStore`) — `providedIn: 'root'`, one instance app-wide,
  * self-initializing: the constructor dispatches `AuthPageActions.bootRequested()` itself rather than
  * needing `app.ts` or an `APP_INITIALIZER` to remember to call it.

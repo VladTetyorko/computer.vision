@@ -77,7 +77,7 @@ This doc is long because the SPA's surface is. Jump, don't read front-to-back.
 
 **NgRx 21.1.1** (`store`, `effects`, `entity`, `router-store`, `operators`; `store-devtools` in dev)
 is the app's state engine. The migration off the 32 hand-rolled store classes runs wave by wave —
-docs/plans/active/NGRX-MIGRATION-PLAN.md is the spec, its §9 the status. **Both shapes are live right
+docs/plans/done/NGRX-MIGRATION-PLAN.md is the spec, its §9 the status. **Both shapes are live right
 now**: the table below still lists the hand-rolled stores that have not moved yet.
 
 | Piece | Where | Rule |
@@ -187,7 +187,7 @@ writable `store.someSignal.set(value)` directly, which an NgRx facade's read-onl
 never expose (§3 rule 8), so each became a `setXxx(value)` dispatch method on the facade instead. Cost
 folded into the measurement below (route-scoped, so negligible — see that paragraph's own note).
 
-**`overlay` is the first slice with real DOM behaviour** (docs/plans/active/NGRX-MIGRATION-PLAN.md
+**`overlay` is the first slice with real DOM behaviour** (docs/plans/done/NGRX-MIGRATION-PLAN.md
 §8), so it splits across more than one file: `core/ui/state/overlay.{model,actions,reducer,effects}.ts`
 hold only the serializable half — the open `GlobalOverlayId | null` — while
 `core/ui/overlay-host-registry.ts#OverlayHostRegistry` (a plain `providedIn: 'root'` class, **not** a
@@ -633,7 +633,7 @@ Redirects: `/crew` → `/wall` (wave W3 — no crew-specific landing/picker page
 
 - Standalone components, `OnPush`, signals for all state, **zoneless** (no `zone.js`).
 - **Three files per component** — `.ts`/`.html`/`.css`. Never inline `template`/`styles`; split any component you touch.
-- **Component → Facade → Store → Service.** Every *routed* feature has a `<feature>-facade.ts` (`@Injectable()`, in the page's own `providers`) owning all injection, `computed()` read-models (incl. every `canX`/disabled predicate) and HTTP commands. The page injects **only its facade** (+ host-owned `UiStore`) — enforced by `core/ui/architecture.spec.ts`, which globs `features/**` only. Non-routed presentational children may inject a shared store directly. "Store" here means an **NgRx slice** for anything already migrated (docs/plans/active/NGRX-MIGRATION-PLAN.md) and a hand-rolled store class for the rest; no component injects NgRx's `Store`, only a `*-facade.ts` or a `*.effects.ts` may — the same spec's NgRx layering guard, which additionally asserts reducers stay pure (no `inject`/clock/random/`localStorage`/DOM) and that every `*.reducer.ts` has a sibling `*.actions.ts` and spec.
+- **Component → Facade → Store → Service.** Every *routed* feature has a `<feature>-facade.ts` (`@Injectable()`, in the page's own `providers`) owning all injection, `computed()` read-models (incl. every `canX`/disabled predicate) and HTTP commands. The page injects **only its facade** (+ host-owned `UiStore`) — enforced by `core/ui/architecture.spec.ts`, which globs `features/**` only. Non-routed presentational children may inject a shared store directly. "Store" here means an **NgRx slice** for anything already migrated (docs/plans/done/NGRX-MIGRATION-PLAN.md) and a hand-rolled store class for the rest; no component injects NgRx's `Store`, only a `*-facade.ts` or a `*.effects.ts` may — the same spec's NgRx layering guard, which additionally asserts reducers stay pure (no `inject`/clock/random/`localStorage`/DOM) and that every `*.reducer.ts` has a sibling `*.actions.ts` and spec.
 - Mutually-exclusive overlays go through `UiStore`, never independent booleans.
 - HTTP errors are reported **once**, by the layer that knows what the user attempted — never an interceptor: a hand-rolled store's own toast-wrapper method (the old `FleetStore.run()`'s shape, before wave N4b), one `notify$`/`notifyFailure$`-style effect per slice mapping `*Failure` in a migrated one. Background polls degrade silently (no toast).
 - **Pure logic in `*-logic.ts`, unit-tested; components are not.** No *page* facade has a spec — those are covered through their logic + `tsc` + the architecture guard. The exception is a **core facade over an NgRx slice** (`core/shell/theme-facade.spec.ts`/`sidebar-facade.spec.ts`, `core/settings/settings-facade.spec.ts`, `core/org/org-facade.spec.ts`, `core/seat/seat-facade.spec.ts`), which is specced end to end over the real `provideAppState()` — facade → action → reducer → effect → `localStorage`/DOM/HTTP — because that is where the replaced store's behaviour now lives and a `provideMockStore` version would assert nothing real; each slice's `*.reducer.spec.ts`/`*.effects.spec.ts` cover the RxJS-timing-specific cases (cadence, `groupBy` isolation, `distinctUntilChanged` dedup) directly, so the facade spec itself stays a consumer-level read of the observable behaviour. Component `TestBed` specs only for wiring bugs a pure spec cannot reach.

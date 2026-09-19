@@ -7,7 +7,7 @@ import { orgFeature } from './org.reducer';
 
 /**
  * The `org` slice + its effects, registered by the routes that use it instead of at the root
- * injector (docs/plans/active/NGRX-MIGRATION-PLAN.md §9, waves N-split and N4). Consumed by the five map surfaces (through `<vision-layer-manager>`) and `manage/roster`.
+ * injector (docs/plans/done/NGRX-MIGRATION-PLAN.md §9, waves N-split and N4). Consumed by the five map surfaces (through `<vision-layer-manager>`) and `manage/roster`.
  *
  * Its facade is `@Injectable()` and listed in each host page's own `providers:` — the five map pages
  * plus `OrgSettingsPage`, which is not routed itself but embedded in `CrewPage` at `manage/roster`

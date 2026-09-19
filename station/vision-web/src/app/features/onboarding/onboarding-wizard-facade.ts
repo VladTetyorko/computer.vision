@@ -68,7 +68,7 @@ function collisionFrom(response: CandidateCollisionResponse): number | null {
 }
 
 /**
- * Replaces `OnboardingStore` (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N8b) — the wizard's
+ * Replaces `OnboardingStore` (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N8b) — the wizard's
  * read/dispatch boundary over the `onboardingWizard` slice (`state/onboarding.reducer.ts`) plus the
  * two things that stay out of it: `OnboardingPhotoBuffer` (the photo `File`/`Blob`/object-URL) and
  * the discovery-inbox ref-count (`DiscoveryInboxFacade#activate`/`#release` — a facade may inject

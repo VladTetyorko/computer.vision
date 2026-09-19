@@ -4,7 +4,7 @@ import { SidebarPageActions } from './state/sidebar.actions';
 import { sidebarFeature } from './state/sidebar.reducer';
 
 /**
- * The sidebar slice's read/dispatch boundary (docs/plans/active/NGRX-MIGRATION-PLAN.md §2). Signals
+ * The sidebar slice's read/dispatch boundary (docs/plans/done/NGRX-MIGRATION-PLAN.md §2). Signals
  * and methods keep the `SidebarStore` names they replace, so `app.ts` and `AppSidebar` change only
  * the symbol they inject.
  */

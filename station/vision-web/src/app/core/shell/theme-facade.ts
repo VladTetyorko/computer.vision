@@ -5,7 +5,7 @@ import type { Theme } from './state/theme.model';
 import { themeFeature } from './state/theme.reducer';
 
 /**
- * The theme slice's read/dispatch boundary (docs/plans/active/NGRX-MIGRATION-PLAN.md §2) — the only
+ * The theme slice's read/dispatch boundary (docs/plans/done/NGRX-MIGRATION-PLAN.md §2) — the only
  * type that injects NgRx's `Store` for this slice. Components inject this, never the store: the
  * signal and the two methods are named exactly as the `ThemeStore` they replace, so a consumer's
  * whole change is which symbol it injects.

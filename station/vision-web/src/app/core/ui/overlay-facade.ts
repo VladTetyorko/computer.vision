@@ -7,7 +7,7 @@ import { overlayFeature } from './state/overlay.reducer';
 
 /**
  * The overlay slice's read/dispatch boundary, replacing `GlobalOverlayStore`
- * (docs/plans/active/NGRX-MIGRATION-PLAN.md §8). Signals and methods keep that class's exact names —
+ * (docs/plans/done/NGRX-MIGRATION-PLAN.md §8). Signals and methods keep that class's exact names —
  * `active`, `isOpen`, `open`, `close`, `toggle`, `register` — so every consumer's change is
  * `inject(GlobalOverlayStore)` → `inject(OverlayFacade)` and nothing else.
  *

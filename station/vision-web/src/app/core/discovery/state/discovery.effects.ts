@@ -53,7 +53,7 @@ function pollOnce$(api: VisionApi): Observable<Action> {
 type Phase = 'idle' | 'live' | 'poll';
 
 /**
- * Root-singleton demand gate (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N7's own trap #3/#4) —
+ * Root-singleton demand gate (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N7's own trap #3/#4) —
  * replaces `DiscoveryInboxStore`'s `activate()`/`release()` + reconnect-driven `applyTransport`
  * pair with one derived "phase" stream: `activeConsumers` (this slice's own state, incremented by
  * `DiscoveryPageActions.activated`/`released`) crossed with `core/live`'s own connection state, read

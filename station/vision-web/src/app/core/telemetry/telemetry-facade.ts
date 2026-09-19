@@ -12,7 +12,7 @@ import { telemetryFeature } from './state/telemetry.reducer';
 const CLOCK_TICK_MS = 1_000;
 
 /**
- * The telemetry slice's read/dispatch boundary (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N5,
+ * The telemetry slice's read/dispatch boundary (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N5,
  * replacing `TelemetryStore`). `@Injectable()`, **not** `providedIn: 'root'` — component-provided
  * exactly like the old store (`LivePage`/`WallTile`/`AssetDetailPage`/`CockpitPage`/`CrewPage` list
  * this in their own `providers:` array), so a fresh instance — and, via {@link track}/{@link reset},

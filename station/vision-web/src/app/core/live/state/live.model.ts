@@ -16,14 +16,14 @@ import type {
 } from '../../api/models';
 import type { LiveConnectionState } from '../live-fallback-logic';
 
-/** The six ref-counted per-asset topic families (docs/plans/active/NGRX-MIGRATION-PLAN.md §8) — one
+/** The six ref-counted per-asset topic families (docs/plans/done/NGRX-MIGRATION-PLAN.md §8) — one
  *  fewer than the seven reader accessors `LiveFacade` exposes, because `worldObjectsFor` piggybacks
  *  on the same `tracks:<assetId>` subscription `tracksFor` does (see `live-facade.ts`'s own doc
  *  comment on `worldObjectsFor` for why that one reader has no independent track/untrack pair). */
 export type LiveTopicFamily = 'telemetry' | 'detections' | 'geo' | 'worldObjects' | 'cvTrace' | 'links';
 
 /**
- * The app's one `GET /api/live` connection (docs/plans/active/NGRX-MIGRATION-PLAN.md §8), as plain
+ * The app's one `GET /api/live` connection (docs/plans/done/NGRX-MIGRATION-PLAN.md §8), as plain
  * state — the non-serializable `EventSource` itself lives in `../live-gateway.ts#LiveGateway`
  * instead, exactly like `overlay.model.ts` keeps `HTMLElement` refs out of the `overlay` slice. Every
  * top-level field here mirrors one of the old `LiveStore`'s own signals 1:1 — see that class's

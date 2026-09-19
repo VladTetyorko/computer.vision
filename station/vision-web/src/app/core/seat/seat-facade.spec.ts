@@ -51,7 +51,7 @@ function setup(apiOverrides: Partial<VisionApi> = {}, scheduler = stubScheduler(
 /**
  * The seat slice end to end — facade → action → effect (real HTTP call through a stub `VisionApi`,
  * real polling through a stub `PollScheduler`) → reducer → facade computed signals. Replaces
- * `SeatStore`'s own spec case for case (docs/plans/active/NGRX-MIGRATION-PLAN.md N2); the deeply
+ * `SeatStore`'s own spec case for case (docs/plans/done/NGRX-MIGRATION-PLAN.md N2); the deeply
  * RxJS-timing-specific cases (cadence derivation, `groupBy` per-asset isolation, `distinctUntilChanged`
  * dedup) moved to `state/seat.effects.spec.ts`, since they exercise the effects directly.
  */

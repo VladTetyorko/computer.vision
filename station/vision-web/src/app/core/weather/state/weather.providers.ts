@@ -7,7 +7,7 @@ import { weatherFeature } from './weather.reducer';
 
 /**
  * The `weather` slice + its effects, registered by the route that uses it instead of at the root
- * injector (docs/plans/active/NGRX-MIGRATION-PLAN.md §9, wave N-split). Consumed by `fly` and `command`.
+ * injector (docs/plans/done/NGRX-MIGRATION-PLAN.md §9, wave N-split). Consumed by `fly` and `command`.
  *
  * Exported as a function for the same reason `core/state/app-state.ts#provideAppState()` is: the
  * route and every spec that needs real `weather` state register the **identical** pair, so a test can

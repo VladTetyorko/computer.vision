@@ -26,7 +26,7 @@ export const appConfig: ApplicationConfig = {
     // `sessionInterceptor` (docs/plans/active/AUTH-ROLES-PLAN.md §3.6/§3.7, wave W1) — this app's first
     // `HttpInterceptorFn`; see that file's own doc comment for what it does with a session-death 401.
     provideHttpClient(withFetch(), withInterceptors([sessionInterceptor])),
-    // The store itself, its slices and their effects (docs/plans/active/NGRX-MIGRATION-PLAN.md §2) —
+    // The store itself, its slices and their effects (docs/plans/done/NGRX-MIGRATION-PLAN.md §2) —
     // shared verbatim with the specs, see `core/state/app-state.ts`.
     provideAppState(),
     // The minimal serializer, not the full one: a full `RouterStateSnapshot` carries component

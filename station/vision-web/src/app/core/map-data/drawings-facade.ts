@@ -10,7 +10,7 @@ import { DrawingsApiActions, DrawingsPageActions } from './state/drawings.action
 import { drawingsFeature } from './state/drawings.reducer';
 
 /**
- * `DrawingsStore`'s read/dispatch boundary (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N6).
+ * `DrawingsStore`'s read/dispatch boundary (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N6).
  * `providedIn: 'root'`, exactly like the store it replaces — drawing *data* is shared app-wide;
  * only `mode` resets per genuine page change (`drawings.reducer.ts#routeChanged`).
  *

@@ -12,7 +12,7 @@ import { groundingFeature } from './state/grounding.reducer';
  * this facade reads `GET /api/assets/{id}/readiness` once per selected asset and exposes the parsed
  * banner text `<vision-grounded-banner>` and `flight-command-panel.ts`'s Arm button both render.
  *
- * **Over an NgRx slice since docs/plans/active/NGRX-MIGRATION-PLAN.md wave N8** (replacing
+ * **Over an NgRx slice since docs/plans/done/NGRX-MIGRATION-PLAN.md wave N8** (replacing
  * `GroundingStore`, deleted): `features/fly/state/grounding.*`, page-scoped and registered by
  * `fly.page-routes.ts`. Every public member below keeps that class's exact name and contract, so
  * `CockpitFacade` changed only its `inject()` line.

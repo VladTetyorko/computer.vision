@@ -105,7 +105,7 @@ import type { DetectionEvent } from '../../core/api/models';
  * route change" (this app's only other cleanup mechanism) never applied to it. Reproduced live: open
  * this bell, then the identity menu — both stayed open at once (D1); navigate to another page — both
  * stayed open there too (D2). The trigger now toggles `OverlayFacade` (`'notification-bell'`, an
- * NgRx slice, docs/plans/active/NGRX-MIGRATION-PLAN.md §8 — the old `GlobalOverlayStore` composed
+ * NgRx slice, docs/plans/done/NGRX-MIGRATION-PLAN.md §8 — the old `GlobalOverlayStore` composed
  * `core/ui/ui-store.ts#UiStore` for this; the reducer now expresses one-open-at-a-time directly) for
  * exclusivity with the identity menu and adds the lifecycle rules the shell needs and no page does:
  * closes on any navigation, on `Escape` (returning focus to the trigger), and on a click outside —

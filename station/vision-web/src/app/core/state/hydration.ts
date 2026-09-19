@@ -1,7 +1,7 @@
 import { INIT, UPDATE, type MetaReducer } from '@ngrx/store';
 
 /**
- * One slice's read side of `localStorage` (docs/plans/active/NGRX-MIGRATION-PLAN.md §3 rule 5).
+ * One slice's read side of `localStorage` (docs/plans/done/NGRX-MIGRATION-PLAN.md §3 rule 5).
  *
  * Reducers must stay pure, so a slice that restores a persisted preference cannot read storage in
  * its own `initialState`. It registers a hydrator instead: {@link hydrationMetaReducer} asks each

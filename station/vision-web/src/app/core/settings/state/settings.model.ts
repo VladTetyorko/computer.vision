@@ -26,7 +26,7 @@ export function isMapLayerId(value: unknown): value is MapLayerId {
 /**
  * View/session preferences — genuinely personal, client-only choices with no server-side counterpart
  * (docs/plans/active/CV-SETTINGS-PLAN.md wave W7, H2; migrated off `SettingsStore` per
- * docs/plans/active/NGRX-MIGRATION-PLAN.md wave N2). See the deleted `SettingsStore`'s own doc
+ * docs/plans/done/NGRX-MIGRATION-PLAN.md wave N2). See the deleted `SettingsStore`'s own doc
  * comment (git history) for why no CV pipeline defaults live here.
  */
 export interface SettingsState {

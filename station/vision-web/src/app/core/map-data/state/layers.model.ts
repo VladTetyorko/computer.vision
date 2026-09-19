@@ -3,7 +3,7 @@ import { createEntityAdapter } from '@ngrx/entity';
 import type { MapLayer } from '../../api/models';
 
 /**
- * `layers` slice model (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N6) — replaces
+ * `layers` slice model (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N6) — replaces
  * `LayersStore`'s own `layersSignal`. `@ngrx/entity` is mandatory here (§3 rule 4).
  *
  * **No `sortComparer`**: `GET /api/map/layers` already serves COP-first-then-name

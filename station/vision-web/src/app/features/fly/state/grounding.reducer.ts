@@ -4,7 +4,7 @@ import { GroundingApiActions, GroundingPageActions } from './grounding.actions';
 import { initialGroundingState } from './grounding.model';
 
 /**
- * The `grounding` slice (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N8) — page-scoped, registered
+ * The `grounding` slice (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N8) — page-scoped, registered
  * by `features/fly/fly.page-routes.ts`, never in `core/state/app-state.ts`.
  *
  * Both derived values are `extraSelectors` rather than facade-level `computed()`s so the parsing

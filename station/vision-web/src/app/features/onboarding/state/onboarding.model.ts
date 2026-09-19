@@ -19,7 +19,7 @@ import type { SourceMode, WizardStep } from '../onboarding-logic';
 import type { FlightPlanForm } from '../../../shared/map/flight-plan-logic';
 
 /**
- * `OnboardingWizardFacade`'s own slice (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N8b, replacing
+ * `OnboardingWizardFacade`'s own slice (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N8b, replacing
  * `OnboardingStore`) — page-provided on `OnboardingPage`, not root-registered (see
  * `onboarding.providers.ts`'s own doc comment): wizard state has no reason to survive leaving
  * `/add-source`.

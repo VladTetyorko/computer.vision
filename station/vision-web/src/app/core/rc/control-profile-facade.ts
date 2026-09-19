@@ -7,7 +7,7 @@ import { ControlProfileApiActions, ControlProfilePageActions } from './state/con
 import { controlProfileFeature } from './state/control-profile.reducer';
 
 /**
- * Replaces `ControlProfileStore` (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N7).
+ * Replaces `ControlProfileStore` (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N7).
  *
  * **Page-provided since wave N-split** (NGRX-MIGRATION-PLAN.md §9), where the old store — and this
  * facade until then — was `providedIn: 'root'` so that the `/manage/controller` setup page and the

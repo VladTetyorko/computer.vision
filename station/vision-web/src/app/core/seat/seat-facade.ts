@@ -6,7 +6,7 @@ import { SeatPageActions } from './state/seat.actions';
 import { seatFeature } from './state/seat.reducer';
 
 /**
- * The seat slice's read/dispatch boundary (docs/plans/active/NGRX-MIGRATION-PLAN.md §2, and that
+ * The seat slice's read/dispatch boundary (docs/plans/done/NGRX-MIGRATION-PLAN.md §2, and that
  * plan's own N1/N2 correction). `@Injectable()`, **not** `providedIn: 'root'` — component-provided
  * exactly like `SeatStore` was (`crew.ts`/`cockpit.ts` list it in their own `providers:` array), so a
  * fresh instance starts/stops with the route. The underlying `byAssetId` state and its effects are

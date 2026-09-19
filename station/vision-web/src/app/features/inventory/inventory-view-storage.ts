@@ -28,7 +28,7 @@ const INVENTORY_VIEW_KEY = 'vision.inventory.view';
  * Needs-attention default on the next boot.
  *
  * <h2>Why this is not an NgRx slice (wave N8 judgement call)</h2>
- * It was named `InventoryViewStore` until docs/plans/active/NGRX-MIGRATION-PLAN.md wave N8, which is
+ * It was named `InventoryViewStore` until docs/plans/done/NGRX-MIGRATION-PLAN.md wave N8, which is
  * what made it look like the migration had missed one. **It owns no state at all** — two methods, no
  * signals, no fetch, no timer, no toast. The state it guards (`InventoryFacade#viewSelection`) is one
  * enum among roughly twenty plain page signals on that facade, none of which N8 converts; promoting

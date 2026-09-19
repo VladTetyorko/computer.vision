@@ -3,7 +3,7 @@ import { OverlayPageActions } from './overlay.actions';
 import { initialOverlayState } from './overlay.model';
 
 /**
- * The shell's one-open-overlay-at-a-time rule (docs/plans/active/NGRX-MIGRATION-PLAN.md §8), pure:
+ * The shell's one-open-overlay-at-a-time rule (docs/plans/done/NGRX-MIGRATION-PLAN.md §8), pure:
  * opening any id closes whichever other was open by construction (a plain assignment, not a
  * composed `UiStore` — see this slice's `MODULE.md` entry for why `UiStore` itself is not composed
  * here). `Escape`/an outside click/a navigation all reduce to the same "close whatever is open" as

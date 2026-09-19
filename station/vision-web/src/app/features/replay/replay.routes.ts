@@ -4,7 +4,7 @@ import type { Routes } from '@angular/router';
  * The replay routes. Only the per-usage player needs a `providers:` array (the `training` slice its
  * `ReplayFacade` reads), so only that one is a **lazy boundary** — see
  * `features/fly/fly.routes.ts`'s doc comment for why a slice may not be named in a
- * statically-imported route file (docs/plans/active/NGRX-MIGRATION-PLAN.md §9, wave N-split). The
+ * statically-imported route file (docs/plans/done/NGRX-MIGRATION-PLAN.md §9, wave N-split). The
  * library below keeps its plain `loadComponent`: it reads no page-scoped slice.
  *
  * This entry must keep sitting *before* `ASSET_DETAIL_ROUTES` in `app.routes.ts` — `assets/:assetId`

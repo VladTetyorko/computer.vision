@@ -14,7 +14,7 @@ import { linksFeature } from './state/links.reducer';
 let nextHostSequence = 0;
 
 /**
- * Replaces `LinksStore` (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N7) — one asset's whole link
+ * Replaces `LinksStore` (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N7) — one asset's whole link
  * group (docs/plans/active/LINK-PAIRING-PLAN.md §3.4), the asset-detail Links panel's own source.
  * `@Injectable()`, **not** `providedIn: 'root'` — `AssetDetailPage` lists this in its own `providers`
  * (alongside `TelemetryStore`), so a fresh instance — and its poll/subscription — starts/stops with

@@ -2,7 +2,7 @@ import { Injectable, OnDestroy, signal } from '@angular/core';
 import { downscaleImageToJpeg, isAcceptableImageType } from './image-downscale';
 
 /**
- * Owns the Identify step's photo `File`/`Blob`/object-URL (docs/plans/active/NGRX-MIGRATION-PLAN.md
+ * Owns the Identify step's photo `File`/`Blob`/object-URL (docs/plans/done/NGRX-MIGRATION-PLAN.md
  * §3 rule 11 — non-serializable state must never enter an NgRx slice). The `GlobalOverlayStore`
  * split precedent (wave N1): the *serializable* half (`photoProcessing`/`photoError`) lives in
  * `OnboardingWizardState`; this service holds the rest and the revoke lifecycle that goes with it.

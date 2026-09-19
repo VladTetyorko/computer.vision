@@ -110,7 +110,7 @@ import { NotificationBell } from '../notification-bell';
  * page bar in Wave 2) — this component owns its own trigger rather than waiting for one.
  *
  * **The mobile sheet joins `OverlayFacade`** (docs/plans/done/UI-STATE-PLAN.md §1/§2.2, now an NgRx
- * slice per docs/plans/active/NGRX-MIGRATION-PLAN.md §8) as `'sidebar-mobile'`
+ * slice per docs/plans/done/NGRX-MIGRATION-PLAN.md §8) as `'sidebar-mobile'`
  * — it used to be a plain local `signal(false)`, invisible to the identity menu/notification bell it
  * shares this always-mounted shell with, so opening one could leave a *second* thing open behind it
  * (§1 D1/D3, generalized past just the two `<details>`-turned-overlays the plan's own reproduction

@@ -2,7 +2,7 @@ import type { Dataset } from '../../api/models';
 
 /**
  * The `features/labeling/**` surface's dataset list (docs/plans/done/CV-TRAINING-PLAN.md Wave T5;
- * migrated off `TrainingStore` per docs/plans/active/NGRX-MIGRATION-PLAN.md wave N7). Registered
+ * migrated off `TrainingStore` per docs/plans/done/NGRX-MIGRATION-PLAN.md wave N7). Registered
  * app-wide in `provideAppState()`, mirroring the old store's `providedIn: 'root'` posture. **Lazy,
  * not self-initializing** — nothing dispatches `Refresh Requested` on boot; `DatasetsPage`'s own
  * facade calls it once actually reached.

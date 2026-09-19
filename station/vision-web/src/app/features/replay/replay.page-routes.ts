@@ -4,7 +4,7 @@ import { provideTrainingState } from '../../core/training/state/training.provide
 
 /**
  * The per-usage replay player, behind `replay.routes.ts`'s `loadChildren` boundary
- * (docs/plans/active/NGRX-MIGRATION-PLAN.md §9, wave N-split). `ReplayPage` provides
+ * (docs/plans/done/NGRX-MIGRATION-PLAN.md §9, wave N-split). `ReplayPage` provides
  * `TrainingFacade` — replay is where an operator sends a frame to a dataset — so the `training`
  * slice is registered here rather than in `core/state/app-state.ts`.
  *

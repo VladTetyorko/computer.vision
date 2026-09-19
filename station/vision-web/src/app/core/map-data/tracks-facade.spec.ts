@@ -12,7 +12,7 @@ import { TracksFacade } from './tracks-facade';
 /**
  * `TracksFacade` end to end — facade → action → effect (real HTTP call through a stub `VisionApi`,
  * real polling through a stub `PollScheduler`, real `live` slice reducer) → reducer → facade
- * signals. Replaces `tracks-store.spec.ts` case for case (docs/plans/active/NGRX-MIGRATION-PLAN.md
+ * signals. Replaces `tracks-store.spec.ts` case for case (docs/plans/done/NGRX-MIGRATION-PLAN.md
  * wave N6); the live gate is driven by dispatching real `LiveSocketActions` against the actually
  * registered `live` slice rather than a stub `LiveFacade` — this wave's effects read `live` only
  * through `liveFeature`'s own selectors (§9), so there is nothing left to stub.

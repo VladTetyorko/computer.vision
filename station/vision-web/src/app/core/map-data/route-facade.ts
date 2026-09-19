@@ -7,7 +7,7 @@ import { RouteApiActions, RoutePageActions } from './state/route.actions';
 import { routeFeature } from './state/route.reducer';
 
 /**
- * `RouteStore`'s read/dispatch boundary (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N6).
+ * `RouteStore`'s read/dispatch boundary (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N6).
  * `@Injectable()`, **not** `providedIn: 'root'` — same posture as the store it replaces:
  * `CommandPage` lists this in its own `providers`, so a fresh instance (and the `route` slice's
  * per-page-visit lifecycle) starts the moment that page mounts. Unlike `SeatFacade`'s

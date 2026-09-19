@@ -15,7 +15,7 @@ import { liveFeature } from './state/live.reducer';
 export type { LiveConnectionState } from './live-fallback-logic';
 
 /**
- * Owns the app's **one** `GET /api/live` connection (docs/plans/active/NGRX-MIGRATION-PLAN.md §8,
+ * Owns the app's **one** `GET /api/live` connection (docs/plans/done/NGRX-MIGRATION-PLAN.md §8,
  * replacing `LiveStore`). Signals and methods keep that class's exact names — `connectionState`,
  * `fleet`, `liveEvents`, `devices`, `detectionEvents`, `mapEvents`, `discoveryEvents`, `zoneEvents`,
  * `systemStatus`, `telemetryFor`/`detectionsFor`/`geoFor`/`worldObjectsFor`/`tracksFor`/`cvTraceFor`/

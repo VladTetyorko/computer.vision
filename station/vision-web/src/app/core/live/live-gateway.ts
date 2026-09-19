@@ -9,7 +9,7 @@ const LOG_PREFIX = '[live]';
  * One lifecycle event off the raw `EventSource` this app's `GET /api/live` connection uses — the
  * non-serializable seam `core/live/state/live.effects.ts` translates into plain actions, so the
  * `live` slice itself only ever holds the resulting state, never the socket
- * (docs/plans/active/NGRX-MIGRATION-PLAN.md §8).
+ * (docs/plans/done/NGRX-MIGRATION-PLAN.md §8).
  */
 export type LiveGatewayEvent =
   | { readonly kind: 'open' }
@@ -25,7 +25,7 @@ export type LiveGatewayEvent =
   | { readonly kind: 'fatal' };
 
 /**
- * Owns the one real `EventSource` `GET /api/live` uses (docs/plans/active/NGRX-MIGRATION-PLAN.md
+ * Owns the one real `EventSource` `GET /api/live` uses (docs/plans/done/NGRX-MIGRATION-PLAN.md
  * §8) — the non-serializable half of what used to be `LiveStore`. `live.effects.ts#connection$` is
  * the only consumer; every decision that used to live on the class (topic ref-counts, accumulated
  * payloads, connection state) now lives in the `live` slice instead, which is what makes this seam

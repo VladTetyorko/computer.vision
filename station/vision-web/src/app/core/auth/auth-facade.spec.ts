@@ -94,7 +94,7 @@ function dispatched(seen: readonly Action[], action: { type: string }): boolean 
 /**
  * The auth slice end to end — facade → action → effect (real HTTP call through a stub `VisionApi`)
  * → reducer → facade signals, replacing `AuthStore`'s own equally end-to-end spec
- * (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N2). Every case below is ported from
+ * (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N2). Every case below is ported from
  * `auth-store.spec.ts` 1:1 — this facade's public surface is unchanged, only its DI identity is new.
  */
 describe('AuthFacade', () => {

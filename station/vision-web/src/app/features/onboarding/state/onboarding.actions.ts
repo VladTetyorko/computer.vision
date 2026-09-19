@@ -26,7 +26,7 @@ import type { FlightPlanForm } from '../../../shared/map/flight-plan-logic';
 import type { SourceMode, WizardStep } from '../onboarding-logic';
 
 /**
- * Every wizard-page-initiated event (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N8b) — sync field
+ * Every wizard-page-initiated event (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N8b) — sync field
  * edits, navigation, and the `Requested` half of every async operation. `OnboardingWizardFacade` is
  * the only dispatcher; the six step components never dispatch directly (they call facade methods,
  * exactly as they called `OnboardingStore` methods before).

@@ -4,7 +4,7 @@ import { EventsPageActions } from './state/events.actions';
 import { eventsFeature } from './state/events.reducer';
 
 /**
- * Replaces `EventsStore` (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N7) — `providedIn: 'root'`,
+ * Replaces `EventsStore` (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N7) — `providedIn: 'root'`,
  * same as that class: a root singleton with `activate()`/`release()` ref-counting, since
  * `eventsFeature`'s state is genuinely app-wide (the Wall rail, the asset detail Events section, the
  * fleet-map/command markers, and the always-on app-shell notification bell all read the *same*

@@ -14,7 +14,7 @@ import { detectionsFeature } from './state/detections.reducer';
 const CLOCK_TICK_MS = 1_000;
 
 /**
- * The detections slice's read/dispatch boundary (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N5,
+ * The detections slice's read/dispatch boundary (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N5,
  * replacing `DetectionsStore`). `@Injectable()`, **not** `providedIn: 'root'` — component-provided
  * exactly like the old store (`LivePage`/`WallTile`/`CockpitPage`/`CrewPage` list this in their own
  * `providers:` array). See `detections.model.ts`'s own class doc for why the detections feed

@@ -22,7 +22,7 @@ function mountHost(): { root: HTMLElement; trigger: HTMLButtonElement; cleanup: 
 
 /**
  * `OverlayFacade` end to end — facade → action → reducer → effect, replacing `overlay-store.spec.ts`
- * (docs/plans/active/NGRX-MIGRATION-PLAN.md §8). Real `provideAppState()`, no `Router`: the
+ * (docs/plans/done/NGRX-MIGRATION-PLAN.md §8). Real `provideAppState()`, no `Router`: the
  * navigation-close case dispatches `@ngrx/router-store`'s own `ROUTER_NAVIGATED` action directly
  * (see `overlay.effects.ts#closeOnNavigation$`'s doc comment for why this slice listens for that
  * action instead of injecting `Router`) rather than standing up a real `Router` + routes.

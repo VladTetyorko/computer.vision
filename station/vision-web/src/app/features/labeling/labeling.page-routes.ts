@@ -7,7 +7,7 @@ import { provideTrainingState } from '../../core/training/state/training.provide
  * `labeling.routes.ts`'s `loadChildren` boundary. The `training` slice below is registered on the
  * pathless parent so the list → detail → sample-editor drill-down keeps one registration across all
  * three pages instead of tearing it down and refetching at every step
- * (docs/plans/active/NGRX-MIGRATION-PLAN.md §9, wave N-split).
+ * (docs/plans/done/NGRX-MIGRATION-PLAN.md §9, wave N-split).
  *
  * Paths are relative to `manage/training`, so `''` is the dataset list. `orgGuard` is not repeated
  * here — `labeling.routes.ts` runs it once on the boundary, which covers every child.

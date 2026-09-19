@@ -4,7 +4,7 @@ import type { AssetRoute } from '../route-logic';
 export type RouteLoadState = 'idle' | 'loading' | 'loaded' | 'error';
 
 /**
- * The `route` slice's entire state (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N6) — replacing
+ * The `route` slice's entire state (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N6) — replacing
  * `RouteStore`'s own four signals. Registered app-wide in `provideAppState()` like every other
  * slice, but read/written only through the page-provided {@link RouteFacade} (see that class's own
  * doc comment for why the slice being global doesn't make the *feature* global): `CommandPage` is

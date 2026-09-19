@@ -4,7 +4,7 @@ import type { DrawKind, MapDrawingResponse } from '../../api/models';
 import { DRAWING_COLOR_TOKENS } from '../drawings-logic';
 
 /**
- * `@ngrx/entity` for `MapDrawingResponse` (docs/plans/active/NGRX-MIGRATION-PLAN.md §3 rule 4 —
+ * `@ngrx/entity` for `MapDrawingResponse` (docs/plans/done/NGRX-MIGRATION-PLAN.md §3 rule 4 —
  * mandatory). **No `sortComparer`** — same reasoning as `marks.model.ts`: the list is newest-first
  * by arrival (`map-event-logic.ts#upsertById` prepends), not by any sortable field. The reducer
  * re-derives the whole array through `applyDrawingEvents` and hands the result to `setAll`.

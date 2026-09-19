@@ -131,7 +131,7 @@ describe('UI architecture guard (routed page components)', () => {
 });
 
 /**
- * NgRx layering guard (docs/plans/active/NGRX-MIGRATION-PLAN.md §6) — the same cheap source-scanning
+ * NgRx layering guard (docs/plans/done/NGRX-MIGRATION-PLAN.md §6) — the same cheap source-scanning
  * shape as the suite above, widened past `features/` because the state slices themselves live under
  * `core/` and the components that read them live under `shared/` as well.
  *

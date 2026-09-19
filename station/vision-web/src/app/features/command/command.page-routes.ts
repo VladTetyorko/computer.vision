@@ -13,7 +13,7 @@ import { provideOrgState } from '../../core/org/state/org.providers';
  * The `/command` route (docs/plans/done/MVP3-PLAN.md §C-c: the manager dashboard), behind
  * `command.routes.ts`'s `loadChildren` boundary — see that file, and
  * `features/fly/fly.page-routes.ts` for the fuller rationale
- * (docs/plans/active/NGRX-MIGRATION-PLAN.md §9, wave N-split).
+ * (docs/plans/done/NGRX-MIGRATION-PLAN.md §9, wave N-split).
  *
  * `map`/`route`/`weather` register here rather than at the root injector: `MapFacade`, `RouteFacade`
  * and `WeatherFacade` are all page-provided in `CommandPage`'s own `providers:` array, so slice and

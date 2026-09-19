@@ -15,7 +15,7 @@ import { MapFacade } from './map-facade';
 
 /**
  * `MapFacade` end to end — replaces `map-store.spec.ts` case for case
- * (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N6). Unlike `marks-facade.spec.ts`/
+ * (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N6). Unlike `marks-facade.spec.ts`/
  * `drawings-facade.spec.ts`, `MapFacade` *does* inject the real `LiveFacade` directly (for
  * `markers`' telemetry merge — facade-to-facade composition, not effect-level injection; see
  * `map-facade.ts`'s own class doc comment), so constructing it always runs `LiveFacade`'s own

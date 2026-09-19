@@ -12,7 +12,7 @@ import { provideOrgState } from '../../core/org/state/org.providers';
 /**
  * The `/crew` route family (docs/plans/done/CREW-CONTROL-PLAN.md — the second seat on an asset),
  * behind `crew.routes.ts`'s `loadChildren` boundary; see `features/fly/fly.page-routes.ts` for the
- * rationale (docs/plans/active/NGRX-MIGRATION-PLAN.md §9, wave N-split).
+ * rationale (docs/plans/done/NGRX-MIGRATION-PLAN.md §9, wave N-split).
  *
  * **`''` keeps `pathMatch: 'full'`.** Without it the bare `/crew` redirect would also swallow
  * `/crew/:assetId`, since an empty child path prefix-matches everything — the exact bug

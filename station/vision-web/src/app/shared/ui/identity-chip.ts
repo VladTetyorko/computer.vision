@@ -45,7 +45,7 @@ import { OverlayFacade } from '../../core/ui/overlay-facade';
  * app's only other cleanup mechanism) never applied to it either. Reproduced live: open this menu,
  * then the notification bell — both stayed open at once (D1); navigate to another page — both stayed
  * open there too (D2). The trigger now toggles `OverlayFacade` (`'identity-menu'`, an NgRx slice,
- * docs/plans/active/NGRX-MIGRATION-PLAN.md §8 — the old `GlobalOverlayStore` composed
+ * docs/plans/done/NGRX-MIGRATION-PLAN.md §8 — the old `GlobalOverlayStore` composed
  * `core/ui/ui-store.ts#UiStore` for this; the reducer now expresses one-open-at-a-time directly) for
  * exclusivity with the bell and adds the three lifecycle rules the shell needs and no page does:
  * closes on any navigation, on `Escape` (returning focus to the trigger), and on a click outside —

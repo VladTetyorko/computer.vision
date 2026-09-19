@@ -9,7 +9,7 @@ import { TrainingApiActions, TrainingPageActions } from './state/training.action
 import { trainingFeature } from './state/training.reducer';
 
 /**
- * The training slice's read/dispatch boundary (docs/plans/active/NGRX-MIGRATION-PLAN.md §2),
+ * The training slice's read/dispatch boundary (docs/plans/done/NGRX-MIGRATION-PLAN.md §2),
  * replacing `TrainingStore`. Every method keeps that class's exact name/signature/return contract so
  * `DatasetsPage`/`DatasetDetailFacade`/`ModelsFacade`/`ReplayFacade` change only `inject(TrainingStore)`
  * → `inject(TrainingFacade)`.

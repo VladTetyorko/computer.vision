@@ -7,7 +7,7 @@ import { groundingFeature } from './grounding.reducer';
 
 /**
  * The `grounding` slice + its effect, registered by the `/fly` route rather than at the root
- * injector (docs/plans/active/NGRX-MIGRATION-PLAN.md §9). `GroundingFacade` is page-provided by
+ * injector (docs/plans/done/NGRX-MIGRATION-PLAN.md §9). `GroundingFacade` is page-provided by
  * `CockpitPage`, which is what makes the slice eligible to live here — see
  * `core/state/app-state.ts`'s own doc comment for why a `providedIn: 'root'` facade's slice may not.
  *

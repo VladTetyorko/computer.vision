@@ -6,7 +6,7 @@ import { orgGuard } from '../../core/org/org-guard';
 /**
  * The `/manage/cv` engineer inspector (docs/plans/active/CV-ORCHESTRATION-PLAN.md §4.4/§4.8, wave
  * W5.3) behind `cv-inspector.routes.ts`'s `loadChildren` boundary; see
- * `features/fly/fly.page-routes.ts` for the rationale (docs/plans/active/NGRX-MIGRATION-PLAN.md §9,
+ * `features/fly/fly.page-routes.ts` for the rationale (docs/plans/done/NGRX-MIGRATION-PLAN.md §9,
  * wave N-split).
  *
  * This is the clearest case the split exists for: `cv-trace` is a ~10 kB slice with exactly one

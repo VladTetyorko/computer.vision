@@ -15,7 +15,7 @@ import { MarksFacade } from './marks-facade';
 
 /**
  * `MarksFacade` end to end — replaces `marks-store.spec.ts` case for case
- * (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N6). The live gate is driven by dispatching real
+ * (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N6). The live gate is driven by dispatching real
  * `LiveSocketActions` against the actually-registered `live` slice, the palette-vs-layers
  * reconciliation by seeding the actually-registered `layers` slice, and BUG 3 by dispatching a real
  * `ROUTER_NAVIGATED` (§9 — no stubbed `LiveFacade`/`LayersStore`/`Router` anywhere in this file).

@@ -6,7 +6,7 @@ import { CvTracePageActions } from './state/cv-trace.actions';
 import { cvTraceFeature } from './state/cv-trace.reducer';
 
 /**
- * The cv-trace slice's read/dispatch boundary (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N5,
+ * The cv-trace slice's read/dispatch boundary (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N5,
  * replacing `CvTraceStore`). `@Injectable()`, **not** `providedIn: 'root'` — the routed `/manage/cv`
  * page lists this in its own `providers:` array, exactly like the old store.
  *

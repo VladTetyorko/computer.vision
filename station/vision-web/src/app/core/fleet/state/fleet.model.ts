@@ -3,7 +3,7 @@ import { createEntityAdapter } from '@ngrx/entity';
 import type { ActiveStream, CvModel, CvTracker, Device } from '../../api/models';
 
 /**
- * `@ngrx/entity` for `Device`/`ActiveStream` (docs/plans/active/NGRX-MIGRATION-PLAN.md §3 rule 4 —
+ * `@ngrx/entity` for `Device`/`ActiveStream` (docs/plans/done/NGRX-MIGRATION-PLAN.md §3 rule 4 —
  * both named explicitly there). **No `sortComparer` on either**: `FleetStore` never sorted its two
  * lists — a poll/live snapshot lands in whatever order the server returned, and `setAll` preserves
  * that order in `selectAll` exactly like a plain signal assignment did, same "no comparator, no

@@ -8,7 +8,7 @@ import { RouteFacade } from './route-facade';
 
 /**
  * `RouteFacade` end to end — replaces `route-store.spec.ts` case for case
- * (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N6). The old `generation` counter is gone; the
+ * (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N6). The old `generation` counter is gone; the
  * "superseded show() never clobbers the later result" case now exercises `switchMap` doing that
  * structurally (see `route.effects.ts#show$`'s own doc comment) rather than hand-counted bookkeeping.
  */

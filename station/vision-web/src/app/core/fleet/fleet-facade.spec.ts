@@ -8,7 +8,7 @@ import { provideAppState } from '../state/app-state';
 import { FleetFacade } from './fleet-facade';
 
 /**
- * `FleetFacade`'s own read/dispatch boundary spec (docs/plans/active/NGRX-MIGRATION-PLAN.md wave
+ * `FleetFacade`'s own read/dispatch boundary spec (docs/plans/done/NGRX-MIGRATION-PLAN.md wave
  * N4b) — `provideAppState()` registers the real `fleet` slice + its effects (fleet is root, per
  * `core/state/app-state.ts`'s own doc comment), with `VisionApi`/`PollScheduler`/`ToastService`
  * overridden by plain stubs, mirroring `core/ops/thresholds-facade.spec.ts`'s own established

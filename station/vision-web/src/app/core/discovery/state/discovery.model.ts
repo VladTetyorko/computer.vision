@@ -1,7 +1,7 @@
 import type { DiscoveryCandidate, DiscoverySource } from '../../api/models';
 
 /**
- * `DiscoveryInboxFacade`'s own slice (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N7, replacing
+ * `DiscoveryInboxFacade`'s own slice (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N7, replacing
  * `DiscoveryInboxStore`) — a root singleton, unlike `WeatherState`/`GeoState`/`LinksState`'s
  * `byHostId` keying: exactly one inbox exists app-wide, so `activeConsumers` is a plain counter
  * rather than a per-host map. See `discovery.effects.ts#poll$`'s own doc comment for how

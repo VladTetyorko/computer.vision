@@ -1,7 +1,7 @@
 import { createActionGroup, emptyProps, props } from '@ngrx/store';
 import type { BootstrapRequest, MeResponse } from '../../api/models';
 
-/** Every command a page/guard/interceptor can issue (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N2) —
+/** Every command a page/guard/interceptor can issue (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N2) —
  *  mirrors the old `AuthStore`'s public methods one-for-one. */
 export const AuthPageActions = createActionGroup({
   source: 'Auth Page',

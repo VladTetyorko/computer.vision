@@ -9,7 +9,7 @@
 export type GlobalOverlayId = 'identity-menu' | 'notification-bell' | 'sidebar-mobile';
 
 /**
- * The overlay slice's entire state (docs/plans/active/NGRX-MIGRATION-PLAN.md §8 "GlobalOverlayStore
+ * The overlay slice's entire state (docs/plans/done/NGRX-MIGRATION-PLAN.md §8 "GlobalOverlayStore
  * splits in two") — just the open overlay id, or `null`. The DOM registry a `register()` call needs
  * (live `HTMLElement` refs) is **not** state at all — it would trip `strictStateSerializability` the
  * instant one was registered — and lives instead in `core/ui/overlay-host-registry.ts#OverlayHostRegistry`,

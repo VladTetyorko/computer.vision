@@ -86,7 +86,7 @@ function segmentsOf(path: string): string[] {
 /**
  * `flattenRoutes`, but resolving every `loadChildren` boundary first.
  *
- * Since NGRX-MIGRATION wave N-split (docs/plans/active/NGRX-MIGRATION-PLAN.md §9) seven features —
+ * Since NGRX-MIGRATION wave N-split (docs/plans/done/NGRX-MIGRATION-PLAN.md §9) seven features —
  * `/fly`, `/command`, `/crew`, `/wall`, `/live/:deviceId`, `/assets/:assetId`, `/manage/cv` — are
  * `loadChildren` routes rather than `loadComponent` ones, so that the NgRx slices their
  * `providers:` arrays register stay out of the initial bundle. Their real paths therefore only

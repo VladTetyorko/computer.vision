@@ -2,7 +2,7 @@ import type { GroupSummary, UserSummary } from '../../api/models';
 
 /**
  * Users and groups for the org-settings surface (docs/plans/done/U-SCOPE-PLAN.md, U-e slice 2;
- * migrated off `OrgStore` per docs/plans/active/NGRX-MIGRATION-PLAN.md wave N2). Registered
+ * migrated off `OrgStore` per docs/plans/done/NGRX-MIGRATION-PLAN.md wave N2). Registered
  * app-wide in `provideAppState()`, mirroring the old store's `providedIn: 'root'` posture — the
  * pilot-assignment card also reads the user list, so this outlives any one page. **Lazy, not
  * self-initializing**: nothing dispatches `Refresh Requested` on boot; `features/org-settings/**`

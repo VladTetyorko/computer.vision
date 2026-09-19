@@ -7,7 +7,7 @@ import { trainingFeature } from './training.reducer';
 
 /**
  * The `training` slice + its effects, registered by the route that uses it instead of at the root
- * injector (docs/plans/active/NGRX-MIGRATION-PLAN.md §9, wave N-split). Consumed by `manage/training` (`DatasetsFacade`) and `assets/:assetId/replay/:usageId` (`ReplayFacade`).
+ * injector (docs/plans/done/NGRX-MIGRATION-PLAN.md §9, wave N-split). Consumed by `manage/training` (`DatasetsFacade`) and `assets/:assetId/replay/:usageId` (`ReplayFacade`).
  *
  * Its facade (`core/training/training-facade.ts`) is `@Injectable()` and listed in `DatasetsPage`’s and `ReplayPage`’s own `providers:` — that is
  * what makes this slice eligible to live here rather than in `core/state/app-state.ts`: facade and

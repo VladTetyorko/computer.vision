@@ -1,7 +1,7 @@
 import type { GeofenceZone } from '../../api/models';
 
 /**
- * The `geofence` slice's entire state (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N6), replacing
+ * The `geofence` slice's entire state (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N6), replacing
  * `GeofenceStore`. No `@ngrx/entity` here — §3 rule 4 mandates it only for marks/layers/drawings/
  * tracks; a zone's own `id` is already a plain string and this list has no fold-history-dependent
  * ordering to preserve (unlike `tracks`/`marks`), so a bare array round-trips through

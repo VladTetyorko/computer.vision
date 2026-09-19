@@ -20,7 +20,7 @@ import type {
 } from '../../api/models';
 
 /**
- * `FleetStore`'s public surface, one `'Fleet Page'` source (docs/plans/active/NGRX-MIGRATION-PLAN.md
+ * `FleetStore`'s public surface, one `'Fleet Page'` source (docs/plans/done/NGRX-MIGRATION-PLAN.md
  * §3 rule 1) — every method that used to be a `run()`-wrapped `async` call becomes a `Requested`
  * event here; `fleet-facade.ts` dispatches these and, for every one that must keep returning a
  * value, resolves via `dispatchAndAwait` against the matching `FleetApiActions` pair.

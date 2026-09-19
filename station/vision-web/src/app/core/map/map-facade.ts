@@ -16,7 +16,7 @@ import { mapFeature } from './state/map.reducer';
 const CLOCK_TICK_MS = 1_000;
 
 /**
- * `FleetMapStore`'s read/dispatch boundary (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N6).
+ * `FleetMapStore`'s read/dispatch boundary (docs/plans/done/NGRX-MIGRATION-PLAN.md wave N6).
  * `@Injectable()`, **not** `providedIn: 'root'` — same posture as the store it replaces:
  * `CommandPage` lists this in its own `providers`, so a fresh instance starts the moment that page
  * mounts and tears down the moment it doesn't. See `map.effects.ts#assetGate$`'s own doc comment for

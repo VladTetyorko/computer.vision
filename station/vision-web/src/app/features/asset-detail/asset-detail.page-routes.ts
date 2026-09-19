@@ -11,7 +11,7 @@ import { provideTracksState } from '../../core/map-data/state/tracks.providers';
 
 /**
  * The `/assets/:assetId` route behind `asset-detail.routes.ts`'s `loadChildren` boundary; see
- * `features/fly/fly.page-routes.ts` for the rationale (docs/plans/active/NGRX-MIGRATION-PLAN.md §9,
+ * `features/fly/fly.page-routes.ts` for the rationale (docs/plans/done/NGRX-MIGRATION-PLAN.md §9,
  * wave N-split). `:assetId` lives on the **parent**, so `withComponentInputBinding()` still binds it
  * to `AssetDetailPage#assetId` by name.
  *
