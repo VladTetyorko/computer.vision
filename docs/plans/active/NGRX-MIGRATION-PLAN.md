@@ -205,7 +205,9 @@ Promise-returning method is added to `VisionApi` after N0 — new endpoints land
 | N5 | **BUILT**, `91143666` — `telemetry`, `detections`, `cv-trace`; 24 consumers rewired, all three classes deleted. **240/240 files · 4 492/4 492 tests green**, build exit 0, bundle 505.87 → 515.83 kB raw |
 | N7 | **BUILT**, `ecc84dd7` — eight slices at once: `training`, `thresholds`, `controlProfile`, `weather`, `geo`, `links`, `discoveryInbox`, `events`; all eight classes deleted. Settled the two demand-gate idioms later waves reuse (per-host page-provided facade with its own live-bridging `effect()`; root-singleton whose ref-count lives in NgRx state, phase computed by cross-`store.select()` inside the effects file) |
 | N7 merged | **257/257 files · 4 653/4 653 tests green**, both tsconfigs clean, production build exit 0 at **540.44 kB raw / 155.15 kB transfer** — 40.44 kB over the 500 kB *warning* budget, **9.56 kB under the 550 kB error budget** |
-| N6 | in flight |
+| N6 | **BUILT**, `09fefaca` — `map`, `marks`, `layers`, `drawings`, `tracks`, `route`, `geofence`; all seven classes deleted. `@ngrx/entity` backs the four collections; `FleetMapStore`'s "construction is demand" contract needed an explicit `activeConsumers` ref-count to survive app-wide registration |
+| N6 merged | `00d74f12` — **26 slices now NgRx**. 264/264 files · 4 748/4 748 tests green, both tsconfigs clean. **Production build RED**: 587.42 kB raw / 168.30 kB transfer, 37.42 kB over the 550 kB error budget — see the costed options below |
+| N-split | **OPEN, and it blocks N4/N8** — the build does not currently produce a bundle. Owner picks: raise the budget, or move the page-scoped slices off the root injector |
 | N4, N8, N9 | open |
 
 ### The bundle expectation was wrong — recorded, not quietly dropped
@@ -222,41 +224,50 @@ way — not a number for a wave to bump on its way past.
 
 ### The two ways out of the budget, costed — 2026-09-19
 
-Measured on the N7 merge so the owner is choosing between numbers, not guesses. Routes are **already
-lazy** (48 lazy chunks); what sits in the initial bundle is `provideAppState()`, which registers all
-19 slices and their effects at the root injector.
+**The production build is RED as of the N6 merge**: 587.42 kB raw against a 550 kB error budget.
+`npm run test:ci` and both `tsc` configs are green; only `-c production` fails. Measured so the
+owner is choosing between numbers, not guesses.
 
-Grouping every slice by who actually reads its facade (`grep` over non-spec sources, `core/**`,
-`shared/**` and `app.ts` included):
+**Option 1 — raise `angular.json`'s error budget.** One line. Instant, reversible, and it spends the
+visibility the 500 kB warning currently buys. 620 kB would clear N6 and leave room for N4/N8.
 
-| Must stay root | Read by the shell, `app.ts`, `core/**` or a shared component |
+**Option 2 — wave N-split: stop registering page-scoped slices at the root injector.** Routes are
+*already* lazy (48 chunks); what fills the initial bundle is `provideAppState()` registering all 26
+slices at root, so a slice only `/fly` ever reads still ships to a visitor who opens `/settings`.
+
+Which slices can move was measured, not guessed. **The test is the facade's own injectability**, not
+its consumer count: a `providedIn: 'root'` facade outlives the route that registered its slice, and
+would then read selectors of a feature NgRx has already removed. Only page-provided facades
+(`@Injectable()` in a component's `providers:`) can move, because facade and slice then share one
+lifetime:
+
+| Feature route | Slices it would register |
 |---|---|
-| `theme`, `sidebar`, `overlay` | app shell chrome |
-| `auth`, `live`, `settings` | read from `core/**` by a dozen files each |
-| `events` | the always-on notification bell in `shared/ui` |
+| `fly` | `telemetry`, `detections`, `weather`, `geo`, `seat` |
+| `command` | `weather`, `map`, `route` |
+| `crew` | `telemetry`, `detections`, `seat` |
+| `live` | `telemetry`, `detections` |
+| `wall` | `detections` |
+| `asset-detail` | `telemetry`, `links` |
+| `cv-inspector` | `cvTrace` |
 
-| Route-splittable | Only lazy features read it |
-|---|---|
-| `thresholds`, `controlProfile`, `geo` | `features/fly` (+ `features/controller`) |
-| `links` | `features/asset-detail` |
-| `cvTrace` | `features/cv-inspector` |
-| `training` | `features/labeling`, `features/replay`, `features/models` |
-| `discoveryInbox` | `features/inventory`, `features/onboarding` |
-| `weather`, `seat`, `telemetry`, `detections`, `org` | 2–4 lazy features each |
+Registering one feature from two routes is safe — NgRx keys feature state by name. The seven slices
+that must stay root are `theme`, `sidebar`, `overlay`, `auth`, `live`, `events` (the always-on
+notification bell) and `settings` (`events.effects.ts` selects it); verified by walking what
+`app.ts`, the five shell components, `notification-bell`/`identity-chip`, and every root-`providedIn`
+service and guard actually inject. No root slice's effects cross-select a movable feature — checked.
 
-That second group is **148 kB of pre-minification source** — `provideState`/`provideEffects` moved
-from `provideAppState()` into each feature's own `*.routes.ts`, which is what §2 already prescribes
-for page-scoped slices. Minified and tree-shaken it is worth well under 148 kB, but the overage to
-clear is only 40 kB, so the headroom is real rather than hoped for. **Registering the same feature
-from two lazy routes is safe** — NgRx keys feature state by name and the second registration is a
-no-op — so a slice with two consuming features does not need a shared parent route.
+**The constraint that makes this a wave rather than an edit**, found while attempting it: route
+`providers` must be statically analysable, and every `features/*/*.routes.ts` is **statically
+imported** by `app.routes.ts`. Putting `provideState(...)` there pulls the slice straight back into
+the initial chunk. The providers must sit behind a `loadChildren` boundary — which removes those
+routes from the static `children` tree that `features/hubs/route-audit-logic.ts#flattenRoutes` walks,
+and `app.routes.spec.ts`'s "no dead link" suite plus the in-app route audit both depend on that walk.
+So N-split is: seven features converted to `loadChildren`, **plus** teaching the route audit to
+resolve a `loadChildren` boundary. Do not attempt it as a tail-end fix to another wave.
 
-The alternative is one line: raise `angular.json`'s error budget past 550 kB. Honest, instant, and
-it spends the visibility the current warning buys.
-
-**Not started, deliberately**: both options rewrite `core/state/app-state.ts`, the one file every
-wave touches, so doing it while N6 is in flight would conflict with it. It is the first thing to do
-on a settled tree, before N4/N6/N8 land.
+**Not decided by an agent.** Option 1 is a policy change about what the project is willing to ship;
+it belongs to the owner, and no wave may take it unilaterally on its way past.
 
 ### N5 found a convention that does not generalise
 
