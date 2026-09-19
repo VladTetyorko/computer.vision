@@ -3151,3 +3151,76 @@ correctly for a user-initiated refresh — just not for a silent background one.
 `notifyRefreshFailure$`, the last quiet-aware so a background poll failure never surfaces a toast).
 Every mutation effect keeps `FleetStore#run()`'s original "always refetch after a write" contract —
 a full `listDevices()`/`listStreams()` reconcile on success, never a targeted entity upsert.
+
+## Status — NGRX-MIGRATION wave N8: the last two hand-rolled stores, and the first wave that cost nothing (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N8, §9) — 2026-09-19
+
+Two halves again, but for a different reason than N4's: these were simply very different jobs.
+**N8a** converted `GroundingStore` — 86 lines, one fetch — and assessed `InventoryViewStore`.
+**N8b** converted `OnboardingStore`: **1 656 lines, 66 signals, 13 computeds, ~60 methods, 21 direct
+`VisionApi` calls**, the biggest single-file store this migration has touched.
+
+**The headline is the measurement.** Every previous wave added net bytes to the initial bundle
+despite deleting the class it replaced — N1 +0.89, N2 +12.47, N3 +5.04, N5 +9.96, N7 +24.62,
+N6 +47.21, N4 +14.58 kB raw. N8 converted the largest store in the app and the initial bundle came
+back **byte-for-byte unchanged**: 512.34 kB raw, and transfer 0.02 kB *down* at 146.04 kB. The whole wizard — slice,
+~105 actions, ~25 effects, facade and photo buffer — ships in the `onboarding` lazy chunk
+(100.16 kB raw / 21.14 kB transfer). Nothing clever was done to achieve that; both stores were
+already `@Injectable()` page-provided, which made their slices route-registrable by the N-split
+eligibility rule. **This is what the split was for**: after N-split and N4a, page-scoping stopped
+being a rescue and became the default, and a wave this size arrived free.
+
+**The non-serializable split, for the second time.** `overlay` (wave N1) was the first slice that
+could not hold all of its own state; `onboardingWizard` is the second, and a much larger instance.
+Three things stayed out:
+
+- the photo `File`/`Blob`/object URL → `OnboardingPhotoBuffer`, which also owns the
+  `URL.revokeObjectURL` lifecycle;
+- `preProvenRoles`, a `ReadonlySet<FitOutRole>` → a plain `readonly FitOutRole[]` (a `Set` is not a
+  plain object; every `.has()` became `.includes()`, including one in a template that only the
+  Angular compiler caught, not `tsc`);
+- the `PollScheduler` teardown handle → `discoveryStatusPoll$`, gated on `store.select` of
+  `step === 'source'`.
+
+**The subtlety worth carrying to any future non-serializable split**: `OnboardingPhotoBuffer` is
+registered *inside* `provideOnboardingState()`, **not** in `OnboardingPage`'s component `providers:`
+— even though only the page reads it through its facade. An `@ngrx/effects` class's `inject()`
+resolves against the **environment** injector `provideEffects()` was registered on, and can never see
+an element-injector provider. `uploadAssetImage$` injects the buffer, so it must sit at the slice's
+own level. The wrong placement type-checks cleanly and fails only at runtime, on the first photo
+upload.
+
+**Not every store needs a slice — the second time this wave, and the third in the migration.**
+`InventoryViewStore` was assessed and deliberately left unconverted. It owns no state whatsoever:
+two `localStorage` methods, no signals, no fetch, no timer. The state it *guards* is one enum among
+roughly twenty plain page signals on the 916-line `InventoryFacade`, so promoting exactly that one to
+a feature slice would have been arbitrary — and whatever remained would still have been this wrapper,
+because `core/state/hydration.ts#StateHydrator.read()` would have had to call something just like it.
+So the rename was the migration: it is `InventoryViewStorage` now, named for what it is, with the
+reasoning in its own class doc. Same call as `SystemEventsFacade` in N4b, and the same rule §8
+already fixed for `UiStore`. After N8 those two are the only non-slice state classes left, both by
+explicit decision rather than omission.
+
+**A latent capability nobody is using.** `hydrationMetaReducer` handles `UPDATE` as well as `INIT`
+specifically so a lazily-registered, page-scoped slice can hydrate from `localStorage` — and
+**nothing exercises that branch**. All three hydrators (`theme`, `sidebar`, `settings`) are root
+slices hydrated at `INIT`. It is the seam to use if Inventory ever does grow a real slice; it is also
+untested code, and should be treated as such by whoever gets there first.
+
+**Two defects found reviewing the wizard conversion rather than trusting it green.** The suite,
+both tsconfigs and the production build were all clean, and neither of these would have failed any
+of them:
+
+- `OnboardingPhotoBuffer`'s class doc claimed it was provided on `OnboardingPage` — the exact
+  opposite of the environment-injector constraint that forced its real placement, and precisely the
+  sentence that would talk the next reader into "fixing" it into the component and breaking uploads.
+- `private file: File | null` was written in `choose()` and nulled in `remove()` and **never read**,
+  pinning the operator's original full-size image in memory for the page's lifetime for nothing.
+
+**The specs could not see the slice's real risk, either.** `onboarding.reducer.spec.ts` calls the
+reducer function directly and `onboarding.effects.spec.ts` uses `provideMockActions` — so neither
+constructs a real `Store`, and neither exercises `provideAppState()`'s four `runtimeChecks`. The
+largest slice in the app, ~105 actions wide, had never had a single action dispatched through a store
+with `strictActionSerializability` on. `state/onboarding.wiring.spec.ts` now does that, and also
+resolves `OnboardingPhotoBuffer` from the environment injector to pin the placement above. Worth
+copying for any slice big enough that a `Date`, `Set` or `Map` could hide in one payload — `tsc`
+cannot see it, and a direct-reducer spec will not either.

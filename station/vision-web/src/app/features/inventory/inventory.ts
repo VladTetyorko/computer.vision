@@ -33,7 +33,7 @@ import type { VehicleInventoryStateFilter, VehicleReadinessFilter } from './vehi
  * old Reports-page "Fleet at a glance" strip (Total/Streaming/Active/Deactivated/Needs attention),
  * which occupied the widest band on the page to answer a question nobody in a hangar asks and could
  * not be acted on at all. Counts come from `InventoryFacade#viewTiles`, computed over the same
- * filtered rows the table renders. The pick survives a reload (`InventoryViewStore`).
+ * filtered rows the table renders. The pick survives a reload (`InventoryViewStorage`).
  *
  * **Export** — Reports' one other surviving idea — is a page-bar action, a plain `<a [href]>`
  * download following the after-action-archive pattern (`VisionApi.inventoryExportUrl`/

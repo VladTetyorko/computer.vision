@@ -2,7 +2,7 @@
 <p class="muted hint">Before this becomes an asset, make sure what you connected is actually there.</p>
 
 @for (role of facade.fitOutRoles; track role) {
-  @if (facade.store.rows()[role].value === 'find' && !facade.store.preProvenRoles().has(role)) {
+  @if (facade.store.rows()[role].value === 'find' && !facade.store.preProvenRoles().includes(role)) {
     <div class="role-card">
       <div class="role-card-head">
         <span class="role-label">{{ facade.store.fitOutRoleLabels[role] }}</span>

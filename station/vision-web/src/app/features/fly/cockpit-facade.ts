@@ -12,7 +12,7 @@ import { EventsFacade } from '../../core/events/events-facade';
 import { GeofenceFacade } from '../../core/geofence/geofence-facade';
 import { GeoFacade } from '../../core/geo/geo-facade';
 import { hasFix } from '../../core/geo/geo-logic';
-import { GroundingStore } from './grounding-store';
+import { GroundingFacade } from './grounding-facade';
 import { LiveFacade } from '../../core/live/live-facade';
 import { isLiveAvailable } from '../../core/live/live-fallback-logic';
 import { MarksFacade } from '../../core/map-data/marks-facade';
@@ -162,12 +162,12 @@ export class CockpitFacade {
    * Custody grounding (docs/plans/active/ASSET-FLOWS-PLAN.md §2 "S1 gate semantics", wave WB1) — its
    * own class, not folded into this facade's own state, so `cockpit-facade.ts`'s source stays free
    * of every readiness-API literal token `core/telemetry/preflight-readiness-independence.spec.ts`
-   * scans for (`GroundingStore`/`groundedReason` match none of them): the live-telemetry preflight
+   * scans for (`GroundingFacade`/`groundedReason` match none of them): the live-telemetry preflight
    * checklist must never be able to observe that the readiness API exists, even transitively through
    * this facade. {@link groundedReason} below is a plain pass-through — see that store's own doc
    * comment for the actual fetch/parse.
    */
-  private readonly grounding = inject(GroundingStore);
+  private readonly grounding = inject(GroundingFacade);
   /**
    * The three halves of the Common Operational Picture (docs/plans/done/MAP-REWORK-PLAN.md §5.2) — exposed as
    * whole stores (not thin passthroughs), mirroring `geofence` above: `cockpit.html` wires
@@ -411,7 +411,7 @@ export class CockpitFacade {
   // already reads, no second telemetry source.
   readonly failsafeBanner = computed(() => flightBanner(this.telemetry.latest()));
 
-  /** `GroundingStore#groundedReason` for the currently tracked asset — `undefined` unless it carries
+  /** `GroundingFacade#groundedReason` for the currently tracked asset — `undefined` unless it carries
    * an open `MAINTENANCE_GROUNDED:` blocker. Renders `<vision-grounded-banner>` in the same
    * `.grid-banner` area as {@link failsafeBanner} above, and disables Arm via
    * `flight-command-panel.ts#armDisabled` (docs/plans/active/ASSET-FLOWS-PLAN.md §2, wave WB1). */
@@ -848,7 +848,7 @@ export class CockpitFacade {
     });
 
     // Custody grounding (docs/plans/active/ASSET-FLOWS-PLAN.md §2, wave WB1) — same per-asset
-    // track/reset shape as `geo` above; `GroundingStore.track()` is a no-op for an unchanged
+    // track/reset shape as `geo` above; `GroundingFacade.track()` is a no-op for an unchanged
     // assetId (its own `lastTrackedAssetId` field), so no derived-primitive guard needed here either.
     effect(() => {
       const assetId = this.activeAssetId();
