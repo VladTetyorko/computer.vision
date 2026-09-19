@@ -106,20 +106,26 @@ export class LiveFacade {
 
   /**
    * Force-closes the current connection and immediately opens a fresh one (docs/plans/active/
-   * AUTH-ROLES-PLAN.md §3.7) — `core/auth/state/auth.effects.ts#reconnectLiveOnSession$` calls this
-   * on every successful sign-in, so a connection opened under a stale/anonymous/different-user
-   * session never lingers into the new one. Also what this facade's own constructor calls once at
-   * boot, mirroring `AuthFacade`'s own constructor-dispatch precedent.
+   * AUTH-ROLES-PLAN.md §3.7). This facade's own constructor calls it once at boot, mirroring
+   * `AuthFacade`'s constructor-dispatch precedent.
+   *
+   * **Nothing in `core/auth/` calls this any more (wave N9).** A connection opened under a
+   * stale/anonymous/different-user session must not linger into the new one, but that reaction now
+   * belongs to the live feature itself: `state/live.effects.ts#reconnectOnSession$` dispatches the
+   * same action straight off `AuthApiActions.loginSucceeded`/`bootstrapSucceeded`. Since this method
+   * is nothing but that dispatch, no caller is bypassed by the change.
    */
   reconnect(): void {
     this.store.dispatch(LivePageActions.reconnectRequested());
   }
 
   /**
-   * Force-closes the current connection without reopening one —
-   * `core/auth/state/auth.effects.ts#logoutSideEffects$` calls this once a real session ends, so a
-   * signed-out browser stops holding an authenticated SSE connection open while the login screen is
-   * up. `login()`'s own subsequent `reconnect()` is what opens the next one.
+   * Force-closes the current connection without reopening one, so a signed-out browser stops holding
+   * an authenticated SSE connection open while the login screen is up.
+   *
+   * As with {@link reconnect}, wave N9 moved that trigger out of `auth.effects.ts` and into
+   * `state/live.effects.ts#stopOnLogout$`, which reacts to `AuthApiActions.logoutCompleted` and
+   * keeps the original `wasAuthEnabled` guard — dev parity never had a session to invalidate.
    */
   stop(): void {
     this.store.dispatch(LivePageActions.stopRequested());

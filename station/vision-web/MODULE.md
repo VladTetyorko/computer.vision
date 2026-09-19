@@ -144,6 +144,19 @@ explicit decision, and neither is an oversight:
   have to call something just like it. Same "decline the ceremony, write down why" call as
   `systemEvents` in N4b — see the class's own doc comment.
 
+**`core/api/vision-api.ts` stays Promise-shaped — permanently, and by measurement (wave N9).** Every
+one of its 161 public methods returns `Promise<T>`, and an effect reaches them **only** through
+`from(...)`/`defer(...)` inside a flattening operator — never an `async` effect body. The plan (§7)
+had scheduled a flip to Observables for N9 on the assumption that by then most call sites would live
+in effects; the final tree says otherwise — **120 call sites in 25 `*.effects.ts` files, 170 in 43
+other files** (facades, guards, components), because the page-facade layer that owns those 170 is a
+deliberate part of this architecture, not a residue of the old stores. The flip would therefore
+delete 120 `from(...)` wrappers to add 170 `firstValueFrom(...)` wrappers, several of them genuine
+rewrites (`Promise.all` fan-outs, `await` inside `.map()`, `.catch()` fallbacks), for no behaviour
+change. **If a single endpoint ever needs a superseded request genuinely *aborted*** — `from(promise)`
+drops the result but never cancels the request — add an `Observable`-returning sibling for that one
+method and use it from the effect; do not convert the service.
+
 Note for whoever adds the first persisted page-scoped preference: `hydrationMetaReducer`'s `UPDATE`
 branch already exists so a lazily-registered feature slice can hydrate, and **nothing exercises it
 yet** — all three current hydrators (`theme`, `sidebar`, `settings`) are root slices hydrated at
@@ -290,10 +303,22 @@ had even been created to receive it — silently dropping the boot-time reconnec
 practice only because `AuthFacade`'s own later `bootstrapSucceeded` dispatch re-triggers
 `reconnectLiveOnSession$` well after every effect is live. `live-facade.spec.ts`'s "degrades to closed
 shortly after construction" case is what caught it (deterministic, not flaky — confirmed by bisecting
-against a byte-for-byte copy of `live-facade.ts` under a different class name, which passed). Fixed by
-injecting a plain `Injector` and resolving `Injector.get(LiveFacade)` **inside** each effect's own
-callback instead of as a factory parameter, deferring construction until the action genuinely fires —
-see `auth.effects.ts#reconnectLiveOnSession$`'s own doc comment for the full mechanism.
+against a byte-for-byte copy of `live-facade.ts` under a different class name, which passed). N3
+dodged it by resolving `Injector.get(LiveFacade)` lazily inside each effect callback; **wave N9
+removed the cause instead** — see the standing rule below.
+
+**One slice's effect never reaches for another slice's facade — it dispatches (wave N9).** Both
+`LiveFacade.reconnect()` and `LiveFacade.stop()` were already pure `store.dispatch(...)` calls, so
+there was never anything to *call*: `core/live/state/live.effects.ts` now carries
+`reconnectOnSession$` (on `AuthApiActions.loginSucceeded`/`bootstrapSucceeded`) and `stopOnLogout$`
+(on `logoutCompleted`, still guarded by that action's `wasAuthEnabled` flag), and `auth.effects.ts`
+no longer imports `Injector`, `LiveFacade` or `tap` — it does not know a live connection exists. Two
+things fall out, and both are the reason this is the rule and not a preference: the dependency now
+points the way the architecture says it should (`live` reacts to auth's published facts, instead of
+`auth` steering `live`), and **the registration-order hazard disappears rather than being deferred**
+— reacting to an action constructs nothing, so there is no singleton whose constructor can run before
+the effect that must hear it. `Logout Completed` carries `wasAuthEnabled` precisely so two
+independent reactors can each read it after the reducer has cleared the session.
 
 **Wave N6 converted all seven map/geofence stores in one pass** (`FleetMapStore`→`MapFacade`,
 `MarksStore`/`LayersStore`/`DrawingsStore`/`TracksStore`/`RouteStore`/`GeofenceStore` → their

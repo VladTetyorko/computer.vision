@@ -39,7 +39,8 @@ export const authFeature = createFeature({
     ),
     // Clears the session unconditionally — `authEnabled`/`reauthRequired` are left untouched, exactly
     // like `AuthStore#logout`'s own state writes (its `wasAuthEnabled` read happens in the effect,
-    // *before* this dispatches, purely to decide navigation/LiveStore — never to gate this clear).
+    // *before* this dispatches, purely to decide the redirect and whether a live connection is
+    // open to close — never to gate this clear).
     on(AuthApiActions.logoutCompleted, (state) => ({ ...state, user: null, status: 'anon' })),
     on(AuthApiActions.bootstrapSucceeded, (state, { me }) => applySession(state, me)),
   ),

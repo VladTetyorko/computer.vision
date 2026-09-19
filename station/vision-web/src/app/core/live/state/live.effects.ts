@@ -3,8 +3,9 @@ import { Actions, createEffect, ofType } from '@ngrx/effects';
 import { concatLatestFrom } from '@ngrx/operators';
 import type { Action } from '@ngrx/store';
 import { Store } from '@ngrx/store';
-import { EMPTY, type Observable, catchError, concat, concatMap, from, map, merge, of, switchMap, timer } from 'rxjs';
+import { EMPTY, type Observable, catchError, concat, concatMap, filter, from, map, merge, of, switchMap, timer } from 'rxjs';
 import { VisionApi } from '../../api/vision-api';
+import { AuthApiActions } from '../../auth/state/auth.actions';
 import { SSE_RETRY_INTERVAL_MS, buildTopicsParam } from '../live-fallback-logic';
 import { LiveGateway, type LiveGatewayEvent } from '../live-gateway';
 import { LiveApiActions, LivePageActions, LiveSocketActions } from './live.actions';
@@ -197,4 +198,52 @@ export const patchOnUntrack$ = createEffect(
   { functional: true },
 );
 
-export const liveEffects = { connection$, patchOnTrack$, patchOnUntrack$ };
+/**
+ * A fresh session (login, or the boot-time `/api/auth/me`) supersedes whatever the live connection
+ * was opened under — reconnect so its topic scope and any server-side session check start clean.
+ *
+ * **This used to live in `auth.effects.ts` as `reconnectLiveOnSession$`, calling
+ * `injector.get(LiveFacade).reconnect()`** (NGRX-MIGRATION-PLAN.md wave N9). Two things were wrong
+ * with that and are fixed by moving it here:
+ *  - **The dependency pointed the wrong way.** The session is the lower-level fact; the live
+ *    connection is a consumer of it. Auth had to know that a live connection exists at all. Now
+ *    `live` reacts to auth's own published facts and `auth` knows nothing about `live` — the same
+ *    direction `overlay.effects.ts#closeOnNavigation$` already takes with `@ngrx/router-store`'s
+ *    `ROUTER_NAVIGATED`.
+ *  - **It forced a lazy `Injector.get`.** `EffectsRootModule` resolves every group's factories
+ *    synchronously before subscribing any of them, and `authEffects` is registered ahead of
+ *    `liveEffects` in `core/state/app-state.ts` — so an eager `inject(LiveFacade)` there constructed
+ *    the singleton (running its own constructor-time `reconnect()` dispatch) *before*
+ *    `connection$` existed to receive it, silently dropping the boot-time reconnect. Reacting to an
+ *    action has no construction at all, so the hazard is gone rather than worked around: by the time
+ *    a login or bootstrap action is ever dispatched, every effects group is long since subscribed.
+ */
+export const reconnectOnSession$ = createEffect(
+  (actions$ = inject(Actions)) =>
+    actions$.pipe(
+      ofType(AuthApiActions.loginSucceeded, AuthApiActions.bootstrapSucceeded),
+      map(() => LivePageActions.reconnectRequested()),
+    ),
+  { functional: true },
+);
+
+/**
+ * A signed-out browser must stop holding an authenticated SSE connection open while the login screen
+ * is up — the other half of `auth.effects.ts#logoutSideEffects$`'s old inline `LiveFacade.stop()`.
+ *
+ * `wasAuthEnabled` is the original guard, unchanged: dev parity never had a real session to
+ * invalidate, so there is nothing to close. Stopping and navigating are independent, so this no
+ * longer has to be sequenced ahead of the redirect the way an inline call was — both react to the
+ * same `Logout Completed` fact.
+ */
+export const stopOnLogout$ = createEffect(
+  (actions$ = inject(Actions)) =>
+    actions$.pipe(
+      ofType(AuthApiActions.logoutCompleted),
+      filter(({ wasAuthEnabled }) => wasAuthEnabled),
+      map(() => LivePageActions.stopRequested()),
+    ),
+  { functional: true },
+);
+
+export const liveEffects = { connection$, patchOnTrack$, patchOnUntrack$, reconnectOnSession$, stopOnLogout$ };

@@ -1,12 +1,11 @@
-import { Injector, inject } from '@angular/core';
+import { inject } from '@angular/core';
 import { HttpErrorResponse } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { Actions, createEffect, ofType } from '@ngrx/effects';
 import { concatLatestFrom } from '@ngrx/operators';
 import { Store } from '@ngrx/store';
-import { catchError, from, map, mergeMap, of, switchMap, tap } from 'rxjs';
+import { catchError, from, map, mergeMap, of, switchMap } from 'rxjs';
 import { describeHttpError } from '../../api-error';
-import { LiveFacade } from '../../live/live-facade';
 import { VisionApi } from '../../api/vision-api';
 import { AuthApiActions, AuthPageActions } from './auth.actions';
 import { authFeature } from './auth.reducer';
@@ -82,32 +81,6 @@ export const bootstrap$ = createEffect(
 );
 
 /**
- * A fresh session (login or bootstrap) supersedes whatever the live connection was opened under —
- * reconnect so its topic scope and any server-side session check start clean. Split out from
- * `login$`/`bootstrap$` themselves so those stay pure request/response mappings.
- *
- * Resolves `LiveFacade` lazily through `Injector.get` **inside** the `tap`, rather than as an eager
- * default parameter — `EffectsRootModule` resolves every effects group's factories synchronously,
- * in `provideEffects(...)`'s own array order, all *before* subscribing any of them
- * (`node_modules/@ngrx/effects` `EffectsRootModule#constructor`: `runner.start()` first, then one
- * `sources.addEffects(...)` per group). `authEffects` is registered ahead of `liveEffects` in
- * `core/state/app-state.ts`, so an eager `inject(LiveFacade)` here used to construct the singleton
- * — running its own constructor-time `reconnect()` dispatch — *before* `live.effects.ts#connection$`
- * even existed to receive it, silently dropping that boot-time reconnect (caught by
- * `live-facade.spec.ts`'s "degrades to closed shortly after construction" case, which lets
- * `LiveFacade` be the one to construct itself, exactly as `app.ts`'s own root-component field does
- * in the real app — after every effect is already live).
- */
-export const reconnectLiveOnSession$ = createEffect(
-  (actions$ = inject(Actions), injector = inject(Injector)) =>
-    actions$.pipe(
-      ofType(AuthApiActions.loginSucceeded, AuthApiActions.bootstrapSucceeded),
-      tap(() => injector.get(LiveFacade).reconnect()),
-    ),
-  { functional: true, dispatch: false },
-);
-
-/**
  * Logout, stage 1 — reads `wasAuthEnabled` *before* the reducer clears it (`concatLatestFrom`, the
  * same "read current state alongside the triggering action" idiom `settings.effects.ts` uses),
  * best-effort calls `POST /api/auth/logout` (clears local state even if the request itself fails —
@@ -138,25 +111,23 @@ export const logout$ = createEffect(
 );
 
 /**
- * Logout, stage 2 — the LiveFacade stop + navigation `AuthStore#logout` used to do inline, now split
- * out because they're side effects the reducer can't own. Only stops LiveFacade when there was a real
- * session to invalidate (dev parity never had one). Routes to `/login` when auth is enabled, `/fly`
- * when it isn't — `AuthFacade#logout()` is the one caller that awaits `Logout Finished`.
+ * Logout, stage 2 — the navigation `AuthStore#logout` used to do inline, now split out because it is
+ * a side effect the reducer can't own. Routes to `/login` when auth is enabled, `/fly` when it isn't
+ * — `AuthFacade#logout()` is the one caller that awaits `Logout Finished`.
  *
- * `LiveFacade` is resolved lazily via `Injector.get`, not an eager default parameter — see
- * `reconnectLiveOnSession$`'s own doc comment for why an eager `inject(LiveFacade)` in this file is
- * load-bearing wrong (it fires before `liveEffects` is registered).
+ * **This file no longer knows that a live connection exists** (NGRX-MIGRATION-PLAN.md wave N9). The
+ * `LiveFacade.stop()` that used to run here — behind a lazy `Injector.get`, to dodge an
+ * effects-registration-order hazard — is now `core/live/state/live.effects.ts#stopOnLogout$`,
+ * reacting to this stage's own `Logout Completed` action. See that effect's doc comment for why the
+ * dependency belongs in that direction.
  */
 export const logoutSideEffects$ = createEffect(
-  (actions$ = inject(Actions), router = inject(Router), injector = inject(Injector)) =>
+  (actions$ = inject(Actions), router = inject(Router)) =>
     actions$.pipe(
       ofType(AuthApiActions.logoutCompleted),
       switchMap(({ wasAuthEnabled }) =>
         from(
           (async () => {
-            if (wasAuthEnabled) {
-              injector.get(LiveFacade).stop();
-            }
             await router.navigateByUrl(wasAuthEnabled ? '/login' : '/fly');
             return AuthApiActions.logoutFinished();
           })(),
@@ -230,7 +201,6 @@ export const authEffects = {
   bootMe$,
   login$,
   bootstrap$,
-  reconnectLiveOnSession$,
   logout$,
   logoutSideEffects$,
   changePassword$,
