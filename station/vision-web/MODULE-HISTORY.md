@@ -2784,3 +2784,119 @@ plain, self-contained, eagerly-constructed class with no dependency on effects r
 all).
 
 - **Commit** (suggested; this agent does not commit per its task — the orchestrator commits each wave): `feat(ngrx N3): the live slice — SSE connection as an NgRx slice + LiveGateway seam, and an auth.effects.ts eager-injection fix`.
+
+## Status — NGRX-MIGRATION wave N6: the map/geofence stores — all seven in one pass (docs/plans/active/NGRX-MIGRATION-PLAN.md §4 row N6) — 2026-09-19
+
+**Scope.** The largest wave by line count (~2,240 lines across 7 hand-rolled classes), built in its
+own worktree (`feat/ngrx-n6-map`, branched from `93af4a4d` — the N3-merged tip) concurrently with N5
+(perception slices) and N7 (ops slices) in separate worktrees. All seven became
+`core/<domain>/state/<domain>.{model,actions,reducer,effects}.ts` + a `core/<domain>/<domain>-facade.ts`,
+registered in `provideAppState()`: `core/map/map-store.ts` → `MapFacade` (page-provided, `CommandPage`'s
+`providers:`), `core/map-data/{marks,layers,drawings,tracks}-store.ts` → their `*Facade` siblings
+(all `providedIn: 'root'`), `core/map-data/route-store.ts` → `RouteFacade` (page-provided), and
+`core/geofence/geofence-store.ts` → `GeofenceFacade` (`providedIn: 'root'`). Every real consumer
+changed only its one `inject(XStore)` → `inject(XFacade)` line, import path swap only. All seven
+legacy classes and their specs are deleted in this same wave (14 files).
+
+**`@ngrx/entity` fits all four mandatory collections cleanly, same shape every time.** `marks`,
+`layers`, `drawings`, `tracks` each use `createEntityAdapter<T>({selectId})` with **no**
+`sortComparer` — display order (`selectDisplayMarks`/`selectDisplayDrawings`/etc.) is a pure
+derivation over `selectAll`, never storage order, so the adapter only ever needs unordered upsert/
+remove. Every live/REST fold routes through the domain's pre-existing pure `apply*Events` function
+first (`map-event-logic.ts#applyMapEvent`, `camera-geo-logic.ts#applyTrackEvent`, `layers-logic.ts#
+applyLayerEvents`) and only the *result* array goes into `adapter.setAll([...], state)` — the adapter
+never does a per-field entity mutation, keeping the pure-fold precedent these domains already had
+before NgRx existed in this codebase. `geofence`'s zones stayed a plain array (no adapter) — no
+collection here needed keyed lookup or upsert-by-id at adapter granularity, `applyZoneEvent`'s own
+fold already does the equivalent work over a small array.
+
+**Domain semantics carried over exactly, verified by reading the fold logic rather than assumed while
+writing specs** (two were gotten wrong on the first pass and caught by the reducer specs, not by
+review): a mark or drawing/track event with `action: 'cleared'` **removes** the entity outright — the
+same branch `'deleted'` takes (`map-event-logic.ts#isRemoval`) — it does not linger with a
+`status: 'CLEARED'` field; `interactionModeForDrawKind(kind)` returns `'view'` for `null`/the default
+case, never `null` itself, so `drawings.reducer.spec.ts`'s not-drawing assertion had to be `.toBe
+('view')`, not `.toBeNull()`. A layer arriving over the `map` SSE topic with no `grants` field keeps
+the previously-known grants (`layers.reducer.ts#adoptLayer`) — correct for everything except a grant
+**revocation**, which that fold still cannot represent, same accepted gap as the old class.
+
+**`FleetMapStore`'s "construction is demand" contract does not survive the move to NgRx unchanged —
+the one real plan-shaped defect this wave found.** The old class was page-provided with no ref-count
+of its own: its constructor running *was* the demand signal, since nothing else could construct it
+except `CommandPage`. An NgRx slice can't express that — `map` is registered once, root-scoped, in
+`provideAppState()`, and its effects subscribe for the app's whole lifetime regardless of whether any
+facade instance currently exists. Fix: a **new** `activeConsumers` ref-count on the `map` slice
+itself, bumped/dropped by `MapPageActions.activated()`/`released()` from `MapFacade`'s constructor/
+`DestroyRef.onDestroy` — the same ref-count idiom `map-data`'s four stores already used for the same
+reason, just newly needed here because `FleetMapStore` alone among this wave's stores had never
+needed one before. `RouteFacade` carries a smaller version of the same lesson: its constructor now
+dispatches `hide()` on every mount, because the `route` slice is app-wide storage for what used to be
+a page-scoped-by-construction value — without the reset, a second `/command` visit would flash the
+previous visit's stale route span before its own `show()` call landed.
+
+**A wave-wide latent gap this wave found and fixed, not specific to map/geofence**: none of the seven
+new `*.reducer.ts` files had the sibling `*.reducer.spec.ts` that `core/ui/architecture.spec.ts`'s
+NgRx layering guard requires (every `.reducer.ts` needs a sibling `.actions.ts` *and* `.reducer.spec.ts`).
+The guard was passing throughout — not because it couldn't catch this, but because nothing had
+tripped it yet at the point this wave started. Wrote all seven specs (71 tests total: geofence 9,
+layers 9, marks 16, drawings 13, tracks 8, route 6, map 10, plus `map-facade.spec.ts`'s own 20 = 91)
+rather than loosen the guard.
+
+**`map-facade.spec.ts` needed two new test patterns this codebase didn't have yet.** First: a `vi.spyOn
+(store, 'dispatch')` set up before construction never sees an action an *effect* redispatches (here,
+`LivePageActions.telemetryTracked`/`telemetryUntracked` from the merge-and-redispatch in
+`reconcileTrackers$`) — only a subscription to the `Actions` service (`@ngrx/effects`) reliably
+observes every dispatch regardless of path. Second: asserting a side effect of a page-provided
+facade's *own* `DestroyRef.onDestroy` (here, untracking every remaining tracked asset on teardown)
+needs the facade destroyed without tearing down the shared `Store`/`Actions`/effects the rest of the
+spec still needs — `TestBed.resetTestingModule()` tears down too much and races the callback.
+Constructing `MapFacade` in a **child** injector (`Injector.create({providers: [MapFacade], parent})`)
+and calling `child.destroy()` isolates exactly the facade's own teardown, mirroring a real page
+component's injector lifecycle. Both patterns are reusable for any future page-provided facade spec
+that needs to watch effect-originated dispatches or isolated teardown.
+
+### Tests / build
+
+`npm run test:ci` — **241/241 files, 4538/4538 tests green** (+7 files / +95 tests over the N3
+baseline of 234/4443). Every domain lost one `*-store.spec.ts` and gained exactly two: a
+`*-facade.spec.ts` and a `*.reducer.spec.ts` (14 new files, 7 deleted, net +7) — 201 new tests
+(facade specs: map 20, marks 30, layers 19, drawings 22, tracks 9, route 8, geofence 22 = 130;
+reducer specs: map 10, marks 16, layers 9, drawings 13, tracks 8, route 6, geofence 9 = 71) against
+106 deleted legacy tests (map-store 19, marks-store 30, layers-store 12, drawings-store 8,
+tracks-store 8, route-store 7, geofence-store 22), netting the confirmed +95. `npx tsc --noEmit`
+clean on both `tsconfig.app.json` and `tsconfig.spec.json`, including after all 14 legacy-file
+deletions (a genuine backstop — would have caught any stale import).
+
+**`npx ng build --configuration production` fails: exit 1.** Initial bundle **553.08 kB raw / 157.88
+kB transfer**. Rebuilt the exact commit this wave branched from (`93af4a4d`) in a throwaway `git
+worktree` with a symlinked `node_modules` (no reinstall needed): **505.87 kB raw / 143.69 kB
+transfer**, exit 0. This wave's own cost: **+47.21 kB raw (+9.3%) / +14.19 kB transfer (+9.9%)** — by
+far the largest single-wave jump in this migration so far, and enough on its own to cross
+`angular.json`'s 550 kB **error** budget (over by 3.08 kB; also 53.08 kB over the 500 kB warning
+line). Every prior wave's growth stayed inside the warning band, so this is the first wave where the
+"leave it as a warning, it's the only signal tracking cost" call from N1–N3 turns the build red rather
+than merely loud. The cost itself is architecturally inherent, not a mistake: four `@ngrx/entity`
+adapters that never existed in the bundle before, plus seven slices' worth of
+`createFeature`/`createReducer`/`createActionGroup`/effects boilerplate, none of it optional if the
+plan's own recipe (entity adapters for the four collections) is followed. Investigated for legitimate
+in-scope savings (accidental non-type imports, duplicated helpers, eager registration, disabled
+runtime checks) and found none that both stayed inside this wave's file scope and didn't violate an
+explicit constraint (`angular.json` untouched; `core/seat/`'s established per-file `ticks$` duplication
+convention left alone; `provideAppState()`'s eager-registration architecture left alone; runtime checks
+all stay on, per the plan). `angular.json` was **not** edited, per this task's explicit instruction —
+raising the error budget is an orchestrator-level call, ideally made once against the combined tip of
+N4–N8 rather than per-wave, since N5 and N7 each add their own cost on top of this one before N4 closes
+the migration out. This is the wave's principal open finding.
+
+**Nothing in the plan's own recipe for the seven stores was wrong.** The two things worth flagging for
+future waves are procedural, not architectural: (1) a wave converting several stores at once should
+write each reducer's spec *as it writes the reducer*, not after — the layering-guard gap here was only
+caught because `test:ci` was run at all, and a wave that skipped that step would have shipped silently
+uncovered reducers; (2) any store whose page-provided lifetime doubled as its demand signal (only
+`FleetMapStore`, of the seven) needs an explicit new ref-count the moment it moves to a root-registered
+slice — worth a one-line callout in the plan itself for N4/N8 if either touches a store with the same
+shape.
+
+- **Commit** (suggested; this agent does not commit per its task — the orchestrator commits each
+  wave): `feat(ngrx N6): the map/geofence stores — map, marks, layers, drawings, tracks, route,
+  geofence`.

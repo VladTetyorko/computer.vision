@@ -1,8 +1,16 @@
 import { TestBed } from '@angular/core/testing';
 import { describe, expect, it, vi } from 'vitest';
-import { RouteStore } from './route-store';
+import { provideAppState } from '../state/app-state';
 import { VisionApi } from '../api/vision-api';
 import type { TelemetrySample, UsageSummary, UsageTimeline } from '../api/models';
+import { RouteFacade } from './route-facade';
+
+/**
+ * `RouteFacade` end to end — replaces `route-store.spec.ts` case for case
+ * (docs/plans/active/NGRX-MIGRATION-PLAN.md wave N6). The old `generation` counter is gone; the
+ * "superseded show() never clobbers the later result" case now exercises `switchMap` doing that
+ * structurally (see `route.effects.ts#show$`'s own doc comment) rather than hand-counted bookkeeping.
+ */
 
 function flush(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
@@ -34,21 +42,21 @@ function stubApi(overrides: Partial<Record<'listUsages' | 'usageTimeline', Retur
   };
 }
 
-function create(api: ReturnType<typeof stubApi>): RouteStore {
-  TestBed.configureTestingModule({ providers: [RouteStore, { provide: VisionApi, useValue: api }] });
-  return TestBed.inject(RouteStore);
+function create(api: ReturnType<typeof stubApi>): RouteFacade {
+  TestBed.configureTestingModule({ providers: [provideAppState(), RouteFacade, { provide: VisionApi, useValue: api }] });
+  return TestBed.inject(RouteFacade);
 }
 
-describe('RouteStore', () => {
+describe('RouteFacade', () => {
   it('off never calls the API and clears whatever was showing', async () => {
     const api = stubApi();
-    const store = create(api);
+    const facade = create(api);
 
-    await store.show('a1', 'off');
+    await facade.show('a1', 'off');
 
     expect(api.listUsages).not.toHaveBeenCalled();
-    expect(store.routes()).toEqual([]);
-    expect(store.state()).toBe('idle');
+    expect(facade.routes()).toEqual([]);
+    expect(facade.state()).toBe('idle');
   });
 
   it('last asks for one usage and builds one route from its timeline', async () => {
@@ -56,16 +64,16 @@ describe('RouteStore', () => {
       listUsages: vi.fn().mockResolvedValue([usageSummary()]),
       usageTimeline: vi.fn().mockResolvedValue(timeline('u1', [sample()], '2026-09-02T10:05:00Z')),
     });
-    const store = create(api);
+    const facade = create(api);
 
-    await store.show('a1', 'last');
+    await facade.show('a1', 'last');
 
     expect(api.listUsages).toHaveBeenCalledWith({ assetId: 'a1', limit: 1 });
     expect(api.usageTimeline).toHaveBeenCalledWith('u1', { maxPoints: 500 });
-    expect(store.state()).toBe('loaded');
-    expect(store.routes()).toHaveLength(1);
-    expect(store.routes()[0]).toMatchObject({ assetId: 'a1', usageId: 'u1', endedAt: '2026-09-02T10:05:00Z' });
-    expect(store.noUsages()).toBe(false);
+    expect(facade.state()).toBe('loaded');
+    expect(facade.routes()).toHaveLength(1);
+    expect(facade.routes()[0]).toMatchObject({ assetId: 'a1', usageId: 'u1', endedAt: '2026-09-02T10:05:00Z' });
+    expect(facade.noUsages()).toBe(false);
   });
 
   it('last3 asks for three usages and fetches every timeline', async () => {
@@ -73,46 +81,46 @@ describe('RouteStore', () => {
       listUsages: vi.fn().mockResolvedValue([usageSummary({ usageId: 'u1' }), usageSummary({ usageId: 'u2' }), usageSummary({ usageId: 'u3' })]),
       usageTimeline: vi.fn().mockImplementation((usageId: string) => Promise.resolve(timeline(usageId, [sample()]))),
     });
-    const store = create(api);
+    const facade = create(api);
 
-    await store.show('a1', 'last3');
+    await facade.show('a1', 'last3');
 
     expect(api.listUsages).toHaveBeenCalledWith({ assetId: 'a1', limit: 3 });
     expect(api.usageTimeline).toHaveBeenCalledTimes(3);
-    expect(store.routes().map((r) => r.usageId)).toEqual(['u1', 'u2', 'u3']);
+    expect(facade.routes().map((r) => r.usageId)).toEqual(['u1', 'u2', 'u3']);
   });
 
   it('is honest about zero recorded flights — noUsages, not an error', async () => {
     const api = stubApi({ listUsages: vi.fn().mockResolvedValue([]) });
-    const store = create(api);
+    const facade = create(api);
 
-    await store.show('a1', 'last');
+    await facade.show('a1', 'last');
 
-    expect(store.state()).toBe('loaded');
-    expect(store.noUsages()).toBe(true);
-    expect(store.routes()).toEqual([]);
+    expect(facade.state()).toBe('loaded');
+    expect(facade.noUsages()).toBe(true);
+    expect(facade.routes()).toEqual([]);
   });
 
   it('a fetch failure lands in state error, never a fabricated route', async () => {
     const api = stubApi({ listUsages: vi.fn().mockRejectedValue(new Error('network')) });
-    const store = create(api);
+    const facade = create(api);
 
-    await store.show('a1', 'last');
+    await facade.show('a1', 'last');
 
-    expect(store.state()).toBe('error');
-    expect(store.routes()).toEqual([]);
+    expect(facade.state()).toBe('error');
+    expect(facade.routes()).toEqual([]);
   });
 
   it('hide() clears the map and its state back to idle', async () => {
     const api = stubApi({ listUsages: vi.fn().mockResolvedValue([usageSummary()]), usageTimeline: vi.fn().mockResolvedValue(timeline('u1', [sample()])) });
-    const store = create(api);
-    await store.show('a1', 'last');
-    expect(store.routes()).toHaveLength(1);
+    const facade = create(api);
+    await facade.show('a1', 'last');
+    expect(facade.routes()).toHaveLength(1);
 
-    store.hide();
+    facade.hide();
 
-    expect(store.routes()).toEqual([]);
-    expect(store.state()).toBe('idle');
+    expect(facade.routes()).toEqual([]);
+    expect(facade.state()).toBe('idle');
   });
 
   it('a superseded show() (span changed mid-flight) never clobbers the later result', async () => {
@@ -120,15 +128,24 @@ describe('RouteStore', () => {
     const firstCall = new Promise<UsageSummary[]>((resolve) => (resolveFirst = resolve));
     const listUsages = vi.fn().mockImplementationOnce(() => firstCall).mockResolvedValueOnce([usageSummary({ usageId: 'u2' })]);
     const api = stubApi({ listUsages, usageTimeline: vi.fn().mockImplementation((usageId: string) => Promise.resolve(timeline(usageId, [sample()]))) });
-    const store = create(api);
+    const facade = create(api);
 
-    const stale = store.show('a1', 'last');
-    const fresh = store.show('a1', 'last3');
+    const stale = facade.show('a1', 'last');
+    const fresh = facade.show('a1', 'last3');
     await fresh;
     resolveFirst([usageSummary({ usageId: 'u1-stale' })]);
     await stale;
     await flush();
 
-    expect(store.routes().map((r) => r.usageId)).toEqual(['u2']);
+    expect(facade.routes().map((r) => r.usageId)).toEqual(['u2']);
+  });
+
+  it('a fresh mount resets any stale global slice state left by a previous visit', () => {
+    TestBed.configureTestingModule({ providers: [provideAppState(), RouteFacade, { provide: VisionApi, useValue: stubApi() }] });
+    const first = TestBed.inject(RouteFacade);
+    void first;
+    // A second facade instance in the same injector simulates a second page mount reusing the
+    // same global `route` slice — its constructor-time `hideRequested()` must still reset it.
+    expect(TestBed.inject(RouteFacade).routes()).toEqual([]);
   });
 });

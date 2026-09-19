@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { LayersStore } from '../../../core/map-data/layers-store';
+import { LayersFacade } from '../../../core/map-data/layers-facade';
 import { AuthFacade } from '../../../core/auth/auth-facade';
 import { OrgFacade } from '../../../core/org/org-facade';
 import {
@@ -79,7 +79,7 @@ interface SubjectOption {
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class LayerManager {
-  protected readonly layers = inject(LayersStore);
+  protected readonly layers = inject(LayersFacade);
   private readonly auth = inject(AuthFacade);
   protected readonly org = inject(OrgFacade);
 
@@ -296,7 +296,7 @@ export class LayerManager {
   /**
    * Two steps, not an undo toast: deleting a layer cascades its marks and drawings server-side, and
    * re-creating the layer would not bring those back — so this asks first rather than promising a
-   * restore it cannot deliver (`LayersStore.remove`'s own doc comment).
+   * restore it cannot deliver (`LayersFacade.remove`'s own doc comment).
    */
   protected requestDelete(layer: MapLayer): void {
     this.confirmingDeleteSignal.set(layer.layerId);

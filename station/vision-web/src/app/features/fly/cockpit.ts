@@ -220,8 +220,8 @@ export class CockpitPage {
     effect(() => this.facade.setAutostart(this.autostart()));
 
     // Tactical marks (docs/plans/done/TACTICAL-MARKS-PLAN.md M5) — a captured map click always produces a
-    // `MarksStore.draft()` regardless of whether the `marks` drawer happens to be open at that
-    // moment (the map inset and the drawer are independent siblings — see `MarksStore`'s own class
+    // `MarksFacade.draft()` regardless of whether the `marks` drawer happens to be open at that
+    // moment (the map inset and the drawer are independent siblings — see `MarksFacade`'s own class
     // doc comment). Auto-reopening the drawer here is what keeps a draft from silently landing
     // out of sight if the operator armed a kind, closed the drawer, then clicked the map.
     effect(() => {

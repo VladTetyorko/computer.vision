@@ -14,8 +14,8 @@ import { buildFollowLockPatch, buildHotKnobPatch, buildPointLockPatch, type Reso
  * **Test boundary (this wave's own judgment call — the plan explicitly leaves it open, §7 D8's W3
  * row / the task brief's own "your call on the right test boundary")**: a full `CockpitFacade` has on
  * the order of twenty injected collaborators (`VisionApi`, `FleetStore`, `Router`, `ActivatedRoute`,
- * `SettingsFacade`, `TelemetryStore`, `DetectionsStore`, `SeatFacade`, `EventsStore`, `GeofenceStore`,
- * `GeoStore`, `GroundingStore`, `LiveFacade`, `MarksStore`, `LayersStore`, `DrawingsStore`,
+ * `SettingsFacade`, `TelemetryStore`, `DetectionsStore`, `SeatFacade`, `EventsStore`, `GeofenceFacade`,
+ * `GeoStore`, `GroundingStore`, `LiveFacade`, `MarksFacade`, `LayersFacade`, `DrawingsFacade`,
  * `WeatherStore`, `AuthFacade`, …) and, as of this wave, no spec file anywhere in this codebase
  * instantiates it — building a harness for one just to count three calls would dwarf the thing being
  * measured, and would mean this spec's own setup code, not production logic, decides whether the

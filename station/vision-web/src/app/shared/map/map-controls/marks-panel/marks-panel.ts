@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, signal } from '@angular/core';
-import { MarksStore } from '../../../../core/map-data/marks-store';
-import { LayersStore } from '../../../../core/map-data/layers-store';
+import { MarksFacade } from '../../../../core/map-data/marks-facade';
+import { LayersFacade } from '../../../../core/map-data/layers-facade';
 import {
   bearingDistance,
   bearingDistanceLabel,
@@ -38,7 +38,7 @@ export interface MarksPanelCockpit {
  * **Gating**: Confirm/Reject/Promote render only where the server resolved MANAGE
  * (`<vision-verify-controls>`'s own rule). Edit/Clear/Delete stay visible for every mark — the server
  * gates them by creator-or-manager *and* verification state (§3), finer than anything this panel can
- * know without guessing; `MarksStore` turns a 403 into a friendly toast, the honest arbiter.
+ * know without guessing; `MarksFacade` turns a 403 into a friendly toast, the honest arbiter.
  *
  * **Source/Position facts, now on every host** (a small, deliberate parity gain from the merge — see
  * `COMMAND-MAP-FLOW-PLAN.md` close-out): the selected mark's `dl.facts` block used to be Fly-only;
@@ -63,8 +63,8 @@ export class MarksPanel {
    * everywhere else: no drone to target, no bearing/distance to fabricate. */
   readonly cockpit = input<MarksPanelCockpit | undefined>(undefined);
 
-  protected readonly store = inject(MarksStore);
-  protected readonly layers = inject(LayersStore);
+  protected readonly store = inject(MarksFacade);
+  protected readonly layers = inject(LayersFacade);
 
   constructor() {
     // ALWAYS-ON-FLOW-PLAN.md §4 Wave C3: a non-routed presentational child that injects these

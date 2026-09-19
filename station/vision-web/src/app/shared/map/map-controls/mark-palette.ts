@@ -1,8 +1,8 @@
 import { ChangeDetectionStrategy, Component, DestroyRef, computed, inject, input, linkedSignal, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { MarksStore } from '../../../core/map-data/marks-store';
-import { LayersStore } from '../../../core/map-data/layers-store';
-import { DrawingsStore } from '../../../core/map-data/drawings-store';
+import { MarksFacade } from '../../../core/map-data/marks-facade';
+import { LayersFacade } from '../../../core/map-data/layers-facade';
+import { DrawingsFacade } from '../../../core/map-data/drawings-facade';
 import { DEFAULT_MARK_PALETTE, paletteFromMark, type MarkPalette as Palette } from '../../../core/map-data/mark-logic';
 import {
   AFFILIATIONS,
@@ -23,7 +23,7 @@ import type { Affiliation, MapMark, MarkKind } from '../../../core/api/models';
  * folder (this codebase's own "a second consumer moves it to `shared/`" rule).
  *
  * **Two modes, one component**, chosen by whether `[mark]` is bound:
- * - **create** (no `[mark]`): reads and writes `MarksStore.palette` — the *shared* selection, so the
+ * - **create** (no `[mark]`): reads and writes `MarksFacade.palette` — the *shared* selection, so the
  *   cockpit's "Mark target" geolocate drops a pin of exactly the kind/affiliation/layer the operator
  *   has picked here, with no second control to keep in sync. Arm → the next map click captures a
  *   draft → label/note → create.
@@ -37,15 +37,15 @@ import type { Affiliation, MapMark, MarkKind } from '../../../core/api/models';
  * and stay legible on a phone. Affiliation buttons carry the map's own frame swatch, so the picker
  * and the pin can never disagree about what HOSTILE looks like.
  *
- * **Layer picker gating**: options are `LayersStore.contributable()` only — a layer the viewer may
+ * **Layer picker gating**: options are `LayersFacade.contributable()` only — a layer the viewer may
  * merely VIEW never appears, mirroring the server's own CONTRIBUTE rule (§3). When the viewer has no
  * contributable layer at all, the picker is replaced by an honest line saying the mark will land on
  * their default layer: the request then simply omits `layerId` and the server decides, rather than
  * this UI blocking a legal action it merely can't name yet.
  *
  * A non-routed presentational child, so `architecture.spec.ts`'s facade rule doesn't apply — it
- * injects the three root map-data stores directly, exactly as `features/command/zones-panel.ts`
- * injects `GeofenceStore`.
+ * injects the three root map-data facades directly, exactly as `features/command/zones-panel.ts`
+ * injects `GeofenceFacade`.
  */
 @Component({
   selector: 'vision-mark-palette',
@@ -63,9 +63,9 @@ export class MarkPalette {
   /** Fired after a successful save or an explicit cancel — the host closes its editor row. */
   readonly done = output<void>();
 
-  protected readonly marks = inject(MarksStore);
-  protected readonly layers = inject(LayersStore);
-  private readonly drawings = inject(DrawingsStore);
+  protected readonly marks = inject(MarksFacade);
+  protected readonly layers = inject(LayersFacade);
+  private readonly drawings = inject(DrawingsFacade);
 
   constructor() {
     // ALWAYS-ON-FLOW-PLAN.md §4 Wave C3 — see `MarksPanel`'s identical constructor comment. `drawings`
@@ -93,7 +93,7 @@ export class MarkPalette {
 
   /**
    * The edit-mode working copies below re-seed on the mark's *identity* (`markId`), never on the mark
-   * object itself. `MarksStore` replaces its whole list with brand-new `MapMark` objects on every SSE
+   * object itself. `MarksFacade` replaces its whole list with brand-new `MapMark` objects on every SSE
    * event and on its 30s safety-net poll (`marks-store.ts`) — if these `linkedSignal`s tracked `mark()`
    * directly (as they used to), an operator's in-progress edit was silently discarded every time that
    * poll landed mid-edit, even though the mark itself hadn't changed. See `vision-web/MODULE.md`

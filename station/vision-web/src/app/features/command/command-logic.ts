@@ -81,7 +81,7 @@ export function rowRank(row: EntityRow): number {
  *
  * `gpsFixTypeByAssetId` (docs/plans/done/FC-INTEGRATIONS-PLAN.md F-d, optional) feeds each asset's own
  * `gps-degraded` reason (see `gpsDegradedReason`'s own doc comment) — `CommandPage` builds this from
- * `FleetMapStore.markers()`; an asset with no entry (not currently plotted/live) simply never
+ * `MapFacade.markers()`; an asset with no entry (not currently plotted/live) simply never
  * triggers that one reason, exactly like every other "unknown, not fabricated" gap in this app.
  *
  * `geofenceBreachesByAssetId` (docs/plans/done/OPS-CORE-PLAN.md §G-c, optional) is the identical shape for the

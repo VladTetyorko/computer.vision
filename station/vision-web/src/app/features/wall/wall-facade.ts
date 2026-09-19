@@ -198,7 +198,7 @@ export class WallFacade {
 
     // No `refreshSummary()` here: `applySummaryTransport` below fetches once on its own first run,
     // whichever transport it resolves to. Calling it here as well would double-fetch at construction
-    // -- the same reason `MarksStore.activate()` routes through `applyTransport` instead of
+    // -- the same reason `MarksFacade.activate()` routes through `applyTransport` instead of
     // refreshing directly.
     const stopClock = this.scheduler.schedule(CLOCK_TICK_MS, () => this.nowSignal.set(Date.now()));
     inject(DestroyRef).onDestroy(stopClock);

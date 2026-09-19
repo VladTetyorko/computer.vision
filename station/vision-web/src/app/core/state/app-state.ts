@@ -4,8 +4,22 @@ import { provideState, provideStore } from '@ngrx/store';
 
 import { authEffects } from '../auth/state/auth.effects';
 import { authFeature } from '../auth/state/auth.reducer';
+import { geofenceEffects } from '../geofence/state/geofence.effects';
+import { geofenceFeature } from '../geofence/state/geofence.reducer';
 import { liveEffects } from '../live/state/live.effects';
 import { liveFeature } from '../live/state/live.reducer';
+import { mapEffects } from '../map/state/map.effects';
+import { mapFeature } from '../map/state/map.reducer';
+import { drawingsEffects } from '../map-data/state/drawings.effects';
+import { drawingsFeature } from '../map-data/state/drawings.reducer';
+import { layersEffects } from '../map-data/state/layers.effects';
+import { layersFeature } from '../map-data/state/layers.reducer';
+import { marksEffects } from '../map-data/state/marks.effects';
+import { marksFeature } from '../map-data/state/marks.reducer';
+import { routeEffects } from '../map-data/state/route.effects';
+import { routeFeature } from '../map-data/state/route.reducer';
+import { tracksEffects } from '../map-data/state/tracks.effects';
+import { tracksFeature } from '../map-data/state/tracks.reducer';
 import { sidebarEffects } from '../shell/state/sidebar.effects';
 import { sidebarHydrator } from '../shell/state/sidebar.hydration';
 import { sidebarFeature } from '../shell/state/sidebar.reducer';
@@ -73,6 +87,13 @@ export function provideAppState() {
     provideState(seatFeature),
     provideState(authFeature),
     provideState(liveFeature),
+    provideState(geofenceFeature),
+    provideState(layersFeature),
+    provideState(marksFeature),
+    provideState(drawingsFeature),
+    provideState(tracksFeature),
+    provideState(routeFeature),
+    provideState(mapFeature),
     provideEffects(
       themeEffects,
       sidebarEffects,
@@ -82,6 +103,13 @@ export function provideAppState() {
       seatEffects,
       authEffects,
       liveEffects,
+      geofenceEffects,
+      layersEffects,
+      marksEffects,
+      drawingsEffects,
+      tracksEffects,
+      routeEffects,
+      mapEffects,
     ),
   ]);
 }

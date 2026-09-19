@@ -1,8 +1,8 @@
 import { ChangeDetectionStrategy, Component, computed, effect, inject, input, viewChild } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { UiStore } from '../../core/ui/ui-store';
-import { FleetMapStore } from '../../core/map/map-store';
-import { RouteStore } from '../../core/map-data/route-store';
+import { MapFacade } from '../../core/map/map-facade';
+import { RouteFacade } from '../../core/map-data/route-facade';
 import { WeatherStore } from '../../core/weather/weather-store';
 import { TacticalMap } from '../../shared/map/tactical-map/tactical-map';
 import { WeatherChip } from '../../shared/ui/weather-chip';
@@ -44,7 +44,7 @@ import { CommandFacade } from './command-facade';
  * "resolve a device and dock `LiveDock`" to "select this asset" (`CommandFacade.selectAsset`).
  *
  * **The map component is dumb now** (docs/plans/done/MAP-REWORK-PLAN.md §5.1 Wave D): the deleted `FleetMap`
- * injected `FleetMapStore`/`EventsStore` itself; `<vision-tactical-map>` takes `[assets]`/`[events]`/
+ * injected `MapFacade`/`EventsStore` itself; `<vision-tactical-map>` takes `[assets]`/`[events]`/
  * `[unplottedAssets]` as plain inputs from `CommandFacade` instead. Every other binding — zones,
  * marks, focus, attention, selection, and all three outputs — is unchanged.
  */
@@ -54,12 +54,12 @@ import { CommandFacade } from './command-facade';
   templateUrl: './command.html',
   styleUrl: './command.css',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  // `FleetMapStore`/`WeatherStore`/`RouteStore`: own instance per route activation (page-provided,
+  // `MapFacade`/`WeatherStore`/`RouteFacade`: own instance per route activation (page-provided,
   // not `providedIn: 'root'` — see their own class doc comments). `CommandFacade` is provided
   // alongside them so it can `inject()` all three; `<vision-weather-chip>` still resolves
   // `WeatherStore` through this same component-level injector, while the map now receives its
   // markers/routes as inputs instead.
-  providers: [FleetMapStore, WeatherStore, RouteStore, CommandFacade],
+  providers: [MapFacade, WeatherStore, RouteFacade, CommandFacade],
 })
 export class CommandPage {
   protected readonly facade = inject(CommandFacade);
@@ -131,7 +131,7 @@ export class CommandPage {
     this.facade.trackRequestedAsset(this.requestedAssetId);
 
     // Tactical marks (docs/plans/done/TACTICAL-MARKS-PLAN.md M5) — see `fly.ts`'s identical effect's own doc
-    // comment: a map click always produces a `MarksStore.draft()` regardless of whether the drawer
+    // comment: a map click always produces a `MarksFacade.draft()` regardless of whether the drawer
     // happens to be open; this is what keeps a draft from landing out of sight.
     effect(() => {
       if (this.facade.marks.draft()) {

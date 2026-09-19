@@ -58,7 +58,7 @@ function create(
   const store = TestBed.inject(SystemStatusStore);
   // This store has no `activate()` (see class doc) — construction's own reconnect-driven `effect()`
   // is the one and only "first activation" trigger, so it must be flushed here for every test,
-  // mirroring how `MarksStore`/`DrawingsStore` specs `TestBed.tick()` after their own `activate()`.
+  // mirroring how `MarksFacade`/`DrawingsFacade` specs `TestBed.tick()` after their own `activate()`.
   TestBed.tick();
   return { store, scheduler, live };
 }
